@@ -27,6 +27,40 @@ const scriptedFetch = (...routes: Route[]) => {
 
 const ok = (): Response => new Response(payload);
 
+/**
+ * A body that sends `payload` one byte every `byteIntervalMilliseconds` (or nothing when it is undefined) and errors when
+ * the request is aborted, as the platform `fetch` does.
+ */
+const trickle = (request: Request, byteIntervalMilliseconds: number | undefined): Response => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+    start(controller) {
+      request.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          controller.error(request.signal.reason);
+        },
+        { once: true },
+      );
+      let offset = 0;
+      const send = (): void => {
+        if (offset === payload.byteLength) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(payload.slice(offset, offset + 1));
+        offset += 1;
+        timer = setTimeout(send, byteIntervalMilliseconds);
+      };
+      if (byteIntervalMilliseconds !== undefined) {
+        timer = setTimeout(send, byteIntervalMilliseconds);
+      }
+    },
+  });
+  return new Response(body);
+};
+
 describe('fetchVerified', () => {
   it('should return verified bytes and send no credentials', async () => {
     const { transport, requests } = scriptedFetch(ok);
@@ -151,6 +185,50 @@ describe('fetchVerified', () => {
       ).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED', reason: 'redirect' });
       expect(transport).toHaveBeenCalledOnce();
     });
+  });
+
+  it('should fail each attempt after 60 s without a byte and retry it', async () => {
+    vi.useFakeTimers();
+    try {
+      const stalled = (request: Request): Response => trickle(request, undefined);
+      const { transport } = scriptedFetch(stalled, stalled, stalled);
+
+      const outcome = fetchVerified({ url, integrity, fetch: transport, signal: new AbortController().signal });
+      const settled = expect(outcome).rejects.toMatchObject({
+        code: 'DOWNLOAD_FAILED',
+        reason: 'transport',
+        detail: 'no bytes received for 60000 ms',
+      });
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(transport).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+
+      await settled;
+      expect(transport).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should keep a slow body that keeps arriving past 60 s in total', async () => {
+    vi.useFakeTimers();
+    try {
+      const { transport } = scriptedFetch((request) => trickle(request, 30_000));
+
+      const outcome = fetchVerified({
+        url,
+        integrity,
+        byteLength: payload.byteLength,
+        fetch: transport,
+        signal: new AbortController().signal,
+      });
+      await vi.advanceTimersByTimeAsync(30_000 * (payload.byteLength + 1));
+
+      expect(new TextDecoder().decode(await outcome)).toBe('payload bytes');
+      expect(transport).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should reject with the signal reason when aborted', async () => {

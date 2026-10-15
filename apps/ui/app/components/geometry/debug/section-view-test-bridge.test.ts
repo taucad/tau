@@ -228,7 +228,7 @@ describe('getSectionViewTestRenderedModelComponentState', () => {
 });
 
 describe('getRenderedModelComponentSurfaceBounds', () => {
-  it('should measure transformed surface vertices and ignore fat-line proxy geometry', () => {
+  it('should measure transformed surface vertices in physical metres and ignore fat-line proxy geometry', () => {
     const scene = new THREE.Scene();
     const parent = new THREE.Group();
     parent.position.set(10, 20, 30);
@@ -242,15 +242,16 @@ describe('getRenderedModelComponentSurfaceBounds', () => {
     parent.add(surface, edge);
     scene.add(parent);
     try {
-      const bounds = getRenderedModelComponentSurfaceBounds(scene, 'component:gear');
+      const renderFrame = { anchorFrameId: 'tau:root', originMeters: [1, 2, 3], metersPerRenderUnit: 0.001 } as const;
+      const bounds = getRenderedModelComponentSurfaceBounds(scene, 'component:gear', renderFrame);
       expect(bounds).toBeDefined();
-      for (const [index, value] of [8, 24, 27].entries()) {
+      for (const [index, value] of [1.008, 2.024, 3.027].entries()) {
         expect(bounds?.min[index]).toBeCloseTo(value, 10);
       }
-      for (const [index, value] of [12, 26, 33].entries()) {
+      for (const [index, value] of [1.012, 2.026, 3.033].entries()) {
         expect(bounds?.max[index]).toBeCloseTo(value, 10);
       }
-      expect(getRenderedModelComponentSurfaceBounds(scene, 'component:absent')).toBeUndefined();
+      expect(getRenderedModelComponentSurfaceBounds(scene, 'component:absent', renderFrame)).toBeUndefined();
     } finally {
       surface.geometry.dispose();
       surface.material.dispose();

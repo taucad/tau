@@ -326,7 +326,12 @@ test.skipIf(!enabled)(
               };
             }
           ).__TAU_SECTION_VIEW_TEST__;
+          const surfaceCenter = (id: string) => {
+            const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(`occurrence:${id}`);
+            return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
+          };
           return {
+            ringCenter: surfaceCenter('ring'),
             coordinates: bridge?.getState('file:main.py')?.coordinates,
             matrices: ['ring', 'sun', 'carrier-front', 'planet-1-gear', 'planet-2-gear', 'planet-3-gear'].map((id) =>
               bridge?.getComponentWorldMatrix('file:main.py', `occurrence:${id}`),
@@ -334,12 +339,7 @@ test.skipIf(!enabled)(
             // These centrally symmetric gears and pins have their bore-axis midpoint at the surface bounds center.
             // Read rendered vertices, not joint metadata: a correct pivot can still carry incorrectly baked geometry.
             boreCenters: [1, 2, 3].map((planet) =>
-              ['gear', 'pin'].map((role) => {
-                const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(
-                  `occurrence:planet-${planet}-${role}`,
-                );
-                return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
-              }),
+              ['gear', 'pin'].map((role) => surfaceCenter(`planet-${planet}-${role}`)),
             ),
           };
         });
@@ -383,9 +383,13 @@ test.skipIf(!enabled)(
           const observed = Math.atan2(matrix[8]!, matrix[0]!);
           expect(Math.abs(Math.atan2(Math.sin(observed - expected), Math.cos(observed - expected)))).toBeLessThan(1e-6);
         }
+        expect(state.ringCenter).toBeDefined();
         const errors = state.boreCenters.map(([gear, pin]) => {
           expect(gear).toBeDefined();
           expect(pin).toBeDefined();
+          // The canonical 24/24-tooth, module-2 stage has a 48 mm center distance.
+          const radius = Math.hypot(...gear!.map((value, index) => value - state.ringCenter![index]!));
+          expect(Math.abs(radius - 0.048)).toBeLessThan(1e-7);
           return Math.hypot(...gear!.map((value, index) => value - pin![index]!));
         });
         // 0.0001 mm admits Float32 meshing roundoff while detecting independent geometry/pivot drift.

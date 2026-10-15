@@ -7,7 +7,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
 import { perspectiveVerticalSpan } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
-import { toThreeRenderPoint } from '@taucad/three/spatial';
+import { fromThreeRenderBounds, toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { graphicsSettingsForView } from '#workbench-records/projection.js';
@@ -245,7 +245,7 @@ export type SectionViewTestBridgeApi = Readonly<{
   getModelComponents(): SectionViewTestModelComponent[];
   getModelVisibility(): SectionViewTestModelVisibility;
   getRenderedModelComponentState(componentId: string): SectionViewTestRenderedModelComponentState;
-  /** Actual triangle vertices in the presented world frame, including the live mechanism pose. */
+  /** Actual triangle bounds in anchor-frame metres, including the live mechanism pose. */
   getRenderedModelComponentSurfaceBounds(
     componentId: string,
   ): Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }> | undefined;
@@ -321,10 +321,11 @@ export function getSectionViewTestRenderedModelComponentState(
   };
 }
 
-/** Read actual surface vertices; fat-line proxy bounds do not describe CAD geometry. */
+/** Read actual surface vertices in physical metres; fat-line proxy bounds do not describe CAD geometry. */
 export function getRenderedModelComponentSurfaceBounds(
   scene: THREE.Object3D,
   componentId: string,
+  renderFrame: RenderFrame,
 ): Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }> | undefined {
   const bounds = new THREE.Box3();
   const point = new THREE.Vector3();
@@ -346,7 +347,7 @@ export function getRenderedModelComponentSurfaceBounds(
       bounds.expandByPoint(point.fromBufferAttribute(position, index).applyMatrix4(object.matrixWorld));
     }
   });
-  return bounds.isEmpty() ? undefined : { min: bounds.min.toArray(), max: bounds.max.toArray() };
+  return bounds.isEmpty() ? undefined : fromThreeRenderBounds({ renderFrame, bounds });
 }
 
 export const getSectionViewTestControlState = ({
@@ -848,7 +849,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         return getSectionViewTestRenderedModelComponentState(scene, componentId);
       },
       getRenderedModelComponentSurfaceBounds(componentId) {
-        return getRenderedModelComponentSurfaceBounds(scene, componentId);
+        return getRenderedModelComponentSurfaceBounds(scene, componentId, cameraRig.renderFrame);
       },
       projectModelComponent(componentId) {
         const { camera, gl } = get();

@@ -33,6 +33,7 @@ import { z } from 'zod';
 import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
 import type {
   TauMcpDispatch,
+  TauMcpDispatchOptions,
   TauMcpHostCall,
   TauMcpHostTool,
   TauMcpRpcFailure,
@@ -47,6 +48,7 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
+import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -85,7 +87,8 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
  * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the
  * machine tools: an external agent may read machines and their slicing profiles, apply the host's unattended
  * actions, stop a machine, and request or check a job. A job, or an action needing a person's approval, goes ahead
- * only on the person's answer in Tau's Print pane, while the agent is told so: nothing here starts a program. Every
+ * only on the person's answer in Tau's Print pane, while the agent is told so: nothing here starts a program. And
+ * `prepare_kernel`, the one tool that downloads, offered only by a host that prepares native kernels (D7). Every
  * name is dispatched into the daemon's own registry by tool name.
  *
  * @public
@@ -106,6 +109,7 @@ export const hostMcpAllowedTools = [
   toolName.requestJob,
   toolName.checkJob,
   toolName.askQuestions,
+  prepareKernelToolName,
 ] as const;
 
 /** One name from {@link hostMcpAllowedTools}. @public */
@@ -129,6 +133,7 @@ const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAll
   toolName.getPrintProfiles,
   toolName.requestJob,
   toolName.checkJob,
+  prepareKernelToolName,
 ]);
 
 /** The registry tools that change nothing, here or on a machine. */
@@ -163,6 +168,13 @@ const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<Ta
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
+  },
+  /* Downloads a pinned runtime into the computer's shared store (D7); preparing a prepared kernel changes nothing. */
+  [prepareKernelToolName]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
   },
   /* Records a question for the person and waits for them; nothing outside the chat changes. */
   [toolName.askQuestions]: {
@@ -343,6 +355,27 @@ const present = async (
     message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
   };
 };
+
+/**
+ * Forward a registry tool's progress reports (partial results shaped `{ progress, total, message }`) to the client.
+ *
+ * @param progress - The call's reporter, present when the client asked for progress.
+ * @returns The registry's `onUpdate`, or `undefined`.
+ */
+const progressUpdates = (
+  progress: TauMcpDispatchOptions['progress'],
+): ((result: Awaited<ReturnType<ToolRegistry['invoke']>>) => void) | undefined =>
+  progress === undefined
+    ? undefined
+    : ({ content }) => {
+        if (isJsonObject(content) && typeof content['progress'] === 'number') {
+          void progress({
+            progress: content['progress'],
+            ...(typeof content['total'] === 'number' ? { total: content['total'] } : {}),
+            ...(typeof content['message'] === 'string' ? { message: content['message'] } : {}),
+          });
+        }
+      };
 
 /**
  * Which registry tool one adapter call names, and with what input.
@@ -631,6 +664,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
             (candidate): candidate is AbortSignal => candidate !== undefined,
           ),
         ),
+        onUpdate: progressUpdates(dispatchOptions.progress),
       });
       binding.pending.add(pending);
       try {
@@ -864,6 +898,7 @@ export const serveLocalHostMcp = async (
     readonly call: {
       readonly toolCallId: string;
       readonly signal?: AbortSignal | undefined;
+      readonly progress?: TauMcpDispatchOptions['progress'];
     };
   }): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
     const runId = `mcp:${workspaceRoot}`;
@@ -875,6 +910,7 @@ export const serveLocalHostMcp = async (
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the args were validated against the tool's own schema.
       input: args as unknown as JsonValue,
       signal: call.signal ?? new AbortController().signal,
+      onUpdate: progressUpdates(call.progress),
       /* No approve here: a job or an action needing a person waits for them in Tau's Print pane, where their own
        * session records the approval with its attestations (machines contract R15). */
     });

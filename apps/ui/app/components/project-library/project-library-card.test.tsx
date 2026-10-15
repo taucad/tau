@@ -1,14 +1,32 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation } from 'react-router';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectListItem } from '#types/project-library.types.js';
+
+const routerContent = createContext<React.ReactNode>(null);
+
+function RouterContent(): React.ReactNode {
+  return useContext(routerContent);
+}
+
+function TestRouter({
+  children,
+  initialEntries = ['/projects'],
+}: React.PropsWithChildren<{ readonly initialEntries?: string[] }>): React.JSX.Element {
+  const [router] = useState(() => createMemoryRouter([{ path: '*', Component: RouterContent }], { initialEntries }));
+  return (
+    <routerContent.Provider value={children}>
+      <RouterProvider router={router} />
+    </routerContent.Provider>
+  );
+}
 
 const mockProject: ProjectListItem = {
   ...projectToManifest({
@@ -32,12 +50,12 @@ const mockActions: ProjectActions = {
 };
 let providerMountCount = 0;
 
-vi.mock('#components/inline-text-editor.js', () => ({
-  InlineTextEditor: ({ value }: { readonly value: string }) => <button type='button'>Edit {value}</button>,
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ getProjectClosePlan: vi.fn() }),
 }));
-
-vi.mock('#components/project-library/project-action-dropdown.js', () => ({
-  ProjectActionDropdown: () => <button type='button'>Actions</button>,
+vi.mock('#hooks/use-sidebar-status.js', () => ({
+  useProjectSidebarRow: () => undefined,
+  useSidebarCommands: () => ({ closeProject: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => {
@@ -138,12 +156,12 @@ function renderCard(
 ): RenderResult {
   const { project = mockProject, ...cardProperties } = properties;
   return render(
-    <MemoryRouter initialEntries={['/projects']}>
+    <TestRouter initialEntries={['/projects']}>
       <TooltipProvider>
         <ProjectLibraryCard project={project} actions={mockActions} {...cardProperties} />
       </TooltipProvider>
       <LocationProbe />
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 
@@ -153,10 +171,66 @@ describe('ProjectLibraryCard live preview', () => {
     providerMountCount = 0;
   });
 
+  it('should show opening activity until local navigation settles and ignore repeated opens', async () => {
+    const ready = Promise.withResolvers<void>();
+    const loader = vi.fn(async () => ready.promise);
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/projects',
+          element: (
+            <TooltipProvider>
+              <ProjectLibraryCard project={mockProject} actions={mockActions} />
+            </TooltipProvider>
+          ),
+        },
+        { path: '/w/home/library', loader, element: <h1>Opened project</h1> },
+      ],
+      { initialEntries: ['/projects'] },
+    );
+    render(<RouterProvider router={router} />);
+    try {
+      await userEvent.click(screen.getByRole('link', { name: 'Open Library Preview Demo' }));
+      const opening = screen.getByRole('link', { name: 'Opening… Library Preview Demo', busy: true });
+      expect(screen.getByText('Opening…')).toBeVisible();
+      await userEvent.click(opening);
+      expect(loader).toHaveBeenCalledOnce();
+      await act(async () => {
+        ready.resolve();
+        await ready.promise;
+      });
+      expect(await screen.findByRole('heading', { name: 'Opened project' })).toBeVisible();
+    } finally {
+      ready.resolve();
+      router.dispose();
+    }
+  });
+
+  it('should focus and select the inline name from Rename, save with Enter, and cancel with Escape', async () => {
+    renderCard();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = await screen.findByRole('textbox', { name: 'Project name' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue(mockProject.name);
+    expect(input).toHaveProperty('selectionStart', 0);
+    expect(input).toHaveProperty('selectionEnd', mockProject.name.length);
+    await userEvent.keyboard('Renamed project{Enter}');
+    expect(mockActions.handleRename).toHaveBeenCalledExactlyOnceWith(mockProject.id, 'Renamed project');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await userEvent.keyboard('Discarded{Escape}');
+    expect(mockActions.handleRename).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: mockProject.name })).toBeVisible();
+  });
+
   it('should render the static thumbnail and no project-scoped FM until preview is toggled', () => {
     renderCard();
 
-    expect(screen.getByRole('presentation')).toBeInTheDocument();
+    expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
     expect(screen.getAllByRole('link')).toHaveLength(1);
     const cardLink = screen.getByRole('link', { name: 'Open Library Preview Demo' });
     expect(cardLink).toHaveAttribute('href', '/w/home/library');
@@ -205,7 +279,7 @@ describe('ProjectLibraryCard live preview', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
 
-    expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
     expect(screen.getByTestId('shared-worker-gate')).toBeInTheDocument();
 
     const fm = screen.getByTestId('file-manager-provider');
@@ -227,7 +301,7 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.getByTestId('file-manager-provider')).toBeInTheDocument();
 
     await userEvent.click(previewToggle);
-    expect(screen.getByRole('presentation')).toBeInTheDocument();
+    expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
     expect(screen.queryByTestId('file-manager-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
   });
@@ -243,12 +317,12 @@ describe('ProjectLibraryCard live preview', () => {
     };
 
     view.rerender(
-      <MemoryRouter initialEntries={['/projects']}>
+      <TestRouter initialEntries={['/projects']}>
         <TooltipProvider>
           <ProjectLibraryCard project={nextProject} actions={mockActions} />
         </TooltipProvider>
         <LocationProbe />
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     const provider = screen.getByTestId('file-manager-provider');
@@ -267,10 +341,10 @@ describe('ProjectLibraryCard live preview', () => {
     expect(onSelect).toHaveBeenCalledOnce();
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Edit Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Library Preview Demo' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
   });
 });

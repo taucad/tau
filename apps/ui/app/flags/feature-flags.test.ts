@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- localStorage keys use 'tau:flags' format */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { isFeatureEnabled, getAllFlags, resetFlagCache, setFlagOverrides } from '#flags/feature-flags.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
@@ -28,6 +27,13 @@ beforeEach(() => {
 });
 
 describe('isFeatureEnabled', () => {
+  it('keeps machines disabled despite saved or newly written local overrides', () => {
+    const storage = createMockStorage({ 'tau:flags': JSON.stringify({ machines: true }) });
+    expect(featureFlagDefaults.machines).toBe(false);
+    expect(isFeatureEnabled('machines', storage)).toBe(false);
+    setFlagOverrides({ machines: true }, storage);
+    expect(isFeatureEnabled('machines', storage)).toBe(false);
+  });
   it('should keep code-only flags at their defaults even with stored overrides', () => {
     const storage = createMockStorage({ 'tau:flags': JSON.stringify({ automaticReload: true }) });
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);

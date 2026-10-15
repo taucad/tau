@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
@@ -10,6 +10,24 @@ import { cookieName } from '#constants/cookie.constants.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+
+const routerContent = createContext<React.ReactNode>(null);
+
+function RouterContent(): React.ReactNode {
+  return useContext(routerContent);
+}
+
+function TestRouter({
+  children,
+  initialEntries = ['/projects'],
+}: React.PropsWithChildren<{ readonly initialEntries?: string[] }>): React.JSX.Element {
+  const [router] = useState(() => createMemoryRouter([{ path: '*', Component: RouterContent }], { initialEntries }));
+  return (
+    <routerContent.Provider value={children}>
+      <RouterProvider router={router} />
+    </routerContent.Provider>
+  );
+}
 
 const makeProject = (id: string, name: string, directory = `/${id}`): ProjectListItem => ({
   ...projectToManifest({
@@ -244,11 +262,11 @@ describe('ProjectLibrary', () => {
   describe('one list with Tau Cloud (D20)', () => {
     const renderLibrary = (): void => {
       render(
-        <MemoryRouter>
+        <TestRouter>
           <TooltipProvider>
             <ProjectLibrary />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
     };
 
@@ -264,22 +282,22 @@ describe('ProjectLibrary', () => {
       mockUseProjectsResult.projects = [];
       cloudListing.isFetching = true;
       const view = render(
-        <MemoryRouter>
+        <TestRouter>
           <TooltipProvider>
             <ProjectLibrary />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
       expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
       expect(screen.getByText('Loading Tau Cloud projects…')).toBeInTheDocument();
       cloudListing.isFetching = false;
       cloudListing.isFailed = true;
       view.rerender(
-        <MemoryRouter>
+        <TestRouter>
           <TooltipProvider>
             <ProjectLibrary />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
       expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
       expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -332,7 +350,10 @@ describe('ProjectLibrary', () => {
       cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
       renderLibrary();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+      const open = screen.getByRole('button', { name: 'Open Hinge Delta' });
+      expect(open).toHaveClass('absolute', 'inset-0');
+      expect(open.parentElement).toHaveClass('hover:border-foreground/30');
+      fireEvent.click(open);
 
       await waitFor(() => {
         expect(mockOpenCloudProject).toHaveBeenCalledWith(
@@ -359,6 +380,8 @@ describe('ProjectLibrary', () => {
       const opening = await screen.findByRole('button', { name: 'Opening… Hinge Delta' });
       expect(opening).toHaveAttribute('aria-busy', 'true');
       expect(opening).toBeDisabled();
+      fireEvent.click(opening);
+      expect(mockOpenCloudProject).toHaveBeenCalledOnce();
       finish();
       expect(await screen.findByRole('button', { name: 'Open Hinge Delta' })).toHaveAttribute('aria-busy', 'false');
     });
@@ -429,11 +452,11 @@ describe('ProjectLibrary', () => {
 
   it('should render the projects heading and every project from useProjects', () => {
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
@@ -454,11 +477,11 @@ describe('ProjectLibrary', () => {
       ],
     };
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getAllByText('Gearbox Alpha')).toHaveLength(2);
@@ -481,11 +504,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Tau is finishing this project.')).toBeInTheDocument();
@@ -529,11 +552,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('This project directory could not be read.')).toBeInTheDocument();
@@ -572,11 +595,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('47 projects are linked to previous workspace identities.')).toBeInTheDocument();
@@ -601,11 +624,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
@@ -618,11 +641,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
@@ -632,11 +655,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByRole('status', { name: 'Loading projects' })).toHaveAttribute('aria-busy', 'true');
@@ -659,11 +682,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('gearbox-alpha-2')).toBeInTheDocument();
@@ -699,11 +722,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('This project needs a Tau identity before it can be opened.')).toBeInTheDocument();
@@ -734,11 +757,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
     screen.getByRole('button', { name: 'Use this folder' }).click();
 
@@ -760,11 +783,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [degraded, mockProjects[1]!] };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('assets: Unrecognized key: "second"')).toBeInTheDocument();
@@ -797,11 +820,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(
@@ -817,11 +840,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), deleteProject };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
     screen.getByRole('button', { name: `Trash ${mockProjects[0]!.name}` }).click();
 
@@ -842,11 +865,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
@@ -864,11 +887,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
@@ -894,12 +917,12 @@ describe('ProjectLibrary', () => {
         return undefined;
       };
       render(
-        <MemoryRouter initialEntries={[entry]}>
+        <TestRouter initialEntries={[entry]}>
           <TooltipProvider>
             <ProjectLibrary />
             <SearchProbe />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
       return { search: () => currentSearch };
     };

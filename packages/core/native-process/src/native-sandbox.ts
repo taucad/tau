@@ -1,5 +1,7 @@
+import { spawn } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { endianness, homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -223,11 +225,143 @@ const ensureInitialized = async (): Promise<void> => {
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
+/* Classic BPF, as `bwrap --seccomp` loads it: one `struct sock_filter` (code, jt, jf, k) per instruction. */
+const bpfLoadWord = 0x20;
+const bpfAnd = 0x54;
+const bpfJumpEqual = 0x15;
+const bpfJump = 0x05;
+const bpfReturn = 0x06;
+const seccompAllow = 0x7f_ff_00_00;
+/* SECCOMP_RET_ERRNO with EPERM. */
+const seccompRefuse = 0x00_05_00_01;
+
+/**
+ * The calls that create a symbolic or hard link, per audit architecture, plus `io_uring_setup` (425 on every one of
+ * them), whose rings carry their own `symlinkat` and `linkat`. The compat architectures are listed because a 64-bit
+ * process can still enter through them.
+ */
+const linkCalls: ReadonlyArray<{ readonly arch: number; readonly mask?: number; readonly calls: readonly number[] }> = [
+  /* On x86_64: link, symlink, linkat, symlinkat. An x32 call carries bit 30 and is masked onto the same number. */
+  { arch: 0xc0_00_00_3e, mask: 0xbf_ff_ff_ff, calls: [86, 88, 265, 266, 425] },
+  /* On i386: link, symlink, linkat, symlinkat. */
+  { arch: 0x40_00_00_03, calls: [9, 83, 303, 304, 425] },
+  /* On aarch64: symlinkat, linkat (it has no link or symlink). */
+  { arch: 0xc0_00_00_b7, calls: [36, 37, 425] },
+  /* 32-bit Arm: link, symlink, linkat, symlinkat. */
+  { arch: 0x40_00_00_28, calls: [9, 83, 330, 331, 425] },
+];
+
+let linkRefusal: Uint8Array<ArrayBuffer> | undefined;
+
+/**
+ * The seccomp program every Linux worker runs under: creating a symbolic or hard link fails with EPERM, every other
+ * call is left to the sandbox runtime's own filter, and an architecture it does not know is refused outright.
+ *
+ * A worker writes inside a root the requesting process also reads and writes. Node's permission model follows a
+ * symlink it finds there, so a link a worker planted would carry that process's grants anywhere; a worker that cannot
+ * create one cannot plant one.
+ *
+ * @returns The compiled program, little-endian.
+ */
+const linkRefusalProgram = (): Uint8Array<ArrayBuffer> => {
+  if (linkRefusal !== undefined) {
+    return linkRefusal;
+  }
+  if (endianness() !== 'LE') {
+    throw new NativeRuntimeUnavailableError('the link-refusing seccomp program is built for little-endian hosts only.');
+  }
+  const program: Array<{ code: number; jt: number; jf: number; k: number }> = [];
+  const emit = (code: number, k: number): number => program.push({ code, jt: 0, jf: 0, k }) - 1;
+  /* Load `seccomp_data.arch`. */
+  emit(bpfLoadWord, 4);
+  const dispatch = linkCalls.map(({ arch }) => {
+    program.push({ code: bpfJumpEqual, jt: 0, jf: 1, k: arch });
+    return emit(bpfJump, 0);
+  });
+  emit(bpfReturn, seccompRefuse);
+  const refusals: number[] = [];
+  for (const [index, { mask, calls }] of linkCalls.entries()) {
+    program[dispatch[index]!]!.k = program.length - dispatch[index]! - 1;
+    /* Load `seccomp_data.nr`. */
+    emit(bpfLoadWord, 0);
+    if (mask !== undefined) {
+      emit(bpfAnd, mask);
+    }
+    for (const call of calls) {
+      refusals.push(emit(bpfJumpEqual, call));
+    }
+    emit(bpfReturn, seccompAllow);
+  }
+  const refuse = emit(bpfReturn, seccompRefuse);
+  for (const at of refusals) {
+    program[at]!.jt = refuse - at - 1;
+  }
+  const bytes = Buffer.alloc(program.length * 8);
+  for (const [index, { code, jt, jf, k }] of program.entries()) {
+    bytes.writeUInt16LE(code, index * 8);
+    bytes.writeUInt8(jt, index * 8 + 2);
+    bytes.writeUInt8(jf, index * 8 + 3);
+    bytes.writeUInt32LE(k, index * 8 + 4);
+  }
+  linkRefusal = Uint8Array.from(bytes);
+  return linkRefusal;
+};
+
+/** File descriptor `bwrap` reads {@link linkRefusalProgram} from. */
+const linkRefusalDescriptor = 3;
+
+/* Appended last, so they win over the runtime's own re-allow of file-write-create in the writable root (Seatbelt is
+ * last-match-wins between rules for the same operation). */
+const seatbeltLinkRefusal =
+  '\n; Tau: no symbolic or hard link\n(deny file-write-create (vnode-type SYMLINK))\n(deny file-link)';
+
+/**
+ * Close the gap the sandbox runtime leaves: it lets a worker create links inside its writable root. On Linux `bwrap`
+ * is handed {@link linkRefusalProgram} on file descriptor 3; on macOS the Seatbelt profile gains rules refusing both
+ * kinds of link. A vector of any other shape is refused rather than run without them.
+ *
+ * @param argv - The runtime's `[shell, '-c', wrapped]` vector.
+ * @returns The same vector, refusing links.
+ */
+const refuseLinkCreation = (argv: readonly string[]): readonly string[] => {
+  const [shell, flag, wrapped] = argv;
+  if (argv.length !== 3 || flag !== '-c' || wrapped === undefined) {
+    throw new NativeRuntimeUnavailableError('the sandbox runtime returned a vector Tau cannot refuse links in.');
+  }
+  if (process.platform === 'linux') {
+    if (!wrapped.startsWith('bwrap ')) {
+      throw new NativeRuntimeUnavailableError('the sandbox runtime did not start bwrap, so links cannot be refused.');
+    }
+    return [shell!, flag, `bwrap --seccomp ${String(linkRefusalDescriptor)} ${wrapped.slice('bwrap '.length)}`];
+  }
+  if (process.platform === 'darwin') {
+    /* The runtime single-quotes the profile, spelling each quote inside it as '"'"'. */
+    const marker = "/usr/bin/sandbox-exec -p '(version 1)";
+    const start = wrapped.indexOf(marker);
+    if (start === -1 || wrapped.includes(marker, start + 1)) {
+      throw new NativeRuntimeUnavailableError(
+        'the sandbox runtime did not pass one Seatbelt profile, so links cannot be refused.',
+      );
+    }
+    let close = wrapped.indexOf("'", start + marker.length);
+    while (close !== -1 && wrapped.startsWith(`'"'"'`, close)) {
+      close = wrapped.indexOf("'", close + `'"'"'`.length);
+    }
+    if (close === -1) {
+      throw new NativeRuntimeUnavailableError('the Seatbelt profile is not closed, so links cannot be refused.');
+    }
+    return [shell!, flag, `${wrapped.slice(0, close)}${seatbeltLinkRefusal}${wrapped.slice(close)}`];
+  }
+  return argv;
+};
+
 /**
  * Wrap one host-owned executable and argument vector in the fixed Tau sandbox.
  *
  * The returned vector is spawned with `shell: false`; only host-owned paths and fixed worker
- * arguments are quoted into the wrapper command, never project content.
+ * arguments are quoted into the wrapper command, never project content. The worker may not create a symbolic or hard
+ * link. On Linux the vector reads the seccomp program that refuses them from file descriptor 3, so spawn it with
+ * {@link spawnInNativeSandbox}: spawned any other way it fails to start.
  *
  * @public
  * @param launch - Executable, arguments, and the paths the worker may use.
@@ -240,17 +374,54 @@ export const launchInNativeSandbox = async (launch: NativeSandboxLaunch): Promis
   // the worker's temporary files belong in its private artifact root.
   const temporary = ['TMPDIR', 'TEMP', 'TMP'].map((name) => `${name}=${quote(launch.writablePath)}`).join(' ');
   const command = `${temporary} exec ${vector}`;
+  let argv: readonly string[];
   try {
-    const { argv } = await SandboxManager.wrapWithSandboxArgv(
+    ({ argv } = await SandboxManager.wrapWithSandboxArgv(
       command,
       '/bin/sh',
       nativeSandboxPolicy(launch),
       undefined,
       launch.workingDirectory,
       { commandId: launch.commandId },
-    );
-    return argv;
+    ));
   } catch (error) {
     throw unavailable(error);
   }
+  return refuseLinkCreation(argv);
+};
+
+/**
+ * Spawn a vector from {@link launchInNativeSandbox} with piped stdio, handing `bwrap` the seccomp program that
+ * refuses links on file descriptor 3 on Linux.
+ *
+ * @public
+ * @param vector - The spawn vector.
+ * @param options - The working directory and the environment.
+ * @returns The started process.
+ */
+export const spawnInNativeSandbox = (
+  vector: readonly string[],
+  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+): ChildProcessWithoutNullStreams => {
+  const [command, ...commandArguments] = vector;
+  const filtered = process.platform === 'linux';
+  const program = filtered ? linkRefusalProgram() : undefined;
+  const child = spawn(command!, commandArguments, {
+    cwd: options.cwd,
+    detached: process.platform !== 'win32',
+    env: options.env,
+    shell: false,
+    windowsHide: true,
+    stdio: filtered ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+  });
+  const channel = program === undefined ? undefined : child.stdio[linkRefusalDescriptor];
+  if (program !== undefined && channel !== undefined && channel !== null && 'end' in channel) {
+    /* A process that exits before reading the program closes its end; that is its failure to report, not this. */
+    channel.on('error', () => undefined);
+    /* Only the program crosses: once it is written this end closes, so the worker inherits nothing to talk on. */
+    channel.end(program, () => {
+      channel.destroy();
+    });
+  }
+  return child;
 };

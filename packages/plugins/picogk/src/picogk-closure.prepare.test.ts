@@ -74,7 +74,7 @@ const hex = (algorithm: 'sha256' | 'sha512', bytes: Uint8Array<ArrayBuffer>): st
   createHash(algorithm).update(bytes).digest('hex');
 const sha512Integrity = `sha512-${createHash('sha512').update(runtimeArchive).digest('base64')}`;
 const layerRecord: PicogkLayerRecord = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   target: 'darwin-arm64',
   asset: 'tau-picogk-layer-darwin-arm64.tar.gz',
   sha256: hex('sha256', layerArchive),
@@ -85,6 +85,8 @@ const layerRecord: PicogkLayerRecord = {
   dotnetRuntimeVersion: runtimeVersion,
   readyToRun: true,
   sourceFilesSha256: '0'.repeat(64),
+  nativeSourceSha256: '1'.repeat(64),
+  toolchain: { dotnetSdk: '10.0.400', compiler: 'clang', sdk: '26.2', cmake: 'cmake version 4.4.4', ninja: '1.13.2' },
 };
 const darwinArm64: HostIndicators = {
   os: 'darwin',

@@ -15,6 +15,7 @@ import type { Build123dAnalysis } from '#build123d.protocol.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
 import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
+import { libraryVersionMismatches, pyprojectPath } from '#project-manifest.js';
 
 const computeNamespace = 'build123d.operation.v1';
 const computeProducerVersion = 'build123d@0.11.1|python@3.13|ocp@7.9.3.1.1|occt@7.9.3|worker-protocol@1|adapter@1';
@@ -201,7 +202,11 @@ export const build123dKernel = defineKernel({
   },
 
   async evaluate({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
+    const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
+    // D35: the project's own pins must name the libraries this kernel runs, or it runs differently outside Tau.
+    const issues = paths.includes(pyprojectPath)
+      ? libraryVersionMismatches(await runtime.filesystem.readFile(pyprojectPath, 'utf8'))
+      : [];
     const build = async (compute: Record<string, unknown> | undefined) => {
       const span = runtime.tracer.startSpan('build123d.build', { entryPath });
       try {
@@ -233,6 +238,7 @@ export const build123dKernel = defineKernel({
             sessionGeneration: context.session.generation,
             handleId: plain.handleId,
           },
+          issues,
         };
       }
       const scope = runtime.compute.openScope({
@@ -288,6 +294,7 @@ export const build123dKernel = defineKernel({
             sessionGeneration: context.session.generation,
             handleId: result.handleId,
           },
+          issues,
         };
       } finally {
         // Seals metadata only; the runtime permits the export tail after real delivery.

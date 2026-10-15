@@ -303,7 +303,7 @@ describe('Build123d kernel lifecycle errors', () => {
 
     await expect(
       definition.evaluate({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
-    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'shape' } });
+    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'shape' }, issues: [] });
     expect(openScope).toHaveBeenCalledWith(
       expect.objectContaining({ namespace: 'build123d.operation.v1', admissionFloor: 5, resident: context.resident }),
     );
@@ -333,7 +333,7 @@ describe('Build123d kernel lifecycle errors', () => {
     off.session.request.mockResolvedValueOnce({ handleId: 'plain', observedDependencies: [] });
     await expect(
       definition.evaluate({ entryPath: 'main.py', parameters: {}, options: renderOptions }, offRuntime, off),
-    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'plain' } });
+    ).resolves.toEqual({ handle: { sessionGeneration: 2, handleId: 'plain' }, issues: [] });
     expect(off.session.request).toHaveBeenCalledWith(
       expect.objectContaining({ params: { entryPath: 'main.py', parameters: {} } }),
     );
@@ -341,6 +341,38 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(openScope).toHaveBeenCalledTimes(2);
     expect(warm).toHaveBeenCalledOnce();
     openScope.mockRestore();
+  });
+
+  it('warns when pyproject.toml pins build123d at a version the kernel does not run', async () => {
+    const context = createContext();
+    context.mirror.sync.mockResolvedValueOnce(['main.py', 'pyproject.toml']);
+    context.session.request.mockResolvedValueOnce({ handleId: 'plain', observedDependencies: [] });
+    const project = createMockKernelRuntime({
+      filesystemOverrides: {
+        readFileResult: (path) =>
+          path === 'pyproject.toml' ? '[project]\nname = "plate"\ndependencies = ["build123d==0.12.0"]\n' : '',
+      },
+    });
+    const offRuntime = { ...project, compute: { status: 'off' } } as unknown as typeof runtime;
+
+    const result = await definition.evaluate(
+      { entryPath: 'main.py', parameters: {}, options: renderOptions },
+      offRuntime,
+      context,
+    );
+
+    expect(result).toMatchObject({
+      handle: { handleId: 'plain' },
+      issues: [
+        {
+          code: 'LIBRARY_VERSION_MISMATCH',
+          severity: 'warning',
+          location: { fileName: 'pyproject.toml', startLineNumber: 3 },
+          details: { library: 'build123d', declared: '0.12.0', runs: '0.11.1' },
+        },
+      ],
+    });
+    expect(project.filesystem.mocks.readFile).toHaveBeenCalledWith('pyproject.toml', 'utf8');
   });
 
   it('delegates handle validity/disposal and always removes the mirror', async () => {

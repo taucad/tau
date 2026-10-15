@@ -1485,3 +1485,14 @@ describe('Simulated X1C operations it never sent, stops during filament work and
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
+
+describe('simulated storage diagnosis', () => {
+  it('reports the real storage recovery message without a write', async () => {
+    const simulator = await createBambuSimulator({ faults: ['storage-damaged'] });
+    const report = await simulator.session.getSnapshot({ signal });
+    const alert = report.alerts.find((entry) => entry.code === '0500-402F');
+    expect(alert?.message).toContain('Back up readable files');
+    expect(simulator.writes()).toEqual([]);
+    await simulator.session.close();
+  });
+});

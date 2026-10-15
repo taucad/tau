@@ -9,6 +9,10 @@ import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
+import {
+  instantScrollBehavior,
+  useFollowLatestOutput,
+} from '#routes/w.$workspace.$project/use-follow-latest-output.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -40,14 +44,6 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
-
-// Virtuoso's `scrollToIndex` types restrict `behavior` to `'auto' | 'smooth'`,
-// but at runtime the value is forwarded straight to the native `scrollTo()`
-// API which also accepts `'instant'` (no animation, no layout-shift jitter
-// while assistant tokens stream in). Bridge the type vs runtime mismatch
-// once here so the call sites read cleanly.
-// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- runtime accepts 'instant'; Virtuoso's type is narrower than the native ScrollBehavior
-const instantScrollBehavior = 'instant' as 'auto';
 
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
@@ -230,10 +226,9 @@ const ExpandedChatHistory = memo(function ({
     setAtBottom(atBottom);
   }, []);
 
-  // Only auto-follow output when the user is already pinned to the bottom —
-  // otherwise leave the scroll position alone so the user can read earlier
-  // messages without Virtuoso fighting them as assistant tokens stream in.
-  const followOutput = useCallback((atBottom: boolean): 'auto' | false => (atBottom ? 'auto' : false), []);
+  // Follow streaming output only while the user stays pinned to the bottom —
+  // otherwise leave the scroll position alone so they can read earlier messages.
+  const followLatestOutput = useFollowLatestOutput(virtuosoRef);
 
   // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
@@ -287,7 +282,9 @@ const ExpandedChatHistory = memo(function ({
                 initialTopMostItemIndex={initialChatTurn}
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
-                followOutput={followOutput}
+                scrollerRef={followLatestOutput.scrollerRef}
+                followOutput={followLatestOutput.followOutput}
+                totalListHeightChanged={followLatestOutput.totalListHeightChanged}
                 className='mt-1 min-h-0 min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
                 components={virtuosoComponents}

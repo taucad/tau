@@ -61,9 +61,7 @@ export function CloudProjectPreview({
           className={isCompact ? 'size-4' : 'size-8'}
         />
       )}
-      {!isCompact && hasImage ? (
-        <span className='absolute right-2 bottom-2 rounded-md bg-background px-2 py-1 text-xs'>Saved preview</span>
-      ) : null}
+
       {!isCompact && preview.isFailed && !preview.canRetry ? (
         <p className='absolute right-2 bottom-2 left-2 text-center text-xs'>
           Preview unavailable. Open the project to view it.
@@ -73,7 +71,7 @@ export function CloudProjectPreview({
         <Button
           size='sm'
           variant='outline'
-          className='absolute bottom-2'
+          className='absolute bottom-2 z-20'
           disabled={preview.isLoading}
           aria-busy={preview.isLoading}
           onClick={async () => {

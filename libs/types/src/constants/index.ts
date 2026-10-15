@@ -9,6 +9,7 @@ export * from '#constants/id.constants.js';
 export * from '#constants/kernel.constants.js';
 export * from '#constants/logger.constants.js';
 export * from '#constants/material.constants.js';
+export * from '#constants/machines-feature.constants.js';
 export * from '#constants/format-names.constants.js';
 export * from '#constants/mime-types.constants.js';
 export * from '#constants/publication.constants.js';

@@ -1,0 +1,67 @@
+# Spike S29 (native-dependency-resolution charter, wave 2): a static directory is a complete payload mirror under
+# TAU_PAYLOAD_MIRROR + no-fallback, and an image with a baked store answers `ready` under --network none (D25, W19).
+# Spike code under scripts/spikes/native-deps/linux/s29; the run's evidence is the uploaded artifact and the job
+# summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S29 (static mirror and baked store)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s29-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s29:
+    name: S29 static mirror, G5 receipts and --network none
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Create the baked config directory
+        run: sudo install -d -o "$(id -u)" -g "$(id -g)" /config
+      - name: Online prepare, static mirror, no-fallback prepare and a missing-blob refusal
+        run: scripts/spikes/native-deps/linux/s29/run.sh mirror "$RUNNER_TEMP/s29" "$RUNNER_TEMP/evidence" /config
+      - name: Throwaway image with the baked store under --network none
+        if: always()
+        run: scripts/spikes/native-deps/linux/s29/run.sh image "$RUNNER_TEMP/s29" "$RUNNER_TEMP/evidence" /config
+      - name: Collect the summary
+        if: always()
+        run: |
+          e="$RUNNER_TEMP/evidence"
+          set +e
+          {
+            echo "== runs"; cat "$e/runs.jsonl"
+            for f in a-tally b-tally n-tally mirror mirror-n g5-compare; do echo "== $f"; cat "$e/$f.json" 2>/dev/null; echo; done
+            echo "== mirror http GETs / 200s: $(cat "$e/mirror-http-gets.txt" 2>/dev/null) / $(cat "$e/mirror-http-200.txt" 2>/dev/null)"
+            echo "== mirror size"; cat "$e/mirror-size.txt" 2>/dev/null
+            for f in a-prepare b-prepare n-prepare image-prepare image-verify; do echo "== $f stdout"; head -c 1200 "$e/$f.out" 2>/dev/null; echo; echo "== $f stderr (tail)"; tail -c 800 "$e/$f.err" 2>/dev/null; echo; done
+            echo "== b-inspect-before"; head -c 1500 "$e/b-inspect-before.out" 2>/dev/null; echo
+            echo "== image-inspect"; head -c 1500 "$e/image-inspect.out" 2>/dev/null; echo; tail -c 600 "$e/image-inspect.err" 2>/dev/null
+            echo "== image"; cat "$e/image-size.txt" "$e/image-base.txt" "$e/image-layers.txt" "$e/image-network-probe.txt" 2>/dev/null
+            echo "== image build tails"; tail -5 "$e/image-build-cli.log" "$e/image-deploy.log" "$e/image-docker-build.log" 2>/dev/null
+          } > "$e/s29-summary.txt"
+          { echo '```'; cat "$e/s29-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S29' "$RUNNER_TEMP/evidence/s29-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s29-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

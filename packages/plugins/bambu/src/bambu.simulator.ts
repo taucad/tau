@@ -1459,7 +1459,9 @@ export const defineBambuSimulatorMachine = (
   )[input.model ?? 'X1C']();
 
 /** Selectable, explicitly labelled simulated X1C provider; no sockets, no hardware. @public */
-export const bambuSimulatorMachine = defineBambuSimulatorMachine();
+export const bambuSimulatorMachine: ReturnType<typeof defineBambuSimulatorMachine> = defineBambuSimulatorMachine();
 
 /** Selectable, explicitly labelled simulated A1 mini provider; no sockets, no hardware. @public */
-export const bambuA1MiniSimulatorMachine = defineBambuSimulatorMachine({ model: 'A1 mini' });
+export const bambuA1MiniSimulatorMachine: ReturnType<typeof defineBambuSimulatorMachine> = defineBambuSimulatorMachine({
+  model: 'A1 mini',
+});

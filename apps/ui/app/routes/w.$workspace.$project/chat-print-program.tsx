@@ -17,14 +17,9 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { operator } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { useProject } from '#hooks/use-project.js';
-import { PrintNotice, PrintRow, PrintStage } from '#routes/w.$workspace.$project/chat-print-section.js';
-import {
-  JobChecks,
-  describeProgram,
-  requestKeptJob,
-  startBlocker,
-} from '#routes/w.$workspace.$project/chat-print-send.js';
-import type { KeptJobId } from '#routes/w.$workspace.$project/chat-print-send.js';
+import { PrintNotice, PrintRow, PrintStage } from '#components/machines/machine-section.js';
+import { JobChecks, describeProgram, requestKeptJob, startBlocker } from '#components/machines/machine-send.js';
+import type { KeptJobId } from '#components/machines/machine-send.js';
 
 /**
  * The extensions a machine's accepted containers are saved under: each container's own `extensions`, or, for one that

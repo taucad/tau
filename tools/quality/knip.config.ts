@@ -175,6 +175,8 @@ const config: KnipConfig = {
       // Electron's main/preload and utility-process bundles are separate entry points.
       entry: [
         'electron.vite.config.ts',
+        // Compiled by desktop: typecheck's tsconfig.spec.json.
+        'src/**/*.test-d.ts',
         'src/main/index.ts',
         'src/preload/**/*.ts',
         'src/tau/*.entry.ts',
@@ -187,6 +189,10 @@ const config: KnipConfig = {
       ignoreDependencies: [
         // The externalization test resolves this platform package from a synthetic install tree it writes.
         'geospec-engine-darwin-arm64',
+        // Externalized by electron.vite.config.ts and staged for the host's lazy provider imports.
+        '@taucad/bambu',
+        '@taucad/carvera',
+        '@taucad/grbl',
         // `desktopExternalizedDependencies` (electron.vite.config.ts): loaded from node_modules at run
         // time and copied in by the packaging script; the ACP adapters are resolved by name through
         // `discoverAcpAgents({ resolveFrom: import.meta.url })` (packages/host/src/acp/registry.ts).

@@ -53,6 +53,36 @@ export async function getKernelDependencies(kernelId: KernelProvider): Promise<R
 }
 
 /**
+ * The project template a new project of this kernel starts from: the manifest and lock files its plugin publishes,
+ * pinned to the kernel's own closure (`@taucad/build123d/project/*`, `@taucad/picogk/project/*`); undefined for a
+ * kernel whose project files Tau writes itself. Only the text files load, never the plugin.
+ */
+export async function getKernelProjectTemplate(kernelId: KernelProvider): Promise<Record<string, string> | undefined> {
+  switch (kernelId) {
+    case 'build123d': {
+      const [pyproject, pylock, uvLock] = await Promise.all([
+        import('@taucad/build123d/project/pyproject.toml?raw'),
+        import('@taucad/build123d/project/pylock.toml?raw'),
+        import('@taucad/build123d/project/uv.lock?raw'),
+      ]);
+      return { 'pyproject.toml': pyproject.default, 'pylock.toml': pylock.default, 'uv.lock': uvLock.default };
+    }
+
+    case 'picogk': {
+      const [csproj, lock] = await Promise.all([
+        import('@taucad/picogk/project/project.csproj?raw'),
+        import('@taucad/picogk/project/packages.lock.json?raw'),
+      ]);
+      return { 'project.csproj': csproj.default, 'packages.lock.json': lock.default };
+    }
+
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/**
  * Format kernel names as a readable list with the specified conjunction.
  * @example formatKernelList('or') // "OpenSCAD, Replicad, Manifold, Zoo, or JSCAD"
  * @example formatKernelList('and') // "OpenSCAD, Replicad, Manifold, Zoo, and JSCAD"

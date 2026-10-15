@@ -70,7 +70,27 @@ describe('MCP configs', () => {
     expect(tau).toMatchObject({
       command: 'node',
       cwd: '.',
-      env_vars: ['TAU_CLI', 'TAU_HOST_MACHINES'],
+      env_vars: [
+        'TAU_CLI',
+        'TAU_HOST_MACHINES',
+        'TAU_ACQUISITION',
+        'TAU_PAYLOAD_MIRROR',
+        'TAU_PAYLOAD_MIRROR_NO_FALLBACK',
+        'TAU_PAYLOAD_DIR',
+        'TAU_CONFIG_DIR',
+        'TAU_PAYLOAD_TARGET',
+        'TAU_PAYLOAD_EMULATION',
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'NO_PROXY',
+        'http_proxy',
+        'https_proxy',
+        'no_proxy',
+        'SSL_CERT_FILE',
+        'SSL_CERT_DIR',
+        'NODE_EXTRA_CA_CERTS',
+        'NODE_USE_SYSTEM_CA',
+      ],
       omit_tools_from: ['deferred'],
     });
     /* eslint-enable @typescript-eslint/naming-convention -- Back to camelCase after the Codex keys */

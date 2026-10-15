@@ -39,6 +39,7 @@ export const windowFullscreenChannel = 'tau:window-fullscreen';
  */
 export const quitChannels = {
   ask: 'tau:quit:ask',
+  navigate: 'tau:machines:navigate',
   quiesced: 'tau:quit:quiesced',
 } as const;
 

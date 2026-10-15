@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +32,7 @@ import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import type { HostPrepareKernel } from '#agent-tools.js';
 import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
@@ -286,7 +288,12 @@ type StubRelay = {
  * each one back by path. Unlike the real API it reaps nothing on its own, so a
  * test decides exactly when a peerless route dies.
  */
-const startRelay = async (options: { readonly refuse?: (pathname: string) => boolean } = {}): Promise<StubRelay> => {
+const startRelay = async (
+  options: {
+    readonly refuse?: (pathname: string) => boolean;
+    readonly onRequest?: (pathname: string) => void;
+  } = {},
+): Promise<StubRelay> => {
   const httpServer = createServer();
   resources.push(httpServer);
   const socketServer = new WebSocketServer({ noServer: true });
@@ -313,6 +320,7 @@ const startRelay = async (options: { readonly refuse?: (pathname: string) => boo
       line: `${request.method ?? ''} ${request.url ?? ''}`,
       authorization: request.headers.authorization,
     });
+    options.onRequest?.(new URL(request.url ?? '/', 'http://relay.invalid').pathname);
     response.statusCode = 404;
     response.end();
   });
@@ -1708,7 +1716,15 @@ describe('startHostDaemon', () => {
       temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-connect-tau-'));
       process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
       process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
-      const relay = await startRelay();
+      const configPath = join(temporaryDirectory, 'workspace', '.git', 'config');
+      let advertisedConfig: string | undefined;
+      const relay = await startRelay({
+        onRequest(pathname) {
+          if (pathname === '/v1/git/workspace.git/info/refs') {
+            advertisedConfig = readFileSync(configPath, 'utf8');
+          }
+        },
+      });
       let project: ReturnType<typeof realCreateProjectRevisions> | undefined;
       revisionsSpy.mockImplementationOnce((options) => {
         project = realCreateProjectRevisions(options);
@@ -1716,18 +1732,17 @@ describe('startHostDaemon', () => {
       });
 
       const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
-      await daemon.ready;
-      await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
+      try {
+        await daemon.ready;
+        await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
 
-      /* Git's own remotes list is the record (D29), so that is what is read —
-       * and it is written before the registration this fixture's API never
-       * answers, which is why nothing here waits for a `connected` phase. */
-      const workspaceRoot = join(temporaryDirectory, 'workspace');
-      await expect
-        .poll(async () => readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''), { timeout: 10_000 })
-        .toContain(tauRemoteUrl(relay.url.origin, 'workspace'));
-
-      await daemon.close();
+        // Observe the recorded URL before the fixture's refusal makes the actor remove it.
+        const remoteUrl = tauRemoteUrl(relay.url.origin, 'workspace');
+        await expect.poll(() => advertisedConfig, { timeout: 10_000 }).toContain(remoteUrl);
+        await expect.poll(async () => readFile(configPath, 'utf8'), { timeout: 10_000 }).not.toContain(remoteUrl);
+      } finally {
+        await daemon.close();
+      }
     },
     30_000,
   );
@@ -2383,6 +2398,67 @@ describe('startHostDaemon runtime child per root and session', () => {
       await daemon.close();
     }
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
+
+  it('offers prepare_kernel, composes every child from the store, and replaces each root child once a kernel is ready (D37)', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-native-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const compose = vi.fn(async () => ({ unavailable: [] }));
+    const outcomes: Array<Awaited<ReturnType<HostPrepareKernel>>> = [
+      { status: 'blocked', kernel: 'picogk', reason: 'offline-miss', message: 'offline' },
+      { status: 'ready', kernel: 'picogk' },
+    ];
+    const prepareKernel = vi.fn(async () => outcomes.shift() ?? { status: 'ready', kernel: 'picogk' });
+    projectHostSpy.mockClear();
+    registrySpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: {
+        modulePath: proofChild,
+        native: {
+          directory: join(temporaryDirectory, 'children'),
+          store: join(temporaryDirectory, 'store'),
+          compose,
+          closureRoots: async () => [],
+          start: vi.fn(),
+        },
+      },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), prepareKernel },
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options?.prepareKernel === undefined) {
+        throw new TypeError('Expected the daemon to hand its project host prepare_kernel.');
+      }
+      expect(typeof registrySpy.mock.lastCall?.[0]?.prepareKernel).toBe('function');
+      const root = join(temporaryDirectory, 'workspace');
+      const before = runtimeChildren.length;
+      const composedBefore = compose.mock.calls.length;
+      await options.runtimeClient(root);
+      const [first] = runtimeChildren.slice(before);
+      const context = { signal: new AbortController().signal, onProgress: () => undefined };
+
+      await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'blocked' });
+      expect(await exitOf(first!.handle, 200)).toBe('open');
+      await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'ready' });
+      expect(await exitOf(first!.handle)).toBe('closed');
+      await options.runtimeClient(root);
+
+      expect(runtimeChildren.slice(before)).toHaveLength(2);
+      expect(compose.mock.calls.length - composedBefore).toBe(2);
+      expect(prepareKernel).toHaveBeenCalledWith({ kernel: 'picogk' }, context);
+    } finally {
+      await daemon.close();
+    }
   }, 30_000);
 
   it('stays quiet about the runtime child a close interrupts while it starts', async () => {

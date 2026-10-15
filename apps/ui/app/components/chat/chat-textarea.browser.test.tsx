@@ -399,6 +399,48 @@ describe('dictation recording and transcription', () => {
   );
 });
 
+describe('dictation idle waveform', () => {
+  it.each(['light', 'dark'] as const)('should keep moving while the microphone is silent in %s mode', async (theme) => {
+    await page.viewport(800, 480);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    dictationAvailable = true;
+    transcription = Promise.withResolvers<string>();
+    renderComposer({ status: 'ready', inputText: '' });
+    await page.getByRole('button', { name: 'Dictate', exact: true }).click();
+    await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+    act(() => {
+      // A silent microphone: every batch reports zero level.
+      for (let index = 0; index < 40; index++) {
+        recordLevel?.(0);
+      }
+    });
+    const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
+    const frames: string[] = [];
+    const transforms: string[] = [];
+    for (let frame = 0; frame < 4; frame++) {
+      // oxlint-disable-next-line no-await-in-loop -- Frames are sampled sequentially in time.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 170);
+      });
+      transforms.push(
+        [...waveform.querySelectorAll('span')]
+          .slice(-24)
+          .map((bar) => getComputedStyle(bar).transform)
+          .join('|'),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- Frames are sampled sequentially in time.
+      const { base64 } = await page.screenshot({
+        element: waveform,
+        base64: true,
+        path: `../../../../../out/test-results/composer/dictation-idle-${theme}-frame-${frame}.png`,
+      });
+      frames.push(base64);
+    }
+    expect(new Set(transforms).size).toBe(transforms.length);
+    expect(new Set(frames).size).toBe(frames.length);
+  });
+});
+
 describe('question dictation', () => {
   it.each(
     ['light', 'dark', 'black', 'high-contrast'].flatMap((theme) =>

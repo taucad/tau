@@ -20,10 +20,14 @@ export default defineConfig({
     include: [
       'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
       'app/components/select-alignment.browser.test.tsx',
+      'app/components/machines/machines.browser.test.tsx',
     ],
     fileParallelism: false,
     browser: {
       enabled: true,
+      screenshotDirectory: fileURLToPath(
+        new URL('../../../../../out/research/global-machines/implementation/browser/failures', import.meta.url),
+      ),
       headless: true,
       provider: playwright({ launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium' }],

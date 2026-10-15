@@ -16,11 +16,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { ProjectCard } from '#components/project-card.js';
 import { CloudProjectPreview } from '#components/project-library/cloud-project-preview.js';
 import { ArrowRight, Cloud, Users } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardFooter, CardHeader } from '@taucad/ui/components/card';
+import { Loader } from '@taucad/ui/components/loader';
+import { CardFooter, CardHeader } from '@taucad/ui/components/card';
 import {
   isCloudProjectPending,
   materializedCloudProjects,
@@ -135,8 +137,7 @@ export function OnTauCloudMark(): React.JSX.Element {
 
 /**
  * *Open* for a project only Tau Cloud holds: clones it under the remote's id.
- * Drawn as the local project's *Open* beside it: `→ Open` on a card, `Open →`
- * in a list row.
+ * Drawn as the local project's *Open* beside it, with a trailing activity indicator.
  *
  * @param props - The row, the open verb, which reports its own failure, and
  * whether it sits on a card.
@@ -155,7 +156,6 @@ export function OpenCloudProjectButton({
   readonly isCard?: boolean;
 }): React.JSX.Element {
   const [isOpening, setIsOpening] = useState(false);
-  const arrow = isOpening ? undefined : <ArrowRight aria-hidden className='size-4' />;
   return (
     <Button
       size={isCard ? 'default' : 'sm'}
@@ -172,10 +172,9 @@ export function OpenCloudProjectButton({
         }
       }}
     >
-      {isCard ? arrow : undefined}
       {isOpening ? 'Opening…' : 'Open'}
       <span className='sr-only'> {entry.name}</span>
-      {isCard ? undefined : arrow}
+      {isOpening ? <Loader /> : <ArrowRight aria-hidden />}
     </Button>
   );
 }
@@ -232,8 +231,22 @@ export function CloudProjectCard({
   readonly entry: CloudProject;
   readonly onOpen: (entry: CloudProject) => Promise<void>;
 }): React.JSX.Element {
+  const [isOpening, setIsOpening] = useState(false);
   return (
-    <Card data-slot='cloud-project-card' className='flex h-full flex-col overflow-hidden pt-0'>
+    <ProjectCard
+      data-slot='cloud-project-card'
+      className='flex flex-col'
+      linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${entry.name}`}
+      isOpening={isOpening}
+      onOpen={async () => {
+        setIsOpening(true);
+        try {
+          await onOpen(entry);
+        } finally {
+          setIsOpening(false);
+        }
+      }}
+    >
       <CloudProjectPreview projectId={entry.id} name={entry.name} />
       <CardHeader>
         <div className='flex min-w-0 flex-col gap-1 py-1'>
@@ -242,9 +255,14 @@ export function CloudProjectCard({
         </div>
       </CardHeader>
       <CardFooter className='mt-auto'>
-        <OpenCloudProjectButton isCard entry={entry} onOpen={onOpen} />
+        <Button asChild variant='outline'>
+          <span aria-hidden='true' className='pointer-events-none'>
+            {isOpening ? 'Opening…' : 'Open'}
+            {isOpening ? <Loader /> : <ArrowRight />}
+          </span>
+        </Button>
       </CardFooter>
-    </Card>
+    </ProjectCard>
   );
 }
 

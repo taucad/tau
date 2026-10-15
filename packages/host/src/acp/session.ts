@@ -89,20 +89,15 @@ import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
+import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
+import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
+import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import {
-  exportModelInputSchema,
-  exportModelOutputSchema,
-  evaluateModelInputSchema,
-  evaluateModelOutputSchema,
-  screenshotInputSchema,
-  screenshotMcpOutputSchema,
-  testModelInputSchema,
-  testModelOutputSchema,
   arrangeWorkbenchInputSchema,
   arrangeWorkbenchOutputSchema,
-  askQuestionsInputSchema,
-  askQuestionsOutputSchema,
-} from '@taucad/chat';
+} from '@taucad/chat/schemas/tools/arrange-workbench';
+import { askQuestionsInputSchema, askQuestionsOutputSchema } from '@taucad/chat/schemas/tools/ask-questions';
 import { toolName } from '@taucad/chat/constants';
 import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
 import { checkProjectManifestReplacement } from '@taucad/types';

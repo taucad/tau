@@ -6,7 +6,10 @@ import type { AgentHostApproval } from '#services/agent-host-event-projection.js
 import { ChatPermissionRequest, permissionContent } from '#components/chat/chat-permission-request.js';
 
 let isDebug = false;
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => isDebug }));
+let machinesEnabled = true;
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: string) => (flag === 'machines' ? machinesEnabled : isDebug),
+}));
 const approval: AgentHostApproval = {
   interruptId: 'request-1',
   kind: 'approval',
@@ -19,8 +22,27 @@ const approval: AgentHostApproval = {
 };
 beforeEach(() => {
   isDebug = false;
+  machinesEnabled = true;
 });
 describe('compact permission requests', () => {
+  it('offers only denial for a stored machine approval while disabled', async () => {
+    machinesEnabled = false;
+    const onRespond = vi.fn(async () => undefined);
+    const onReview = vi.fn();
+    render(
+      <ChatPermissionRequest
+        approval={{ ...approval, context: { machineId: 'mill', jobId: 'job' } }}
+        name='Tau'
+        onRespond={onRespond}
+        onReview={onReview}
+      />,
+    );
+    expect(screen.getByText('Machines are not available in this release.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow|Review/u })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Deny' }));
+    expect(onRespond).toHaveBeenCalledWith(false, undefined);
+    expect(onReview).not.toHaveBeenCalled();
+  });
   it('keeps exact commands visible with raw arguments only behind Debug', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ChatPermissionRequest approval={approval} name='Codex' />);
@@ -34,6 +56,7 @@ describe('compact permission requests', () => {
     await user.click(screen.getByRole('button', { name: 'Request details' }));
     expect(screen.getByText(/private detail/u)).toBeInTheDocument();
     isDebug = false;
+    machinesEnabled = true;
     rerender(<ChatPermissionRequest approval={approval} name='Codex' />);
     expect(screen.queryByText(/private detail/u)).toBeNull();
   });
@@ -69,14 +92,10 @@ describe('compact permission requests', () => {
       expect(screen.queryByRole('button')).toBeNull();
     },
   );
-  it('preserves machine consequences, unknown requests and old payload-free summaries', () => {
+  it('preserves generic machine consequences, unknown requests and old payload-free summaries', () => {
     expect(
-      permissionContent({ ...approval, context: { machineId: 'printer', jobId: 'job-1', fileName: 'bracket.3mf' } })
-        .consequence,
-    ).toBe('This starts a job on a physical machine.');
-    expect(permissionContent({ ...approval, context: { machineId: 'printer' } }).consequence).toBe(
-      'This acts on a physical machine.',
-    );
+      permissionContent({ ...approval, context: { machineId: 'printer', fileName: 'bracket.3mf' } }).consequence,
+    ).toBe('This changes the machine. Review the action before allowing it.');
     expect(permissionContent({ ...approval, request: undefined }).title).toBe('Allow shell');
     expect(permissionContent({ ...approval, request: undefined, prompt: 'Allow call_unknown?' }).consequence).toContain(
       'describe this action',

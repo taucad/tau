@@ -102,15 +102,6 @@ export type RevisionSyncRegionProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncChats`.
   readonly syncChats: boolean;
   readonly onSyncChatsChange: (enabled: boolean) => void;
-  /** EQ7/D16: generated evidence is opt-in, per project, beside *Sync chats*. */
-  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncLargeExports`.
-  readonly syncLargeExports: boolean;
-  readonly onSyncLargeExportsChange: (enabled: boolean) => void;
-  /** Device-local, per-project consent. Never read from tau.json. */
-  readonly isSyncGeoSpecCandidates?: boolean;
-  readonly onSyncGeoSpecCandidatesChange?: (enabled: boolean) => void;
-  /** Desktop cannot enforce the browser candidate transfer ceiling. */
-  readonly isGeoSpecCandidateSharingUnavailable?: boolean;
   /**
    * Whether this account may back a project up at all (N4).
    *
@@ -522,11 +513,6 @@ export function RevisionSyncRegion({
   onSync,
   syncChats,
   onSyncChatsChange,
-  syncLargeExports,
-  isSyncGeoSpecCandidates = false,
-  onSyncGeoSpecCandidatesChange,
-  isGeoSpecCandidateSharingUnavailable = false,
-  onSyncLargeExportsChange,
   canSyncFiles = true,
   onUpgrade,
   storageLimitBytes,
@@ -818,12 +804,7 @@ export function RevisionSyncRegion({
   const glyphTone =
     GlyphIcon === CircleAlert ? 'text-feature' : GlyphIcon === CloudAlert ? 'text-warning' : 'text-muted-foreground';
   const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
-  const includes = [
-    'Files',
-    'history',
-    ...(remote.kind === 'tau' && syncChats ? ['chats'] : []),
-    ...(remote.kind === 'tau' && syncLargeExports ? ['exports'] : []),
-  ];
+  const includes = ['Files', 'history', ...(remote.kind === 'tau' && syncChats ? ['chats'] : [])];
   const facts: ReadonlyArray<readonly [string, ReactNode]> = [
     [
       'Backup',
@@ -977,31 +958,9 @@ export function RevisionSyncRegion({
                           </DropdownMenuItem>
                         ) : null}
                         {remote.kind === 'tau' && canManage ? (
-                          <>
-                            {/* EQ7/D16: the project's own transfer choices, beside each other. */}
-                            <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
-                              Sync chats
-                            </DropdownMenuSwitchItem>
-                            <DropdownMenuSwitchItem
-                              isChecked={syncLargeExports}
-                              onIsCheckedChange={onSyncLargeExportsChange}
-                            >
-                              Sync exports
-                            </DropdownMenuSwitchItem>
-                          </>
-                        ) : null}
-                        {remote.kind !== 'none' && canManage && onSyncGeoSpecCandidatesChange ? (
-                          <DropdownMenuSwitchItem
-                            isChecked={isSyncGeoSpecCandidates}
-                            onIsCheckedChange={onSyncGeoSpecCandidatesChange}
-                          >
-                            Share derived GeoSpec geometry candidates separately from project files (this device)
+                          <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
+                            Sync chats
                           </DropdownMenuSwitchItem>
-                        ) : null}
-                        {remote.kind !== 'none' && canManage && isGeoSpecCandidateSharingUnavailable ? (
-                          <DropdownMenuLabel>
-                            GeoSpec candidate sharing is available in the browser only.
-                          </DropdownMenuLabel>
                         ) : null}
                         {canManage ? (
                           <>

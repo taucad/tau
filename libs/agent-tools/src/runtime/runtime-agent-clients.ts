@@ -1,4 +1,4 @@
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import type {
   RpcGraphicsClient,
   RpcGraphicsExportModelResult,
@@ -7,12 +7,12 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
-import type { GetParametersOutput } from '@taucad/chat/schemas';
+import type { GetParametersOutput } from '@taucad/chat/schemas/tools/parameter';
 import {
   applyParameterOperationOutputSchema,
   getParametersOutputSchema,
   parameterManifestWireSchema,
-} from '@taucad/chat/schemas';
+} from '@taucad/chat/schemas/tools/parameter';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
 import type { ExportFile, KernelIssue } from '@taucad/runtime/types';

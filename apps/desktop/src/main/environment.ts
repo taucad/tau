@@ -21,6 +21,7 @@ export const clientEnvironmentNames = [
    * empty Billing tab because the renderer never resolves an owner identity. */
   'TAU_BILLING_ENVIRONMENT',
   'TAU_DEBUG',
+  'TAU_MACHINES_ENABLED',
   'NODE_ENV',
 ] as const;
 
@@ -64,6 +65,7 @@ export const packagedLockedEnvironmentNames = [
   'ELECTRON_RENDERER_URL',
   'TAU_DESKTOP_CLIENT_ROOT',
   'TAU_BAMBU_STUDIO_PATH',
+  'TAU_MACHINES_ENABLED',
 ] as const;
 
 /** Test-only switches (`TAU_E2E_*`) a locked packaged build ignores as well. */

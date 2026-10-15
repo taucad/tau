@@ -1,4 +1,4 @@
-import { Hammer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
+import { Hammer, Printer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 import { PartsIcon } from '#components/icons/parts.js';
@@ -34,6 +34,12 @@ export const navRoutes: {
       //     url: '/projects/settings',
       //   },
       // ],
+    },
+    {
+      title: 'Machines',
+      featureFlag: 'machines',
+      url: '/machines',
+      icon: Printer,
     },
     {
       title: 'Community',

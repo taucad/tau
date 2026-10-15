@@ -45,8 +45,11 @@ jobs:
 
       # The GeoSpec engine is the published `geospec-engine` catalog pin, installed
       # from npm with the workspace; the release gate prepares its installed consumer.
+      # `--parallel=1`, as every CI lane runs: the gate's ~400 tasks at Nx's default
+      # parallelism starved timing-bound tests on this one runner (filesystem and
+      # revisions tests timed out in run 38699246591 while green in the CI lanes).
       - name: Run the release gate
-        run: pnpm nx run scripts:release-gate
+        run: pnpm nx run scripts:release-gate --parallel=1
 
       # Nx delegates `nx-release-publish` to the workspace package manager, and only
       # pnpm applies `publishConfig` field overrides. Under npm every package would

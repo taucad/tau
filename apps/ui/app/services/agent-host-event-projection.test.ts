@@ -2448,7 +2448,14 @@ it('should keep Grok activity beside its turn and preserve vendor accounting wit
       ],
       metadata: {
         responseModel: 'Actual Grok',
-        usage: { input: 50, output: 20, cacheRead: 40, cacheWrite: 10, totalTokens: 120, cost: 0 },
+        usage: {
+          input: 50,
+          output: 20,
+          cacheRead: 40,
+          cacheWrite: 10,
+          totalTokens: 120,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
         tauInternal: {
           origin: 'external',
           agentId: 'grok',

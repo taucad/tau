@@ -105,7 +105,7 @@ jobs:
           ls -l "$RUNNER_TEMP/producer"
 
       - name: Upload the trees
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spike-trees
           path: ${{ runner.temp }}/producer/trees.tar
@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the producer records
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spike-producer
           path: ${{ runner.temp }}/producer/*.json
@@ -223,7 +223,7 @@ jobs:
       - &upload-records
         name: Upload the records
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spike-${{ github.job }}${{ matrix.runner && format('-{0}', matrix.runner) || '' }}
           path: ${{ runner.temp }}/out

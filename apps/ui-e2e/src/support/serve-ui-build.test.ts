@@ -9,7 +9,8 @@
  * daemon — is `src/daemon-agent-host.spec.ts`.
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
@@ -30,9 +31,17 @@ const agentToken = 'serve-ui-integration-token-at-least-32-chars';
 const disposers: Array<() => Promise<void> | void> = [];
 
 afterEach(async () => {
+  const errors: unknown[] = [];
   for (const dispose of disposers.splice(0).reverse()) {
-    // oxlint-disable-next-line no-await-in-loop -- teardown is ordered: child first, then its servers.
-    await dispose();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- teardown is ordered: child first, then its servers.
+      await dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, 'Serve UI cleanup or tracked-source preservation failed.');
   }
 });
 
@@ -75,11 +84,32 @@ const startServe = async (options: {
   readonly configDirectory: string;
   readonly relayUrl: URL;
 }): Promise<URL> => {
+  const sourceState = async (): Promise<string[]> => {
+    const environment = { ...process.env };
+    environment['GIT_OPTIONAL_LOCKS'] = '0';
+    const git = (...args: string[]): Uint8Array<ArrayBuffer> =>
+      Uint8Array.from(execFileSync('git', ['-C', repoRoot, ...args], { env: environment }));
+    const hash = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+    const metadata = await Promise.all(
+      ['index', 'config'].map(async (name) => {
+        const path = Buffer.from(git('rev-parse', '--git-path', name))
+          .toString()
+          .trim();
+        return hash(Uint8Array.from(await readFile(resolvePath(repoRoot, path))));
+      }),
+    );
+    return [hash(git('diff', '--binary', 'HEAD')), ...metadata];
+  };
+  const before = await sourceState();
+  // Registered before child cleanup so this runs after the process has stopped.
+  disposers.push(async () => {
+    expect(await sourceState()).toEqual(before);
+  });
   const child: ChildProcess = spawn(
     process.execPath,
     [
       '--import',
-      'tsx',
+      import.meta.resolve('tsx'),
       binPath,
       'serve',
       '--trust-projects',
@@ -92,7 +122,7 @@ const startServe = async (options: {
       '--modelProvider=anthropic',
     ],
     {
-      cwd: repoRoot,
+      cwd: options.workspace,
       /* eslint-disable @typescript-eslint/naming-convention -- child-process environment variable names. */
       env: {
         ...process.env,
@@ -140,7 +170,9 @@ const startServe = async (options: {
         }),
       ]);
       child.kill('SIGKILL');
+      await exited;
     }
+    expect(output.join('')).not.toMatch(/ERR_MODULE_NOT_FOUND|Tau Host runtime child (?:failed|exited before ready)/u);
   });
   const deadline = new Promise<never>((_resolve, reject) => {
     const timer = setTimeout(() => {

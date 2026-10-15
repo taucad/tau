@@ -76,6 +76,9 @@ export default defineConfig({
     fs: { allow: [path.resolve(__dirname, '../../..')] },
   },
   build: {
+    // The served layer contains the complete client output. Do not generate hidden client
+    // debug maps here; copied/emitted runtime maps (for example Replicad) remain assets.
+    sourcemap: false,
     assetsInlineLimit(file) {
       if (file.endsWith('.svg')) {
         return false;

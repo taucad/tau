@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Purpose: Spike S12 (native-dependency-resolution charter, W18/Q51). Measure the serve UI build
-#   as a gzip layer (pass <= 150 MB) and prove `tau serve --ui` serves it unchanged from a
+#   as a gzip runtime layer (pass <= 150,000,000 bytes) and prove `tau serve --ui` serves it from a
 #   digest-named store directory (<store>/closures/sha256/<hex>/client).
 # Why: decides whether W18 needs a serve-UI trimming package before the UI ships as a layer.
 # Environment: run from anywhere after `pnpm nx run ui:build:serve`; needs tar, gzip, sha256sum,
 #   pnpm. Writes only under <out-dir>, <store-dir> and one generated test file it removes on exit.
 # Usage: scripts/spikes/native-deps/linux/s12/measure-and-serve.sh <out-dir> <store-dir>
-# Exit codes: 0 measured and both test runs green, 1 a test failed, 2 usage or missing build.
+# Exit codes: 0 budget and both test runs green, 1 budget/packing/test failure, 2 usage or missing build.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
@@ -23,9 +23,19 @@ if [[ ! -f "$build/client/index.html" ]]; then
 fi
 cd "$REPO_ROOT"
 
-# 1. Measure. Deterministic tar so the digest is a property of the bytes, not of the checkout time.
+# 1. Package the complete client output without filtering any emitted or public asset.
+# The helper enforces the charter cap; continue to collect serving evidence on a size failure.
+status=0
+pack_status=0
+node scripts/src/pack-serve-ui-layer.ts "$build" "$out" || pack_status=$?
+if [[ "$pack_status" == "2" ]]; then
+  status=1 # Complete archives exist; retain the failed budget and collect serving evidence.
+elif [[ "$pack_status" != "0" ]]; then
+  echo "UI packaging failed; refusing to serve potentially stale output." >&2
+  exit 1
+fi
+# Deterministic archives make the digest a property of bytes, not checkout time.
 layer="$out/serve-ui-client.tar.gz"
-tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$build" -cf - client | gzip -9n >"$layer"
 digest="$(sha256sum "$layer" | cut -d' ' -f1)"
 {
   echo "layer_bytes=$(stat -c %s "$layer")"
@@ -36,11 +46,9 @@ digest="$(sha256sum "$layer" | cut -d' ' -f1)"
   echo "wasm_unpacked_bytes=$(find "$build/client" -type f -name '*.wasm' -printf '%s\n' | awk '{s+=$1} END {print s+0}')"
   echo "wasm_gzip_bytes=$(cd "$build" && find client -type f -name '*.wasm' -print0 | sort -z | tar --null --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -T - -cf - | gzip -9n | wc -c)"
   echo "map_unpacked_bytes=$(find "$build/client" -type f -name '*.map' -printf '%s\n' | awk '{s+=$1} END {print s+0}')"
-  echo "limit_bytes=157286400 (150 MiB); 150000000 (150 MB)"
+  echo "limit_bytes=150000000 (150 MB)"
 } | tee "$out/measure.txt"
-# Without source maps: the build emits hidden maps (`--sourcemapClient hidden`) that no page requests.
-nomaps_bytes="$(tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner --exclude='*.map' -C "$build" -cf - client | gzip -9n | wc -c)"
-echo "layer_without_maps_bytes=$nomaps_bytes" | tee -a "$out/measure.txt"
+# The manifest records every shipped file and the digest of this complete archive.
 # Listings go through files: `sort | head` under pipefail fails on sort's broken pipe.
 find "$build/client" -type f -printf '%s %P\n' | sort -rn >"$out/files-by-size.txt"
 echo "largest files:" | tee -a "$out/measure.txt"
@@ -53,10 +61,10 @@ sed -n '1,12p' "$out/by-extension.txt" | tee -a "$out/measure.txt"
 target="$store/closures/sha256/$digest"
 mkdir -p "$target"
 tar -xzf "$layer" -C "$target"
+node scripts/src/pack-serve-ui-layer.ts "$target" "$out" --verify
 echo "store_ui_root=$target/client" | tee -a "$out/measure.txt"
 
 # 3. The serve-build gate, unchanged, against the in-tree build.
-status=0
 pnpm exec vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node 2>&1 | tee "$out/serve-ui-build.in-tree.txt" || status=1
 
 # 4. The same test with only its UI root swapped to the store path; the in-tree build is moved

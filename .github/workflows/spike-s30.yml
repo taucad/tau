@@ -62,7 +62,7 @@ jobs:
           echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
 
       - name: Restore the seed
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: out/cache/build123d-seed
           key: ${{ steps.seed-key.outputs.key }}
@@ -87,7 +87,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: spike-s30-evidence
           path: |

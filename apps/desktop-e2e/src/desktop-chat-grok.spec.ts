@@ -60,10 +60,12 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
         .toBe('true');
       await session.capture('grok-reasoning-order');
       await page.keyboard.press('Escape');
-      await expectVisible(page.getByRole('button', { name: 'Mode: Ask', exact: true }));
-      await page.getByRole('button', { name: 'Mode: Ask', exact: true }).click();
+      // Home also mounts the empty-project composer below the primary composer.
+      const permissionControl = page.getByRole('button', { name: /^Mode:/u }).first();
+      await expectVisible(permissionControl);
+      await permissionControl.click();
       await page.getByRole('option', { name: /^Always approve(?:\s|$)/u }).click();
-      await expectVisible(page.getByRole('button', { name: 'Mode: Always approve', exact: true }));
+      await expect.poll(() => permissionControl.getAttribute('aria-label')).toBe('Mode: Always approve');
       await session.capture('grok-permissions-before-first-turn');
       const slug = await submitPrompt(
         page,

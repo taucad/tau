@@ -99,6 +99,24 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expectVisible(page.getByRole('article').getByText(/^(?:magenta|fuchsia)[.!]?$/iu));
       await session.capture('grok-composer-image-read');
       const secondRun = latestCompletedRun(readEvents());
+      // Record short visible phases in the renderer rather than losing them between driver polls.
+      const phaseHistory = await page.evaluateHandle(() => {
+        const loading = new Set<string>();
+        const activities = new Set<string>();
+        const collect = (): void => {
+          for (const element of document.querySelectorAll('[data-status="loading"], [aria-label="Current activity"]')) {
+            if (element.getClientRects().length === 0) {
+              continue;
+            }
+            const labels = element.getAttribute('aria-label') === 'Current activity' ? activities : loading;
+            labels.add(element.textContent.trim());
+          }
+        };
+        const observer = new MutationObserver(collect);
+        observer.observe(document.body, { attributes: true, characterData: true, childList: true, subtree: true });
+        collect();
+        return { loading, activities, observer };
+      });
       await sendPrompt(
         page,
         'Use the cad-build123d skill to create a simple 20 mm cube in main.py. Check it with Tau evaluate_model and a geometry assertion in main.geospec.ts using test_model. Capture all six views of main.py with screenshot mode multi_angle, then briefly report the results. Do not export anything.',
@@ -116,7 +134,10 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
             }
             // Permission pauses can collapse these groups before the tool starts running.
             const group = page
-              .getByRole('button', { name: /Rendering models|Running tests|Capturing images/u, expanded: false })
+              .getByRole('button', {
+                name: /rendering models|running tests|capturing images|editing files/iu,
+                expanded: false,
+              })
               .first();
             // Concurrent tools can have separate collapsed groups; inspect all before approving either.
             // oxlint-disable-next-line no-await-in-loop -- Each click removes that group from the collapsed locator.
@@ -124,8 +145,10 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
               // oxlint-disable-next-line no-await-in-loop -- Re-resolve the first remaining group after each click.
               await group.click();
             }
-            const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();
-            const loading = await page.locator('[data-status="loading"]:visible').allTextContents();
+            const { activity, loading } = await phaseHistory.evaluate((history) => ({
+              activity: [...history.activities],
+              loading: [...history.loading],
+            }));
             const permissions = await page
               .locator('[aria-label="Approval required"], [aria-label="Request allowed"]')
               .allTextContents();
@@ -161,6 +184,10 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
           { timeout: 600_000 },
         )
         .not.toBe(secondRun);
+      await phaseHistory.evaluate((history) => {
+        history.observer.disconnect();
+      });
+      await phaseHistory.dispose();
       expect(approvals, 'Always approve should avoid interrupting harmless CAD MCP calls').toBe(0);
       expect([...observedToolLabels]).toEqual(expect.arrayContaining(['rendering', 'testing', 'capturing']));
       expect([...observedActivities]).toContain('Running tests');

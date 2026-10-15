@@ -43,9 +43,12 @@ const fsOverrides = vi.hoisted(() => ({
 }));
 /**
  * The sandbox runtime is replaced by a controllable double: its default wrap runs the
- * quoted command through `/bin/sh` unsandboxed so lifecycle cases stay portable, while
- * a wrap failure proves the fail-closed seam. Initialization knobs are exercised in
- * `native-sandbox.test.ts`; real containment in `native-sandbox.integration.test.ts`.
+ * quoted command unsandboxed so lifecycle cases stay portable, while a wrap failure proves
+ * the fail-closed seam. It answers in the runtime's own shape, so the link refusal is added
+ * as in production: on Linux a stand-in for `bwrap` checks that the seccomp program arrived
+ * on descriptor 3 and runs the command; on macOS the profile is a real `(allow default)`
+ * Seatbelt one plus the refusal. Initialization knobs are exercised in `native-sandbox.test.ts`;
+ * real containment in `native-sandbox.integration.test.ts`.
  */
 const sandbox = vi.hoisted(() => ({
   supported: true,
@@ -54,8 +57,32 @@ const sandbox = vi.hoisted(() => ({
   reset: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
-  launcher: '/bin/sh',
+  /* The process the double's vector starts; `undefined` is the default stand-in. */
+  launcher: undefined as string | undefined,
 }));
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
+let bwrapStandIn: string | undefined;
+/** A stand-in for `bwrap` that refuses to run without the link-refusing program on descriptor 3. */
+const bwrapStandInPath = (): string => {
+  if (bwrapStandIn === undefined) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tau-bwrap-stand-in-')));
+    bwrapStandIn = join(directory, 'sh');
+    writeFileSync(
+      bwrapStandIn,
+      [
+        '#!/bin/sh',
+        `case "$2" in 'bwrap --seccomp 3 '*) ;; *) echo 'no link-refusing seccomp program' >&2; exit 97 ;; esac`,
+        'size=$(wc -c <&3)',
+        `if [ "$size" -eq 0 ] || [ $((size % 8)) -ne 0 ]; then echo "bad seccomp program: $size bytes" >&2; exit 98; fi`,
+        `eval "set -- \${2#bwrap --seccomp 3 }"`,
+        'exec /bin/sh -c "$1"',
+        '',
+      ].join('\n'),
+    );
+    chmodSync(bwrapStandIn, 0o700);
+  }
+  return bwrapStandIn;
+};
 vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
   // The default write roots stay real: the profile's deny list is derived from them.
   ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
@@ -71,7 +98,18 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
         // oxlint-disable-next-line typescript/only-throw-error -- launchers can reject with bare strings.
         throw sandbox.wrapFailure;
       }
-      return { argv: [sandbox.launcher, '-c', command], env: process.env };
+      if (process.platform === 'darwin') {
+        const profile = shellQuote('(version 1)\n(allow default)');
+        return {
+          argv: [
+            sandbox.launcher ?? '/bin/sh',
+            '-c',
+            `env /usr/bin/sandbox-exec -p ${profile} /bin/sh -c ${shellQuote(command)}`,
+          ],
+          env: process.env,
+        };
+      }
+      return { argv: [sandbox.launcher ?? bwrapStandInPath(), '-c', `bwrap ${shellQuote(command)}`], env: process.env };
     },
   },
 }));
@@ -879,7 +917,7 @@ ${keepAlive}`);
     const missingLauncher = fixture();
     sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
     await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
-    sandbox.launcher = '/bin/sh';
+    sandbox.launcher = undefined;
     await missingLauncher.session.cleanup();
 
     const writeFailure = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));

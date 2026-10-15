@@ -7,8 +7,19 @@
  * platform sandbox and its dependencies are present; the product itself fails closed
  * on such a host, so a skip here never hides a broken boundary in a packaged build.
  */
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -225,6 +236,72 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(homeCanary, { force: true });
+    }
+  }, 60_000);
+
+  /* A worker writes inside a root the process that asked for it also reads and writes, and Node's permission model
+   * follows a symlink it finds there (I7). So no worker may create one, nor a hard link to a file it can only read. */
+  it('should refuse a worker every symbolic and hard link, so the host process never meets one', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-links-')));
+    const writablePath = join(root, 'writable');
+    const readablePath = join(root, 'readable');
+    const elsewhere = join(root, 'elsewhere');
+    for (const path of [writablePath, readablePath, elsewhere]) {
+      mkdirSync(path);
+    }
+    writeFileSync(join(readablePath, 'sealed.txt'), 'sealed');
+    const script = [
+      "const fs = require('node:fs');",
+      "const probe = (action) => { try { action(); return 'allowed'; } catch (error) { return error.code ?? error.name; } };",
+      `const writable = ${JSON.stringify(writablePath)};`,
+      "fs.writeFileSync(writable + '/own.txt', 'own');",
+      'process.stdout.write(JSON.stringify({',
+      `  symlink: probe(() => fs.symlinkSync(${JSON.stringify(elsewhere)}, writable + '/planted')),`,
+      "  ownHardLink: probe(() => fs.linkSync(writable + '/own.txt', writable + '/own-hard')),",
+      `  readableHardLink: probe(() => fs.linkSync(${JSON.stringify(join(readablePath, 'sealed.txt'))}, writable + '/sealed-hard')),`,
+      "  regularFile: probe(() => fs.writeFileSync(writable + '/still-writes.txt', 'ok')),",
+      '}));',
+    ].join('\n');
+    /* What a runtime child does with a path under its grant: Node writes through a link it finds there. */
+    const writeUnderGrant = (path: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          '--permission',
+          `--allow-fs-read=${root}`,
+          `--allow-fs-write=${writablePath}`,
+          '-e',
+          `require('node:fs').writeFileSync(${JSON.stringify(path)}, 'escaped')`,
+        ],
+        { encoding: 'utf8' },
+      );
+    try {
+      const result = await runInNativeSandbox({
+        executablePath: process.execPath,
+        arguments: ['-e', script],
+        readablePaths: [dirname(process.execPath), readablePath],
+        writablePath,
+        workingDirectory: writablePath,
+        commandId: 'links#1',
+      });
+      expect(result.exitCode, result.stderr).toBe(0);
+      const outcome = JSON.parse(result.stdout) as Record<string, string>;
+      expect(outcome['regularFile']).toBe('allowed');
+      for (const kind of ['symlink', 'ownHardLink', 'readableHardLink']) {
+        expect(denied, `${kind} ${outcome[kind]}`).toContain(outcome[kind]);
+      }
+      for (const name of ['planted', 'own-hard', 'sealed-hard']) {
+        expect(lstatSync(join(writablePath, name), { throwIfNoEntry: false }), name).toBeUndefined();
+      }
+
+      /* With no planted link, a write under the grant stays there; a link the host planted shows what one would do. */
+      expect(writeUnderGrant(join(writablePath, 'planted', 'escape.txt')).status).not.toBe(0);
+      expect(existsSync(join(elsewhere, 'escape.txt'))).toBe(false);
+      symlinkSync(elsewhere, join(writablePath, 'host-planted'));
+      expect(writeUnderGrant(join(writablePath, 'host-planted', 'escape.txt')).status).toBe(0);
+      expect(existsSync(join(elsewhere, 'escape.txt'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
 

@@ -9,7 +9,12 @@ import { StringDecoder } from 'node:string_decoder';
 
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
-import { acquireNativeSandbox, launchInNativeSandbox, releaseNativeSandbox } from '#native-sandbox.js';
+import {
+  acquireNativeSandbox,
+  launchInNativeSandbox,
+  releaseNativeSandbox,
+  spawnInNativeSandbox,
+} from '#native-sandbox.js';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
@@ -375,7 +380,7 @@ const verifyResources = async (launch: NativeWorkerLaunch): Promise<void> => {
 
 /* Wrap a verified launch in the sandbox and spawn it; nothing is spawned when the sandbox cannot wrap it. */
 const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerProcess> => {
-  const [command, ...commandArguments] = await launchInNativeSandbox({
+  const vector = await launchInNativeSandbox({
     executablePath: launch.executablePath,
     arguments: launch.arguments,
     readablePaths: [launch.runtimePath, launch.sandboxRoot ?? launch.workspacePath],
@@ -383,13 +388,9 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     workingDirectory: launch.workspacePath,
     commandId: launch.commandId,
   });
-  const child = spawn(command!, commandArguments, {
+  const child = spawnInNativeSandbox(vector, {
     cwd: launch.workspacePath,
-    detached: process.platform !== 'win32',
     env: processEnvironment(launch.artifactPath),
-    shell: false,
-    windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
   });
   const ended = new Promise<NativeWorkerEnd>((resolve) => {
     child.once('error', (error) => {

@@ -155,18 +155,33 @@ export const desktopEnvironment = (
 };
 
 /**
+ * Whether an environment switch is on: `'1'` or `'true'`, case-insensitive.
+ *
+ * The same rule `apps/ui`'s environment schema applies to `TAU_DEBUG`, so the
+ * desktop shell and the web server agree on what turns a switch on.
+ *
+ * @param value - The raw environment value.
+ * @returns True only for the canonical truthy strings.
+ */
+const isEnvironmentSwitchOn = (value: string | undefined): boolean => /^(1|true)$/iu.test(value ?? '');
+
+/**
  * Select the renderer-visible environment.
+ *
+ * `TAU_DEBUG` crosses as the boolean the renderer's `ClientEnvironment`
+ * declares, as the web server's parsed `window.ENV` does: a raw `'false'`
+ * would be truthy to every `ENV.TAU_DEBUG` reader.
  *
  * @param source - Main's own environment.
  * @returns A flat record of the defined allowlisted names.
  */
-export const clientEnvironment = (source: NodeJS.ProcessEnv = process.env): Record<string, string> => {
+export const clientEnvironment = (source: NodeJS.ProcessEnv = process.env): Record<string, string | boolean> => {
   const resolved = desktopEnvironment(source);
-  const environment: Record<string, string> = {};
+  const environment: Record<string, string | boolean> = {};
   for (const name of clientEnvironmentNames) {
     const value = resolved[name];
     if (value !== undefined) {
-      environment[name] = value;
+      environment[name] = name === 'TAU_DEBUG' ? isEnvironmentSwitchOn(value) : value;
     }
   }
   return environment;

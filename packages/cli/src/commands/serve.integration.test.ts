@@ -366,6 +366,7 @@ const synthetic = {
     { name: 'Tau.PicoGK.Worker.runtimeconfig.json', bytes: text('{}') },
     { name: 'Tau.PicoGK.Worker.deps.json', bytes: text('{}') },
     { name: 'PicoGK.dll', bytes: text('picogk') },
+    { name: 'picogk.26.2.dylib', bytes: text('engine') },
   ]),
   notices: tarGz([{ name: 'NOTICES.txt', bytes: text('notices') }]),
 } as const;

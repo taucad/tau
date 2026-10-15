@@ -485,9 +485,9 @@ export const ChatTextareaDesktop = memo(function ({
   const dictationRecording = useMemo(
     () =>
       dictationActive ? (
-        <DictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+        <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
       ) : undefined,
-    [dictation.cancel, dictation.levels, dictation.phase, dictationActive],
+    [dictation.cancel, dictation.waveform, dictation.phase, dictationActive],
   );
   const blockReasonId = useId();
   /* F19: the beam follows the box's corners. */

@@ -3,7 +3,8 @@
 /**
  * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
- * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin;
+ * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin; network (or
+ * TAU_PAYLOAD_DIR / TAU_PAYLOAD_MIRROR) for the native kernel closures it seals and ships under Resources/payloads;
  * TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE names that engine version's source/relink archive (required for an arm64 --release);
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
  * Apple credentials only for --release; --unsigned skips all package signing.
@@ -16,7 +17,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync } from 'node:fs';
-import { cp, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
+  stageNativePayloads,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -51,17 +53,6 @@ type PackageMetadata = {
   readonly type: string;
 };
 
-type PythonResourceManifest = {
-  readonly pythonRelativePath: string;
-  pythonSha256: string;
-};
-
-type PicoGkResourceManifest = {
-  readonly workerPath: string;
-  workerSha256: string;
-  resourceFiles: Array<{ readonly label: string; readonly path: string; sha256: string }>;
-};
-
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
@@ -71,16 +62,15 @@ if (process.platform !== 'darwin') {
 const architecture = macosPackageArchitecture(process.platform, process.arch);
 const target = `darwin-${architecture}` as const;
 const machArchitecture = architecture === 'arm64' ? 'arm64' : 'x86_64';
-// Intel has the portable desktop feature set; native GeoSpec and PicoGK remain ARM-only.
+// Intel has the portable desktop feature set; native GeoSpec remains ARM-only. Which native kernel closures ship is
+// each kernel's `tau-plugin.json` business (PicoGK declares darwin-arm64 only).
 const shipsNativeGeometry = architecture === 'arm64';
 const stageRoot = resolve(outputRoot, 'stage');
 const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
 const extensionEntitlements = resolve(desktopRoot, 'macos/Config/TauQuickLook.entitlements');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
-const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
-const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
-/* The `git` this app records revisions with, prepared beside python and picogk
+/* The `git` this app records revisions with, prepared beside the native kernels' payloads
  * (OQ3). One payload, not two: `git-lfs` lives inside this git's own exec path,
  * so `git lfs` resolves through the binary main points the services host at. */
 const gitResourceRoot = resolve(desktopRoot, `resources/git/${target}`);
@@ -155,11 +145,6 @@ if (shipsNativeGeometry && geospecSourceRelinkArchive === undefined) {
 }
 const readJson = async <Value extends NonNullable<unknown>>(path: string): Promise<Value> =>
   JSON.parse(await readFile(path, 'utf8')) as Value;
-
-const sha256 = async (path: string): Promise<string> =>
-  createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex');
 
 /** The Mach-O header (magic, CPU type, CPU subtype) in a file's first 12 bytes, or `undefined` for any other file. */
 const machHeader = (bytes: Uint8Array<ArrayBuffer>): DataView | undefined => {
@@ -332,10 +317,6 @@ await Promise.all([
     resolve(workspaceRoot, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt'),
     resolve(resources, 'legal/OPEN-SOURCE-NOTICES.md'),
   ),
-  copyTree(resolve(pythonResourceRoot, target), resolve(resources, `python/${target}`)),
-  ...(shipsNativeGeometry
-    ? [copyTree(resolve(picoGkResourceRoot, target), resolve(resources, `picogk/${target}`))]
-    : []),
   ...(geospecSourceRelinkArchive === undefined || geospecSourceRelinkReceipt === undefined
     ? []
     : [copyGeoSpecSourceRelink(resolve(geospecSourceRelinkArchive), geospecSourceRelinkReceipt, resources)]),
@@ -350,6 +331,20 @@ await Promise.all([
   ),
 ]);
 console.log(`Retained ${machArchitecture} slices in ${String(await thinOtherSlices(appPath))} bundled Mach-O files`);
+
+/* The native kernels' sealed closures, in the store's own layout, which the app seeds its payload store from by
+ * clonefile on first launch (charter W6 phase 1, D10, D24, ruling X30). Staged after thinning and excluded from
+ * signing below: they ship byte for byte as their receipts record them, so nothing rewrites a digest after signing. */
+const nativeClosures = await stageNativePayloads({
+  target,
+  payloadsRoot: resolve(resources, 'payloads'),
+  workRoot: resolve(outputRoot, 'native-payloads'),
+});
+for (const closure of nativeClosures) {
+  console.log(
+    `Staged ${closure.package} ${closure.dependency}: ${closure.closureIntegrity}, tree ${closure.treeIntegrity}, ${String(closure.fileCount)} files`,
+  );
+}
 
 /* Before the first signature: flipping rewrites the Electron Framework binary.
  * An unsigned arm64 binary must keep a valid ad-hoc signature to launch at all. */
@@ -370,11 +365,10 @@ if (!unsigned) {
     preEmbedProvisioningProfile: false,
     strictVerify: true,
     batchCodesignCalls: true,
+    /* Sealed native closures are verified by digest, never signed (I3); the git payload's code is signed. */
     ignore: (path) =>
-      (path.includes('/Contents/Resources/python/') ||
-        path.includes('/Contents/Resources/picogk/') ||
-        path.includes('/Contents/Resources/git/')) &&
-      !isMachObject(path),
+      path.includes('/Contents/Resources/payloads/') ||
+      (path.includes('/Contents/Resources/git/') && !isMachObject(path)),
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
         ? { entitlements: adhocAppEntitlements }
@@ -385,58 +379,6 @@ if (!unsigned) {
           }
         : {}),
       ...(path.includes('/Contents/PlugIns/') ? { entitlements: extensionEntitlements } : {}),
-      ...(path.includes('/Contents/Resources/python/') && path.endsWith('/bin/python3.13')
-        ? { entitlements: ['com.apple.security.cs.disable-library-validation'] }
-        : {}),
-      ...(path.endsWith('/Contents/Resources/picogk/darwin-arm64/Tau.PicoGK.Worker')
-        ? {
-            entitlements: [
-              'com.apple.security.cs.allow-jit',
-              ...(release ? [] : ['com.apple.security.cs.disable-library-validation']),
-            ],
-          }
-        : {}),
-      ...(release ? {} : { timestamp: 'none' }),
-    }),
-  });
-}
-
-const packagedPythonRoot = resolve(resources, `python/${target}`);
-const packagedPythonManifestPath = resolve(packagedPythonRoot, 'tau-runtime-manifest.json');
-const packagedPythonManifest = await readJson<PythonResourceManifest>(packagedPythonManifestPath);
-packagedPythonManifest.pythonSha256 = await sha256(
-  resolve(packagedPythonRoot, packagedPythonManifest.pythonRelativePath),
-);
-await writeFile(packagedPythonManifestPath, `${JSON.stringify(packagedPythonManifest, undefined, 2)}\n`);
-
-if (shipsNativeGeometry) {
-  const packagedPicoGkRoot = resolve(resources, 'picogk/darwin-arm64');
-  const packagedPicoGkManifestPath = resolve(packagedPicoGkRoot, 'tau-runtime-manifest.json');
-  const packagedPicoGkManifest = await readJson<PicoGkResourceManifest>(packagedPicoGkManifestPath);
-  packagedPicoGkManifest.workerSha256 = await sha256(resolve(packagedPicoGkRoot, packagedPicoGkManifest.workerPath));
-  await Promise.all(
-    packagedPicoGkManifest.resourceFiles.map(async (resource) => {
-      resource.sha256 = await sha256(resolve(packagedPicoGkRoot, resource.path));
-    }),
-  );
-  await writeFile(packagedPicoGkManifestPath, `${JSON.stringify(packagedPicoGkManifest, undefined, 2)}\n`);
-}
-
-// The inner signing pass mutates Mach-O bytes. Refresh their integrity hashes, then reseal only the
-// outer bundle so runtime verification covers the exact executable macOS will launch.
-if (!unsigned) {
-  await sign({
-    app: appPath,
-    platform: 'darwin',
-    identity,
-    identityValidation: release,
-    preAutoEntitlements: false,
-    preEmbedProvisioningProfile: false,
-    strictVerify: true,
-    batchCodesignCalls: true,
-    ignore: (path) => path !== appPath,
-    optionsForFile: (path) => ({
-      ...(path === appPath && !release ? { entitlements: adhocAppEntitlements } : {}),
       ...(release ? {} : { timestamp: 'none' }),
     }),
   });
@@ -452,9 +394,6 @@ const assertArchitecture = (path: string): void => {
   }
 };
 assertArchitecture(resolve(appPath, 'Contents/MacOS/Tau'));
-if (shipsNativeGeometry) {
-  assertArchitecture(resolve(resources, `picogk/${target}/Tau.PicoGK.Worker`));
-}
 for (const extension of extensions) {
   const name = extension.slice(0, -'.appex'.length);
   assertArchitecture(resolve(plugins, extension, `Contents/MacOS/${name}`));

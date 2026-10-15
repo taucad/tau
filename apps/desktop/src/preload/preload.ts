@@ -28,6 +28,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 import {
   appIconThemeChannel,
   openDirectoryChannel,
+  revealPathChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
   machinesChannels,
@@ -156,8 +157,17 @@ contextBridge.exposeInMainWorld('tau', {
         : process.platform === 'win32'
           ? 'Open in File Explorer'
           : 'Open in file manager',
+    revealLabel:
+      process.platform === 'darwin'
+        ? 'Reveal in Finder'
+        : process.platform === 'win32'
+          ? 'Reveal in File Explorer'
+          : 'Reveal in file manager',
     open: async (path: string): Promise<void> => {
       await ipcRenderer.invoke(openDirectoryChannel, path);
+    },
+    reveal: async (path: string): Promise<void> => {
+      await ipcRenderer.invoke(revealPathChannel, path);
     },
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },

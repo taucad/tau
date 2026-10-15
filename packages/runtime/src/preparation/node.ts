@@ -3,6 +3,7 @@
 // selection, the digest-keyed payload store, and the managed profile. `tau mcp`, `tau export`, `tau prepare`, the
 // daemon parent and the desktop main process compose it; the sandboxed worker never does.
 export { computeClosureIntegrity, computeTreeIntegrity } from '#preparation/closure-receipt.js';
+export { reverifyClosure } from '#preparation/closure-verify.js';
 export { detectHostIndicators } from '#preparation/host-indicators.js';
 export { describeEffectiveProfile, readManagedPreparation } from '#preparation/managed-environment.js';
 export { parsePluginDeployment, targetKey, wheelDataDestination } from '#preparation/plugin-deployment.js';
@@ -15,11 +16,13 @@ export { missingSystemLibrary, systemLibraryRefusal } from '#preparation/system-
 export type {
   AcquisitionProfile,
   ClosureDescription,
+  ClosureLaunch,
   ClosureVerification,
   CollectGarbageInput,
   CreatePreparationHostOptions,
   EffectiveProfile,
   GarbageReport,
+  LaunchInspection,
   ManagedPreparation,
   PluginPreparation,
   PluginSelection,

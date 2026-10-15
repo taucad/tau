@@ -21,9 +21,10 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
+import { readBuildIdentity } from '#lib/build-identity.js';
 
-/** The page's build, the worker's hello `build` (I32); the timestamp `vite.config.ts` injects, as `build-skew.ts` reads it. */
-export const agentHostWorkerBuild = String(typeof tauBuildId === 'number' ? tauBuildId : 0);
+/** The worker's hello and leadership `build` (I32), compared for equality between workers (`#lib/build-identity`). */
+export const agentHostWorkerBuild = readBuildIdentity();
 
 type AgentHostCapabilityChecks = {
   readonly worker: boolean;

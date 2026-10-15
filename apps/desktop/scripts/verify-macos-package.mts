@@ -33,6 +33,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
+import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 import { isQuickLookEnabled } from '#shared/quick-look.js';
@@ -57,6 +58,8 @@ const {
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
+const { computeClosureIntegrity, parsePluginDeployment, reverifyClosure, targetKey } =
+  await import('@taucad/runtime/preparation/node');
 /** The PicoGK worker protocol, which the prepared resource manifest also records. */
 const picoGkWireProtocol = picogkRuntimeManifestSchema.shape.protocolVersion.value;
 
@@ -293,83 +296,7 @@ const assertThumbnailDimensions = (path: string, maximumPixels: number): void =>
   }
 };
 
-type IntegrityEntry = { readonly path: string; readonly sha256: string };
-type PythonResourceManifest = {
-  readonly build123dVersion: string;
-  readonly distributions: ReadonlyArray<{ readonly name: string; readonly version: string }>;
-  readonly ocpVersion: string;
-  readonly pythonRelativePath: string;
-  readonly pythonSha256: string;
-  readonly pythonVersion: string;
-  readonly sbom: IntegrityEntry;
-  readonly schemaVersion: number;
-  readonly supportFiles: readonly IntegrityEntry[];
-  readonly target: string;
-  readonly topologySchema: IntegrityEntry;
-  readonly workerPath: string;
-  readonly workerSha256: string;
-};
-type PicoGkResourceManifest = {
-  readonly dotnetRuntimeVersion: string;
-  readonly hostApiVersion: number;
-  readonly picoGkArchiveSha256: string;
-  readonly picoGkCommit: string;
-  readonly picoGkHostedPatchSha256: string;
-  readonly protocolVersion: number;
-  readonly resourceFiles: ReadonlyArray<IntegrityEntry & { readonly label: string }>;
-  readonly sceneArtifactVersion: number;
-  readonly schemaVersion: number;
-  readonly target: string;
-  readonly workerPath: string;
-  readonly workerSha256: string;
-};
-
 const sha256 = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
-
-const verifyPythonResource = (architecture: 'arm64' | 'x64'): void => {
-  const target = `darwin-${architecture}`;
-  const root = resolve(appPath, `Contents/Resources/python/${target}`);
-  const manifest = JSON.parse(
-    readFileSync(resolve(root, 'tau-runtime-manifest.json'), 'utf8'),
-  ) as PythonResourceManifest;
-  if (manifest.schemaVersion !== 1 || manifest.target !== target) {
-    throw new Error(`Invalid Build123d resource manifest for ${target}`);
-  }
-  const integrityEntries = [
-    { path: manifest.pythonRelativePath, sha256: manifest.pythonSha256 },
-    { path: manifest.workerPath, sha256: manifest.workerSha256 },
-    ...manifest.supportFiles,
-    manifest.topologySchema,
-    manifest.sbom,
-  ];
-  for (const entry of integrityEntries) {
-    const path = resolve(root, entry.path);
-    if (relative(root, path).startsWith('..') || sha256(path) !== entry.sha256) {
-      throw new Error(`Build123d resource integrity failed for ${target}/${entry.path}`);
-    }
-  }
-  const sbom = JSON.parse(readFileSync(resolve(root, manifest.sbom.path), 'utf8')) as {
-    readonly bomFormat?: string;
-    readonly components?: ReadonlyArray<{ readonly name?: string; readonly version?: string }>;
-    readonly metadata?: {
-      readonly properties?: ReadonlyArray<{ readonly name?: string; readonly value?: string }>;
-    };
-    readonly specVersion?: string;
-  };
-  const components = new Map(sbom.components?.map((component) => [component.name, component.version]));
-  const targetProperty = sbom.metadata?.properties?.find((property) => property.name === 'taucad:target');
-  if (
-    sbom.bomFormat !== 'CycloneDX' ||
-    sbom.specVersion !== '1.6' ||
-    targetProperty?.value !== target ||
-    components.get('CPython') !== manifest.pythonVersion ||
-    components.get('build123d') !== manifest.build123dVersion ||
-    components.get('cadquery-ocp-novtk') !== manifest.ocpVersion ||
-    manifest.distributions.some((distribution) => components.get(distribution.name) !== distribution.version)
-  ) {
-    throw new Error(`Invalid Build123d SBOM for ${target}`);
-  }
-};
 
 /**
  * The PicoGK payload carries the MIT notices of the .NET runtime, Roslyn and SkiaSharp, lists SkiaSharp
@@ -556,60 +483,59 @@ Library.Go(1f, () =>
   rmSync(picoGkProbe, { recursive: true, force: true });
 };
 
-const verifyPicoGkResource = (): string => {
-  const target = 'darwin-arm64';
-  const root = resolve(appPath, `Contents/Resources/picogk/${target}`);
-  const manifest = JSON.parse(
-    readFileSync(resolve(root, 'tau-runtime-manifest.json'), 'utf8'),
-  ) as PicoGkResourceManifest;
-  if (
-    manifest.schemaVersion !== 2 ||
-    manifest.target !== target ||
-    manifest.dotnetRuntimeVersion !== '10.0.11' ||
-    manifest.picoGkCommit !== '0e6cf6b6f4993ec16dbcd72d8f27f26b999980f3' ||
-    manifest.picoGkArchiveSha256 !== '6e188832832241ce5fad3639e2cab63982e4b392eaea367c49a32aac361f4ca5' ||
-    !/^[\da-f]{64}$/u.test(manifest.picoGkHostedPatchSha256) ||
-    manifest.hostApiVersion !== 2 ||
-    manifest.protocolVersion !== picoGkWireProtocol ||
-    manifest.sceneArtifactVersion !== 4
-  ) {
-    throw new Error(`Invalid PicoGK resource manifest for ${target}`);
-  }
-  for (const entry of [{ path: manifest.workerPath, sha256: manifest.workerSha256 }, ...manifest.resourceFiles]) {
-    const path = resolve(root, entry.path);
-    if (relative(root, path).startsWith('..') || sha256(path) !== entry.sha256) {
-      throw new Error(`PicoGK resource integrity failed for ${target}/${entry.path}`);
+/** The native kernel closures this app ships for seeding the payload store (charter W6 phase 1). */
+type ShippedClosure = { readonly root: string; readonly receipt: ClosureReceipt };
+
+/**
+ * The sealed closures under `Contents/Resources/payloads/closures/sha256`: exactly one per dependency each native
+ * package's `tau-plugin.json` declares for this target, each named by the pins it declares, every file matching its
+ * receipt, and build123d's tree equal to its golden receipt (I9), so the app seeds the closure `tau prepare` would.
+ * @returns The closure of each package.
+ */
+const verifyNativeClosures = async (): Promise<ReadonlyMap<string, ShippedClosure>> => {
+  const closuresRoot = resolve(appPath, 'Contents/Resources/payloads/closures/sha256');
+  const expected = new Map<string, { readonly package: string; readonly dependency: string }>();
+  for (const name of ['@taucad/build123d', '@taucad/picogk']) {
+    const manifestPath = resolve(workspaceRoot, `packages/plugins/${name.slice('@taucad/'.length)}/tau-plugin.json`);
+    const deployment = parsePluginDeployment(JSON.parse(readFileSync(manifestPath, 'utf8')), manifestPath);
+    for (const [dependency, variants] of Object.entries(deployment.dependencies)) {
+      const variant = variants.find(({ target }) => targetKey(target) === `darwin-${architecture}`);
+      if (variant !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- two small manifests
+        const integrity = await computeClosureIntegrity(variant.payloads);
+        const key = Buffer.from(integrity.slice('sha256-'.length), 'base64');
+        expected.set(key.toString('hex'), { package: name, dependency });
+      }
     }
   }
-  const sbom = JSON.parse(readFileSync(resolve(root, 'tau-picogk-sbom.cdx.json'), 'utf8')) as {
-    readonly bomFormat?: string;
-    readonly components?: ReadonlyArray<{
-      readonly hashes?: ReadonlyArray<{ readonly alg?: string; readonly content?: string }>;
-      readonly name?: string;
-      readonly version?: string;
-    }>;
-    readonly specVersion?: string;
-  };
-  const components = new Map(sbom.components?.map((component) => [component.name, component]));
-  const picoGk = components.get('PicoGK');
-  if (
-    sbom.bomFormat !== 'CycloneDX' ||
-    sbom.specVersion !== '1.6' ||
-    components.get('.NET Runtime')?.version !== manifest.dotnetRuntimeVersion ||
-    picoGk?.version !== manifest.picoGkCommit ||
-    !picoGk.hashes?.some(({ alg, content }) => alg === 'SHA-256' && content === manifest.picoGkHostedPatchSha256)
-  ) {
-    throw new Error(`Invalid PicoGK SBOM for ${target}`);
+  const shipped = existsSync(closuresRoot) ? readdirSync(closuresRoot).toSorted() : [];
+  if (JSON.stringify(shipped) !== JSON.stringify([...expected.keys()].toSorted())) {
+    throw new Error(
+      `The app ships the closures ${shipped.join(', ') || 'none'}; the manifests pin ${[...expected.keys()].join(', ')} for darwin-${architecture}.`,
+    );
   }
-  const resourcePaths = filesUnder(root);
-  if (resourcePaths.some((path) => basename(path) === 'dotnet')) {
-    throw new Error('PicoGK resource must use its self-contained apphost, not a dotnet launcher.');
+  const golden = JSON.parse(
+    readFileSync(resolve(workspaceRoot, 'packages/plugins/build123d/tau-plugin.golden.json'), 'utf8'),
+  ) as Readonly<Record<string, { readonly treeIntegrity: string }>>;
+  const closures = new Map<string, ShippedClosure>();
+  for (const [key, { package: name, dependency }] of expected) {
+    const root = resolve(closuresRoot, key);
+    const receipt = JSON.parse(readFileSync(resolve(root, 'receipt.json'), 'utf8')) as ClosureReceipt;
+    // oxlint-disable-next-line no-await-in-loop -- seconds per closure, one at a time
+    const damaged = await reverifyClosure(root, AbortSignal.timeout(600_000));
+    if (receipt.package !== name || receipt.dependency !== dependency || damaged === undefined || damaged.length > 0) {
+      throw new Error(
+        `The shipped ${name} closure differs from its receipt: ${(damaged ?? ['receipt.json']).slice(0, 5).join(', ')}`,
+      );
+    }
+    if (name === '@taucad/build123d' && receipt.treeIntegrity !== golden[`darwin-${architecture}`]?.treeIntegrity) {
+      throw new Error(
+        `The shipped build123d closure's treeIntegrity ${receipt.treeIntegrity} is not its golden receipt's.`,
+      );
+    }
+    closures.set(name, { root, receipt });
   }
-  if (resourcePaths.some((path) => path.endsWith('.pdb') || path.endsWith('.xml'))) {
-    throw new Error('PicoGK production resources contain development-only symbols or XML documentation.');
-  }
-  verifyPicoGkNoticesAndTrims(root, resourcePaths, components.has('SkiaSharp'));
-  return resolve(root, manifest.workerPath);
+  return closures;
 };
 
 if (!unsigned) {
@@ -837,12 +763,18 @@ if (
 }
 
 let machObjectCount = 0;
+const payloadsRoot = resolve(appPath, 'Contents/Resources/payloads');
 for (const path of filesUnder(appPath)) {
   if (!isMachObject(path)) {
     continue;
   }
   const architectures = run('lipo', ['-archs', path]).trim().split(/\s+/u).sort();
-  if (architectures.join(' ') !== machArchitecture) {
+  /* A sealed closure ships its files as its receipt records them, so a universal file keeps every slice. */
+  if (
+    path.startsWith(`${payloadsRoot}/`)
+      ? !architectures.includes(machArchitecture)
+      : architectures.join(' ') !== machArchitecture
+  ) {
     throw new Error(`${path} is not ${machArchitecture}-only: ${architectures.join(', ')}`);
   }
   machObjectCount += 1;
@@ -861,27 +793,24 @@ for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
   }
 }
 
-verifyPythonResource(architecture);
+const nativeClosures = await verifyNativeClosures();
+const picoGkClosure = nativeClosures.get('@taucad/picogk');
+if (picoGkClosure !== undefined) {
+  const layer = resolve(picoGkClosure.root, 'tau-worker');
+  const sbom = JSON.parse(readFileSync(resolve(layer, 'tau-picogk-sbom.cdx.json'), 'utf8')) as {
+    readonly components?: ReadonlyArray<{ readonly name: string }>;
+  };
+  verifyPicoGkNoticesAndTrims(
+    layer,
+    filesUnder(layer),
+    sbom.components?.some(({ name }) => name === 'SkiaSharp') === true,
+  );
+  probePicoGkWorker(
+    [resolve(picoGkClosure.root, 'dotnet/dotnet'), resolve(layer, 'Tau.PicoGK.Worker.dll')],
+    'shipped PicoGK closure launched through the dotnet muxer',
+  );
+}
 if (architecture === 'arm64') {
-  const picoGkWorker = verifyPicoGkResource();
-  if (!unsigned) {
-    const picoGkEntitlements = run('codesign', ['-d', '--entitlements', ':-', picoGkWorker]);
-    if (!picoGkEntitlements.includes('com.apple.security.cs.allow-jit')) {
-      throw new Error('The PicoGK worker is missing the CoreCLR JIT entitlement.');
-    }
-    const disablesLibraryValidation = picoGkEntitlements.includes('com.apple.security.cs.disable-library-validation');
-    if ((!release && !disablesLibraryValidation) || (release && disablesLibraryValidation)) {
-      throw new Error(
-        release
-          ? 'The release PicoGK worker unnecessarily disables library validation.'
-          : 'The ad-hoc PicoGK worker must disable library validation for its independently signed CoreCLR dylibs.',
-      );
-    }
-    if (picoGkEntitlements.includes('com.apple.security.get-task-allow')) {
-      throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
-    }
-  }
-  probePicoGkWorker([picoGkWorker], 'packaged PicoGK worker');
   const layerCommand = verifyPicoGkLayer();
   if (layerCommand !== undefined) {
     probePicoGkWorker(layerCommand, 'Tau PicoGK layer launched through the dotnet muxer');
@@ -902,7 +831,11 @@ if (!unsigned) {
     }
   }
 }
-const python = resolve(appPath, `Contents/Resources/python/darwin-${architecture}/bin/python3`);
+const build123dClosure = nativeClosures.get('@taucad/build123d');
+if (build123dClosure === undefined) {
+  throw new Error('The app ships no build123d closure.');
+}
+const python = resolve(build123dClosure.root, 'python/bin/python3');
 run(
   'env',
   [

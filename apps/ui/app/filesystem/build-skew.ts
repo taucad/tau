@@ -15,11 +15,12 @@
 
 import { Topic } from '@taucad/events';
 import { metaConfig } from '#constants/meta.constants.js';
+import { readBuildId } from '#lib/build-identity.js';
 
 const channelName = `${metaConfig.databasePrefix}build-id`;
 
-/** Build timestamp injected by `vite.config.ts`; `0` in a context without the define. */
-export const buildId: number = typeof tauBuildId === 'number' ? tauBuildId : 0;
+/** This build's timestamp (`#lib/build-identity`); `0` in a context without one. */
+export const buildId: number = readBuildId();
 
 let superseded = false;
 const supersededTopic = new Topic<void>({ name: 'build-skew' });

@@ -19,7 +19,16 @@ const maxDictationSamples = Math.floor((dictationMaxAudioBytes - 44) / 2);
 
 /** Bounded history with silent leading slots to fill a wide composer from the first frame. */
 const waveformHistoryLength = 256;
-const silentWaveform = Array.from<number>({ length: waveformHistoryLength }).fill(0);
+const silentLevels = Array.from<number>({ length: waveformHistoryLength }).fill(0);
+
+/** Recent microphone levels, oldest first, and how many batches have shifted them this session. */
+export type DictationWaveform = {
+  readonly levels: readonly number[];
+  /** Advances with every batch, including silent ones whose levels look unchanged. */
+  readonly batch: number;
+};
+
+const emptyWaveform: DictationWaveform = { levels: [], batch: 0 };
 
 type Session = {
   readonly owner: unknown;
@@ -40,7 +49,7 @@ export type Dictation = {
   readonly error: string | undefined;
   /** Streamed text while the provider transcribes; replaced by the final transcript. */
   readonly transcript: string;
-  readonly levels: readonly number[];
+  readonly waveform: DictationWaveform;
   start(): Promise<void>;
   stop(): Promise<boolean>;
   cancel(): void;
@@ -56,7 +65,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<string>();
   const [transcript, setTranscript] = useState('');
-  const [levels, setLevels] = useState<readonly number[]>([]);
+  const [waveform, setWaveform] = useState(emptyWaveform);
   const current = useRef<Session | undefined>(undefined);
   const receiveTranscript = useRef(onTranscript);
   useLayoutEffect(() => {
@@ -95,7 +104,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     session.settle(success);
     setPhase('idle');
     setTranscript('');
-    setLevels([]);
+    setWaveform(emptyWaveform);
     setError(message);
   }, []);
 
@@ -184,7 +193,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     activeSession = session;
     setError(undefined);
     setTranscript('');
-    setLevels(silentWaveform);
+    setWaveform({ levels: silentLevels, batch: 0 });
     setPhase('requesting');
     try {
       session.capture = await captureDictation({
@@ -192,7 +201,10 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
         maxSamples: maxDictationSamples,
         onLevel: (level) => {
           if (current.current === session) {
-            setLevels((previous) => [...previous.slice(-(waveformHistoryLength - 1)), level]);
+            setWaveform((previous) => ({
+              levels: [...previous.levels.slice(-(waveformHistoryLength - 1)), level],
+              batch: previous.batch + 1,
+            }));
           }
         },
         onLimit: () => {
@@ -219,5 +231,5 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     }
   }, [available, draftOwner, reset, stop]);
 
-  return { available, phase, error, transcript, levels, start, stop, cancel };
+  return { available, phase, error, transcript, waveform, start, stop, cancel };
 }

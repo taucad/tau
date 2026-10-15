@@ -55,6 +55,7 @@ import {
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
 import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
+import { readBuildIdentity } from '#lib/build-identity.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -285,7 +286,7 @@ const installBundledTypes = async (): Promise<void> => {
     buildBundledTypesPayload(kernelTypePackageMaps, authoringTypeMaps),
     {
       populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
-      buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+      buildIdentity: readBuildIdentity(),
     },
   );
   console.debug(`[FM-Worker] bundled types ${outcome} +${(performance.now() - t0).toFixed(1)}ms`);

@@ -1,5 +1,6 @@
 // Tier-2 scenarios of the preparation host (W2 oracle, T1): a real store on disk, in-test archives and a hermetic
 // registry `fetch`. The global `fetch` is replaced by a tripwire, so no scenario can reach the network.
+import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
@@ -82,6 +83,7 @@ const scenario = async (
     readonly serve?: boolean;
     readonly host?: Partial<CreatePreparationHostOptions>;
     readonly seal?: PreparationPlugin['seal'];
+    readonly launchSet?: PreparationPlugin['launchSet'];
   } = {},
 ): Promise<Scenario> => {
   const directory = await temporaryDirectory('tau-preparation-');
@@ -94,6 +96,7 @@ const scenario = async (
   const plugin = {
     ...pluginOf(packageName, { engine: options.variants?.(payloads) ?? [{ target: linuxTarget, payloads }] }),
     ...(options.seal === undefined ? {} : { seal: options.seal }),
+    ...(options.launchSet === undefined ? {} : { launchSet: options.launchSet }),
   };
   const registry = createFakeRegistry();
   if (options.serve !== false) {
@@ -354,15 +357,194 @@ describe('createPreparationHost', () => {
       const upgraded = reopen({ tauVersion: '2.0.0' });
 
       await expect(prepare(upgraded, { offline: true })).resolves.toMatchObject({ status: 'blocked', ...refusal });
-      await expectPreparationError(
+      // The refused repair leaves the closure unsealed: no reader reports it intact, and no launch uses it.
+      await expect(
         upgraded.verify({
           package: packageName,
           repair: true,
           offline: true,
           signal: AbortSignal.timeout(prepareTimeout),
         }),
+      ).resolves.toMatchObject([{ status: 'absent', files: [] }]);
+      await expect(upgraded.inspect({ package: packageName })).resolves.toMatchObject({ state: { status: 'idle' } });
+      await expect(upgraded.inspectLaunch({ package: packageName })).resolves.toEqual({ status: 'idle' });
+      libraryPresent = true;
+      const rebuilt = readyReceipt(await prepare(upgraded, { offline: true }));
+      expect(rebuilt).toMatchObject({ tauVersion: '2.0.0', treeIntegrity: receipt.treeIntegrity });
+    });
+
+    it('should repair through a seal step that refuses any file it did not expect, as Build123d does (S4)', async () => {
+      const roots: string[][] = [];
+      const { store, bytes, host } = await scenario({
+        // Like Build123d's compileall check: only the payloads' files and bytecode may be under the root.
+        seal: async ({ root, files }) => {
+          const present = await listFiles(root);
+          roots.push(present);
+          const known = new Set(files.map(({ path }) => path));
+          const unexpected = present.filter((path) => !known.has(path) && path !== bytecode);
+          if (unexpected.length > 0) {
+            throw new PreparationError(
+              'EXTRACTION_REFUSED',
+              `left files that are not bytecode: ${unexpected.join(', ')}`,
+            );
+          }
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          await writeFile(join(root, ...bytecode.split('/')), 'compiled');
+          return undefined;
+        },
+        launchSet: () => ['python/bin/python3', 'worker/worker.py'],
+      });
+      const receipt = readyReceipt(await prepare(host));
+      await rm(join(receipt.root, ...bytecode.split('/')));
+      await rm(blobPath(store, bytes.demo));
+
+      const [repaired] = await host.verify({
+        package: packageName,
+        repair: true,
+        offline: true,
+        signal: AbortSignal.timeout(prepareTimeout),
+      });
+      const [intact] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
+
+      expect(repaired).toMatchObject({ status: 'repaired', payloads: [], files: [bytecode] });
+      expect(intact).toMatchObject({ status: 'intact' });
+      expect(roots).toHaveLength(2);
+      expect(roots.flat().filter((path) => path === 'receipt.json' || path === 'launch.json')).toEqual([]);
+    });
+
+    it('should leave a closure whose repair fails unsealed, so nothing reports it intact, and rebuild it on prepare', async () => {
+      let failRepair = false;
+      const { host } = await scenario({
+        seal: async ({ root }) => {
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          // Like compileall, the step restores the file before it fails: the tree then matches the receipt again.
+          await writeFile(join(root, ...bytecode.split('/')), 'compiled');
+          if (failRepair) {
+            throw new PreparationError('EXTRACTION_REFUSED', 'the seal step failed after it wrote its files');
+          }
+          return undefined;
+        },
+      });
+      const receipt = readyReceipt(await prepare(host));
+      await writeFile(join(receipt.root, ...bytecode.split('/')), 'tampered');
+      failRepair = true;
+
+      await expectPreparationError(
+        host.verify({ package: packageName, repair: true, offline: true, signal: AbortSignal.timeout(prepareTimeout) }),
         'EXTRACTION_REFUSED',
       );
+      const [after] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
+
+      expect(after).toMatchObject({ status: 'absent' });
+      expect(await exists(join(receipt.root, 'receipt.json'))).toBe(false);
+      await expect(host.inspect({ package: packageName })).resolves.toMatchObject({ state: { status: 'idle' } });
+      failRepair = false;
+      expect(readyReceipt(await prepare(host, { offline: true })).treeIntegrity).toBe(receipt.treeIntegrity);
+      await expect(
+        host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) }),
+      ).resolves.toMatchObject([{ status: 'intact' }]);
+    });
+  });
+
+  describe('launch index', () => {
+    const launchSet = (): readonly string[] => ['python/bin/python3', 'worker/worker.py'];
+
+    it('should seal a launch index of the launch set rows that treeIntegrity covers', async () => {
+      const { host } = await scenario({ launchSet });
+
+      const receipt = readyReceipt(await prepare(host));
+      const index = JSON.parse(await readFile(join(receipt.root, 'launch.json'), 'utf8')) as {
+        readonly files: ReadonlyArray<{ readonly path: string }>;
+      };
+
+      expect(index).toEqual({
+        schemaVersion: 1,
+        package: packageName,
+        dependency: 'engine',
+        closureIntegrity: receipt.closureIntegrity,
+        files: receipt.files.filter(({ path }) => launchSet().includes(path)),
+      });
+      const row = receipt.files.find(({ path }) => path === 'launch.json');
+      const indexBytes = new Uint8Array(await readFile(join(receipt.root, 'launch.json')));
+      expect(row).toMatchObject({ mode: 0o644, sha256: sha256Hex(indexBytes) });
+      expect(row?.payload).toBeUndefined();
+      expect(receipt.treeIntegrity).toBe(await computeTreeIntegrity(receipt.files));
+      // The version stamp leads the receipt, so a launch reads it from the head.
+      const written = await readFile(join(receipt.root, 'receipt.json'), 'utf8');
+      expect(written.startsWith('{\n  "tauVersion": "1.0.0",')).toBe(true);
+    });
+
+    it('should answer a launch from the index and the receipt head alone, as inspect answers it', async () => {
+      const { host, reopen } = await scenario({ launchSet });
+      await expect(host.inspectLaunch({ package: packageName })).resolves.toEqual({ status: 'idle' });
+      const receipt = readyReceipt(await prepare(host));
+
+      const launch = await host.inspectLaunch({ package: packageName });
+
+      expect(launch).toEqual({
+        status: 'ready',
+        closures: {
+          engine: {
+            package: packageName,
+            dependency: 'engine',
+            root: receipt.root,
+            closureIntegrity: receipt.closureIntegrity,
+            files: receipt.files.filter(({ path }) => launchSet().includes(path)),
+          },
+        },
+      });
+      // Only the head of the receipt is read: a body no parser accepts does not change the launch's answer.
+      const text = await readFile(join(receipt.root, 'receipt.json'), 'utf8');
+      await writeFile(join(receipt.root, 'receipt.json'), `${text.slice(0, 200)} not json`);
+      await expect(host.inspect({ package: packageName })).resolves.toMatchObject({ state: { status: 'idle' } });
+      await expect(host.inspectLaunch({ package: packageName })).resolves.toEqual(launch);
+      await writeFile(join(receipt.root, 'receipt.json'), text);
+      // A receipt from another Tau version is stale for a launch too, and an unsealed closure is absent.
+      await expect(reopen({ tauVersion: '2.0.0' }).inspectLaunch({ package: packageName })).resolves.toEqual({
+        status: 'idle',
+      });
+      await rm(join(receipt.root, 'receipt.json'));
+      await expect(host.inspectLaunch({ package: packageName })).resolves.toEqual({ status: 'idle' });
+    });
+
+    it('should read the full receipt for a closure sealed without a launch index', async () => {
+      const { host } = await scenario();
+      const receipt = readyReceipt(await prepare(host));
+
+      expect(await exists(join(receipt.root, 'launch.json'))).toBe(false);
+      await expect(host.inspectLaunch({ package: packageName })).resolves.toMatchObject({
+        status: 'ready',
+        closures: { engine: { root: receipt.root, files: receipt.files } },
+      });
+    });
+
+    it('should catch a changed launch index on verify and rewrite it without running the seal step', async () => {
+      let runs = 0;
+      const { host } = await scenario({
+        launchSet,
+        seal: async () => {
+          runs += 1;
+          return undefined;
+        },
+      });
+      const receipt = readyReceipt(await prepare(host));
+      const path = join(receipt.root, 'launch.json');
+      const original = await readFile(path, 'utf8');
+      const worker = receipt.files.find((row) => row.path === 'worker/worker.py')!;
+      await writeFile(path, original.replace(worker.sha256, '0'.repeat(64)));
+
+      const [stale] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
+      const [repaired] = await host.verify({
+        package: packageName,
+        repair: true,
+        offline: true,
+        signal: AbortSignal.timeout(prepareTimeout),
+      });
+
+      expect(stale).toMatchObject({ status: 'stale', payloads: [], files: ['launch.json'] });
+      expect(repaired).toMatchObject({ status: 'repaired', payloads: [] });
+      expect(await readFile(path, 'utf8')).toBe(original);
+      expect(runs).toBe(1);
     });
   });
 
@@ -703,6 +885,43 @@ describe('createPreparationHost', () => {
       expect(intact).toMatchObject({ status: 'intact', payloads: [], files: [] });
       expect(await readFile(join(receipt.root, 'worker', 'worker.py'), 'utf8')).toBe('print("ready")\n');
       expect(registry.calls).toHaveLength(calls);
+    });
+
+    it('should record a payload the store already held as acquired from the store, offline or not', async () => {
+      const { store, registry, host } = await scenario();
+      const first = readyReceipt(await prepare(host));
+      await rm(join(store, 'closures'), { recursive: true });
+      const calls = registry.calls.length;
+
+      const again = readyReceipt(await prepare(host, { offline: true }));
+
+      expect(registry.calls).toHaveLength(calls);
+      expect(again.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom])).toEqual(
+        first.payloads.map(({ name, sha256 }) => [name, { kind: 'store', location: `blobs/sha256/${sha256}` }]),
+      );
+    });
+
+    it('should verify intact after a tar of the sealed closures is extracted under the usual umask (S30)', async () => {
+      const { store, host, reopen } = await scenario({ launchSet: () => ['python/bin/python3'] });
+      const receipt = readyReceipt(await prepare(host));
+      const seeded = await temporaryDirectory('tau-tar-seed-');
+      cleanups.push(seeded.remove);
+      const archive = join(seeded.path, 'closures.tar');
+      const copy = join(seeded.path, 'store');
+      await mkdir(copy);
+      execFileSync('tar', ['-cf', archive, '-C', store, 'closures']);
+      // What a user who is not root gets: tar applies the umask instead of the archived modes.
+      execFileSync('sh', ['-c', 'umask 022 && tar --no-same-permissions -xf "$0" -C "$1"', archive, copy]);
+
+      const [verified] = await reopen({ store: copy }).verify({
+        package: packageName,
+        offline: true,
+        signal: AbortSignal.timeout(prepareTimeout),
+      });
+
+      expect(verified).toMatchObject({ status: 'intact', files: [] });
+      expect(receipt.files.find(({ path }) => path === 'python/lib/python3.13/os.py')?.mode).toBe(0o644);
+      expect(new Set(receipt.files.map(({ mode }) => mode))).toEqual(new Set([0o644, 0o755]));
     });
 
     it('should treat a receipt from another Tau version as idle, then re-verify it locally on prepare', async () => {

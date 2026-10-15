@@ -52,6 +52,19 @@ afterEach(() => {
 });
 
 describe('useModels', () => {
+  it('should reuse a fresh catalog when another consumer mounts', async () => {
+    respond([catalogRow('anthropic-claude-opus-4.8', true)]);
+    const first = renderHook(() => useModels(), { wrapper });
+    await waitFor(() => {
+      expect(first.result.current.availableModels).toHaveLength(1);
+    });
+
+    const second = renderHook(() => useModels(), { wrapper });
+
+    expect(second.result.current.availableModels).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   describe('new-chat default execution', () => {
     it('should start the next chat on the external agent last used, with its model and config', async () => {
       respond([catalogRow('anthropic-claude-opus-4.8', true)]);

@@ -1349,7 +1349,10 @@
       // fixtures also author `.tsx`/`.js`/`.jsx` modules, pragma JSX and directory
       // index imports that the library tsconfig cannot type, so `any` operands are
       // warnings like the other unsafe-`any` rules.
-      "files": ["libs/tau-examples/src/kernels/**/*.{ts,tsx,js,jsx}"],
+      "files": [
+        "libs/tau-examples/src/kernels/**/*.{ts,tsx,js,jsx}",
+        "libs/tau-examples/src/standalone/**/*.{ts,tsx,mjs}"
+      ],
       "rules": {
         "no-restricted-imports": "off",
         "tau-lint/no-impl-in-index": "off",
@@ -1496,7 +1499,10 @@
       // libcascade exposes generated OCCT/Emscripten names whose constructor
       // and factory conventions intentionally do not match JavaScript new-cap
       // heuristics.
-      "files": ["libs/tau-examples/src/kernels/opencascade/**/*.ts"],
+      "files": [
+        "libs/tau-examples/src/kernels/opencascade/**/*.ts",
+        "libs/tau-examples/src/standalone/opencascadejs/*.{ts,mjs}"
+      ],
       "rules": {
         "new-cap": "off"
       }

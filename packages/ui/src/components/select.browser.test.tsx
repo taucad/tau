@@ -18,6 +18,22 @@ const rect = (element: Element) => {
   return { x, y, width, height };
 };
 
+/** The open row covers the trigger from its leading edge and may only grow toward the trailing edge. */
+const expectRowOverTrigger = (row: Element, trigger: ReturnType<typeof rect>, isRtl: boolean) => {
+  const opened = rect(row);
+  expect({ y: opened.y, height: opened.height }).toEqual({ y: trigger.y, height: trigger.height });
+  expect(isRtl ? opened.x + opened.width : opened.x).toBe(isRtl ? trigger.x + trigger.width : trigger.x);
+  expect(opened.width).toBeGreaterThanOrEqual(trigger.width);
+};
+
+/** Every option label renders in full rather than truncating to the trigger width. */
+const expectNoClippedOptions = () => {
+  for (const option of screen.getAllByRole('option')) {
+    const label = option.lastElementChild!;
+    expect(label.scrollWidth, option.textContent).toBeLessThanOrEqual(label.clientWidth);
+  }
+};
+
 const options = ['First', 'Selected', 'Last'];
 const cases = [
   { name: 'invitation role', size: 'default', width: 128, selected: 'First' },
@@ -58,7 +74,8 @@ it.each(cases.flatMap((scenario) => ['light', 'dark'].map((theme) => ({ ...scena
       </SelectItem>
     ));
     render(
-      <div style={{ padding: '220px 100px' }}>
+      // An RTL subtree lays the trigger out from the right, leaving room for the list to grow leftward.
+      <div dir={'direction' in scenario ? 'rtl' : undefined} style={{ padding: '220px 100px' }}>
         <Select
           size={scenario.size}
           dir={'direction' in scenario ? scenario.direction : undefined}
@@ -94,7 +111,9 @@ it.each(cases.flatMap((scenario) => ['light', 'dark'].map((theme) => ({ ...scena
     const opened = await screen.findByRole('option', {
       name: selectedLabel === 'Selected' && iconBefore ? 'Material Selected' : selectedLabel,
     });
-    expect(rect(opened)).toEqual(before);
+    const isRtl = 'direction' in scenario;
+    expectRowOverTrigger(opened, before, isRtl);
+    expectNoClippedOptions();
     expect(getComputedStyle(opened).borderRadius).toBe(getComputedStyle(trigger).borderRadius);
     expect(getComputedStyle(opened).getPropertyValue('corner-shape')).toBe(
       getComputedStyle(trigger).getPropertyValue('corner-shape'),
@@ -113,15 +132,44 @@ it.each(cases.flatMap((scenario) => ['light', 'dark'].map((theme) => ({ ...scena
     trigger.style.width = '200px';
     const resized = rect(trigger);
     await page.getByRole('combobox', { name: scenario.name }).click();
-    expect(
-      rect(
-        await screen.findByRole('option', {
-          name: selectedLabel === 'Selected' && iconBefore ? 'Material Selected' : selectedLabel,
-        }),
-      ),
-    ).toEqual(resized);
+    expectRowOverTrigger(
+      await screen.findByRole('option', {
+        name: selectedLabel === 'Selected' && iconBefore ? 'Material Selected' : selectedLabel,
+      }),
+      resized,
+      isRtl,
+    );
+    expectNoClippedOptions();
   },
 );
+
+it('should widen a popper list to its longest option instead of clipping it', async () => {
+  await page.viewport(800, 800);
+  render(
+    <div style={{ padding: '220px 100px' }}>
+      <Select size='sm' defaultValue='20'>
+        <SelectTrigger aria-label='Items per page'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position='popper' side='top'>
+          {['20', '50', '100', '150', '200'].map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>,
+  );
+  const trigger = screen.getByRole('combobox', { name: 'Items per page' });
+  const before = rect(trigger);
+  trigger.focus();
+  await userEvent.keyboard('{ArrowDown}');
+  const selected = await screen.findByRole('option', { name: '20', selected: true });
+  expect(rect(selected).width).toBeGreaterThanOrEqual(before.width);
+  expectNoClippedOptions();
+  expect(rect(trigger)).toEqual(before);
+});
 
 it('should align controlled and initially open selects and preserve forwarded refs', async () => {
   function Controlled(): React.JSX.Element {

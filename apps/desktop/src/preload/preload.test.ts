@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
   openDirectoryChannel,
+  revealPathChannel,
   quitChannels,
   slicersChannels,
   windowFullscreenChannel,
@@ -189,7 +190,13 @@ describe('desktop preload Quick Look bridge', () => {
 describe('native directory access', () => {
   it('should advertise the native file manager and forward the selected directory', async () => {
     const tau = state.exposed.get('tau') as {
-      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+      directories: {
+        openLabel: string;
+        openIcon: string;
+        revealLabel: string;
+        open(path: string): Promise<void>;
+        reveal(path: string): Promise<void>;
+      };
     };
     expect(tau.directories.openLabel).toBe(
       process.platform === 'darwin'
@@ -203,6 +210,15 @@ describe('native directory access', () => {
     );
     await tau.directories.open('/picked/Project');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
+    expect(tau.directories.revealLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Reveal in Finder'
+        : process.platform === 'win32'
+          ? 'Reveal in File Explorer'
+          : 'Reveal in file manager',
+    );
+    await tau.directories.reveal('/picked/Project/main.ts');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(revealPathChannel, '/picked/Project/main.ts');
   });
 });
 

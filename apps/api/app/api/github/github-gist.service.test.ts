@@ -1,0 +1,163 @@
+/* eslint-disable @typescript-eslint/naming-convention -- GitHub wire fixtures. */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock, mockDeep } from 'vitest-mock-extended';
+import type { ConfigService } from '@nestjs/config';
+import type { BetterAuthService } from '#auth/better-auth.service.js';
+import type { Environment } from '#config/environment.config.js';
+import type { DatabaseService } from '#database/database.service.js';
+import type { account, githubGistPreference } from '#database/schema.js';
+import { GithubGistService } from '#api/github/github-gist.service.js';
+
+const revision = 'a'.repeat(40);
+const headers = new Headers({ cookie: 'session=test' });
+const payload = { public: false, files: { 'tau-project.zip.base64url': { content: 'YXJjaGl2ZQ' } } };
+const fixture = () => {
+  const database = mockDeep<DatabaseService>();
+  const auth = mockDeep<BetterAuthService>();
+  const config = mock<ConfigService<Environment, true>>();
+  config.get.mockReturnValue('client-id');
+  database.database.query.account.findFirst.mockResolvedValue(
+    mock<typeof account.$inferSelect>({
+      id: 'linked',
+      accountId: '42',
+      userId: 'user',
+      providerId: 'github',
+      scope: 'gist',
+    }),
+  );
+  database.database.query.githubGistPreference.findFirst.mockResolvedValue(undefined);
+  auth.api.getAccessToken.mockResolvedValue({
+    accessToken: 'server-only-token',
+    scopes: ['gist'],
+    accessTokenExpiresAt: undefined,
+    idToken: undefined,
+  });
+  const state = {
+    scopes: 'read:user, user:email, gist',
+    identity: 42,
+    status: 200,
+    gist: {
+      id: 'abc123',
+      owner: { id: 42 },
+      history: [{ version: revision }],
+      files: { 'tau-project.zip.base64url': { content: 'old' } },
+    },
+  };
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/user')) {
+      return Response.json({ id: state.identity, login: 'person' }, { headers: { 'x-oauth-scopes': state.scopes } });
+    }
+    if (init?.method === 'DELETE') {
+      return new Response(null, { status: 204 });
+    }
+    return Response.json(state.gist, { status: state.status });
+  });
+  vi.stubGlobal('fetch', fetch);
+  return { database, auth, state, fetch, service: new GithubGistService(auth, database, config) };
+};
+afterEach(() => vi.unstubAllGlobals());
+
+describe('server-side Gist authority', () => {
+  it('should use verified provider scopes rather than stored scopes and never expose the token', async () => {
+    const { service, state, auth } = fixture();
+    state.scopes = 'read:user, user:email';
+    const capability = await service.capability('user', headers);
+    expect(capability).toMatchObject({
+      status: 'permission-required',
+      grantedScopes: ['read:user', 'user:email'],
+      authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
+    });
+    expect(JSON.stringify(capability)).not.toContain('server-only-token');
+    expect(auth.api.getAccessToken).toHaveBeenCalledWith({ headers, body: { accountId: 'linked' } });
+  });
+  it('should require reconnection when the provider identity differs', async () => {
+    const { service, state } = fixture();
+    state.identity = 99;
+    expect(await service.capability('user', headers)).toMatchObject({ status: 'reconnect-required' });
+  });
+  it('should report no connection without obtaining a token', async () => {
+    const { service, database, auth } = fixture();
+    database.database.query.account.findFirst.mockResolvedValue(undefined);
+    expect(await service.capability('user', headers)).toMatchObject({ status: 'not-connected' });
+    expect(auth.api.getAccessToken).not.toHaveBeenCalled();
+  });
+  it('should reject a mutation without the live Gist grant', async () => {
+    const { service, state, fetch } = fixture();
+    state.scopes = 'read:user';
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_PERMISSION_REQUIRED' },
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('should stop Gist use without affecting or consulting GitHub', async () => {
+    const { service, database, fetch } = fixture();
+    database.database.query.githubGistPreference.findFirst.mockResolvedValue(
+      mock<typeof githubGistPreference.$inferSelect>({ enabled: false }),
+    );
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_USE_DISABLED' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('should publish only the bounded canonical artifact and return a token-free locator', async () => {
+    const { service, fetch } = fixture();
+    expect(await service.mutate('user', headers, { action: 'create', payload })).toEqual({
+      id: 'abc123',
+      history: [{ version: revision }],
+      html_url: 'https://gist.github.com/abc123',
+    });
+    expect(fetch.mock.calls[1]?.[0]).toBe('https://api.github.com/gists');
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { authorization: 'Bearer server-only-token' },
+    });
+  });
+  it.each([
+    { public: false, files: { 'other.txt': { content: 'data' } } },
+    { public: false, files: { 'tau-project.zip.base64url': { content: 'x'.repeat(921_601) } } },
+    { public: false, files: { 'tau-project.zip.base64url': { content: 'x' }, 'tau-project.jwe': { content: 'x' } } },
+    { public: false, files: {}, description: 'extra' },
+  ])('should reject invalid artifact payloads before obtaining credentials', async (invalid) => {
+    const { service, fetch } = fixture();
+    await expect(service.mutate('user', headers, { action: 'create', payload: invalid })).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_PAYLOAD_INVALID' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(['update', 'delete'] as const)('should refuse %s of another account’s publication', async (action) => {
+    const { service, state, fetch } = fixture();
+    state.gist.owner.id = 99;
+    await expect(
+      service.mutate('user', headers, { action, id: 'abc123', revision, payload: { files: payload.files } }),
+    ).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
+    });
+    expect(fetch.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
+  });
+  it('should refuse ordinary Gists and stale publication revisions', async () => {
+    const { service, state } = fixture();
+    await expect(
+      service.mutate('user', headers, { action: 'delete', id: 'abc123', revision: 'b'.repeat(40) }),
+    ).rejects.toMatchObject({ response: { code: 'GITHUB_GIST_CHANGED' } });
+    Object.assign(state.gist, { files: { 'main.ts': { content: 'source' } } });
+    await expect(service.mutate('user', headers, { action: 'delete', id: 'abc123', revision })).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
+    });
+  });
+  it('should remove the previous canonical filename when encryption changes', async () => {
+    const { service, fetch } = fixture();
+    await service.mutate('user', headers, {
+      action: 'update',
+      id: 'abc123',
+      revision,
+      payload: { files: { 'tau-project.jwe': { content: 'encrypted' } } },
+    });
+    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+      method: 'PATCH',
+      body: JSON.stringify({
+        files: { 'tau-project.jwe': { content: 'encrypted' }, 'tau-project.zip.base64url': null },
+      }),
+    });
+  });
+});

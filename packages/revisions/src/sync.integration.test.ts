@@ -896,7 +896,9 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     );
     offline.stop();
 
-    const second = await startGitHttpBackend({ root: remoteRoot });
+    /* Reconnect the same authority: a different port would change the approved
+     * repository URL while leaving the native credential bound to the old one. */
+    const second = await startGitHttpBackend({ root: remoteRoot, listenPort: Number(new URL(first.url).port) });
     try {
       await one.port.setRemote({ name: 'tau', url: second.url });
 

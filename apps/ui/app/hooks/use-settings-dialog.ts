@@ -13,6 +13,7 @@ export const settingsSectionSchema = z.enum([
   'filesystem',
   'account',
   'security',
+  'repositories',
   'billing',
   'compute',
   'machines',

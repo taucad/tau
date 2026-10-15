@@ -59,6 +59,8 @@ export const staticAuthConfig = {
       // No-op for mock configuration
     },
   },
+  // Provider tokens are consumed by server-owned capability endpoints only.
+  disabledPaths: ['/get-access-token', '/refresh-token'],
   basePath: '/v1/auth',
   appName: 'Tau',
   session: {

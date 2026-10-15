@@ -92,6 +92,17 @@ const codeMessages: ReadonlyMap<string, string> = new Map([
   ['GITHUB_CONNECTION_NOT_FOUND', 'This GitHub account is no longer connected. Refresh and choose another account.'],
   ['GITHUB_CONNECTION_WRITE_FAILED', 'Tau could not save the GitHub connection. Try again.'],
   ['GITHUB_RECONNECT_REQUIRED', 'Your GitHub connection needs to be renewed. Connect GitHub again.'],
+  ['GITHUB_REPOSITORY_WRITE_DISABLED', 'Enable writes for this repository before pushing.'],
+  [
+    'GITHUB_REPOSITORY_WRITE_DENIED',
+    'GitHub has not granted write access to this repository. Review its access on GitHub.',
+  ],
+  [
+    'GITHUB_REPOSITORY_READ_DENIED',
+    'This repository is no longer shared with Tau. Review repository access on GitHub.',
+  ],
+  ['GITHUB_SCOPED_TOKEN_INVALID', 'GitHub could not provide the requested repository access. Try reconnecting.'],
+  ['GITHUB_AUTHORIZATION_CHANGED', 'GitHub access changed. Check this repository’s access, then try again.'],
   ['GITHUB_REFRESH_BUSY', 'GitHub access is being renewed. Try again in a moment.'],
   ['GITHUB_REFRESH_CONFLICT', 'GitHub access changed while it was being renewed. Try again.'],
   ['GITHUB_RATE_LIMITED', rateLimitedMessage],
@@ -278,9 +289,30 @@ export const githubConnections = Object.freeze({
    * name the backup (R23). A linked import's mint keeps the code table's
    * sentences: its page is where another account is chosen.
    */
+  access: async (connectionId: string, repositoryId: number) =>
+    request(
+      `/connections/${encodeURIComponent(connectionId)}/repositories/${String(repositoryId)}/access`,
+      z.object({
+        repositoryId: githubId,
+        ownerId: githubId,
+        fullName: z.string(),
+        cloneUrl: z.url(),
+        canRead: z.boolean(),
+        canWrite: z.boolean(),
+        writeEnabled: z.boolean(),
+        authorizationVersion: z.number(),
+        verifiedAt: z.string(),
+      }),
+    ),
+  setWrite: async (connectionId: string, input: { repositoryId: number; enabled: boolean }) =>
+    request(
+      `/connections/${encodeURIComponent(connectionId)}/repositories/${String(input.repositoryId)}/write`,
+      z.object({ writeEnabled: z.boolean() }),
+      { method: 'POST', body: JSON.stringify({ enabled: input.enabled }) },
+    ),
   token: async (
     connectionId: string,
-    purpose: 'backup' | 'import' = 'backup',
+    input: { repositoryId: number; operation: 'read' | 'write'; purpose?: 'backup' | 'import' },
   ): Promise<{ accessToken: string; expiresAt: string; generation: number }> => {
     try {
       return await request(
@@ -290,10 +322,10 @@ export const githubConnections = Object.freeze({
           expiresAt: z.iso.datetime(),
           generation: z.number().int().positive(),
         }),
-        { method: 'POST' },
+        { method: 'POST', body: JSON.stringify({ repositoryId: input.repositoryId, operation: input.operation }) },
       );
     } catch (error) {
-      throw purpose === 'backup' ? backupCredentialRefusal(error) : error;
+      throw input.purpose === 'import' ? error : backupCredentialRefusal(error);
     }
   },
 });

@@ -2026,7 +2026,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     describeRun,
     ledger: async (chatId) => {
       if (!closed) {
-        return ledgerOf(chatId);
+        // A retired writer must release its lock before this read can reopen the log.
+        return serial(chatId, async () => ledgerOf(chatId));
       }
       /* A closed host still answers a final read from the ledger its close left, so its caller settles what the
        * close drained; it never reopens the log (L2a D14). */

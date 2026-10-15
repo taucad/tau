@@ -142,8 +142,10 @@ describe('Linked account row ownership', () => {
             body: JSON.stringify({ accountId: otherAccount.id }),
           }),
         );
-        expect(response.status).toBe(400);
-        expect(await response.json()).toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
+        expect(response.status).toBe(path === 'get-access-token' ? 404 : 400);
+        if (path === 'unlink-account') {
+          expect(await response.json()).toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
+        }
       }),
     );
     expect(await internalAdapter.findAccounts(other.id)).toHaveLength(1);
@@ -191,7 +193,7 @@ describe('Cached client account selectors against the upgraded server', () => {
     const oldUnlink = await request('unlink-account', { providerId: 'github' });
     expect(oldUnlink.status).toBe(400);
     const oldGist = await request('get-access-token', { providerId: 'github', accountId: account.accountId });
-    expect(oldGist.status).toBe(400);
+    expect(oldGist.status).toBe(404);
     expect(await internalAdapter.findAccounts(owner.id)).toEqual(before);
     expect(getGithubUserInfo).not.toHaveBeenCalled();
     const currentInfo = await request(`account-info?accountId=${account.id}`);
@@ -199,8 +201,8 @@ describe('Cached client account selectors against the upgraded server', () => {
     expect(await currentInfo.json()).toMatchObject({ account: { id: account.id, providerId: 'github' } });
     expect(getGithubUserInfo).toHaveBeenCalledOnce();
     const currentGist = await request('get-access-token', { accountId: account.id });
-    expect(currentGist.status).toBe(200);
-    expect(await currentGist.json()).toMatchObject({ accessToken: 'offline-gist-token' });
+    expect(currentGist.status).toBe(404);
+    expect(await currentGist.text()).not.toContain('offline-gist-token');
     const currentUnlink = await request('unlink-account', { accountId: account.id });
     expect(currentUnlink.status).toBe(200);
     const remainingAccounts = await internalAdapter.findAccounts(owner.id);

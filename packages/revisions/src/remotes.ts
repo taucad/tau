@@ -77,7 +77,14 @@ export const remoteOf = (
   name: string,
   url: string,
   metadata?: Readonly<{ provider?: 'github'; repositoryId?: string; fetchOnly?: boolean }>,
-): Remote => Object.freeze({ name, url, kind: remoteKindOf(name), ...metadata });
+): Remote =>
+  Object.freeze({
+    name,
+    url,
+    kind: remoteKindOf(name),
+    ...metadata,
+    ...(isGithubRemoteUrl(url) || /^(?:[^@]+@)?github\.com:/iu.test(url) ? { provider: 'github' } : {}),
+  });
 
 /**
  * The ref namespaces that are this host's own and never cross a wire.

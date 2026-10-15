@@ -210,25 +210,17 @@ const createGistArtifact = async (
 
 const requireGistId = (providerId: string, reference?: string): string => {
   const gistId = reference?.split('.')[0];
-  if (providerId !== 'github-gist' || !gistId) {
+  if (providerId !== 'github-gist' || !gistId || !/^[0-9a-f]{1,64}$/u.test(gistId)) {
     throw new ShareError('SHARE_LOCATOR_INVALID', 'The GitHub Gist share link is malformed.');
   }
   return gistId;
 };
 
-const getGithubLease = async (context: ShareProviderContext) => {
-  if (!context.credentialBroker) {
+const requireGithubTransport = (context: ShareProviderContext) => {
+  if (!context.githubGist) {
     throw new ShareError('SHARE_AUTH_REQUIRED', 'Connect GitHub before managing a Gist.');
   }
-  const lease = await context.credentialBroker.getAccessToken({
-    connectionId: 'github',
-    scopes: ['gist'],
-    audience: githubApiOrigin,
-  });
-  if (!lease.grantedScopes.includes('gist')) {
-    throw new ShareError('SHARE_PERMISSION_REQUIRED', 'Allow Gist access before managing a GitHub Gist.');
-  }
-  return lease;
+  return context.githubGist;
 };
 
 const parsePublication = (
@@ -260,26 +252,11 @@ export const githubGistShareProvider: ShareProvider = {
   descriptor: githubGistShareProviderDescriptor,
   async publish(input, context) {
     const { protection, filename, content } = await createGistArtifact(input, context);
-    const lease = await getGithubLease(context);
-    let response: Response;
-    try {
-      response = await context.fetch(`${githubApiOrigin}/gists`, {
-        method: 'POST',
-        signal: input.signal,
-        headers: { ...githubHeaders, authorization: `Bearer ${lease.accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          public: input.visibility === 'public',
-          files: { [filename]: { content } },
-        }),
-      });
-    } catch {
-      input.signal?.throwIfAborted();
-      throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable.');
-    }
-    if (!response.ok) {
-      return throwForResponse(response);
-    }
-    const body = await parseJson(response, 64 * 1024);
+    const body = await requireGithubTransport(context).mutate({
+      action: 'create',
+      signal: input.signal,
+      payload: { public: input.visibility === 'public', files: { [filename]: { content } } },
+    });
     return parsePublication(body, protection);
   },
   async resolve(input, context) {
@@ -342,70 +319,23 @@ export const githubGistShareProvider: ShareProvider = {
   },
   async republish(input, context) {
     const gistId = requireGistId(input.locator.providerId, input.locator.reference);
-    const lease = await getGithubLease(context);
-    const authorization = `Bearer ${lease.accessToken}`;
-    let currentResponse: Response;
-    try {
-      currentResponse = await context.fetch(`${githubApiOrigin}/gists/${gistId}`, {
-        method: 'GET',
-        signal: input.signal,
-        headers: { ...githubHeaders, authorization },
-      });
-    } catch {
-      input.signal?.throwIfAborted();
-      throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable.');
-    }
-    if (!currentResponse.ok) {
-      return throwForResponse(currentResponse);
-    }
-    const current = await parseJson(currentResponse, shareArtifactLimits.maxEncodedArchiveCharacters * 2 + 64 * 1024);
-    const currentFiles = current['files'];
-    if (!currentFiles || typeof currentFiles !== 'object' || Array.isArray(currentFiles)) {
-      throw new ShareError('SHARE_PROVIDER_INVALID_RESPONSE', 'The Gist does not contain project files.');
-    }
-    const currentNames = Object.keys(currentFiles);
-    const currentFilename = currentNames.length === 1 ? currentNames[0] : undefined;
-    if (currentFilename !== canonicalPlainFilename && currentFilename !== canonicalEncryptedFilename) {
-      throw new ShareError('SHARE_PROVIDER_INVALID_RESPONSE', 'Only Tau-created Gists can be republished.');
-    }
     const { protection, filename, content } = await createGistArtifact(input, context);
-    const files: Record<string, unknown> = { [filename]: { content } };
-    if (currentFilename !== filename) {
-      files[currentFilename] = null;
-    }
-    let response: Response;
-    try {
-      response = await context.fetch(`${githubApiOrigin}/gists/${gistId}`, {
-        method: 'PATCH',
-        signal: input.signal,
-        headers: { ...githubHeaders, authorization, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files }),
-      });
-    } catch {
-      input.signal?.throwIfAborted();
-      throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable.');
-    }
-    if (!response.ok) {
-      return throwForResponse(response);
-    }
-    return parsePublication(await parseJson(response, 64 * 1024), protection);
+    const body = await requireGithubTransport(context).mutate({
+      action: 'update',
+      id: gistId,
+      revision: input.locator.reference?.split('.')[1],
+      signal: input.signal,
+      payload: { files: { [filename]: { content } } },
+    });
+    return parsePublication(body, protection);
   },
   async unpublish(input, context) {
     const gistId = requireGistId(input.locator.providerId, input.locator.reference);
-    const lease = await getGithubLease(context);
-    let response: Response;
-    try {
-      response = await context.fetch(`${githubApiOrigin}/gists/${gistId}`, {
-        method: 'DELETE',
-        signal: input.signal,
-        headers: { ...githubHeaders, authorization: `Bearer ${lease.accessToken}` },
-      });
-    } catch {
-      input.signal?.throwIfAborted();
-      throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable.');
-    }
-    if (!response.ok) {
-      throwForResponse(response);
-    }
+    await requireGithubTransport(context).mutate({
+      action: 'delete',
+      id: gistId,
+      revision: input.locator.reference?.split('.')[1],
+      signal: input.signal,
+    });
   },
 };

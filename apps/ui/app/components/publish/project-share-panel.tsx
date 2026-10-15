@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { Check, ChevronDown, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -36,7 +38,6 @@ import {
   shareProviderRegistry,
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
-import type { GithubGistConnectionStatus } from '#lib/share-providers.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
@@ -397,7 +398,7 @@ function PortableShareBody({
   readonly onBusyChange: (busy: boolean) => void;
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [operationError, setError] = useState<string>();
   const [shareUrl, setShareUrl] = useState<string>();
   /* The Gist this panel made, so it can be managed where it was made (R8). */
   const [publication, setPublication] = useState<{
@@ -405,7 +406,17 @@ function PortableShareBody({
     readonly protection: ShareProtection;
   }>();
   const [warnings, setWarnings] = useState<ShareProjectSnapshot['warnings']>([]);
-  const [githubStatus, setGithubStatus] = useState<GithubGistConnectionStatus>();
+  const settings = useSettingsDialog();
+  const githubCapability = useQuery({
+    queryKey: ['github', 'gist-status'],
+    queryFn: getGithubGistConnectionStatus,
+    enabled: method === 'github-gist',
+    retry: false,
+    staleTime: 0,
+  });
+  const githubStatus = githubCapability.data;
+  const error =
+    operationError ?? (githubCapability.error ? 'Could not check the GitHub connection. Try again.' : undefined);
   const [encrypted, setEncrypted] = useState(false);
   const [password, setPassword] = useState('');
   const [includePassword, setIncludePassword] = useState(true);
@@ -432,28 +443,6 @@ function PortableShareBody({
       consentRef.current?.abort();
     };
   }, []);
-  useEffect(() => {
-    let cancelled = false;
-    if (method === 'github-gist') {
-      const loadConnection = async (): Promise<void> => {
-        try {
-          const status = await getGithubGistConnectionStatus();
-          if (!cancelled) {
-            setGithubStatus(status);
-          }
-        } catch {
-          if (!cancelled) {
-            setError('Could not check the GitHub connection. Try again.');
-          }
-        }
-      };
-      // async-iife: bootstrap
-      void loadConnection();
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [method]);
 
   const publish = async (): Promise<void> => {
     const controller = new AbortController();
@@ -508,9 +497,9 @@ function PortableShareBody({
       }
     } catch (error) {
       if (isShareError(error) && error.code === 'SHARE_PERMISSION_REQUIRED') {
-        setGithubStatus('permission-required');
+        void githubCapability.refetch();
       } else if (isShareError(error) && error.code === 'SHARE_AUTH_REQUIRED') {
-        setGithubStatus('not-connected');
+        void githubCapability.refetch();
       }
       setError(error instanceof Error ? error.message : 'Sharing failed.');
     } finally {
@@ -543,7 +532,7 @@ function PortableShareBody({
       consentRef.current = undefined;
       setBrowserConsent(connected ? undefined : 'timed-out');
       if (connected) {
-        setGithubStatus('connected');
+        await githubCapability.refetch();
       }
       setBusy(false);
     } catch (error) {
@@ -573,11 +562,15 @@ function PortableShareBody({
     !encrypted || (passwordBytes >= sharePasswordLimits.minBytes && passwordBytes <= sharePasswordLimits.maxBytes);
   const needsConnection = !isDirect && githubStatus !== 'connected';
   const connectionLabel =
-    githubStatus === 'permission-required'
-      ? 'Allow Gist access'
-      : githubStatus === 'not-connected'
-        ? 'Connect GitHub'
-        : 'Sign in';
+    githubStatus === 'disabled'
+      ? 'Manage Gist sharing'
+      : githubStatus === 'reconnect-required'
+        ? 'Reconnect GitHub'
+        : githubStatus === 'permission-required'
+          ? 'Allow Gist access'
+          : githubStatus === 'not-connected'
+            ? 'Connect GitHub'
+            : 'Sign in';
   return (
     <div className='flex flex-col gap-4'>
       <div className='rounded-lg border bg-muted/30 p-4'>
@@ -591,14 +584,16 @@ function PortableShareBody({
             <p className='font-medium'>
               {encrypted
                 ? `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`
-                : 'No upload through Tau'}
+                : isDirect
+                  ? 'No upload through Tau'
+                  : 'Stored on GitHub'}
             </p>
             <p className='mt-1 text-muted-foreground'>
               {encrypted
                 ? 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.'
                 : isDirect
                   ? 'The compressed project stays in the URL. Anyone with the link can open it.'
-                  : 'GitHub stores the compressed project; Tau only opens it in memory.'}
+                  : 'Tau sends the compressed project to GitHub using your Gist connection.'}
             </p>
           </div>
         </div>
@@ -694,11 +689,15 @@ function PortableShareBody({
       ) : null}
       {!isDirect && githubStatus && githubStatus !== 'connected' && browserConsent !== 'waiting' ? (
         <div className='rounded-md border border-feature/30 bg-feature/10 px-3 py-2 text-sm text-feature dark:text-feature/80'>
-          {githubStatus === 'signed-out'
-            ? 'Sign in to Tau before connecting GitHub.'
-            : githubStatus === 'permission-required'
-              ? 'GitHub is connected, but Tau needs Gist access before it can publish.'
-              : 'Connect GitHub to create a Gist.'}
+          {githubStatus === 'disabled'
+            ? 'Gist sharing is off in Tau. Enable it in Security settings to share again.'
+            : githubStatus === 'reconnect-required'
+              ? 'Reconnect GitHub to verify access before sharing.'
+              : githubStatus === 'signed-out'
+                ? 'Sign in to Tau before connecting GitHub.'
+                : githubStatus === 'permission-required'
+                  ? 'GitHub is connected, but Tau needs Gist access before it can publish.'
+                  : 'Connect GitHub to create a Gist.'}
         </div>
       ) : null}
       {error ? (
@@ -711,7 +710,7 @@ function PortableShareBody({
       ) : null}
       {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
       <div className='flex flex-wrap justify-end gap-2'>
-        {method === 'github-gist' && publication ? (
+        {method === 'github-gist' && publication && githubStatus === 'connected' ? (
           <GithubGistManagement
             locator={publication.locator}
             protection={publication.protection}
@@ -736,7 +735,11 @@ function PortableShareBody({
             type='button'
             disabled={busy || !passwordValid || (!isDirect && githubStatus === undefined)}
             onClick={() => {
-              void (needsConnection ? connect() : publish());
+              if (githubStatus === 'disabled' && !isDirect) {
+                settings.open('security', 'github-permissions');
+              } else {
+                void (needsConnection ? connect() : publish());
+              }
             }}
           >
             {busy ? (

@@ -9,15 +9,18 @@
 class BuildPart(Builder)
 
   # build123d.build_part.BuildPart.__init__ (constructor)
-  BuildPart(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
-  #   workplanes: initial plane to work on
+  BuildPart(*placements: Face | Plane | Location, mode: Mode = Mode.ADD)
+  #   placements: output placement(s)
   #   mode: combination mode
 
-  # Get the current part
+  # Get the placed part
   part: Part | None
+
+  # Get the part in the Builder's local construction coordinates
+  part_local: Part | None
 
   # Return a wire representation of the pending edges
   pending_edges_as_wire: Wire
 
   # Builder's location
-  location: Location | None
+  location: Location

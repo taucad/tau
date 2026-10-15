@@ -7,51 +7,76 @@ description: Guides native Build123d BRep authoring in main.py. Use when creatin
 
 ## Contract
 
-1. Author `main.py` with a top-level `@dataclass(frozen=True) class Params` whose fields have scalar or `Literal` annotations and defaults.
-2. Define `main(params: Params)` returning one `build123d.Shape` or a finite non-empty list or tuple of shapes.
-3. Set each root shape's `label` and `color`; labels must be unique. Tau preserves them in the viewer topology and STEP export.
-4. Use static project-relative Python imports. Declare non-Python assets in `__tau__ = {"dependencies": [...]}`.
-5. Keep render tessellation out of `Params`; Tau owns display tolerance.
+1. Author `main.py` with a top-level `@dataclass(frozen=True) class Params` whose fields have scalar or `Literal` annotations and defaults. Use the bundled Build123d 0.13 native API.
+2. Define `main(params: Params)` returning a native `Shape`, a list/tuple of shapes, or `None`/an empty list for an empty scene.
+3. Use native `Part`/`Solid` values and `Compound(children=[...])` for assemblies. Each occurrence must be a distinct native object; copy before placing a reused part. Labels are display names and may repeat; they do not define occurrence identity.
+4. Use static project-relative Python imports. Declare non-Python assets in `__tau__ = {"dependencies": [...]}` using paths from the project root. Imported part modules may declare their own assets. Project texture files must be declared so image-only edits invalidate the model.
+5. Keep render tessellation out of `Params`; Tau owns display tolerance, native UV generation and exact BRep edge rendering. UVs use native face-local [0, 1] charts; this does not promise a whole-part texture atlas.
 
-## Canonical pattern
+## Native parts, materials and joints
 
 ```python
 from dataclasses import dataclass
-from typing import Literal
-from build123d import Box, Color, Shape
+from bd_materials import metals, wood
+from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
 
 @dataclass(frozen=True)
 class Params:
-    width: float = 80.0
-    depth: float = 40.0
-    height: float = 12.0
-    finish: Literal["blue", "orange"] = "blue"
+    angle: float = 22.5
 
-__tau__ = {
-    "parameters": {
-        "width": {"minimum": 1.0, "description": "Body width in millimeters"}
+def main(params: Params):
+    base = Box(40, 40, 6)
+    base.label = "Base"
+    base.material = metals.aluminum()
+    arm = Box(60, 12, 4)
+    arm.label = "Arm"
+    arm.material = wood.walnut()
+    RevoluteJoint("shaft", base, axis=Axis.Z, angle_reference=(1, 1, 0))
+    RigidJoint("mount", arm)
+    base.joints["shaft"].connect_to(arm.joints["mount"], angle=params.angle)
+    return Compound(label="Pivot", children=[base, arm])
+
+def motion(model):
+    base, arm = model.children
+    shaft = base.joints["shaft"]
+    return {
+        "ground": base,
+        "occurrence_ids": {"base": base, "arm": arm},
+        "animations": [{
+            "id": "turn",
+            "name": "Turn",
+            "duration": 2,
+            "keyframes": [
+                {"time": 0, "coordinates": {shaft: 0}},
+                {"time": 2, "coordinates": {shaft: 90}},
+            ],
+        }],
     }
-}
-
-def main(params: Params) -> Shape:
-    body = Box(params.width, params.depth, params.height)
-    body.label = "Body"
-    body.color = Color(params.finish)
-    return body
 ```
 
-Prefer Build123d features, sketches, joints, and assemblies over primitive-buttings. Diagnose invalid shapes, duplicate labels, coincident booleans, and zero dimensions first.
+`Shape.material` uses native `bd_materials` finished materials. Built-in textured materials carry their packaged images. Use `Shape.color` for a simple color without a material. Engineering physical-property publication is separate from appearance.
 
-Both build123d styles work: builder mode (`with BuildPart() as part:` … `part.part`, objects combine by `mode=Mode.ADD`/`Mode.SUBTRACT`) and algebra mode (`Pos(x, y, z) * Box(…) - Cylinder(…)`). Pick one per model.
+For a custom image, use native `threejs_materials.PbrProperties`, `PbrValues`, `PbrMaps(color="finish.png")` with `maps_dir=Path(__file__).parent`, then `bd_materials.FinishedMaterial(metals.aluminum().material, pbr=pbr)`. Add `finish.png` to `__tau__.dependencies` (project-relative, even when the Python module lives in a subdirectory). Native image data URIs are also supported. Exported GLB embeds its images; remote URLs and paths outside the project are rejected.
 
-## Wrong / Correct
+Attach named interfaces with native `RigidJoint`, `RevoluteJoint`, `LinearJoint`, `CylindricalJoint` or `BallJoint`; connect them with native `connect_to`. Unconnected interfaces remain portable. Native angle references, local placement and joint limits are retained; do not subtract a reference angle to compensate for older Build123d behavior.
 
-- Wrong: `Cylinder(radius=4, height=10, base=(0, 0, 5))`. Correct: primitives take no position: `Pos(0, 0, 5) * Cylinder(4, 10)`, or place them with `Locations` in builder mode.
-- Wrong: assuming an OCP/OCCT call. Correct: use build123d objects and operations; the reference lists build123d's public API only.
+`motion(model)` is Tau's optional declaration hook, not a released Build123d API. Use it only for facts native placement does not retain: `ground`, stable `occurrence_ids`, explicit `connections`, coupled motion and animation. Return a dictionary referencing the actual objects returned by `main`; no imports from an invented `build123d.mechanisms` module.
+
+- `connections`: list of `(source_joint, target_joint)` pairs, useful when native `connected_to` has been overwritten by another connection.
+- `couplings`: list of `{"driver": joint, "follower": other_joint, "ratio": -2.0}`; optional `offset`. For a joint with multiple coordinates, use `(joint, "angle")` or `(joint, "distance")`.
+- Animation keyframe coordinates are **deltas from the exported assembled pose** in degrees and meters. Native `connect_to` uses Build123d degrees and millimeters. For a ball joint, use `(joint, "x")`, `(joint, "y")`, `(joint, "z")`; these deltas apply to the final composed intrinsic XYZ chart native Build123d range-checks, including its reference frame.
+- Each reusable subassembly's occurrences need separate objects and identifiers. Set one assembly ground; an embedded module must not introduce another global ground.
+- Tau preserves valid mechanical intent even when its viewer cannot execute that graph; inspect mechanism diagnostics. Native `connect_to` is placement, not a general closed-loop or dynamics solver.
+
+## Native modeling
+
+Prefer Build123d features and sketches. Builder mode (`with BuildPart() as part:` … `part.part`) and algebra mode (`Pos(x, y, z) * Box(...) - Cylinder(...)`) both work. Use native `Select.NEW` and `Select.LAST` for operation history; Tau recomputes operations whose native semantics cannot survive BRep cache restoration.
+
+Wrong: `Cylinder(radius=4, height=10, base=(0, 0, 5))`. Correct: `Pos(0, 0, 5) * Cylinder(4, 10)`, or `Locations` in builder mode. Read the native API reference before assuming an OCP call or a method from another kernel.
 
 ## Verify
 
-Test the model with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.py' })`, then `expectGeo(model)`.
+Test the model with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.py' })`, then `expectGeo(model)`. Inspect assembly hierarchy, exact edges, materials and joint playback in Tau. For sharing, export the Tau GLB so topology, interfaces, mechanism intent and embedded textures travel together. Current native STEP export carries geometry, hierarchy and supported native appearance; do not claim it embeds editable source or mechanism data.
 
 ## Core API
 
@@ -62,13 +87,15 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 ```python
 # BuildPart
 class BuildPart(Builder)
-  BuildPart(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
-  # Get the current part
+  BuildPart(*placements: Face | Plane | Location, mode: Mode = Mode.ADD)
+  # Get the placed part
   part: Part | None
+  # Get the part in the Builder's local construction coordinates
+  part_local: Part | None
   # Return a wire representation of the pending edges
   pending_edges_as_wire: Wire
   # Builder's location
-  location: Location | None
+  location: Location
 
 # Combination Mode
 class Mode(Enum)
@@ -84,7 +111,7 @@ class Mode(Enum)
 ```python
 # BuildSketch
 class BuildSketch(Builder)
-  BuildSketch(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
+  BuildSketch(*placements: Face | Plane | Location, mode: Mode = Mode.ADD)
   # Get the builder's object
   sketch_local: Sketch | None
   # solids() not implemented
@@ -117,11 +144,11 @@ class Cylinder(BasePartObject)
   Cylinder(radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 
 # Part Operation
-class Hole(BasePartObject)
+class Hole(_BaseHole)
   Hole(radius: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
 
 # Part Operation
-class CounterBoreHole(BasePartObject)
+class CounterBoreHole(_BaseHole)
   CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
 
 # Part Object
@@ -171,7 +198,7 @@ class Axis
   Axis(edge: Edge) -> None
   # Return self as Location
   location: Location
-  # … 15 more members in the API reference
+  # … 14 more members in the API reference
 
 # Color object based on OCCT Quantity_ColorRGBA
 class Color
@@ -220,7 +247,7 @@ class Vector
   center() -> Vector
   # Rotate about axis
   rotate(axis: Axis, angle: float) -> Vector
-  # … 28 more members in the API reference
+  # … 27 more members in the API reference
 
 # Location in 3D space
 class Location
@@ -236,7 +263,7 @@ class Location
   Location(position: VectorLike, direction: VectorLike, angle: float) -> None
   # Return center of the location - useful for sorting
   center() -> Vector
-  # … 15 more members in the API reference
+  # … 13 more members in the API reference
 
 # Order to apply extrinsic rotations by axis
 class Extrinsic(Enum)
@@ -275,9 +302,6 @@ class Intrinsic(Enum)
 # Location Context
 class Locations(LocationList)
   Locations(*pts: VectorLike | Vertex | Location | Face | Plane | Axis | Iterable[VectorLike | Vertex | Location | Face | Plane | Axis])
-
-# Return Edges
-edges(select: Select = Select.ALL) -> ShapeList[Edge]
 ```
 
 ### operations_part
@@ -321,7 +345,7 @@ class Shape(NodeMixin, Generic)
   # Remove the positional arguments from this Shape
   cut(*to_cut: Shape) -> Self | Compound
   # edges - all the edges in this Shape - subclasses may override
-  edges() -> ShapeList[Edge]
+  edges(select: Select = Select.ALL) -> ShapeList[Edge]
   # fuse
   fuse(*to_fuse: Shape, glue: bool = False, tol: float | None = None) -> Self | Compound
   # located
@@ -342,23 +366,13 @@ class Shape(NodeMixin, Generic)
   translate(vector: VectorLike, transform: bool = False) -> Self
   # Return the Wire
   wire() -> Wire
-  # … 65 more members in the API reference
+  # … 71 more members in the API reference
 
-# Subclass of list with custom filter and sort methods appropriate to CAD
-class ShapeList(list)
-  # The average of the center of objects within the ShapeList
-  center() -> Vector
-  # edges - all the edges in this ShapeList
-  edges() -> ShapeList[Edge]
-  # filter by
-  filter_by(filter_by: Callable[[T], bool] | Axis | Plane | GeomType | property, reverse: bool = False, tolerance: float = 1e-05) -> ShapeList[T]
-  # Return the Shell
-  shell() -> Shell
-  # solids - all the solids in this ShapeList
-  solids() -> ShapeList[Solid]
-  # vertices - all the vertices in this ShapeList
-  vertices() -> ShapeList[Vertex]
-  # … 27 more members in the API reference
+# How much of a shape a selector returns
+class Select(Enum)
+  ALL
+  LAST
+  NEW
 ```
 
 ### three_d
@@ -367,7 +381,7 @@ class ShapeList(list)
 # A Solid in build123d represents a three-dimensional solid geometry
 class Solid(Mixin3D)
   # Build a solid from an OCCT TopoDS_Shape/TopoDS_Solid
-  Solid(obj: TopoDS_Solid | Shell | None = None, label: str = '', color: Color | None = None, material: str = '', joints: dict[str, Joint] | None = None, parent: Compound | None = None)
+  Solid(obj: TopoDS_Solid | Shell | None = None, label: str = '', color: Color | None = None, material: FinishedMaterial | None = None, joints: dict[str, Joint] | None = None, parent: Compound | None = None)
   # extrude
   extrude(obj: Face, direction: VectorLike) -> Solid
   # make box
@@ -380,7 +394,7 @@ class Solid(Mixin3D)
   revolve(section: Face | Wire, angle: float, axis: Axis, inner_wires: list[Wire] | None = None) -> Solid
   # Sweep
   sweep(section: Face | Wire, path: Wire | Edge, inner_wires: list[Wire] | None = None, make_solid: bool = True, is_frenet: bool = False, mode: Vector | Wire | Edge | None = None, transition: Transition = Transition.TRANSFORMED) -> Solid
-  # … 13 more members in the API reference
+  # … 14 more members in the API reference
 
 # Sweep discontinuity handling option
 class Transition(Enum)
@@ -444,7 +458,7 @@ class Edge(Mixin1D)
   make_spline(points: list[VectorLike], tangents: list[VectorLike] | None = None, periodic: bool = False, parameters: list[float] | None = None, scale: bool = True, tol: float = 1e-06) -> Edge
   # Three Point Arc
   make_three_point_arc(point1: VectorLike, point2: VectorLike, point3: VectorLike) -> Edge
-  # … 27 more members in the API reference
+  # … 25 more members in the API reference
 
 # Angular rotation direction
 class AngularDirection(Enum)
@@ -466,31 +480,17 @@ class Wire(Mixin1D)
   make_ellipse(x_radius: float, y_radius: float, plane: Plane = Plane.XY, start_angle: float = 360.0, end_angle: float = 360.0, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE, closed: bool = True) -> Wire
   # make_polygon
   make_polygon(vertices: Iterable[VectorLike], close: bool = True) -> Wire
-  # edges - all the edges in this Shape
-  edges() -> ShapeList[Edge]
+  # edges - all the edges in this Shape, in connection order
+  edges(select: Select = Select.ALL) -> ShapeList[Edge]
   # fillet_2d
   fillet_2d(radius: float, vertices: Iterable[Vertex]) -> Wire
-  # … 16 more members in the API reference
-```
-
-### composite
-
-```python
-# A Compound in build123d is a topological entity representing a collection of
-class Compound(Mixin3D)
-  # Build a Compound from Shapes
-  Compound(obj: TopoDS_Compound | Iterable[Shape] | None = None, label: str = '', color: Color | None = None, material: str = '', joints: dict[str, Joint] | None = None, parent: Compound | None = None, children: Sequence[Shape] | None = None)
-  # extrude
-  extrude(obj: Shell, direction: VectorLike) -> Compound
-  # Return center of object
-  center(center_of: CenterOf = CenterOf.MASS) -> Vector
-  # … 14 more members in the API reference
+  # … 15 more members in the API reference
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 1046 symbols by file.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 1067 symbols by file.
 
-- 30 reference files, named in `api-index.md`
+- 32 reference files, named in `api-index.md`
 
 Read ranges, not whole files. Never copy a reference into a source file.

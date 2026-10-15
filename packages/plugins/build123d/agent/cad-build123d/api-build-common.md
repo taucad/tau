@@ -1,6 +1,6 @@
 # build123d — build_common
 
-16 top-level symbols. Signatures are verbatim python.
+17 top-level symbols. Signatures are verbatim python.
 
 # Category: build_common
 # Location Context
@@ -129,20 +129,28 @@ wires(select: Select = Select.ALL) -> ShapeList[Wire]
 #   select: Wire selector
 
 # Category: build_common
+# Common context-isolation behavior for builder-aware objects
+# build123d.build_common.BaseObject (class)
+class BaseObject
+
+# Category: build_common
 # Builder
-# Remarks: Base class for the build123d Builders. Attributes: mode (Mode): builder's combination mode workplanes (list[Plane]): active workplanes builder_parent (Builder): build to pass objects to on exit
+# Remarks: Base class for the build123d Builders. Attributes: mode (Mode): builder's combination mode placements (tuple[Location, ...]): output placement(s) builder_parent (Builder): build to pass objects to on exit label (str): label assigned to the builder's output object
 # build123d.build_common.Builder (class)
 class Builder(ABC, Generic)
 
   # build123d.build_common.Builder.__init__ (constructor)
-  Builder(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
-  #   workplanes: sequence of Union[Face, Plane, Location]
+  Builder(*placements: Face | Plane | Location, mode: Mode = Mode.ADD)
+  #   placements: sequence of Union[Face, Plane, Location]
   #   mode: combination mode
 
   # Maximum size of object in all directions
   max_dimension: float
 
-  # Edges that changed during last operation
+  # Label assigned to the builder's output object
+  label: str
+
+  # Edges the last operation created outright, as ``edges(Select.NEW)``
   new_edges: ShapeList[Edge]
 
   # Upon entering record the parent and a token to restore contextvars
@@ -213,17 +221,23 @@ class Builder(ABC, Generic)
   solid(select: Select = Select.ALL) -> Solid
   #   select: Solid selector
 
+  # Shapes the last operation brought in or created, by type
+  lasts: dict
+
+  # Shapes the last operation created outright, by type
+  news: dict
+
   # Validate that objects/operations and parameters apply
   # build123d.build_common.Builder.validate_inputs (method)
   validate_inputs(validating_class, objects: Shape | Iterable[Shape] | None = None)
 
 # Category: build_common
 # Location Context
-# Remarks: A stateful context of active locations. At least one must be active at all time. Note that local locations are stored and global locations are returned as a property of the local locations and the currently active workplanes.
+# Remarks: A stateful context of active locations. At least one must be active at all times. Locations are expressed in the Builder's local Plane.XY construction coordinates. Consequently, ordinary ``Vector`` and tuple arithmetic is already local and no workplane-aware Vector monkeypatch is required; output placements are applied only when the product is published.
 # build123d.build_common.LocationList (class)
 class LocationList
 
-  # Current local locations globalized with current workplanes
+  # Current locations in local construction coordinates
   locations: list[Location]
 
   # build123d.build_common.LocationList.__init__ (constructor)

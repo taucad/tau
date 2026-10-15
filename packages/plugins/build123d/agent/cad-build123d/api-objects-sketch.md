@@ -1,12 +1,12 @@
 # build123d — objects_sketch
 
-14 top-level symbols. Signatures are verbatim python.
+15 top-level symbols. Signatures are verbatim python.
 
 # Category: objects_sketch
 # BaseSketchObject
 # Remarks: Base class for all BuildSketch objects
 # build123d.objects_sketch.BaseSketchObject (class)
-class BaseSketchObject(Sketch)
+class BaseSketchObject(Sketch, BaseObject)
 
   # build123d.objects_sketch.BaseSketchObject.__init__ (constructor)
   BaseSketchObject(obj: Compound | Face, rotation: float = 0, align: Align | tuple[Align, Align] | None = None, mode: Mode = Mode.ADD)
@@ -155,6 +155,22 @@ class SlotOverall(BaseSketchObject)
 
 # Category: objects_sketch
 # Sketch Object
+# Remarks: Create an superellipse ("squircle") defined by width, height, and order.
+# build123d.objects_sketch.Superellipse (class)
+class Superellipse(BaseSketchObject)
+
+  # build123d.objects_sketch.Superellipse.__init__ (constructor)
+  Superellipse(width: float, height: float, order: float = 4, point_count: int = 16, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
+  #   width: superellipse width
+  #   height: superellipse height
+  #   order: order of the superellipse
+  #   point_count: number of points per quadrant to use for generating the superellipse
+  #   rotation: angle to rotate object
+  #   align: align MIN, CENTER, or MAX of object
+  #   mode: combination mode
+
+# Category: objects_sketch
+# Sketch Object
 # Remarks: Create text defined by text string and font size. Fonts installed to the system can be specified by name and FontStyle. Fonts with subfamilies not in FontStyle should be specified with the subfamily name, e.g. "Arial Black". Alternatively, a specific font file can be specified with font_path. Use `available_fonts()` to list available font names for `font` and FontStyles. Note: on Windows, fonts must be installed with "Install for all users" to be found by name. Not all fonts have every FontStyle available, however ITALIC and BOLDITALIC will still italicize the font if the respective font file is not available. text_align specifies alignment of text inside the bounding box, while align the aligns the bounding box itself. Optionally, the Text can be positioned on a non-linear edge or wire with a path and position_on_path.
 # build123d.objects_sketch.Text (class)
 class Text(BaseSketchObject)
@@ -163,7 +179,7 @@ class Text(BaseSketchObject)
   Text(txt: str, font_size: float, font: str = 'Arial', font_path: PathLike[str] | str | None = None, font_style: FontStyle = FontStyle.REGULAR, text_align: tuple[TextAlign, TextAlign] = (TextAlign.CENTER, TextAlign.CENTER), align: Align | tuple[Align, Align] | None = None, path: Edge | Wire | None = None, position_on_path: float = 0.0, single_line_width: float | None = None, rotation: float = 0.0, mode: Mode = Mode.ADD)
   #   txt: text to render
   #   font_size: size of the font in model units
-  #   font: font name
+  #   font: requested font name
   #   font_path: system path to font file
   #   font_style: font style, REGULAR, BOLD, BOLDITALIC, or ITALIC
   #   text_align: horizontal text align LEFT, CENTER, or RIGHT

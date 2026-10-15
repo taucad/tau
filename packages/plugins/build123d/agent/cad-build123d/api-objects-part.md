@@ -1,12 +1,12 @@
 # build123d — objects_part
 
-11 top-level symbols. Signatures are verbatim python.
+12 top-level symbols. Signatures are verbatim python.
 
 # Category: objects_part
 # BasePartObject
 # Remarks: Base class for all BuildPart objects & operations
 # build123d.objects_part.BasePartObject (class)
-class BasePartObject(Part)
+class BasePartObject(Part, BaseObject)
 
   # build123d.objects_part.BasePartObject.__init__ (constructor)
   BasePartObject(part: Part | Solid, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] | None = None, mode: Mode = Mode.ADD)
@@ -62,7 +62,7 @@ class ConvexPolyhedron(BasePartObject)
 # Part Operation
 # Remarks: Create a counter bore hole defined by radius, counter bore radius, counter bore and depth.
 # build123d.objects_part.CounterBoreHole (class)
-class CounterBoreHole(BasePartObject)
+class CounterBoreHole(_BaseHole)
 
   # build123d.objects_part.CounterBoreHole.__init__ (constructor)
   CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
@@ -76,7 +76,7 @@ class CounterBoreHole(BasePartObject)
 # Part Operation
 # Remarks: Create a countersink hole defined by radius, countersink radius, countersink angle, and depth.
 # build123d.objects_part.CounterSinkHole (class)
-class CounterSinkHole(BasePartObject)
+class CounterSinkHole(_BaseHole)
 
   # build123d.objects_part.CounterSinkHole.__init__ (constructor)
   CounterSinkHole(radius: float, counter_sink_radius: float, depth: float | None = None, counter_sink_angle: float = 82, mode: Mode = Mode.SUBTRACT)
@@ -105,7 +105,7 @@ class Cylinder(BasePartObject)
 # Part Operation
 # Remarks: Create a hole defined by radius and depth.
 # build123d.objects_part.Hole (class)
-class Hole(BasePartObject)
+class Hole(_BaseHole)
 
   # build123d.objects_part.Hole.__init__ (constructor)
   Hole(radius: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
@@ -164,3 +164,8 @@ class Wedge(BasePartObject)
   #   rotation: angles to rotate about axes
   #   align: align MIN, CENTER, or MAX of object
   #   mode: combine mode
+
+# Category: objects_part
+# Shared functionality for hole-style part operations
+# build123d.objects_part._BaseHole (class)
+class _BaseHole(BasePartObject)

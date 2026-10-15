@@ -18,7 +18,7 @@ class Solid(Mixin3D)
 
   # Build a solid from an OCCT TopoDS_Shape/TopoDS_Solid
   # build123d.topology.three_d.Solid.__init__ (constructor)
-  Solid(obj: TopoDS_Solid | Shell | None = None, label: str = '', color: Color | None = None, material: str = '', joints: dict[str, Joint] | None = None, parent: Compound | None = None)
+  Solid(obj: TopoDS_Solid | Shell | None = None, label: str = '', color: Color | None = None, material: FinishedMaterial | None = None, joints: dict[str, Joint] | None = None, parent: Compound | None = None)
   #   obj: OCCT Solid or Shell
   #   label: Defaults to ''
   #   color: Defaults to None
@@ -28,6 +28,10 @@ class Solid(Mixin3D)
 
   # volume - the volume of this Solid
   volume: float
+
+  # mass - the mass of this Solid
+  # build123d.topology.three_d.Solid.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
 
   # Find where this Solid's boundary contacts another shape
   # Remarks: Returns geometry where boundaries contact without interior overlap: - Solid + Solid → Face + Edge + Vertex (all boundary contacts) - Solid + Face/Shell → Face + Edge + Vertex (boundary contacts) - Solid + Edge/Wire → Vertex (edge endpoints on solid boundary) - Solid + Vertex → Vertex if on boundary - Solid + Compound → distributes over compound elements Returns: ShapeList of boundary contact geometry (empty if no contact)
@@ -182,10 +186,6 @@ class Mixin3D(Shape)
   # Remarks: Return both the point(s) and normal(s) of the intersection of the axis and the shape Returns: list[tuple[Vector, Vector]]: Point and normal of intersection
   # build123d.topology.three_d.Mixin3D.find_intersection_points (method)
   find_intersection_points(other: Axis, tolerance: float = TOLERANCE) -> list[tuple[Vector, Vector]]
-
-  # Returns the right type of wrapper, given a OCCT object
-  # build123d.topology.three_d.Mixin3D.cast (method)
-  cast(obj: TopoDS_Shape) -> Self
 
   # Unused - only here because Mixin1D is a subclass of Shape
   # build123d.topology.three_d.Mixin3D.extrude (method)

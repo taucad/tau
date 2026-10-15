@@ -7,7 +7,7 @@
 # Remarks: Given an edge from a Face/Sketch, modify the face by replacing the given edge with the arc of the Voronoi largest empty circle that will fit within the Face. This "rounds off" the end of the object. Returns: Sketch: the modified shape
 # Throws: ValueError: Invalid geometry
 # build123d.operations_sketch.full_round (function)
-full_round(edge: Edge, invert: bool = False, voronoi_point_count: int = 100, mode: Mode = Mode.REPLACE) -> tuple[Sketch, Vector, float]
+full_round(edge: Edge, invert: bool = False, voronoi_point_count: int = 100, mode: Mode = Mode.REPLACE) -> Sketch
 #   edge: target Edge to remove
 #   invert: make the arc concave instead of convex
 #   voronoi_point_count: number of points along each edge used to create the voronoi vertices as potential locations for the center of the largest empty circle

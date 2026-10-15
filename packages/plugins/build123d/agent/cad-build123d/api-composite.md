@@ -10,7 +10,7 @@ class Compound(Mixin3D)
 
   # Build a Compound from Shapes
   # build123d.topology.composite.Compound.__init__ (constructor)
-  Compound(obj: TopoDS_Compound | Iterable[Shape] | None = None, label: str = '', color: Color | None = None, material: str = '', joints: dict[str, Joint] | None = None, parent: Compound | None = None, children: Sequence[Shape] | None = None)
+  Compound(obj: TopoDS_Compound | Iterable[Shape] | None = None, label: str = '', color: Color | None = None, material: FinishedMaterial | None = None, joints: dict[str, Joint] | None = None, parent: Compound | None = None, children: Sequence[Shape] | None = None)
   #   obj: OCCT Compound or shapes
   #   label: Defaults to ''
   #   color: Defaults to None
@@ -22,9 +22,10 @@ class Compound(Mixin3D)
   # volume - the volume of this Compound
   volume: float
 
-  # Returns the right type of wrapper, given a OCCT object
-  # build123d.topology.composite.Compound.cast (method)
-  cast(obj: TopoDS_Shape) -> Vertex | Edge | Wire | Face | Shell | Solid | Compound
+  # mass - the mass of this Compound
+  # Remarks: An assembly is summed over its children so each one contributes its own material; Shape.material walks up the tree for children that don't declare one. A Compound with no children is summed over its topology instead, where the sub-shapes are not build123d objects and can only take this Compound's material.
+  # build123d.topology.composite.Compound.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
 
   # extrude
   # Remarks: Extrude a Shell into a Compound. Returns: Edge: extruded shape
@@ -33,6 +34,14 @@ class Compound(Mixin3D)
   # build123d.topology.composite.Compound.extrude (method)
   extrude(obj: Shell, direction: VectorLike) -> Compound
   #   direction: direction and magnitude of extrusion
+
+  # Resolve a requested font to its name, path, and system font
+  # Remarks: Returns: tuple[str, str, Font_SystemFont]: resolved font name, resolved font path, and OpenCascade system font
+  # build123d.topology.composite.Compound.resolve_font (method)
+  resolve_font(font: str = 'Arial', font_path: PathLike[str] | str | None = None, font_style: FontStyle = FontStyle.REGULAR) -> tuple[str, str, Font_SystemFont]
+  #   font: requested font name
+  #   font_path: system path to font file
+  #   font_style: requested font style
 
   # Text that optionally follows a path
   # Remarks: The text that is created can be combined as with other sketch features by specifying a mode or rotated by the given angle. In addition, edges have been previously created with arc or segment, the text will follow the path defined by these edges. The start parameter can be used to shift the text along the path to achieve precise positioning.
@@ -131,7 +140,7 @@ class Curve(Compound)
 
   # A list of wires created from the edges
   # build123d.topology.composite.Curve.wires (method)
-  wires() -> ShapeList[Wire]
+  wires(select: Select = Select.ALL) -> ShapeList[Wire]
 
 # Category: composite
 # A Compound containing 3D objects - aka Solids

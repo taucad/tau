@@ -1,6 +1,6 @@
 # build123d — build_enums
 
-29 top-level symbols. Signatures are verbatim python.
+30 top-level symbols. Signatures are verbatim python.
 
 # Category: build_enums
 # Align object about Axis
@@ -57,6 +57,20 @@ class ContinuityLevel(IntEnum)
   C1
 
   C2
+
+# Category: build_enums
+# How the material of a shape sits around one of its elements
+# Remarks: Classifies a vertex, edge or face relative to the shape it was selected from - it is a property of that relationship, not of the element alone. A straight edge is convex on a box, concave at the inner corner of an L, and smooth where a fillet meets the face it blends into. - CONVEX: the material closes around the element by less than half a turn - the outer edge of a box, the corner of a plate, a boss - CONCAVE: by more than half a turn - the inner corner of a pocket, a hole - SMOOTH: the boundary passes through without bending - a fillet seam, a planar face, a vertex where two edges meet in line - SADDLE: both senses are present - an edge whose dihedral angle crosses half a turn along its length, a vertex where convex and concave edges meet, a face with principal curvatures of opposite sign
+# build123d.build_enums.Convexity (enum)
+class Convexity(Enum)
+
+  CONVEX
+
+  CONCAVE
+
+  SMOOTH
+
+  SADDLE
 
 # Category: build_enums
 # Order to apply extrinsic rotations by axis
@@ -330,7 +344,8 @@ class Sagitta(Enum)
   BOTH
 
 # Category: build_enums
-# Selector scope - all, last operation or new objects
+# How much of a shape a selector returns
+# Remarks: - ALL: every feature of the kind - LAST: the features the last operation brought in or created; a feature it merely rebuilt is not included - NEW: only the features that existed in no input of the last operation LAST and NEW read the record an operation leaves on its result, so they work on builders and on the shapes Algebra mode operations return alike.
 # build123d.build_enums.Select (enum)
 class Select(Enum)
 
@@ -410,7 +425,7 @@ class Transition(Enum)
 # Category: build_enums
 # Standard Units
 # build123d.build_enums.Unit (enum)
-class Unit(Enum)
+class Unit(StrEnum)
 
   MC
 
@@ -423,6 +438,12 @@ class Unit(Enum)
   IN
 
   FT
+
+  G
+
+  KG
+
+  LB
 
 # Category: build_enums
 # Extrude limit

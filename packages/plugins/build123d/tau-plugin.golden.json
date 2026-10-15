@@ -1,0 +1,8 @@
+{
+  "linux-x64-glibc": {
+    "closureIntegrity": "sha256-fNmZ5xXq8pKPyZUunVpsaHeVp1Z4lU+2mlIpzBci0Ik=",
+    "treeIntegrity": "sha256-xOzF8YJsmBh8DipobL2VdxMzc0ikQDwJ1lOc34/OSFw=",
+    "fileCount": 25165,
+    "byteLength": 923838868
+  }
+}

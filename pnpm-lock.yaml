@@ -4134,6 +4134,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../../libs/agent-tools
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../../core/archive
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

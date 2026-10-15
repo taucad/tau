@@ -185,7 +185,7 @@ pnpm plugin:dev doctor --smoke                # starts the launcher as a host wo
 pnpm plugin:dev uninstall                     # and `desktop --remove`
 ```
 
-`doctor --smoke` calls `test_model`, which needs this checkout's GeoSpec engine (`pnpm nx run geospec-engine-native:build-node`, with Rust 1.88), and `screenshot`, which needs a graphics adapter.
+`doctor --smoke` calls `test_model`, which needs the GeoSpec engine that `pnpm install` takes from npm as `geospec-engine` (its prebuilt native binding covers only the platforms it publishes), and `screenshot`, which needs a graphics adapter.
 
 Claude Code reads a catalog added from a local folder in place, so a rebuild reaches it at the next session. Codex copies the folder into `~/.codex/plugins/cache/tau-dev/tau/<version>/`. By hand, the same steps are:
 

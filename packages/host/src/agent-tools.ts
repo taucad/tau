@@ -51,7 +51,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@t
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
-import type { Engine as NativeGeoSpecEngine } from '@taucad/geospec-engine-native/node';
+import type { Engine as NativeGeoSpecEngine } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
@@ -195,7 +195,7 @@ const geoSpecEngineResolves = (): boolean => {
     /* The modules the runner imports, all this host's own declared
      * dependencies, so its own module is the correct base — unlike the kernel
      * plugins next door. */
-    import.meta.resolve('@taucad/geospec-engine-native/node');
+    import.meta.resolve('geospec-engine/node');
     import.meta.resolve('geospec/runner/native');
     import.meta.resolve('@taucad/geospec-engine/node-filesystem');
     return true;
@@ -224,7 +224,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
   previous?.carried.clear();
   previous?.engine.close();
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
-  const { Engine } = await import('@taucad/geospec-engine-native/node');
+  const { Engine } = await import('geospec-engine/node');
   const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
   let engine: NativeGeoSpecEngine;
   try {

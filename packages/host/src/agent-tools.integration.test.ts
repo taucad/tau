@@ -30,7 +30,7 @@ afterEach(async () => {
 
 /* CI ships the native engine only to its Darwin lane; a Linux shard resolves the loader but has no binding, and this
  * proof is about the registry composition, not about provisioning. It runs wherever the engine actually loads. */
-const nativeEngineLoads = await import('@taucad/geospec-engine-native/node').then(
+const nativeEngineLoads = await import('geospec-engine/node').then(
   ({ Engine }) => {
     try {
       new Engine().close();

@@ -26,7 +26,7 @@ Module._load = function(request, parent, isMain) {
   const binding = load.apply(this, arguments);
   let resolved;
   try { resolved = Module._resolveFilename(request, parent, isMain); } catch { return binding; }
-  if (typeof resolved !== 'string' || !/geospec-engine-native.*\.node$/u.test(resolved) ||
+  if (typeof resolved !== 'string' || !/geospec-engine.*\.node$/u.test(resolved) ||
       typeof binding?.Engine?.prototype?.evaluateClaim !== 'function') return binding;
   const original = binding.Engine.prototype.evaluateClaim;
   if (original.__tauE2eNativeEntryWrapped) return binding;

@@ -321,7 +321,7 @@ it('accepts the project Runtime mesh', async () => {
       'accepts the project Runtime mesh',
     ]);
     expect(output.failures.map((row) => row.requirement)).toEqual(['rejects the impossible fixed box volume']);
-    const native = await import('@taucad/geospec-engine-native/node');
+    const native = await import('geospec-engine/node');
     const engine = new native.Engine();
     const load = createGeoSpecNativeModelLoader({ engine });
     try {

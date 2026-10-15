@@ -594,14 +594,6 @@
       "owner": "W9"
     },
     {
-      "id": "D18",
-      "bound": "GeoSpec performance lab cell infrastructure timeout (300 s)",
-      "site": "apps/ui/app/services/geospec-performance.ts",
-      "token": "const cellTimeoutHandle = setTimeout",
-      "class": "External edge",
-      "owner": "GM"
-    },
-    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

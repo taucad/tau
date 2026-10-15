@@ -57,7 +57,6 @@ const state = vi.hoisted(() => ({
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
   geometryMeasurementConnect: vi.fn(() => ({ id: 'geometry-measurement-port' })),
-  geometryPerformanceConnect: vi.fn(() => ({ id: 'geometry-performance-port' })),
   geometryDispose: vi.fn(async () => undefined),
   geometrySampleResidentBytes: undefined as undefined | ((utility: { pid: number | undefined }) => number | undefined),
   servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
@@ -313,7 +312,7 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'exactMeasurement', 'machines'],
   ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
@@ -337,7 +336,6 @@ vi.mock('#main/geometry-broker.js', () => ({
     state.geometrySampleResidentBytes = options.sampleResidentBytes;
     return {
       connectMeasurement: state.geometryMeasurementConnect,
-      connectPerformance: state.geometryPerformanceConnect,
       connectSuite: vi.fn(),
       revokeUnauthorized: vi.fn(),
       dispose: state.geometryDispose,
@@ -405,7 +403,6 @@ afterEach(async () => {
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
   state.geometryMeasurementConnect.mockClear();
-  state.geometryPerformanceConnect.mockClear();
   state.geometrySampleResidentBytes = undefined;
   app.getAppMetrics.mockReset();
   app.getAppMetrics.mockReturnValue([]);
@@ -1417,33 +1414,20 @@ describe('desktop main machine store', () => {
   };
 
   it(
-    'routes exact measurement and debug performance to geometry, never the services singleton',
+    'routes exact measurement to geometry, never the services singleton',
     async () => {
-      const { desktopEnvironment } = await import('#main/environment.js');
-      vi.mocked(desktopEnvironment).mockReturnValueOnce({
-        TAU_API_URL: 'http://127.0.0.1:1',
-        TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
-        TAU_FRONTEND_URL: 'http://127.0.0.1:1',
-        TAU_DEBUG: 'true',
-      } as ReturnType<typeof desktopEnvironment>);
       await boot();
       const postMessage = vi.fn();
-      for (const [requestId, concern] of [
-        ['measure', 'exactMeasurement'],
-        ['diagnostic', 'geospecPerformance'],
-      ] as const) {
-        for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
-          listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
-        }
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'measure', concern: 'exactMeasurement' },
+        );
       }
       expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
-      expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
       expect(state.servicesConnect).not.toHaveBeenCalled();
       expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [
         { id: 'geometry-measurement-port' },
-      ]);
-      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [
-        { id: 'geometry-performance-port' },
       ]);
     },
     bootMilliseconds,
@@ -1465,7 +1449,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'refuses the diagnostic geometry port when TAU_DEBUG is absent',
+    'refuses the retired GeoSpec performance concern as unknown',
     async () => {
       await boot();
       const postMessage = vi.fn();
@@ -1477,9 +1461,9 @@ describe('desktop main machine store', () => {
       }
       expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
         requestId: 'diagnostic',
-        error: 'GeoSpec performance tools require TAU_DEBUG.',
+        error: 'services.unknown-concern',
       });
-      expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
+      expect(state.geometryMeasurementConnect).not.toHaveBeenCalled();
       expect(state.servicesConnect).not.toHaveBeenCalled();
     },
     bootMilliseconds,

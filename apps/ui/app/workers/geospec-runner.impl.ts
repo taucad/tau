@@ -388,7 +388,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
     );
     {
       const [native, { createNativeGeoSpecRunner }] = await Promise.all([
-        import('@taucad/geospec-engine-native'),
+        import('geospec-engine'),
         import('geospec/runner/native'),
       ]);
       await native.initialize();

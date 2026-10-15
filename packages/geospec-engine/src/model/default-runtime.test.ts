@@ -41,7 +41,7 @@ describe('default runtime', () => {
     ]);
     const manifest = JSON.parse(manifestSource) as { dependencies?: Record<string, string> };
     const expected = Object.keys(manifest.dependencies ?? {}).filter(
-      (name) => name.startsWith('@taucad/') && !['@taucad/runtime', '@taucad/geospec-engine-native'].includes(name),
+      (name) => name.startsWith('@taucad/') && name !== '@taucad/runtime',
     );
     const actual = ts
       .preProcessFile(source, true, true)
@@ -49,9 +49,9 @@ describe('default runtime', () => {
       .filter((specifier) => specifier.startsWith('@taucad/') && !specifier.startsWith('@taucad/runtime'));
 
     expect(actual.toSorted()).toEqual(expected.toSorted());
-    expect(manifest.dependencies).toHaveProperty('@taucad/geospec-engine-native');
+    expect(manifest.dependencies).toHaveProperty('geospec-engine');
     expect(ts.preProcessFile(nativeWorkerSource, true, true).importedFiles.map(({ fileName }) => fileName)).toContain(
-      '@taucad/geospec-engine-native/node',
+      'geospec-engine/node',
     );
   });
 });

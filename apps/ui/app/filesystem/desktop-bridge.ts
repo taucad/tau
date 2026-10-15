@@ -217,8 +217,6 @@ export type DesktopAgentHostConnectInput = {
 export type DesktopBridge = {
   /** Exact AP242 measurement in the desktop services utility. */
   readonly exactMeasurement: { connect(): Promise<MessagePort> };
-  /** Debug-only native GeoSpec comparisons, with byte-only inputs. */
-  readonly geoSpecPerformance: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
   readonly nodeFs: {
     /**
@@ -383,9 +381,6 @@ export const desktopBridge = (): DesktopBridge | undefined => {
   built ??= {
     exactMeasurement: {
       connect: async () => connectServices('exactMeasurement'),
-    },
-    geoSpecPerformance: {
-      connect: async () => connectServices('geospecPerformance'),
     },
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
     /* Parsed, not trusted: the names and model ids main put here came out of a

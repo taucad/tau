@@ -60,6 +60,8 @@ For a custom image, use native `threejs_materials.PbrProperties`, `PbrValues`, `
 
 Attach named interfaces with native `RigidJoint`, `RevoluteJoint`, `LinearJoint`, `CylindricalJoint` or `BallJoint`; connect them with native `connect_to`. Unconnected interfaces remain portable. Native angle references, local placement and joint limits are retained; do not subtract a reference angle to compensate for older Build123d behavior.
 
+Connect the final child instances before constructing their `Compound`. If a connection moves a child after containment, refresh the native aggregate with `assembly.children = assembly.children` before placing it in a parent or exporting it; otherwise the Compound's cached BRep can retain the old child geometry. Expose a moving descendant's named joint through the ordinary mapping, for example `module.joints["output"] = rotor.joints["output"]`. Consumers can connect through that public name without indexing private children, and the interface stays owned by the moving rotor.
+
 `motion(model)` is Tau's optional declaration hook, not a released Build123d API. Use it only for facts native placement does not retain: `ground`, stable `occurrence_ids`, explicit `connections`, coupled motion and animation. Return a dictionary referencing the actual objects returned by `main`; no imports from an invented `build123d.mechanisms` module.
 
 - `connections`: list of `(source_joint, target_joint)` pairs, useful when native `connected_to` has been overwritten by another connection.
@@ -154,10 +156,6 @@ class CounterBoreHole(_BaseHole)
 # Part Object
 class Sphere(BasePartObject)
   Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
-
-# Part Object
-class Torus(BasePartObject)
-  Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 ```
 
 ### objects_sketch

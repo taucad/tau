@@ -27,6 +27,8 @@ A shape owns reusable named attachment interfaces, including interfaces that are
 
 Build123D `connected_to` is a one-way last-connection pointer. Tau scans those retained pointers. `motion(model)["connections"]` can retain additional native `(source_joint, target_joint)` pairs. It does not create or solve constraints. Create or copy parts first, place them, and connect the final instances. External endpoints, copied stale targets and ambiguous joint references are rejected. Moving an endpoint after connection without preserving its mate produces an explicit unsupported diagnostic.
 
+Connect final child instances before constructing their containing `Compound` when possible. Native `connect_to` can change a child's placement without rebuilding an existing parent's cached BRep. If a connection must be made after containment, refresh that assembly with `assembly.children = assembly.children` before placing it in another parent or exporting its aggregate geometry. The [planetary example](../../libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py) demonstrates this order with fresh assembly containers and copied leaf geometry. Its 34-part STEP roundtrip qualifies that construction pattern; it does not establish that arbitrary copied Compound trees preserve all native relationships.
+
 ## Minimal authoring supplement
 
 ```python

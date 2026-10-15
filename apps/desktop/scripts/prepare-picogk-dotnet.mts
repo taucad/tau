@@ -1008,12 +1008,11 @@ const layerCompanionFiles = [
  */
 const deterministicTarGz = async (
   root: string,
-): Promise<{ bytes: Buffer; unpackedByteLength: number; fileCount: number }> => {
-  const blocks: Buffer[] = [];
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; unpackedByteLength: number; fileCount: number }> => {
+  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
   let unpackedByteLength = 0;
-  const files = (await filesUnder(root))
-    .map((path) => relative(root, path))
-    .toSorted((left, right) => (left < right ? -1 : 1));
+  const paths = await filesUnder(root);
+  const files = paths.map((path) => relative(root, path)).toSorted((left, right) => (left < right ? -1 : 1));
   for (const name of files) {
     if (Buffer.byteLength(name) > 100) {
       throw new Error(`Layer file name exceeds the ustar name field: ${name}`);
@@ -1022,7 +1021,9 @@ const deterministicTarGz = async (
     const [data, info] = await Promise.all([readFile(resolve(root, name)), stat(resolve(root, name))]);
     const header = Buffer.alloc(512);
     header.write(name, 0);
-    header.write(`${((info.mode & 0o111) === 0 ? 0o644 : 0o755).toString(8).padStart(7, '0')}\0`, 100);
+    // The owner's execute bit decides the archived mode.
+    const executable = Math.floor(info.mode / 0o100) % 2 === 1;
+    header.write(`${(executable ? 0o755 : 0o644).toString(8).padStart(7, '0')}\0`, 100);
     header.write('0000000\0', 108);
     header.write('0000000\0', 116);
     header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124);
@@ -1037,11 +1038,11 @@ const deterministicTarGz = async (
         .padStart(6, '0')}\0 `,
       148,
     );
-    blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
+    blocks.push(header, new Uint8Array(data), Buffer.alloc((512 - (data.length % 512)) % 512));
     unpackedByteLength += data.length;
   }
   return {
-    bytes: gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]), { level: 9 }),
+    bytes: new Uint8Array(gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]), { level: 9 })),
     unpackedByteLength,
     fileCount: files.length,
   };
@@ -1146,14 +1147,12 @@ const prepareLayer = async (): Promise<void> => {
   const tree = resolve(layerRoot, `.tree.${String(process.pid)}.tmp`);
   await rm(tree, { recursive: true, force: true });
   await mkdir(tree, { recursive: true });
-  const buildEnvironment: NodeJS.ProcessEnv = {
-    ...process.env,
-    DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-    DOTNET_MULTILEVEL_LOOKUP: '0',
-    DOTNET_NOLOGO: '1',
-    DOTNET_ROOT: dotnetRoot,
-    NUGET_PACKAGES: nugetRoot,
-  };
+  const buildEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  buildEnvironment['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1';
+  buildEnvironment['DOTNET_MULTILEVEL_LOOKUP'] = '0';
+  buildEnvironment['DOTNET_NOLOGO'] = '1';
+  buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
+  buildEnvironment['NUGET_PACKAGES'] = nugetRoot;
   // The muxer from Microsoft's runtime archive runs the worker, so no apphost; ReadyToRun per S2 (D22).
   const layerProperties = [
     `-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`,
@@ -1204,10 +1203,9 @@ const prepareLayer = async (): Promise<void> => {
   }
   // The engine dylibs prepareNative built and ad-hoc signed; the cached build is reused.
   const nativeRoot = await prepareNative();
+  const nativeNames = await readdir(nativeRoot);
   await Promise.all([
-    ...(await readdir(nativeRoot)).map(async (name) =>
-      cp(resolve(nativeRoot, name), resolve(tree, name), { recursive: true }),
-    ),
+    ...nativeNames.map(async (name) => cp(resolve(nativeRoot, name), resolve(tree, name), { recursive: true })),
     ...layerCompanionFiles.map(async (name) => cp(resolve(selfContained, name), resolve(tree, name))),
   ]);
 

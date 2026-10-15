@@ -20,6 +20,6 @@ export default defineConfig({
     ssr: 'app/billing-command.ts',
     outDir: 'dist',
     emptyOutDir: false,
-    rollupOptions: { output: { entryFileNames: 'billing-command.js' } },
+    rolldownOptions: { output: { entryFileNames: 'billing-command.js' } },
   },
 });

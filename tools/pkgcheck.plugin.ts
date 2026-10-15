@@ -7,13 +7,7 @@
 import { basename, dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
-import type {
-  CreateNodesContext,
-  CreateNodesContextV2,
-  CreateNodesResult,
-  CreateNodesV2,
-  ProjectConfiguration,
-} from '@nx/devkit';
+import type { CreateNodesContext, CreateNodesResult, CreateNodes, ProjectConfiguration } from '@nx/devkit';
 
 type InputDefinition =
   | { input: string; projects: string | string[] }
@@ -37,7 +31,7 @@ type PackageJson = {
 
 function getNamedInputs(
   directory: string,
-  context: CreateNodesContext | CreateNodesContextV2,
+  context: CreateNodesContext,
 ): Record<string, Array<string | InputDefinition>> {
   const projectJsonPath = join(directory, 'project.json');
   const projectJson: ProjectConfiguration | undefined = existsSync(projectJsonPath)
@@ -104,7 +98,7 @@ function stagedProjects(manifest: PackageJson, packages: Map<string, BuiltPackag
 
 const createPkgcheckTarget = (
   configFilePath: string,
-  context: Parameters<CreateNodesV2[1]>[2],
+  context: Parameters<CreateNodes[1]>[2],
   packages: Map<string, BuiltPackage>,
 ): CreateNodesResult | undefined => {
   const projectRoot = dirname(configFilePath);
@@ -183,7 +177,7 @@ const createSizeTarget = (configFilePath: string): CreateNodesResult | undefined
       };
 };
 
-export const createNodesV2: CreateNodesV2 = [
+export const createNodesV2: CreateNodes = [
   '**/{tsdown.config.ts,.size-limit.json}',
   // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options, context) => {

@@ -5,7 +5,7 @@
  */
 import { dirname, join } from 'node:path';
 import { readJsonFile } from '@nx/devkit';
-import type { CreateNodesResult, CreateNodesV2 } from '@nx/devkit';
+import type { CreateNodesResult, CreateNodes } from '@nx/devkit';
 
 /** One `from` → `to` copy, with `to` normalised out of its object form. */
 export type CopyFilesEntry = { readonly from: string; readonly to: string };
@@ -59,7 +59,7 @@ const createCopyTarget = (configFilePath: string): CreateNodesResult | undefined
   };
 };
 
-export const createNodesV2: CreateNodesV2 = [
+export const createNodesV2: CreateNodes = [
   '**/copy-files-from-to.cjson',
   // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options) => {

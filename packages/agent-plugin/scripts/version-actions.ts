@@ -9,15 +9,32 @@
  * @module
  */
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { updateJson } from '@nx/devkit';
 import type { Tree } from '@nx/devkit';
-import JsVersionActions from '@nx/js/src/release/version-actions.js';
+import type JsVersionActionsType from '@nx/js/src/release/version-actions';
+
+/**
+ * Recognize Nx's CommonJS release-actions export under Node's native TypeScript loader.
+ *
+ * @param value - The loaded CommonJS module.
+ * @returns Whether the module exposes the release-actions constructor.
+ */
+function isVersionActionsModule(value: unknown): value is { default: typeof JsVersionActionsType } {
+  return typeof value === 'object' && value !== null && 'default' in value && typeof value.default === 'function';
+}
+
+const versionActionsModule: unknown = createRequire(import.meta.url)('@nx/js/src/release/version-actions');
+if (!isVersionActionsModule(versionActionsModule)) {
+  throw new TypeError('Nx release version actions must expose a default constructor');
+}
+const jsVersionActions = versionActionsModule.default;
 
 /** The plugin manifests whose `version` follows `package.json`, relative to the project root. */
 export const pluginManifests = ['.codex-plugin/plugin.json', '.claude-plugin/plugin.json'] as const;
 
 /** The JavaScript version actions, plus the plugin manifests. */
-export default class AgentPluginVersionActions extends JsVersionActions {
+export default class AgentPluginVersionActions extends jsVersionActions {
   /**
    * Write the new version into `package.json`, as the JavaScript actions do, then into both plugin manifests.
    *

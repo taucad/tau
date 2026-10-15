@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { addProjectConfiguration } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing.js';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { AnyMachineSnapshot, AnyStateMachine } from 'xstate';

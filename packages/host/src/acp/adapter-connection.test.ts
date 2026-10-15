@@ -1,6 +1,8 @@
 import { ChildProcess } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { childEventSchemas } from '#acp/acp-machine-schemas.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
@@ -28,7 +30,10 @@ describe('ACP adapter connection', () => {
     const events: AcpSessionEvent[] = [];
     const parent = createActor(
       setup({
-        types: { events: {} as AcpSessionEvent },
+        schemas: {
+          events: childEventSchemas,
+          children: types<{ adapter: ActorRefFrom<ReturnType<typeof createAdapterConnection>> }>(),
+        },
         actors: { adapter: createAdapterConnection() },
       }).createMachine({
         invoke: {
@@ -46,7 +51,12 @@ describe('ACP adapter connection', () => {
             cwd: '/unused',
           },
         },
-        on: { '*': { actions: ({ event }) => events.push(event) } },
+        on: {
+          '*': ({ event }) => {
+            events.push(event);
+            return {};
+          },
+        },
       }),
     );
     parent.start();

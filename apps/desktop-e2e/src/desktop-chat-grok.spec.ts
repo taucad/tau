@@ -169,6 +169,7 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
           toolResult(readEvents(), { runId: cadRun, toolName: 'screenshot', targetFile: 'main.py' }),
         ).images,
       ).toHaveLength(6);
+      expect(await page.getByText('Image capture failed', { exact: true }).count()).toBe(0);
       expect(readEvents()).toContain('cad-build123d');
       await session.capture('grok-composer-cad');
     } catch (error) {

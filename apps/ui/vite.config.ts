@@ -441,6 +441,14 @@ export default defineConfig(({ command, mode }) => {
        */
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
       ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
+      /*
+       * This bundle is served by the web host, never by a `tau serve` daemon
+       * (`serve/vite.config.ts`), so its origin has no agent descriptor. The
+       * probe otherwise reached the SSR catch-all, which answered every workspace
+       * load with a full HTML page.
+       */
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest ? {} : { 'import.meta.env.TAU_ORIGIN_AGENT_HOST': '"absent"' }),
     },
     plugins: [
       mtAssets.plugin,
@@ -484,6 +492,8 @@ export default defineConfig(({ command, mode }) => {
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
     },
+    // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
+    ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),
     resolve: {
       alias: [
         ...uiResolveAlias,
@@ -492,8 +502,6 @@ export default defineConfig(({ command, mode }) => {
     },
     ssr: uiSsrOptions,
 
-    // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
-    ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),
     server: {
       port: 3000,
       // Permit LAN previews (e.g. `nx dev ui --host`); production deploys terminate TLS upstream.

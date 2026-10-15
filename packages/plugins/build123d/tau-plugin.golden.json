@@ -4,5 +4,17 @@
     "treeIntegrity": "sha256-z5cIunIARR/ARPJ5su0jygOc4/Oi9E0SktAxFJa6Hdc=",
     "fileCount": 22928,
     "byteLength": 857418957
+  },
+  "linux-arm64-glibc": {
+    "closureIntegrity": "sha256-w9seuV8OEPAZjat5pP6EYnMi8jR/vE9O7fmv89oym4I=",
+    "treeIntegrity": "sha256-XasBGvvPtyL/7Ow7pfZL50rYTjXqJ31bXdpCo4smgZw=",
+    "fileCount": 25798,
+    "byteLength": 1016630511
+  },
+  "linux-x64-glibc": {
+    "closureIntegrity": "sha256-U3zS8QfnScuwuCQhGP0vqHWOhQi0SSTABozCRippKqE=",
+    "treeIntegrity": "sha256-LzTK+q2lzPkXhVWfWsHIjrCrXxzTE5YHMwDQUSTMqQw=",
+    "fileCount": 25802,
+    "byteLength": 1172566833
   }
 }

@@ -40,3 +40,17 @@ describe('Grok native questions', () => {
     }
   });
 });
+
+it('should preserve every multi-select choice in Grok native response arrays', () => {
+  const ask = askOfGrok(
+    grokQuestionSchema.parse({
+      ...request,
+      questions: [{ question: 'Materials?', multiSelect: true, options: [{ label: 'PLA' }, { label: 'PETG' }] }],
+    }),
+    { askId: 'ask_multi', now },
+  );
+  expect(grokQuestionResponseOf(ask, { questions: { [questionId]: { value: ['PLA', 'PETG'], at } } })).toEqual({
+    outcome: 'accepted',
+    answers: { 'Materials?': ['PLA', 'PETG'] },
+  });
+});

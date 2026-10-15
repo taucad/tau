@@ -2594,12 +2594,12 @@ describe('authentication, initialize and prompt content', () => {
     const answerWhenAsked = async (): Promise<void> => {
       for (let attempt = 0; attempt < 200; attempt += 1) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
-        const text = await readFile(join(chatDirectory, 'questions.yaml'), 'utf8').catch(() => undefined);
+        const text = await readFile(join(chatDirectory, 'questions.v2.yaml'), 'utf8').catch(() => undefined);
         const [recorded] = parseQuestionsFile(text).asks;
         if (recorded !== undefined) {
           // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
           await writeFile(
-            join(chatDirectory, 'answers.yaml'),
+            join(chatDirectory, 'answers.v2.yaml'),
             serializeAnswersFile({
               version: 1,
               answers: {
@@ -2621,7 +2621,7 @@ describe('authentication, initialize and prompt content', () => {
       answerWhenAsked(),
     ]);
 
-    const [ask] = parseQuestionsFile(await readFile(join(chatDirectory, 'questions.yaml'), 'utf8')).asks;
+    const [ask] = parseQuestionsFile(await readFile(join(chatDirectory, 'questions.v2.yaml'), 'utf8')).asks;
     expect(ask).toMatchObject({
       callId: 'ask-1',
       source: 'acp',

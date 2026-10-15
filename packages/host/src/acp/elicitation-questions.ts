@@ -12,7 +12,13 @@
  * and can be declined.
  */
 import type { CreateElicitationRequest, CreateElicitationResponse } from '@agentclientprotocol/sdk';
-import { askQuestionsDefaultWaitSeconds, resolveAnswers } from '@taucad/chat';
+import {
+  askQuestionsDefaultWaitSeconds,
+  resolveAnswers,
+  isQuestionAnswerValid,
+  questionFieldSchema,
+  askSchema,
+} from '@taucad/chat';
 import type { Ask, AskAnswers, AskedQuestion } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 
@@ -109,9 +115,27 @@ export const askOfElicitation = (
     return undefined;
   }
   const properties = isRecord(request.requestedSchema['properties']) ? request.requestedSchema['properties'] : {};
+  if (request.requestedSchema['type'] !== 'object') {
+    return undefined;
+  }
+  const { required } = request.requestedSchema;
+  if (required !== undefined && (!Array.isArray(required) || required.some((key) => typeof key !== 'string'))) {
+    return undefined;
+  }
   const entries = Object.entries(properties).filter((entry): entry is [string, Record<string, unknown>] =>
     isRecord(entry[1]),
   );
+  if (
+    entries.some(([, property]) => {
+      const codex = metaOf(property)?.['codex'];
+      return property['writeOnly'] === true || (isRecord(codex) && codex['isSecret'] === true);
+    })
+  ) {
+    return undefined;
+  }
+  if (Array.isArray(required) && required.some((key) => typeof key !== 'string' || !(key in properties))) {
+    return undefined;
+  }
   const meta = isRecord(request._meta) ? request._meta : undefined;
   const codexMeta = isRecord(meta?.['codex']) ? meta['codex'] : undefined;
   const companions = new Map<string, string>();
@@ -136,6 +160,30 @@ export const askOfElicitation = (
   for (const [key, property] of entries) {
     if (companionKeys.has(key)) {
       continue;
+    }
+    const { type } = property;
+    if (type !== 'string' && type !== 'boolean' && type !== 'integer' && type !== 'number' && type !== 'array') {
+      return undefined;
+    }
+    if (
+      [
+        'pattern',
+        'allOf',
+        'anyOf',
+        'not',
+        'if',
+        'then',
+        'else',
+        'exclusiveMinimum',
+        'exclusiveMaximum',
+        'multipleOf',
+      ].some((key) => property[key] !== undefined)
+    ) {
+      return undefined;
+    }
+    const codexField = metaOf(property)?.['codex'];
+    if (isRecord(codexField) && codexField['isSecret'] === true) {
+      return undefined;
     }
     const title = stringOf(property['title']);
     const description = stringOf(property['description']);
@@ -169,6 +217,26 @@ export const askOfElicitation = (
         kind = options.length > 0 ? 'choice' : 'text';
       }
     }
+    if (kind === 'list' && (items?.['type'] !== 'string' || options.length === 0)) {
+      return undefined;
+    }
+    const field = questionFieldSchema.safeParse({
+      ...property,
+      required: isQuestionTool || (Array.isArray(required) && required.includes(key)),
+    });
+    if (!field.success) {
+      return undefined;
+    }
+    if (options.length > 12 || new Set(options.map((option) => option.value)).size !== options.length) {
+      return undefined;
+    }
+    const suppliedChoices = property['oneOf'] ?? property['enum'] ?? items?.['anyOf'] ?? items?.['enum'];
+    if (
+      suppliedChoices !== undefined &&
+      (!Array.isArray(suppliedChoices) || suppliedChoices.length !== options.length || options.length === 0)
+    ) {
+      return undefined;
+    }
     const textKey = companions.get(key);
     const recommendedIndex = options.findIndex((option) => recommendedSuffix.test(option.title));
     const allowsText = textKey !== undefined || kind === 'text' || kind === 'number';
@@ -177,12 +245,14 @@ export const askOfElicitation = (
       ...(header === undefined || header === question ? {} : { header: header.slice(0, 64) }),
       question: question.slice(0, 2000),
       options: options.map((option) => ({
+        value: option.value,
         label: option.title.replace(recommendedSuffix, '').slice(0, 120),
         ...(option.description === undefined ? {} : { description: option.description.slice(0, 400) }),
       })),
       ...(isQuestionTool && options.length > 0 ? { recommended: Math.max(0, recommendedIndex) } : {}),
       allowsText,
       ...(kind === 'list' ? { isList: true } : {}),
+      field: field.data,
     });
     fields.set(key, {
       key,
@@ -198,8 +268,11 @@ export const askOfElicitation = (
   const autoResolution = codexMeta?.['autoResolutionMs'];
   /** Milliseconds until the recommended options are adopted. */
   const wait = typeof autoResolution === 'number' ? autoResolution : askQuestionsDefaultWaitSeconds * 1000;
+  if (!Number.isFinite(wait) || wait < 0 || !Number.isFinite(context.now + wait)) {
+    return undefined;
+  }
   const toolCallId = 'toolCallId' in request ? stringOf(request.toolCallId) : undefined;
-  return {
+  const result: ElicitationAsk = {
     dialect,
     fields,
     ask: {
@@ -216,6 +289,7 @@ export const askOfElicitation = (
       questions,
     },
   };
+  return askSchema.safeParse(result.ask).success ? result : undefined;
 };
 
 /**
@@ -233,8 +307,27 @@ export const elicitationResponseOf = (
   if (answers?.declined) {
     return { action: 'decline' };
   }
+  if (
+    elicitation.ask.questions.some((question) => {
+      const answer = answers?.questions[question.id];
+      return answer === undefined
+        ? question.field?.required === true && question.recommended === undefined
+        : !isQuestionAnswerValid(question, answer);
+    })
+  ) {
+    return { action: 'cancel' };
+  }
   const resolved = resolveAnswers(elicitation.ask, answers);
-  if (resolved.length === 0) {
+  if (
+    resolved.length === 0 &&
+    !(
+      answers !== undefined &&
+      elicitation.ask.questions.every(
+        (question) =>
+          question.field?.required === false && isQuestionAnswerValid(question, answers.questions[question.id]),
+      )
+    )
+  ) {
     /* Nothing answered and nothing to default to: the person never decided. */
     return { action: elicitation.dialect === 'form' ? 'cancel' : 'decline' };
   }
@@ -247,7 +340,9 @@ export const elicitationResponseOf = (
     }
     const index = question.options.findIndex((option) => option.label === answer.answer);
     const value = answer.text === true ? undefined : field.values[index];
-    if (value !== undefined) {
+    if (answer.value !== undefined) {
+      content[field.key] = answer.value;
+    } else if (value !== undefined) {
       content[field.key] = field.kind === 'list' ? [String(value)] : value;
     } else if (field.kind === 'number') {
       const number = Number(answer.answer);

@@ -5,10 +5,13 @@ import {
   parseAnswersFile,
   parseQuestionsFile,
   questionsPath,
+  legacyQuestionsPath,
+  legacyAnswersPath,
   serializeAnswersFile,
+  questionValueText,
+  isQuestionAnswerValid,
 } from '@taucad/chat';
-import type { AnswersFile, Ask, AskAnswers } from '@taucad/chat';
-import type { QuestionReply } from '#components/chat/question-card.js';
+import type { AnswersFile, Ask, AskAnswers, QuestionReply } from '@taucad/chat';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 
@@ -19,6 +22,7 @@ export type ChatQuestions = {
   readonly answers: Readonly<Record<string, AskAnswers>>;
   /** Epoch milliseconds, ticking once a second while an ask counts down. */
   readonly now: number;
+  readonly recordFailure?: string | undefined;
   readonly answer: (askId: string, questionId: string, reply: QuestionReply) => Promise<void>;
   readonly hold: (askId: string) => Promise<void>;
   readonly decline: (askId: string) => Promise<void>;
@@ -27,11 +31,23 @@ export type ChatQuestions = {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-/* ponytail: one in-process queue per answers file; this tab is its only writer. */
+/* Serialize local submissions before the shared Web Lock coordinates windows. */
 const answerWrites = new Map<string, Promise<unknown>>();
 
 const textOf = (content: ReturnType<typeof useFileContent>): string | undefined =>
   content.kind === 'text' ? decoder.decode(content.content) : undefined;
+
+/** Resolve a known ask whose host can consume this version, or a settled historical ask. */
+const editableAsk = (asks: readonly Ask[], askId: string): Ask => {
+  const ask = asks.find((candidate) => candidate.id === askId);
+  if (ask === undefined) {
+    throw new Error('This question is no longer available.');
+  }
+  if (ask.answerVersion !== 2 && ask.resolution === undefined) {
+    throw new Error('This question needs an updated host. Resume the chat to request it again.');
+  }
+  return ask;
+};
 
 /**
  * The message a late answer travels as, once the agent already moved on.
@@ -43,7 +59,14 @@ const textOf = (content: ReturnType<typeof useFileContent>): string | undefined 
  */
 const lateAnswerMessage = (ask: Ask, questionId: string, reply: QuestionReply): string => {
   const question = ask.questions.find((candidate) => candidate.id === questionId);
-  const answer = 'choice' in reply ? reply.choice : reply.text;
+  const answer =
+    'choice' in reply
+      ? reply.choice
+      : 'text' in reply
+        ? reply.text
+        : 'value' in reply
+          ? questionValueText(reply.value)
+          : 'Skipped';
   const assumed = question?.recommended === undefined ? undefined : question.options[question.recommended]?.label;
   return [
     `Answer to your earlier question "${question?.question ?? questionId}": ${answer}.`,
@@ -56,8 +79,8 @@ const lateAnswerMessage = (ask: Ask, questionId: string, reply: QuestionReply): 
 /**
  * Read the chat's question record and answer it.
  *
- * The host writes `questions.yaml`; this client is the only writer of
- * `answers.yaml` (agent questions blueprint D3). An answer to an ask the agent
+ * The host writes `questions.v2.yaml`; UI clients coordinate writes to
+ * `answers.v2.yaml` (agent questions blueprint D3). An answer to an ask the agent
  * already moved past is also delivered as a message (D5).
  *
  * @param chatId - The chat.
@@ -66,11 +89,33 @@ const lateAnswerMessage = (ask: Ask, questionId: string, reply: QuestionReply): 
  * @public
  */
 export function useChatQuestions(chatId: string, deliver: (text: string) => Promise<void>): ChatQuestions {
-  const { readFile, writeFile } = useFileManager();
+  const { readFile, writeFile, exists } = useFileManager();
   const questionsContent = useFileContent(questionsPath(chatId));
   const answersContent = useFileContent(answersPath(chatId));
-  const asks = useMemo(() => parseQuestionsFile(textOf(questionsContent)).asks, [questionsContent]);
-  const answers = useMemo(() => parseAnswersFile(textOf(answersContent)).answers, [answersContent]);
+  const legacyQuestionsContent = useFileContent(legacyQuestionsPath(chatId));
+  const legacyAnswersContent = useFileContent(legacyAnswersPath(chatId));
+  const records = useMemo<Pick<ChatQuestions, 'asks' | 'answers' | 'recordFailure'>>(() => {
+    try {
+      const legacyAsks = parseQuestionsFile(textOf(legacyQuestionsContent)).asks;
+      const currentAsks = parseQuestionsFile(textOf(questionsContent)).asks;
+      const mergedAsks = new Map([...legacyAsks, ...currentAsks].map((ask) => [ask.id, ask]));
+      return {
+        asks: [...mergedAsks.values()].sort((left, right) => left.askedAt.localeCompare(right.askedAt)),
+        answers: {
+          ...parseAnswersFile(textOf(legacyAnswersContent)).answers,
+          ...parseAnswersFile(textOf(answersContent)).answers,
+        },
+        recordFailure: undefined,
+      };
+    } catch {
+      return {
+        asks: [],
+        answers: {},
+        recordFailure: 'Questions could not be read. Update Tau or restore the question record.',
+      };
+    }
+  }, [questionsContent, legacyQuestionsContent, answersContent, legacyAnswersContent]);
+  const { asks, answers, recordFailure } = records;
   const [now, setNow] = useState(() => Date.now());
   const isCounting = asks.some((ask) => {
     const status = askStatus(ask, answers[ask.id], now);
@@ -99,24 +144,35 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
         } catch {
           /* The previous write reported its own failure. */
         }
-        let text: string | undefined;
-        try {
-          text = decoder.decode(await readFile(path));
-        } catch {
-          text = undefined;
+        const write = async (): Promise<void> => {
+          const source = (await exists(path)) ? path : legacyAnswersPath(chatId);
+          const text = (await exists(source)) ? decoder.decode(await readFile(source)) : undefined;
+          await writeFile(path, encoder.encode(serializeAnswersFile(change(parseAnswersFile(text)))), {
+            source: 'user',
+          });
+        };
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- Older webviews may lack Web Locks despite the DOM declaration.
+        if (navigator.locks === undefined) {
+          throw new Error(
+            'This browser cannot safely coordinate question answers across windows. Use a current browser.',
+          );
         }
-        await writeFile(path, encoder.encode(serializeAnswersFile(change(parseAnswersFile(text)))), { source: 'user' });
+        await navigator.locks.request(`tau-question-answers:${path}`, write);
       })();
       answerWrites.set(path, queued);
       await queued;
     },
-    [chatId, readFile, writeFile],
+    [chatId, readFile, writeFile, exists],
   );
 
   const answer = useCallback(
     async (askId: string, questionId: string, reply: QuestionReply): Promise<void> => {
-      const ask = asks.find((candidate) => candidate.id === askId);
+      const ask = editableAsk(asks, askId);
       const at = new Date().toISOString();
+      const question = ask.questions.find((candidate) => candidate.id === questionId);
+      if (question === undefined || !isQuestionAnswerValid(question, { ...reply, at })) {
+        throw new Error('The answer does not match the current question.');
+      }
       await mutate((file) => {
         const current = file.answers[askId] ?? { questions: {} };
         return {
@@ -132,9 +188,6 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
           },
         };
       });
-      if (ask === undefined) {
-        return;
-      }
       const status = askStatus(ask, answers[askId], Date.now());
       if (status.kind === 'defaulted' || status.kind === 'cancelled') {
         await deliver(lateAnswerMessage(ask, questionId, reply));
@@ -145,6 +198,7 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
 
   const hold = useCallback(
     async (askId: string): Promise<void> => {
+      editableAsk(asks, askId);
       if (answers[askId]?.heldAt !== undefined) {
         return;
       }
@@ -154,18 +208,19 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
         answers: { ...file.answers, [askId]: { ...(file.answers[askId] ?? { questions: {} }), heldAt: at } },
       }));
     },
-    [answers, mutate],
+    [answers, asks, mutate],
   );
 
   const decline = useCallback(
     async (askId: string): Promise<void> => {
+      editableAsk(asks, askId);
       await mutate((file) => ({
         ...file,
         answers: { ...file.answers, [askId]: { ...(file.answers[askId] ?? { questions: {} }), declined: true } },
       }));
     },
-    [mutate],
+    [asks, mutate],
   );
 
-  return { asks, answers, now, answer, hold, decline };
+  return { asks, answers, now, answer, hold, decline, recordFailure };
 }

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { CircleCheck, CircleSlash, Clock, MessageCircleQuestionMark, Undo2 } from 'lucide-react';
-import { askStatus, resolveAnswers } from '@taucad/chat';
-import type { Ask, AskAnswers, AskedQuestion, AskStatus } from '@taucad/chat';
+import { askStatus, resolveAnswers, questionValueText, isQuestionAnswerValid } from '@taucad/chat';
+import type { Ask, AskAnswers, AskedQuestion, AskStatus, QuestionReply } from '@taucad/chat';
+import { Loader } from '@taucad/ui/components/loader';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
+import { TypedQuestionField } from '#components/chat/typed-question-field.js';
 import { QuestionTextAnswer } from '#components/chat/question-text-answer.js';
-
-/** What the person gives one question. @public */
-export type QuestionReply = { readonly choice: string } | { readonly text: string };
 
 /** @public */
 export type QuestionCardProperties = {
@@ -43,10 +42,16 @@ const minutes = (milliseconds: number): string => {
 
 const answerOf = (question: AskedQuestion, answers: AskAnswers | undefined): string | undefined => {
   const given = answers?.questions[question.id];
-  if (given === undefined) {
+  if (given === undefined || !isQuestionAnswerValid(question, given)) {
     return undefined;
   }
-  return 'choice' in given ? given.choice : given.text;
+  return 'choice' in given
+    ? given.choice
+    : 'text' in given
+      ? given.text
+      : 'value' in given
+        ? questionValueText(given.value)
+        : 'Skipped';
 };
 
 function LetterKey({ letter }: { readonly letter: string }): React.JSX.Element {
@@ -65,6 +70,7 @@ type QuestionBodyProperties = {
   /** Take focus on arrival: the person just answered or reopened from inside the card. */
   readonly shouldTakeFocus: boolean;
   readonly onFocusTaken: () => void;
+  readonly pendingReply?: QuestionReply | undefined;
 };
 
 /** One question's lettered options and its own-words row. */
@@ -75,6 +81,7 @@ function QuestionOptions({
   onHold,
   shouldTakeFocus,
   onFocusTaken,
+  pendingReply,
 }: QuestionBodyProperties): React.JSX.Element {
   const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => {
@@ -99,6 +106,12 @@ function QuestionOptions({
               variant='ghost'
               type='button'
               disabled={!isOpen}
+              aria-busy={
+                !isOpen &&
+                pendingReply !== undefined &&
+                'choice' in pendingReply &&
+                pendingReply.choice === option.label
+              }
               data-letter={letter}
               aria-label={`${letter}, ${option.label}${isRecommended ? ', recommended' : ''}${option.description ? `. ${option.description}` : ''}`}
               className='group h-auto min-h-6 max-w-full items-start justify-start py-0 text-left whitespace-normal'
@@ -116,6 +129,12 @@ function QuestionOptions({
                   <span className='text-xs wrap-break-word text-muted-foreground'>{option.description}</span>
                 )}
               </span>
+              {!isOpen &&
+              pendingReply !== undefined &&
+              'choice' in pendingReply &&
+              pendingReply.choice === option.label ? (
+                <Loader className='motion-reduce:animate-none' />
+              ) : null}
             </Button>
           </li>
         );
@@ -133,6 +152,7 @@ function QuestionOptions({
                 draft={draft}
                 onDraftChange={setDraft}
                 isOpen={isOpen}
+                isPending={!isOpen && pendingReply !== undefined && 'text' in pendingReply}
                 shouldTakeFocus={isWriting || shouldTakeFocus}
                 placeholder={question.options.length === 0 ? 'Type your answer' : 'Type your own answer'}
                 onHold={onHold}
@@ -373,12 +393,14 @@ function QuestionFooter({
   isLate,
   hasDefault,
   isPending,
+  isDeclining,
   onCancel,
   onDecline,
 }: {
   readonly isLate: boolean;
   readonly hasDefault: boolean;
   readonly isPending: boolean;
+  readonly isDeclining: boolean;
   readonly onCancel: () => void;
   readonly onDecline: () => void;
 }): React.JSX.Element | undefined {
@@ -400,9 +422,11 @@ function QuestionFooter({
         size='xs'
         disabled={isPending}
         className='text-muted-foreground'
+        aria-busy={isPending && isDeclining}
         onClick={onDecline}
       >
         Decline
+        {isPending && isDeclining ? <Loader className='motion-reduce:animate-none' /> : null}
       </Button>
     </div>
   );
@@ -439,7 +463,12 @@ export function QuestionCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const isLate = status.kind === 'defaulted' || status.kind === 'cancelled';
   const isOpen = status.kind === 'open' || (isReopened && isLate);
-  const current = ask.questions.find((question) => answerOf(question, answers) === undefined);
+  const [pendingReply, setPendingReply] = useState<QuestionReply>();
+  const [isDeclining, setIsDeclining] = useState(false);
+  const [reviewQuestion, setReviewQuestion] = useState<string>();
+  const current =
+    ask.questions.find((question) => question.id === reviewQuestion) ??
+    ask.questions.find((question) => answerOf(question, answers) === undefined);
   const position = current === undefined ? ask.questions.length : ask.questions.indexOf(current) + 1;
   const isMulti = ask.questions.length > 1;
   const kicker = [current?.header, isMulti ? `${String(position)} of ${String(ask.questions.length)}` : undefined]
@@ -502,28 +531,67 @@ export function QuestionCard({
           {ask.message !== undefined && !isMulti ? (
             <p className='text-xs/5 wrap-break-word text-muted-foreground'>{ask.message}</p>
           ) : null}
-          <QuestionOptions
-            key={`${ask.id}:${current.id}`}
-            question={current}
-            isOpen={!isPending}
-            shouldTakeFocus={focusFrom !== undefined && focusFrom !== current.id && focusFrom !== 'reopened'}
-            onFocusTaken={clearFocusFrom}
-            onHold={onHold}
-            onAnswer={(reply) => {
-              if (cardRef.current?.contains(document.activeElement)) {
-                setFocusFrom(current.id);
-              }
-              onAnswer(current.id, reply);
-            }}
-          />
+          {current.field === undefined ? (
+            <QuestionOptions
+              key={`${ask.id}:${current.id}`}
+              question={current}
+              isOpen={!isPending}
+              shouldTakeFocus={focusFrom !== undefined && focusFrom !== current.id && focusFrom !== 'reopened'}
+              onFocusTaken={clearFocusFrom}
+              onHold={onHold}
+              pendingReply={isPending ? pendingReply : undefined}
+              onAnswer={(reply) => {
+                setIsDeclining(false);
+                if (cardRef.current?.contains(document.activeElement)) {
+                  setFocusFrom(current.id);
+                }
+                setReviewQuestion(undefined);
+                setPendingReply(reply);
+                onAnswer(current.id, reply);
+              }}
+            />
+          ) : (
+            <TypedQuestionField
+              key={`${ask.id}:${current.id}`}
+              question={current}
+              isOpen={!isPending}
+              isPending={isPending && !isDeclining}
+              onHold={onHold}
+              shouldTakeFocus={focusFrom !== undefined && focusFrom !== current.id && focusFrom !== 'reopened'}
+              onFocusTaken={clearFocusFrom}
+              onAnswer={(reply) => {
+                setIsDeclining(false);
+                setReviewQuestion(undefined);
+                if (cardRef.current?.contains(document.activeElement)) {
+                  setFocusFrom(current.id);
+                }
+                onAnswer(current.id, reply);
+              }}
+            />
+          )}
+          {position > 1 ? (
+            <Button
+              size='xs'
+              variant='ghost'
+              disabled={isPending}
+              onClick={() => {
+                setReviewQuestion(ask.questions[position - 2]?.id);
+              }}
+            >
+              Back
+            </Button>
+          ) : null}
         </>
       )}
       <QuestionFooter
         isLate={isLate}
         isPending={isPending}
+        isDeclining={isDeclining}
         hasDefault={ask.questions.some((question) => question.recommended !== undefined)}
         onDecline={() => {
           if (!isPending) {
+            setIsDeclining(true);
+            setPendingReply(undefined);
             onDecline();
           }
         }}

@@ -46,10 +46,12 @@ describe('compact permission requests', () => {
     expect(onReview).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Deny', busy: true })).toBeDisabled();
   });
-  it('keeps exact commands visible with raw arguments only behind Debug', async () => {
+  it('keeps exact commands inspectable with raw arguments only behind Debug', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ChatPermissionRequest approval={approval} name='Codex' />);
     expect(screen.getByText('Run the checks')).toBeInTheDocument();
+    expect(screen.queryByText('pnpm test')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'View request' }));
     expect(screen.getByText('pnpm test')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Request details' })).toBeNull();
     expect(screen.queryByText(/private detail/u)).toBeNull();
@@ -87,7 +89,8 @@ describe('compact permission requests', () => {
       />,
     );
     expect(screen.queryByRole('status')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'View request' })).toBeVisible();
   });
   it.each([
     { label: 'Approve', approved: true },
@@ -148,7 +151,8 @@ describe('compact permission requests', () => {
       });
       expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByRole('status')).toBeNull();
-      expect(screen.queryByRole('button')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'View request' })).toBeVisible();
     },
   );
   it('should keep machine review separate and disable it while Deny is pending', async () => {
@@ -367,7 +371,8 @@ describe('compact permission requests', () => {
     (outcome) => {
       render(<ChatPermissionRequest approval={approval} name='Codex' outcome={outcome} />);
       expect(screen.getByText('Run the checks')).toBeInTheDocument();
-      expect(screen.queryByRole('button')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'View request' })).toBeVisible();
     },
   );
   it('preserves generic machine consequences, unknown requests and old payload-free summaries', () => {
@@ -378,5 +383,35 @@ describe('compact permission requests', () => {
     expect(permissionContent({ ...approval, request: undefined, prompt: 'Allow call_unknown?' }).consequence).toContain(
       'describe this action',
     );
+  });
+});
+
+describe('request inspection disclosure', () => {
+  it('keeps exact long requests accessible without Debug and preserves inspection through settlement', async () => {
+    const user = userEvent.setup();
+    const command = `python3 << 'PY'\n${'print("inspection")\n'.repeat(60)}PY`;
+    const request = { ...approval, request: { title: `Execute ${command}`, input: { command, cwd: '/workspace' } } };
+    const { rerender } = render(
+      <ChatPermissionRequest approval={request} name='Grok' onRespond={async () => undefined} />,
+    );
+    expect(screen.queryByRole('region', { name: 'Request content' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'View request' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'View request' }));
+    expect(screen.getByRole('region', { name: 'Request content' })).toHaveTextContent('print("inspection")');
+    expect(screen.getByRole('region', { name: 'Request content' }).textContent).toContain(command);
+    rerender(<ChatPermissionRequest approval={request} name='Grok' outcome='approved' />);
+    expect(screen.getByRole('button', { name: 'Hide request' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('region', { name: 'Request content' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Hide request' }));
+    expect(screen.queryByRole('region', { name: 'Request content' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Request details' })).toBeNull();
+  });
+  it('does not add an empty disclosure to a short request', () => {
+    render(
+      <ChatPermissionRequest approval={{ ...approval, request: undefined, prompt: 'Read metadata' }} name='Grok' />,
+    );
+    expect(screen.getByText('Read metadata')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'View request' })).toBeNull();
   });
 });

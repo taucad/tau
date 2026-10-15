@@ -5,6 +5,7 @@ import { page, userEvent } from 'vitest/browser';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { QuestionCard } from '#components/chat/question-card.js';
 import type { Ask } from '@taucad/chat';
+import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
 afterEach(() => {
@@ -181,3 +182,50 @@ it('should wrap provider readback status at 320px with enlarged text', async () 
   expect(screen.queryByRole('button')).toBeNull();
   await page.screenshot({ path: '../../../../../out/test-results/message-queue/provider-readback-enlarged.png' });
 });
+
+it.each(['', 'dark', 'dark black', 'dark high-contrast'])(
+  'bounds long permission requests and keeps decisions reachable in theme %s',
+  async (theme) => {
+    await page.viewport(1000, 900);
+    document.documentElement.className = theme;
+    const command = `python3 << 'PY'\n${'print("inspect model metadata")\n'.repeat(80)}PY`;
+    const approval: AgentHostApproval = {
+      interruptId: 'long-request',
+      kind: 'approval',
+      prompt: `Execute ${command}`,
+      options: [{ optionId: 'once', kind: 'allow_once', name: 'Allow once' }],
+    };
+    const { rerender } = render(
+      <div style={{ width: 320 }}>
+        <ChatPermissionRequest approval={approval} name='Grok' onRespond={async () => undefined} />
+      </div>,
+    );
+    const card = screen.getByRole('region', { name: 'Approval required' });
+    expect(card.getBoundingClientRect().height).toBeLessThan(180);
+    expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
+    expect(screen.queryByRole('region', { name: 'Request content' })).toBeNull();
+    const trigger = screen.getByRole('button', { name: 'View request' });
+    trigger.focus();
+    await userEvent.keyboard('{Enter}');
+    const content = screen.getByRole('region', { name: 'Request content' });
+    expect(content.textContent).toContain(command);
+    expect(content.getBoundingClientRect().height).toBeLessThanOrEqual(192);
+    expect(content.scrollHeight).toBeGreaterThan(content.clientHeight);
+    expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
+    expect(screen.getByRole('button', { name: 'Allow once' }).getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      content.getBoundingClientRect().bottom,
+    );
+    rerender(
+      <div style={{ width: 320 }}>
+        <ChatPermissionRequest approval={approval} name='Grok' outcome='approved' />
+      </div>,
+    );
+    expect(screen.getByRole('button', { name: 'Hide request' })).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide request' }));
+    expect(screen.queryByRole('region', { name: 'Request content' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Request allowed' }).getBoundingClientRect().height).toBeLessThan(180);
+    await page.screenshot({
+      path: `../../../../../out/test-results/message-queue/disclosure-${theme.replaceAll(' ', '-') || 'light'}.png`,
+    });
+  },
+);

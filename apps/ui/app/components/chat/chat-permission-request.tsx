@@ -1,9 +1,10 @@
 import { machinesDisabledMessage } from '@taucad/types/constants';
 import { useRef, useState } from 'react';
-import { Check, ChevronDown, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
 import { isRecord } from '@taucad/utils/schema';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
+import { cn } from '@taucad/ui/utils/cn';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { ProviderPermissionResolution } from '@taucad/agent-host/wire';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
@@ -52,6 +53,56 @@ export function permissionContent(approval: AgentHostApproval): {
           ? 'This changes the machine. Review the action before allowing it.'
           : 'Review the job and confirm the work area is clear in the Print pane.',
   };
+}
+
+/** Keep exact approval content inspectable without letting provider prose fill the transcript. */
+function PermissionContent({
+  title,
+  facts,
+}: Pick<ReturnType<typeof permissionContent>, 'title' | 'facts'>): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const hasDetails = facts.length > 0 || title.length > 160 || /[\r\n]/u.test(title);
+  const firstLine = title.split(/[\r\n]/u)[0] ?? title;
+  const preview = firstLine.slice(0, 160);
+  const visibleFacts = facts.filter(([label, value]) => label !== 'Command' || !title.includes(value));
+  return (
+    <div className='min-w-0'>
+      <p className={cn('text-sm/5 font-medium [overflow-wrap:anywhere]', hasDetails && 'line-clamp-2')}>
+        {hasDetails && preview !== title ? `${preview}…` : title}
+      </p>
+      {hasDetails ? (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button size='xs' variant='ghost' className='group/request mt-1 -ml-1 gap-1 text-muted-foreground'>
+              <ChevronRight aria-hidden className='size-3 shrink-0 group-data-[state=open]/request:rotate-90' />
+              {isOpen ? 'Hide request' : 'View request'}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div
+              role='region'
+              aria-label='Request content'
+              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the scrollable request must be keyboard reachable (WCAG 2.1.1)
+              tabIndex={0}
+              className='mt-2 max-h-48 overflow-auto overscroll-contain rounded-md border bg-muted/30 p-2 text-xs/5 outline-none focus-visible:focus-outline'
+            >
+              <p className='font-mono [overflow-wrap:anywhere] whitespace-pre-wrap'>{title}</p>
+              {visibleFacts.length > 0 ? (
+                <dl className='mt-2 space-y-2'>
+                  {visibleFacts.map(([label, value]) => (
+                    <div key={label} className='min-w-0'>
+                      <dt className='text-muted-foreground'>{label}</dt>
+                      <dd className='font-mono [overflow-wrap:anywhere] whitespace-pre-wrap'>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
+  );
 }
 
 /** Read-back describes observed provider settings, not proof of a newly durable write. */
@@ -171,7 +222,7 @@ function PermissionRequest({
           {status}
         </p>
       ) : null}
-      <p className='text-sm/5 font-medium [overflow-wrap:anywhere] wrap-break-word'>{content.title}</p>
+      <PermissionContent title={content.title} facts={content.facts} />
       {!isSettled && approval.providerPermission?.unsupportedReason === 'unconfigured-mcp-server' ? (
         <p className='text-xs/5 text-muted-foreground'>
           This temporary connection supports approval for this request or session.
@@ -182,16 +233,6 @@ function PermissionRequest({
           <TriangleAlert aria-hidden className='size-4 shrink-0 text-warning' />
           {machineDisabled ? machinesDisabledMessage : content.consequence}
         </p>
-      ) : null}
-      {!isSettled && content.facts.length > 0 ? (
-        <dl className='space-y-1 text-xs/5'>
-          {content.facts.map(([label, value]) => (
-            <div key={label} className='min-w-0'>
-              <dt className='text-muted-foreground'>{label}</dt>
-              <dd className='[overflow-wrap:anywhere] wrap-break-word whitespace-pre-wrap'>{value}</dd>
-            </div>
-          ))}
-        </dl>
       ) : null}
       {isDebug ? (
         <Collapsible>

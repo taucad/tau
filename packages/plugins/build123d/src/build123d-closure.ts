@@ -84,8 +84,6 @@ const shippedBytecodeSources = (files: SealClosureInput['files']): string[] =>
     return match === null ? [] : [`${match.groups!['directory']!}${match.groups!['module']!}.py`];
   });
 
-const posix = (path: string): string => (sep === '/' ? path : path.split(sep).join('/'));
-
 const tailOf = (text: string): string => text.trim().slice(-reportedOutput);
 
 /**
@@ -97,7 +95,7 @@ const assertOnlyBytecodeAdded = async (input: SealClosureInput): Promise<void> =
   const entries = await readdir(input.root, { recursive: true, withFileTypes: true });
   const unexpected = entries
     .filter((entry) => !entry.isDirectory())
-    .map((entry) => posix(relative(input.root, join(entry.parentPath, entry.name))))
+    .map((entry) => relative(input.root, join(entry.parentPath, entry.name)).split(sep).join('/'))
     .filter((path) => !known.has(path) && !bytecodePattern.test(path));
   if (unexpected.length > 0) {
     throw new PreparationError(
@@ -178,13 +176,11 @@ export const createBuild123dSeal =
       if (imported.exitCode === 0) {
         return undefined;
       }
-      const refusal = systemLibraryRefusal({ package: input.package, output: imported.stderr, attemptId: '' });
-      if (refusal !== undefined) {
-        return {
-          reason: refusal.reason,
-          message: refusal.message,
-          ...(refusal.detail ? { detail: refusal.detail } : {}),
-        };
+      const blocked = systemLibraryRefusal({ package: input.package, output: imported.stderr, attemptId: '' });
+      if (blocked !== undefined) {
+        // The host adds the attempt; the refusal carries the reason, the message and `detail.library`.
+        const { status: _status, attemptId: _attemptId, ...refusal } = blocked;
+        return refusal;
       }
       throw new PreparationError(
         'EXTRACTION_REFUSED',

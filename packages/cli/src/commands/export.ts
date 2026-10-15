@@ -8,6 +8,7 @@ import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 import { loadCliRuntime } from '#runtime-options.js';
+import { unpreparedNativeKernel } from '#native-kernels.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
@@ -251,6 +252,12 @@ export const exportCommand = defineCommand({
       runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
 
       if (!result.success) {
+        const unprepared = result.issues.some(({ code }) => code === 'KERNEL_CAPABILITY_MISSING')
+          ? await unpreparedNativeKernel(extname(inputPath).slice(1))
+          : undefined;
+        if (unprepared !== undefined) {
+          throw cliError(unprepared.code, unprepared.message, exitCodes.refused);
+        }
         const messages = result.issues
           .map((issue) =>
             issue.code === 'KERNEL_CAPABILITY_MISSING'

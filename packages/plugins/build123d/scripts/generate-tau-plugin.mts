@@ -45,15 +45,13 @@ import type { DependencyPayload, DependencyVariant, PluginDeployment } from '@ta
 import { sealBuild123dClosure } from '#build123d-closure.js';
 
 // oxlint-disable-next-line no-restricted-imports -- The generator's own sibling module; scripts have no `#` alias.
-import {
-  compactLock,
-  normalizeName,
-  parseRequirementsLock,
-  renderPylock,
-  variantFloor,
-} from './tau-plugin-generator.mjs';
-// oxlint-disable-next-line no-restricted-imports -- The same sibling module's types.
-import type { IndexFile, LockPin, SelectedWheel, TargetConfig } from './tau-plugin-generator.mjs';
+import * as generator from './tau-plugin-generator.mjs';
+
+const { compactLock, normalizeName, parseRequirementsLock, renderPylock, variantFloor } = generator;
+type IndexFile = generator.IndexFile;
+type LockPin = generator.LockPin;
+type SelectedWheel = generator.SelectedWheel;
+type TargetConfig = generator.TargetConfig;
 
 const packageName = '@taucad/build123d';
 const dependencyName = 'engine';

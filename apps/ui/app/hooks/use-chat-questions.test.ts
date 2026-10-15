@@ -174,7 +174,7 @@ it('should retain new legacy asks after a v2 record exists with v2 precedence on
       version: 1,
       answers: {
         [newLegacyAskId]: { questions: { name: { text: 'Legacy answer', at } } },
-        [legacyAskId]: { questions: { name: { text: 'Old answer', at } } },
+        [legacyAskId]: { questions: { name: { text: 'Old answer', at: '2026-10-03T00:03:00.000Z' } } },
       },
     }),
   );
@@ -202,3 +202,71 @@ it.each(['hold', 'decline'] as const)('should refuse %s for pending legacy and u
   await expect(result.current[action]('ask_unknown')).rejects.toThrow();
   expect(manager.writeFile).not.toHaveBeenCalled();
 });
+
+it('should reconcile a copied legacy ask with later settlement and answers without losing newer v2 edits', async () => {
+  const old = parseQuestionsFile(legacy).asks[0]!;
+  const later = '2026-10-03T00:01:00.000Z';
+  const newest = '2026-10-03T00:02:00.000Z';
+  files.set(questionsPath(chatId), JSON.stringify({ version: 2, asks: [{ ...old, resolution: undefined }] }));
+  files.set(
+    legacyQuestionsPath(chatId),
+    JSON.stringify({ version: 1, asks: [{ ...old, resolution: { at: later, outcome: 'answered' } }] }),
+  );
+  files.set(
+    legacyAnswersPath(chatId),
+    JSON.stringify({
+      version: 1,
+      answers: {
+        [legacyAskId]: {
+          questions: {
+            name: { text: 'Legacy latest', at: later },
+            color: { text: 'Blue', at: later },
+            size: { text: 'Old size', at },
+          },
+        },
+      },
+    }),
+  );
+  files.set(
+    answersPath(chatId),
+    JSON.stringify({
+      version: 2,
+      answers: {
+        [legacyAskId]: { questions: { name: { text: 'Copied old', at }, size: { text: 'New size', at: newest } } },
+      },
+    }),
+  );
+  const { result, rerender } = renderHook(() => useChatQuestions(chatId, async () => undefined));
+  expect(result.current.asks[0]?.resolution).toEqual({ at: later, outcome: 'answered' });
+  expect(result.current.answers[legacyAskId]?.questions).toMatchObject({
+    name: { text: 'Legacy latest' },
+    color: { text: 'Blue' },
+    size: { text: 'New size' },
+  });
+  await act(async () => {
+    await result.current.answer(legacyAskId, 'name', { text: 'Updated here' });
+  });
+  expect(parseAnswersFile(files.get(answersPath(chatId))).answers[legacyAskId]?.questions).toMatchObject({
+    name: { text: 'Updated here' },
+    color: { text: 'Blue' },
+    size: { text: 'New size' },
+  });
+  files.set(
+    questionsPath(chatId),
+    JSON.stringify({ version: 2, asks: [{ ...old, resolution: { at: newest, outcome: 'cancelled' } }] }),
+  );
+  rerender();
+  expect(result.current.asks[0]?.resolution).toEqual({ at: newest, outcome: 'cancelled' });
+});
+
+it.each([legacyAnswersPath(chatId), answersPath(chatId)])(
+  'should refuse unknown answer versions in %s before any write',
+  async (path) => {
+    files.set(legacyQuestionsPath(chatId), legacy);
+    files.set(answersPath(chatId), JSON.stringify({ version: 2, answers: {} }));
+    const { result } = renderHook(() => useChatQuestions(chatId, async () => undefined));
+    files.set(path, JSON.stringify({ version: 99, answers: {} }));
+    await expect(result.current.answer(legacyAskId, 'name', { text: 'Widget' })).rejects.toThrow('Unsupported');
+    expect(manager.writeFile).not.toHaveBeenCalled();
+  },
+);

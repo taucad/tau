@@ -37,6 +37,51 @@ const answerWrites = new Map<string, Promise<unknown>>();
 const textOf = (content: ReturnType<typeof useFileContent>): string | undefined =>
   content.kind === 'text' ? decoder.decode(content.content) : undefined;
 
+/* A migrated copy must not hide a later settlement written by its legacy owner. */
+const mergeQuestionHistory = (legacy: readonly Ask[], current: readonly Ask[]): Ask[] => {
+  const merged = new Map(legacy.map((ask) => [ask.id, ask]));
+  for (const ask of current) {
+    const previous = merged.get(ask.id);
+    if (
+      ask.answerVersion === 2 ||
+      previous === undefined ||
+      Date.parse(ask.resolution?.at ?? ask.askedAt) >= Date.parse(previous.resolution?.at ?? previous.askedAt)
+    ) {
+      merged.set(ask.id, ask);
+    }
+  }
+  return [...merged.values()].sort((left, right) => left.askedAt.localeCompare(right.askedAt));
+};
+
+/* Legacy answer copies reconcile per question; native v2 asks never adopt v1 answers. */
+const mergeAnswerHistory = (
+  legacy: AnswersFile['answers'],
+  current: AnswersFile['answers'],
+  asks: readonly Ask[],
+): AnswersFile['answers'] => {
+  const owners = new Map(asks.map((ask) => [ask.id, ask.answerVersion]));
+  const merged: AnswersFile['answers'] = { ...current };
+  for (const [askId, previous] of Object.entries(legacy)) {
+    if (owners.get(askId) === 2) {
+      continue;
+    }
+    const latest = current[askId];
+    if (latest === undefined) {
+      merged[askId] = previous;
+      continue;
+    }
+    const questions = { ...previous.questions, ...latest.questions };
+    for (const [questionId, answer] of Object.entries(previous.questions)) {
+      const currentAnswer = latest.questions[questionId];
+      if (currentAnswer === undefined || Date.parse(answer.at) > Date.parse(currentAnswer.at)) {
+        questions[questionId] = answer;
+      }
+    }
+    merged[askId] = { ...previous, ...latest, questions };
+  }
+  return merged;
+};
+
 /** Resolve a known ask whose host can consume this version, or a settled historical ask. */
 const editableAsk = (asks: readonly Ask[], askId: string): Ask => {
   const ask = asks.find((candidate) => candidate.id === askId);
@@ -98,13 +143,14 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
     try {
       const legacyAsks = parseQuestionsFile(textOf(legacyQuestionsContent)).asks;
       const currentAsks = parseQuestionsFile(textOf(questionsContent)).asks;
-      const mergedAsks = new Map([...legacyAsks, ...currentAsks].map((ask) => [ask.id, ask]));
+      const mergedAsks = mergeQuestionHistory(legacyAsks, currentAsks);
       return {
-        asks: [...mergedAsks.values()].sort((left, right) => left.askedAt.localeCompare(right.askedAt)),
-        answers: {
-          ...parseAnswersFile(textOf(legacyAnswersContent)).answers,
-          ...parseAnswersFile(textOf(answersContent)).answers,
-        },
+        asks: mergedAsks,
+        answers: mergeAnswerHistory(
+          parseAnswersFile(textOf(legacyAnswersContent)).answers,
+          parseAnswersFile(textOf(answersContent)).answers,
+          mergedAsks,
+        ),
         recordFailure: undefined,
       };
     } catch {
@@ -145,11 +191,13 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
           /* The previous write reported its own failure. */
         }
         const write = async (): Promise<void> => {
-          const source = (await exists(path)) ? path : legacyAnswersPath(chatId);
-          const text = (await exists(source)) ? decoder.decode(await readFile(source)) : undefined;
-          await writeFile(path, encoder.encode(serializeAnswersFile(change(parseAnswersFile(text)))), {
-            source: 'user',
-          });
+          const legacyPath = legacyAnswersPath(chatId);
+          const legacy = parseAnswersFile(
+            (await exists(legacyPath)) ? decoder.decode(await readFile(legacyPath)) : undefined,
+          );
+          const current = parseAnswersFile((await exists(path)) ? decoder.decode(await readFile(path)) : undefined);
+          const file: AnswersFile = { version: 2, answers: mergeAnswerHistory(legacy.answers, current.answers, asks) };
+          await writeFile(path, encoder.encode(serializeAnswersFile(change(file))), { source: 'user' });
         };
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- Older webviews may lack Web Locks despite the DOM declaration.
         if (navigator.locks === undefined) {
@@ -162,7 +210,7 @@ export function useChatQuestions(chatId: string, deliver: (text: string) => Prom
       answerWrites.set(path, queued);
       await queued;
     },
-    [chatId, readFile, writeFile, exists],
+    [chatId, readFile, writeFile, exists, asks],
   );
 
   const answer = useCallback(

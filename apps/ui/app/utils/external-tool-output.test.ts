@@ -15,8 +15,10 @@ describe('external tool output text', () => {
     expect(
       externalToolOutputText({ type: 'GrepSearch', stdout: [], stderr: [...new TextEncoder().encode('missing path')] }),
     ).toBe('missing path');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex wire output key.
     expect(externalToolOutputText({ formatted_output: 'Codex output' })).toBe('Codex output');
     expect(externalToolOutputText({ output: 'Claude output' })).toBe('Claude output');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex wire output key.
     expect(externalToolOutputText({ formatted_output: ' ', output: 'Fallback output' })).toBe('Fallback output');
   });
 });

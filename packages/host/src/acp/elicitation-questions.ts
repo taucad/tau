@@ -68,12 +68,54 @@ const companionOf = (property: Record<string, unknown>): string | undefined => {
 
 type Option = { readonly value: string; readonly title: string; readonly description?: string };
 
+/* Explicitly supported keywords prevent a provider constraint being silently lost. */
+const annotations = ['title', 'description', 'default', '_meta', '$comment'];
+const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).every((key) => keys.includes(key));
+
+const supportedProperty = (property: Record<string, unknown>): boolean => {
+  const common = ['type', ...annotations];
+  switch (property['type']) {
+    case 'string': {
+      return (
+        hasOnlyKeys(property, [...common, 'minLength', 'maxLength', 'format', 'enum', 'oneOf', 'enumNames']) &&
+        !(property['enum'] !== undefined && property['oneOf'] !== undefined)
+      );
+    }
+    case 'number':
+    case 'integer': {
+      return hasOnlyKeys(property, [...common, 'minimum', 'maximum']);
+    }
+    case 'boolean': {
+      return hasOnlyKeys(property, common);
+    }
+    case 'array': {
+      const { items } = property;
+      return (
+        hasOnlyKeys(property, [...common, 'items', 'minItems', 'maxItems']) &&
+        isRecord(items) &&
+        hasOnlyKeys(items, [...common, 'enum', 'anyOf', 'enumNames']) &&
+        (items['type'] === 'string' || (items['type'] === undefined && Array.isArray(items['anyOf']))) &&
+        !(items['enum'] !== undefined && items['anyOf'] !== undefined)
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+};
+
 const optionsOf = (choices: unknown): Option[] | undefined => {
   if (!Array.isArray(choices)) {
     return undefined;
   }
   const options = choices.flatMap((choice): Option[] => {
-    if (!isRecord(choice) || typeof choice['const'] !== 'string') {
+    if (
+      !isRecord(choice) ||
+      typeof choice['const'] !== 'string' ||
+      !hasOnlyKeys(choice, [...annotations, 'const', 'type']) ||
+      (choice['type'] !== undefined && choice['type'] !== 'string')
+    ) {
       return [];
     }
     const description = stringOf(choice['description']);
@@ -115,7 +157,11 @@ export const askOfElicitation = (
     return undefined;
   }
   const properties = isRecord(request.requestedSchema['properties']) ? request.requestedSchema['properties'] : {};
-  if (request.requestedSchema['type'] !== 'object') {
+  if (
+    request.requestedSchema['type'] !== 'object' ||
+    !hasOnlyKeys(request.requestedSchema, [...annotations, 'type', 'properties', 'required', '$schema', '$id']) ||
+    Object.values(properties).some((property) => !isRecord(property))
+  ) {
     return undefined;
   }
   const { required } = request.requestedSchema;
@@ -142,6 +188,18 @@ export const askOfElicitation = (
   for (const [key, property] of entries) {
     const questionId = companionOf(property);
     if (questionId !== undefined) {
+      const target = properties[questionId];
+      if (
+        questionId === key ||
+        !isRecord(target) ||
+        companionOf(target) !== undefined ||
+        companions.has(questionId) ||
+        property['type'] !== 'string' ||
+        !hasOnlyKeys(property, ['type', ...annotations]) ||
+        (Array.isArray(required) && required.includes(key))
+      ) {
+        return undefined;
+      }
       companions.set(questionId, key);
     }
   }
@@ -165,20 +223,7 @@ export const askOfElicitation = (
     if (type !== 'string' && type !== 'boolean' && type !== 'integer' && type !== 'number' && type !== 'array') {
       return undefined;
     }
-    if (
-      [
-        'pattern',
-        'allOf',
-        'anyOf',
-        'not',
-        'if',
-        'then',
-        'else',
-        'exclusiveMinimum',
-        'exclusiveMaximum',
-        'multipleOf',
-      ].some((key) => property[key] !== undefined)
-    ) {
+    if (!supportedProperty(property)) {
       return undefined;
     }
     const codexField = metaOf(property)?.['codex'];
@@ -217,7 +262,7 @@ export const askOfElicitation = (
         kind = options.length > 0 ? 'choice' : 'text';
       }
     }
-    if (kind === 'list' && (items?.['type'] !== 'string' || options.length === 0)) {
+    if (kind === 'list' && options.length === 0) {
       return undefined;
     }
     const field = questionFieldSchema.safeParse({

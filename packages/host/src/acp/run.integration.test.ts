@@ -2598,6 +2598,17 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it('should refuse a raw secret form before SDK normalization can create a plaintext question record', async () => {
+    const harness = await startHarness();
+    await runTurn(harness, { chatId: 'chat-secret-ask', runId: 'run-secret-ask', text: 'ask-secret-form noask' });
+    const events = await readLog(harness.workspaceRoot, 'chat-secret-ask');
+    expect(JSON.stringify(events)).toContain(String.raw`ask-secret-form: {\"action\":\"decline\"}`);
+    await expect(
+      readFile(join(harness.workspaceRoot, '.tau', 'chats', 'chat-secret-ask', 'questions.v2.yaml'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(lifecycleOf(events).at(-1)).toBe('completed');
+  });
+
   it('asks a form elicitation through the chat question record and answers with the person’s choice', async () => {
     const harness = await startHarness();
     const chatDirectory = join(harness.workspaceRoot, '.tau', 'chats', 'chat-ask');

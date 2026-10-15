@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- form field keys are the ACP adapters' wire names */
 import { describe, expect, it } from 'vitest';
-import type { CreateElicitationRequest } from '@agentclientprotocol/sdk';
+import { agent, client } from '@agentclientprotocol/sdk';
+import type { CreateElicitationRequest, CreateElicitationResponse } from '@agentclientprotocol/sdk';
 
 import { askOfElicitation, elicitationResponseOf } from '#acp/elicitation-questions.js';
 
@@ -329,5 +330,48 @@ it('should refuse a secret companion field even when its choice field is ordinar
       },
       context,
     ),
+  ).toBeUndefined();
+});
+
+it('should answer titled arrays after real SDK request parsing without an items type', async () => {
+  const receiver = client().onRequest('elicitation/create', ({ params }): CreateElicitationResponse => {
+    const form = askOfElicitation(params, context);
+    return form === undefined
+      ? { action: 'decline' }
+      : elicitationResponseOf(form, { questions: { colors: { value: ['red', 'blue'], at } } });
+  });
+  const response = await agent().connectWith(receiver, async (remote) =>
+    remote.request('elicitation/create', {
+      mode: 'form',
+      sessionId: 's1',
+      message: 'Colors',
+      requestedSchema: {
+        type: 'object',
+        required: ['colors'],
+        properties: {
+          colors: {
+            type: 'array',
+            items: {
+              anyOf: [
+                { const: 'red', title: 'Red' },
+                { const: 'blue', title: 'Blue' },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  );
+  expect(response).toEqual({ action: 'accept', content: { colors: ['red', 'blue'] } });
+});
+
+it.each([
+  { type: 'object', allOf: [{ required: ['other'] }], properties: { name: { type: 'string' } } },
+  { type: 'object', properties: { amount: { type: 'number', const: 5 } } },
+  { type: 'object', properties: { name: { type: 'string', oneOf: [{ const: 'a', title: 'A' }], enum: ['b'] } } },
+  { type: 'object', properties: { colors: { type: 'array', items: { type: 'string', enum: ['a'], pattern: '^b$' } } } },
+])('should refuse unsupported validation rather than discard it: %j', (requestedSchema) => {
+  expect(
+    askOfElicitation({ mode: 'form', sessionId: 's1', message: 'Form', requestedSchema }, context),
   ).toBeUndefined();
 });

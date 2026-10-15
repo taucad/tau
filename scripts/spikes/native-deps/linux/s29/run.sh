@@ -92,10 +92,16 @@ case "$phase" in
   image)
     [[ "$baked" == /config ]] || { echo "image needs the store baked at /config" >&2; exit 2; }
     # No W19 seed stage exists yet: the smallest throwaway image that has the shape (pruned CLI + baked store).
-    (cd "$REPO_ROOT" && pnpm nx build cli --outputStyle=static) >"$evidence/image-build-cli.log" 2>&1
+    # build_step <log> <command...>: run one image-build step, and print its log's tail when it fails.
+    build_step() {
+      local log="$1"
+      shift
+      "$@" >"$log" 2>&1 || { echo "step failed: $*" >&2; tail -40 "$log" >&2; return 1; }
+    }
+    build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx build cli --outputStyle=static"
     rm -rf "$work/image"
     mkdir -p "$work/image"
-    (cd "$REPO_ROOT" && pnpm --filter=@taucad/cli --prod deploy "$work/image/app" --legacy) >"$evidence/image-deploy.log" 2>&1
+    build_step "$evidence/image-deploy.log" bash -c "cd '$REPO_ROOT' && pnpm --filter=@taucad/cli --prod deploy '$work/image/app' --legacy"
     cp -a "$baked" "$work/image/config"
     cat >"$work/image/Dockerfile" <<'DOCKER'
 FROM node:24-slim
@@ -106,7 +112,7 @@ COPY config /config
 ENV TAU_CONFIG_DIR=/config TAU_ACQUISITION=locked NODE_ENV=production
 ENTRYPOINT ["node", "/app/dist/bin/tau.mjs"]
 DOCKER
-    docker build -t tau-s29-seed "$work/image" >"$evidence/image-docker-build.log" 2>&1
+    build_step "$evidence/image-docker-build.log" docker build -t tau-s29-seed "$work/image"
     docker image inspect tau-s29-seed --format '{{.Size}} {{.Id}}' | tee "$evidence/image-size.txt"
     docker image inspect node:24-slim --format '{{index .RepoDigests 0}}' | tee "$evidence/image-base.txt"
     du -sb "$work/image/app" "$work/image/config" | tee "$evidence/image-layers.txt"

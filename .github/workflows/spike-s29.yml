@@ -42,6 +42,7 @@ jobs:
         if: always()
         run: |
           e="$RUNNER_TEMP/evidence"
+          set +e
           {
             echo "== runs"; cat "$e/runs.jsonl"
             for f in a-tally b-tally n-tally mirror mirror-n g5-compare; do echo "== $f"; cat "$e/$f.json" 2>/dev/null; echo; done

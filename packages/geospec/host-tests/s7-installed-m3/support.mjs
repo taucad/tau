@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { createGeoSpecAssertionClient } from 'geospec/assertion-client';
 import { expect } from 'vitest';
 

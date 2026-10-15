@@ -1,5 +1,5 @@
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '@taucad/geospec/assertion-client';
-import { Engine, canonicalize } from '@taucad/geospec-engine-native/node';
+import { Engine, canonicalize } from 'geospec-engine/node';
 
 /* oxlint-disable no-restricted-imports -- Installed external-consumer acceptance imports its copied sibling harness directly. */
 import {

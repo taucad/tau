@@ -103,6 +103,8 @@ try {
       );
     });
     await page.goto(origin);
+    // The Escape handler belongs to the client enhancement, which marks the page once it has loaded.
+    await page.waitForFunction(() => document.body.dataset['page'] === '/');
     if (width < 1080) {
       await page.locator('.mobile-menu summary').click();
       assert.equal(await page.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), true);
@@ -146,9 +148,13 @@ try {
     .getByRole('link', { name: 'Pricing' })
     .click();
   await navigationPage.waitForURL(`${origin}/pricing/`);
+  // React Router updates history before React commits the destination metadata.
+  await navigationPage.waitForFunction(() => /Pricing/u.test(document.title));
   assert.match(await navigationPage.title(), /Pricing/u);
   await navigationPage.getByRole('link', { name: 'Tau home' }).first().click();
   await navigationPage.waitForURL(`${origin}/`);
+  // React Router updates history before the destination route moves focus to its main landmark.
+  await navigationPage.waitForFunction(() => document.activeElement?.id === 'main');
   assert.equal(await navigationPage.evaluate(() => document.documentElement.dataset['navigationProbe']), 'retained');
   assert.ok(dataRequests.some((url) => url.includes('/pricing.data?_routes=www-pricing')));
   assert.ok(dataRequests.some((url) => url.includes('/_root.data?_routes=www-home')));

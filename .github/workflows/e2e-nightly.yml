@@ -4,9 +4,9 @@ name: E2E nightly
 # project's Vitest Browser matrices and development-server qualifications, the
 # real-device WebGPU qualification, the funded desktop live turn and the live GitHub
 # account rows (C10, A4); each secret-gated lane skips until its secrets exist. Each
-# night they run against the head of `main`, with the GeoSpec engine products a
-# `main` CI run cached for that commit's native source closure, whether or not the
-# rest of that run passed. A failure here is a red nightly, never a merge gate.
+# night they run against the head of `main`, with the GeoSpec engine installed from
+# npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
+# nightly, never a merge gate.
 # `workflow_dispatch` takes an optional commit to run against instead.
 
 on:
@@ -41,7 +41,6 @@ jobs:
       actions: 'read'
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
-      geospec-key: ${{ steps.geospec-key.outputs.key }}
       suites: ${{ steps.suites.outputs.suites }}
       webgpu: ${{ steps.suites.outputs.webgpu }}
     steps:
@@ -57,27 +56,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-
-      # The products depend only on the native source closure, so any `main` CI run
-      # whose producer built this closure cached them, even a run that went red later.
-      - name: Identify the GeoSpec engine product closure
-        id: geospec-key
-        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
-
-      - name: Look up the cached GeoSpec engine products
-        id: geospec-cache
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ steps.geospec-key.outputs.key }}
-          mode: lookup
-
-      - name: Stop when no main CI run has built them
-        if: steps.geospec-cache.outputs.cache-hit != 'true'
-        env:
-          KEY: ${{ steps.geospec-key.outputs.key }}
-        run: |
-          echo "::error::No main CI run has cached $KEY yet; the nightly runs once main's GeoSpec producer has built this closure."
-          exit 1
 
       - name: List the end-to-end suites
         id: suites
@@ -122,17 +100,6 @@ jobs:
       - &setup-nx
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-
-      - &geospec
-        name: Restore the GeoSpec engine products
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ needs.plan.outputs.geospec-key }}
-          mode: restore
-
-      - &verify-geospec
-        name: Verify GeoSpec products against this checkout
-        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
@@ -224,8 +191,6 @@ jobs:
     steps:
       - *checkout
       - *setup-nx
-      - *geospec
-      - *verify-geospec
 
       - name: Install managed Chromium for Vitest Browser
         run: pnpm exec playwright install chromium
@@ -246,9 +211,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # runtime-e2e's Darwin host suite, quarantined out of ci.yml's Darwin lane until its
-  # 11 failing tests pass here: https://github.com/taucad/tau/issues/342. The steps
-  # mirror ci.yml's `geospec-darwin` job.
+  # runtime-e2e's Darwin host suite, quarantined out of ci.yml until its 11 failing
+  # tests pass here: https://github.com/taucad/tau/issues/342. The engine's
+  # darwin-arm64 binding installs with the workspace from the catalog pin.
   runtime-e2e-darwin:
     name: Runtime end-to-end on Darwin (quarantined, #342)
     runs-on: macos-15
@@ -265,17 +230,8 @@ jobs:
         with:
           node-version: '24.10.0'
 
-      - *geospec
-
-      - name: Prepare GeoSpec engine products
-        uses: ./.github/actions/geospec-producer
-
       - name: Prepare current installed GeoSpec consumer
-        env:
-          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
         run: |
-          pnpm nx run-many -t require-geospec-delivery --parallel=1
-          pnpm nx run-many -t build --projects tag:host:darwin-arm64 --parallel=1
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
@@ -319,17 +275,6 @@ jobs:
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
-
-      - name: Restore the GeoSpec engine products
-        if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ needs.plan.outputs.geospec-key }}
-          mode: restore
-
-      - name: Verify GeoSpec products against this checkout
-        if: steps.gate.outputs.enabled == 'true'
-        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       - name: Prepare API env file
         if: steps.gate.outputs.enabled == 'true'
@@ -406,17 +351,6 @@ jobs:
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
-
-      - name: Restore the GeoSpec engine products
-        if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ needs.plan.outputs.geospec-key }}
-          mode: restore
-
-      - name: Verify GeoSpec products against this checkout
-        if: steps.gate.outputs.enabled == 'true'
-        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       - name: Install Chromium for Vitest Browser
         if: steps.gate.outputs.enabled == 'true'

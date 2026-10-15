@@ -157,10 +157,6 @@
         "build",
         "check-renderer-payload",
         {
-          "projects": ["geospec-engine-native"],
-          "target": "prepare-geospec-ci-artifacts"
-        },
-        {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"
         },
@@ -179,10 +175,6 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
-        {
-          "projects": ["geospec-engine-native"],
-          "target": "prepare-geospec-ci-artifacts"
-        },
         {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"
@@ -207,10 +199,6 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
-        {
-          "projects": ["geospec-engine-native"],
-          "target": "prepare-geospec-ci-artifacts"
-        },
         {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"

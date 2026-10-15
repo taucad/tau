@@ -4,10 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createMeasurementFeatureWorkerClient } from '#graphics/three/utils/measurement-features-worker-client.js';
 import { getMeshMeasurementFeatures, listMeasurementTargets } from '#graphics/three/utils/measurement-features.js';
 
-const fixture = new URL(
-  '../../../../../../packages/geospec-engine-native/bench/fixtures/performance-lab/generated/flanged-housing.glb',
-  import.meta.url,
-);
+const fixture = new URL('fixtures/flanged-housing.glb', import.meta.url);
 
 describe('cold mesh measurement graph worker', () => {
   it('keeps the event loop live and preserves the checked-in housing graph', async () => {

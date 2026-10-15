@@ -49,10 +49,7 @@ it('enters the synchronous AP242 claim', async () => {
   expectGeo(model).toHaveConnectedComponents({ count: 5, toleranceMm: 0.001 });
 });
 `;
-const stepFixture = new URL(
-  '../../../packages/geospec-engine-native/bench/fixtures/performance-lab/generated/planetary-gearbox-cad.step',
-  import.meta.url,
-);
+const stepFixture = new URL('../fixtures/planetary-gearbox-cad.step', import.meta.url);
 const stepSha256 = 'a4294f8fbb1e65c57489d2b358dc6db42225323a2f2d2790baf3f739048b7c6c';
 const disableCredentialPersistenceVariable = 'TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE';
 const quickCalls: readonly GatewayFixtureToolCall[] = [

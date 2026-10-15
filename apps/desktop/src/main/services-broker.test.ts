@@ -116,14 +116,7 @@ describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
     expect(servicesConcerns).not.toContain('exactMeasurement');
-    expect(servicesConcerns).not.toContain('geospecPerformance');
-    expect(rendererServicesConcerns).toEqual([
-      'nodeFs',
-      'agentHost',
-      'geospecPerformance',
-      'exactMeasurement',
-      'machines',
-    ]);
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'exactMeasurement', 'machines']);
   });
 
   it('grants geometry runner ports only for registered project roots', () => {

@@ -58,7 +58,7 @@ export const createGeoSpecMtAssets = (
     const manifest = JSON.parse(readFileSync(path.join(stage, 'package.json'), 'utf8')) as
       | { name?: string; exports?: Record<string, string> }
       | undefined;
-    if (manifest?.name !== '@taucad/geospec-engine-native' || !record(manifest.exports)) {
+    if (manifest?.name !== 'geospec-engine' || !record(manifest.exports)) {
       throw new Error('GeoSpec MT staged package manifest is invalid.');
     }
     const root = path.join(stage, 'dist/bindings/mt-wasm');

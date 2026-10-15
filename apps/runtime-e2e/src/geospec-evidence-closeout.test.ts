@@ -2,7 +2,7 @@ import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import { trimToolResultContext } from '@taucad/agent-host';

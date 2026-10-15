@@ -537,6 +537,61 @@ describe('createPreparationHost', () => {
       expect(leftOutcome.status).toBe('cancelled');
       await expect(stays).resolves.toMatchObject({ status: 'ready' });
     });
+
+    it('should start a fresh attempt for a call made right after every caller cancelled, while those callers see the cancellation', async () => {
+      const { store, registry, reopen } = await scenario();
+      /* The first download of the wheel ignores its abort until released, so the cancelled attempt is still winding
+       * down when the retry arrives. */
+      const stuck = Promise.withResolvers<void>();
+      let held = false;
+      const host = reopen({
+        fetch: async (input, init) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (!held && url === originOf('demo')) {
+            held = true;
+            await stuck.promise;
+          }
+          return registry.fetch(input, init);
+        },
+      });
+      const events: PluginPreparation[] = [];
+      host.on('preparation', (event) => {
+        events.push(event);
+      });
+      const cancel = new AbortController();
+      const joined = [prepare(host, { signal: cancel.signal }), prepare(host, { signal: cancel.signal })];
+      await vi.waitFor(() => {
+        expect(held).toBe(true);
+      });
+
+      cancel.abort(new Error('cancelled by the test'));
+      const cancelled = await Promise.all(joined);
+      const retried = await Promise.race([
+        prepare(host),
+        new Promise<'joined the cancelled attempt'>((resolve) => {
+          setTimeout(resolve, 5000, 'joined the cancelled attempt');
+        }),
+      ]);
+      stuck.resolve();
+      await vi.waitFor(async () => {
+        expect(await entriesOf(join(store, 'tmp'))).toEqual([]);
+      });
+
+      const [cancelledId] = cancelled.map((outcome) => outcome.attemptId);
+      expect(cancelled).toEqual([
+        { status: 'cancelled', attemptId: cancelledId },
+        { status: 'cancelled', attemptId: cancelledId },
+      ]);
+      expect(retried).toMatchObject({ status: 'ready' });
+      expect(typeof retried === 'object' && retried.attemptId !== cancelledId).toBe(true);
+      /* The cancelled attempt ends without reporting over the newer one: the last state is the retry's ready. */
+      expect(events.at(-1)?.state).toMatchObject({ status: 'ready' });
+      expect(
+        events.filter(
+          ({ state }) => 'attemptId' in state && state.attemptId === cancelledId && state.status !== 'preparing',
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe('offline', () => {

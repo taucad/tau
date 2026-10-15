@@ -194,6 +194,8 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
   const events = new Topic<PluginPreparation>({ name: 'PreparationHost.preparation' });
   const revisions = new Map<string, number>();
   const attempts = new Map<string, Attempt>();
+  // The id of the newest attempt started under each key; only it reports.
+  const latestAttempts = new Map<string, string>();
   const declaredKeys = new Map<string, Promise<ReadonlyMap<string, DependencyVariant>>>();
   let disposed = false;
 
@@ -227,7 +229,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
   };
 
   const emit = (selection: PluginSelection, key: string, state: PreparationState): void => {
-    if (!disposed) {
+    /* An attempt every caller left is forgotten at once, so a retry may start under the same key while it winds down:
+     * its last words would then overwrite the newer attempt's state. */
+    const superseded = 'attemptId' in state && state.attemptId !== latestAttempts.get(key);
+    if (!disposed && !superseded) {
       events.emit({ selection, revision: nextRevision(key), state });
     }
   };
@@ -844,9 +849,17 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     }
   };
 
+  // Forget an attempt only while it is still the one registered under its key: a later attempt may have taken it.
+  const forget = (key: string, attemptId: string): void => {
+    if (attempts.get(key)?.id === attemptId) {
+      attempts.delete(key);
+    }
+  };
+
   // One caller's view of an attempt: its abort resolves `cancelled` for that caller alone; the attempt itself stops
-  // only when every joined caller has left.
-  const joinAttempt = async (attempt: Attempt, signal: AbortSignal): Promise<PrepareOutcome> => {
+  // only when every joined caller has left, and is forgotten then, so the next call starts afresh instead of joining
+  // an attempt that can only end `cancelled`.
+  const joinAttempt = async (key: string, attempt: Attempt, signal: AbortSignal): Promise<PrepareOutcome> => {
     attempt.callers += 1;
     const left = Promise.withResolvers<PrepareOutcome>();
     const onAbort = (): void => {
@@ -863,6 +876,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       signal.removeEventListener('abort', onAbort);
       attempt.callers -= 1;
       if (attempt.callers === 0) {
+        forget(key, attempt.id);
         attempt.controller.abort(signal.reason);
       }
     }
@@ -872,7 +886,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     try {
       return await run(input);
     } finally {
-      attempts.delete(key);
+      forget(key, input.attemptId);
     }
   };
 
@@ -887,6 +901,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       if (attempt === undefined) {
         const controller = new AbortController();
         const attemptId = randomUUID();
+        latestAttempts.set(key, attemptId);
         const promise = tracked(key, {
           attemptId,
           plugin,
@@ -898,7 +913,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         attempt = { id: attemptId, controller, callers: 0, promise };
         attempts.set(key, attempt);
       }
-      return joinAttempt(attempt, input.signal);
+      return joinAttempt(key, attempt, input.signal);
     },
     async verify(input: VerifyInput): Promise<readonly ClosureVerification[]> {
       const { plugin, dependencies } = normalize(input);

@@ -1932,16 +1932,7 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
         .map(({ frame }) => JSON.parse(frame) as { method?: string })
         .filter(({ method }) => method === 'notifications/cancelled');
       expect(cancelled).toHaveLength(1);
-      /* The cancelled attempt ends by removing its staging directory; a call made before then joins it and is
-       * cancelled with it, so the next test starts after it. */
-      await until(
-        async () => {
-          const entries = await entriesOf(store);
-          return !entries.some((entry) => /(?:^|\/)tmp\/[^/]+\/owner\.json$/u.test(entry));
-        },
-        'the cancelled attempt to end',
-        60_000,
-      );
+      /* No wait for the cancelled attempt to wind down: the next test prepares at once, in a fresh attempt. */
       expect(await closuresIn()).toEqual([]);
     },
     realPrepareLimit,

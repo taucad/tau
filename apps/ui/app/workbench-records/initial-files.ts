@@ -6,13 +6,13 @@ type CreationFile = { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '10075
 /** Seed only an absent workbench. Imported and duplicated record bytes stay authoritative. */
 export function seedInitialWorkbenchFiles<T extends CreationFile>(
   files: Record<string, T>,
-  mainEntryPath: string,
+  mainEntryPath: string | undefined,
 ): Record<string, T | CreationFile> {
   if (files[workbenchPaths.layout]) {
     return files;
   }
   const viewId = mintViewRecordId();
-  const view = workbenchRecords.view.schema.parse({ version: 1, entryPath: mainEntryPath });
+  const view = workbenchRecords.view.schema.parse({ version: 1, entryPath: mainEntryPath ?? null });
   const layout = workbenchRecords.layout.schema.parse({
     version: 1,
     lanes: { chat: true, workbench: true },

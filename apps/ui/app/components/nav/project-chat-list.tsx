@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
@@ -23,7 +24,12 @@ import {
   sidebarRowEditorClass,
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
-import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
+import {
+  selectChatFacts,
+  useChatSidebarStatus,
+  useProjectSidebarRow,
+  useSidebarCommands,
+} from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { toast } from '#components/ui/sonner.js';
@@ -48,6 +54,8 @@ export function ProjectChatList({
   readonly isExpanded?: boolean;
 }): React.ReactNode {
   const { chats: allChats, isLoading, error, retry } = useChatRecords(project.id);
+  const isOpening = useTauCloudIntent(project.id) === 'open';
+  const isLoadingCloudChats = useProjectSidebarRow(project.id).sync?.chats === 'loading';
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
   const chats = useMemo(
     () => allChats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined),
@@ -134,7 +142,7 @@ export function ProjectChatList({
       id={listId}
       className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
-      {isLoading && chats.length === 0
+      {(isLoading || isOpening || isLoadingCloudChats) && chats.length === 0
         ? Array.from({ length: 3 }, (_, index) => (
             <SidebarMenuSubItem key={index} aria-hidden>
               <SidebarRowSkeleton />
@@ -151,7 +159,7 @@ export function ProjectChatList({
           />
         </SidebarMenuSubItem>
       ) : null}
-      {!isLoading && !error && chats.length === 0 ? (
+      {!isLoading && !isOpening && !isLoadingCloudChats && !error && chats.length === 0 ? (
         <SidebarMenuSubItem>
           <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>

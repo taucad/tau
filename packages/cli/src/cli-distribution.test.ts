@@ -27,14 +27,18 @@ const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/bird
 const openrscadKitchenSink = resolve(repoRoot, 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad');
 const picovoxelHelloWorld = resolve(repoRoot, 'libs/tau-examples/src/kernels/picovoxel/hello-world/main.ts');
 const picogkSphere = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/parameterized-sphere/main.cs');
-const picogkResourceRoot = resolve(repoRoot, 'apps/desktop/resources/picogk');
-const picogkResourceRootEnvironment = 'TAU_PICOGK_RESOURCE_ROOT';
-const picogkManifest = resolve(picogkResourceRoot, `${process.platform}-${process.arch}`, 'tau-runtime-manifest.json');
-// Linux payloads are worker-only: upstream ships no voxel library there, so exports need `picogk.<n>`.
+// `picogk:prepare-layer` stages Microsoft's runtime archive and the locally built layer here.
+const picogkSeed = resolve(repoRoot, 'out/picogk-layer/seed');
+/*
+ * The engine is built for darwin-arm64 only (D13), and `tau prepare picogk` can seal a closure only once a release run
+ * has pinned a published layer in place of the empty digest.
+ */
 const picogkNativeEngine =
-  existsSync(picogkManifest) &&
-  (JSON.parse(readFileSync(picogkManifest, 'utf8')) as { resourceFiles: Array<{ path: string }> }).resourceFiles.some(
-    ({ path }) => /^picogk\.\d/u.test(path),
+  process.platform === 'darwin' &&
+  process.arch === 'arm64' &&
+  existsSync(picogkSeed) &&
+  !readFileSync(resolve(repoRoot, 'packages/plugins/picogk/tau-plugin.json'), 'utf8').includes(
+    'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
   );
 
 /**
@@ -293,15 +297,17 @@ describe('tau CLI dist (real binary)', () => {
     expect(summary.bounds.max[1]).toBeCloseTo(0.05, 4);
   }, 240_000);
 
-  describe.runIf(picogkNativeEngine)('PicoGK native resources', () => {
+  describe.runIf(picogkNativeEngine)('PicoGK prepared closure', () => {
     it.each(['3mf', 'usdz'])(
-      'exports a .cs entry point to %s through the built CLI',
+      'exports a .cs entry point to %s through the built CLI after tau prepare picogk',
       async (extension) => {
         const outputPath = join(workspace, `picogk-sphere.${extension}`);
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
+        const store = { TAU_CONFIG_DIR: join(workspace, 'config'), TAU_PAYLOAD_DIR: picogkSeed };
+        const prepared = await runCli(['prepare', 'picogk'], store);
+        expect(prepared.exitCode, `prepare stderr: ${prepared.stderr}`).toBe(0);
 
-        const result = await runCli(['export', picogkSphere, `--ext=${extension}`, `--output=${outputPath}`], {
-          [picogkResourceRootEnvironment]: picogkResourceRoot,
-        });
+        const result = await runCli(['export', picogkSphere, `--ext=${extension}`, `--output=${outputPath}`], store);
 
         expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
         const bytes = await readFile(outputPath);

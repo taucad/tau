@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ESNext", "dom"],
-    "rootDir": ".",
+    "rootDir": "../..",
     "sourceMap": true,
     "composite": true,
     "declaration": true,

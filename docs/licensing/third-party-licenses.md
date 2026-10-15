@@ -7,9 +7,9 @@ bundled into it — and their respective licenses. It ships inside the artifact 
 
 ## Licensing Overview
 
-All Tau-authored source is **[Apache-2.0](./license)**, including the applications,
+All Tau-authored source is **[Apache-2.0](https://github.com/taucad/tau/blob/main/license)**, including the applications,
 libraries, tools, examples, GeoSpec engine, and other published packages.
-Repository licensing details: **[LICENSING.md](./LICENSING.md)**.
+Repository licensing details: **[Licensing overview](https://github.com/taucad/tau/blob/main/docs/licensing/overview.md)**.
 
 Some third-party dependencies impose additional obligations on **combined
 distributions** that include them:

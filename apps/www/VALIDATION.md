@@ -6,7 +6,7 @@
 
 Three cold Lighthouse runs per profile: mobile performance **95, 97, 97** (median 97); desktop **100, 100, 100** (median 100). Accessibility, best practices and SEO are **100 in all six runs**. Node 26.8.1, Chrome 155, Lighthouse 13.5.0, local production SSR with gzip; these are lab results, not field or hosted guarantees. The extracted Netlify function separately returns home/pricing/sitemap 200 and unknown-page 404 without workspace module resolution. CI uses pinned Playwright Chromium and retains the raw reports.
 
-Actual [review screenshots](../../out/reports/www-review/README.md) cover desktop themes, 3D activation, mobile navigation and pricing. Tau Brain's `docs/research/www-react-router-ssr.md` owns detailed measurements and rollout limitations. Hosted staging qualification and the paired cloud billing restriction remain recorded there; no infrastructure apply or DNS change is claimed.
+Actual [review screenshots](./review/README.md) cover desktop themes, 3D activation, mobile navigation and pricing. Tau Brain's `docs/research/www-react-router-ssr.md` owns detailed measurements and rollout limitations. Hosted staging qualification and the paired cloud billing restriction remain recorded there; no infrastructure apply or DNS change is claimed.
 
 ## Ambient occlusion and shadows — 2026-10-05
 

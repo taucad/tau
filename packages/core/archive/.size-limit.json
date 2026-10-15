@@ -1,0 +1,7 @@
+[
+  {
+    "name": "all archive-core ESM entries",
+    "path": "dist/**/*.mjs",
+    "limit": "10 kB"
+  }
+]

@@ -1,3 +1,5 @@
+pnpmfile: tools/pnpm/pnpmfile.cjs
+
 packages:
   - apps/*
   - apps/libs/*
@@ -423,16 +425,16 @@ peerDependencyRules:
     fumadocs-mdx>vite: ^8.0.0
     vite-svg-sprite-wrapper>vite: ^8.0.0
 patchedDependencies:
-  '@ai-sdk/langchain@2.0.181': patches/@ai-sdk__langchain@2.0.181.patch
-  '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
-  vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
-  zod@4.4.3: patches/zod@4.4.3.patch
-  '@agentclientprotocol/codex-acp@1.7.0': patches/@agentclientprotocol__codex-acp@1.7.0.patch
-  n8ao@1.10.2: patches/n8ao@1.10.2.patch
-  vaul@1.1.2: patches/vaul@1.1.2.patch
-  three@0.184.0: patches/three@0.184.0.patch
-  '@react-three/fiber@9.6.1': patches/@react-three__fiber@9.6.1.patch
-  monaco-editor@0.55.1: patches/monaco-editor@0.55.1.patch
+  '@ai-sdk/langchain@2.0.181': tools/pnpm/patches/@ai-sdk__langchain@2.0.181.patch
+  '@kittycad/lib@2.0.48': tools/pnpm/patches/@kittycad__lib@2.0.48.patch
+  vite-plugin-mkcert@2.0.0: tools/pnpm/patches/vite-plugin-mkcert@2.0.0.patch
+  zod@4.4.3: tools/pnpm/patches/zod@4.4.3.patch
+  '@agentclientprotocol/codex-acp@1.7.0': tools/pnpm/patches/@agentclientprotocol__codex-acp@1.7.0.patch
+  n8ao@1.10.2: tools/pnpm/patches/n8ao@1.10.2.patch
+  vaul@1.1.2: tools/pnpm/patches/vaul@1.1.2.patch
+  three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
+  '@react-three/fiber@9.6.1': tools/pnpm/patches/@react-three__fiber@9.6.1.patch
+  monaco-editor@0.55.1: tools/pnpm/patches/monaco-editor@0.55.1.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

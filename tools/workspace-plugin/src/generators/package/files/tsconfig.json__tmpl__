@@ -1,5 +1,5 @@
 {
-  "extends": "<%= offset %>tsconfig.base.json",
+  "extends": "<%= offset %>tools/typescript/base.json",
   "files": [],
   "include": [],
   "references": [

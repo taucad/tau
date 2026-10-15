@@ -770,7 +770,7 @@ export function ExportSchemaForm({
         formContext={formContext}
         experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
         onChange={handleChange}
-        liveValidate
+        liveValidate='onChange'
         noHtml5Validate
       />
     </section>

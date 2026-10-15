@@ -5,7 +5,7 @@ status: active
 created: '2026-09-28'
 updated: '2026-09-28'
 related:
-  - DESIGN.md
+  - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
   - docs/policy/ux-policy.md
   - docs/policy/color-policy.md
@@ -23,7 +23,7 @@ Internal reference for composing route-level pages in `apps/ui` (web and desktop
 
 ## Rationale
 
-`DESIGN.md` states the principles and each page used to re-derive them: at the 2026-09-27 audit, 30 `<h1>` elements carried 18 class recipes, the project grid chain was copied three times and had drifted, and the newest index page shipped fixed-width triggers, a placeholder-only search, a label-less pending button and an inert "Load More". This statute compiles the principles into one recipe per page part, names the component that owns each recipe and the gate that keeps it, so a new page inherits the pattern instead of rediscovering it (DESIGN Principle 1, "Enforced or broken").
+`docs/policy/design-policy.md` states the principles and each page used to re-derive them: at the 2026-09-27 audit, 30 `<h1>` elements carried 18 class recipes, the project grid chain was copied three times and had drifted, and the newest index page shipped fixed-width triggers, a placeholder-only search, a label-less pending button and an inert "Load More". This statute compiles the principles into one recipe per page part, names the component that owns each recipe and the gate that keeps it, so a new page inherits the pattern instead of rediscovering it (DESIGN Principle 1, "Enforced or broken").
 
 ## Scope and owners
 
@@ -426,7 +426,7 @@ Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, exclu
 
 ## References
 
-- [DESIGN.md](../../DESIGN.md) — Composition and visible affordances; Components; Surfaces › apps/ui; Voice; Governance
+- [docs/policy/design-policy.md](../../docs/policy/design-policy.md) — Composition and visible affordances; Components; Surfaces › apps/ui; Voice; Governance
 - [UI Policy](ui-policy.md), [UX Policy](ux-policy.md), [Color Policy](color-policy.md), [Accessibility Policy](accessibility-policy.md), [Keyboard Service Policy](keyboard-service-policy.md)
 - Research: `docs/research/community-page-refresh-audit.md` (Finding 4 and lane D's enforcement matrix); `docs/research/community-page-refresh-blueprint.md` (decision register); `docs/research/project-card-composition-blueprint.md`; `docs/research/panel-empty-state-component-blueprint.md`
 - [WCAG 2.2 Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html); [WAI-ARIA APG](https://www.w3.org/WAI/ARIA/apg/)

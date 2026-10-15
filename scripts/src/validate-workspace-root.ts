@@ -1,8 +1,9 @@
 /**
- * Reject unexpected untracked entries at the Tau workspace root after tooling runs.
+ * Enforce the approved authored roots and reject unexpected local entries after tooling runs.
  *
- * Authored roots come from Git. Stable machine roots and persistent workspace
- * exceptions come from docs/policy/tool-output-location-policy.md.
+ * The authored inventory comes from Git and must match the reviewed root layout.
+ * Stable machine roots and persistent workspace exceptions come from
+ * docs/policy/tool-output-location-policy.md.
  *
  * Usage: pnpm nx run scripts:validate-workspace-root
  */
@@ -11,6 +12,40 @@ import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+
+const authoredRoots = [
+  '.agents',
+  '.claude-plugin',
+  '.claude',
+  '.codex',
+  '.dockerignore',
+  '.github',
+  '.gitignore',
+  '.nx',
+  '.nxignore',
+  '.oxfmtrc.json',
+  '.oxlintrc.json',
+  '.vscode',
+  'AGENTS.md',
+  'CLAUDE.md',
+  'NOTICE',
+  'apps',
+  'docs',
+  'eslint.config.mjs',
+  'examples',
+  'infra',
+  'libs',
+  'license',
+  'nx.json',
+  'package.json',
+  'packages',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'readme.md',
+  'scripts',
+  'tools',
+  'tsconfig.json',
+] as const;
 
 const stableUntrackedRoots = ['.git', '.nx', 'node_modules', 'out', 'out-tsc', 'repos'] as const;
 
@@ -31,6 +66,20 @@ export const unexpectedWorkspaceRootEntries = ({ actualEntries, trackedPaths }: 
   return actualEntries.filter((entry) => !allowed.has(entry)).sort();
 };
 
+export const workspaceRootInventoryErrors = (inventory: WorkspaceRootInventory): string[] => {
+  const trackedRoots = new Set(inventory.trackedPaths.map((path) => path.split('/')[0] ?? '').filter(Boolean));
+  const approved = new Set<string>(authoredRoots);
+  const unexpectedAuthored = [...trackedRoots].filter((entry) => !approved.has(entry)).sort();
+  // Nx release consumes version plans, so .nx can have no tracked files after a release.
+  const missingAuthored = authoredRoots.filter((entry) => entry !== '.nx' && !trackedRoots.has(entry)).sort();
+  const unexpectedLocal = unexpectedWorkspaceRootEntries(inventory);
+  return [
+    ...unexpectedAuthored.map((entry) => `Unapproved authored root: ${entry}`),
+    ...missingAuthored.map((entry) => `Missing approved authored root: ${entry}`),
+    ...unexpectedLocal.map((entry) => `Unexpected local root: ${entry}`),
+  ];
+};
+
 const main = (): void => {
   const workspaceRoot = resolve(import.meta.dirname, '../..');
   const trackedPaths = execFileSync('git', ['ls-files', '-z'], {
@@ -39,16 +88,16 @@ const main = (): void => {
   })
     .split('\0')
     .filter(Boolean);
-  const unexpected = unexpectedWorkspaceRootEntries({
+  const errors = workspaceRootInventoryErrors({
     actualEntries: readdirSync(workspaceRoot),
     trackedPaths,
   });
 
-  if (unexpected.length > 0) {
-    throw new Error(`Unexpected workspace-root entries:\n${unexpected.map((entry) => `  - ${entry}`).join('\n')}`);
+  if (errors.length > 0) {
+    throw new Error(`Invalid workspace-root inventory:\n${errors.map((error) => `  - ${error}`).join('\n')}`);
   }
 
-  console.log('✓ workspace root contains no unexpected generated entries');
+  console.log('✓ workspace root matches the approved authored layout with no unexpected local roots');
 };
 
 const entryPath = process.argv[1];

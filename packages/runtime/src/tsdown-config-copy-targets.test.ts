@@ -6,7 +6,7 @@ describe('runtime package copy targets', () => {
   it('copies package support files', () => {
     expect(runtimeCopyTargets('dist')).toEqual([
       { from: '../../license', to: 'dist', rename: 'LICENSE' },
-      { from: '../../license-deps', to: 'dist', rename: 'THIRD_PARTY_LICENSES.md' },
+      { from: '../../docs/licensing/third-party-licenses.md', to: 'dist', rename: 'THIRD_PARTY_LICENSES.md' },
       { from: 'NOTICE', to: 'dist' },
       { from: 'src/nextjs/package-assets-loader.mjs', to: 'dist/nextjs' },
     ]);

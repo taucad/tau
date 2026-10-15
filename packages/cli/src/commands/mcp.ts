@@ -14,8 +14,14 @@ import { defineCommand } from 'citty';
 import { machineProviders } from '#machine-providers.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
-/** Milliseconds a stopping server waits for its kernels before it exits anyway. */
-const shutdownGrace = 5000;
+/**
+ * Milliseconds a stopping server waits for its kernels before it exits anyway.
+ *
+ * The server exits within five seconds of its client closing. The grace is shorter than that bound because the bound
+ * also covers delivering the end of stdin and exiting: a grace equal to it overran the bound whenever a kernel thread
+ * was still terminating when the grace ran out.
+ */
+const shutdownGrace = 4000;
 
 /**
  * One project's client. Its thread composes the CLI runtime from `--plugin` and `--config` at run time, so the

@@ -240,5 +240,5 @@ describe('parameter variants', () => {
 
 **Apache-2.0.** This package is the permissive perimeter: your specs, your
 models and your verdicts do not inherit this package's license. See
-[LICENSING.md](../../LICENSING.md) at the repository root for the routing map
+[Licensing](../../docs/licensing/overview.md) for the routing map
 and the internal-use FAQ.

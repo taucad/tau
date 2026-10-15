@@ -1,4 +1,12 @@
-# Tau Design Language
+---
+title: 'Design Policy'
+description: 'Canonical Tau design principles, governance and review guidance.'
+status: active
+created: '2026-10-15'
+updated: '2026-10-15'
+---
+
+# Design Policy
 
 This document governs every user-facing surface Tau ships: the CAD workspace (`apps/ui`), the documentation site (`apps/docs`), the published component library (`packages/ui`, `@taucad/ui`), and terminal surfaces (`packages/cli`, the `repos` TUI, and anything after them). It is the constitution; the `docs/policy/` documents are its statutes; nearest `AGENTS.md` files route their current operational application. When they disagree, this document wins, and the disagreement is a bug to fix in the lower document.
 
@@ -7,7 +15,7 @@ Two research documents ground the normative choices here: `docs/research/design-
 This is also the canonical reference for frontend and research-canvas design.
 Skills route the work; they do not define another aesthetic. Recent persona,
 disclosure and affordance rulings are reconciled in the
-[design consolidation evidence](docs/research/artifacts/canvas-authoring/runs/2026-09-16-design-consolidation/review.md).
+[design consolidation evidence](../research/artifacts/canvas-authoring/runs/2026-09-16-design-consolidation/review.md).
 
 ## Principles
 
@@ -145,7 +153,7 @@ without repeating a provider-supplied verb (“Read Read”). This is a chat-spe
 contract, not a requirement to italicize ordinary detail panels.
 
 These are design-review defaults with scenario acceptance as their gate. The
-[revision canvas checks](docs/research/artifacts/chat-turn-revision-story/live/check.mjs)
+[revision canvas checks](../research/artifacts/chat-turn-revision-story/live/check.mjs)
 exercise this proposal; product owners verify equivalent behavior in their
 actual state, streaming and command paths before shipping.
 
@@ -365,7 +373,7 @@ No WCAG exists here; these conventions are the policy (research doc Finding 6):
 
 ## Voice
 
-Engineering seriousness with personality confined to copy. Metrics are honest and captioned with their methodology. Claims are verifiable or absent. Licensing claims follow `LICENSING.md` verbatim — today that is Apache-2.0 across all Tau-authored source, so "open source" is accurate; if the partition ever changes, the copy changes with it, not before. In docs and UI copy alike: no filler transitions, no "simply", no unearned superlatives — the Vale `tau` style encodes the banned list, including the measured LLM focal-word inventory.
+Engineering seriousness with personality confined to copy. Metrics are honest and captioned with their methodology. Claims are verifiable or absent. Licensing claims follow [the licensing overview](../licensing/overview.md) verbatim — today that is Apache-2.0 across all Tau-authored source, so "open source" is accurate; if the partition ever changes, the copy changes with it, not before. In docs and UI copy alike: no filler transitions, no "simply", no unearned superlatives — the Vale `tau` style encodes the banned list, including the measured LLM focal-word inventory.
 
 Write from the user's side: name what people control and recognize, not internal
 implementation layers. Use plain verbs, sentence case and one job per label.
@@ -381,4 +389,4 @@ behavior still follows actual access metadata, never a path or label alone.
 
 - Changes to this document are reviewed diffs with rationale, like any code change. Rules only get stricter by default; loosening one names the cost that justifies it.
 - The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
-- Promote new durable design law through [the shared learning owner](.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.
+- Promote new durable design law through [the shared learning owner](../../.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.

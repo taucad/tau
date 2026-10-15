@@ -11,7 +11,7 @@ export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; 
     rename: 'LICENSE',
   },
   {
-    from: '../../license-deps',
+    from: '../../docs/licensing/third-party-licenses.md',
     to: outDirectory,
     rename: 'THIRD_PARTY_LICENSES.md',
   },

@@ -328,6 +328,7 @@
   },
   "devDependencies": {
     "@parcel/watcher": "catalog:",
+    "@taucad/archive-core": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",

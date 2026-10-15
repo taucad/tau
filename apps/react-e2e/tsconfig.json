@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/typescript/base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,

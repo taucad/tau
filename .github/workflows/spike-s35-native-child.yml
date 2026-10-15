@@ -5,7 +5,7 @@
 #
 # Dispatch-only. The prototype lives on the unmerged branch named by `ref`
 # (packages/host/src/runtime-child-supervisor*); this file only checks it out, runs the
-# existing desktop producers as CI already runs them, and runs the spike suite on macos-15
+# existing desktop producers as CI already runs them, and runs the spike suite on macos-26
 # and ubuntu-latest. Evidence is the uploaded artifact, the job summary and the notice
 # annotations. Deleted when W11 lands.
 name: Spike S35 (native-only runtime child)
@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
+          - os: macos-26
             build123d: prepare-build123d-python-macos
             picogk: prepare-picogk-dotnet-macos
           - os: ubuntu-latest

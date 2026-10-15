@@ -86,7 +86,7 @@ describe('validateTsgoRuntimeReferences', () => {
     writeFixtureFile(
       'examples/react-router/tsconfig.json',
       JSON.stringify({
-        extends: '../../tsconfig.base.json',
+        extends: '../../tools/typescript/base.json',
         references: [{ path: '../../packages/runtime' }],
       }),
     );

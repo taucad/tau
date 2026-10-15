@@ -6,7 +6,11 @@ on:
       - '.github/workflows/build123d-native.yml'
       - '.github/actions/setup-nx/**'
       - 'packages/plugins/build123d/**'
-      - 'packages/core/geometry/schema/tau-cad-topology.schema.json'
+      - 'libs/tau-examples/src/kernels/build123d/planetary-gear-system/**'
+      - 'packages/core/geometry/**'
+      - 'packages/kinematics/**'
+      - 'packages/core/native-process/**'
+      - 'packages/runtime/src/preparation/**'
       - 'apps/desktop/resources/python/manifest.json'
       - 'apps/desktop/scripts/prepare-build123d-python.mts'
       - 'apps/desktop/scripts/build123d-wheel-integrity.mts'
@@ -68,8 +72,25 @@ jobs:
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
         run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) process.exit(1)'
-      - name: Prepare and test the shipped Python runtime
+      - name: Seal this native target and record its golden receipt
+        if: runner.os != 'Windows'
+        run: pnpm nx run build123d:golden-tau-plugin --skip-nx-cache
+      - name: Retain the receipt sealed by this runner
+        if: runner.os != 'Windows'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: |
+          case "$NATIVE_TARGET" in linux-*) NATIVE_TARGET="${NATIVE_TARGET}-glibc" ;; esac
+          mkdir -p out/reports/coverage/packages/plugins/build123d-python
+          jq -e --arg target "$NATIVE_TARGET" 'if .[$target] == null then error("Missing native receipt") else {($target): .[$target]} end' \
+            packages/plugins/build123d/tau-plugin.golden.json \
+            > "out/reports/coverage/packages/plugins/build123d-python/golden-${NATIVE_TARGET}.json"
+      - name: Test the sealed registry Python runtime
+        if: runner.os != 'Windows'
         run: pnpm nx run build123d:test-python --skip-nx-cache
+      - name: Prepare and test the Windows desktop Python runtime
+        if: runner.os == 'Windows'
+        run: pnpm nx run build123d:test-python-desktop --skip-nx-cache
       - name: Qualify the native worker subprocess and sandbox
         if: runner.os != 'Windows'
         run: pnpm nx test build123d --watch=false --skip-nx-cache

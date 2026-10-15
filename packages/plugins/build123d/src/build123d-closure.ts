@@ -12,7 +12,7 @@ import type { build123dOptionsSchema } from '#build123d.schemas.js';
 
 /** Closure-relative POSIX path of the interpreter python-build-standalone ships. */
 const pythonPath = 'python/bin/python3';
-/** Closure-relative directory the three worker scripts unpack into. */
+/** Closure-relative directory the worker and its four support modules unpack into. */
 const workerDirectory = 'tau-worker';
 const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
 /** Characters of a failed command's standard error kept in the error message. */
@@ -38,7 +38,7 @@ const absolute = (receipt: ClosureReceipt, path: string): string => join(receipt
 
 /**
  * Map a sealed `engine` closure to the options `build123dKernel` already takes: the interpreter, the worker and its
- * two support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
+ * four support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
  * sandbox may read. The session hashes exactly these files at launch (D8), so the per-launch check stays O(1).
  *
  * @param receipt - The receipt of the closure `tau prepare build123d` sealed.
@@ -47,23 +47,28 @@ const absolute = (receipt: ClosureReceipt, path: string): string => join(receipt
  * @public
  * @example <caption>Compose the kernel from the prepared closure</caption>
  * ```typescript
- * const { state } = await host.inspect({ package: '@taucad/build123d' });
- * if (state.status === 'ready') {
- *   build123d({ kernels: { default: build123dOptionsFromClosure(state.receipts['engine']!) } });
+ * import { build123d, build123dOptionsFromClosure } from '@taucad/build123d';
+ * import type { PreparationHost } from '@taucad/runtime/preparation/node';
+ * async function preparedKernel(host: PreparationHost) {
+ *   const { state } = await host.inspect({ package: '@taucad/build123d' });
+ *   if (state.status === 'ready') {
+ *     return build123d({ kernels: { default: build123dOptionsFromClosure(state.receipts['engine']!) } });
+ *   }
  * }
  * ```
  */
 export const build123dOptionsFromClosure = (receipt: ClosureReceipt): Build123dClosureOptions => {
   const python = rowOf(receipt, pythonPath);
-  const [worker, analyzer, glb] = ['worker.py', 'analyzer.py', 'glb.py'].map((name) =>
+  const worker = rowOf(receipt, `${workerDirectory}/worker.py`);
+  const support = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map((name) =>
     rowOf(receipt, `${workerDirectory}/${name}`),
-  ) as [ClosureReceipt['files'][number], ClosureReceipt['files'][number], ClosureReceipt['files'][number]];
+  );
   return {
     pythonExecutable: absolute(receipt, python.path),
     pythonSha256: python.sha256,
     workerPath: absolute(receipt, worker.path),
     workerSha256: worker.sha256,
-    supportFiles: [analyzer, glb].map((row) => ({ path: absolute(receipt, row.path), sha256: row.sha256 })),
+    supportFiles: support.map((row) => ({ path: absolute(receipt, row.path), sha256: row.sha256 })),
     runtimePath: receipt.root,
   };
 };

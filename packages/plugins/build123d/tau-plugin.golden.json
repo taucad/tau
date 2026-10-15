@@ -1,8 +1,8 @@
 {
-  "linux-x64-glibc": {
-    "closureIntegrity": "sha256-fNmZ5xXq8pKPyZUunVpsaHeVp1Z4lU+2mlIpzBci0Ik=",
-    "treeIntegrity": "sha256-xOzF8YJsmBh8DipobL2VdxMzc0ikQDwJ1lOc34/OSFw=",
-    "fileCount": 25165,
-    "byteLength": 923838868
+  "darwin-arm64": {
+    "closureIntegrity": "sha256-/ROYJNF2Gx5W9djgy5bXWhTjPKw/hYK+/jGdchz2L9U=",
+    "treeIntegrity": "sha256-1fsjRkFY2b/x45y5LpmpeNi6Y1C/xqNHkV70+Kfb11c=",
+    "fileCount": 22927,
+    "byteLength": 857417481
   }
 }

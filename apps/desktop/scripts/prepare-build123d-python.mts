@@ -15,7 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- this private script helper has no package import mapping.
 import { replaceResourceDirectory, verifyOcpWheel } from './build123d-wheel-integrity.mjs';
 
@@ -236,7 +236,11 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   const temporary = resolve(resourceRoot, `.${targetName}.${String(process.pid)}.tmp`);
   await rm(temporary, { recursive: true, force: true });
   await mkdir(temporary, { recursive: true });
-  execFileSync('tar', ['-xzf', archive, '-C', temporary, '--strip-components=1'], { stdio: 'inherit' });
+  // GNU tar interprets the colon in a Windows drive-qualified archive as a remote host.
+  execFileSync('tar', ['-xzf', basename(archive), '-C', temporary, '--strip-components=1'], {
+    cwd: dirname(archive),
+    stdio: 'inherit',
+  });
   const pythonExecutable = resolve(temporary, target.pythonRelativePath);
   execFileSync(
     'uv',

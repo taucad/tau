@@ -691,18 +691,31 @@ describe('field labels', () => {
           lit: { type: 'boolean', title: 'Chamber light' },
           quality: { type: 'string', title: 'Print quality', enum: ['draft', 'fine'] },
           tags: { type: 'array', title: 'Tags', items: { type: 'string' } },
+          wireForm: { type: 'string', title: 'Command forms (testing)', enum: ['a', 'b'] },
+          nozzleDiameter: { type: 'number' },
         },
       },
-      formData: { speed: 1, host: 'printer.local', lit: false, quality: 'draft', tags: ['one'] },
+      formData: {
+        speed: 1,
+        host: 'printer.local',
+        lit: false,
+        quality: 'draft',
+        tags: ['one'],
+        wireForm: 'a',
+        nozzleDiameter: 0.4,
+      },
     });
 
-    /* WCAG 2.5.3: each control's accessible name contains the label its row shows. */
+    /* WCAG 2.5.3: each control's accessible name contains the label its row shows. A schema's own title shows as
+     * written; a label made from a property key reads in Title Case. */
     for (const [role, name, label] of [
-      ['spinbutton', 'Input for Demo Speed', 'Demo Speed'],
-      ['textbox', 'Input for Printer Address', 'Printer Address'],
-      ['switch', 'Toggle for Chamber Light', 'Chamber Light'],
-      ['combobox', 'Select for Print Quality', 'Print Quality'],
+      ['spinbutton', 'Input for Demo speed', 'Demo speed'],
+      ['textbox', 'Input for Printer address', 'Printer address'],
+      ['switch', 'Toggle for Chamber light', 'Chamber light'],
+      ['combobox', 'Select for Print quality', 'Print quality'],
       ['textbox', 'Input for Tags 1', 'Tags 1'],
+      ['combobox', 'Select for Command forms (testing)', 'Command forms (testing)'],
+      ['spinbutton', 'Input for Nozzle Diameter', 'Nozzle Diameter'],
     ] as const) {
       expect(screen.getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
       expect(screen.getByRole(role, { name })).toBeInTheDocument();

@@ -1,10 +1,18 @@
 import '#styles/global.css';
+import { MemoryRouter } from 'react-router';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
-  agentRequest,
+  carveraManifest,
+  machineEntry,
+  machineSnapshot,
+  millingComponents,
+  routerManifest,
+} from '#components/print/testing/machines.fixture.js';
+import {
+  agentJob,
   createBambuStudio,
   createBridge,
   createFixture,
@@ -21,21 +29,15 @@ import {
 
 /**
  * Screenshot evidence for the reviewed styling: the Print pane at a workbench
- * width and at 320 px, light and dark, in three states (a ready machine with a
- * fresh slice; a ready machine with an agent's request awaiting approval; the
- * same request while a run is in progress, so the start waits with its reason).
- * PNGs land under `out/research/.../K/` (Lane D's first pass wrote `.../D/`).
+ * width and at 320 px, light and dark: a ready printer with a fresh slice; an
+ * agent's job awaiting approval; the same job while a run is in progress, so the
+ * start waits with its reason; Bambu Studio's overrides; and the same pane serving
+ * a Grbl router and a Carvera with Control open (presence, jog pad, spindle).
  */
 
-vi.doMock('#hooks/use-project.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...projectMock,
-}));
-vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...fileManagerMock,
-}));
-vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) =>
+vi.doMock('#hooks/use-project.js', () => projectMock);
+vi.doMock('#hooks/use-file-manager.js', () => fileManagerMock);
+vi.doMock('#components/machines/configuration-manifest.js', async (importOriginal) =>
   converterMock(await importOriginal()),
 );
 vi.doMock('@taucad/viewer/parameters/parameters', async (importOriginal) => parametersMock(await importOriginal()));
@@ -53,7 +55,11 @@ vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
 }));
 // The chat stack behind the approval bridge is not under test here; the pane receives a bridge directly.
 vi.doMock('#hooks/use-machines-approvals.js', () => ({
-  usePrintApprovalBridge: () => ({ pendingFor: () => undefined, respond: async () => undefined }),
+  useMachineApprovalBridge: () => ({
+    pendingForJob: () => undefined,
+    pendingActions: () => [],
+    respond: async () => undefined,
+  }),
 }));
 vi.doMock('#machines/await-fresh-render.js', () => ({
   awaitFreshRender: async (actor: { getSnapshot: () => unknown }) => actor.getSnapshot(),
@@ -61,11 +67,11 @@ vi.doMock('#machines/await-fresh-render.js', () => ({
 
 const { PrintPanel } = await import('#routes/w.$workspace.$project/chat-print.js');
 
-const outputDirectory = '../../../../../out/research/print-pane-polish/2026-09-29-implementation/browser';
+const outputDirectory = '../../../../../out/research/machines-contract-v3/ui/browser';
 const widths = { desktop: 480, narrow: 320 } as const;
 const themes = ['light', 'dark'] as const;
 
-type Scenario = 'prepare' | 'approval' | 'busy' | 'studio';
+type Scenario = 'prepare' | 'approval' | 'busy' | 'studio' | 'router' | 'carvera';
 
 /** The fixture machine observed just now, so the freshness budgets read as current rather than stale. */
 const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry> => ({
@@ -75,20 +81,36 @@ const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry
 
 const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> => {
   desktopHost.bambuStudio = scenario === 'studio' ? createBambuStudio() : undefined;
+  const milling = scenario === 'router' ? routerManifest : scenario === 'carvera' ? carveraManifest : undefined;
   const fixture =
-    scenario === 'prepare' || scenario === 'studio'
-      ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
+    milling === undefined
+      ? scenario === 'prepare' || scenario === 'studio'
+        ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
+        : createFixture({
+            entries: [observedNow(scenario === 'busy' ? printing() : entry())],
+            jobs: [agentJob()],
+          })
       : createFixture({
-          entries: [observedNow(scenario === 'busy' ? printing() : entry())],
-          requests: [agentRequest()],
+          entries: [
+            observedNow(
+              machineEntry({
+                manifest: milling,
+                name: scenario === 'router' ? 'Garage LongMill' : 'Carvera',
+                providerId: `${scenario}-simulator`,
+                snapshot: machineSnapshot(millingComponents(milling)),
+              }),
+            ),
+          ],
         });
   const { bridge } = createBridge();
   const { container } = render(
-    <TooltipProvider>
-      <div data-testid='frame' style={{ width: `${String(width)}px`, height: '900px' }}>
-        <PrintPanel machines={{ available: true, ...fixture.client }} bridge={bridge} />
-      </div>
-    </TooltipProvider>,
+    <MemoryRouter>
+      <TooltipProvider>
+        <div data-testid='frame' style={{ width: `${String(width)}px`, height: '900px' }}>
+          <PrintPanel machines={{ available: true, ...fixture.client }} bridge={bridge} />
+        </div>
+      </TooltipProvider>
+    </MemoryRouter>,
   );
   if (scenario === 'studio') {
     // The real printer with Bambu Studio: presets, then Advanced settings with its overrides and one change.
@@ -96,9 +118,9 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await page.getByRole('button', { name: /^Advanced settings/u }).click();
     await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
-    await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
-    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
-    await screen.findByRole('button', { name: 'Reset Layer Height' });
+    await page.getByRole('spinbutton', { name: 'Input for Layer height' }).fill('0.16');
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer height' }));
+    await screen.findByRole('button', { name: 'Reset Layer height' });
     // Headless Chromium draws few frames between actions, so the stages' open animations would still
     // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
     for (const animation of document.getAnimations()) {
@@ -113,17 +135,25 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     });
     await page.getByRole('button', { name: 'Slice and preview' }).click();
     await screen.findByRole('group', { name: 'Slice result' });
-  } else {
-    const name = 'Print request awaiting you: pyramid.gcode.3mf';
+  } else if (milling === undefined) {
+    const name = 'Job awaiting you: pyramid.gcode.3mf';
     const region = await screen.findByRole('region', { name });
     expect(within(region).getByRole('button', { name: 'Preview' })).toBeEnabled();
-    await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
-    const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
+    await page.getByRole('region', { name }).getByRole('checkbox', { name: 'The build plate is clear' }).click();
     if (scenario === 'busy') {
       expect(
-        within(confirmation).getByText('Workshop X1C has a run in progress. Start another print once it ends.'),
+        within(region).getByText('Workshop X1C has a run in progress. Start another once it ends.'),
       ).toBeInTheDocument();
     }
+  } else {
+    // Control opens on a milling machine: the presence switch, the jog pad and the spindle.
+    await screen.findByRole('switch', { name: 'I am at the machine' });
+    await page.getByRole('switch', { name: 'I am at the machine' }).click();
+    const control = screen.getByRole('button', { name: /^Control/u });
+    if (control.getAttribute('aria-expanded') !== 'true') {
+      await page.getByRole('button', { name: /^Control/u }).click();
+    }
+    await screen.findByRole('group', { name: 'Jog X and Y' });
   }
   return container;
 };
@@ -207,6 +237,18 @@ describe('Print pane screenshots', () => {
     },
   );
 
+  it('should scroll the pane to every stage instead of clipping the stages to its height', async () => {
+    await mount('router', 720);
+    const control = await screen.findByRole('region', { name: 'Control' });
+    // A pane shorter than its stages, as a docked pane often is.
+    screen.getByTestId('frame').style.height = '400px';
+    const stages = control.closest<HTMLElement>('[data-slot="print-stages"]')!;
+    const scroller = stages.parentElement!;
+    // A stage list that shrinks to the pane hides what is below it and leaves nothing to scroll.
+    expect(stages.scrollHeight - stages.clientHeight).toBeLessThanOrEqual(1);
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+  });
+
   it('should space the Prepare setup rows evenly', async () => {
     await page.viewport(800, 1200);
     await mount('studio', 720);
@@ -221,7 +263,7 @@ describe('Print pane screenshots', () => {
     expect(gaps).toEqual(gaps.map(() => gaps[0]));
   });
 
-  for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
+  for (const scenario of ['prepare', 'approval', 'busy', 'studio', 'router', 'carvera'] as const) {
     for (const [size, width] of Object.entries(widths)) {
       for (const theme of themes) {
         it(`captures ${scenario} at ${size} in ${theme}`, async () => {

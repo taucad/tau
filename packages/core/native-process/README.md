@@ -48,8 +48,10 @@ export const inspectNativeWorkspace = async (filesystem: KernelFileSystem): Prom
 Pass the runtime-injected filesystem. A native kernel runs its child against `mirror.workspacePath`
 between `sync()` and `cleanup()`. Exclusions are exact workspace-relative paths, applied before
 metadata and content reads; excluding `thumbnail.webp` leaves `assets/thumbnail.webp` available.
-The mirror also enforces path, size, depth, and case-collision limits. The OS sandbox is applied
-by `NativeProcessSession` when it spawns the worker against that mirror.
+The mirror validates rooted paths and rejects case collisions and files that change during a read.
+It copies one file at a time without fixed file-size, workspace-size, file-count or directory-depth
+ceilings. Available memory, disk space and filesystem path limits still apply. The OS sandbox is
+applied by `NativeProcessSession` when it spawns the worker against that mirror.
 
 Inside a kernel call, pass `runtime.fileContentCache` and `runtime.operationId` as `sync()`'s second
 and third arguments. The mirror then reuses bytes the runtime already read and walks the workspace
@@ -63,10 +65,15 @@ once per runtime operation, however many of a render's calls ask for it.
 | `NativeWorkerReportedError`     | Preserves structured issues returned by the native worker.                                                           |
 | `NativeRuntimeUnavailableError` | Thrown (code `NATIVE_RUNTIME_UNAVAILABLE`) when the operating-system sandbox cannot start; the worker never runs.    |
 | `launchInNativeSandbox`         | Wraps one host-owned executable and argument vector in the fixed Tau sandbox profile.                                |
+| `spawnInNativeSandbox`          | Spawns a `launchInNativeSandbox` vector, handing `bwrap` its link-refusing seccomp program on Linux.                 |
 | `nativeSandboxPolicy`           | The fixed capability profile: bundled runtime and source snapshot readable, one private writable root, no network.   |
-| `createWorkspaceMirror`         | Bounded, disposable projection of the injected filesystem into a private native workspace.                           |
+| `createWorkspaceMirror`         | Disposable projection of the injected filesystem into a private native workspace.                                    |
 | `processEnvironment`            | Constructs the child environment from the supported platform values.                                                 |
 | `terminateProcessTree`          | Terminates the owned native process tree across supported host platforms.                                            |
+
+Native sessions accept `requestTimeout: 0` to wait for completion or cancellation. Startup still
+has a two-minute handshake deadline; a positive request timeout remains an explicit host policy.
+Artifact size limits supplied by the host remain enforced alongside length and digest validation.
 
 ## Sandbox
 
@@ -76,6 +83,13 @@ writes only to its private artifact directory (which also serves as its `HOME` a
 no network. The operating system enforces the boundary; there is no trust prompt and no unsandboxed
 fallback. When the platform sandbox or one of its prerequisites is missing, `start()` rejects with
 `NativeRuntimeUnavailableError` and the next request retries.
+
+A worker may not create a symbolic or hard link, not even inside its writable root. The process that
+asked for the worker often reads and writes that root too, and Node's permission model follows a
+link it finds there. On Linux `bwrap` loads a seccomp program that refuses `link`, `symlink`,
+`linkat`, `symlinkat` and `io_uring_setup`. The program arrives on file descriptor 3, so spawn a
+`launchInNativeSandbox` vector with `spawnInNativeSandbox`. On macOS the Seatbelt profile ends with
+`(deny file-write-create (vnode-type SYMLINK))` and `(deny file-link)`.
 
 | Host  | Mechanism                              | Prerequisites                                                             |
 | ----- | -------------------------------------- | ------------------------------------------------------------------------- |

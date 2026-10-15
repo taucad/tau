@@ -962,8 +962,13 @@ const reconcileCapturedLive = (previous: ChatProjection, captured: ChatProjectio
     extra.push(
       ...projectAgentHostLiveEvent(
         current.type === 'text'
-          ? { type: 'text-start', ...identityFields }
-          : { type: 'thinking-start', ...identityFields, timestamp: current.startedAtMs },
+          ? { type: 'text-start', ...identityFields, phase: current.phase }
+          : {
+              type: 'thinking-start',
+              ...identityFields,
+              timestamp: current.startedAtMs,
+              reasoningSummary: current.reasoningSummary,
+            },
         blocks,
       ),
     );
@@ -974,6 +979,7 @@ const reconcileCapturedLive = (previous: ChatProjection, captured: ChatProjectio
           ...identityFields,
           delta: current.content,
           offset: 0,
+          ...(current.type === 'text' ? { phase: current.phase } : { reasoningSummary: current.reasoningSummary }),
         },
         blocks,
       ),

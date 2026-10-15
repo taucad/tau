@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-NATIVE-TARGET-EXPECTATION-A1",
+  "authority": "Principal ruling, 2026-10-14: per-target native expectation for the M3 centre-of-mass family rows",
+  "recordedAt": "2026-10-14T23:05:49Z",
+  "base": {
+    "path": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+    "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86"
+  },
+  "references": {
+    "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-24-simd-lab/lanes/numeric-profile-review-a5/target-outcome-references.json",
+    "sha256": "4e5956f1603c68aaf6ccaac888eefd4cbff05cb1407f765b16033ae37f6580c5",
+    "note": "Records both operands below with their A26 (native, darwin-arm64) and A28 (mixed) authority pins; joined by primary bytes, payload and polarity."
+  },
+  "scope": "Native backend only, selected by the running NAPI target. The mixed backend, darwin-arm64 and every target not listed keep the base expectation. Claims, payloads, tolerance zero and refusals are unchanged; only expected.status differs.",
+  "basis": "The base native statuses derive from darwin-arm64 operands (A26). On the listed target the native centre of mass is bit-equal to the authored point, the same operand the independent A28 binding records, so tolerance zero decides positive=passed and negative=failed.",
+  "targets": {
+    "linux-x64-gnu": {
+      "triple": "x86_64-unknown-linux-gnu",
+      "measurement": {
+        "method": "Engine.ingestSubject on the row transport, then Engine.evaluateClaim on authoredRequestUtf8; operand is result.evidence.measured (witness source brep).",
+        "observations": [
+          {
+            "engine": "geospec-engine@0.1.0-next.51",
+            "binding": "geospec-engine-linux-x64-gnu@0.1.0-next.51",
+            "bindingSha256": "b7f1da2ed39d4c1dc546a878699980f8e991b557eba3681fbc709728a6d2add0",
+            "numericProfile": "geospec-demand-v6"
+          },
+          {
+            "engine": "geospec-engine@0.1.0-next.76",
+            "binding": "geospec-engine-linux-x64-gnu@0.1.0-next.76",
+            "bindingSha256": "aa78d3d05b17f7d5113fdadb881da60eafe461ae4a8db6d2fc6dc3c86976866f",
+            "numericProfile": "geospec-demand-v6"
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "family/toHaveCenterOfMass/positive",
+          "basePointer": "/rows/20/expected/status",
+          "from": "failed",
+          "to": "passed",
+          "binding": {
+            "primarySha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+            "polarity": "positive",
+            "payload": {
+              "expected": {
+                "point": [
+                  -2.0071763937842757e-15,
+                  -6.312693658228941e-15,
+                  15.000000000000002
+                ],
+                "tolerance": 0
+              },
+              "kind": "centerOfMass"
+            }
+          },
+          "operand": [
+            -2.0071763937842757e-15,
+            -6.312693658228941e-15,
+            15.000000000000002
+          ],
+          "independentOperand": {
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m5-current-remainder-mixed-binding-a28/binding/bound-authority-current.json",
+            "sha256": "5a5581a768873650a1202d848cb5d8ecf79a7ffaa6fb7dce4f50df177e4a3153",
+            "pointer": "/rows/18"
+          },
+          "baseOperand": {
+            "target": "darwin-arm64",
+            "operand": [
+              -1.8584966609113662e-15,
+              -5.662219826909963e-15,
+              15.000000000000004
+            ],
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m5-current-premise-binding-a26/bound-authority-current.json",
+            "sha256": "95a9c279ddcd1d8075b59c8e419d72f09a7e9358e6d4293fe2cd7219b653b967",
+            "pointer": "/rows/18"
+          }
+        },
+        {
+          "id": "family/toHaveCenterOfMass/negative",
+          "basePointer": "/rows/21/expected/status",
+          "from": "passed",
+          "to": "failed",
+          "binding": {
+            "primarySha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+            "polarity": "negative",
+            "payload": {
+              "expected": {
+                "point": [
+                  -2.0071763937842757e-15,
+                  -6.312693658228941e-15,
+                  15.000000000000002
+                ],
+                "tolerance": 0
+              },
+              "kind": "centerOfMass"
+            }
+          },
+          "operand": [
+            -2.0071763937842757e-15,
+            -6.312693658228941e-15,
+            15.000000000000002
+          ],
+          "independentOperand": {
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m5-current-remainder-mixed-binding-a28/binding/bound-authority-current.json",
+            "sha256": "5a5581a768873650a1202d848cb5d8ecf79a7ffaa6fb7dce4f50df177e4a3153",
+            "pointer": "/rows/19"
+          },
+          "baseOperand": {
+            "target": "darwin-arm64",
+            "operand": [
+              -1.8584966609113662e-15,
+              -5.662219826909963e-15,
+              15.000000000000004
+            ],
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m5-current-premise-binding-a26/bound-authority-current.json",
+            "sha256": "95a9c279ddcd1d8075b59c8e419d72f09a7e9358e6d4293fe2cd7219b653b967",
+            "pointer": "/rows/19"
+          }
+        }
+      ]
+    }
+  }
+}

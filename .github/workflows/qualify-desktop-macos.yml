@@ -1,0 +1,115 @@
+# Qualify first-use download of the native kernels under a published, notarised desktop build.
+#
+# Charter W12 (native dependency resolution) and go-live DSK-6: before the desktop stops
+# bundling its Python and .NET runtimes, a clean macos-15 and macos-26 runner downloads the
+# signed archive a desktop release published (Tau-macos-arm64.zip, checked against the
+# release's SHA256SUMS.txt), and runs apps/desktop/scripts/qualify-first-use-download.sh
+# against it. The desktop does not prepare into the payload store yet (W6), so the script runs
+# this checkout's `tau prepare` and `tau export` inside the notarised Tau binary as Node
+# (ELECTRON_RUN_AS_NODE): the notarised binary downloads both closures into an empty store and
+# is the parent of both sandboxed workers. Each cell's verdict is a check annotation and a step
+# summary row; the raw files are the job's artifact.
+#
+# The facts cell requires `spctl` to accept the app as notarised. Staging releases are signed
+# with Developer ID but not notarised (release-build.yml), so a desktop-staging@ tag fails that
+# cell while its other cells still run; only a production desktop@ release can pass the gate.
+#
+# GitHub-hosted runners report SIP disabled, so the quarantined-copy cell is recorded as
+# unobservable there (ruling X19) and needs a SIP-enabled Mac running the same script.
+#
+# Sibling of verify-desktop-macos.yml, which verifies a release-build run's artifact; this one
+# takes the release tag, so it only ever qualifies bytes users can download. It needs no
+# secrets and publishes nothing.
+name: Qualify desktop macOS first-use download
+run-name: Qualify first-use download for ${{ inputs.release-tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Published desktop release tag whose Tau-macos-arm64.zip to qualify (for example desktop-staging@0.1.0-staging.72)'
+        required: true
+        type: string
+      source-ref:
+        description: 'Ref whose CLI, manifests and golden receipt to run (default: the dispatched ref)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualify-desktop-macos-${{ inputs.release-tag }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Qualify on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - name: Download the published archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,publishedAt,targetCommitish
+          test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Tau-macos-arm64.zip --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          grep -E '[[:space:]]\*?Tau-macos-arm64\.zip$' SHA256SUMS.txt | shasum -a 256 -c -
+
+      # ditto keeps the signature, extended attributes and notarisation ticket.
+      - name: Unpack Tau.app
+        run: |
+          mkdir -p "$RUNNER_TEMP/app"
+          ditto -x -k "$RUNNER_TEMP/release/Tau-macos-arm64.zip" "$RUNNER_TEMP/app"
+          test -x "$RUNNER_TEMP/app/Tau.app/Contents/MacOS/Tau"
+
+      - name: Build the CLI
+        run: pnpm nx run cli:build --outputStyle=static
+
+      - name: Qualify first-use download under the notarised app
+        env:
+          W12_ANNOTATE: '1'
+          RUNNER_IMAGE: ${{ matrix.runner }}
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          OUT="$RUNNER_TEMP/w12"
+          rm -rf "$HOME/Library/Application Support/tau/payloads"
+          status=0
+          apps/desktop/scripts/qualify-first-use-download.sh "$RUNNER_TEMP/app/Tau.app" "$OUT" || status=$?
+          {
+            echo "### W12 on $RUNNER_IMAGE for \`$TAG\`"
+            echo
+            cat "$OUT/summary.md" 2>/dev/null || echo "No summary was written (exit $status)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: w12-qualify-${{ matrix.runner }}
+          path: |
+            ${{ runner.temp }}/w12
+            !${{ runner.temp }}/w12/*.glb
+          if-no-files-found: ignore
+          retention-days: 30

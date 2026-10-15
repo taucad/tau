@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
+import { ChevronRight, Cloud, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -30,9 +30,10 @@ import { ProjectChatList } from '#components/nav/project-chat-list.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import { toast } from '#components/ui/sonner.js';
 import { StatusMark } from '#components/nav/status-mark.js';
+import { ProjectSyncStatus } from '#components/nav/project-sync-status.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import {
   SidebarFailureRow,
-  SidebarRowActions,
   SidebarRowContextMenu,
   SidebarRowLink,
   SidebarRowMenuButton,
@@ -54,12 +55,14 @@ import {
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
 
+import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
+
 const projectsPerPage = 5;
 
 export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): ProjectListItem[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
-export function ProjectNavigation(): React.JSX.Element {
+export function ProjectNavigation({ className }: { readonly className?: string }): React.JSX.Element {
   const { projects, isLoading, error, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
@@ -113,10 +116,10 @@ export function ProjectNavigation(): React.JSX.Element {
   };
 
   return (
-    /* R9: one row after another carries a tooltip, so a pointer travelling down
-     * the list waits before the first and then skips the delay. */
+    /* Chat rows and New chat shortcuts share a delay as the pointer travels
+     * down the list. Project status descriptions stay screen-reader-only. */
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
-      <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
+      <SidebarGroup className={cn('px-2 group-data-[collapsible=icon]:hidden', className)}>
         <ProjectsLabel />
         {/* One row pitch throughout: projects, a project and its first chat, and
           chats between themselves all sit `gap-0.5` apart, so expanding or
@@ -254,6 +257,9 @@ function ProjectNavigationItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
+  const openInFileManager = useOpenProjectInFileManager(project);
+  const navigate = useNavigate();
+  const location = useLocation();
   const chatsId = `project-chats-${project.id}`;
   const target = projectUrlOr(project.slugs);
   /* S46's "one coalesced status object per project", in the render tree too
@@ -261,6 +267,16 @@ function ProjectNavigationItem({
    * it, instead of three folds and three subscription trees per row. */
   const row = useProjectSidebarRow(project.id);
   const facts = selectProjectFacts(row, isExpanded);
+  const isCloudPending = useTauCloudIntent(project.id) === 'open';
+  const canCreateChat = Boolean(project.slugs) && !isCloudPending;
+  const openSyncDetails = (): void => {
+    if (!project.slugs) {
+      return;
+    }
+    const parameters = new URLSearchParams(isActive ? location.search : '');
+    parameters.set(searchParameterName.workbench, 'revisions');
+    void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+  };
   /* D3: a mark sits on the disclosure control; hover or focus returns the
    * chevron, so the control always shows what it does when it is reached. */
   const hasMark = facts.mark !== 'none';
@@ -294,14 +310,29 @@ function ProjectNavigationItem({
   const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
     <>
       <Item
-        disabled={!project.slugs}
+        disabled={!canCreateChat}
         onSelect={() => {
-          void onCreateChat();
+          if (canCreateChat) {
+            void onCreateChat();
+          }
         }}
       >
         <SquarePen aria-hidden />
         New chat
       </Item>
+      {openInFileManager ? (
+        <Item
+          disabled={openInFileManager.isOpening}
+          aria-busy={openInFileManager.isOpening}
+          onSelect={() => {
+            void openInFileManager.open();
+          }}
+        >
+          <NativeFileManagerIcon icon={openInFileManager.icon} />
+          {openInFileManager.label}
+        </Item>
+      ) : null}
+      <Separator />
       <Item onSelect={onRename}>
         <Pencil aria-hidden />
         Rename
@@ -318,6 +349,11 @@ function ProjectNavigationItem({
         <Forward aria-hidden />
         Share project
       </Item>
+      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
+        <Cloud aria-hidden />
+        View sync status
+      </Item>
+      <Separator />
       {row.glyph === 'none' ? null : (
         <Item
           aria-label={`Close ${project.name}`}
@@ -333,7 +369,6 @@ function ProjectNavigationItem({
           Close
         </Item>
       )}
-      <Separator />
       <Item
         variant='destructive'
         onSelect={() => {
@@ -407,9 +442,19 @@ function ProjectNavigationItem({
                 descriptionId={`project-status-${project.id}`}
                 isActive={isActive}
                 isPending={isPending}
+                hasTooltip={false}
                 onClick={onOpen}
               />
-              <SidebarRowActions>
+              <span
+                className='flex shrink-0 items-center'
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <ProjectSyncStatus sync={row.sync} isCloudPending={isCloudPending} onOpenDetails={openSyncDetails} />
                 <SidebarRowMenuButton
                   name={project.name}
                   items={menuItems}
@@ -425,17 +470,25 @@ function ProjectNavigationItem({
                       size='icon'
                       className={sidebarRowButtonClass}
                       aria-label={`New chat in ${project.name}`}
-                      disabled={!project.slugs}
+                      aria-disabled={!canCreateChat}
                       onClick={() => {
-                        void onCreateChat();
+                        if (canCreateChat) {
+                          void onCreateChat();
+                        }
                       }}
                     >
                       <SquarePen aria-hidden className='size-3.5' />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side='right'>New chat</TooltipContent>
+                  <TooltipContent side='bottom'>
+                    {isCloudPending
+                      ? 'New chat — Wait for project files to be ready.'
+                      : project.slugs
+                        ? 'New chat'
+                        : 'New chat — Project address is not ready.'}
+                  </TooltipContent>
                 </Tooltip>
-              </SidebarRowActions>
+              </span>
             </>
           )}
         </div>

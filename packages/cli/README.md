@@ -60,14 +60,15 @@ Which extensions and export routes exist remains owned by the plugin packages.
 
 ## PicoGK
 
-Point the CLI at a prepared, target-specific PicoGK payload to run C# entry points natively. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
+Prepare the PicoGK kernel once, then export C# entry points natively. `tau prepare picogk` downloads Microsoft's .NET runtime archive and the Tau PicoGK layer that `@taucad/picogk`'s `tau-plugin.json` pins, verifies both and seals them as one closure in the payload store; `tau export` then launches the worker from that closure with no environment variable. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
 
 ```bash
-TAU_PICOGK_RESOURCE_ROOT=/path/to/picogk-resources tau export model.cs --ext=3mf
-TAU_PICOGK_RESOURCE_ROOT=/path/to/picogk-resources tau export model.cs --ext=usdz
+tau prepare picogk
+tau export model.cs --ext=3mf
+tau export model.cs --ext=usdz
 ```
 
-The resource root contains directories such as `darwin-arm64/` with `tau-runtime-manifest.json` and the integrity-pinned worker payload prepared by the desktop build.
+An export of a `.cs` file before `tau prepare picogk` exits 3 with `KERNEL_NOT_PREPARED`, and on a host no closure supports (PicoGK runs on macOS 14 or later on Apple silicon) with `UNSUPPORTED_TARGET`.
 
 ## Tau Host
 
@@ -121,6 +122,8 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 `tau mcp` serves Tau's CAD tools — `evaluate_model`, `test_model`, `screenshot`, `export_model` and `arrange_workbench` — over stdio to the MCP client that launched it. Stdout carries the MCP protocol only. Each call works in the first of: `--project`; the folder Codex sends with the call; `CLAUDE_PROJECT_DIR`; the working directory. Screenshots come back inline; they and GeoSpec reports over 128 KiB are saved in a temporary folder that is removed when the server stops. `--plugin` and `--config` work as they do for `export`.
 
 Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one.
+
+Native kernels are composed from the payload store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it in the server's process with progress and cancellation, then replaces each project's thread once its in-flight calls finish. A runtime `tau prepare` sealed meanwhile is picked up on the next call. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
 
 ```bash
 tau mcp --project ./bracket

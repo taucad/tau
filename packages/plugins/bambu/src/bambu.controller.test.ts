@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
+import { MessageChannel } from 'node:worker_threads';
+
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import { connectMachineChannel } from '@taucad/runtime/machine';
 
 import type {
   MachineArtifactReference,
@@ -10,12 +18,25 @@ import type {
 import { zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
+import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
+import { bambuA1MiniManifest, bambuServicePort, bambuX1cManifest } from '#bambu.manifest.js';
+
 const report =
   '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"stg_cur":1,"hms":[{"attr":201327360,"code":196619}],"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
 const published = vi.hoisted((): string[] => []);
-const versionReply = vi.hoisted(() => ({ serial: '00M00A391800004' }));
-// The model the mocked printer's status reports; `BL-P001` is the X1C.
-const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001', externalSpool: false }));
+const versionReply = vi.hoisted(() => ({ serial: '00M00A000000001', firmware: '01.08.02.00' }));
+// The model and state the mocked printer's status reports; `BL-P001` is the X1C. A non-zero `amsStatus` is reported
+// as `ams_status` (main state in bits 8–15).
+const statusReply = vi.hoisted(() => ({
+  printerType: 'BL-P001',
+  externalSpool: false,
+  gcodeState: 'RUNNING',
+  amsStatus: 0,
+}));
+// Push the mocked printer's whole status now, as a printer does on its own.
+const mockPrinter = vi.hoisted((): { push?: () => void } => ({}));
+// A CONNACK return code other than 0 refuses the connection, as MQTT.js reports it.
+const connack = vi.hoisted(() => ({ code: 0 }));
 const externalSpoolReport =
   '"vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FFFFFFFF","tray_info_idx":"GFG99","remain":0},"ams":{';
 // How the mocked printer answers a start: an exact echo, or only its status naming the run by the id or name Tau sent.
@@ -36,6 +57,10 @@ vi.mock('mqtt', async () => {
       stream.write(Buffer.from([0x00, 0x00]));
       stream.uncork();
       queueMicrotask(() => {
+        if (connack.code !== 0) {
+          this.#emit('error', Object.assign(new Error('Connection refused: Not authorized'), { code: connack.code }));
+          return;
+        }
         this.connected = true;
         this.#emit('connect');
       });
@@ -61,7 +86,10 @@ vi.mock('mqtt', async () => {
       return this;
     }
 
-    public async subscribeAsync(): Promise<void> {
+    public async subscribeAsync(topic: string): Promise<void> {
+      mockPrinter.push = () => {
+        this.#emit('message', topic, Buffer.from(this.#status()));
+      };
       await Promise.resolve();
     }
 
@@ -112,19 +140,11 @@ vi.mock('mqtt', async () => {
           'message',
           topic.replace('/request', '/report'),
           Buffer.from(
-            `{"info":{"command":"get_version","sequence_id":"0","module":[{"name":"ota","sw_ver":"01.08.02.00","hw_ver":"OTA","sn":"${versionReply.serial}"}],"result":"success"}}`,
+            `{"info":{"command":"get_version","sequence_id":"0","module":[{"name":"ota","sw_ver":"${versionReply.firmware}","hw_ver":"OTA","sn":"${versionReply.serial}"}],"result":"success"}}`,
           ),
         );
       } else {
-        this.#emit(
-          'message',
-          topic.replace('/request', '/report'),
-          Buffer.from(
-            report
-              .replace('BL-P001', statusReply.printerType)
-              .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{'),
-          ),
-        );
+        this.#emit('message', topic.replace('/request', '/report'), Buffer.from(this.#status()));
       }
       await Promise.resolve();
     }
@@ -133,6 +153,16 @@ vi.mock('mqtt', async () => {
       this.connected = false;
       this.#emit('close');
       await Promise.resolve();
+    }
+
+    #status(): string {
+      return report
+        .replace('BL-P001', statusReply.printerType)
+        .replace(
+          '"gcode_state":"RUNNING"',
+          `${statusReply.amsStatus === 0 ? '' : `"ams_status":${String(statusReply.amsStatus)},`}"gcode_state":"${statusReply.gcodeState}"`,
+        )
+        .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{');
     }
 
     #emit(name: string, ...values: unknown[]): void {
@@ -161,12 +191,19 @@ const archive = (plate: string, sliceInfo?: string): Uint8Array<ArrayBuffer> =>
       ...(sliceInfo === undefined ? {} : { 'Metadata/slice_info.config': encoder.encode(sliceInfo) }),
     }),
   );
-// Synthetic stand-ins: only the provenance signals each producer writes, with a made-up version.
-const studioArchive = archive(
-  '; HEADER_BLOCK_START\n; BambuStudio 99.0.0.0\n; HEADER_BLOCK_END\nG28\n',
-  '<config><header><header_item key="X-BBL-Client-Type" value="slicer"/>' +
-    '<header_item key="X-BBL-Client-Version" value="99.0.0.0"/></header></config>',
-);
+// Synthetic stand-ins: the provenance signals each producer writes, with a made-up version, and the facts Bambu
+// Studio records for an X1C 0.4 mm slice on the textured plate.
+const studio = (filaments: readonly string[]): Uint8Array<ArrayBuffer> =>
+  archive(
+    '; HEADER_BLOCK_START\n; BambuStudio 99.0.0.0\n; HEADER_BLOCK_END\n; CONFIG_BLOCK_START\n' +
+      '; curr_bed_type = Textured PEI Plate\n' +
+      `; filament_diameter = ${filaments.map(() => '1.75').join(',')}\n` +
+      `; filament_type = ${filaments.join(';')}\n` +
+      '; nozzle_diameter = 0.4\n; printer_model = Bambu Lab X1 Carbon\n; CONFIG_BLOCK_END\nG28\n',
+    '<config><header><header_item key="X-BBL-Client-Type" value="slicer"/>' +
+      '<header_item key="X-BBL-Client-Version" value="99.0.0.0"/></header></config>',
+  );
+const studioArchive = studio(['PLA']);
 const referenceArchive = archive('; generated by @taucad/slicer reference engine\nG28\n');
 const unnamedArchive = archive('G28\n');
 const artifactOf = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference => ({
@@ -179,21 +216,20 @@ const artifactOf = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference =>
   selectedMember: 'Metadata/plate_1.gcode',
 });
 const candidate = {
-  id: 'bambu:00M00A391800004',
+  id: 'bambu:00M00A000000001',
   name: 'Workshop X1C',
-  endpoint: { address: '192.0.2.10', interface: 'test0' },
-  claimedIdentity: { serial: '00M00A391800004', model: 'X1C' },
+  endpoint: { transport: 'network', address: '192.0.2.10', interface: 'test0' } as const,
+  claimedIdentity: { serial: '00M00A000000001', model: 'X1C' },
   observedAt: '2026-09-14T00:00:00.000Z',
   expiresAt: '2026-09-14T00:00:30.000Z',
 };
 
 describe('Bambu read-only controller', () => {
-  it('should keep secret and trust host-local while normalizing X1C status and AMS setup', async () => {
+  it('should keep secret and trust host-local while reporting X1C status, then prepare, upload and start', async () => {
     published.length = 0;
-    versionReply.serial = '00M00A391800004';
+    versionReply.serial = '00M00A000000001';
     const bytes = studioArchive;
     const artifact = artifactOf(bytes);
-    const artifactDigest = artifact.digest;
     const archives = [studioArchive, referenceArchive, unnamedArchive];
     const configuration = {
       amsMapping: [0],
@@ -208,16 +244,14 @@ describe('Bambu read-only controller', () => {
       timelapse: false,
     } as const;
     const uploadFile = vi.fn(async () => ({ bytesWritten: bytes.byteLength }));
-    const close = vi.fn(async () => undefined);
-    const network: MachineNetworkStream = {
+    const resolveSecret = vi.fn(async () => 'access-code-must-not-escape');
+    const connectStream = vi.fn(async () => ({
       readable: (async function* () {
         yield* [];
       })(),
       write: vi.fn(async () => undefined),
-      close,
-    };
-    const resolveSecret = vi.fn(async () => 'access-code-must-not-escape');
-    const connectStream = vi.fn(async () => network);
+      close: vi.fn(async () => undefined),
+    }));
     const captureNetworkStill: NonNullable<MachineConnectionRuntime['captureNetworkStill']> = vi.fn(async () =>
       Object.freeze({
         bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
@@ -240,7 +274,7 @@ describe('Bambu read-only controller', () => {
     const session = await connectBambuMachine(
       {
         candidate,
-        configuration: { logicalId: 'workshop' },
+        configuration: {},
         connection: {
           secretRef: 'vault:bambu-x1c',
           serviceTrust: {
@@ -248,17 +282,14 @@ describe('Bambu read-only controller', () => {
             camera: { type: 'pinned', digest: pinnedDigest },
           },
         },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,
     );
-
-    const descriptor = await session.getDescriptor({
-      signal: new AbortController().signal,
-    });
-    const snapshot = await session.getSnapshot({
-      signal: new AbortController().signal,
-    });
+    const { signal } = new AbortController();
+    const descriptor = await session.getDescriptor({ signal });
+    const snapshot = await session.getSnapshot({ signal });
     expect(() =>
       JSON.stringify(snapshot, (_key, value: unknown) => {
         if (value === undefined) {
@@ -270,65 +301,49 @@ describe('Bambu read-only controller', () => {
     expect(resolveSecret).toHaveBeenCalledWith(expect.objectContaining({ reference: 'vault:bambu-x1c' }));
     expect(connectStream).toHaveBeenCalledWith(
       expect.objectContaining({
-        endpoint: { address: '192.0.2.10', port: 8883 },
+        // The ports the provider dials are the ones its manifest declares and the binding pins.
+        endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuX1cManifest, 'mqtt') },
         transport: 'tls',
         trust: { type: 'pinned', digest: pinnedDigest },
       }),
     );
-    expect(descriptor).toMatchObject({
-      id: '00M00A391800004',
-      model: 'X1C',
-      firmware: '01.08.02.00',
-    });
+    expect(descriptor).toMatchObject({ id: '00M00A000000001', model: 'X1C', firmware: '01.08.02.00' });
     expect(snapshot).toMatchObject({
-      activeRunId: 'run-1',
+      connection: 'connected',
+      state: { status: 'active' },
       run: {
-        state: 'printing',
-        progress: 42,
-        remainingSeconds: 180,
-        name: 'Cube',
-        currentLayer: 12,
-        totalLayers: 120,
-        stage: 'Levelling the bed',
-        speedProfile: 'standard',
-        speedPercent: 100,
-      },
-      alerts: [
-        {
-          code: '0C00-0300-0003-000B',
-          severity: 'warning',
-          message: "The printer's camera and AI inspection raised a warning.",
-          reference: 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/0C00_0300_0003_000B',
+        runId: 'run-1',
+        origin: 'external',
+        state: 'running',
+        progress: {
+          fraction: 0.42,
+          remaining: 180_000,
+          counters: [{ id: 'layer', current: 12, total: 120 }],
         },
-      ],
-      setup: {
-        materials: [
-          { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA00' },
-          { slot: 1, state: 'empty' },
-          { slot: 2, state: 'empty' },
-          { slot: 3, state: 'empty' },
+      },
+      alerts: [{ code: '0C00-0300-0003-000B', severity: 'warning', blocks: 'nothing' }],
+    });
+    const filament = snapshot.components.find(({ componentId }) => componentId === 'filament');
+    expect(filament).toMatchObject({
+      knowledge: 'known',
+      value: {
+        slots: [
+          { slot: { unitId: 'ams-a', slotId: 'a1' }, state: 'loaded', material: { materialType: 'PLA' } },
+          { slot: { slotId: 'a2' }, state: 'empty' },
+          { slot: { slotId: 'a3' }, state: 'empty' },
+          { slot: { slotId: 'a4' }, state: 'empty' },
+          { slot: { unitId: 'external', slotId: 'spool' } },
         ],
+        routes: [{ toolheadId: 'tool-0', current: { unitId: 'ams-a', slotId: 'a1' } }],
       },
-      temperatures: { nozzleTarget: { value: 220 }, bedTarget: { value: 65 } },
-      fans: { part: 100 },
-      materialSystem: {
-        currentSlot: 0,
-        targetSlot: 0,
-        units: [{ unit: 0, humidityIndex: 3 }],
-      },
-      network: { wifiSignalDbm: -47 },
-      lights: { chamber: 'on' },
-      removableStorage: 'present',
     });
     if (session.stillCapture.type !== 'supported') {
       throw new Error('Expected X1C RTSPS still capability');
     }
-    await expect(session.stillCapture.capture({ signal: new AbortController().signal })).resolves.toMatchObject({
-      mediaType: 'image/jpeg',
-    });
+    await expect(session.stillCapture.capture({ signal })).resolves.toMatchObject({ mediaType: 'image/jpeg' });
     expect(captureNetworkStill).toHaveBeenCalledWith(
       expect.objectContaining({
-        endpoint: { address: '192.0.2.10', port: 322 },
+        endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuX1cManifest, 'camera') },
         connectTimeout: 60_000,
         path: '/streaming/live/1',
         secretRef: 'vault:bambu-x1c',
@@ -338,67 +353,45 @@ describe('Bambu read-only controller', () => {
     );
     expect(JSON.stringify({ descriptor, snapshot })).not.toMatch(/access-code|192\.0\.2\.10|sha256:/u);
     expect(published).toEqual(expect.arrayContaining([expect.stringContaining('"command":"get_version"')]));
-    const prepared = await session.preparePrint({
-      operationId: 'prepared-1',
-      expectedMachineId: '00M00A391800004',
-      artifact,
-      configuration,
-      signal: new AbortController().signal,
-    });
-    expect(prepared).toMatchObject({
-      status: 'ready',
-      remoteName: 'tau-prepared-1.gcode.3mf',
-      digest: artifactDigest,
-      length: bytes.byteLength,
-    });
+
+    const { jobs } = session;
+    if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
+      throw new Error('Expected stored jobs');
+    }
+    const base = { operationId: 'prepared-1', expectedMachineId: '00M00A000000001', artifact, configuration, signal };
+    const prepared = await jobs.prepare(base);
+    if (prepared.status === 'refused' || prepared.remoteName === undefined) {
+      throw new Error('Expected a preparation');
+    }
+    const { remoteName } = prepared;
+    // The mocked printer is mid-run: only the idle check blocks.
+    expect(prepared.checks.filter(({ state }) => state === 'blocked').map(({ id }) => id)).toEqual(['idle']);
+    expect(prepared).toMatchObject({ remoteName: 'tau-prepared-1.gcode.3mf', parser: { id: 'tau.bambu.gcode-3mf' } });
     expect(uploadFile).not.toHaveBeenCalled();
     for (const unqualified of [referenceArchive, unnamedArchive]) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- each refusal is asserted in turn.
-      await expect(
-        session.preparePrint({
-          operationId: 'prepared-unqualified',
-          expectedMachineId: '00M00A391800004',
-          artifact: artifactOf(unqualified),
-          configuration,
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toEqual({
-        status: 'rejected',
-        code: 'ARTIFACT_UNQUALIFIED',
-        message:
-          'This file was not sliced by Bambu Studio. Slice it with Bambu Studio in Tau (desktop app with Bambu Studio installed), then send it again.',
-        observedAt: '2026-09-14T00:00:01.000Z',
+      const refused = await jobs.prepare({ ...base, artifact: artifactOf(unqualified) });
+      expect(refused.status !== 'refused' && refused.checks.find(({ id }) => id === 'producer')).toMatchObject({
+        state: 'blocked',
       });
     }
-    await expect(
-      session.preparePrint({
-        operationId: 'prepared-2',
-        expectedMachineId: '00M00A391800004',
-        artifact,
-        configuration: {
-          ...configuration,
-          operatorConfirmedBedType: 'cool_plate',
-        },
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ status: 'rejected', code: 'SETUP_UNQUALIFIED' });
-    if (prepared.status !== 'ready') {
-      throw new Error('Expected ready preparation');
-    }
-    const transfer = await session.uploadPrint({
+    const otherPlate = await jobs.prepare({
+      ...base,
+      configuration: { ...configuration, operatorConfirmedBedType: 'cool_plate' },
+    });
+    expect(otherPlate.status !== 'refused' && otherPlate.checks.find(({ id }) => id === 'plate')).toMatchObject({
+      state: 'blocked',
+    });
+
+    const transfer = await jobs.transfer({
+      ...base,
       operationId: 'upload-1',
-      expectedMachineId: '00M00A391800004',
-      artifact,
       remoteName: prepared.remoteName,
       providerData: prepared.providerData,
-      configuration,
-      signal: new AbortController().signal,
     });
     expect(transfer).toEqual({
-      status: 'transferred',
+      status: 'accepted',
       transferId: 'tau-prepared-1.gcode.3mf',
-      digest: artifactDigest,
-      length: bytes.byteLength,
       observedAt: '2026-09-14T00:00:01.000Z',
     });
     expect(uploadFile).toHaveBeenCalledWith(
@@ -411,28 +404,24 @@ describe('Bambu read-only controller', () => {
     );
     expect(uploadFile).toHaveBeenCalledOnce();
     expect(published).not.toEqual(expect.arrayContaining([expect.stringContaining('project_file')]));
-    if (transfer.status !== 'transferred') {
-      throw new Error('Expected transferred upload');
-    }
-    await expect(
-      session.submit({
-        operationId: 'start-1',
-        expectedMachineId: '00M00A391800004',
-        artifact,
-        remoteName: prepared.remoteName,
-        transferId: transfer.transferId,
+    const start = async (operationId: string) =>
+      jobs.start({
+        ...base,
+        operationId,
+        remoteName,
+        transferId: 'tau-prepared-1.gcode.3mf',
         providerData: prepared.providerData,
-        configuration,
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ status: 'accepted', providerRunId: 'run-2' });
-    const completed = await session.getSnapshot({
-      signal: new AbortController().signal,
-    });
-    expect(completed).toMatchObject({ readiness: 'idle' });
-    expect(completed).not.toHaveProperty('activeRunId');
-    // The printer may keep its last stage id after a run ends; a finished run shows no stage.
-    expect(completed.run).not.toHaveProperty('stage');
+      });
+    // Prepared while the printer printed; it is still printing, so nothing is sent.
+    await expect(start('start-0')).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_RUN_ACTIVE' });
+    expect(published).not.toEqual(expect.arrayContaining([expect.stringContaining('project_file')]));
+    statusReply.gcodeState = 'IDLE';
+    mockPrinter.push?.();
+    await expect(start('start-1')).resolves.toMatchObject({ status: 'accepted', runId: 'run-2' });
+    const lastStart = (): Record<string, unknown> | undefined =>
+      published
+        .map((payload) => JSON.parse(payload) as { print?: Record<string, unknown> })
+        .findLast((payload) => payload.print?.['command'] === 'project_file')?.print;
     expect(published).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
@@ -440,9 +429,7 @@ describe('Bambu read-only controller', () => {
         ),
       ]),
     );
-    const project = published
-      .map((payload) => JSON.parse(payload) as { print?: Record<string, unknown> })
-      .find((payload) => payload.print?.['command'] === 'project_file')?.print;
+    const project = lastStart();
     expect(project?.['sequence_id']).toMatch(/^\d{5}$/u);
     expect(project?.['project_id']).toMatch(/^[1-9]\d*$/u);
     expect(project?.['subtask_id']).toBe(project?.['project_id']);
@@ -451,73 +438,85 @@ describe('Bambu read-only controller', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names are fixed.
     expect(project?.['ams_mapping2']).toEqual([{ ams_id: 0, slot_id: 0 }]);
 
-    // A printer that starts without a correlated echo still confirms the start through its status, at once.
-    const start = async (operationId: string) =>
-      session.submit({
-        operationId,
-        expectedMachineId: '00M00A391800004',
-        artifact,
-        remoteName: prepared.remoteName,
-        transferId: transfer.transferId,
-        providerData: prepared.providerData,
-        configuration,
-        signal: new AbortController().signal,
-      });
-    const lastStart = (): Record<string, unknown> | undefined =>
-      published
-        .map((payload) => JSON.parse(payload) as { print?: Record<string, unknown> })
-        .findLast((payload) => payload.print?.['command'] === 'project_file')?.print;
+    // A printer that starts without a correlated echo still proves the start through its status.
     try {
       startReply.mode = 'status-id';
-      await expect(start('start-2')).resolves.toMatchObject({
-        status: 'accepted',
-        providerRunId: lastStart()?.['subtask_id'],
-      });
-      await expect(
-        session.reconcile({ operationId: 'start-2', command: 'project_file', signal: new AbortController().signal }),
-      ).resolves.toMatchObject({ status: 'accepted', providerRunId: lastStart()?.['subtask_id'] });
-      // How each start settled reaches the host log by id alone, so a slow printer can be diagnosed from it.
-      const logged = vi.mocked(runtime.log).mock.calls.map(([entry]) => entry.message);
-      expect(logged).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(
-            /^Start \d+ proven by reply accepted in the start window, \d+ ms and \d+ status reports after publishing;/u,
-          ),
-          expect.stringMatching(
-            /^Start \d+ proven by status in the start window, .*; printer \w+, run id matches, run name \w+\.$/u,
-          ),
-        ]),
-      );
-      expect(logged.join('\n')).not.toMatch(/00M00A391800004|192\.0\.2\.10/u);
+      await expect(start('start-2')).resolves.toMatchObject({ status: 'accepted', runId: lastStart()?.['subtask_id'] });
       startReply.mode = 'status-name';
-      await expect(start('start-3')).resolves.toMatchObject({ status: 'accepted', providerRunId: '0' });
-      await expect(session.getSnapshot({ signal: new AbortController().signal })).resolves.toMatchObject({
-        activeRunId: '0',
-      });
+      await expect(start('start-3')).resolves.toMatchObject({ status: 'accepted' });
       // After a reconnect the transfer name still proves a start whose run carries only that name.
       await expect(
-        session.reconcile({
-          operationId: 'start-8',
-          command: 'project_file',
-          transferId: prepared.remoteName,
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ status: 'accepted', providerRunId: '0' });
+        session.reconcile({ operationId: 'start-8', kind: 'start', transferId: prepared.remoteName, signal }),
+      ).resolves.toMatchObject({ status: 'accepted' });
       // A start this session never sent, whose id the printer's run does not carry, stays unproven.
-      await expect(
-        session.reconcile({ operationId: 'start-9', command: 'project_file', signal: new AbortController().signal }),
-      ).resolves.toMatchObject({ status: 'unknown', reason: 'no-correlated-provider-reply' });
+      await expect(session.reconcile({ operationId: 'start-9', kind: 'start', signal })).resolves.toMatchObject({
+        status: 'unknown',
+        reason: 'no-correlated-provider-reply',
+      });
+      const logged = vi.mocked(runtime.log).mock.calls.map(([entry]) => entry.message);
+      expect(logged.join('\n')).not.toMatch(/00M00A000000001|192\.0\.2\.10/u);
     } finally {
       startReply.mode = 'echo';
+      statusReply.gcodeState = 'RUNNING';
     }
     await session.close();
   });
 
+  it('should stop a print during its colour change with Stop alone, never the AMS abort', async () => {
+    published.length = 0;
+    // RUNNING with the AMS in a filament change (main 1): a multi-colour print swapping spools.
+    statusReply.amsStatus = 0x01_00;
+    try {
+      const session = await connectBambuMachine(
+        {
+          candidate,
+          configuration: {},
+          connection: {
+            secretRef: 'vault:bambu-x1c',
+            serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
+          },
+          purpose: 'bind',
+          signal: new AbortController().signal,
+        },
+        {
+          clock: { now: () => '2026-09-14T00:00:01.000Z' },
+          log: vi.fn(async () => undefined),
+          connectStream: vi.fn(async () => ({
+            readable: (async function* () {
+              yield* [];
+            })(),
+            write: vi.fn(async () => undefined),
+            close: vi.fn(async () => undefined),
+          })),
+          async *readArtifact() {
+            yield* [];
+          },
+          resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
+        },
+      );
+      // The stop's reply settles it at once; the bound only keeps a wrongly sent abort, which waits for the AMS to
+      // go idle, from hanging the test before the assertions.
+      await session.stop({ operationId: 'stop-colour-change', signal: AbortSignal.timeout(1000) });
+      const commands = published.map(
+        (payload) => (JSON.parse(payload) as { print?: { command?: string } }).print?.command,
+      );
+      // Bambu Studio's Stop during a print is `stop`; `ams_control abort` is only for a change outside one.
+      expect(commands).toContain('stop');
+      expect(commands).not.toContain('ams_control');
+      await session.close();
+    } finally {
+      statusReply.amsStatus = 0;
+    }
+  });
+
   it('should offer the external spool as slot 254 and start from it with the AMS off', async () => {
     published.length = 0;
-    versionReply.serial = '00M00A391800004';
+    versionReply.serial = '00M00A000000001';
     statusReply.externalSpool = true;
-    const artifact = artifactOf(studioArchive);
+    statusReply.gcodeState = 'IDLE';
+    const petgArchive = studio(['PETG']);
+    const twoFilamentArchive = studio(['PLA', 'PETG']);
+    const artifact = artifactOf(petgArchive);
     const configuration = {
       amsMapping: [254],
       bedLeveling: true,
@@ -540,17 +539,22 @@ describe('Bambu read-only controller', () => {
         write: vi.fn(async () => undefined),
         close: vi.fn(async () => undefined),
       })),
-      async *readArtifact() {
-        yield studioArchive;
+      async *readArtifact({ artifact: requested }) {
+        yield (
+          [petgArchive, twoFilamentArchive, studioArchive].find(
+            (bytes) => artifactOf(bytes).digest === requested.digest,
+          ) ?? petgArchive
+        );
       },
       resolveSecret: vi.fn(async () => 'access-code'),
-      uploadFile: vi.fn(async () => ({ bytesWritten: studioArchive.byteLength })),
+      uploadFile: vi.fn(async () => ({ bytesWritten: petgArchive.byteLength })),
     };
     const session = await connectBambuMachine(
       {
         candidate,
-        configuration: { logicalId: 'workshop' },
+        configuration: {},
         connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,
@@ -558,51 +562,44 @@ describe('Bambu read-only controller', () => {
     const { signal } = new AbortController();
     try {
       const snapshot = await session.getSnapshot({ signal });
-      expect(snapshot.setup.materials.at(-1)).toEqual({
-        slot: 254,
+      const filament = snapshot.components.find(({ componentId }) => componentId === 'filament');
+      const slots =
+        filament?.knowledge === 'known' && filament.value.kind === 'material-system' ? filament.value.slots : [];
+      expect(slots.at(-1)).toMatchObject({
+        slot: { unitId: 'external', slotId: 'spool' },
         state: 'loaded',
-        materialId: 'PETG',
-        profileId: 'GFG99',
-        color: '#FFFFFF',
+        material: { materialType: 'PETG', color: '#FFFFFFFF', preset: { profileId: 'GFG99' } },
       });
-      const prepare = async (
-        overrides: Readonly<{
-          amsMapping?: readonly number[];
-          expectedMaterials?: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
-        }>,
-      ) =>
-        session.preparePrint({
+      const { jobs } = session;
+      if (jobs.type !== 'supported') {
+        throw new Error('Expected jobs');
+      }
+      const prepare = async (overrides: Readonly<{ amsMapping?: number[] }>, program = petgArchive) =>
+        jobs.prepare({
           operationId: 'prepared-external',
-          expectedMachineId: '00M00A391800004',
-          artifact,
+          expectedMachineId: '00M00A000000001',
+          artifact: artifactOf(program),
           configuration: { ...configuration, ...overrides },
           signal,
         });
-      await expect(
-        prepare({
-          amsMapping: [0, 254],
-          expectedMaterials: [
-            { slot: 0, materialId: 'PLA' },
-            { slot: 254, materialId: 'PETG' },
-          ],
-        }),
-      ).resolves.toMatchObject({
-        status: 'rejected',
-        code: 'SETUP_UNQUALIFIED',
-        message: 'The external spool can only feed a one-filament print. Map every filament to an AMS tray.',
+      const filamentCheck = async (overrides: Parameters<typeof prepare>[0], program?: Uint8Array<ArrayBuffer>) => {
+        const prepared = await prepare(overrides, program);
+        return prepared.status === 'refused' ? undefined : prepared.checks.find(({ id }) => id === 'filament');
+      };
+      await expect(filamentCheck({ amsMapping: [0, 254] }, twoFilamentArchive)).resolves.toMatchObject({
+        state: 'blocked',
+        detail: 'The external spool can only feed a one-filament print. Map every filament to an AMS slot.',
       });
-      await expect(prepare({ expectedMaterials: [{ slot: 254, materialId: 'PLA' }] })).resolves.toMatchObject({
-        status: 'rejected',
-        code: 'SETUP_UNQUALIFIED',
-      });
+      // The spool holds PETG; a PLA slice mapped to it is blocked whatever the form claims.
+      await expect(filamentCheck({}, studioArchive)).resolves.toMatchObject({ state: 'blocked' });
       const prepared = await prepare({});
-      if (prepared.status !== 'ready') {
-        throw new Error('Expected ready preparation');
+      if (prepared.status === 'refused' || prepared.remoteName === undefined) {
+        throw new Error('Expected a preparation');
       }
       await expect(
-        session.submit({
+        jobs.start({
           operationId: 'start-external',
-          expectedMachineId: '00M00A391800004',
+          expectedMachineId: '00M00A000000001',
           artifact,
           remoteName: prepared.remoteName,
           transferId: prepared.remoteName,
@@ -623,11 +620,213 @@ describe('Bambu read-only controller', () => {
       /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
     } finally {
       statusReply.externalSpool = false;
+      statusReply.gcodeState = 'RUNNING';
       await session.close();
     }
   });
 
+  it.each([
+    {
+      model: 'X1C',
+      serial: '00M00A000000001',
+      printerType: 'BL-P001',
+      proven: '01.12.00.00',
+      manifest: bambuX1cManifest,
+    },
+    {
+      model: 'A1 mini',
+      serial: '0300AA000000001',
+      printerType: 'N1',
+      proven: '01.03.30.01',
+      manifest: bambuA1MiniManifest,
+    },
+  ] as const)(
+    'should keep the $model actions the operator qualified on its firmware, and mark them designed on another',
+    async ({ model, serial, printerType, proven, manifest }) => {
+      const qualifications = async (firmware: string) => {
+        versionReply.serial = serial;
+        versionReply.firmware = firmware;
+        statusReply.printerType = printerType;
+        const session = await connectBambuMachine(
+          {
+            candidate: { ...candidate, claimedIdentity: { model, serial } },
+            configuration: {},
+            connection: { secretRef: 'vault:bambu', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+            purpose: 'bind',
+            signal: new AbortController().signal,
+          },
+          {
+            clock: { now: () => '2026-10-05T00:00:00.000Z' },
+            log: vi.fn(async () => undefined),
+            connectStream: vi.fn(async () => ({
+              readable: (async function* () {
+                yield* [];
+              })(),
+              write: vi.fn(async () => undefined),
+              close: vi.fn(async () => undefined),
+            })),
+            resolveSecret: vi.fn(async () => '12345678'),
+            async *readArtifact() {
+              yield* [];
+            },
+          },
+          model,
+        );
+        try {
+          const descriptor = await session.getDescriptor({ signal: new AbortController().signal });
+          expect(descriptor.firmware).toBe(firmware);
+          return Object.fromEntries(
+            descriptor.capabilities.actions.map(({ componentId, id, qualification }) => [
+              `${componentId}:${id}`,
+              qualification.status,
+            ]),
+          );
+        } finally {
+          await session.close();
+        }
+      };
+      try {
+        const qualified = manifest.actions
+          .filter(({ qualification }) => qualification.status === 'qualified')
+          .map(({ componentId, id }) => `${componentId}:${id}`);
+        // The operator's evidence: light, fans, home, jog and run control on the X1C; part fan and jog on the A1 mini.
+        expect(qualified).toEqual(
+          expect.arrayContaining(
+            model === 'X1C'
+              ? ['chamber-light:switch.set', 'part-fan:level.set', 'motion:motion.jog', 'controller:run.pause']
+              : ['part-fan:level.set', 'motion:motion.jog'],
+          ),
+        );
+        const onProven = await qualifications(proven);
+        const onOther = await qualifications('01.12.01.00');
+        for (const key of qualified) {
+          expect([key, onProven[key]]).toEqual([key, 'qualified']);
+          expect([key, onOther[key]]).toEqual([key, 'designed']);
+        }
+      } finally {
+        versionReply.serial = '00M00A000000001';
+        versionReply.firmware = '01.08.02.00';
+        statusReply.printerType = 'BL-P001';
+      }
+    },
+  );
+
+  it.each([
+    { providerId: 'bambu', model: 'X1C', serial: '00M00A000000001', printerType: 'BL-P001' },
+    { providerId: 'bambu-a1-mini', model: 'A1 mini', serial: '0300AA000000001', printerType: 'N1' },
+  ] as const)(
+    'should list and connect a $model binding an earlier build stored, address in its configuration',
+    async ({ providerId, model, serial, printerType }) => {
+      versionReply.serial = serial;
+      statusReply.printerType = printerType;
+      const root = await mkdtemp(join(tmpdir(), 'tau-bambu-store-'));
+      try {
+        // Exactly as the store at f1fd08a32 wrote it: an endpoint without `transport`, and the binding form 1.1.0
+        // (`logicalId`, `address` and `serial` in the configuration). The strict 2.1.0 form refuses `logicalId` and
+        // `address`, so this connects only because a stored configuration is never re-parsed.
+        await writeFile(join(root, 'store.json'), JSON.stringify({ version: 1 }), { mode: 0o600 });
+        await mkdir(join(root, 'workshop'), { mode: 0o700 });
+        await writeFile(
+          join(root, 'workshop', 'machine.json'),
+          JSON.stringify({
+            version: 1,
+            id: 'workshop',
+            name: 'Workshop',
+            providerId,
+            physicalId: serial,
+            candidate: {
+              id: `${providerId}:${serial}`,
+              name: 'Workshop',
+              endpoint: { address: '192.0.2.10', interface: 'manual' },
+              claimedIdentity: { serial, model },
+              observedAt: '2026-09-14T00:00:00.000Z',
+              expiresAt: '2026-09-14T00:00:30.000Z',
+            },
+            configuration: { logicalId: 'Workshop', address: '192.0.2.10', serial, wireForm: 'a' },
+            connection: { secretRef: 'vault:bambu', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+            boundAt: '2026-09-14T00:00:00.000Z',
+          }),
+          { mode: 0o600 },
+        );
+        await chmod(root, 0o700);
+        const connectStream = vi.fn(async () => ({
+          readable: (async function* () {
+            yield* [];
+          })(),
+          write: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        }));
+        const clock = { now: () => new Date().toISOString() };
+        const onError = vi.fn();
+        const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+        const host = await createNodeMachineHost({
+          storeRoot: root,
+          hostId: 'host-1',
+          authorityId: 'authority-1',
+          admission,
+          providers: [bambuMachine(), bambuA1MiniMachine()],
+          runtime: {
+            discovery: {
+              clock,
+              async *listenDatagrams() {
+                yield* [];
+              },
+            },
+            connection: () => ({
+              clock,
+              log: vi.fn(async () => undefined),
+              connectStream,
+              resolveSecret: vi.fn(async () => '12345678'),
+              async *readArtifact() {
+                yield* [];
+              },
+            }),
+          },
+          onError,
+        });
+        const ports = new MessageChannel();
+        const server = host.serve({
+          port: ports.port1,
+          session: host.issueSession({
+            actor: { kind: 'user', id: 'operator' },
+            grants: [
+              { route: 'machines', operation: 'machines.list' },
+              { route: 'machines', operation: 'machines.get' },
+            ],
+          }),
+        });
+        const client = connectMachineChannel(ports.port2);
+        try {
+          await client.ready;
+          const listed = await client.list({});
+          expect(listed.entries.map((entry) => [entry.machineId, entry.providerId])).toEqual([
+            ['workshop', providerId],
+          ]);
+          await vi.waitFor(async () => {
+            await expect(client.get({ machineId: 'workshop' })).resolves.toMatchObject({
+              freshness: 'current',
+              descriptor: { id: serial, model },
+            });
+          });
+          expect(connectStream).toHaveBeenCalledWith(
+            expect.objectContaining({ endpoint: { address: '192.0.2.10', port: 8883 } }),
+          );
+          expect(onError).not.toHaveBeenCalled();
+        } finally {
+          client.close();
+          server.dispose();
+          await host.close();
+        }
+      } finally {
+        versionReply.serial = '00M00A000000001';
+        statusReply.printerType = 'BL-P001';
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('should reject an upload the printer refuses to store and keep a lost transfer unknown', async () => {
+    versionReply.serial = '00M00A000000001';
     const artifact = artifactOf(studioArchive);
     const configuration = {
       amsMapping: [0],
@@ -667,35 +866,28 @@ describe('Bambu read-only controller', () => {
     const session = await connectBambuMachine(
       {
         candidate,
-        configuration: { logicalId: 'workshop' },
+        configuration: {},
         connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,
     );
     const { signal } = new AbortController();
     try {
-      const prepared = await session.preparePrint({
-        operationId: 'prepared-refused',
-        expectedMachineId: '00M00A391800004',
-        artifact,
-        configuration,
-        signal,
-      });
-      if (prepared.status !== 'ready') {
-        throw new Error('Expected ready preparation');
+      const { jobs } = session;
+      if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
+        throw new Error('Expected stored jobs');
       }
-      const upload = async () =>
-        session.uploadPrint({
-          operationId: 'upload-refused',
-          expectedMachineId: '00M00A391800004',
-          artifact,
-          remoteName: prepared.remoteName,
-          providerData: prepared.providerData,
-          configuration,
-          signal,
-        });
-      await expect(upload()).resolves.toEqual({
+      const base = { expectedMachineId: '00M00A000000001', artifact, configuration, signal };
+      const prepared = await jobs.prepare({ ...base, operationId: 'prepared-refused' });
+      if (prepared.status === 'refused' || prepared.remoteName === undefined) {
+        throw new Error('Expected a preparation');
+      }
+      const { remoteName } = prepared;
+      const upload = async (operationId: string) =>
+        jobs.transfer({ ...base, operationId, remoteName, providerData: prepared.providerData });
+      await expect(upload('upload-refused')).resolves.toEqual({
         status: 'rejected',
         code: 'TRANSFER_REFUSED',
         message:
@@ -705,10 +897,10 @@ describe('Bambu read-only controller', () => {
       });
       expect(log).toHaveBeenCalledWith({
         level: 'warning',
-        message: `FTPS upload of ${prepared.remoteName} failed: MACHINE_UPLOAD_REFUSED (550 )`,
+        message: `FTPS upload of ${remoteName} failed: MACHINE_UPLOAD_REFUSED (550 )`,
       });
       // A transfer that broke off may have reached the printer, so its result stays unknown.
-      await expect(upload()).resolves.toEqual({
+      await expect(upload('upload-lost')).resolves.toEqual({
         status: 'unknown',
         reason: 'transfer-result-unavailable',
         observedAt: '2026-09-14T00:00:01.000Z',
@@ -724,11 +916,8 @@ describe('Bambu read-only controller', () => {
     });
     const events = discoverBambuMachines(
       {
-        configuration: {
-          logicalId: 'Workshop',
-          address: 'x1c.local',
-          serial: '00M00A391800004',
-        },
+        configuration: { serial: '00M00A000000001' },
+        endpoint: { transport: 'network', address: 'x1c.local' },
         signal: new AbortController().signal,
       },
       { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
@@ -741,10 +930,46 @@ describe('Bambu read-only controller', () => {
     expect(discovered).toMatchObject([
       {
         type: 'found',
-        candidate: { endpoint: { address: 'x1c.local', interface: 'manual' } },
+        candidate: {
+          name: 'X1C at x1c.local',
+          endpoint: { transport: 'network', address: 'x1c.local', interface: 'manual' },
+        },
       },
     ]);
     expect(listenDatagrams).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a manual address, port or serial with a sentence a person can act on', async () => {
+    const listenDatagrams = vi.fn(async function* () {
+      yield* [];
+    });
+    const discover = async (entry: Readonly<{ address: string; port?: number; serial?: string }>): Promise<void> => {
+      const { serial, ...endpoint } = entry;
+      for await (const _event of discoverBambuMachines(
+        {
+          configuration: serial === undefined ? {} : { serial },
+          endpoint: { transport: 'network', ...endpoint },
+          signal: new AbortController().signal,
+        },
+        { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
+      )) {
+        // Refused before anything is yielded.
+      }
+    };
+    await expect(discover({ address: 'http://x1c' })).rejects.toMatchObject({
+      code: 'BAMBU_MANUAL_ADDRESS_INVALID',
+      message: 'Enter a valid IP address or printer hostname.',
+    });
+    // Its MQTT, camera and FTPS services each have their own fixed port, so one entered port names none of them.
+    await expect(discover({ address: 'x1c.local', port: 8883 })).rejects.toMatchObject({
+      code: 'BAMBU_MANUAL_ADDRESS_INVALID',
+      message: 'A Bambu printer answers on its own fixed ports; enter the address without a port.',
+    });
+    // An A1 mini serial is not an X1C serial.
+    await expect(discover({ address: 'x1c.local', serial: '0300AA000000001' })).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_INVALID',
+      message: 'The serial does not match the selected printer model.',
+    });
   });
 
   it('should listen on UDP 2021 for two advertisement periods so a pass cannot fall between them', async () => {
@@ -752,7 +977,7 @@ describe('Bambu read-only controller', () => {
       yield* [];
     });
     for await (const _event of discoverBambuMachines(
-      { configuration: { logicalId: 'discovery' }, signal: new AbortController().signal },
+      { configuration: {}, signal: new AbortController().signal },
       { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
     )) {
       // A silent LAN yields nothing.
@@ -779,8 +1004,9 @@ describe('Bambu read-only controller', () => {
       return connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: { secretRef: 'vault:bambu-x1c', serviceTrust },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
@@ -820,17 +1046,90 @@ describe('Bambu read-only controller', () => {
       connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: {
             secretRef: 'vault:bambu-x1c',
             serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
       ),
-    ).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
-    versionReply.serial = '00M00A391800004';
+    ).rejects.toMatchObject({
+      code: 'BAMBU_INITIAL_FACTS_INVALID',
+      message: 'The device at this address is not the bound printer, or did not report its serial, model and firmware.',
+    });
+    versionReply.serial = '00M00A000000001';
+  });
+
+  it('should name a refused access code apart from a dropped link', async () => {
+    const runtime: MachineConnectionRuntime = {
+      clock: { now: () => '2026-09-14T00:00:00.000Z' },
+      log: vi.fn(async () => undefined),
+      connectStream: vi.fn(async () => ({
+        readable: (async function* () {
+          yield* [];
+        })(),
+        write: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+      })),
+      async *readArtifact() {
+        yield* [];
+      },
+      resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
+    };
+    const connect = async (configuration: Readonly<{ serial?: string }>) =>
+      connectBambuMachine(
+        {
+          candidate,
+          configuration,
+          connection: {
+            secretRef: 'vault:bambu-x1c',
+            serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
+          },
+          purpose: 'bind',
+          signal: new AbortController().signal,
+        },
+        runtime,
+      );
+    try {
+      connack.code = 5;
+      // Settings shows the message to the person, so it is a sentence; callers branch on the stable code.
+      await expect(connect({})).rejects.toMatchObject({
+        code: 'BAMBU_ACCESS_CODE_REJECTED',
+        message: "The printer refused the access code. Check the code on the printer's screen and bind it again.",
+      });
+      connack.code = 3;
+      await expect(connect({})).rejects.toMatchObject({
+        code: 'BAMBU_MQTT_CONNECT_FAILED',
+        message: 'Could not connect to the printer. Check that it is on and on this network, then try again.',
+      });
+    } finally {
+      connack.code = 0;
+    }
+    // The bound serial fences the printer: an advertisement naming another one is not it.
+    await expect(connect({ serial: '00M00A000000002' })).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_MISMATCH',
+      message: 'The printer at this address reports a different serial.',
+    });
+    // Neither bound nor advertised: the person is told where to enter it.
+    await expect(
+      connectBambuMachine(
+        {
+          candidate: { ...candidate, claimedIdentity: { model: 'X1C' } },
+          configuration: {},
+          connection: { secretRef: 'vault:bambu-x1c', serviceTrust: {} },
+          purpose: 'bind',
+          signal: new AbortController().signal,
+        },
+        runtime,
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_REQUIRED',
+      message: "Enter the printer's serial under Printer details, or find the printer on the network to fill it.",
+    });
+    expect(runtime.connectStream).toHaveBeenCalledTimes(2);
   });
 
   it('should keep Mini model facts and capture a fragmented bounded TLS JPEG, closing failed captures', async () => {
@@ -860,12 +1159,12 @@ describe('Bambu read-only controller', () => {
       }),
     );
     try {
-      versionReply.serial = '0300EA652800550';
+      versionReply.serial = '0300AA000000001';
       statusReply.printerType = 'N1';
       const session = await connectBambuMachine(
         {
           candidate: { ...candidate, claimedIdentity: { model: 'A1 mini', serial: versionReply.serial } },
-          configuration: { logicalId: 'Mini' },
+          configuration: {},
           connection: {
             secretRef: 'vault:mini',
             serviceTrust: {
@@ -873,6 +1172,7 @@ describe('Bambu read-only controller', () => {
               camera: { type: 'pinned', digest: pinnedDigest },
             },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         {
@@ -887,15 +1187,16 @@ describe('Bambu read-only controller', () => {
         'A1 mini',
       );
       expect(mqttWrite).toHaveBeenCalledExactlyOnceWith(Uint8Array.from([0x10, 0x02, 0x00, 0x00]));
-      expect(await session.getDescriptor({ signal: new AbortController().signal })).toMatchObject({
-        model: 'A1 mini',
-        printableEnvelope: { width: 0.18, depth: 0.18, height: 0.18 },
-        materialSystem: { slotCount: 4 },
+      const descriptor = await session.getDescriptor({ signal: new AbortController().signal });
+      expect(descriptor).toMatchObject({ model: 'A1 mini' });
+      expect(descriptor.capabilities.processes[0]).toMatchObject({
+        geometry: { buildVolume: { x: 180, y: 180, z: 180 } },
       });
       const snapshot = await session.getSnapshot({ signal: new AbortController().signal });
-      expect(snapshot.lights?.chamber).toBeUndefined();
-      expect(snapshot.temperatures?.chamber).toBeUndefined();
-      expect(snapshot.fans?.auxiliary).toBeUndefined();
+      const reported = snapshot.components.map(({ componentId }) => componentId);
+      expect(reported).not.toContain('chamber-light');
+      expect(reported).not.toContain('chamber');
+      expect(reported).not.toContain('aux-fan');
       if (session.stillCapture.type !== 'supported') {
         throw new Error('Expected Mini camera');
       }
@@ -903,7 +1204,7 @@ describe('Bambu read-only controller', () => {
       expect(still.bytes).toEqual(jpeg);
       expect(connectStream).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          endpoint: { address: '192.0.2.10', port: 6000 },
+          endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuA1MiniManifest, 'camera') },
           trust: { type: 'pinned', digest: pinnedDigest },
           maximumWriteBytes: 80,
         }),
@@ -917,7 +1218,7 @@ describe('Bambu read-only controller', () => {
       expect(cameraClose).toHaveBeenCalledTimes(2);
       await session.close();
     } finally {
-      versionReply.serial = '00M00A391800004';
+      versionReply.serial = '00M00A000000001';
       statusReply.printerType = 'BL-P001';
     }
   });
@@ -928,7 +1229,7 @@ describe('Bambu read-only controller', () => {
       connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: {
             secretRef: 'vault:bambu-x1c',
             serviceTrust: {
@@ -936,6 +1237,7 @@ describe('Bambu read-only controller', () => {
               camera: { type: 'pinned', digest: pinnedDigest },
             },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         {
@@ -958,7 +1260,7 @@ describe('Bambu read-only controller', () => {
     try {
       // Another model's camera needs its own manifest and pin; the X1C's pinned camera service never reaches it.
       statusReply.printerType = 'C12';
-      await expect(connect(true)).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
+      await expect(connect(true)).rejects.toMatchObject({ code: 'BAMBU_INITIAL_FACTS_INVALID' });
       statusReply.printerType = 'BL-P001';
       const withoutHostCapture = await connect(false);
       expect(withoutHostCapture.stillCapture).toEqual({ type: 'unsupported' });

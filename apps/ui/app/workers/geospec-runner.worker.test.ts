@@ -105,7 +105,7 @@ const nativeMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@taucad/geospec-engine-native', () => ({
+vi.mock('geospec-engine', () => ({
   initialize: nativeMocks.initialize,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the public module's constructor export.
   Engine: nativeMocks.engine,

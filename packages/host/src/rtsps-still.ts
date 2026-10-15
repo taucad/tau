@@ -1,6 +1,6 @@
 /**
- * One JPEG still from a pinned RTSPS camera (the Bambu X1C's port 322), decoded
- * by the system `ffmpeg`.
+ * One JPEG still from a pinned RTSPS camera, decoded by the system `ffmpeg`.
+ * The camera's address, port, path and account all come from the caller.
  *
  * ffmpeg never sees the camera or a credential. It plays
  * `rtsp://127.0.0.1:<port><path>` from a loopback proxy whose upstream is the
@@ -13,9 +13,6 @@
  * A capture retries a transient failure (the camera refusing or resetting the
  * connection, or ffmpeg ending without a frame while the camera warms up) with
  * a short backoff until its deadline.
- *
- * Ported from the sampler in `packages/plugins/bambu/scripts/qualify-x1c.mts`,
- * which now captures through this module.
  *
  * @internal
  */
@@ -218,7 +215,7 @@ const isAnswerableDigest = ({ scheme, params }: RtspChallenge): boolean => {
  * Answer camera challenges for one capture, counting nonce uses across its attempts.
  *
  * @internal
- * @param credentials - The camera's username and access code.
+ * @param credentials - The camera's username and password.
  * @returns The authenticator the capture's proxies share.
  */
 export const createRtspAuthenticator = (
@@ -761,7 +758,7 @@ const pauseBeforeRetry = async (pause: number, signal: AbortSignal): Promise<voi
  * @internal
  * @param input - The provider's camera request.
  * @param options - The resolved `ffmpeg` (or `undefined` when it is missing),
- * the camera's access code, and the pinned TLS socket to the camera, which
+ * the camera's password, and the pinned TLS socket to the camera, which
  * rejects with a fixed code such as `MACHINE_TLS_PIN_MISMATCH`.
  * @returns A still that expires 15 s after capture.
  */
@@ -769,7 +766,7 @@ export const captureRtspsStill = async (
   input: MachineNetworkStillInput,
   options: Readonly<{
     ffmpeg: string | undefined;
-    accessCode: () => Promise<string>;
+    password: () => Promise<string>;
     openUpstream: () => Promise<Duplex>;
   }>,
 ): Promise<MachineStill> => {
@@ -783,7 +780,7 @@ export const captureRtspsStill = async (
   const run: CaptureRun = {
     ffmpeg: options.ffmpeg,
     openUpstream: options.openUpstream,
-    authenticator: createRtspAuthenticator({ username: input.username, password: await options.accessCode() }),
+    authenticator: createRtspAuthenticator({ username: input.username, password: await options.password() }),
     deadline: Date.now() + input.connectTimeout,
   };
   for (let attempt = 0; ; attempt += 1) {

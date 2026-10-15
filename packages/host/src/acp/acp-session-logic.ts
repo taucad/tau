@@ -23,7 +23,9 @@ import type {
 } from '#acp/acp-session.machine.js';
 import { createAskId, recordAsk, settleAsk, waitForAnswers } from '@taucad/chat/rpc';
 import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
-import { askOutcomeOf } from '@taucad/chat';
+import { askOfGrok, grokQuestionResponseOf } from '#acp/grok-questions.js';
+import type { Ask, AskAnswers } from '@taucad/chat';
+import { askOutcomeOf } from '@taucad/chat/schemas/questions';
 
 import { createAdapterConnection } from '#acp/adapter-connection.js';
 import { askOfElicitation, elicitationResponseOf } from '#acp/elicitation-questions.js';
@@ -218,42 +220,42 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
     void forget(background, binding);
 
     /**
-     * One form elicitation, asked through the chat's question record (agent questions blueprint D6).
+     * One ACP question, asked through the chat's question record (agent questions blueprint D6).
      *
      * The person answers on the same card a Tau `ask_questions` call uses; a
      * question tool's form adopts its recommended options at its deadline. A
      * form Tau cannot present, or a turn with no record, is declined as before.
      */
-    const serveForm = (
-      params: Extract<AcpLentTurnCommand, { readonly type: 'serve'; readonly method: 'elicitation/create' }>['params'],
+    const serveQuestions = (
+      ask: Ask | undefined,
+      response: {
+        readonly of: (answers: AskAnswers | undefined) => AcpVendorAnswer;
+        readonly cancelled: AcpVendorAnswer;
+      },
       answered: (answer: AcpVendorAnswer) => void,
     ): void => {
       const { questions } = seams;
-      const elicitation =
-        questions === undefined
-          ? undefined
-          : askOfElicitation(params, { agentId: input.adapter.id, askId: createAskId(), now: Date.now() });
-      if (questions === undefined || elicitation === undefined) {
-        answered({ result: { action: 'decline' } });
+      if (questions === undefined || ask === undefined) {
+        answered(response.cancelled);
         return;
       }
       const { chatId, fileSystem } = questions;
       track(background, async () => {
-        let answer: AcpVendorAnswer = { result: { action: 'cancel' } };
+        let answer = response.cancelled;
         try {
-          await recordAsk(fileSystem, chatId, elicitation.ask);
-          const answers = await waitForAnswers(fileSystem, { chatId, ask: elicitation.ask, signal: seams.signal });
-          const response = elicitationResponseOf(elicitation, answers);
+          await recordAsk(fileSystem, chatId, ask);
+          const answers = await waitForAnswers(fileSystem, { chatId, ask, signal: seams.signal });
+          const result = response.of(answers);
           await settleAsk(fileSystem, {
             chatId,
-            askId: elicitation.ask.id,
-            outcome: askOutcomeOf(elicitation.ask, answers),
+            askId: ask.id,
+            outcome: askOutcomeOf(ask, answers),
           });
-          answer = { result: response };
+          answer = result;
         } catch {
           /* The turn stopped or the record failed: nobody decided. */
           try {
-            await settleAsk(fileSystem, { chatId, askId: elicitation.ask.id, outcome: 'cancelled' });
+            await settleAsk(fileSystem, { chatId, askId: ask.id, outcome: 'cancelled' });
           } catch {
             /* The cancel answer below is what the agent needs. */
           }
@@ -290,10 +292,38 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
           });
           return;
         }
+        case '_x.ai/ask_user_question': {
+          const ask = askOfGrok(command.params, { askId: createAskId(), now: Date.now() });
+          serveQuestions(
+            ask,
+            {
+              of: (answers) => ({ result: grokQuestionResponseOf(ask, answers) }),
+              cancelled: { result: { outcome: 'cancelled' } },
+            },
+            answered,
+          );
+          return;
+        }
         case 'elicitation/create': {
           const login = urlLoginOf(input.adapter.id, command.params);
           if (!login?.elicitationId) {
-            serveForm(command.params, answered);
+            const elicitation = askOfElicitation(command.params, {
+              agentId: input.adapter.id,
+              askId: createAskId(),
+              now: Date.now(),
+            });
+            if (elicitation === undefined || seams.questions === undefined) {
+              answered({ result: { action: 'decline' } });
+              return;
+            }
+            serveQuestions(
+              elicitation.ask,
+              {
+                of: (answers) => ({ result: elicitationResponseOf(elicitation, answers) }),
+                cancelled: { result: { action: 'cancel' } },
+              },
+              answered,
+            );
             return;
           }
           const { elicitationId } = login;
@@ -322,7 +352,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
           const { params } = command;
           track(draining, async () => {
             try {
-              const content = await readSessionTextFile(input.cwd, params);
+              const content = await readSessionTextFile(input.cwd, params, input.skillDirectories);
               answered({ result: { content } });
             } catch (error) {
               answered(errorAnswer(error));

@@ -5,7 +5,7 @@ import { customizeValidator } from '@rjsf/validator-ajv8';
 import { assimpEdgeSchemas } from '@taucad/assimp';
 import { imageEdgeSchemas } from '@taucad/image';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { toJSONSchema } from 'zod';
 import type { ZodType } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
@@ -107,7 +107,7 @@ describe('RJSF form-state policy', () => {
           idSeparator={rjsfIdSeparator}
           formContext={formContext}
           experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
-          liveValidate
+          liveValidate='onChange'
           onChange={onChange}
         />
       </TooltipProvider>,
@@ -115,6 +115,43 @@ describe('RJSF form-state policy', () => {
 
     expect(screen.queryByText(/must be number/i)).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('should write an edit of an empty-named property to that property alone', () => {
+    const onChange = vi.fn();
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { '': { type: 'boolean' }, other: { type: 'boolean' } },
+    };
+    render(
+      <TooltipProvider>
+        <Form
+          schema={schema}
+          formData={{ '': false, other: false }}
+          validator={validator}
+          templates={templates}
+          fields={rjsfFields}
+          widgets={widgets}
+          uiSchema={uiSchema}
+          idPrefix={rjsfIdPrefix}
+          idSeparator={rjsfIdSeparator}
+          formContext={formContext}
+          experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
+          onChange={onChange}
+        />
+      </TooltipProvider>,
+    );
+
+    const [emptyNamedSwitch] = screen.getAllByRole('switch');
+    if (!emptyNamedSwitch) {
+      throw new Error('Expected the empty-named switch');
+    }
+    fireEvent.click(emptyNamedSwitch);
+
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ formData: { '': true, other: false } }),
+      `${rjsfIdPrefix}${rjsfIdSeparator}`,
+    );
   });
 
   it('should populate valid declared defaults for required objects and minItems arrays', () => {

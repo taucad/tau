@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useImperativeHandle, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
@@ -20,7 +20,12 @@ const inlineTextEditorVariants = cva('h-full px-[calc(var(--spacing)*1.75)] text
   },
 });
 
+export type InlineTextEditorHandle = {
+  readonly startEditing: () => void;
+};
+
 type InlineTextEditorProps = {
+  readonly ref?: React.Ref<InlineTextEditorHandle>;
   readonly value: string;
   readonly onSave: (value: string) => Promise<void> | void;
   readonly placeholder?: string;
@@ -36,6 +41,7 @@ type InlineTextEditorProps = {
 } & VariantProps<typeof inlineTextEditorVariants>;
 
 export function InlineTextEditor({
+  ref,
   value,
   onSave,
   placeholder,
@@ -62,6 +68,8 @@ export function InlineTextEditor({
     setIsEditing(true);
     onEditingChange?.(true);
   };
+
+  useImperativeHandle(ref, () => ({ startEditing }));
 
   const cancel = (): void => {
     setEditValue(value);

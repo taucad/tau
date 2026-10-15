@@ -14,7 +14,7 @@ const owner = vi.hoisted(() => ({
 }));
 
 vi.mock('node:worker_threads', () => ({ parentPort: null, workerData: undefined }));
-vi.mock('@taucad/geospec-engine-native/node', () => ({
+vi.mock('geospec-engine/node', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native package's public constructor export.
   Engine: class {
     public close = owner.close;

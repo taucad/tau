@@ -21,24 +21,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it, vi } from 'vitest';
 
 import { picogk } from '#index.js';
-
-type ResourceManifest = {
-  readonly target: string;
-  readonly workerPath: string;
-  readonly workerSha256: string;
-  readonly resourceFiles: ReadonlyArray<{
-    readonly path: string;
-    readonly sha256: string;
-    readonly label: string;
-  }>;
-};
-
-const workspaceRoot = resolve(import.meta.dirname, '../../../..');
-const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/picogk/${process.platform}-${process.arch}`);
-const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
-// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
-// without it and these suites run only where the native engine is present.
-const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
+import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
 
 const runtime = defineRuntime({
   plugins: [
@@ -46,12 +29,7 @@ const runtime = defineRuntime({
     picogk({
       kernels: {
         default: {
-          workerExecutable: resolve(targetRoot, manifest.workerPath),
-          workerSha256: manifest.workerSha256,
-          resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
-            ...resource,
-            path: resolve(targetRoot, path),
-          })),
+          ...nativeKernelOptions,
           requestTimeout: 120_000,
         },
       },
@@ -259,6 +237,31 @@ const readTopology = (
 };
 
 describe.runIf(nativeEngineAvailable)('PicoGK native C# kernel', () => {
+  it('should render native geometry with more than 10,000 workspace files and an asset larger than 32 MiB', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: {
+        ...Object.fromEntries(Array.from({ length: 10_001 }, (_, index) => [`data/${String(index)}.txt`, 'data'])),
+        'main.cs': sphereSource(),
+        'simulation.bin': new Uint8Array(33 * 1024 * 1024),
+      },
+    });
+    try {
+      const document = client.open({ source: { path: 'main.cs' } });
+      const result = await document.view('model').rendering();
+      assert.ok(!result.superseded);
+      assert.ok(result.rendering.success, JSON.stringify(result.rendering));
+      const gltf = extractGltfFromResult(result.rendering);
+      assert.ok(gltf);
+      validateGlbData(gltf);
+      const bounds = getBoundingBoxFromInspect(await getInspectReport(gltf));
+      expect(bounds?.size).toEqual([expect.closeTo(0.03, 2), expect.closeTo(0.03, 2), expect.closeTo(0.03, 2)]);
+      document.close();
+    } finally {
+      await client.shutdown();
+    }
+  }, 180_000);
+
   it('resolves opt-in C# metadata and applies selected parameters to native geometry', async () => {
     const client = createTestRuntimeClient({
       runtime,

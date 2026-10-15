@@ -141,3 +141,29 @@ describe('deepLinkArgument', () => {
     expect(deepLinkArgument(['/Applications/Tau.app', '/tmp/part.step'])).toBeUndefined();
   });
 });
+
+describe('machine identity links', () => {
+  it.each([
+    ['tau://machines', '/machines'],
+    ['tau://machines/host/mill', '/machines/host/mill'],
+    ['tau://machines/workshop/M%C3%BChle%201', '/machines/workshop/M%C3%BChle%201'],
+  ])('navigates without an action: %s', (value, route) => {
+    expect(parseDeepLink(value)).toEqual({ kind: 'machine', route });
+  });
+  it.each([
+    'tau://machines/a',
+    'tau://machines/a/b/c',
+    'tau://machines/a/%2F',
+    'tau://machines/a/%5C',
+    'tau://machines/a/%00',
+    'tau://machines/a/%',
+    'tau://machines/a/../b/c',
+    'tau://machines/a/%2e%2e/b/c',
+    'tau://machines/a/b?command=start',
+    'tau://machines/a/b#stop',
+    'tau://user:secret@machines/a/b',
+    'tau://machines:123/a/b',
+  ])('refuses malformed or action-bearing links: %s', (value) => {
+    expect(parseDeepLink(value)).toBeUndefined();
+  });
+});

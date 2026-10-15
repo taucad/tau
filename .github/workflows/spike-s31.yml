@@ -1,0 +1,54 @@
+# Spike S31 (native-dependency-resolution charter, wave 2): `fetch(url, { integrity })` + `compileStreaming`
+# same-origin under COEP require-corp in Chromium, WebKit and Firefox; a tampered byte is a network error (D26, W19).
+# Spike code under scripts/spikes/native-deps/linux/s31; the run's evidence is the uploaded artifact and the job
+# summary. The WebAssembly modules are the workspace's own dependencies, compiled and never instantiated.
+name: Spike S31 (WASM integrity)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s31-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s31:
+    name: S31 fetch integrity and compileStreaming in three engines
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Install the three browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Measure and tamper
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          occt=node_modules/libcascade/dist/opencascade_single.wasm
+          kcl=$(find -L node_modules/.pnpm -path '*@taucad/kcl-wasm-lib/kcl_wasm_lib_bg.wasm' -print -quit)
+          pico=$(find -L node_modules/.pnpm -path '*picovoxel/dist/pico.wasm' -print -quit)
+          node scripts/spikes/native-deps/linux/s31/run.ts "$RUNNER_TEMP/evidence" 7 "$occt" "$kcl" "$pico"
+      - name: Summarise
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s31-summary.txt" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S31' "$RUNNER_TEMP/evidence/s31-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s31-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

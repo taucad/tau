@@ -8,6 +8,11 @@ import type { useChatRecords } from '#hooks/use-chat-records.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
+const cloudOpening = vi.hoisted(() => ({ pending: false, loadingChats: false }));
+vi.mock('#hooks/use-cloud-projects.js', () => ({
+  useTauCloudIntent: () => (cloudOpening.pending ? 'open' : undefined),
+}));
+
 const mockUseChats = vi.fn();
 const mockUseChatRecords = vi.fn();
 const mockWarmMonaco = vi.hoisted(() => vi.fn());
@@ -124,6 +129,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
   const original = await importOriginal<typeof SidebarStatusModule>();
   return {
     ...original,
+    useProjectSidebarRow: () => ({ sync: { chats: cloudOpening.loadingChats ? 'loading' : 'ready' } }),
     useChatSidebarStatus: (projectId: string, chatId: string) => mockChatStatus(projectId, chatId) as unknown,
     useSidebarCommands: () => ({ closeChat: mockCloseChat, closeProject: vi.fn(), openProject: vi.fn() }),
   };
@@ -175,6 +181,8 @@ const { ProjectChatList, sortProjectChats } = await import('#components/nav/proj
 describe('ProjectChatList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cloudOpening.pending = false;
+    cloudOpening.loadingChats = false;
     mockUseChatSessionStore.mockReturnValue(mockStore);
     search = '?chat=chat_12';
     pendingLocation = undefined;
@@ -182,6 +190,20 @@ describe('ProjectChatList', () => {
     mockUseChatRecords.mockReturnValue(defaultChatsResult);
     mockNavigate.mockResolvedValue(undefined);
     mockChatStatus.mockReturnValue(undefined);
+  });
+
+  it('does not claim the cloud project has no chats before its first download', () => {
+    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: false });
+    cloudOpening.pending = true;
+    const view = render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.queryByText('No chats yet')).not.toBeInTheDocument();
+    cloudOpening.pending = false;
+    cloudOpening.loadingChats = true;
+    view.rerender(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.queryByText('No chats yet')).not.toBeInTheDocument();
+    cloudOpening.loadingChats = false;
+    view.rerender(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.getByText('No chats yet')).toBeInTheDocument();
   });
 
   it('sorts by user activity, ignoring newer passive row updates, then breaks ties deterministically', () => {

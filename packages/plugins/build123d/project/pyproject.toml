@@ -1,0 +1,68 @@
+# Runs outside Tau with uv: `uv sync --locked`, then `uv run main.py`.
+# The dependencies are the libraries Tau's build123d kernel runs; keep these pins when you edit the list.
+[project]
+name = "tau-project"
+version = "0.1.0"
+requires-python = "==3.13.*"
+dependencies = [
+  "build123d==0.11.1",
+  "cadquery-ocp-novtk==7.9.3.1.1",
+]
+
+# The platforms and versions of Tau's build123d runtime, so uv.lock and pylock.toml lock the same wheels' versions.
+[tool.uv]
+environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64' and implementation_name == 'cpython'",
+  "sys_platform == 'darwin' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+  "sys_platform == 'linux' and platform_machine == 'aarch64' and implementation_name == 'cpython'",
+  "sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+]
+constraint-dependencies = [
+  "anytree==2.13.0",
+  "asttokens==3.0.2",
+  "build123d==0.11.1",
+  "cadquery-ocp-novtk==7.9.3.1.1",
+  "cadquery-ocp-proxy==7.9.3.1.1",
+  "certifi==2026.7.22",
+  "charset-normalizer==3.5.1",
+  "cloudpickle==3.1.2",
+  "executing==2.2.1",
+  "ezdxf==1.4.4",
+  "fonttools==4.64.0",
+  "idna==3.19",
+  "ipython==9.17.1",
+  "ipython-pygments-lexers==1.1.1",
+  "jedi==0.20.0",
+  "joblib==1.6.0",
+  "lib3mf==2.5.0",
+  "matplotlib-inline==0.2.2",
+  "mpmath==1.3.0",
+  "narwhals==2.25.0",
+  "numpy==2.5.2",
+  "ocp-gordon==0.2.2",
+  "ocpsvg==0.6.0",
+  "parso==0.8.7",
+  "pexpect==4.9.0",
+  "prompt-toolkit==3.0.53",
+  "psutil==7.2.2",
+  "ptyprocess==0.7.0",
+  "pure-eval==0.2.3",
+  "py-lib3mf==2.5.0",
+  "pygments==2.21.0",
+  "pyparsing==3.3.2",
+  "requests==2.34.2",
+  "scikit-learn==1.9.0",
+  "scipy==1.18.1",
+  "stack-data==0.6.3",
+  "svgelements==1.9.6",
+  "svgpathtools==1.7.4",
+  "svgwrite==1.4.3",
+  "sympy==1.14.0",
+  "threadpoolctl==3.6.0",
+  "traitlets==5.16.1",
+  "trianglesolver==1.2",
+  "typing-extensions==4.16.0",
+  "urllib3==2.8.0",
+  "wcwidth==0.8.3",
+  "webcolors==24.8.0",
+]

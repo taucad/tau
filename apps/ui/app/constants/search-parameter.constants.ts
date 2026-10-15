@@ -10,6 +10,8 @@ export const searchParameterName = {
   /* Library */
   // Whether the project library also lists trashed projects.
   trash: 'trash',
+  // Project collection sort field and direction.
+  sort: 'sort',
 
   /* Community */
   // The Community search text, absent when empty.
@@ -28,6 +30,12 @@ export const searchParameterName = {
   settingsTarget: 'setting',
   // The remote-compute pairing code being redeemed.
   pair: 'pair',
+
+  /* Machines */
+  machine: 'machine',
+  machineHost: 'machineHost',
+  machineJob: 'job',
+  machineStatus: 'status',
 
   /* Project route */
   // The focused chat within the open project.

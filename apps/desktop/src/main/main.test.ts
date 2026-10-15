@@ -1,22 +1,30 @@
+import { existsSync } from 'node:fs';
+import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
+  openDirectoryChannel,
+  revealPathChannel,
   machinesChannels,
   quitChannels,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 
+type UpdateMenuItem = { label: string; click?: () => void };
 const originalTitle = process.title;
 const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -51,18 +59,28 @@ const state = vi.hoisted(() => ({
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
   geometryMeasurementConnect: vi.fn(() => ({ id: 'geometry-measurement-port' })),
-  geometryPerformanceConnect: vi.fn(() => ({ id: 'geometry-performance-port' })),
   geometryDispose: vi.fn(async () => undefined),
   geometrySampleResidentBytes: undefined as undefined | ((utility: { pid: number | undefined }) => number | undefined),
   servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
     status: 'bound',
     machineId: 'workshop-x1c',
   })),
+  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly StreamingMachine[]> => []),
+  servicesResumeStarts: vi.fn(),
+  servicesRecover: vi.fn(async () => undefined),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
-    async (): Promise<
-      { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
+    async (
+      _boundMilliseconds: number,
+      _options?: MachineQuitDecision,
+    ): Promise<
+      | { status: 'quiesced' }
+      | { status: 'failed'; message: string }
+      | { status: 'timeout' }
+      | { status: 'no-utility' }
+      | { status: 'streaming'; machines: readonly StreamingMachine[] }
+      | { status: 'streaming-unknown'; message: string }
     > => ({ status: 'quiesced' }),
   ),
   utilityEnvironmentAdditions: [] as NodeJS.ProcessEnv[],
@@ -71,10 +89,23 @@ const state = vi.hoisted(() => ({
   /* A renderer that closes its sessions at once, which is what every case but
    * the ordering pin is about. */
   autoQuiesce: true,
+  autoForced: false,
+  prepareToRestart: undefined as undefined | (() => Promise<boolean>),
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
+  updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
+  installedUpdateMenuItems: [] as UpdateMenuItem[],
+  updaterCheck: vi.fn(async () => undefined),
+  updaterInstall: vi.fn(async () => undefined),
+}));
+
+vi.mock('#main/updater.js', () => ({
+  startDesktopUpdater: (options: DesktopUpdaterOptions) => {
+    state.prepareToRestart = options.prepareToRestart;
+    return { check: state.updaterCheck, install: state.updaterInstall, status: () => 'Update ready' };
+  },
 }));
 
 vi.mock('node:worker_threads', async (importOriginal) => {
@@ -121,29 +152,38 @@ const fakeWindow = {
   webContents: {
     id: 1,
     getURL: vi.fn(() => 'app://tau/'),
-    send: vi.fn((channel: string) => {
+    mainFrame: {},
+    send: vi.fn((channel: string, _attemptId?: string) => {
       state.sentToRenderer.push(channel);
       if (channel === 'tau:quit:ask' && state.autoQuiesce) {
         queueMicrotask(() => {
           for (const listener of state.ipcListeners.get('tau:quit:quiesced') ?? []) {
-            listener(undefined, false);
+            listener(
+              { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+              fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1],
+              state.autoForced,
+            );
           }
         });
       }
     }),
     isDestroyed: vi.fn(() => false),
-    on: vi.fn(),
+    on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
     setWindowOpenHandler: vi.fn(),
   },
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
+  isFullScreen: vi.fn(() => false),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
+  reload: vi.fn(),
   show: vi.fn(),
   focus: vi.fn(),
   once: vi.fn(),
-  on: vi.fn(),
+  on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
 };
+
+const getWindows = vi.fn(() => [fakeWindow]);
 
 /* The quit hold's only visible surface when it cannot settle (C69). */
 const dialog = {
@@ -155,13 +195,27 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
+  Menu: {
+    getApplicationMenu: vi.fn(() => ({
+      items: [
+        { submenu: { insert: (index: number, item: UpdateMenuItem) => state.updateMenuItems.splice(index, 0, item) } },
+      ],
+    })),
+    setApplicationMenu: vi.fn(() => {
+      // Electron's native menu does not reflect additions until it is installed again.
+      state.installedUpdateMenuItems = [...state.updateMenuItems];
+    }),
+  },
+  MenuItem: vi.fn(function MenuItem(options: UpdateMenuItem) {
+    return options;
+  }),
   autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
       return fakeWindow;
     }),
     {
-      getAllWindows: vi.fn(() => [fakeWindow]),
+      getAllWindows: getWindows,
       fromWebContents: vi.fn(() => fakeWindow),
     },
   ),
@@ -180,6 +234,7 @@ vi.mock('electron', () => ({
   },
   MessageChannelMain: vi.fn(() => ({ port1: {}, port2: {} })),
   net: { fetch: vi.fn() },
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
   screen: {
@@ -194,7 +249,7 @@ vi.mock('electron', () => ({
       webRequest: {},
     },
   },
-  shell: { openExternal: vi.fn() },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   utilityProcess: { fork: vi.fn() },
 }));
 
@@ -211,11 +266,13 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
-  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  const { keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
+    await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
+    keepAwakeWhileStreaming,
     projectCloseMilliseconds,
     projectReleaseMilliseconds,
   };
@@ -251,6 +308,7 @@ vi.mock('#main/environment.js', async (importOriginal) => ({
   desktopAgentGatewayBaseUrl: vi.fn(() => 'http://127.0.0.1:1'),
   desktopAgentSystemPrompt: vi.fn(() => 'test'),
   desktopEnvironment: vi.fn(() => ({
+    TAU_MACHINES_ENABLED: 'true',
     TAU_API_URL: 'http://127.0.0.1:1',
     TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
     TAU_FRONTEND_URL: 'http://127.0.0.1:1',
@@ -270,7 +328,7 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'exactMeasurement', 'machines'],
   ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
@@ -278,6 +336,10 @@ vi.mock('#main/services-broker.js', () => ({
       post: vi.fn(),
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
+      streamingMachines: state.servicesStreaming,
+      peekStreamingMachines: vi.fn(async () => []),
+      resumeMachineStarts: state.servicesResumeStarts,
+      recover: state.servicesRecover,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -290,7 +352,6 @@ vi.mock('#main/geometry-broker.js', () => ({
     state.geometrySampleResidentBytes = options.sampleResidentBytes;
     return {
       connectMeasurement: state.geometryMeasurementConnect,
-      connectPerformance: state.geometryPerformanceConnect,
       connectSuite: vi.fn(),
       revokeUnauthorized: vi.fn(),
       dispose: state.geometryDispose,
@@ -309,6 +370,7 @@ vi.mock('#main/utility-environment.js', () => ({
     return {};
   }),
 }));
+vi.mock('#main/browser-host.js', () => ({ installBrowserHost: vi.fn() }));
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
   removeStaleQuickLookSessions: vi.fn(),
@@ -342,6 +404,11 @@ afterEach(async () => {
   state.ipcListeners.clear();
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
+  state.autoForced = false;
+  state.prepareToRestart = undefined;
+  state.updateMenuItems = [{ label: 'About Tau' }];
+  state.installedUpdateMenuItems = [];
+  getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
   state.ready = undefined;
   state.shellApplied = undefined;
@@ -354,7 +421,6 @@ afterEach(async () => {
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
   state.geometryMeasurementConnect.mockClear();
-  state.geometryPerformanceConnect.mockClear();
   state.geometrySampleResidentBytes = undefined;
   app.getAppMetrics.mockReset();
   app.getAppMetrics.mockReturnValue([]);
@@ -380,6 +446,7 @@ afterEach(async () => {
     Reflect.deleteProperty(process, 'resourcesPath');
   }
   vi.clearAllMocks();
+  fakeWindow.isFullScreen.mockReturnValue(false);
 });
 
 describe('desktop main compute owner', () => {
@@ -397,6 +464,112 @@ describe('desktop main compute owner', () => {
     });
     return resolve(join(state.userData, 'home', 'project'));
   };
+
+  it(
+    'should expose a native update action that can resume a deferred installation',
+    async () => {
+      await bootstrap();
+      await vi.waitFor(() => {
+        expect(state.installedUpdateMenuItems.map((item) => item.label)).toEqual(['About Tau', 'Check for Updates…']);
+      });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      state.installedUpdateMenuItems[1]!.click!();
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledOnce();
+        expect(state.updaterInstall).toHaveBeenCalledOnce();
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'settles restart without normal quit stealing the updater finalizer',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      const restart = state.prepareToRestart!();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      assessment.resolve([]);
+      await expect(restart).resolves.toBe(true);
+      expect(state.servicesDispose).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses updater takeover of a normal quit attempt',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await expect(state.prepareToRestart!()).resolves.toBe(false);
+      assessment.resolve([]);
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+    },
+    bootMilliseconds,
+  );
+  it('should open only granted directories and propagate file manager failures', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    const { shell } = await import('electron');
+    const open = state.handlers.get(openDirectoryChannel)!;
+    await expect(open({ senderFrame: {} }, directory)).resolves.toBeUndefined();
+    const canonicalDirectory = await realpath(directory);
+    expect(shell.openPath).toHaveBeenCalledWith(canonicalDirectory);
+    vi.mocked(shell.openPath).mockClear();
+    await expect(open({ senderFrame: {} }, tmpdir())).rejects.toThrow('Reopen this folder');
+    await expect(open({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(open({ senderFrame: {} }, join(directory, 'missing'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(open({ senderFrame: {} }, join(directory, 'escape'))).rejects.toThrow('Reopen this folder');
+    expect(shell.openPath).not.toHaveBeenCalled();
+    vi.mocked(shell.openPath).mockResolvedValueOnce('No file manager available');
+    await expect(open({ senderFrame: {} }, directory)).rejects.toThrow('No file manager available');
+  }, 120_000);
+
+  it('should reveal only granted files and folders in the file manager', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'main.ts'), '');
+    const { shell } = await import('electron');
+    const reveal = state.handlers.get(revealPathChannel)!;
+    await expect(reveal({ senderFrame: {} }, join(directory, 'main.ts'))).resolves.toBeUndefined();
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(join(await realpath(directory), 'main.ts'));
+    vi.mocked(shell.showItemInFolder).mockClear();
+    await expect(reveal({ senderFrame: {} }, join(tmpdir(), 'outside.ts'))).rejects.toThrow('Reopen this folder');
+    await expect(reveal({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(reveal({ senderFrame: {} }, join(directory, 'missing.ts'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(reveal({ senderFrame: {} }, join(directory, 'escape', 'x'))).rejects.toThrow('Reopen this folder');
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
+  }, 120_000);
+
+  it(
+    'should publish current native fullscreen state on enter, leave and renderer reload',
+    async () => {
+      await bootstrap();
+      const enter = fakeWindow.on.mock.calls.find(([name]) => name === 'enter-full-screen')?.[1];
+      const leave = fakeWindow.on.mock.calls.find(([name]) => name === 'leave-full-screen')?.[1];
+      const loaded = fakeWindow.webContents.on.mock.calls.find(([name]) => name === 'did-finish-load')?.[1];
+      expect(enter).toBeTypeOf('function');
+      expect(leave).toBeTypeOf('function');
+      expect(loaded).toBeTypeOf('function');
+      fakeWindow.isFullScreen.mockReturnValue(true);
+      enter?.();
+      expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, true);
+      loaded?.();
+      expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, true);
+      fakeWindow.isFullScreen.mockReturnValue(false);
+      leave?.();
+      expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, false);
+    },
+    bootMilliseconds,
+  );
 
   /* AF-L03-1: the descriptors used to be frozen into the window's
    * `additionalArguments`, so a vendor model probe on a 5 s clock was a
@@ -612,7 +785,11 @@ describe('desktop main compute owner', () => {
       });
       expect(order).toEqual([]);
       for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
-        listener(undefined, false);
+        listener(
+          { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+          fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1],
+          false,
+        );
       }
 
       await vi.waitFor(() => {
@@ -627,45 +804,138 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
-  /*
-   * C69: a quit that cannot settle has to be *visible*.
-   *
-   * Aborting the quit is right — the projects keep their unrecorded work — but
-   * the renderer has already dismissed its overlay by then, so without a dialog
-   * Cmd+Q simply does nothing, with no reason and nothing to act on. *Quit
-   * anyway* re-enters the same shutdown, forced.
-   */
   it(
-    'names what could not settle when a quit is held, and quits anyway on request',
+    'requires every window, rejects stale attempts and subframes, and ignores duplicate replies',
     async () => {
       await bootstrap();
-      state.servicesQuiesce.mockResolvedValue({ status: 'failed', message: 'utility drain failed' });
-
-      const quit = state.appListeners.get('before-quit')!.at(-1)!;
-      quit({ preventDefault: vi.fn() });
-
+      state.autoQuiesce = false;
+      const second = {
+        ...fakeWindow,
+        id: 2,
+        webContents: { ...fakeWindow.webContents, id: 2, mainFrame: {}, send: vi.fn() },
+      };
+      getWindows.mockReturnValue([fakeWindow, second]);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
-        expect(dialog.showMessageBox).toHaveBeenCalled();
+        expect(second.webContents.send).toHaveBeenCalled();
       });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        buttons: expect.arrayContaining(['Quit anyway']) as unknown as string[],
-      });
-      expect(app.quit).not.toHaveBeenCalled();
-      expect(state.servicesDispose).not.toHaveBeenCalled();
-      /* The outcome itself is logged, not just its name, so what refused to
-       * settle is recoverable from the log. */
-      expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {
-        outcome: { status: 'failed', message: 'utility drain failed' },
-      });
-
-      dialog.showMessageBox.mockResolvedValue({ response: 1 });
-      quit({ preventDefault: vi.fn() });
-
+      const attempt = fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1];
+      const reply = (sender: typeof fakeWindow.webContents, id = attempt, frame = sender.mainFrame): void => {
+        for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
+          listener({ sender, senderFrame: frame }, id, false);
+        }
+      };
+      reply(fakeWindow.webContents, 'retired');
+      reply(second.webContents, attempt, {});
+      reply(fakeWindow.webContents);
+      reply(fakeWindow.webContents);
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      reply(second.webContents);
       await vi.waitFor(() => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
-      dialog.showMessageBox.mockResolvedValue({ response: 0 });
-      state.servicesQuiesce.mockResolvedValue({ status: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'requires explicit unsaved-edit consent before forced renderer recovery reloads',
+    async () => {
+      await bootstrap();
+      state.autoForced = true;
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      const decision = Promise.withResolvers<{ response: number }>();
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 }).mockImplementationOnce(async () => decision.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
+      });
+      expect(fakeWindow.reload).not.toHaveBeenCalled();
+      expect(state.servicesRecover).not.toHaveBeenCalled();
+      expect(dialog.showMessageBox.mock.calls[1]?.[0]).toMatchObject({
+        buttons: ['Review again', 'Restore and discard unsaved changes'],
+        defaultId: 0,
+      });
+      decision.resolve({ response: 1 });
+      await vi.waitFor(() => {
+        expect(fakeWindow.reload).toHaveBeenCalledOnce();
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'offers machine navigation before any teardown and releases the quit fence',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['View machines', 'Keep Tau open', 'Quit anyway'],
+        cancelId: 1,
+      });
+      expect(fakeWindow.webContents.send).toHaveBeenCalledWith(quitChannels.navigate, '/machines/host/mill');
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'requires explicit interruption confirmation for an unknown assessment',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockRejectedValueOnce(new Error('Host did not answer'));
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 2 }).mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[1]?.[0]).toMatchObject({
+        buttons: ['Go back', 'Quit anyway'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.objectContaining({ forceMachines: true }),
+      );
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'recovers the service and reloads a usable renderer when saving fails and Keep open is chosen',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(fakeWindow.reload).toHaveBeenCalledOnce();
+      });
+      expect(state.servicesRecover).toHaveBeenCalledWith(expect.any(String), expect.any(Number));
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'requires a separate confirmation after a utility settlement failure',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
     },
     bootMilliseconds,
   );
@@ -822,7 +1092,8 @@ describe('desktop quit bounds', () => {
 
     /* The utility's launchers drain their runs before they release. */
     expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
-    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The utility's quiesce first waits for machine job starts in flight, then closes its projects. */
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds + machineStartWaitMilliseconds);
     /* The page cancels runs and flushes producers (10 s each) before the host's close. */
     expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
   }, 60_000);
@@ -1082,6 +1353,42 @@ describe('desktop main Bambu Studio channels', () => {
 });
 
 describe('desktop main machine binding channel', () => {
+  it('refuses machine and slicer IPC without creating the machine store when disabled', async () => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    const { desktopEnvironment } = await import('#main/environment.js');
+    vi.mocked(desktopEnvironment).mockReturnValueOnce({
+      TAU_API_URL: 'http://127.0.0.1:1',
+      TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+      TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+    });
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-disabled-'));
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+    });
+    const complete = state.handlers.get(machinesChannels.completeBinding)!;
+    await expect(complete({ senderFrame: {} }, { ceremonyId: 'old' })).resolves.toMatchObject({
+      status: 'failed',
+      code: 'MACHINES_DISABLED',
+    });
+    expect(state.servicesCompleteBinding).not.toHaveBeenCalled();
+    const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+    await expect(status({ senderFrame: {} })).rejects.toThrow('Machines are not available');
+    const postMessage = vi.fn();
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener(
+        { senderFrame: { url: 'app://tau/index.html', postMessage } },
+        { requestId: 'disabled', concern: 'machines' },
+      );
+    }
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+      requestId: 'disabled',
+      error: 'Machines are not available in this release.',
+    });
+    expect(state.servicesConnect).not.toHaveBeenCalled();
+    expect(existsSync(join(state.userData, 'config', 'machines'))).toBe(false);
+  }, 30_000);
+
   const bootMilliseconds = 30_000;
 
   it(
@@ -1110,6 +1417,24 @@ describe('desktop main machine binding channel', () => {
         { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
       ]);
       expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+
+      /* A refusal resolves as data, so the host's typed code crosses the context bridge, which keeps only an error's
+       * message. */
+      state.servicesCompleteBinding.mockRejectedValueOnce(
+        Object.assign(new Error('Enter the access code shown on the machine.'), {
+          code: 'MACHINE_CREDENTIAL_REQUIRED',
+        }),
+      );
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-4' })).resolves.toEqual({
+        status: 'failed',
+        code: 'MACHINE_CREDENTIAL_REQUIRED',
+        message: 'Enter the access code shown on the machine.',
+      });
+      state.servicesCompleteBinding.mockRejectedValueOnce(new Error('The desktop machine binding timed out.'));
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-5' })).resolves.toEqual({
+        status: 'failed',
+        message: 'The desktop machine binding timed out.',
+      });
     },
     bootMilliseconds,
   );
@@ -1141,33 +1466,20 @@ describe('desktop main machine store', () => {
   };
 
   it(
-    'routes exact measurement and debug performance to geometry, never the services singleton',
+    'routes exact measurement to geometry, never the services singleton',
     async () => {
-      const { desktopEnvironment } = await import('#main/environment.js');
-      vi.mocked(desktopEnvironment).mockReturnValueOnce({
-        TAU_API_URL: 'http://127.0.0.1:1',
-        TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
-        TAU_FRONTEND_URL: 'http://127.0.0.1:1',
-        TAU_DEBUG: 'true',
-      } as ReturnType<typeof desktopEnvironment>);
       await boot();
       const postMessage = vi.fn();
-      for (const [requestId, concern] of [
-        ['measure', 'exactMeasurement'],
-        ['diagnostic', 'geospecPerformance'],
-      ] as const) {
-        for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
-          listener({ senderFrame: { url: 'app://tau/index.html', postMessage } }, { requestId, concern });
-        }
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'measure', concern: 'exactMeasurement' },
+        );
       }
       expect(state.geometryMeasurementConnect).toHaveBeenCalledOnce();
-      expect(state.geometryPerformanceConnect).toHaveBeenCalledOnce();
       expect(state.servicesConnect).not.toHaveBeenCalled();
       expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'measure' }, [
         { id: 'geometry-measurement-port' },
-      ]);
-      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [
-        { id: 'geometry-performance-port' },
       ]);
     },
     bootMilliseconds,
@@ -1189,7 +1501,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'refuses the diagnostic geometry port when TAU_DEBUG is absent',
+    'refuses the retired GeoSpec performance concern as unknown',
     async () => {
       await boot();
       const postMessage = vi.fn();
@@ -1201,9 +1513,9 @@ describe('desktop main machine store', () => {
       }
       expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
         requestId: 'diagnostic',
-        error: 'GeoSpec performance tools require TAU_DEBUG.',
+        error: 'services.unknown-concern',
       });
-      expect(state.geometryPerformanceConnect).not.toHaveBeenCalled();
+      expect(state.geometryMeasurementConnect).not.toHaveBeenCalled();
       expect(state.servicesConnect).not.toHaveBeenCalled();
     },
     bootMilliseconds,
@@ -1270,3 +1582,5 @@ describe('desktop main machine store', () => {
     bootMilliseconds,
   );
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/viewer",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.2",
   "description": "Tau's interactive CAD viewer: the React Three Fiber canvas, graphics machines and model controls",
   "type": "module",
   "sideEffects": [
@@ -552,8 +552,9 @@
     "@gltf-transform/core": "catalog:",
     "@panzoom/panzoom": "^4.6.2",
     "@react-three/drei": "^10.7.7",
-    "@rjsf/core": "5.24.13",
-    "@rjsf/utils": "5.24.13",
+    "@rjsf/core": "6.11.0",
+    "@rjsf/utils": "6.11.0",
+    "@rjsf/validator-ajv8": "6.11.0",
     "@taucad/camera": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
@@ -577,7 +578,7 @@
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",
     "@taucad/runtime": "^0.1.0-beta.0",
-    "@taucad/ui": "^0.0.1",
+    "@taucad/ui": "^0.1.0-beta.0",
     "@xstate/react": "^7.0.0-alpha.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -587,7 +588,6 @@
   },
   "devDependencies": {
     "@react-three/fiber": "^9.6.1",
-    "@rjsf/validator-ajv8": "5.24.13",
     "@taucad/assimp": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/image": "workspace:*",

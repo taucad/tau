@@ -1,22 +1,15 @@
+import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useSelector } from '@xstate/react';
-import { LayoutPriority } from 'allotment';
-import { Allotment } from '#components/panes/allotment.js';
-import { Code, PanelBottom, Play } from 'lucide-react';
+import { Code, Play } from 'lucide-react';
 import { getActiveGroupValues } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
-import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { ProjectProvider, useParameterSetActor } from '#hooks/use-project.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
-import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
@@ -192,80 +185,26 @@ const SharedProjectLayout = ({
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
-  const isMobile = useIsMobile();
-  const topbar = (
-    <SharedProjectTopbar
-      publication={publication}
-      files={files}
-      archive={archive}
-      shareUrl={shareUrl}
-      sourceLabel={sourceLabel}
-      managementActions={
-        isMobile ? (
-          <>
-            {/* A glyph, like its neighbours at phone widths. A label would overflow the bar below 24rem, and from
-                40rem, where the neighbours show theirs, when every action is present. */}
-            <DrawerTrigger asChild>
-              <Button type='button' size='sm' variant='ghost' aria-label='Workbench' className='size-8 px-0'>
-                <PanelBottom className='size-3.5' aria-hidden />
-              </Button>
-            </DrawerTrigger>
-            {managementActions}
-          </>
-        ) : (
-          managementActions
-        )
-      }
-    />
-  );
-
   return (
-    <div className='flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-sidebar'>
-      <ChatContextInsertionProvider>
-        {isMobile ? (
-          <>
-            {/* The viewer's bottom edge belongs to its controls, so the workbench opens from the top bar. The drawer
-                wraps only the bar and its content, so `useIsInsideDrawer` stays false in the viewer. */}
-            <Drawer modal>
-              {topbar}
-              <DrawerContent className='h-[min(78dvh,48rem)] bg-sidebar'>
-                <DrawerTitle className='sr-only'>Project workbench</DrawerTitle>
-                <DrawerDescription className='sr-only'>
-                  Inspect parameters, files, exports, and details.
-                </DrawerDescription>
-                <div className='min-h-0 flex-1'>
-                  <WorkbenchDockview profile='shared' />
-                </div>
-              </DrawerContent>
-            </Drawer>
-            <main className='relative min-h-0 flex-1 bg-background'>
-              <ViewerDockview profile='shared' />
-            </main>
-          </>
-        ) : (
-          <>
-            {topbar}
-            <main className='min-h-0 flex-1 p-2'>
-              <Allotment
-                paneLabels={['Viewer', 'Workbench']}
-                separator={false}
-                proportionalLayout={false}
-                className='size-full overflow-hidden rounded-lg border border-border bg-background'
-              >
-                <Allotment.Pane minSize={360} priority={LayoutPriority.High}>
-                  <ViewerDockview profile='shared' />
-                </Allotment.Pane>
-                <Allotment.Pane minSize={300} preferredSize={380} priority={LayoutPriority.Low}>
-                  <div className='size-full border-l border-border'>
-                    <WorkbenchDockview profile='shared' />
-                  </div>
-                </Allotment.Pane>
-              </Allotment>
-            </main>
-          </>
+    <main className='h-dvh'>
+      <PreviewWorkbenchLayout
+        renderTopbar={(workbenchTrigger) => (
+          <SharedProjectTopbar
+            publication={publication}
+            files={files}
+            archive={archive}
+            shareUrl={shareUrl}
+            sourceLabel={sourceLabel}
+            managementActions={
+              <>
+                {workbenchTrigger}
+                {managementActions}
+              </>
+            }
+          />
         )}
-      </ChatContextInsertionProvider>
-    </div>
+      />
+    </main>
   );
 };
 
@@ -322,16 +261,14 @@ export const SharedProjectWorkbench = ({
             input={projectInput}
           >
             <MonacoModelServiceProvider>
-              <ProjectWorkspaceProvider>
-                <SharedProjectLayout
-                  publication={publication}
-                  files={files}
-                  archive={archive}
-                  shareUrl={shareUrl}
-                  sourceLabel={sourceLabel}
-                  managementActions={managementActions}
-                />
-              </ProjectWorkspaceProvider>
+              <SharedProjectLayout
+                publication={publication}
+                files={files}
+                archive={archive}
+                shareUrl={shareUrl}
+                sourceLabel={sourceLabel}
+                managementActions={managementActions}
+              />
             </MonacoModelServiceProvider>
           </ProjectProvider>
         </WebglContextTrackerProvider>

@@ -1,117 +1,43 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { on } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { Duplex } from 'node:stream';
 
 import type {
+  MachineCandidate,
   MachineConnectInput,
   MachineConnectionRuntime,
-  MachineCommandReceipt,
-  MachineDescriptor,
-  MachineDiscoveryInput,
   MachineDiscoveryEvent,
+  MachineDiscoveryInput,
   MachineDiscoveryRuntime,
   MachineNetworkStream,
   MachineSession,
-  MachineSnapshot,
-  MachineSubmissionReceipt,
-  MachineTransferReceipt,
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
-import { checkOperation, createQuantity, quantityKinds } from '@taucad/units/quantity';
-import type { Quantity } from '@taucad/units/quantity';
 import type { Client as FtpClientConstructor } from 'basic-ftp';
 import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
-import type { BambuCommandResult, BambuModel, BambuStatus } from '#bambu.protocol.js';
-import {
-  bambuExternalSpoolSlot,
-  bambuRemoteName,
-  bambuStage,
-  bambuTopic,
-  definedFields,
-  isBambuSerial,
-  parseBambuStill,
-  mergeBambuStatus,
-  parseBambuCommandPayload,
-  parseBambuDiscoveryDatagram,
-  parseBambuStatusPayload,
-  parseBambuVersionPayload,
-} from '#bambu.protocol.js';
 import { prepareBambuArtifact } from '#bambu.archive.js';
-import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
+import type { BambuWireForm } from '#bambu.commands.js';
+import { bambuFtpsPort, bambuManifests, bambuServicePort } from '#bambu.manifest.js';
+import type { BambuModel } from '#bambu.protocol.js';
+import {
+  BambuProtocolError,
+  bambuModels,
+  bambuTopic,
+  isBambuSerial,
+  parseBambuDiscoveryDatagram,
+  parseBambuStill,
+} from '#bambu.protocol.js';
+import { openBambuSession } from '#bambu.session.js';
+import type { BambuSubmission } from '#bambu.session.js';
 
-type Binding = Readonly<{
-  logicalId: string;
-  address?: string;
+/** The admitted binding; where the printer is lives in the discovery endpoint, not here. @internal */
+export type BambuBinding = Readonly<{
   serial?: string;
+  /** Which variant of the commands the clients disagree on to send; (a), Bambu Studio's, by default. */
+  wireForm?: BambuWireForm;
 }>;
-type Submission = Readonly<{
-  amsMapping: readonly number[];
-  bedLeveling: boolean;
-  expectedBedType: string;
-  expectedFilamentDiameter: number;
-  expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
-  expectedModel: BambuModel;
-  expectedNozzleDiameter: number;
-  operatorConfirmedBedType?: string;
-  flowCalibration: boolean;
-  timelapse: boolean;
-}>;
-const serialIdentifier = /^[A-Za-z0-9_-]{1,64}$/u;
-const remoteNamePattern = /^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u;
-const memberMd5Pattern = /^[0-9a-f]{32}$/u;
-const bambuWireId = (operationId: string): string =>
-  String(
-    Number(BigInt(`0x${createHash('sha256').update(operationId).digest('hex').slice(0, 8)}`) % 2_147_483_646n) + 1,
-  );
-const bambuWireSequenceId = (operationId: string): string =>
-  String(10_000 + (Number(bambuWireId(operationId)) % 90_000));
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-const filamentDiameter = createQuantity({
-  value: 1.75,
-  unit: 'mm',
-  kind: quantityKinds.diameter,
-  space: 'linear',
-  semanticMode: 'declared-only',
-});
-if (filamentDiameter.status !== 'success') {
-  throw new Error('BAMBU_PROVIDER_UNITS_INVALID');
-}
-
-/**
- * Every tray the printer reports, by its flat tray id: the AMS trays, then the external spool.
- *
- * @param facts - The merged status.
- * @returns The snapshot's materials.
- */
-const observedMaterials = (facts: BambuStatus): NonNullable<BambuStatus['materials']> => [
-  ...(facts.materials ?? []),
-  ...(facts.externalMaterial ? [facts.externalMaterial] : []),
-];
-
-const sameQuantity = (observed: Quantity | undefined, declared: number): boolean => {
-  if (!observed) {
-    return false;
-  }
-  const expected = createQuantity({
-    value: declared,
-    unit: 'mm',
-    kind: quantityKinds.diameter,
-    space: 'linear',
-    semanticMode: 'declared-only',
-  });
-  if (expected.status !== 'success') {
-    return false;
-  }
-  const compared = checkOperation({
-    operator: 'compare',
-    left: observed,
-    right: expected.value,
-  });
-  return compared.status === 'success' && compared.value.value === 0;
-};
+type Binding = BambuBinding;
 
 /**
  * How long a discovery pass listens. An X1C advertises on UDP 2021 about every
@@ -121,8 +47,21 @@ const sameQuantity = (observed: Quantity | undefined, declared: number): boolean
  */
 const advertisementWindow = 11_000;
 
+/**
+ * The printer's network address. A Bambu printer is a network machine, so the host never hands it a serial candidate.
+ * @internal
+ * @param candidate - The candidate being connected.
+ * @returns The address its services answer at.
+ */
+export const bambuCandidateAddress = (candidate: Pick<MachineCandidate, 'endpoint'>): string => {
+  if (candidate.endpoint.transport !== 'network') {
+    throw new BambuProtocolError('BAMBU_MANUAL_ADDRESS_INVALID', 'A Bambu printer is reached over the network.');
+  }
+  return candidate.endpoint.address;
+};
+
 /** Execute one bounded provider discovery pass through the host-owned datagram port.
- * @param input - Qualified provider configuration and cancellation.
+ * @param input - Qualified provider configuration, the address a person entered (if any) and cancellation.
  * @param runtime - Host-owned bounded datagram authority.
  * @param model - Model admitted by this provider.
  * @returns Normalized discovery events.
@@ -132,24 +71,36 @@ export async function* discoverBambuMachines(
   runtime: MachineDiscoveryRuntime,
   model: BambuModel = 'X1C',
 ): AsyncGenerator<MachineDiscoveryEvent> {
-  if (input.configuration.address) {
-    const { address } = input.configuration;
+  if (input.endpoint !== undefined) {
+    // A serial endpoint finds nothing: the host refuses one before it reaches a network provider.
+    if (input.endpoint.transport !== 'network') {
+      return;
+    }
+    const { address, port } = input.endpoint;
+    if (port !== undefined) {
+      throw new BambuProtocolError(
+        'BAMBU_MANUAL_ADDRESS_INVALID',
+        'A Bambu printer answers on its own fixed ports; enter the address without a port.',
+      );
+    }
     if (input.configuration.serial && !isBambuSerial(input.configuration.serial, model)) {
-      throw new TypeError('BAMBU_SERIAL_INVALID');
+      throw new BambuProtocolError('BAMBU_SERIAL_INVALID', 'The serial does not match the selected printer model.');
     }
     if (
       (/^[0-9.]+$/u.test(address) && isIP(address) !== 4) ||
       !/^(?=.{1,253}$)(?!.*[\s/\\?#@])(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$/u.test(address)
     ) {
-      throw new TypeError('BAMBU_MANUAL_ADDRESS_INVALID');
+      throw new BambuProtocolError('BAMBU_MANUAL_ADDRESS_INVALID', 'Enter a valid IP address or printer hostname.');
     }
     const observedAt = runtime.clock.now();
     yield Object.freeze({
       type: 'found',
       candidate: Object.freeze({
-        id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${input.configuration.serial ?? address}`,
-        name: input.configuration.logicalId,
-        endpoint: Object.freeze({ address, interface: 'manual' }),
+        id: `${bambuModels[model].providerId}:${input.configuration.serial ?? address}`,
+        // What was entered and what it claims to be; the person names the machine at bind. A 253-character hostname
+        // would overrun the 256-character candidate name, so it is cut (the address is ASCII).
+        name: `${model} at ${address}`.slice(0, 256),
+        endpoint: Object.freeze({ transport: 'network', address, interface: 'manual' }),
         claimedIdentity: Object.freeze({
           serial: input.configuration.serial,
           model,
@@ -277,32 +228,24 @@ const toDuplex = (stream: MachineNetworkStream): Duplex => {
   return duplex;
 };
 
-const mapRunState = (
-  state: ReturnType<typeof parseBambuStatusPayload>['runState'],
-): NonNullable<MachineSnapshot['run']>['state'] => {
-  switch (state) {
-    case 'failed':
-    case 'finishing':
-    case 'paused':
-    case 'printing':
-    case 'succeeded': {
-      return state;
-    }
-    case 'downloading':
-    case 'heating':
-    case 'preparing': {
-      return 'preparing';
-    }
-    case 'none': {
-      return 'idle';
-    }
-    default: {
-      return 'unknown';
-    }
-  }
-};
-
 const maximumCameraBytes = 4 * 1024 * 1024;
+
+/**
+ * Name an MQTT connect failure by its remedy: CONNACK 4 (bad user name or password) and 5 (not authorized) mean the
+ * access code is wrong and the printer must be bound again; anything else is the link, which a retry may fix.
+ * @param error - The MQTT.js error; a refused CONNACK is an `ErrorWithReasonCode` whose `code` is the return code.
+ * @returns The coded failure, worded for a person.
+ */
+const connectFailure = (error?: Error): BambuProtocolError =>
+  error !== undefined && 'code' in error && (error.code === 4 || error.code === 5)
+    ? new BambuProtocolError(
+        'BAMBU_ACCESS_CODE_REJECTED',
+        "The printer refused the access code. Check the code on the printer's screen and bind it again.",
+      )
+    : new BambuProtocolError(
+        'BAMBU_MQTT_CONNECT_FAILED',
+        'Could not connect to the printer. Check that it is on and on this network, then try again.',
+      );
 
 /**
  * Resolve the printer's access code from the host vault. It stays in the session and never reaches a log or error.
@@ -335,17 +278,17 @@ const resolveAccessCode = async (
  *
  * @param input - Admitted connection input naming the printer.
  * @param runtime - Host network authority.
- * @param trust - The MQTT service's pinned trust.
+ * @param service - The MQTT service's pinned trust, and its port as the manifest declares it.
  * @returns The open stream.
  */
 const openMqttStream = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  trust: MachineTransportTrust,
+  { trust, port }: Readonly<{ trust: MachineTransportTrust; port: number }>,
 ): Promise<MachineNetworkStream> => {
   try {
     return await runtime.connectStream({
-      endpoint: { address: input.candidate.endpoint.address, port: 8883 },
+      endpoint: { address: bambuCandidateAddress(input.candidate), port },
       transport: 'tls',
       trust,
       connectTimeout: 10_000,
@@ -364,16 +307,17 @@ const openMqttStream = async (
   }
 };
 
-/** Capture one bounded A1 mini JPEG frame over its pinned TLS camera service.
+/** Capture one bounded JPEG frame over a pinned TLS camera service (the A1 mini's framed JPEG stream).
  * @param input - Admitted connection input.
  * @param runtime - Host-owned network and secret authority.
- * @param signal - Cancels this capture independently of the observation session.
+ * @param capture - The camera service's port as the manifest declares it, and the signal that cancels this capture
+ *   independently of the observation session.
  * @returns The first complete JPEG frame.
  */
-const captureA1MiniStill = async (
+const captureJpegStill = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  signal: AbortSignal,
+  { port, signal }: Readonly<{ port: number; signal: AbortSignal }>,
 ) => {
   const accessCode = await resolveAccessCode(input, runtime);
   if (Buffer.byteLength(accessCode) > 32) {
@@ -385,7 +329,7 @@ const captureA1MiniStill = async (
   }
   const captureSignal = AbortSignal.any([signal, input.signal, AbortSignal.timeout(60_000)]);
   const stream = await runtime.connectStream({
-    endpoint: { address: input.candidate.endpoint.address, port: 6000 },
+    endpoint: { address: bambuCandidateAddress(input.candidate), port },
     transport: 'tls',
     trust,
     connectTimeout: 10_000,
@@ -438,37 +382,39 @@ const captureA1MiniStill = async (
 };
 
 /**
- * An X1C's still: the host captures one frame from the pinned RTSPS camera. Another model's camera needs its own
- * manifest and pin; the A1 mini uses framed JPEG over TLS instead.
+ * A printer's still, by its model's camera: the host captures one RTSPS frame (X1C), or the provider reads one framed
+ * JPEG over TLS (A1 mini). Either way from the pinned camera service the manifest declares.
  *
  * @param input - Admitted connection input with the camera trust and secret.
  * @param runtime - Host capture authority.
- * @param model - The printer's model, from its status or its discovery.
+ * @param model - The printer's model; its manifest declares the camera's port.
  * @returns The session's still capability.
  */
 const bambuStillCapture = (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  model: string | undefined,
-): MachineSession<Submission>['stillCapture'] => {
+  model: BambuModel,
+): MachineSession<BambuSubmission>['stillCapture'] => {
   const trust = input.connection.serviceTrust['camera'];
   const { captureNetworkStill } = runtime;
-  if (trust?.type !== 'pinned' || (model !== 'A1 mini' && (model !== 'X1C' || !captureNetworkStill))) {
+  const { camera } = bambuModels[model];
+  if (trust?.type !== 'pinned' || (camera === 'rtsps' && !captureNetworkStill)) {
     return Object.freeze({ type: 'unsupported' });
   }
+  const port = bambuServicePort(bambuManifests[model], 'camera');
   return Object.freeze({
     type: 'supported',
     async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
-      if (model === 'A1 mini') {
-        return captureA1MiniStill(input, runtime, captureInput.signal);
+      if (camera === 'jpeg-tls') {
+        return captureJpegStill(input, runtime, { port, signal: captureInput.signal });
       }
       if (!captureNetworkStill) {
         throw new Error('BAMBU_CAMERA_UNSUPPORTED');
       }
       return captureNetworkStill({
         endpoint: {
-          address: input.candidate.endpoint.address,
-          port: 322,
+          address: bambuCandidateAddress(input.candidate),
+          port,
         },
         trust,
         secretRef: input.connection.secretRef,
@@ -482,7 +428,7 @@ const bambuStillCapture = (
   });
 };
 
-/** Connect one host-owned, pinned MQTTS observation session.
+/** Connect one host-owned, pinned MQTTS session.
  * @param input - Admitted connection input.
  * @param runtime - Host-owned secret, clock, log and bounded network services.
  * @param model - Model and hardware manifest selected by the provider.
@@ -492,736 +438,136 @@ export const connectBambuMachine = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
   model: BambuModel = 'X1C',
-): Promise<MachineSession<Submission>> => {
-  const manifest = model === 'X1C' ? bambuX1cManifest : bambuA1MiniManifest;
-  if (input.candidate.endpoint.address !== 'simulator.invalid') {
-    const serial = input.candidate.claimedIdentity.serial ?? input.configuration.serial;
-    if (!serial || !isBambuSerial(serial, model)) {
-      throw new TypeError('BAMBU_SERIAL_REQUIRED');
-    }
-    const trust = input.connection.serviceTrust['mqtt'];
-    if (trust?.type !== 'pinned') {
-      throw new Error('BAMBU_MQTT_PIN_REQUIRED');
-    }
-    const accessCode = await resolveAccessCode(input, runtime);
-    const network = await openMqttStream(input, runtime, trust);
-    let client: MqttClientConstructor;
-    try {
-      const { mqttClient: mqttClientConstructor } = await loadBambuHostLibraries();
-      // oxlint-disable-next-line new-cap -- dependency constructor is returned by a lazy camel-case property.
-      client = new mqttClientConstructor(() => toDuplex(network), {
-        clean: true,
-        clientId: `tau-${randomUUID()}`,
-        connectTimeout: 10_000,
-        keepalive: 30,
-        log: () => undefined,
-        password: accessCode,
-        protocol: 'mqtt',
-        protocolVersion: 4,
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream MQTT.js option.
-        queueQoSZero: false,
-        reconnectPeriod: 0,
-        resubscribe: false,
-        username: 'bblp',
-      });
-    } catch {
-      await network.close().catch(() => undefined);
-      throw new Error('BAMBU_MQTT_CLIENT_FAILED');
-    }
-    const updates = new EventTarget();
-    const commandContexts = new Map<string, 'pause' | 'project_file' | 'resume' | 'stop'>();
-    // The run name each start in this session asked for; the wire id is derived from the operation.
-    const startRunNames = new Map<string, string>();
-    const commandResults = new Map<string, Readonly<{ result: BambuCommandResult; observedAt: string }>>();
-    let closed = false;
-    let firmware: string | undefined;
-    let status: ReturnType<typeof parseBambuStatusPayload> | undefined;
-    let statusObservedAt: string | undefined;
-    /** Status reports merged in this session; start diagnostics count the reports a window saw. */
-    let statusReports = 0;
-    let versionSerial: string | undefined;
-    let versionModel: string | undefined;
-    const snapshot = (): MachineSnapshot => {
-      const state = status ? mapRunState(status.runState) : 'unknown';
-      const active = state === 'paused' || state === 'preparing' || state === 'printing' || state === 'finishing';
-      const facts: BambuStatus = status ?? {};
-      return Object.freeze({
-        connection: client.connected ? 'connected' : 'disconnected',
-        readiness: active ? 'busy' : state === 'idle' || state === 'succeeded' ? 'idle' : 'unknown',
-        ...definedFields({ activeRunId: active ? facts.providerRunId : undefined }),
-        observedAt: statusObservedAt ?? runtime.clock.now(),
-        setup: Object.freeze({
-          toolId: 'tool-0',
-          ...definedFields({ bedType: facts.bedType }),
-          materials: observedMaterials(facts),
-        }),
-        run: Object.freeze({
-          state,
-          ...definedFields({
-            progress: facts.progress,
-            remainingSeconds: facts.remainingSeconds,
-            name: facts.runName,
-            file: facts.runFile,
-            currentLayer: facts.currentLayer,
-            totalLayers: facts.totalLayers,
-            stage: active ? bambuStage(facts.stageId) : undefined,
-            printType: facts.printType,
-            speedProfile: facts.speedProfile,
-            speedPercent: facts.speedPercent,
-          }),
-        }),
-        temperatures: definedFields({
-          nozzle: facts.nozzleTemperature,
-          nozzleTarget: facts.nozzleTargetTemperature,
-          bed: facts.bedTemperature,
-          bedTarget: facts.bedTargetTemperature,
-          chamber: model === 'X1C' ? facts.chamberTemperature : undefined,
-        }),
-        fans: definedFields({
-          part: facts.partFanPercent,
-          auxiliary: model === 'X1C' ? facts.auxiliaryFanPercent : undefined,
-          chamber: model === 'X1C' ? facts.chamberFanPercent : undefined,
-        }),
-        materialSystem: Object.freeze({
-          ...definedFields({ currentSlot: facts.currentMaterialSlot, targetSlot: facts.targetMaterialSlot }),
-          units: facts.materialUnits ?? [],
-        }),
-        network: definedFields({ wifiSignalDbm: facts.wifiSignalDbm }),
-        lights: definedFields({ chamber: model === 'X1C' ? facts.chamberLight : undefined }),
-        ...definedFields({ removableStorage: facts.removableStorage, alerts: facts.alerts }),
-      });
-    };
-    client.on('message', (topic, message) => {
-      if (topic !== bambuTopic(serial, 'report')) {
-        return;
-      }
-      try {
-        const version = parseBambuVersionPayload(Uint8Array.from(message));
-        firmware = version.firmware;
-        versionSerial = version.serial;
-        versionModel = version.model;
-        updates.dispatchEvent(new Event('facts'));
-        return;
-      } catch {
-        // The same bounded provider payload may be a status or command result.
-      }
-      for (const [sequence, command] of commandContexts) {
-        try {
-          const result = parseBambuCommandPayload({
-            bytes: Uint8Array.from(message),
-            command,
-            sequence: bambuWireSequenceId(sequence),
-          });
-          if (result.status !== 'unrelated') {
-            commandResults.set(sequence, Object.freeze({ result, observedAt: runtime.clock.now() }));
-            updates.dispatchEvent(new Event(`command:${sequence}`));
-            return;
-          }
-        } catch {
-          // The same bounded provider payload may be an unrelated status report.
-        }
-      }
-      try {
-        status = mergeBambuStatus(status, parseBambuStatusPayload(Uint8Array.from(message)));
-        statusObservedAt = runtime.clock.now();
-        statusReports += 1;
-        updates.dispatchEvent(new Event('facts'));
-        updates.dispatchEvent(new CustomEvent('snapshot', { detail: snapshot() }));
-      } catch {
-        // Untrusted payloads are discarded without retaining bytes or error detail.
-      }
-    });
-    client.on('close', () => {
-      updates.dispatchEvent(new CustomEvent('snapshot', { detail: snapshot() }));
-    });
-    client.on('error', () => {
-      runtime.clock.now();
-    });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const connected = (): void => {
-          cleanup();
-          resolve();
-        };
-        const failed = (): void => {
-          cleanup();
-          reject(new Error('BAMBU_MQTT_CONNECT_FAILED'));
-        };
-        const aborted = (): void => {
-          cleanup();
-          reject(new Error('BAMBU_MQTT_CONNECT_ABORTED'));
-        };
-        const cleanup = (): void => {
-          client.off('connect', connected);
-          client.off('error', failed);
-          input.signal.removeEventListener('abort', aborted);
-        };
-        client.once('connect', connected);
-        client.once('error', failed);
-        input.signal.addEventListener('abort', aborted, { once: true });
-      });
-      await client.subscribeAsync(bambuTopic(serial, 'report'), { qos: 0 });
-      await client.publishAsync(
-        bambuTopic(serial, 'request'),
-        '{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}',
-        { qos: 0 },
-      );
-      await client.publishAsync(bambuTopic(serial, 'request'), '{"info":{"sequence_id":"0","command":"get_version"}}', {
-        qos: 0,
-      });
-      if (!status || !firmware || !versionSerial) {
-        await new Promise<void>((resolve) => {
-          const initialFactsTimeout = setTimeout(finish, 15_000);
-          function finish(): void {
-            clearTimeout(initialFactsTimeout);
-            updates.removeEventListener('facts', observed);
-            input.signal.removeEventListener('abort', finish);
-            resolve();
-          }
-          function observed(): void {
-            if (status && firmware && versionSerial) {
-              finish();
-            }
-          }
-          updates.addEventListener('facts', observed);
-          input.signal.addEventListener('abort', finish, { once: true });
-          observed();
-        });
-      }
-      input.signal.throwIfAborted();
-      if (
-        !status ||
-        !firmware ||
-        versionSerial !== serial ||
-        (versionModel !== undefined && versionModel !== model) ||
-        (status.model !== undefined && status.model !== model)
-      ) {
-        throw new Error('BAMBU_INITIAL_FACTS_INVALID');
-      }
-    } catch {
-      await client.endAsync(true).catch(() => undefined);
-      throw new Error('BAMBU_MQTT_CONNECT_FAILED');
-    }
-    const close = async (): Promise<void> => {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      await client.endAsync(true).catch(() => undefined);
-    };
-    /**
-     * The run a start produced, from the printer's own status: its run carries the `subtask_id` or
-     * `subtask_name` the start sent. An X1C may start without an echo Tau can correlate, so the
-     * printer's status is start evidence in its own right.
-     *
-     * @param operationId - The start's operation, whose wire id the command sent.
-     * @param transferId - The start's transfer, whose name the command sent; only needed after a reconnect.
-     * @returns The printer's run id for that start, or `undefined` while its status shows no such run.
-     */
-    const startedRunId = (operationId: string, transferId?: string): string | undefined => {
-      const wireId = bambuWireId(operationId);
-      const runName =
-        startRunNames.get(operationId) ??
-        (transferId !== undefined && remoteNamePattern.test(transferId)
-          ? transferId.replace('.gcode.3mf', '')
-          : undefined);
-      // A name is reused when the same preparation is sent again, so only a live run proves it.
-      const runState = status ? mapRunState(status.runState) : 'unknown';
-      const isLive = runState === 'preparing' || runState === 'printing' || runState === 'paused';
-      const isOurs =
-        status?.providerRunId === wireId || (isLive && runName !== undefined && status?.runName === runName);
-      return isOurs ? (status?.providerRunId ?? wireId) : undefined;
-    };
-    const commandReceipt = (
-      operationId: string,
-      command: 'pause' | 'project_file' | 'resume' | 'stop',
-      transferId?: string,
-    ): MachineSubmissionReceipt => {
-      const stored = commandResults.get(operationId);
-      const runId = command === 'project_file' ? startedRunId(operationId, transferId) : undefined;
-      if ((!stored || stored.result.status === 'unrelated') && runId !== undefined) {
-        return Object.freeze({
-          status: 'accepted',
-          providerRunId: runId,
-          observedAt: statusObservedAt ?? runtime.clock.now(),
-        });
-      }
-      if (!stored || stored.result.status === 'unrelated') {
-        return Object.freeze({
-          status: 'unknown',
-          reason: 'reply-lost-after-possible-acceptance',
-          observedAt: runtime.clock.now(),
-        });
-      }
-      if (stored.result.status === 'rejected') {
-        return Object.freeze({
-          status: 'rejected',
-          code: 'PROVIDER_REJECTED',
-          message: stored.result.reason,
-          observedAt: stored.observedAt,
-        });
-      }
-      const providerRunId = stored.result.providerRunId ?? runId;
-      return Object.freeze({
-        status: 'accepted',
-        ...(providerRunId ? { providerRunId } : {}),
-        observedAt: stored.observedAt,
-      });
-    };
-    /** When each start of this session was published, and how many status reports had arrived by then. */
-    const startWindows = new Map<string, Readonly<{ publishedAt: number; reportsBefore: number }>>();
-    /**
-     * Record how a start settled, or what the printer last showed when it did not, so a start the printer has not proven
-     * can be diagnosed from the host log (blueprint x1c-start-confirmation R7). Ids only: no payload bytes, serials or
-     * addresses.
-     *
-     * @param operationId - The start's operation.
-     * @param phase - The provider's own start window, or a later reconciliation.
-     * @returns Once the log entry is written or dropped.
-     */
-    const logStart = async (operationId: string, phase: 'window' | 'reconciliation'): Promise<void> => {
-      const wireId = bambuWireId(operationId);
-      const stored = commandResults.get(operationId);
-      const proof = stored ? `reply ${stored.result.status}` : startedRunId(operationId) ? 'status' : undefined;
-      const window = startWindows.get(operationId);
-      const since = window
-        ? `${String(Date.parse(runtime.clock.now()) - window.publishedAt)} ms and ${String(statusReports - window.reportsBefore)} status reports after publishing`
-        : 'after a reconnect';
-      const facts = `printer ${status?.runState ?? 'unreported'}, run id ${status?.providerRunId === wireId ? 'matches' : 'differs'}, run name ${status?.runName !== undefined && status.runName === startRunNames.get(operationId) ? 'matches' : 'differs'}`;
-      await runtime
-        .log({
-          level: 'info',
-          message: `Start ${wireId} ${proof ? `proven by ${proof}` : 'not yet proven'} ${phase === 'window' ? 'in the start window' : 'on reconciliation'}, ${since}; ${facts}.`,
-        })
-        .catch(() => undefined);
-    };
-    const sendCommand = async (
-      commandInput: Readonly<{
-        operationId: string;
-        command: 'pause' | 'project_file' | 'resume' | 'stop';
-        payload: Readonly<Record<string, unknown>>;
-        signal: AbortSignal;
-      }>,
-    ): Promise<MachineSubmissionReceipt> => {
-      if (!serialIdentifier.test(commandInput.operationId)) {
-        throw new TypeError('BAMBU_OPERATION_ID_INVALID');
-      }
-      const existing = commandContexts.get(commandInput.operationId);
-      if (existing) {
-        if (existing !== commandInput.command) {
-          throw new Error('BAMBU_OPERATION_ID_CONFLICT');
-        }
-        return commandReceipt(commandInput.operationId, commandInput.command);
-      }
-      // Ponytail: one live session retains at most 128 reconciliation slots; reconnect after operator resolution if exhausted.
-      if (commandContexts.size >= 128) {
-        return Object.freeze({
-          status: 'rejected',
-          code: 'COMMAND_LEDGER_FULL',
-          message: 'The live provider reconciliation ledger is full.',
-          observedAt: runtime.clock.now(),
-        });
-      }
-      commandInput.signal.throwIfAborted();
-      commandContexts.set(commandInput.operationId, commandInput.command);
-      if (commandInput.command === 'project_file') {
-        startWindows.set(commandInput.operationId, {
-          publishedAt: Date.parse(runtime.clock.now()),
-          reportsBefore: statusReports,
-        });
-      }
-      try {
-        await client.publishAsync(bambuTopic(serial, 'request'), JSON.stringify(commandInput.payload), { qos: 0 });
-      } catch {
-        return commandReceipt(commandInput.operationId, commandInput.command);
-      }
-      const isSettled = (): boolean =>
-        commandResults.has(commandInput.operationId) ||
-        (commandInput.command === 'project_file' && startedRunId(commandInput.operationId) !== undefined);
-      if (!isSettled()) {
-        await new Promise<void>((resolve) => {
-          const eventName = `command:${commandInput.operationId}`;
-          const commandTimeout = setTimeout(finish, 15_000);
-          function finish(): void {
-            clearTimeout(commandTimeout);
-            updates.removeEventListener(eventName, finish);
-            updates.removeEventListener('facts', observed);
-            commandInput.signal.removeEventListener('abort', finish);
-            resolve();
-          }
-          function observed(): void {
-            if (isSettled()) {
-              finish();
-            }
-          }
-          updates.addEventListener(eventName, finish, { once: true });
-          updates.addEventListener('facts', observed);
-          commandInput.signal.addEventListener('abort', finish, { once: true });
-        });
-      }
-      if (commandInput.command === 'project_file') {
-        await logStart(commandInput.operationId, 'window');
-      }
-      return commandReceipt(commandInput.operationId, commandInput.command);
-    };
-    const stillCapture = bambuStillCapture(input, runtime, status.model ?? input.candidate.claimedIdentity.model);
-    const session: MachineSession<Submission> = {
-      stillCapture,
-      async getDescriptor(descriptorInput): Promise<MachineDescriptor> {
-        descriptorInput.signal.throwIfAborted();
-        const descriptor: MachineDescriptor = {
-          id: serial,
-          name: input.candidate.name,
-          vendor: 'Bambu Lab',
-          model,
-          technology: 'additive.fff',
-          firmware: firmware ?? status?.firmware ?? 'unknown',
-          accepts: [
-            {
-              contract: {
-                id: 'manufacturing.toolpath.bambu-gcode-3mf',
-                version: 1,
-              },
-              mediaType: 'application/vnd.bambulab.gcode-3mf',
-              requiredMembers: ['Metadata/plate_1.gcode'],
-              payloadSelection: 'plate',
-              technology: 'additive.fff',
-            },
-          ],
-          operations: [
-            'observe',
-            'prepare',
-            'upload',
-            'submit',
-            'pause',
-            'resume',
-            'cancel',
-            'urgent-stop',
-            ...(stillCapture.type === 'supported' ? ['still'] : []),
-          ],
-          ratedEnvelope: {
-            width: manifest.geometry.buildVolume.x / 1000,
-            depth: manifest.geometry.buildVolume.y / 1000,
-            height: manifest.geometry.buildVolume.z / 1000,
-            unit: 'm',
-          },
-          printableEnvelope: {
-            width: manifest.geometry.buildVolume.x / 1000,
-            depth: manifest.geometry.buildVolume.y / 1000,
-            height: manifest.geometry.buildVolume.z / 1000,
-            unit: 'm',
-          },
-          tools: [
-            {
-              id: 'tool-0',
-              kind: 'extruder',
-              ...(status?.nozzleDiameter ? { nozzleDiameter: status.nozzleDiameter } : {}),
-            },
-          ],
-          materialSystem: { kind: model === 'X1C' ? 'ams' : 'ams-lite', slotCount: model === 'X1C' ? 16 : 4 },
-          bedTypes: manifest.bed.plates.map(({ id }) => id),
-        };
-        return Object.freeze(descriptor);
-      },
-      async getSnapshot(snapshotInput) {
-        snapshotInput.signal.throwIfAborted();
-        return snapshot();
-      },
-      async *observe(observeInput) {
-        for await (const [value] of on(updates, 'snapshot', {
-          signal: observeInput.signal,
-        })) {
-          const event = value as CustomEvent<MachineSnapshot>;
-          yield Object.freeze({ type: 'snapshot', snapshot: event.detail });
-        }
-      },
-      async preparePrint(prepareInput) {
-        if (prepareInput.expectedMachineId !== serial) {
-          return {
-            status: 'rejected',
-            code: 'IDENTITY_MISMATCH',
-            message: 'The prepared machine identity changed.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        const { configuration } = prepareInput;
-        const observedStatus = status;
-        const actualModel = observedStatus?.model ?? input.candidate.claimedIdentity.model;
-        const actualBedType = observedStatus?.bedType ?? configuration.operatorConfirmedBedType;
-        if (configuration.amsMapping.includes(bambuExternalSpoolSlot) && configuration.amsMapping.length > 1) {
-          return {
-            status: 'rejected',
-            code: 'SETUP_UNQUALIFIED',
-            message: 'The external spool can only feed a one-filament print. Map every filament to an AMS tray.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        const setupQualified =
-          observedStatus !== undefined &&
-          actualModel === configuration.expectedModel &&
-          actualBedType === configuration.expectedBedType &&
-          sameQuantity(observedStatus.nozzleDiameter, configuration.expectedNozzleDiameter) &&
-          sameQuantity(filamentDiameter.value, configuration.expectedFilamentDiameter) &&
-          configuration.amsMapping.length === configuration.expectedMaterials.length &&
-          configuration.expectedMaterials.every(
-            (expected, index) =>
-              configuration.amsMapping[index] === expected.slot &&
-              observedMaterials(observedStatus).some(
-                (observed) =>
-                  observed.slot === expected.slot &&
-                  observed.materialId?.toLowerCase() === expected.materialId.toLowerCase(),
-              ),
-          );
-        if (!setupQualified) {
-          return {
-            status: 'rejected',
-            code: 'SETUP_UNQUALIFIED',
-            message: 'The observed model, nozzle, plate, filament, or AMS setup is not qualified.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        try {
-          const artifact = await prepareBambuArtifact({
-            artifact: prepareInput.artifact,
-            runtime,
-            signal: prepareInput.signal,
-          });
-          // Real printers run only Bambu Studio output (blueprint P3); the simulator accepts any producer.
-          if (artifact.producer?.name !== 'Bambu Studio') {
-            return {
-              status: 'rejected',
-              code: 'ARTIFACT_UNQUALIFIED',
-              message:
-                'This file was not sliced by Bambu Studio. Slice it with Bambu Studio in Tau (desktop app with Bambu Studio installed), then send it again.',
-              observedAt: runtime.clock.now(),
-            };
-          }
-          return {
-            status: 'ready',
-            remoteName: bambuRemoteName(prepareInput.operationId),
-            digest: artifact.digest,
-            length: artifact.length,
-            parser: artifact.parser,
-            providerData: { memberMd5: artifact.memberMd5 },
-            observedAt: runtime.clock.now(),
-          };
-        } catch {
-          return {
-            status: 'rejected',
-            code: 'ARTIFACT_INVALID',
-            message: 'The artifact failed bounded verification.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-      },
-      async uploadPrint(uploadInput): Promise<MachineTransferReceipt> {
-        const providerRecord = isRecord(uploadInput.providerData) ? uploadInput.providerData : undefined;
-        if (uploadInput.expectedMachineId !== serial || !remoteNamePattern.test(uploadInput.remoteName)) {
-          return {
-            status: 'rejected',
-            code: 'PREPARATION_INVALID',
-            message: 'The prepared artifact identity is invalid.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        if (!runtime.uploadFile) {
-          return {
-            status: 'rejected',
-            code: 'TRANSFER_UNAVAILABLE',
-            message: 'The host does not provide bounded FTPS transfer.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        let artifact;
-        try {
-          artifact = await prepareBambuArtifact({
-            artifact: uploadInput.artifact,
-            runtime,
-            signal: uploadInput.signal,
-          });
-        } catch {
-          return {
-            status: 'rejected',
-            code: 'ARTIFACT_INVALID',
-            message: 'The artifact failed bounded verification.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        if (providerRecord?.['memberMd5'] !== artifact.memberMd5) {
-          return {
-            status: 'rejected',
-            code: 'PREPARATION_INVALID',
-            message: 'The artifact changed since it was prepared.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        let bytesWritten: number;
-        try {
-          ({ bytesWritten } = await runtime.uploadFile({
-            endpoint: { address: input.candidate.endpoint.address, port: 990 },
-            trust: input.connection.serviceTrust['ftp'] ?? trust,
-            secretRef: input.connection.secretRef,
-            username: 'bblp',
-            remoteName: uploadInput.remoteName,
-            bytes: artifact.bytes,
-            connectTimeout: 15_000,
-            signal: uploadInput.signal,
-          }));
-        } catch (error) {
-          // The host's transport errors name the failure, never the access code; a refusal keeps the printer's reply.
-          const cause = error instanceof Error && error.cause instanceof Error ? error.cause : undefined;
-          await runtime.log({
-            level: 'warning',
-            message: `FTPS upload of ${uploadInput.remoteName} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}${cause ? ` (${cause.message.slice(0, 200)})` : ''}`,
-          });
-          if (error instanceof Error && error.message === 'MACHINE_UPLOAD_REFUSED') {
-            // The printer stores uploads on its microSD card; a refused store is the card, not the network.
-            const reply = isRecord(cause) && typeof cause['code'] === 'number' ? `FTP ${cause['code']}` : 'FTP refusal';
-            return {
-              status: 'rejected',
-              code: 'TRANSFER_REFUSED',
-              message:
-                `The printer refused to store the file (${reply}), so nothing was started. Its microSD card may be ` +
-                'full, damaged or locked: free space on it or format it on the printer, then send again.',
-              observedAt: runtime.clock.now(),
-            };
-          }
-          // A transfer that broke off may have reached the printer, so its result is unknown.
-          return {
-            status: 'unknown',
-            reason: 'transfer-result-unavailable',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        if (bytesWritten !== artifact.length) {
-          return {
-            status: 'rejected',
-            code: 'TRANSFER_PARTIAL',
-            message: 'The transfer ended before the whole artifact was written.',
-            observedAt: runtime.clock.now(),
-          };
-        }
-        // The printer holds exactly one object per remote name, so the name is the transfer evidence.
-        return {
-          status: 'transferred',
-          transferId: uploadInput.remoteName,
-          digest: artifact.digest,
-          length: artifact.length,
-          observedAt: runtime.clock.now(),
-        };
-      },
-      async submit(submitInput) {
-        const { providerData } = submitInput;
-        const providerRecord = isRecord(providerData) ? providerData : undefined;
-        const { memberMd5 } = providerRecord ?? {};
-        if (
-          submitInput.expectedMachineId !== serial ||
-          !remoteNamePattern.test(submitInput.remoteName) ||
-          submitInput.transferId !== submitInput.remoteName ||
-          !providerRecord ||
-          Object.keys(providerRecord).length !== 1 ||
-          typeof memberMd5 !== 'string' ||
-          !memberMd5Pattern.test(memberMd5)
-        ) {
-          return Object.freeze({
-            status: 'rejected',
-            code: 'PREPARATION_INVALID',
-            message: 'The prepared artifact identity or provider data is invalid.',
-            observedAt: runtime.clock.now(),
-          });
-        }
-        const { configuration } = submitInput;
-        const wireId = bambuWireId(submitInput.operationId);
-        const runName = submitInput.remoteName.replace('.gcode.3mf', '');
-        startRunNames.set(submitInput.operationId, runName);
-        /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
-        // The external spool prints with the AMS off: firmware takes -1 in `ams_mapping` and holder 255 in
-        // `ams_mapping2` for a single-nozzle printer; preflight keeps it to one-filament prints.
-        const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
-        const amsMapping = external ? configuration.amsMapping.map(() => -1) : configuration.amsMapping;
-        const amsMapping2 = configuration.amsMapping.map((slot) =>
-          external ? { ams_id: 255, slot_id: 0 } : { ams_id: Math.floor(slot / 4), slot_id: slot % 4 },
-        );
-        return sendCommand({
-          operationId: submitInput.operationId,
-          command: 'project_file',
-          signal: submitInput.signal,
-          payload: {
-            print: {
-              command: 'project_file',
-              param: submitInput.artifact.selectedMember,
-              url: `ftp://${submitInput.remoteName}`,
-              file: submitInput.remoteName,
-              subtask_name: runName,
-              md5: memberMd5,
-              flow_cali: configuration.flowCalibration,
-              extrude_cali_flag: configuration.flowCalibration ? 1 : 0,
-              extrude_cali_manual_mode: 0,
-              timelapse: configuration.timelapse,
-              bed_leveling: configuration.bedLeveling,
-              auto_bed_leveling: configuration.bedLeveling ? 1 : 0,
-              vibration_cali: true,
-              layer_inspect: model === 'X1C',
-              nozzle_offset_cali: 0,
-              bed_type: 'auto',
-              use_ams: configuration.amsMapping.length > 0 && !external,
-              ams_mapping: amsMapping,
-              ams_mapping2: amsMapping2,
-              cfg: '0',
-              profile_id: '0',
-              project_id: wireId,
-              sequence_id: bambuWireSequenceId(submitInput.operationId),
-              subtask_id: wireId,
-              task_id: wireId,
-            },
-          },
-        });
-        /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
-      },
-      async control(controlInput): Promise<MachineCommandReceipt> {
-        const command =
-          controlInput.command === 'cancel' || controlInput.command === 'urgent-stop' ? 'stop' : controlInput.command;
-        /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
-        return sendCommand({
-          operationId: controlInput.operationId,
-          command,
-          signal: controlInput.signal,
-          payload: {
-            print: {
-              sequence_id: bambuWireSequenceId(controlInput.operationId),
-              command,
-              param: '',
-            },
-          },
-        });
-        /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
-      },
-      async reconcile(reconcileInput) {
-        const { operationId, command, transferId } = reconcileInput;
-        // After a reconnect only a start is still provable: its run carries the operation's wire id or transfer name.
-        const isStartOnRecord = command === 'project_file' && startedRunId(operationId, transferId) !== undefined;
-        if (commandContexts.get(operationId) !== command && !isStartOnRecord) {
-          return Object.freeze({
-            status: 'unknown',
-            reason: 'no-correlated-provider-reply',
-            observedAt: runtime.clock.now(),
-          });
-        }
-        const receipt = commandReceipt(
-          operationId,
-          command === 'project_file' ? 'project_file' : commandContexts.get(operationId)!,
-          transferId,
-        );
-        // The host re-runs this on every report while a start is unproven; only its settling is worth a log line.
-        if (command === 'project_file' && receipt.status !== 'unknown') {
-          await logStart(operationId, 'reconciliation');
-        }
-        return receipt;
-      },
-      close,
-      dispose: close,
-    };
-    return Object.freeze(session);
+): Promise<MachineSession<BambuSubmission>> => {
+  const manifest = bambuManifests[model];
+  // The bound serial fences the printer; an advertisement that names another one is a different printer.
+  const bound = input.configuration.serial;
+  const claimed = input.candidate.claimedIdentity.serial;
+  if (bound !== undefined && claimed !== undefined && bound !== claimed) {
+    throw new BambuProtocolError('BAMBU_SERIAL_MISMATCH', 'The printer at this address reports a different serial.');
   }
-  throw new Error('BAMBU_SIMULATOR_IS_A_SEPARATE_PROVIDER');
+  const serial = bound ?? claimed;
+  if (!serial || !isBambuSerial(serial, model)) {
+    throw new BambuProtocolError(
+      'BAMBU_SERIAL_REQUIRED',
+      "Enter the printer's serial under Printer details, or find the printer on the network to fill it.",
+    );
+  }
+  const trust = input.connection.serviceTrust['mqtt'];
+  if (trust?.type !== 'pinned') {
+    throw new Error('BAMBU_MQTT_PIN_REQUIRED');
+  }
+  const accessCode = await resolveAccessCode(input, runtime);
+  const network = await openMqttStream(input, runtime, { trust, port: bambuServicePort(manifest, 'mqtt') });
+  let client: MqttClientConstructor;
+  try {
+    const { mqttClient: mqttClientConstructor } = await loadBambuHostLibraries();
+    // oxlint-disable-next-line new-cap -- dependency constructor is returned by a lazy camel-case property.
+    client = new mqttClientConstructor(() => toDuplex(network), {
+      clean: true,
+      clientId: `tau-${randomUUID()}`,
+      connectTimeout: 10_000,
+      keepalive: 30,
+      log: () => undefined,
+      password: accessCode,
+      protocol: 'mqtt',
+      protocolVersion: 4,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream MQTT.js option.
+      queueQoSZero: false,
+      reconnectPeriod: 0,
+      resubscribe: false,
+      username: 'bblp',
+    });
+  } catch {
+    await network.close().catch(() => undefined);
+    throw new Error('BAMBU_MQTT_CLIENT_FAILED');
+  }
+  client.on('error', (error) => {
+    // MQTT.js errors carry no credential; a bounded message is enough to tell a dropped link from a refusal.
+    // oxlint-disable-next-line tau-lint/no-async-iife -- an event handler cannot await.
+    void runtime
+      .log({ level: 'warning', message: `Bambu MQTT error: ${error.message.slice(0, 200)}` })
+      // oxlint-disable-next-line promise/prefer-await-to-then -- a failed host log has nowhere else to go.
+      .catch(() => undefined);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const connected = (): void => {
+        cleanup();
+        resolve();
+      };
+      const failed = (error: Error): void => {
+        cleanup();
+        reject(connectFailure(error));
+      };
+      const aborted = (): void => {
+        cleanup();
+        reject(new Error('BAMBU_MQTT_CONNECT_ABORTED'));
+      };
+      const cleanup = (): void => {
+        client.off('connect', connected);
+        client.off('error', failed);
+        input.signal.removeEventListener('abort', aborted);
+      };
+      client.once('connect', connected);
+      client.once('error', failed);
+      input.signal.addEventListener('abort', aborted, { once: true });
+    });
+    await client.subscribeAsync(bambuTopic(serial, 'report'), { qos: 0 });
+  } catch (error) {
+    await client.endAsync(true).catch(() => undefined);
+    throw error instanceof BambuProtocolError || (error instanceof Error && error.message.startsWith('BAMBU_'))
+      ? error
+      : connectFailure();
+  }
+  const request = bambuTopic(serial, 'request');
+  const report = bambuTopic(serial, 'report');
+  return openBambuSession({
+    model,
+    serial,
+    name: input.candidate.name,
+    clock: runtime.clock,
+    log: async (entry) => runtime.log(entry),
+    signal: input.signal,
+    manifest,
+    form: input.configuration.wireForm ?? 'a',
+    requireBambuStudio: true,
+    stillCapture: bambuStillCapture(input, runtime, model),
+    link: {
+      async publish(payload) {
+        await client.publishAsync(request, payload, { qos: 0 });
+      },
+      subscribe(listener) {
+        client.on('message', (topic, message) => {
+          if (topic === report) {
+            listener(Uint8Array.from(message));
+          }
+        });
+      },
+      onClose(listener) {
+        client.on('close', listener);
+      },
+      connected: () => client.connected,
+      async close() {
+        await client.endAsync(true).catch(() => undefined);
+      },
+    },
+    readArtifact: async (artifact, signal) => prepareBambuArtifact({ artifact, runtime, signal }),
+    async upload({ remoteName, artifact, signal }) {
+      if (!runtime.uploadFile) {
+        throw new BambuProtocolError('MACHINE_TRANSFER_UNAVAILABLE');
+      }
+      const { bytesWritten } = await runtime.uploadFile({
+        endpoint: { address: bambuCandidateAddress(input.candidate), port: bambuFtpsPort },
+        trust: input.connection.serviceTrust['ftp'] ?? trust,
+        secretRef: input.connection.secretRef,
+        username: 'bblp',
+        remoteName,
+        bytes: artifact.bytes,
+        connectTimeout: 15_000,
+        signal,
+      });
+      return bytesWritten;
+    },
+  });
 };

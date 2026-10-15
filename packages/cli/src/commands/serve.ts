@@ -4,19 +4,26 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, defaultMachineProviders, defaultPayloadStore, startHostDaemon } from '@taucad/host';
+import { startNativeWorker } from '@taucad/native-process-core';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
+import type {
+  HostDaemonAgentOptions,
+  HostDaemonEvent,
+  HostPrepareKernel,
+  RuntimeChildNativeKernels,
+} from '@taucad/host';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
-import { machineProviders } from '#machine-providers.js';
 import { cliError, exitCodes } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
+import type * as NativeKernels from '#native-kernels.js';
+import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
@@ -250,6 +257,66 @@ const agentOptions = (args: {
   };
 };
 
+/**
+ * The native kernels this daemon serves (D37): Build123d for `.py`, PicoGK for `.cs`.
+ *
+ * Every runtime child composes them from the payload store's receipts, which this process reads and hands over; a
+ * kernel that is not prepared answers `KERNEL_NOT_PREPARED`. `prepare_kernel` prepares in this process, with its
+ * unrestricted network (D4). The child may not spawn, so this process starts each native worker on its behalf, from
+ * a closure sealed in the store and through the OS sandbox (North Star S2). The native packages load on first use.
+ *
+ * @returns The children's native kernels, the preparation behind `prepare_kernel`, and its disposal.
+ */
+export const serveNativeKernels = (): {
+  readonly native: RuntimeChildNativeKernels;
+  readonly prepareKernel: HostPrepareKernel;
+  readonly dispose: () => Promise<void>;
+} => {
+  let loaded: Promise<typeof NativeKernels> | undefined;
+  const nativeKernels = async (): Promise<typeof NativeKernels> => {
+    loaded ??= import('#native-kernels.js');
+    return loaded;
+  };
+  const compose = async (): Promise<NativeComposition> => {
+    try {
+      const { composeNativeKernels } = await nativeKernels();
+      return await composeNativeKernels();
+    } catch (error) {
+      consola.warn(`Serving without native kernels: ${error instanceof Error ? error.message : String(error)}`);
+      return { unavailable: [] };
+    }
+  };
+  let preparation: Promise<NativePreparation> | undefined;
+  const openPreparation = async (): Promise<NativePreparation> => {
+    const { openNativePreparation } = await nativeKernels();
+    return openNativePreparation();
+  };
+  return {
+    native: {
+      /* Beside the payload store and outside TMPDIR, which each runtime child may write. */
+      directory: join(dirname(defaultPayloadStore()), 'runtime-children'),
+      store: defaultPayloadStore(),
+      compose,
+      closureRoots: async () => {
+        const { closureRoots } = await compose();
+        return closureRoots ?? [];
+      },
+      start: startNativeWorker,
+    },
+    prepareKernel: async ({ kernel }, { signal, onProgress }) => {
+      preparation ??= openPreparation();
+      const opened = await preparation;
+      return opened.prepare(kernel, { signal, onProgress });
+    },
+    dispose: async () => {
+      if (preparation !== undefined) {
+        const opened = await preparation;
+        await opened.dispose();
+      }
+    },
+  };
+};
+
 const parsePositiveInteger = (name: string, value: string): number => {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
@@ -352,11 +419,14 @@ export const serveCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+        'Serve the machines route beside the agent channel with the Bambu Lab, Grbl and Carvera providers and their simulators (TAU_HOST_MACHINES=true)',
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
   },
   async run({ args }) {
+    if (args.machines && !/^(1|true)$/iu.test(process.env['TAU_MACHINES_ENABLED'] ?? '')) {
+      throw new Error('Machines are not available in this release.');
+    }
     if (!args.trustProjects) {
       throw new Error(
         'tau serve is experimental and requires --trust-projects. Remote project code executes on this machine.',
@@ -374,7 +444,7 @@ export const serveCommand = defineCommand({
     if (args.machines && !agent) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
-    const machines = args.machines ? await machineProviders() : undefined;
+    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
@@ -412,9 +482,11 @@ export const serveCommand = defineCommand({
         ? () => ({ mode: 'durable', store: ensureCompute().store })
         : { mode: args.computeMode }
       : undefined;
+    const kernels = serveNativeKernels();
     const configuredAgent = agent
       ? {
           ...agent,
+          prepareKernel: kernels.prepareKernel,
           ...(machines ? { machines } : {}),
           compute: compute!,
           ...(args.computeMode === 'durable'
@@ -447,6 +519,7 @@ export const serveCommand = defineCommand({
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
         args: childArguments({ plugin: args.plugin, config: args.config, zooProxyUrl }),
+        native: kernels.native,
       },
       zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },
       maxSessions,
@@ -504,6 +577,7 @@ export const serveCommand = defineCommand({
       } finally {
         computeConnection?.dispose();
         await computeWorker?.terminate();
+        await kernels.dispose().catch(() => undefined);
       }
     }
   },

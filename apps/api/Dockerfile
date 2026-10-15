@@ -39,8 +39,8 @@ WORKDIR /app
 
 # ── Deps: workspace skeleton only (cache key = lockfile + package.jsons) ──
 FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .pnpmfile.cjs ./
-COPY patches/ ./patches/
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY tools/pnpm/ ./tools/pnpm/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
 # globs apps/*, libs/*, packages/*, packages/plugins/*, packages/core/*, and
@@ -60,8 +60,8 @@ ENV pnpm_config_verify_deps_before_run=warn
 # Nx's native PTY runner intermittently segfaults; CI turns it off the same way
 # in .github/actions/setup-nx.
 ENV NX_NATIVE_COMMAND_RUNNER=false
-# The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
-# its header says why the runtime image does not need it.
+# The script builds the API's dependencies, then the API targets, and refuses an API
+# runtime dependency on the GeoSpec engine; its header says why.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \

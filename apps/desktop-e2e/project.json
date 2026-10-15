@@ -54,7 +54,7 @@
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-consent-boundary.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-arrange-workbench.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts; first=$?; TAU_FREE_TIER_SYNC_ENABLED=true ../../node_modules/.bin/vitest run --config vitest.config.ts src/sync-refusals.spec.ts; second=$?; exit $(( first || second ))"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-consent-boundary.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-arrange-workbench.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-record-recovery.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts; first=$?; TAU_FREE_TIER_SYNC_ENABLED=true ../../node_modules/.bin/vitest run --config vitest.config.ts src/sync-refusals.spec.ts; second=$?; exit $(( first || second ))"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",
@@ -168,6 +168,28 @@
           "TAU_E2E_API_URL": "http://localhost:4014",
           "TAU_E2E_LIVE_LLM": "true"
         }
+      }
+    },
+    "test:e2e:desktop:grok": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Opt-in Grok composer, continuity, skill, approval and Build123d MCP evaluation checks. Uses the operator's grok login and quota. Set TAU_E2E_GROK_PACKAGED=true to test the prepared macOS app."
+      },
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["desktop"], "target": "prepare-build123d-python" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-grok.spec.ts"
+        ],
+        "env": { "TAU_E2E_API_URL": "http://localhost:4014", "TAU_E2E_GROK": "true" }
       }
     },
     "test:e2e:desktop:acp": {
@@ -330,6 +352,18 @@
       },
       "metadata": {
         "description": "Opt-in macOS synthesized speech through Chromium's file microphone, the Tau API and the real OpenAI transcription provider. Needs a funded OPENAI_API_KEY in apps/api/.env and spends its quota."
+      }
+    },
+    "test:e2e:record-recovery": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.record-recovery.config.ts"
+      },
+      "metadata": {
+        "description": "Offline record recovery, direct close and quit with delayed real authority replies. Build desktop first; TAU_E2E_RECORD_PACKAGED=true selects the unsigned macOS package."
       }
     },
     "test:e2e:machine-profiles": {

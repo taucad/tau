@@ -1,4 +1,6 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -88,7 +90,6 @@ import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -134,6 +135,8 @@ import {
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
+import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
+import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
 
 /**
  * What one row shows about where its bytes come from.
@@ -1401,6 +1404,8 @@ export const ChatEditorFileTree = memo(function ({
     [projectRef],
   );
 
+  const revealInFileManager = useRevealInFileManager(projectId);
+
   const handleQuickLook = useCallback(
     (path: string) => {
       if (!projectId) {
@@ -2058,6 +2063,7 @@ export const ChatEditorFileTree = memo(function ({
                               onOpenInEditor={handleOpenInEditor}
                               onOpenInViewer={handleOpenInViewer}
                               onQuickLook={desktopBridge()?.quickLook ? handleQuickLook : undefined}
+                              revealInFileManager={revealInFileManager}
                               onDownload={handleDownload}
                               onCopyPath={handleCopyPath}
                               onCopyToProject={handleCopyToProject}
@@ -2140,14 +2146,11 @@ export const ChatEditorFileTree = memo(function ({
  * would otherwise all re-render on every revision the project mints.
  */
 function FileTreeEmptyState(): React.JSX.Element {
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
-  return (
-    <PanelEmptyState
-      icon={FolderOpen}
-      title={checkingRemote ? 'Checking…' : 'No files available'}
-      className='rounded-xl border bg-card'
-    />
-  );
+  const availability = useProjectAvailability();
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
+  return <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />;
 }
 
 type TreeItemProps = {
@@ -2165,6 +2168,8 @@ type TreeItemProps = {
   readonly onOpenInEditor: (path: string) => void;
   readonly onOpenInViewer: (path: string) => void;
   readonly onQuickLook?: (path: string) => void;
+  /** Absent where the host has no native file manager. */
+  readonly revealInFileManager?: RevealInFileManager;
   readonly onDownload: (path: string, isFolder: boolean) => void;
   readonly onCopyPath: (path: string) => Promise<void>;
   readonly onCopyToProject: (path: string) => void;
@@ -2187,6 +2192,7 @@ function TreeItem({
   onOpenInEditor,
   onOpenInViewer,
   onQuickLook,
+  revealInFileManager,
   onDownload,
   onCopyPath,
   onCopyToProject,
@@ -2356,6 +2362,18 @@ function TreeItem({
           <Separator />
         </>
       )}
+      {/* Overlay entries are composed views with no file of their own on disk. */}
+      {revealInFileManager &&
+      (presentation.provenance === undefined || presentation.provenance.source === 'project') ? (
+        <Item
+          onSelect={() => {
+            void revealInFileManager.reveal(item.getId());
+          }}
+        >
+          <NativeFileManagerIcon icon={revealInFileManager.icon} />
+          {revealInFileManager.label}
+        </Item>
+      ) : null}
       <Item
         onSelect={() => {
           void onCopyPath(item.getId());

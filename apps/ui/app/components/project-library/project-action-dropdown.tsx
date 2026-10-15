@@ -6,6 +6,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Button } from '@taucad/ui/components/button';
@@ -17,13 +18,15 @@ import { useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-sta
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import { toast } from '#components/ui/sonner.js';
+import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
 
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;
   readonly actions: ProjectActions;
+  readonly onRename?: () => void;
 };
 
-export function ProjectActionDropdown({ project, actions }: ProjectActionDropdownProps): ReactNode {
+export function ProjectActionDropdown({ project, actions, onRename }: ProjectActionDropdownProps): ReactNode {
   const isDeleted = Boolean(project.deletedAt);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isConfirmingClose, setIsConfirmingClose] = useState(false);
@@ -32,6 +35,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
   const row = useProjectSidebarRow(project.id);
   const { closeProject } = useSidebarCommands();
   const chatSessions = useChatSessionStore();
+  const openInFileManager = useOpenProjectInFileManager(project);
 
   const requestTrash = async (): Promise<void> => {
     try {
@@ -73,7 +77,16 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
             <EllipsisVertical className='size-4' />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
+        <DropdownMenuContent
+          align='end'
+          onCloseAutoFocus={(event) => {
+            if (isRenaming && onRename) {
+              event.preventDefault();
+              setIsRenaming(false);
+              onRename();
+            }
+          }}
+        >
           {isDeleted ? (
             <>
               <DropdownMenuItem
@@ -102,6 +115,22 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
             </>
           ) : (
             <>
+              {openInFileManager ? (
+                <>
+                  <DropdownMenuItem
+                    data-action='open-in-file-manager'
+                    disabled={openInFileManager.isOpening}
+                    aria-busy={openInFileManager.isOpening}
+                    onClick={() => {
+                      void openInFileManager.open();
+                    }}
+                  >
+                    <NativeFileManagerIcon icon={openInFileManager.icon} />
+                    <span>{openInFileManager.label}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <DropdownMenuItem
                 data-action='duplicate'
                 data-id={project.id}
@@ -140,7 +169,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Popover open={isRenaming} onOpenChange={setIsRenaming}>
+      <Popover open={isRenaming && !onRename} onOpenChange={setIsRenaming}>
         <PopoverContent align='end' className='w-64 p-1'>
           <form className='flex items-center gap-2 align-middle' onSubmit={handleRename}>
             <Input

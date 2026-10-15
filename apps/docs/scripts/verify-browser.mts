@@ -122,8 +122,8 @@ const main = async (): Promise<void> => {
       await searchButton.press('Enter');
 
       const dialog = page.getByRole('dialog');
-      await dialog.getByRole('textbox').fill('Replicad');
-      const result = dialog.getByRole('button', { name: /Replicad$/u }).first();
+      await dialog.getByRole('combobox', { name: 'Search' }).fill('Replicad');
+      const result = dialog.getByRole('option', { name: /Replicad$/u }).first();
       await result.waitFor({ state: 'visible' });
       await result.click();
       await page.waitForURL((url) => url.pathname !== '/runtime/api/machines');

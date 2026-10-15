@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "target": "ESNext",
+    "skipLibCheck": true
+  },
+  "exclude": ["../../repos", "../../node_modules", "../../**/*.test.ts", "../../**/*.spec.ts"],
+  "include": ["../../**/*"]
+}

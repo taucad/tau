@@ -4,12 +4,8 @@ import { useState } from 'react';
 import type { Handle } from '#types/matches.types.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
-import ProjectPreview, {
-  PreviewSession,
-  previewBreadcrumb,
-} from '#routes/w.$workspace.$project_.preview/preview-route.js';
+import ProjectPreview, { PreviewSession } from '#routes/w.$workspace.$project_.preview/preview-route.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
-import { projectPreviewUrl } from '#utils/project-url.utils.js';
 
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
   const { workspace = '', project = '' } = useParams();
@@ -40,13 +36,6 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 }
 
 export const handle: Handle = {
-  breadcrumb(match) {
-    const { workspace, project } = match.params as { workspace: string; project: string };
-    return previewBreadcrumb(
-      { workspace, project },
-      projectPreviewUrl({ workspaceSlug: workspace, projectSlug: project }),
-    );
-  },
   providers: () => RouteProvider,
 };
 

@@ -175,3 +175,99 @@ it('should let tool activity supersede commentary and not resurrect it when the 
     ).toBe(state === 'input-available' ? 'Running commands' : 'Planning next moves…');
   }
 });
+
+it('should use a typed reasoning summary over older commentary without parsing thought formatting', () => {
+  expect(
+    selectChatActivityCue({
+      runState: 'working',
+      chatStatus: 'streaming',
+      parts: [
+        {
+          type: 'text',
+          text: 'Old commentary',
+          state: 'done',
+          providerMetadata: { common: { messagePhase: 'commentary' } },
+        },
+        {
+          type: 'reasoning',
+          text: '**Preparing supplemental CAD details**\n\n**Checking plot quality**',
+          state: 'streaming',
+          providerMetadata: { common: { reasoningSummary: '**Checking plot quality**' } },
+        },
+      ],
+    })?.sentence,
+  ).toBe('Checking plot quality');
+});
+
+it.each(['approval', 'question', 'reconnecting', 'done', 'failed', 'stopped'] as const)(
+  'should not let a summary override authoritative %s state',
+  (runState) => {
+    const parts = [
+      {
+        type: 'reasoning',
+        text: 'Details',
+        state: 'streaming',
+        providerMetadata: { common: { reasoningSummary: '**Checking plot quality**' } },
+      },
+    ] as const;
+    expect(selectChatActivityCue({ runState, chatStatus: 'streaming', parts })).toEqual(
+      selectChatActivityCue({ runState, chatStatus: 'streaming' }),
+    );
+  },
+);
+
+it('should parse the whole typed summary for display and never select a heading from it', () => {
+  expect(
+    selectChatActivityCue({
+      runState: 'working',
+      chatStatus: 'streaming',
+      parts: [
+        {
+          type: 'reasoning',
+          text: 'Not the summary',
+          state: 'done',
+          providerMetadata: {
+            common: {
+              reasoningSummary:
+                '**Checking plot quality**\n\nValidate `main.cs` and [dimensions](https://example.com).',
+            },
+          },
+        },
+      ],
+    })?.sentence,
+  ).toBe('Checking plot quality Validate main.cs and dimensions.');
+});
+
+it('should prefer active tools and not resurrect summaries after a later tool or answer', () => {
+  const summary = {
+    type: 'reasoning',
+    text: 'Details',
+    state: 'streaming',
+    providerMetadata: { common: { reasoningSummary: '**Checking plot quality**' } },
+  } as const;
+  const tool = {
+    type: 'dynamic-tool',
+    toolName: 'exec',
+    toolCallId: 'exec',
+    state: 'input-available',
+    input: {},
+    toolMetadata: { tau: { kind: 'execute' } },
+  } as const;
+  expect(selectChatActivityCue({ runState: 'tool', chatStatus: 'streaming', parts: [tool, summary] })?.sentence).toBe(
+    'Running commands',
+  );
+  expect(
+    selectChatActivityCue({
+      runState: 'working',
+      chatStatus: 'streaming',
+      parts: [summary, { ...tool, state: 'output-available', output: 'done' }],
+    })?.sentence,
+  ).toBe('Planning next moves…');
+  expect(
+    selectChatActivityCue({
+      runState: 'working',
+      chatStatus: 'streaming',
+      parts: [summary, { type: 'text', text: 'Answer', state: 'streaming' }],
+    })?.sentence,
+  ).toBe('Writing response…');
+});

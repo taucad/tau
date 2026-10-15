@@ -1,18 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Purpose: Assemble the pinned self-contained PicoGK C# worker for Electron.
- * Why: Runtime model execution must not discover system .NET or restore packages.
+ * Purpose: Assemble the pinned self-contained PicoGK C# worker for Electron, and with --layer the Tau PicoGK layer
+ *   that `@taucad/picogk`'s tau-plugin.json pins beside Microsoft's .NET runtime archive.
+ * Why: Runtime model execution must not discover system .NET or restore packages. The layer is the framework-dependent
+ *   ReadyToRun worker (D6, D22) that Microsoft's `dotnet` muxer runs from a prepared closure.
  * Environment: Node 24+, tar/network; Darwin arm64 builds also need Apple Clang/SDK, CMake 3.25.1+ and Ninja. Linux x64 is worker-only.
- * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64] [--native-only]
+ * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64] [--native-only] [--layer]
+ *   --layer builds out/picogk-layer/darwin-arm64/{tau-picogk-layer-darwin-arm64.tar.gz,tau-layer.json} and stages
+ *   out/picogk-layer/seed (the runtime archive and the layer as `blobs/sha256/<hex>`) for offline preparation; on any
+ *   other host than darwin-arm64 it prints why it skipped and exits 0.
  * Exit codes: 0 for an integrity-verified resource; non-zero for unsupported targets or build/integrity failure.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 
 type Target = {
@@ -71,6 +77,21 @@ const picoGkHostedPatch = resolve(dotnetProjectRoot, 'PicoGK.hosted.patch');
 const nativeSourceRoot = resolve(dotnetProjectRoot, 'native');
 const topologySchema = resolve(workspaceRoot, 'packages/core/geometry/schema/tau-cad-topology.schema.json');
 
+/**
+ * MSBuild properties that make the published assemblies a function of their sources and the pinned SDK (X26): no git
+ * commit in the informational version, no SourceLink or source-control query, and workspace paths mapped to `/_/`.
+ * Global properties also reach the PicoGK project reference, whose source sits under `out/cache` inside the checkout.
+ */
+const reproducibleProperties = [
+  '-p:Deterministic=true',
+  '-p:IncludeSourceRevisionInInformationalVersion=false',
+  '-p:EnableSourceLink=false',
+  '-p:EnableSourceControlManagerQueries=false',
+  // Without source-control queries there are no SourceRoot items to derive the path map from; set it directly.
+  '-p:DeterministicSourcePaths=false',
+  `-p:PathMap=${workspaceRoot}/=/_/`,
+];
+
 const digest = async (path: string, algorithm: 'sha256' | 'sha512' = 'sha256'): Promise<string> =>
   createHash(algorithm)
     .update(await readFile(path))
@@ -80,11 +101,13 @@ const parseTargets = (): string[] => {
   const arguments_ = process.argv.slice(2);
   const selected: string[] = [];
   for (let index = 0; index < arguments_.length; index += 1) {
-    if (arguments_[index] === '--native-only') {
+    if (arguments_[index] === '--native-only' || arguments_[index] === '--layer') {
       continue;
     }
     if (arguments_[index] !== '--target' || !arguments_[index + 1]) {
-      throw new TypeError('Usage: prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64] [--native-only]');
+      throw new TypeError(
+        'Usage: prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64] [--native-only] [--layer]',
+      );
     }
     selected.push(arguments_[index + 1]!);
     index += 1;
@@ -382,7 +405,17 @@ const prepareNative = async (): Promise<string> => {
     '-sNO_LZMA=1',
     '-sNO_ZSTD=1',
   ];
-  const profile = { target: 'darwin-arm64', sourceDateEpoch, commonFlags, bloscFlags, tbbFlags, boostFlags };
+  // Apple's ar, ranlib and ld write zero member dates under ZERO_AR_DATE, so the static archives do not carry build times.
+  const zeroArDate = '1';
+  const profile = {
+    target: 'darwin-arm64',
+    sourceDateEpoch,
+    zeroArDate,
+    commonFlags,
+    bloscFlags,
+    tbbFlags,
+    boostFlags,
+  };
   const patchSha256 = await digest(resolve(nativeSourceRoot, 'Runtime.patch'));
   const fingerprint = createHash('sha256').update(JSON.stringify({ sources, toolchain, profile }));
   for (const path of [...(await filesUnder(nativeSourceRoot)), import.meta.filename]) {
@@ -401,6 +434,13 @@ const prepareNative = async (): Promise<string> => {
   const root = resolve(cacheRoot, `native-${sourceSha256}`);
   const engineRoot = resolve(cacheRoot, `native-engine-${engineSha256}`);
   const output = resolve(root, 'resources');
+  // The libraries are renamed, re-linked and signed here before `output` replaces it atomically.
+  const staging = `${output}.${String(process.pid)}.tmp`;
+  /**
+   * A path as the receipt records it: the staging directory under its final name and workspace paths relative, so the
+   * shipped receipt holds no process id or checkout location.
+   */
+  const recordedPath = (value: string): string => value.replaceAll(staging, output).replaceAll(`${workspaceRoot}/`, '');
   const verifyFiles = async (directory: string, files: readonly HashedFile[]): Promise<boolean> => {
     if (files.length === 0) {
       return false;
@@ -455,6 +495,7 @@ const prepareNative = async (): Promise<string> => {
   };
   const environment: NodeJS.ProcessEnv = { ...process.env };
   environment['SOURCE_DATE_EPOCH'] = sourceDateEpoch;
+  environment['ZERO_AR_DATE'] = zeroArDate;
   environment['LC_ALL'] = 'C';
   environment['CXX'] = compilerPath;
   for (const name of [
@@ -476,7 +517,11 @@ const prepareNative = async (): Promise<string> => {
     readonly arguments: readonly string[];
     readonly cwd?: string;
   }): void => {
-    commands.push(options);
+    commands.push({
+      command: options.command,
+      arguments: options.arguments.map(recordedPath),
+      ...(options.cwd === undefined ? {} : { cwd: recordedPath(options.cwd) }),
+    });
     execFileSync(options.command, [...options.arguments], { cwd: options.cwd, env: environment, stdio: 'inherit' });
   };
   const dependencyPins = [source('blosc'), source('tbb'), source('boost')];
@@ -639,22 +684,21 @@ const prepareNative = async (): Promise<string> => {
       arguments: ['--build', build, '--target', 'picogk', 'tau-picogk-readback', '--parallel', '2'],
     });
   }
-  const temporary = `${output}.${String(process.pid)}.tmp`;
-  await rm(temporary, { recursive: true, force: true });
-  await mkdir(temporary, { recursive: true });
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
   await Promise.all([
     cp(
       compiledEngine === undefined
         ? resolve(build, 'lib/picogk.26.2.dylib')
         : resolve(compiledEngine.directory, 'picogk.26.2.dylib'),
-      resolve(temporary, 'picogk.26.2.dylib'),
+      resolve(staging, 'picogk.26.2.dylib'),
       { dereference: true },
     ),
     cp(
       compiledEngine === undefined
         ? resolve(build, 'tau-picogk-readback.dylib')
         : resolve(compiledEngine.directory, 'tau-picogk-readback.dylib'),
-      resolve(temporary, 'tau-picogk-readback.dylib'),
+      resolve(staging, 'tau-picogk-readback.dylib'),
       {
         dereference: true,
       },
@@ -663,14 +707,14 @@ const prepareNative = async (): Promise<string> => {
       compiledEngine === undefined
         ? resolve(dependencies, 'lib/libtbb.12.dylib')
         : resolve(compiledEngine.directory, 'libtbb.12.dylib'),
-      resolve(temporary, 'libtbb.12.dylib'),
+      resolve(staging, 'libtbb.12.dylib'),
       { dereference: true },
     ),
   ]);
   const libraries = ['picogk.26.2.dylib', 'tau-picogk-readback.dylib', 'libtbb.12.dylib'];
   const linkedLibraries: Record<string, readonly string[]> = {};
   const auditAndSign = (name: string): void => {
-    const library = resolve(temporary, name);
+    const library = resolve(staging, name);
     run({ command: 'install_name_tool', arguments: ['-id', `@loader_path/${name}`, library] });
     const links = execFileSync('otool', ['-L', library], { encoding: 'utf8' })
       .split('\n')
@@ -710,24 +754,30 @@ const prepareNative = async (): Promise<string> => {
   ];
   await Promise.all(
     licenses.map(async ([name, path, outputName]) =>
-      cp(resolve(sourceRoot(name!), path!), resolve(temporary, outputName!)),
+      cp(resolve(sourceRoot(name!), path!), resolve(staging, outputName!)),
     ),
   );
-  await cp(resolve(sourceRoot('blosc'), 'LICENSES'), resolve(temporary, 'Blosc-LICENSES'), { recursive: true });
-  await cp(resolve(nativeSourceRoot, 'licenses/Zstd-LICENSE'), resolve(temporary, 'Zstd-LICENSE'));
+  await cp(resolve(sourceRoot('blosc'), 'LICENSES'), resolve(staging, 'Blosc-LICENSES'), { recursive: true });
+  await cp(resolve(nativeSourceRoot, 'licenses/Zstd-LICENSE'), resolve(staging, 'Zstd-LICENSE'));
   await cp(
     resolve(nativeSourceRoot, 'licenses/Zstd-license-receipt.json'),
-    resolve(temporary, 'Zstd-license-receipt.json'),
+    resolve(staging, 'Zstd-license-receipt.json'),
   );
-  const nativeFiles = await filesUnder(temporary);
+  const nativeFiles = await filesUnder(staging);
   const files = await Promise.all(
-    nativeFiles.map(async (path) => ({ name: relative(temporary, path), sha256: await digest(path) })),
+    nativeFiles.map(async (path) => ({ name: relative(staging, path), sha256: await digest(path) })),
   );
+  /*
+   * The shipped receipt names the dependency libraries it ships (libtbb). The static archives are linked into the engine
+   * and are a function of the pins, toolchain and profile recorded beside them; their hashes stay in the dependency
+   * cache's own receipt, which decides whether that cache is reused.
+   */
+  const shippedDependencyFiles = dependencyFiles.filter((file) => !file.name.endsWith('.a'));
   await writeFile(
-    resolve(temporary, 'tau-picogk-native-build.json'),
+    resolve(staging, 'tau-picogk-native-build.json'),
     `${JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         sourceSha256,
         engineSha256,
         preparerSha256,
@@ -740,7 +790,7 @@ const prepareNative = async (): Promise<string> => {
           toolchain,
           profile,
           dependencySha256,
-          dependencyFiles,
+          dependencyFiles: shippedDependencyFiles,
           dependencyCommands,
           commands,
         },
@@ -750,7 +800,7 @@ const prepareNative = async (): Promise<string> => {
         toolchain,
         profile,
         dependencySha256,
-        dependencyFiles,
+        dependencyFiles: shippedDependencyFiles,
         dependencyCommands,
         commands,
         linkedLibraries,
@@ -762,7 +812,7 @@ const prepareNative = async (): Promise<string> => {
     )}\n`,
   );
   await rm(output, { recursive: true, force: true });
-  await rename(temporary, output);
+  await rename(staging, output);
   if (compiledEngine === undefined) {
     await mkdir(engineRoot, { recursive: true });
     const receipt = JSON.parse(await readFile(resolve(output, 'tau-picogk-native-build.json'), 'utf8')) as {
@@ -835,7 +885,10 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
   const nugetRoot = resolve(cacheRoot, 'nuget-packages');
   buildEnvironment['NUGET_PACKAGES'] = nugetRoot;
-  const projectProperties = [`-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`];
+  const projectProperties = [
+    `-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`,
+    ...reproducibleProperties,
+  ];
   const lockProperties = ['-p:RestorePackagesWithLockFile=true', `-p:NuGetLockFilePath=${target.lockFile}`];
   execFileSync(
     dotnet,
@@ -978,6 +1031,310 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   console.log(`Prepared PicoGK .NET: ${targetName}`);
 };
 
+const layerRoot = resolve(workspaceRoot, 'out/picogk-layer');
+const layerAsset = 'tau-picogk-layer-darwin-arm64.tar.gz';
+const pluginManifestPath = resolve(workspaceRoot, 'packages/plugins/picogk/tau-plugin.json');
+/** Files of the self-contained resource the layer carries unchanged: notices, licences, schema and SBOM. */
+const layerCompanionFiles = [
+  'DotNet-LICENSE.txt',
+  'DotNet-THIRD-PARTY-NOTICES.txt',
+  'PicoGK-LICENSE',
+  'Roslyn-NOTICES.rtf',
+  'SkiaSharp-LICENSE.txt',
+  'SkiaSharp-THIRD-PARTY-NOTICES.txt',
+  'Tau-PicoGK-LICENSE',
+  basename(topologySchema),
+  'tau-picogk-sbom.cdx.json',
+];
+
+/**
+ * A gzipped ustar archive of a directory's regular files, byte-reproducible from the same files: sorted names, mtime
+ * 0, uid and gid 0, and modes reduced to 0644 or 0755.
+ */
+const deterministicTarGz = async (
+  root: string,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; unpackedByteLength: number; fileCount: number }> => {
+  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
+  let unpackedByteLength = 0;
+  const paths = await filesUnder(root);
+  const files = paths.map((path) => relative(root, path)).toSorted((left, right) => (left < right ? -1 : 1));
+  for (const name of files) {
+    if (Buffer.byteLength(name) > 100) {
+      throw new Error(`Layer file name exceeds the ustar name field: ${name}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- archive members are appended in name order.
+    const [data, info] = await Promise.all([readFile(resolve(root, name)), stat(resolve(root, name))]);
+    const header = Buffer.alloc(512);
+    header.write(name, 0);
+    // The owner's execute bit decides the archived mode.
+    const executable = Math.floor(info.mode / 0o100) % 2 === 1;
+    header.write(`${(executable ? 0o755 : 0o644).toString(8).padStart(7, '0')}\0`, 100);
+    header.write('0000000\0', 108);
+    header.write('0000000\0', 116);
+    header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124);
+    header.write('00000000000\0', 136);
+    header.write('0', 156);
+    header.write('ustar\u000000', 257);
+    header.fill(0x20, 148, 156);
+    header.write(
+      `${header
+        .reduce((sum, byte) => sum + byte, 0)
+        .toString(8)
+        .padStart(6, '0')}\0 `,
+      148,
+    );
+    blocks.push(header, new Uint8Array(data), Buffer.alloc((512 - (data.length % 512)) % 512));
+    unpackedByteLength += data.length;
+  }
+  return {
+    bytes: new Uint8Array(gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]), { level: 9 })),
+    unpackedByteLength,
+    fileCount: files.length,
+  };
+};
+
+/** The `dotnet` payload tau-plugin.json pins for darwin-arm64: Microsoft's runtime archive, by URL and sha512. */
+const pinnedRuntimeArchive = async (): Promise<{ integrity: string; sha512: string; url: string; name: string }> => {
+  const manifest = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
+    readonly dependencies: Readonly<
+      Record<
+        string,
+        ReadonlyArray<{
+          readonly target: { readonly os: string; readonly arch: string };
+          readonly payloads: ReadonlyArray<{
+            readonly name: string;
+            readonly integrity: string;
+            readonly origin: { readonly urls?: readonly string[] };
+          }>;
+        }>
+      >
+    >;
+  };
+  const payload = manifest.dependencies['runtime']
+    ?.find(({ target }) => target.os === 'darwin' && target.arch === 'arm64')
+    ?.payloads.find(({ name }) => name === 'dotnet');
+  const url = payload?.origin.urls?.[0];
+  if (payload === undefined || url === undefined || !payload.integrity.startsWith('sha512-')) {
+    throw new Error(`${pluginManifestPath} pins no darwin-arm64 dotnet runtime archive by sha512.`);
+  }
+  const expectedUrl = `https://builds.dotnet.microsoft.com/dotnet/Runtime/${dotnetRuntimeVersion}/dotnet-runtime-${dotnetRuntimeVersion}-osx-arm64.tar.gz`;
+  if (url !== expectedUrl) {
+    throw new Error(
+      `${pluginManifestPath} pins ${url}; the worker targets .NET ${dotnetRuntimeVersion} (${expectedUrl}).`,
+    );
+  }
+  return {
+    integrity: payload.integrity,
+    sha512: Buffer.from(payload.integrity.slice('sha512-'.length), 'base64').toString('hex'),
+    url,
+    name: basename(url),
+  };
+};
+
+/** Cross-check the runtime pin against Microsoft's release metadata, which publishes each file's sha512. */
+const assertRuntimePinPublished = async (pin: { sha512: string; url: string }): Promise<void> => {
+  const response = await fetch('https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json');
+  if (!response.ok) {
+    throw new Error(`.NET 10.0 release metadata answered HTTP ${String(response.status)}`);
+  }
+  const metadata = (await response.json()) as {
+    readonly releases: ReadonlyArray<{
+      readonly runtime?: {
+        readonly version: string;
+        readonly files: ReadonlyArray<{ readonly rid?: string; readonly url: string; readonly hash: string }>;
+      };
+    }>;
+  };
+  const file = metadata.releases
+    .find(({ runtime }) => runtime?.version === dotnetRuntimeVersion)
+    // The same RID also has an app-host pack; select the pinned runtime archive.
+    ?.runtime?.files.find(({ rid, url }) => rid === 'osx-arm64' && url === pin.url);
+  if (file?.url !== pin.url || file.hash.toLowerCase() !== pin.sha512) {
+    throw new Error(
+      `Microsoft's release metadata for .NET ${dotnetRuntimeVersion} osx-arm64 does not publish the pinned archive.`,
+    );
+  }
+};
+
+/** Whether the layer, its record and the seed were built from these sources and toolchain and are byte-intact. */
+const layerIsCurrent = async (
+  output: string,
+  expected: { readonly sourceFilesSha256: string; readonly nativeSourceSha256: string },
+): Promise<boolean> => {
+  try {
+    const record = JSON.parse(await readFile(resolve(output, 'tau-layer.json'), 'utf8')) as {
+      readonly sha256: string;
+      readonly sourceFilesSha256: string;
+      readonly nativeSourceSha256?: string;
+    };
+    return (
+      record.sourceFilesSha256 === expected.sourceFilesSha256 &&
+      record.nativeSourceSha256 === expected.nativeSourceSha256 &&
+      (await digest(resolve(output, layerAsset))) === record.sha256 &&
+      (await digest(resolve(layerRoot, 'seed/blobs/sha256', record.sha256))) === record.sha256 &&
+      existsSync(resolve(layerRoot, 'seed/tau-seed.json'))
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Publish the framework-dependent ReadyToRun worker with the Tau-built engine as the Tau PicoGK layer, write its
+ * record, and stage the seed the native suites prepare their closure from offline.
+ */
+const prepareLayer = async (): Promise<void> => {
+  const target = targets['darwin-arm64']!;
+  const dotnetRoot = resolve(cacheRoot, `dotnet-${dotnetVersion}-darwin-arm64`);
+  const dotnet = resolve(dotnetRoot, 'dotnet');
+  const nugetRoot = resolve(cacheRoot, 'nuget-packages');
+  const selfContained = resolve(resourceRoot, 'darwin-arm64');
+  const output = resolve(layerRoot, 'darwin-arm64');
+  const expectedSourceDigest = await sourceDigest();
+  // The engine dylibs prepareNative built and ad-hoc signed; the cached build is reused. Its receipt names the native
+  // inputs, the toolchain among them, so a runner-image toolchain change is a declared input change of the layer.
+  const nativeRoot = await prepareNative();
+  const nativeReceipt = JSON.parse(await readFile(resolve(nativeRoot, 'tau-picogk-native-build.json'), 'utf8')) as {
+    readonly sourceSha256: string;
+    readonly toolchain: {
+      readonly compiler: string;
+      readonly sdk: string;
+      readonly cmake: string;
+      readonly ninja: string;
+    };
+  };
+  const firstLine = (text: string): string => text.split('\n', 1)[0]!.trim();
+  if (
+    await layerIsCurrent(output, {
+      sourceFilesSha256: expectedSourceDigest,
+      nativeSourceSha256: nativeReceipt.sourceSha256,
+    })
+  ) {
+    console.log(`The Tau PicoGK layer is current: ${resolve(output, layerAsset)}`);
+    return;
+  }
+  const tree = resolve(layerRoot, `.tree.${String(process.pid)}.tmp`);
+  await rm(tree, { recursive: true, force: true });
+  await mkdir(tree, { recursive: true });
+  const buildEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  buildEnvironment['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1';
+  buildEnvironment['DOTNET_MULTILEVEL_LOOKUP'] = '0';
+  buildEnvironment['DOTNET_NOLOGO'] = '1';
+  buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
+  buildEnvironment['NUGET_PACKAGES'] = nugetRoot;
+  // The muxer from Microsoft's runtime archive runs the worker, so no apphost; ReadyToRun per S2 (D22).
+  const layerProperties = [
+    `-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`,
+    '-p:PublishReadyToRun=true',
+    '-p:SelfContained=false',
+    '-p:UseAppHost=false',
+    ...reproducibleProperties,
+  ];
+  execFileSync(
+    dotnet,
+    [
+      'restore',
+      workerProject,
+      '--runtime',
+      target.rid,
+      '--locked-mode',
+      '-p:RestorePackagesWithLockFile=true',
+      `-p:NuGetLockFilePath=${target.lockFile}`,
+      ...layerProperties,
+    ],
+    { env: buildEnvironment, stdio: 'inherit' },
+  );
+  execFileSync(
+    dotnet,
+    [
+      'publish',
+      workerProject,
+      '--configuration',
+      'Release',
+      '--runtime',
+      target.rid,
+      '--self-contained',
+      'false',
+      '--no-restore',
+      '--output',
+      tree,
+      ...layerProperties,
+    ],
+    { env: buildEnvironment, stdio: 'inherit' },
+  );
+  for (const path of await filesUnder(tree)) {
+    if (path.endsWith('.pdb') || path.endsWith('.xml')) {
+      // oxlint-disable-next-line no-await-in-loop -- deterministic bounded publish cleanup.
+      await rm(path, { force: true });
+    }
+  }
+  if (existsSync(resolve(tree, 'Tau.PicoGK.Worker')) || !existsSync(resolve(tree, 'Tau.PicoGK.Worker.dll'))) {
+    throw new Error('The framework-dependent publish must produce Tau.PicoGK.Worker.dll and no apphost.');
+  }
+  const nativeNames = await readdir(nativeRoot);
+  await Promise.all([
+    ...nativeNames.map(async (name) => cp(resolve(nativeRoot, name), resolve(tree, name), { recursive: true })),
+    ...layerCompanionFiles.map(async (name) => cp(resolve(selfContained, name), resolve(tree, name))),
+  ]);
+
+  const archive = await deterministicTarGz(tree);
+  const sha256 = createHash('sha256').update(archive.bytes).digest('hex');
+  const record = {
+    schemaVersion: 2,
+    target: 'darwin-arm64',
+    asset: layerAsset,
+    sha256,
+    byteLength: archive.bytes.byteLength,
+    unpackedByteLength: archive.unpackedByteLength,
+    fileCount: archive.fileCount,
+    protocolVersion: picogkRuntimeManifestSchema.shape.protocolVersion.value,
+    dotnetRuntimeVersion,
+    readyToRun: true,
+    sourceFilesSha256: expectedSourceDigest,
+    nativeSourceSha256: nativeReceipt.sourceSha256,
+    toolchain: {
+      dotnetSdk: dotnetVersion,
+      compiler: firstLine(nativeReceipt.toolchain.compiler),
+      sdk: nativeReceipt.toolchain.sdk,
+      cmake: firstLine(nativeReceipt.toolchain.cmake),
+      ninja: nativeReceipt.toolchain.ninja,
+    },
+  };
+  await rm(output, { recursive: true, force: true });
+  await mkdir(output, { recursive: true });
+  await writeFile(resolve(output, layerAsset), archive.bytes);
+  await writeFile(resolve(output, 'tau-layer.json'), `${JSON.stringify(record, undefined, 2)}\n`);
+  await rm(tree, { recursive: true, force: true });
+
+  const runtime = await pinnedRuntimeArchive();
+  await assertRuntimePinPublished(runtime);
+  const runtimeArchive = await download({
+    algorithm: 'sha512',
+    expected: runtime.sha512,
+    name: runtime.name,
+    url: runtime.url,
+  });
+  const runtimeSha256 = await digest(runtimeArchive);
+  const seed = resolve(layerRoot, 'seed');
+  await rm(seed, { recursive: true, force: true });
+  await mkdir(resolve(seed, 'blobs/sha256'), { recursive: true });
+  await Promise.all([
+    cp(runtimeArchive, resolve(seed, 'blobs/sha256', runtimeSha256)),
+    cp(resolve(output, layerAsset), resolve(seed, 'blobs/sha256', sha256)),
+  ]);
+  await writeFile(
+    resolve(seed, 'tau-seed.json'),
+    `${JSON.stringify(
+      { closures: [{ payloads: [{ integrity: runtime.integrity, blob: `blobs/sha256/${runtimeSha256}` }] }] },
+      undefined,
+      2,
+    )}\n`,
+  );
+  console.log(
+    `Prepared the Tau PicoGK layer: ${resolve(output, layerAsset)} sha256 ${sha256} (${String(record.byteLength)} B)`,
+  );
+};
+
 const main = async (): Promise<void> => {
   const selected = parseTargets();
   if (process.argv.includes('--native-only')) {
@@ -985,6 +1342,17 @@ const main = async (): Promise<void> => {
       throw new Error('--native-only supports darwin-arm64 only.');
     }
     console.log(`Prepared PicoGK native: ${await prepareNative()}`);
+    return;
+  }
+  if (process.argv.includes('--layer')) {
+    if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+      console.log(
+        `Skipped the Tau PicoGK layer on ${process.platform}-${process.arch}: the engine builds on darwin-arm64 only (D13).`,
+      );
+      return;
+    }
+    await prepareTarget('darwin-arm64');
+    await prepareLayer();
     return;
   }
   for (const target of selected) {

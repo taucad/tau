@@ -1,6 +1,7 @@
 import { createActor, createCallbackLogic } from 'xstate';
 import type { AnyActorRef, EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { confirmFlush, slowWriteMilliseconds } from '#workbench-records/record-health.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 import * as machineModule from './project-session.machine.js';
@@ -20,7 +21,10 @@ const isMachine = (value: unknown): boolean =>
 const regions: readonly ProjectSessionRegion[] = ['views', 'runtime', 'agentHost', 'compute'];
 
 /** A started parent that records what the session sends it. */
-const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Record<string, unknown>> } => {
+const recordingParent = (): {
+  ref: AnyActorRef & { stop(): void };
+  received: Array<EventObject & Record<string, unknown>>;
+} => {
   const received: Array<EventObject & Record<string, unknown>> = [];
   const ref = createActor(
     createCallbackLogic<EventObject>(({ receive }) => {
@@ -40,6 +44,7 @@ const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Re
 const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
+  readonly flushProducers?: () => Promise<void>;
   readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 }) => {
@@ -69,6 +74,7 @@ const harness = (options?: {
         }),
         flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
           order.push('flushProducers');
+          await options?.flushProducers?.();
           if (options?.failCloseStep === 'flushProducers') {
             throw new Error('flushProducers failed');
           }
@@ -491,6 +497,39 @@ describe('projectSessionMachine', () => {
     expect(actor.getSnapshot().matches('closed')).toBe(false);
     expect(actor.getSnapshot().context.failures['close']).toMatch(/not provided/u);
     actor.stop();
+  });
+
+  it('should keep resources live after bounded refusal and close only on an explicit retry after late settlement', async () => {
+    const pending = Promise.withResolvers<boolean>();
+    const parent = recordingParent();
+    const { actor, live, order } = harness({
+      parentRef: parent.ref,
+      flushProducers: async () => confirmFlush(async () => pending.promise, 'Pane layout is not confirmed saved.'),
+    });
+    try {
+      await settle();
+      actor.send({ type: 'close', reason: 'user' });
+      await settle();
+      await vi.advanceTimersByTimeAsync(slowWriteMilliseconds);
+      await settle();
+      expect(actor.getSnapshot().matches('live')).toBe(true);
+      expect(actor.getSnapshot().context.failures['close']).toBe('Pane layout is not confirmed saved.');
+      expect(live.size).toBe(4);
+      expect(order).not.toContain('flushSync');
+      pending.resolve(true);
+      await settle();
+      expect(actor.getSnapshot().matches('live')).toBe(true);
+      expect(parent.received.filter((event) => event.type === 'sessionClosed')).toHaveLength(0);
+      actor.send({ type: 'close', reason: 'user' });
+      await settle();
+      expect(actor.getSnapshot().matches('closed')).toBe(true);
+      expect(live.size).toBe(0);
+      expect(parent.received.filter((event) => event.type === 'sessionClosed')).toHaveLength(1);
+    } finally {
+      pending.resolve(true);
+      actor.stop();
+      parent.ref.stop();
+    }
   });
 
   it('stays live with a retryable close when a producer refuses to flush', async () => {

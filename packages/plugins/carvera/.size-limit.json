@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/carvera (.) with the lazy session and the simulator — measured 22.82 kB brotli on 2026-10-05",
+    "path": "dist/**/*.mjs",
+    "limit": "25 kB"
+  }
+]

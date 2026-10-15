@@ -107,6 +107,38 @@ describe('UnloadProvider', () => {
     expect(sequence).toEqual(['producer:hidden:start', 'producer:hidden:done']);
   });
 
+  it('should name each refusal once while retaining every original cause', async () => {
+    const layout = new Error('Pane layout is not confirmed saved.');
+    const view = new Error('View settings are not confirmed saved.');
+    const grouped = new AggregateError([layout, view], `${layout.message} ${view.message}`);
+    let flush = async (): Promise<void> => undefined;
+    function Probe(): undefined {
+      flush = useFlushProducers();
+      return undefined;
+    }
+    render(
+      <UnloadProvider>
+        <Registration
+          stage='producer'
+          callback={() => {
+            throw layout;
+          }}
+        />
+        <Registration
+          stage='producer'
+          callback={() => {
+            throw grouped;
+          }}
+        />
+        <Probe />
+      </UnloadProvider>,
+    );
+    await expect(flush()).rejects.toMatchObject({
+      message: `${layout.message} ${view.message}`,
+      errors: [layout, grouped],
+    });
+  });
+
   it('keeps session teardown behind a failed producer and permits a successful retry', async () => {
     const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

@@ -75,8 +75,9 @@ const createInitialEditorState = (args: {
   readonly chatId: string | undefined;
   readonly overrides?: InitialEditorState;
   readonly timestamp: number;
+  readonly deferInitialView?: boolean;
 }): EditorState => {
-  const mainFile = args.project.assets.main.entryPath;
+  const mainFile = args.deferInitialView ? undefined : args.project.assets.main.entryPath;
   const seedPaneId = mainFile ? generatePrefixedId(idPrefix.pane) : undefined;
   const openFiles: OpenFile[] =
     args.overrides?.openFiles && args.overrides.openFiles.length > 0
@@ -134,6 +135,7 @@ const objectStoreWorker = {
     /** Where the chat's attachment references are copied from; see `PendingCreateProjectOperation`. */
     attachmentSource?: string;
     editorState?: InitialEditorState;
+    deferInitialView?: boolean;
     files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
     storage: PendingProjectStorage;
   }): Promise<PendingCreateProjectOperation> {
@@ -157,7 +159,10 @@ const objectStoreWorker = {
       ...options.storage,
       manifest: project,
       library: { projectId: project.id, lastActivityAt: timestamp },
-      files: seedInitialWorkbenchFiles(options.files, project.assets.main.entryPath),
+      files: seedInitialWorkbenchFiles(
+        options.files,
+        options.deferInitialView ? undefined : project.assets.main.entryPath,
+      ),
       ...(chat === undefined ? {} : { chat }),
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({
@@ -165,6 +170,7 @@ const objectStoreWorker = {
         chatId: chat?.id,
         overrides: options.editorState,
         timestamp,
+        deferInitialView: options.deferInitialView,
       }),
     };
     await storage.putPendingProjectOperation(operation);

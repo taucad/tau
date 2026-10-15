@@ -39,6 +39,8 @@ Control reconnect uses bounded exponential backoff. An interrupted runtime sessi
 
 Remote project code executes as native Node ESM in the runtime child. The child receives no device credential or parent environment and uses Node's permission model to deny host filesystem access, process spawning, workers, addons, WASI, and the inspector. Node network access remains unrestricted, and Node's permission model is not a malicious-code sandbox.
 
+Native kernel workers (build123d, PicoGK) are never spawned by the runtime child. It asks its daemon over the IPC channel, and the daemon starts the worker only from a closure sealed in the payload store, after verifying its digests, inside the OS sandbox with no network; any other launch is refused. The sandbox grants the worker only a directory the daemon creates for that child outside its temp directory (beside the payload store), which holds the child's temp directory and which neither the child nor a worker can replace. A daemon removes the directories a stopped daemon left there when it starts its first such child.
+
 This package is therefore restricted to explicitly trusted projects. Public/general availability is blocked until an OS/container sandbox contains filesystem, environment, network, native-code, process, and resource-exhaustion attacks on every supported daemon OS.
 
 ## Compatibility

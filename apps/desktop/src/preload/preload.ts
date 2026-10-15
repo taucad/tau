@@ -1,3 +1,5 @@
+import { browserChannels } from '@taucad/types/browser';
+import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
 /**
  * Electron preload entry (work item E4).
  *
@@ -25,6 +27,8 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  openDirectoryChannel,
+  revealPathChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
   machinesChannels,
@@ -33,6 +37,7 @@ import {
   readBootstrap,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -51,14 +56,38 @@ import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'jso
 
 const bootstrap = readBootstrap(process.argv);
 
-let pendingQuitAsk = false;
-let quitAskHandler: (() => void) | undefined;
-ipcRenderer.on(quitChannels.ask, () => {
-  if (quitAskHandler === undefined) {
-    pendingQuitAsk = true;
+// Keep the snapshot even when native fullscreen changes before React mounts.
+let isWindowFullscreen = false;
+ipcRenderer.on(windowFullscreenChannel, (_event, isFullscreen: unknown) => {
+  if (typeof isFullscreen === 'boolean') {
+    isWindowFullscreen = isFullscreen;
+  }
+});
+
+let pendingQuitAsk: string | undefined;
+let quitAskHandler: ((attemptId: string) => void) | undefined;
+ipcRenderer.on(quitChannels.ask, (_event, attemptId: unknown) => {
+  if (typeof attemptId !== 'string') {
     return;
   }
-  quitAskHandler();
+  if (quitAskHandler === undefined) {
+    pendingQuitAsk = attemptId;
+    return;
+  }
+  quitAskHandler(attemptId);
+});
+
+let pendingMachineRoute: string | undefined;
+let machineNavigationHandler: ((route: string) => void) | undefined;
+ipcRenderer.on(quitChannels.navigate, (_event, route: unknown) => {
+  if (typeof route !== 'string' || !/^\/machines(?:\/[^/?#]+\/[^/?#]+)?$/u.test(route)) {
+    return;
+  }
+  if (machineNavigationHandler) {
+    machineNavigationHandler(route);
+  } else {
+    pendingMachineRoute = route;
+  }
 });
 
 exposeElectronRuntime();
@@ -102,7 +131,9 @@ contextBridge.exposeInMainWorld('tau', {
   machines: {
     /* The one route a secret takes: invoke → main → the utility's ceremony,
      * which saves it once the printer accepts it. Omit `accessCode` to reuse
-     * a saved one. The port relay above carries the non-secret half. */
+     * a saved one. The port relay above carries the non-secret half. A failed
+     * ceremony resolves `{ status: 'failed', code?, message }`, keeping the
+     * host's typed code, which a rejection across this bridge would drop. */
     completeBinding: async (input: { ceremonyId: string; address?: string; accessCode?: string }): Promise<unknown> =>
       ipcRenderer.invoke(machinesChannels.completeBinding, input),
   },
@@ -116,6 +147,27 @@ contextBridge.exposeInMainWorld('tau', {
         ipcRenderer.invoke(slicersChannels.bambuStudio.resolveSelection, input),
       settings: async (input: unknown): Promise<unknown> =>
         ipcRenderer.invoke(slicersChannels.bambuStudio.settings, input),
+    },
+  },
+  directories: {
+    openIcon: process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
+    openLabel:
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    revealLabel:
+      process.platform === 'darwin'
+        ? 'Reveal in Finder'
+        : process.platform === 'win32'
+          ? 'Reveal in File Explorer'
+          : 'Reveal in file manager',
+    open: async (path: string): Promise<void> => {
+      await ipcRenderer.invoke(openDirectoryChannel, path);
+    },
+    reveal: async (path: string): Promise<void> => {
+      await ipcRenderer.invoke(revealPathChannel, path);
     },
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
@@ -136,13 +188,39 @@ contextBridge.exposeInMainWorld('tau', {
       ipcRenderer.send(appIconThemeChannel, theme);
     },
   },
+  window: {
+    isFullscreen: (): boolean => isWindowFullscreen,
+    onFullscreenChange: (listener: () => void): (() => void) => {
+      const handler = (): void => {
+        listener();
+      };
+      ipcRenderer.on(windowFullscreenChannel, handler);
+      return () => {
+        ipcRenderer.off(windowFullscreenChannel, handler);
+      };
+    },
+  },
   quit: {
     isReady: (): boolean => quitAskHandler !== undefined,
-    onAsk: (handler: () => void): (() => void) => {
+    onNavigate: (handler: (route: string) => void): (() => void) => {
+      machineNavigationHandler = handler;
+      if (pendingMachineRoute !== undefined) {
+        const route = pendingMachineRoute;
+        pendingMachineRoute = undefined;
+        handler(route);
+      }
+      return () => {
+        if (machineNavigationHandler === handler) {
+          machineNavigationHandler = undefined;
+        }
+      };
+    },
+    onAsk: (handler: (attemptId: string) => void): (() => void) => {
       quitAskHandler = handler;
-      if (pendingQuitAsk) {
-        pendingQuitAsk = false;
-        handler();
+      if (pendingQuitAsk !== undefined) {
+        const attemptId = pendingQuitAsk;
+        pendingQuitAsk = undefined;
+        handler(attemptId);
       }
       return () => {
         if (quitAskHandler === handler) {
@@ -150,8 +228,8 @@ contextBridge.exposeInMainWorld('tau', {
         }
       };
     },
-    reportQuiesced: (forced: boolean): void => {
-      ipcRenderer.send(quitChannels.quiesced, forced);
+    reportQuiesced: (attemptId: string, forced: boolean): void => {
+      ipcRenderer.send(quitChannels.quiesced, attemptId, forced);
     },
   },
   dialog: {
@@ -183,4 +261,21 @@ contextBridge.exposeInMainWorld('tau', {
         },
       }
     : {}),
+});
+
+const browserBridge: BrowserBridge = {
+  command: async (command) => ipcRenderer.invoke(browserChannels.command, command) as Promise<BrowserSnapshot>,
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: BrowserSnapshot): void => {
+      listener(snapshot);
+    };
+    ipcRenderer.on(browserChannels.state, handler);
+    return () => {
+      ipcRenderer.off(browserChannels.state, handler);
+    };
+  },
+};
+contextBridge.exposeInMainWorld('tauBrowser', browserBridge);
+ipcRenderer.on('tau:browser:shortcut', (_event, key: string) => {
+  globalThis.dispatchEvent(new CustomEvent('tau-browser-shortcut', { detail: key }));
 });

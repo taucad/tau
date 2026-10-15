@@ -2213,3 +2213,32 @@ it('isolates late corrected tool metadata by call and run', async () => {
   ]);
   expect(state.blocks).toEqual({});
 });
+
+it.each(['text', 'thinking'] as const)(
+  'should preserve %s activity metadata when catch-up retains a live suffix',
+  (kind) => {
+    const base = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 1);
+    const live = reduceChatProjection(base, {
+      type: 'live',
+      event: {
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'progress',
+        contentIndex: 0,
+        type: kind === 'text' ? 'text-delta' : 'thinking-delta',
+        delta: 'Checking plot quality',
+        offset: 0,
+        ...(kind === 'text' ? { phase: 'commentary' } : { reasoningSummary: 'Checking plot quality' }),
+      },
+    }).state;
+    const next = reduceChatProjection(live, { type: 'catch-up', base, projection: base }).state;
+    const chunks = chunksOf(next.live?.chunks);
+    expect(
+      chunks.findLast((chunk) => chunk.type === (kind === 'text' ? 'text-delta' : 'reasoning-delta')),
+    ).toMatchObject({
+      providerMetadata: {
+        common: kind === 'text' ? { messagePhase: 'commentary' } : { reasoningSummary: 'Checking plot quality' },
+      },
+    });
+  },
+);

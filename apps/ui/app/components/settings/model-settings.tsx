@@ -31,7 +31,6 @@ export function ModelSettings(): React.JSX.Element {
       <SearchInput
         aria-label='Search models'
         value={search}
-        variant='transparent'
         onClear={() => {
           setSearch('');
         }}
@@ -56,7 +55,7 @@ export function ModelSettings(): React.JSX.Element {
             }}
           />
         ) : (
-          <div className='flex flex-col gap-0.5 rounded-xl border p-1'>
+          <div className='flex flex-col gap-0.5 rounded-xl border bg-card p-1'>
             {visibleModels.map((model) => (
               <SwitchRow
                 key={model.id}

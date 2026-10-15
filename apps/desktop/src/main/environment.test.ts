@@ -49,6 +49,7 @@ describe('desktopEnvironment', () => {
         ELECTRON_RENDERER_URL: 'https://attacker.example',
         TAU_DESKTOP_CLIENT_ROOT: '/tmp/attacker-spa',
         TAU_BAMBU_STUDIO_PATH: '/tmp/attacker-binary',
+        TAU_MACHINES_ENABLED: 'true',
         TAU_E2E_HIDE_WINDOW: '1',
         TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
         TAU_DEBUG: 'true',
@@ -94,6 +95,17 @@ describe('desktopEnvironment', () => {
       TAU_WEBSOCKET_URL: 'wss://api.tau.new',
       TAU_FRONTEND_URL: 'https://tau.new',
     });
+  });
+
+  it.each([
+    ['false', false],
+    ['true', true],
+  ])('should publish TAU_DEBUG=%s to the renderer as %s', (raw, expected) => {
+    expect(clientEnvironment({ TAU_DEBUG: raw })['TAU_DEBUG']).toBe(expected);
+  });
+
+  it('publishes the machines opt-in for an unlocked qualification build', () => {
+    expect(clientEnvironment({ TAU_MACHINES_ENABLED: 'true' })).toMatchObject({ TAU_MACHINES_ENABLED: 'true' });
   });
 
   it('publishes the billing environment the cloud renderer needs', () => {

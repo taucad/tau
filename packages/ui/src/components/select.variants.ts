@@ -21,7 +21,10 @@ export const selectControlVariants = cva(
 /** A declared size shared across the trigger and portaled options. */
 export type SelectSize = NonNullable<VariantProps<typeof selectControlVariants>['size']>;
 
-/** Radix owns placement and wrapper width; CSS prevents option text widening it. */
+/**
+ * Radix owns placement; the list is at least as wide as its trigger and grows to its
+ * widest option so labels are never clipped, up to the space the viewport allows.
+ */
 export const selectContentVariants = cva(
   [
     popoverSurfaceVariants({ appearance: 'picker' }),
@@ -31,10 +34,11 @@ export const selectContentVariants = cva(
     variants: {
       position: {
         // Radix's minimum wrapper width includes one gutter; content adds the other.
+        // Radix keeps a 10px margin from each viewport edge when clamping placement.
         'item-aligned':
-          'w-[calc(100%+var(--select-gutter))] [contain:inline-size] [align-self:self-start] animate-none',
+          'w-max min-w-[calc(100%+var(--select-gutter))] max-w-[calc(100vw-20px)] [align-self:self-start] animate-none',
         popper:
-          'max-h-(--radix-select-content-available-height) w-[calc(var(--radix-select-trigger-width)+var(--select-gutter)*2)] origin-(--radix-select-content-transform-origin) duration-100 data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
+          'max-h-(--radix-select-content-available-height) w-max max-w-(--radix-select-content-available-width) min-w-[calc(var(--radix-select-trigger-width)+var(--select-gutter)*2)] origin-(--radix-select-content-transform-origin) duration-100 data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
       },
     },
     defaultVariants: { position: 'item-aligned' },

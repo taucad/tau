@@ -91,10 +91,11 @@ test('should manage profiles and restore their independent settings after a desk
           name: machine.name,
           providerId: machine.providerId,
           physicalId: machine.id,
-          configuration: { logicalId: machine.name, address: '127.0.0.1' },
+          // The binding configuration carries only provider fields; the name is the bind's, the candidate's is observed.
+          configuration: {},
           candidate: {
             id: `${machine.providerId}:${machine.id}`,
-            name: machine.name,
+            name: `${machine.model} at 127.0.0.1`,
             endpoint: { address: '127.0.0.1', interface: 'manual' },
             claimedIdentity: { model: machine.model },
             observedAt: binding.last.observedAt,

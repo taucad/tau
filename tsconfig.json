@@ -1,6 +1,9 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "./tools/typescript/base.json",
   "compilerOptions": {
+    // Nx's secondary-entrypoint resolver reads root options without following extends.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "./out-tsc"
   },
   "references": [

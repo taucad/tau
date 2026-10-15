@@ -23,7 +23,7 @@ import { reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { openAcpSession } from '#acp/acp-session.js';
-import { chooseOption, createTurnProjection } from '#acp/session.js';
+import { chooseOption, createTurnProjection, promptUsageOf } from '#acp/session.js';
 import type { AcpPromptTurn } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
@@ -37,6 +37,212 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   publishLive: async () => undefined,
   signal: new AbortController().signal,
 });
+
+it('should normalize a qualified Grok MCP call and its JSON output', async () => {
+  const output = { status: 'ready' };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'grok-mcp',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__evaluate_model', tool_input: { targetFile: 'main.py' } },
+        _meta: { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'grok-mcp',
+        title: 'tau__evaluate_model',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'evaluate_model',
+          server_name: 'tau',
+          output: { OkayOutput: JSON.stringify(output) },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[0]).toMatchObject({
+    role: 'tool-input',
+    toolName: 'evaluate_model',
+    content: { targetFile: 'main.py' },
+    metadata: { tauInternal: { presentation: 'tau-mcp' } },
+  });
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'evaluate_model',
+    content: output,
+    isError: false,
+  });
+});
+
+it.each([false, true])('should validate Grok GeoSpec summary and JSON blocks (invalid=%s)', async (invalid) => {
+  const output = { failures: [], passes: [], passed: 0, total: invalid ? 'invalid' : 0 };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'geospec',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__test_model', tool_input: { files: ['main.geospec.ts'] } },
+        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'geospec',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'test_model',
+          server_name: 'tau',
+          output: { OkayOutput: `GeoSpec passed 0 of 0 requirements.\n${JSON.stringify(output)}` },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'test_model',
+    isError: invalid,
+    content: invalid ? { errorCode: 'MCP_RESULT_INVALID' } : output,
+  });
+});
+
+it.each([false, true])('should validate a Grok screenshot with flattened text blocks (invalid=%s)', async (invalid) => {
+  const image = {
+    view: 'front',
+    path: `attachments/${'0'.repeat(64)}.png`,
+    absolutePath: '/tmp/capture.png',
+    mimeType: 'image/png',
+    byteLength: 70,
+    sha256: '0'.repeat(64),
+  };
+  const output = { images: invalid ? [{ view: 'front' }] : [image] };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'capture',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__screenshot', tool_input: { targetFile: 'main.py' } },
+        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'capture',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'screenshot',
+          server_name: 'tau',
+          output: {
+            OkayOutput: `Captured 1 CAD view. Open each local image with your image-viewing tool:\nfront: /tmp/capture.png\n${JSON.stringify(output)}`,
+          },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'screenshot',
+    isError: invalid,
+    content: invalid ? { errorCode: 'MCP_RESULT_INVALID' } : output,
+  });
+});
+
+it('should prefer standard usage and ignore malformed or foreign Grok metadata', () => {
+  const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+  const response = { stopReason: 'end_turn', _meta: { usage } } as const;
+  expect(promptUsageOf({ ...response, usage }, 'grok', usage)).toEqual(usage);
+  expect(promptUsageOf(response, 'codex', undefined)).toBeUndefined();
+  expect(
+    promptUsageOf({ ...response, _meta: { usage: { ...usage, inputTokens: -1 } } }, 'grok', undefined),
+  ).toBeUndefined();
+  expect(promptUsageOf({ ...response, _meta: { usage: { totalTokens: 12 } } }, 'grok', undefined)).toBeUndefined();
+});
+
+it.each(['foreign-server', 'foreign-tool', 'invalid-json', 'invalid-schema', 'missing-output'])(
+  'should refuse a Grok MCP %s result',
+  async (variant) => {
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'grok-mcp',
+          title: 'use_tool',
+          rawInput: { tool_name: 'tau__evaluate_model', tool_input: { targetFile: 'main.py' } },
+          _meta: { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'grok-mcp',
+          status: 'completed',
+          rawOutput: {
+            type: 'MCP',
+            tool_name: variant === 'foreign-tool' ? 'screenshot' : 'evaluate_model',
+            server_name: variant === 'foreign-server' ? 'foreign' : 'tau',
+            output:
+              variant === 'missing-output'
+                ? {}
+                : {
+                    OkayOutput:
+                      variant === 'invalid-json'
+                        ? '{broken'
+                        : JSON.stringify(variant === 'invalid-schema' ? { unrelated: true } : { status: 'ready' }),
+                  },
+          },
+        },
+      ],
+      'grok',
+      undefined,
+      'tau',
+    );
+    expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: 'evaluate_model', isError: true });
+  },
+);
+
+it.each(['foreign-server', 'unattested', 'foreign-agent'])(
+  'should keep a %s Grok-shaped MCP call generic',
+  async (variant) => {
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'grok-mcp',
+          title: 'use_tool',
+          status: 'completed',
+          rawInput: {
+            tool_name: `${variant === 'foreign-server' ? 'foreign' : 'tau'}__evaluate_model`,
+            tool_input: { targetFile: 'main.py' },
+          },
+          _meta:
+            variant === 'unattested' ? {} : { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+          rawOutput: {
+            type: 'MCP',
+            tool_name: 'evaluate_model',
+            server_name: 'tau',
+            output: { OkayOutput: '{"status":"ready"}' },
+          },
+        },
+      ],
+      variant === 'foreign-agent' ? 'codex' : 'grok',
+      undefined,
+      'tau',
+    );
+    expect(messages[0]).toMatchObject({ toolName: 'use_tool' });
+    expect(messages[0]?.metadata?.tauInternal).not.toHaveProperty('presentation');
+  },
+);
 
 it('should finalize named text exactly once after its durable append fails', async () => {
   const appended: ExternalAgentLogEvent[] = [];
@@ -1477,3 +1683,102 @@ it.each([
     expect(messages[0]?.metadata?.phase).toBe(expected);
   },
 );
+
+it('should preserve the latest structured Codex summary separately from the full thought', async () => {
+  const updates: SessionUpdate[] = [
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: '**Preparing supplemental CAD details**' },
+      _meta: { codex: { reasoningSummary: { index: 0, text: '**Preparing supplemental CAD details**' } } },
+    },
+    { sessionUpdate: 'agent_thought_chunk', messageId: 'rs', content: { type: 'text', text: '\n\n' } },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: '**Checking ' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: '**Checking ' } } },
+    },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: 'plot quality**' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: 'plot quality**' } } },
+    },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: 'Raw detail is not a summary' },
+    },
+  ];
+  const { appended, live } = await projectEvents(updates);
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  expect(messages[0]?.metadata?.reasoningSummary).toBe('**Checking plot quality**');
+  expect(live.filter((event) => event['type'] === 'thinking-delta').map((event) => event['reasoningSummary'])).toEqual([
+    '**Preparing supplemental CAD details**',
+    '**Preparing supplemental CAD details**',
+    '**Checking ',
+    '**Checking plot quality**',
+    '**Checking plot quality**',
+  ]);
+  expect(messages[0]?.content).toEqual([
+    {
+      type: 'thinking',
+      thinking: '**Preparing supplemental CAD details**\n\n**Checking plot quality**Raw detail is not a summary',
+    },
+  ]);
+});
+
+it.each([
+  ['claude', { index: 0, text: 'Not Codex' }],
+  ['codex', { index: -1, text: 'Invalid index' }],
+  ['codex', { index: 1.5, text: 'Invalid index' }],
+  ['codex', { index: 0, text: 123 }],
+] as const)('should reject unowned or malformed summary metadata (%s)', async (agentId, reasoningSummary) => {
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: 'rs',
+        content: { type: 'text', text: '**Thinking**' },
+        _meta: { codex: { reasoningSummary } },
+      },
+    ],
+    agentId,
+  );
+  expect(messages[0]?.metadata?.reasoningSummary).toBeUndefined();
+});
+
+it('should keep summary indexes scoped to each Codex item and ignore stale or empty parts', async () => {
+  const chunk = (messageId: string, index: number, text: string): SessionUpdate => ({
+    sessionUpdate: 'agent_thought_chunk',
+    messageId,
+    content: { type: 'text', text },
+    _meta: { codex: { reasoningSummary: { index, text } } },
+  });
+  const messages = await project([
+    chunk('first', 1, 'Checking plot quality'),
+    chunk('first', 0, 'Earlier summary'),
+    chunk('first', 2, ''),
+    chunk('second', 0, 'Preparing a status comment'),
+  ]);
+  expect(messages.map((message) => message.metadata?.reasoningSummary)).toEqual([
+    'Checking plot quality',
+    'Preparing a status comment',
+  ]);
+});
+
+it('should retain a completed-only summary without losing earlier transcript sections', async () => {
+  const messages = await project([
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'completed',
+      content: { type: 'text', text: 'Preparing supplemental CAD details\n\nChecking plot quality' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: 'Checking plot quality' } } },
+    },
+  ]);
+  expect(messages[0]?.metadata?.reasoningSummary).toBe('Checking plot quality');
+  expect(messages[0]?.content).toEqual([
+    { type: 'thinking', thinking: 'Preparing supplemental CAD details\n\nChecking plot quality' },
+  ]);
+});

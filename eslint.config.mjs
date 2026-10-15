@@ -422,8 +422,6 @@ const config = [
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
       'packages/geospec-engine/fixtures/scripts/**',
-      // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
-      'packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**',
       // Registry-gate fixtures are inert artifact inputs the gate parses as
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.
@@ -431,9 +429,6 @@ const config = [
       // Same class: a bundler fixture whose asset queries, JSX and untyped modules
       // the bundler suites check; it is outside the tau-examples tsconfig.
       'libs/tau-examples/src/kernels/replicad/bundler-feature-matrix/**',
-      // Opt-in benchmark experiments: engine-internal, unpublished, and outside
-      // the package tsconfig until PE2 rebuilds what they measure.
-      'packages/geospec-engine/experiments/**',
       // Same class: the compute-reuse baseline harness (charter W0) is an
       // opt-in benchmark reaching runtime-internal seams through a loader
       // hook; `.mts` files outside the project tsconfig.
@@ -1122,7 +1117,7 @@ const config = [
           message:
             'Reserved engineering vocabulary in rendered copy (policy rule 1). Say it in product ' +
             'words: a Revision, a Branch, Current, Restore, Switch, Merge, Discard, Work in, Sync. ' +
-            'See docs/policy/revisions-policy.md (rule 1) and DESIGN.md.',
+            'See docs/policy/revisions-policy.md (rule 1) and docs/policy/design-policy.md.',
         },
         {
           selector: 'JSXText[value=/\\bHEAD\\b/]',

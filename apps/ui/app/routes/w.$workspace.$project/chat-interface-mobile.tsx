@@ -15,7 +15,7 @@ import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
-import { ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
+import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
@@ -94,7 +94,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 onValueChange={handleTabChange}
               >
                 <TabsContent enableAnimation={false} value='chat' className='flex h-full flex-col'>
-                  <ChatHistory />
+                  <ChatHistoryGate>
+                    <ChatHistory />
+                  </ChatHistoryGate>
                 </TabsContent>
                 <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col'>
                   <ChatFileTree />

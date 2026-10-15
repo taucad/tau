@@ -1,4 +1,6 @@
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The CAD canvas needs focus for scoped viewer shortcuts; a button role would misrepresent a drawing surface. */
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -23,8 +25,6 @@ import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { Loader } from '@taucad/ui/components/loader';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
@@ -309,16 +309,11 @@ function MissingViewerFile({
   readonly entryPath: string;
   readonly onSelect: (path: string) => void;
 }): React.JSX.Element {
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
   return (
     <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-      {checkingRemote ? (
-        <Loader className='size-12 motion-reduce:animate-none' />
-      ) : (
-        <FileX className='size-12 stroke-1' />
-      )}
-      <div className='flex flex-col items-center gap-1' role={checkingRemote ? 'status' : undefined}>
-        <p className='text-sm font-medium'>{checkingRemote ? 'Checking synced files…' : 'File not found'}</p>
+      <FileX className='size-12 stroke-1' />
+      <div className='flex flex-col items-center gap-1'>
+        <p className='text-sm font-medium'>File not found</p>
         <p className='max-w-60 truncate text-xs'>{entryPath}</p>
       </div>
       <FileSelector
@@ -335,7 +330,7 @@ function MissingViewerFile({
   );
 }
 
-export const ChatViewer = memo(function ({
+const ChatViewerContent = memo(function ({
   viewId,
   entryPath,
   panelApi,
@@ -1204,3 +1199,13 @@ function ModelComponentNameBadge({
     </div>
   );
 }
+
+/** Keep file absence and rendering errors hidden until the authored checkout is acknowledged. */
+export const ChatViewer = memo(function (props: ChatViewerProps): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return props.profile !== 'shared' && availability !== 'ready' ? (
+    <ProjectSyncPlaceholder state={availability} />
+  ) : (
+    <ChatViewerContent {...props} />
+  );
+});

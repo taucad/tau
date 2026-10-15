@@ -60,7 +60,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 };
 // Agent Workbench Control T20 adds two reviewed editor pages, each with a 500-word budget.
 // T21 baseline repair documents configuration, jobs, machines, host, compute, Electron and protocol APIs in eight references.
-const siteCeiling = 33_500;
+// Raised 33,500 -> 34,700 on 2026-10-15 for machines contract revision 3 (machines, machine-providers and host references).
+const siteCeiling = 34_700;
 
 const documentTypeCaps = {
   tutorial: 1500,

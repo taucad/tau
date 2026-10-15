@@ -1,5 +1,6 @@
 /**
- * Pack every publishable package, install the TGZs with npm outside Tau, and exercise the
+ * Pack every package of the release train (every publishable package except the GeoSpec engine,
+ * charter D36), install the TGZs with npm outside Tau, and exercise the
  * published surface: every export subpath, every `files` entry, the native payloads that only
  * fail once instantiated, and the runtime's shipped README quick start.
  *
@@ -125,15 +126,7 @@ export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<s
  * module body runs, so a missing sibling file surfaces as ERR_MODULE_NOT_FOUND and stays red.
  * Anything not listed here, and any listed entry that fails differently, is red.
  */
-const toleratedImportFailures: Record<string, string> = {
-  // @rjsf/core and @rjsf/utils 5.x publish CommonJS `main` plus an ESM `module` field and no `exports`,
-  // so a bundler (the viewer's consumers) takes their ESM build while bare Node ESM cannot read their
-  // named exports. Reported for the viewer's owner; a bundled consumer is unaffected.
-  '@taucad/viewer/parameters/parameters': "The requested module '@rjsf/core' is a CommonJS module",
-  '@taucad/viewer/parameters/rjsf-field-path': "The requested module '@rjsf/core' is a CommonJS module",
-  '@taucad/viewer/parameters/rjsf-theme': "The requested module '@rjsf/core' does not provide an export named",
-  '@taucad/viewer/parameters/rjsf-validator': "The requested module '@rjsf/utils' is a CommonJS module",
-};
+const toleratedImportFailures: Record<string, string> = {};
 
 /**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the
@@ -885,13 +878,21 @@ export const consumerZodVersion = (manifests: readonly Manifest[]): { version: s
   };
   let version = declaredZodFloor;
   const raisedBy: string[] = [];
+  const exact = new Set<string>();
   for (const manifest of manifests) {
     const range = manifest.dependencies?.['zod'];
     if (range === undefined) {
       continue;
     }
-    const floor = /^\^(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups?.['floor'];
-    invariant(floor !== undefined, `${manifest.name} depends on zod ${range}, which is not a caret range.`);
+    const match = /^(?<caret>\^)?(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups;
+    const floor = match?.['floor'];
+    invariant(
+      floor !== undefined,
+      `${manifest.name} depends on zod ${range}, which is neither a caret range nor a version.`,
+    );
+    if (match?.['caret'] === undefined) {
+      exact.add(floor);
+    }
     if (newer(floor, declaredZodFloor)) {
       raisedBy.push(`${manifest.name} (zod ${range})`);
       if (newer(floor, version)) {
@@ -899,6 +900,12 @@ export const consumerZodVersion = (manifests: readonly Manifest[]): { version: s
       }
     }
   }
+  // An exact pin is the only version that dependent accepts, so every other floor must admit it.
+  invariant(exact.size <= 1, `The packages pin different zod versions: ${[...exact].join(', ')}.`);
+  invariant(
+    exact.size === 0 || exact.has(version),
+    `zod ${[...exact][0] ?? ''} is pinned exactly, but another package requires at least ${version}.`,
+  );
   return { version, raisedBy };
 };
 
@@ -1171,21 +1178,21 @@ type InstallPlan = {
 };
 
 /**
- * The GeoSpec engine projects: published from taucad/geospec, never by Tau's train (charter D36), so a
- * consumer of the CLI closure installs without them. `@taucad/host` declares both as optional peers.
+ * The GeoSpec engine project: outside Tau's train (charter D36), so a consumer of the CLI closure
+ * installs without it. `@taucad/host` declares it, and the published `geospec-engine`, as optional peers.
  */
-const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine', 'geospec-engine-native']);
+const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine']);
 
 /** Pack the requested (or every) publishable directory into TGZs. */
 const planFromTarballs = async (requested: readonly string[], artifactRoot: string): Promise<InstallPlan> => {
   const resolved = await workspace({ fresh: true });
   const projectByName = new Map(publishable(resolved).map((project) => [project.name, project]));
-  // The release train, in dependency order, derived from the graph.
+  // The release train, in dependency order, derived from the graph; the GeoSpec engine is not in it (D36).
   const releaseTrainDirectories = publishWaves(resolved)
     .flat()
     .flatMap((name) => {
       const project = projectByName.get(name);
-      return project ? [project.root] : [];
+      return project && !geospecEngineProjects.has(name) ? [project.root] : [];
     });
   /** Private workspace libraries bundled into some artifact; none may ever be declared. */
   const bundledLibraryNames = new Set(

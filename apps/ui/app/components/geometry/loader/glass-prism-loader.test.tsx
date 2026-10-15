@@ -146,9 +146,9 @@ describe('GlassPrismLoader', () => {
     const { rerender, unmount } = render(<GlassPrismLoader semantic='img' label='Glass showcase' speed={1} />);
     await waitFor(() => {
       expect(screen.getByRole('img', { name: 'Glass showcase' })).toHaveAttribute('data-state', 'ready');
+      expect(lastController().setTheme).toHaveBeenCalledWith('light');
     });
     const controller = lastController();
-    expect(controller.setTheme).toHaveBeenCalledWith('light');
     expect(vi.mocked(controller.setSize).mock.calls[0]?.[0]?.pixelRatio).toBeGreaterThan(0);
 
     rerender(<GlassPrismLoader semantic='img' label='Glass showcase' speed={0.5} />);

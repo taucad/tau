@@ -56,15 +56,8 @@ WORKDIR /app
 # ── Deps: workspace skeleton only (cache key = lockfile + package.jsons) ──
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY patches/ ./patches/
-COPY --parents */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
-# The workspace pins two dependencies to local paths the root `.dockerignore`
-# excludes: `out/` (generated artifacts) and `repos/` (86 GB of external
-# checkouts). The install cannot resolve the lockfile without them, so
-# `Dockerfile.dockerignore` beside this file re-includes exactly these paths
-# and they are copied here.
-COPY --parents out/artifacts/nanoraster/candidate-bef3b79-20260905T2252NZ/*.tgz ./
-COPY --parents repos/openrscad/packages/npm-native/package.json repos/openrscad/packages/npm-native/dist repos/openrscad/packages/npm-native/src ./
+COPY tools/pnpm/ ./tools/pnpm/
+COPY --parents scripts/package.json */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 

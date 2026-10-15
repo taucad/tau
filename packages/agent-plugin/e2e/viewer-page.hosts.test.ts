@@ -150,7 +150,7 @@ let project = '';
 /** Uncaught errors in any harness page; each test expects none. */
 const pageErrors: string[] = [];
 let hostScript = '';
-let browser: Browser;
+let browser: Browser | undefined;
 const clients: Client[] = [];
 
 /**
@@ -244,7 +244,7 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
   const { contents } = await client.readResource({ uri: resourceUri });
   const { resources } = await client.listResources();
   const listed = resources.find((resource) => resource.uri === resourceUri);
-  const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+  const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
   page.on('pageerror', (error) => {
     pageErrors.push(error.message);
   });
@@ -307,6 +307,18 @@ const recorded = async <Key extends keyof HostRecord>(page: Page, key: Key): Pro
   return record[key];
 };
 
+/**
+ * The browser `beforeAll` launched.
+ *
+ * @returns The launched browser.
+ */
+const launched = (): Browser => {
+  if (!browser) {
+    throw new Error('The browser did not launch.');
+  }
+  return browser;
+};
+
 beforeAll(async () => {
   await readFile(pagePath);
   project = await mkdtemp(join(tmpdir(), 'viewer-page-e2e-'));
@@ -347,7 +359,8 @@ beforeAll(async () => {
 }, kernelCallLimit);
 
 afterAll(async () => {
-  await browser.close();
+  /* A setup failure leaves no browser to close. */
+  await browser?.close();
   for (const client of clients) {
     // oxlint-disable-next-line no-await-in-loop -- each server stops before the project is removed.
     await client.close();
@@ -724,7 +737,7 @@ describe('the viewer page from a text host', () => {
       expect(viewerUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?model=/u);
       /* A later show does not change what the first link opens. */
       shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
-      const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+      const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
       await page.goto(viewerUrl ?? '');
 
       await drawn(page, 'Copy prompt');

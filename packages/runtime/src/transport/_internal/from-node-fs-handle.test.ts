@@ -353,12 +353,21 @@ describe('fromNodeFS watch', { timeout: 3 * watchDeliveryBudget.timeout }, () =>
 
       // The nearest existing ancestor of `/absent-dir/nested/deep.ts` is the root, so the
       // adapter has to re-arm onto each directory as it appears before the leaf is visible.
+      // A leaf written before the re-armed subscription is admitted cannot be named, so the
+      // provider reports `reset` and the subscriber rescans: either event delivers the creation.
       events.length = 0;
       await fs.mkdir(path.join(root, 'absent-dir', 'nested'), { recursive: true });
       await fs.writeFile(path.join(root, 'absent-dir', 'nested', 'deep.ts'), 'deep');
       await vi.waitFor(() => {
-        expect(events).toContainEqual({ type: 'change', path: 'absent-dir/nested/deep.ts' });
+        expect(
+          events.some(
+            (event) =>
+              event.type === 'reset' || (event.type === 'change' && event.path === 'absent-dir/nested/deep.ts'),
+          ),
+          JSON.stringify(events),
+        ).toBe(true);
       }, watchDeliveryBudget);
+      expect(await fs.readFile(path.join(root, 'absent-dir', 'nested', 'deep.ts'), 'utf8')).toBe('deep');
     } finally {
       unsubscribe();
     }

@@ -37,12 +37,30 @@ function Pagination(): React.JSX.Element {
     columns: [{ accessorKey: 'id' }],
     getCoreRowModel: getCoreRowModel(),
   });
-  return <DataTablePagination table={table} pageSizeOptions={[10, 20, 100]} />;
+  return <DataTablePagination table={table} pageSizeOptions={[10, 20, 100, 150, 200]} />;
 }
 
 const rect = (element: Element) => {
   const { x, y, width, height } = element.getBoundingClientRect();
   return { x, y, width, height };
+};
+
+/** The selected row covers the trigger's leading edge unless Radix shifts it inside the 10px viewport margin. */
+const expectRowAtTrigger = (row: ReturnType<typeof rect>, trigger: ReturnType<typeof rect>) => {
+  expect(row.y).toBe(trigger.y);
+  if (trigger.x + row.width <= window.innerWidth - 10) {
+    expect(row.x).toBe(trigger.x);
+  } else {
+    expect(row.x + row.width).toBeLessThanOrEqual(window.innerWidth - 10);
+  }
+};
+
+/** Every option label renders in full rather than truncating to the trigger width. */
+const expectNoClippedOptions = () => {
+  for (const option of screen.getAllByRole('option')) {
+    const label = option.lastElementChild!;
+    expect(label.scrollWidth, option.textContent).toBeLessThanOrEqual(label.clientWidth);
+  }
 };
 
 afterEach(() => {
@@ -156,14 +174,16 @@ it.each(
   await userEvent.keyboard('{ArrowDown}');
   const selected = await screen.findByRole('option', { name: current, selected: true });
   const row = rect(selected);
-  expect(row.width).toBe(before.width);
+  // The list grows past the trigger to fit its longest option, never narrower.
+  expect(row.width).toBeGreaterThanOrEqual(before.width);
   expect(row.height).toBe(before.height);
   expect(getComputedStyle(selected).borderRadius).toBe(getComputedStyle(trigger).borderRadius);
   if (site === 'Items per page') {
     // Popper opens above the trigger rather than replacing its selected row.
     expect(row.y + row.height).toBeLessThan(before.y);
+    expectNoClippedOptions();
   } else {
-    expect(row).toEqual(before);
+    expectRowAtTrigger(row, before);
   }
   expect(rect(trigger)).toEqual(before);
   if (frame && frameBefore) {

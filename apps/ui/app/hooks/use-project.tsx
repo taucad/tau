@@ -1,5 +1,9 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { parameterRecordInputValues } from '@taucad/parameters';
+import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
+import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { findEntryGraphics } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import type { ReactNode } from 'react';
@@ -79,7 +83,7 @@ type ProjectContextType = {
   setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
   registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
-  registerWorkbenchRecordProducer: (flush: () => Promise<boolean>) => () => void;
+  registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
   flushWorkbenchRecordProducers: () => Promise<void>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
@@ -146,13 +150,18 @@ export async function ensureFocusedChatForProject({
   persistedChatId,
   worker,
   onCreatedChat,
+  canCreateChat = () => true,
 }: {
   readonly projectId: string;
   readonly requestedChatId: string | undefined;
   readonly persistedChatId: string | undefined;
   readonly worker: FocusedChatWorker;
   readonly onCreatedChat?: () => void;
-}): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
+  readonly canCreateChat?: () => boolean;
+}): Promise<
+  { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
+> {
+  const couldCreateBeforeRead = canCreateChat();
   const chats = await worker.getChatRecordsForResource(projectId);
 
   for (const candidateChatId of [requestedChatId, persistedChatId]) {
@@ -172,6 +181,9 @@ export async function ensureFocusedChatForProject({
     return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
   }
 
+  if (!couldCreateBeforeRead || !canCreateChat()) {
+    return { type: 'focusedChatDeferred' };
+  }
   const created = await worker.createNavigationRepairChat(projectId);
   onCreatedChat?.();
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
@@ -242,11 +254,13 @@ export const createProjectManifestChangeObserver = ({
   getCurrent,
   reload,
   report,
+  onSettled,
 }: {
   readonly projectId: string;
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
+  readonly onSettled?: () => void;
 }): {
   readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
   readonly invalidate: () => void;
@@ -260,6 +274,7 @@ export const createProjectManifestChangeObserver = ({
     // A later return to the same bytes must reload to clear the report.
     lastObserved = undefined;
     report(issue);
+    onSettled?.();
   };
 
   return {
@@ -299,6 +314,10 @@ export const createProjectManifestChangeObserver = ({
         return;
       }
       const observed = manifestStateKey({ project: read.data, issue: read.issue });
+      if (current.project !== undefined && manifestStateKey(current) === observed) {
+        onSettled?.();
+        return;
+      }
       if (observed === lastObserved) {
         return;
       }
@@ -349,6 +368,7 @@ export function ProjectProvider({
   input,
   kernelOptionsFactory,
   profile = 'editor',
+  previewParameterService,
 }: {
   readonly children: ReactNode;
   readonly projectId: string;
@@ -363,6 +383,7 @@ export function ProjectProvider({
   >;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
+  readonly previewParameterService?: ParameterSetService;
 }): React.JSX.Element {
   // A caller without a factory (the converter route) gets the local kernel, which
   // reads the same preference the focused workbench does instead of silently
@@ -376,6 +397,7 @@ export function ProjectProvider({
   const fileSystemRoot = useSelector(fileManager.fileManagerRef, (state) => state.context.rootDirectory);
   const parameterService = useMemo(
     () =>
+      previewParameterService ??
       createParameterSetService({
         rootDirectory: fileSystemRoot,
         client: fileManager.parameterFiles,
@@ -397,20 +419,26 @@ export function ProjectProvider({
           toast.error(errorMessage(error));
         },
       }),
-    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot],
+    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot, previewParameterService],
   );
-  const workbenchRecordProducers = useRef(new Set<() => Promise<boolean>>());
-  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<boolean>) => {
+  const workbenchRecordProducers = useRef(new Set<() => Promise<void>>());
+  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<void>) => {
     workbenchRecordProducers.current.add(flush);
     return () => {
       workbenchRecordProducers.current.delete(flush);
     };
   }, []);
   const flushWorkbenchRecordProducers = useCallback(async (): Promise<void> => {
-    for (const flush of workbenchRecordProducers.current) {
-      if (!(await flush())) {
-        throw new Error('Workbench records could not be saved.');
-      }
+    const outcomes = await Promise.allSettled([...workbenchRecordProducers.current].map(async (flush) => flush()));
+    const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    if (failures.length > 0) {
+      const reasons = failures.map((failure) => failure.reason as unknown);
+      throw new AggregateError(
+        reasons,
+        reasons
+          .map((reason) => (reason instanceof Error ? reason.message : 'Workbench records are not confirmed saved.'))
+          .join(' '),
+      );
     }
   }, []);
   /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
@@ -431,6 +459,8 @@ export function ProjectProvider({
       }
     })();
   }, [parameterService]);
+
+  usePreviewParameterLifetime(parameterService, profile === 'shared' && previewParameterService === undefined);
 
   const projectActors = {
     loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
@@ -543,6 +573,13 @@ export function ProjectProvider({
             /* Chats are files now (W17): the project manager owns the store,
              * and the object-store worker knows nothing about them. */
             worker: projectManager,
+            canCreateChat: () => {
+              const status = peekRevisionClient(input.projectId)?.status();
+              if (isCloudProjectPending(input.projectId) && status?.sync.hasAppliedRemote !== true) {
+                return false;
+              }
+              return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
+            },
             onCreatedChat: () => {
               // Surface the new chat through TanStack Query so `useChats`
               // refetches and the history selector picks it up immediately.
@@ -664,6 +701,33 @@ export function ProjectProvider({
    * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
   const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
 
+  const previewValuesByRuntime = useRef(new WeakMap<object, string>());
+  const publishPreviewParameters = useCallback(
+    (entryPath: string): void => {
+      if (previewParameterService === undefined) {
+        return;
+      }
+      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+      const snapshot = previewParameterService.snapshot(entryPath);
+      if (cadRef === undefined || snapshot === undefined) {
+        return;
+      }
+      const runtime = cadRef.getSnapshot();
+      const { document } = runtime.context;
+      if (document === undefined || !runtime.can({ type: 'setPreviewParameters', parameters: {} })) {
+        return;
+      }
+      const parameters = parameterRecordInputValues(snapshot.entry);
+      const signature = JSON.stringify(parameters);
+      if (previewValuesByRuntime.current.get(document) === signature) {
+        return;
+      }
+      previewValuesByRuntime.current.set(document, signature);
+      cadRef.send({ type: 'setPreviewParameters', parameters });
+    },
+    [actorRef, previewParameterService],
+  );
+
   const observeParameters = useCallback(
     (entryPath: string): void => {
       const actor = parameterService.actor(entryPath);
@@ -677,6 +741,12 @@ export function ProjectProvider({
         const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
         const current = parameterService.snapshot(entryPath);
         if (cadRef === undefined || current === undefined) {
+          return;
+        }
+        if (previewParameterService !== undefined) {
+          if (shouldDispatchParameterSettlement(outcome)) {
+            publishPreviewParameters(entryPath);
+          }
           return;
         }
         const stage = parameterStageForSettlement({ entryPath, outcome, bytes: current.bytes ?? undefined });
@@ -695,7 +765,7 @@ export function ProjectProvider({
         },
       });
     },
-    [actorRef, parameterService],
+    [actorRef, parameterService, previewParameterService, publishPreviewParameters],
   );
 
   useEffect(() => {
@@ -703,8 +773,14 @@ export function ProjectProvider({
     const observeAll = (): void => {
       for (const entryPath of geometryUnits.keys()) {
         observeParameters(entryPath);
+        publishPreviewParameters(entryPath);
       }
     };
+    const runtimeSubscriptions = [...geometryUnits].map(([entryPath, cadRef]) =>
+      cadRef.subscribe(() => {
+        publishPreviewParameters(entryPath);
+      }),
+    );
     observeAll();
     const unsubscribeActors = parameterService.subscribeActors(observeAll);
     for (const [entryPath, { unsubscribe }] of observers) {
@@ -715,12 +791,15 @@ export function ProjectProvider({
     }
     return () => {
       unsubscribeActors();
+      for (const subscription of runtimeSubscriptions) {
+        subscription.unsubscribe();
+      }
       for (const { unsubscribe } of observers.values()) {
         unsubscribe();
       }
       observers.clear();
     };
-  }, [geometryUnits, observeParameters, parameterService]);
+  }, [geometryUnits, observeParameters, parameterService, publishPreviewParameters]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
@@ -777,6 +856,15 @@ export function ProjectProvider({
 
     const observer = createProjectManifestChangeObserver({
       projectId,
+      onSettled: () => {
+        if (
+          isCloudProjectPending(projectId) &&
+          canOpenCloudProject(projectId) &&
+          peekRevisionClient(projectId)?.status()?.sync.hasAppliedRemote === true
+        ) {
+          tauCloudIntent.set(projectId, undefined);
+        }
+      },
       getCurrent: () => {
         const { project, manifestIssue } = actorRef.getSnapshot().context;
         return { project, issue: manifestIssue };
@@ -843,6 +931,7 @@ export function ProjectProvider({
       const settle = async (): Promise<void> => {
         try {
           await operation;
+          publishPreviewParameters(filePath);
         } catch {
           // The set actor holds the typed diagnostic.
         }
@@ -850,7 +939,7 @@ export function ProjectProvider({
       // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
       void settle();
     },
-    [parameterService],
+    [parameterService, publishPreviewParameters],
   );
 
   const setGeometryUnitParameters = useCallback(

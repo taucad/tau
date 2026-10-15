@@ -49,6 +49,18 @@ const picogkOptions = {
   maxArtifactBytes: 512 * 1024 * 1024,
 };
 
+const build123dOptions = {
+  pythonExecutable: '/store/closures/sha256/abc/python/bin/python3',
+  pythonSha256: 'a'.repeat(64),
+  workerPath: '/store/closures/sha256/abc/tau-worker/worker.py',
+  workerSha256: 'b'.repeat(64),
+  supportFiles: [
+    { path: '/store/closures/sha256/abc/tau-worker/analyzer.py', sha256: 'c'.repeat(64) },
+    { path: '/store/closures/sha256/abc/tau-worker/glb.py', sha256: 'd'.repeat(64) },
+  ],
+  runtimePath: '/store/closures/sha256/abc',
+};
+
 const novelPlugin = definePlugin({
   meta: { name: '@example/novel' },
   kernels: { novel: () => ({ id: 'novel', extensions: ['novel'] }) },
@@ -83,13 +95,13 @@ describe('createCliRuntime', () => {
         name.startsWith('@taucad/') &&
         ![
           '@taucad/agent-host',
-          // Machine providers, loaded by `tau serve --machines`, not runtime plugins.
-          '@taucad/bambu',
           // Package install support used by `tau install`, not runtime plugins.
           '@taucad/bundler-core',
           '@taucad/filesystem',
           '@taucad/host',
           '@taucad/jobs-solvers',
+          // The worker launcher `tau serve` brokers native kernels with, not a runtime plugin.
+          '@taucad/native-process-core',
           '@taucad/parameters',
           '@taucad/runtime',
           '@taucad/skills',
@@ -152,6 +164,20 @@ describe('createCliRuntime', () => {
       builtInKernelIds.at(-1),
     ]);
     expect(deriveImportExtensions(runtime)).toContain('cs');
+  });
+
+  it('registers Build123d when the payload store holds its sealed closure', async () => {
+    const runtime = await composeCli({ build123d: build123dOptions });
+
+    expect(runtime.kernels.map(({ id }) => id)).toEqual([
+      ...builtInKernelIds.slice(0, -1),
+      'build123d',
+      builtInKernelIds.at(-1),
+    ]);
+    expect(runtime.kernels.find(({ id }) => id === 'build123d')?.options).toMatchObject({
+      runtimePath: '/store/closures/sha256/abc',
+    });
+    expect(deriveImportExtensions(runtime)).toContain('py');
   });
 
   it('rejects an explicit plugin that duplicates a built-in', async () => {

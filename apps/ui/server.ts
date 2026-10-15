@@ -362,7 +362,7 @@ const ensureHttpsCertsBootstrapped = (): void => {
 
   /*
    * `bootstrap-https-certs.ts` is patched to omit mkcert's `-install` flag when
-   * `MKCERT_TRUST_INSTALL=false` (see `patches/vite-plugin-mkcert@2.0.0.patch`)
+   * `MKCERT_TRUST_INSTALL=false` (see `tools/pnpm/patches/vite-plugin-mkcert@2.0.0.patch`)
    * so we never trip a `sudo` keychain prompt during a non-interactive serve.
    * Set/restore on `process.env` so the child inherits every existing variable
    * while this one scoped override is active.

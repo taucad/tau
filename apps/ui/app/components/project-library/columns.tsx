@@ -1,6 +1,6 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
-import { NavLink } from 'react-router';
+import { NavLink, useNavigation } from 'react-router';
 import type { ReactNode } from 'react';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { DataTableColumnHeader } from '#components/ui/data-table.js';
@@ -80,19 +80,22 @@ function ProjectNameCell({
 }
 
 function ProjectOpenButton({ project }: { readonly project: ProjectListItem }): ReactNode {
+  const navigation = useNavigation();
+  const projectUrl = projectUrlOr(project.slugs);
+  const isOpening = navigation.location?.pathname === projectUrl;
   return (
-    <Button asChild variant='outline' size='sm' className='ml-auto flex items-center gap-1'>
-      <NavLink to={projectUrlOr(project.slugs)}>
-        {({ isPending }) =>
-          isPending ? (
-            <Loader />
-          ) : (
-            <>
-              Open
-              <ArrowRight />
-            </>
-          )
-        }
+    <Button asChild variant='outline' size='sm' className='ml-auto'>
+      <NavLink
+        to={projectUrl}
+        aria-busy={isOpening}
+        onClick={(event) => {
+          if (isOpening) {
+            event.preventDefault();
+          }
+        }}
+      >
+        {isOpening ? 'Opening…' : 'Open'}
+        {isOpening ? <Loader /> : <ArrowRight />}
       </NavLink>
     </Button>
   );

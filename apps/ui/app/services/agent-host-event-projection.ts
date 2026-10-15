@@ -117,6 +117,7 @@ export type AgentHostLiveBlocks = Map<
       /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
       resting?: boolean;
       phase?: string | undefined;
+      reasoningSummary?: string | undefined;
     }
   | {
       readonly type: 'tool';
@@ -158,6 +159,23 @@ const textStreamState = (
  * orphaned ("File edits failed", lane H5).
  */
 const toolKey = (runId: string, toolCallId: string): string => JSON.stringify([runId, 'tool', toolCallId]);
+
+const reasoningMetadata = (
+  summary?: string,
+  startedAt?: number,
+  endedAt?: number,
+): { providerMetadata?: ProviderMetadata } =>
+  summary === undefined && startedAt === undefined && endedAt === undefined
+    ? {}
+    : {
+        providerMetadata: {
+          common: {
+            ...(summary === undefined ? {} : { reasoningSummary: summary }),
+            ...(startedAt === undefined ? {} : { reasoningStartedAtMs: startedAt }),
+            ...(endedAt === undefined ? {} : { reasoningEndedAtMs: endedAt }),
+          },
+        },
+      };
 
 const reasoningTiming = (
   metadata: ProviderMessageMetadata | undefined,
@@ -305,71 +323,54 @@ const assistantChunks = (
       const key = blockKey(runId, message.id, index);
       let streamed = streamedBlocks?.get(key);
       const timing = reasoningTiming(message.metadata, index);
+      const summary = message.metadata?.reasoningSummary;
       if (streamed?.type === 'thinking') {
         if (!streamed.closed) {
           streamed = { ...streamed };
           streamedBlocks?.set(key, streamed);
-          const suffix = value['thinking'].startsWith(streamed.content)
-            ? value['thinking'].slice(streamed.content.length)
-            : '';
-          if (suffix) {
-            chunks.push({ type: 'reasoning-delta', id, delta: suffix });
-          }
+          // A checkpoint behind the live stream must not rewind its summary.
           if (value['thinking'].startsWith(streamed.content)) {
+            const suffix = value['thinking'].slice(streamed.content.length);
+            const summaryChanged = summary !== undefined && summary !== streamed.reasoningSummary;
+            streamed.reasoningSummary = summary ?? streamed.reasoningSummary;
+            if (suffix || summaryChanged) {
+              chunks.push({
+                type: 'reasoning-delta',
+                id,
+                delta: suffix,
+                ...reasoningMetadata(streamed.reasoningSummary),
+              });
+            }
             streamed.content = value['thinking'];
           }
           if (!streamCheckpoint) {
             chunks.push({
               type: 'reasoning-end',
               id,
-              ...(timing === undefined && streamed.startedAtMs === undefined
-                ? {}
-                : {
-                    providerMetadata: {
-                      common: {
-                        reasoningStartedAtMs: timing?.startedAt ?? streamed.startedAtMs,
-                        ...(timing?.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                      },
-                    },
-                  }),
+              ...reasoningMetadata(
+                streamed.reasoningSummary,
+                timing?.startedAt ?? streamed.startedAtMs,
+                timing?.endedAt,
+              ),
             });
             streamed.closed = true;
           }
         }
       } else {
+        const metadata = reasoningMetadata(summary, timing?.startedAt);
         chunks.push(
-          {
-            type: 'reasoning-start',
-            id,
-            ...(timing === undefined
-              ? {}
-              : { providerMetadata: { common: { reasoningStartedAtMs: timing.startedAt } } }),
-          },
-          { type: 'reasoning-delta', id, delta: value['thinking'] },
+          { type: 'reasoning-start', id, ...metadata },
+          { type: 'reasoning-delta', id, delta: value['thinking'], ...metadata },
         );
-        if (streamedBlocks) {
-          streamedBlocks.set(key, {
-            type: 'thinking',
-            content: value['thinking'],
-            closed: !streamCheckpoint,
-            ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
-          });
-        }
+        streamedBlocks?.set(key, {
+          type: 'thinking',
+          content: value['thinking'],
+          closed: !streamCheckpoint,
+          ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
+          ...(summary === undefined ? {} : { reasoningSummary: summary }),
+        });
         if (!streamCheckpoint || !streamedBlocks) {
-          chunks.push({
-            type: 'reasoning-end',
-            id,
-            ...(timing === undefined
-              ? {}
-              : {
-                  providerMetadata: {
-                    common: {
-                      reasoningStartedAtMs: timing.startedAt,
-                      ...(timing.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                    },
-                  },
-                }),
-          });
+          chunks.push({ type: 'reasoning-end', id, ...reasoningMetadata(summary, timing?.startedAt, timing?.endedAt) });
         }
       }
       continue;
@@ -474,7 +475,8 @@ const toolChunkFacts = (
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
-    ...(presentation === 'tau-mcp' ? { presentation } : {}),
+    // Grok omits nativeName; its qualified Tau tool name is already canonical.
+    ...(presentation === 'tau-mcp' ? { presentation, nativeName: call?.nativeName ?? message.toolName } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {
@@ -816,15 +818,16 @@ export const projectAgentHostLiveEvent = (
       closed: false,
       ...(event.type === 'text-start' && event.phase !== undefined ? { phase: event.phase } : {}),
       ...(event.type === 'thinking-start' && event.timestamp !== undefined ? { startedAtMs: event.timestamp } : {}),
+      ...(event.type === 'thinking-start' && event.reasoningSummary !== undefined
+        ? { reasoningSummary: event.reasoningSummary }
+        : {}),
     });
     return [
       {
         type: type === 'text' ? 'text-start' : 'reasoning-start',
         id,
         ...(event.type === 'text-start' ? textStreamState(undefined, event.phase) : {}),
-        ...(event.type === 'thinking-start' && event.timestamp !== undefined
-          ? { providerMetadata: { common: { reasoningStartedAtMs: event.timestamp } } }
-          : {}),
+        ...(event.type === 'thinking-start' ? reasoningMetadata(event.reasoningSummary, event.timestamp) : {}),
       },
     ];
   }
@@ -842,6 +845,9 @@ export const projectAgentHostLiveEvent = (
       return [];
     }
     const delta = event.delta.slice(block.content.length - offset);
+    if (delta && event.type === 'thinking-delta' && event.reasoningSummary !== undefined) {
+      block.reasoningSummary = event.reasoningSummary;
+    }
     block.content += delta;
     const resumed = delta !== '' && block.resting === true;
     if (resumed) {
@@ -855,12 +861,17 @@ export const projectAgentHostLiveEvent = (
             type: type === 'text' ? 'text-delta' : 'reasoning-delta',
             id,
             delta,
-            ...(event.type === 'text-delta' ? textStreamState(resumed ? 'live' : undefined, block.phase) : {}),
+            ...(event.type === 'text-delta'
+              ? textStreamState(resumed ? 'live' : undefined, block.phase)
+              : reasoningMetadata(block.reasoningSummary)),
           },
         ]
       : start;
   }
   const { content } = event;
+  if (event.type === 'thinking-end' && event.reasoningSummary !== undefined) {
+    block.reasoningSummary = event.reasoningSummary;
+  }
   const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';
   block.content = content;
   block.closed = true;
@@ -873,15 +884,8 @@ export const projectAgentHostLiveEvent = (
     type: type === 'text' ? 'text-end' : 'reasoning-end',
     id,
     ...(event.type === 'text-end' ? textStreamState(undefined, block.phase) : {}),
-    ...(event.type === 'thinking-end' && (block.startedAtMs !== undefined || event.timestamp !== undefined)
-      ? {
-          providerMetadata: {
-            common: {
-              ...(block.startedAtMs === undefined ? {} : { reasoningStartedAtMs: block.startedAtMs }),
-              ...(event.timestamp === undefined ? {} : { reasoningEndedAtMs: event.timestamp }),
-            },
-          },
-        }
+    ...(event.type === 'thinking-end'
+      ? reasoningMetadata(block.reasoningSummary, block.startedAtMs, event.timestamp)
       : {}),
   });
   return chunks;
@@ -983,18 +987,35 @@ export type AgentHostApproval = {
   /**
    * The durable record this interrupt gates, when the tool named one.
    *
-   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
-   * pane can resolve the same ledger record the banner shows; other tools may
-   * write nothing.
+   * A job request writes `{ jobId, machineId, fileName }` and a machine action
+   * `{ machineId, componentId, action, operationId, label, intent }`, so the Print pane
+   * can answer the same interrupt the banner shows; other tools may write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
+  /** Structured request facts retained for compact presentation and Debug inspection. */
+  readonly request?: { readonly title?: string | undefined; readonly input?: unknown } | undefined;
 };
 
 /** Ledger correlation a tool attaches to the interrupt it raises. @public */
 export type AgentHostApprovalContext = {
-  readonly requestId?: string | undefined;
+  readonly jobId?: string | undefined;
   readonly machineId?: string | undefined;
   readonly fileName?: string | undefined;
+  /** For a machine action: the component, the action id, the operation it will send and its label. */
+  readonly componentId?: string | undefined;
+  readonly action?: string | undefined;
+  readonly operationId?: string | undefined;
+  readonly label?: string | undefined;
+  /** For a machine action: the parameters of the exact intent the person approves, from the tool's `intent`. */
+  readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+  /** For a machine action: the action version of that intent, which the host's approval record names (R15). */
+  readonly version?: number | undefined;
+  /**
+   * For a machine action: the run the agent saw when it asked, `null` for none. The person approves the action for
+   * this run only (R16).
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+  readonly expectedRunId?: string | null | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -1035,19 +1056,39 @@ const interruptRequestSchema = z.looseObject({
   agentId: z.string().optional(),
   context: z
     .looseObject({
-      toolCall: z.looseObject({ title: z.string().optional() }).optional(),
+      toolCall: z.looseObject({ title: z.string().optional(), rawInput: z.json().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      input: z.json().optional(),
       requestId: z.string().min(1).optional(),
+      jobId: z.string().min(1).optional(),
       machineId: z.string().min(1).optional(),
       fileName: z.string().min(1).optional(),
+      componentId: z.string().min(1).optional(),
+      action: z.string().min(1).optional(),
+      operationId: z.string().min(1).optional(),
+      label: z.string().min(1).optional(),
+      intent: z
+        .looseObject({
+          parameters: z.record(z.string(), z.unknown()).optional(),
+          version: z.number().int().optional(),
+          expectedRunId: z.string().min(1).nullable().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
 
 const agentHostApprovalContextSchema = z.object({
-  requestId: z.string().min(1).optional(),
+  jobId: z.string().min(1).optional(),
   machineId: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
+  componentId: z.string().min(1).optional(),
+  action: z.string().min(1).optional(),
+  operationId: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  version: z.number().int().optional(),
+  expectedRunId: z.string().min(1).nullable().optional(),
 });
 
 /**
@@ -1057,16 +1098,39 @@ const agentHostApprovalContextSchema = z.object({
  * @returns Only the correlation keys present, or `undefined` when none are.
  */
 const approvalContextOf = (
-  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+  context:
+    | (AgentHostApprovalContext & {
+        readonly requestId?: string | undefined;
+        readonly intent?:
+          | {
+              readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+              readonly version?: number | undefined;
+              // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+              readonly expectedRunId?: string | null | undefined;
+            }
+          | undefined;
+      })
+    | undefined,
 ): AgentHostApprovalContext | undefined => {
   if (!context) {
     return undefined;
   }
-  const picked: AgentHostApprovalContext = {
-    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
-    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
-    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
-  };
+  // ponytail: a host from before jobs names the job `requestId`; drop the alias once every host writes `jobId`.
+  const jobId = context.jobId ?? context.requestId;
+  const picked: AgentHostApprovalContext = Object.fromEntries(
+    Object.entries({
+      jobId,
+      machineId: context.machineId,
+      fileName: context.fileName,
+      componentId: context.componentId,
+      action: context.action,
+      operationId: context.operationId,
+      label: context.label,
+      parameters: context.intent?.parameters,
+      version: context.intent?.version,
+      expectedRunId: context.intent?.expectedRunId,
+    }).filter(([, value]) => value !== undefined),
+  );
   return Object.keys(picked).length === 0 ? undefined : picked;
 };
 
@@ -1139,6 +1203,7 @@ const agentHostApprovalSchema = z.object({
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
   context: agentHostApprovalContextSchema.optional(),
+  request: z.object({ title: z.string().optional(), input: z.json().optional() }).optional(),
 });
 
 /**
@@ -1165,6 +1230,16 @@ const approvalChunks = (
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const login = loginOf(event.payload);
   const context = approvalContextOf(request?.context);
+  const content = request?.context?.toolCall?.['content'];
+  const description = Array.isArray(content)
+    ? content
+        .flatMap((block: unknown) =>
+          isRecord(block) && isRecord(block['content']) && typeof block['content']['text'] === 'string'
+            ? [block['content']['text']]
+            : [],
+        )
+        .join('\n')
+    : undefined;
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -1177,6 +1252,14 @@ const approvalChunks = (
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
     ...(login === undefined ? {} : { login }),
     ...(context === undefined ? {} : { context }),
+    ...(request?.context?.toolCall === undefined && request?.context?.input === undefined
+      ? {}
+      : {
+          request: {
+            title: request.context.toolCall?.title ?? (description === '' ? undefined : description),
+            input: request.context.input ?? request.context.toolCall?.rawInput,
+          },
+        }),
   };
   return [
     {

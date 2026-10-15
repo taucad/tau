@@ -231,8 +231,9 @@ type ExtensionName<Extensions extends ReadonlyArray<{ readonly name: string }>> 
     ? Name
     : never;
 
+/* oxlint-disable typescript/consistent-type-definitions, typescript/no-empty-object-type -- A named interface preserves this readonly public contract in consumer declarations instead of expanding internal dependency types. */
 /** Trusted schema-bearing provider definition retained inside the runtime host. @public */
-export type JobProviderDefinition<
+export interface JobProviderDefinition<
   Id extends string,
   Kind extends string,
   ConfigurationSchema extends StandardSchemaV1,
@@ -240,7 +241,7 @@ export type JobProviderDefinition<
   CheckpointSchema extends ProviderSchema | undefined = undefined,
   Queries extends readonly JobQuerySchemas[] = readonly never[],
   Commands extends readonly JobCommandSchemas[] = readonly never[],
-> = Readonly<{
+> extends Readonly<{
   id: Id;
   kind: Kind;
   version: string;
@@ -270,7 +271,8 @@ export type JobProviderDefinition<
       CheckpointSchema extends ProviderSchema ? StandardSchemaV1.InferInput<CheckpointSchema> : never
     >,
   ): Promise<StandardSchemaV1.InferInput<ResultSchema>>;
-}>;
+}> {}
+/* oxlint-enable typescript/consistent-type-definitions, typescript/no-empty-object-type */
 
 /* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions -- Named callable type keeps the shared private-symbol carrier nameable in emitted declarations. */
 /** Callable provider capability factory using the shared runtime plugin ABI. @public */

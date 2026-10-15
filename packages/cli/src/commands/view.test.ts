@@ -57,7 +57,6 @@ describe('viewCommand', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '');
     workspace = await mkdtemp(join(tmpdir(), 'tau-cli-view-'));
     inputPath = join(workspace, 'model.ts');
     previewPath = join(workspace, 'model.webp');

@@ -12,7 +12,7 @@
  * and can be declined.
  */
 import type { CreateElicitationRequest, CreateElicitationResponse } from '@agentclientprotocol/sdk';
-import { askQuestionsDefaultWaitSeconds, resolveAnswers } from '@taucad/chat';
+import { askQuestionsDefaultWaitSeconds, resolveAnswers } from '@taucad/chat/schemas/questions';
 import type { Ask, AskAnswers, AskedQuestion } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 

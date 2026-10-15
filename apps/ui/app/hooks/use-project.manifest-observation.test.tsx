@@ -2,6 +2,11 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { createActor } from 'xstate';
+import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
+import { cadMachine } from '#machines/cad.machine.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { AppRuntimeClient, KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -12,6 +17,7 @@ import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 
 const fixture = vi.hoisted(() => {
@@ -225,5 +231,128 @@ it('reloads the physical project manifest after held retry without accepting its
     mounted.unmount();
     actualContentService = undefined;
     content.dispose();
+  }
+});
+
+it('should attempt every registered record and report every refusal on direct project close', async () => {
+  const project = projectToManifest({
+    id: 'proj_123456789012345678901',
+    name: 'Close records',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  Object.assign(fixture.actor.getSnapshot().context, { project });
+  fixture.readFile.mockResolvedValue(serializeProjectManifest(project));
+  let current: ReturnType<typeof useProject> | undefined;
+  function Probe(): undefined {
+    current = useProject();
+    return undefined;
+  }
+  const mounted = render(
+    <ProjectProvider projectId={project.id} profile='shared'>
+      <Probe />
+    </ProjectProvider>,
+  );
+  const first = new Error('Pane layout is not confirmed saved.');
+  const second = new Error('View settings for main.cs are not confirmed saved.');
+  const layout = vi.fn(async () => {
+    throw first;
+  });
+  const view = vi.fn(async () => {
+    throw second;
+  });
+  const unregisterLayout = current!.registerWorkbenchRecordProducer(layout);
+  const unregisterView = current!.registerWorkbenchRecordProducer(view);
+  try {
+    await expect(current!.flushWorkbenchRecordProducers()).rejects.toMatchObject({
+      message: `${first.message} ${second.message}`,
+      errors: [first, second],
+    });
+    expect(layout).toHaveBeenCalledTimes(1);
+    expect(view).toHaveBeenCalledTimes(1);
+    unregisterLayout();
+    await expect(current!.flushWorkbenchRecordProducers()).rejects.toMatchObject({
+      message: second.message,
+      errors: [second],
+    });
+    unregisterView();
+    await expect(current!.flushWorkbenchRecordProducers()).resolves.toBeUndefined();
+  } finally {
+    unregisterLayout();
+    unregisterView();
+    mounted.unmount();
+  }
+});
+
+it('should replay held temporary parameters after replacement CAD connection and document opening', async () => {
+  const service = mock<ParameterSetService>();
+  service.subscribeActors.mockReturnValue(() => undefined);
+  service.snapshot.mockReturnValue({
+    entry: { activeGroup: 'default', groups: { default: { values: { crankAngle: 35 } } } },
+    identity: { manifestRevision: 'sha256:held' },
+    bytes: new Uint8Array(),
+  });
+  const createCad = () => {
+    const connection = Promise.withResolvers<void>();
+    const client = createMockRuntimeClient();
+    const runtime = createMockRuntimeDocument();
+    vi.mocked(client.open).mockReturnValue(runtime.document);
+    const actor = createActor(
+      cadMachine.provide({
+        actors: {
+          connectKernelActor: fromSafeAsync(
+            async (): Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }> => {
+              await connection.promise;
+              return { type: 'kernelConnected', client, cleanups: [] };
+            },
+          ),
+        },
+      }),
+      {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileSystemRoot: '/projects/preview',
+          kernelOptionsFactory: async () => () => mock<ReturnType<KernelOptionsFactory>>(),
+        },
+      },
+    );
+    actor.start();
+    actor.send({ type: 'initializeModel', entryPath: 'main.ts' });
+    return { actor, runtime, connection };
+  };
+  const first = createCad();
+  const replacement = createCad();
+  const { context } = fixture.actor.getSnapshot();
+  context.geometryUnits = new Map([['main.ts', first.actor]]);
+  const renderPreview = (label: string) => (
+    <ProjectProvider projectId='proj_123456789012345678901' profile='shared' previewParameterService={service}>
+      <span>{label}</span>
+    </ProjectProvider>
+  );
+  const mounted = render(renderPreview('Preview'));
+  try {
+    expect(first.runtime.document.update).not.toHaveBeenCalled();
+    await act(async () => {
+      first.connection.resolve();
+    });
+    await waitFor(() => {
+      expect(first.runtime.document.update).toHaveBeenCalledWith({ parameters: { crankAngle: 35 } });
+    });
+    context.geometryUnits = new Map([['main.ts', replacement.actor]]);
+    mounted.rerender(renderPreview('Replacement'));
+    expect(replacement.runtime.document.update).not.toHaveBeenCalled();
+    await act(async () => {
+      replacement.connection.resolve();
+    });
+    await waitFor(() => {
+      expect(replacement.runtime.document.update).toHaveBeenCalledWith({ parameters: { crankAngle: 35 } });
+    });
+    expect(service.resolve).not.toHaveBeenCalled();
+  } finally {
+    mounted.unmount();
+    first.actor.stop();
+    replacement.actor.stop();
+    context.geometryUnits = new Map();
   }
 });

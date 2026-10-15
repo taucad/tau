@@ -17,6 +17,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
+import { MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
@@ -24,11 +25,11 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
-import type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
+import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
-import type { HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
+import type { HostPrepareKernel, HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import {
@@ -38,9 +39,12 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
-import { localMachineFacet, readProjectId } from '#machine-host.js';
+import { readProjectId } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
-import { openSharedMachineHost } from '#local-machines.js';
+import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
+import type { KeepAwakeBlocker } from '#keep-awake.js';
+import { agentMachineFacet, openSharedMachineHost } from '#local-machines.js';
+import type { SharedMachineHost } from '#local-machines.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -50,7 +54,7 @@ import type { ProjectHost } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
-import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
+import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
@@ -181,6 +185,12 @@ export type HostDaemonAgentOptions = {
   /** Default system prompt; one admission may override it. */
   readonly systemPrompt: string;
   /**
+   * The native kernel preparation behind `prepare_kernel` (D7, D37), in this process with its unrestricted network.
+   * A `ready` outcome replaces every agent root's runtime child, so the next call composes the prepared kernel. Omit
+   * it and the tool is not offered.
+   */
+  readonly prepareKernel?: HostPrepareKernel | undefined;
+  /**
    * Offer the `test_model` tool. Defaults to `true`, which still yields the
    * tool only where the native GeoSpec engine resolves — `false` withholds it
    * from an installation that has the engine, so the surface is this host's
@@ -210,18 +220,37 @@ export type HostDaemonAgentOptions = {
    * `unsupported`. Printers live in the per-user machine store,
    * `<config>/machines`, which the desktop app opens too; while another Tau
    * app holds it, the daemon warns `MACHINE_STORE_OWNED_ELSEWHERE` and serves
-   * without machines. Access codes resolve from the host's secret vault (the
+   * without machines. Machine credentials resolve from the host's secret vault (the
    * macOS keychain, else that directory). The binding ceremony's native half
    * (the secret) has no daemon surface yet, so only providers that bind
    * without one — the simulator — complete here.
+   *
+   * While a streamed run is feeding a machine, the daemon keeps the computer
+   * awake with `keepAwake`, by default {@link platformKeepAwakeBlocker}: a
+   * computer that sleeps leaves the machine waiting mid-run. Where it cannot,
+   * it warns `MACHINE_HOST` once.
    */
-  readonly machines?: { readonly providers: CreateNodeMachineHostInput['providers'] } | undefined;
+  readonly machines?:
+    | {
+        readonly providers: CreateNodeMachineHostInput['providers'];
+        readonly keepAwake?: KeepAwakeBlocker | undefined;
+      }
+    | undefined;
 };
 
 /** Options for {@link startHostDaemon}. @public */
 export type HostDaemonOptions = {
   readonly relayUrl: URL;
-  readonly runtimeHost: { readonly modulePath: string; readonly args?: readonly string[] };
+  readonly runtimeHost: {
+    readonly modulePath: string;
+    readonly args?: readonly string[];
+    /**
+     * Native kernels (Build123d, PicoGK) the runtime children compose from the payload store (D37). The child may
+     * not spawn, so this daemon starts each native worker on its behalf, only from a sealed closure and only through
+     * the OS sandbox. Absent, the children compose no native kernel.
+     */
+    readonly native?: RuntimeChildNativeKernels;
+  };
   /**
    * The runtime child's Zoo proxy. With a session token, the daemon sends the
    * child a Zoo-scoped token (never the session) and keeps it current.
@@ -510,7 +539,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentExternalAgents: readonly ExternalAgentDescriptor[] = [];
   let agentRunReporter: RunReporter | undefined;
   let agentFileSystem: AgentFileSystemAuthority | undefined;
-  let agentMachines: NonNullable<AgentServerOptions['machines']> | undefined;
+  let agentMachines: SharedMachineHost | undefined;
+  /* Releases the computer when the agent stops; set while a machine host serves. */
+  let stopKeepingAwake: (() => void) | undefined;
   /* Close failures of a released candidate root's runtime, reported by the next `stopAgent`. */
   const agentRuntimeCloseFailures: unknown[] = [];
 
@@ -748,13 +779,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * exiting.
    *
    * @param providers - The providers `--machines` admitted.
-   * @param readArtifact - Finds a print request's file in the served project.
+   * @param readArtifact - Finds a job's file in the served project.
    * @returns What the agent server needs to answer the machines route, or `undefined` while the store is owned elsewhere.
    */
   const openMachineHost = async (
     providers: CreateNodeMachineHostInput['providers'],
     readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'],
-  ): Promise<NonNullable<AgentServerOptions['machines']> | undefined> => {
+  ): Promise<SharedMachineHost | undefined> => {
     const shared = await openSharedMachineHost({
       providers,
       readArtifact,
@@ -815,19 +846,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ? await discoverAcpAgents({ resolveFrom: agent.externalAgents.resolveFrom })
       : { agents: [], refused: [] };
     /* Named here rather than left to the revision port's default, because a
-     * print request's slice can sit in one of these checkouts: the machine
+     * job's slice can sit in one of these checkouts: the machine
      * host's artifact reader looks in the same directory the port writes. */
     const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', basename(agent.workspaceRoot));
-    /* The served root is the project, and its `tau.json` id is what a print
-     * request names. A root without one prints nothing: no `request_print` is
+    /* The served root is the project, and its `tau.json` id is what a job
+     * names. A root without one prints nothing: no `request_job` is
      * offered, and every artifact is refused. */
     const projectId = await readProjectId(providerForAgentRoot(agent.workspaceRoot));
     /**
-     * Find a print request's file: only this project's, in the served root and
+     * Find a job's file: only this project's, in the served root and
      * then its checkouts, where a candidate turn's slice lands. The digest
      * decides; a checkout is admitted only for the read.
      *
-     * @param artifact - The request's reference.
+     * @param artifact - The job's reference.
      * @returns The first candidate's bytes whose digest matches.
      */
     const readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'] = async (artifact) => {
@@ -862,9 +893,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       workspaceRoot: agent.workspaceRoot,
       checkoutsDirectory,
       ...(projectId === undefined ? {} : { projectId }),
-      ...(machines
-        ? { machines: localMachineFacet((port) => machines.host.serve({ port, session: machines.session })) }
-        : {}),
+      /* The agent's facet rides an agent session of its own, so the host applies the agent rules whatever a call
+       * claims; the route's session stays the person's. */
+      ...(machines ? { machines: agentMachineFacet(machines, 'tau') } : {}),
       fileSystem: {
         open: providerForAgentRoot,
         admit: (root) => admitAgentRoot(filesystem, root),
@@ -922,6 +953,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
       ...(agent.testModel === false ? { geospecRunner: false } : {}),
+      /* A child composes the native kernels once, at its start: a prepared kernel reaches a root on its next call
+       * only through a new child, so every root's child is replaced once the preparation is ready (D7, D37). */
+      ...(agent.prepareKernel === undefined
+        ? {}
+        : {
+            prepareKernel: async (input, context) => {
+              const outcome = await agent.prepareKernel!(input, context);
+              if (outcome.status === 'ready') {
+                await Promise.allSettled(agentRuntimes.keys().map(async (root) => agentRuntimes.close(root)));
+              }
+              return outcome;
+            },
+          }),
       /* The MCP url is only known once the server is listening, so it is read per run. */
       ...(discovery.agents.length > 0
         ? {
@@ -1007,6 +1051,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     agentProject = project;
     agentServer = server;
     agentMachines = machines;
+    if (machines) {
+      const warnMachineHost = (message: string): void => {
+        emit({ type: 'warning', code: 'MACHINE_HOST', message });
+      };
+      stopKeepingAwake = keepAwakeWhileStreaming({
+        streamingMachines: async () => machines.host.streamingMachines(),
+        blocker: agent.machines?.keepAwake ?? platformKeepAwakeBlocker({ warn: warnMachineHost }),
+        log: (level, event, detail) => {
+          if (level === 'error') {
+            warnMachineHost(`${event}: ${detail instanceof Error ? detail.message : String(detail)}`);
+          }
+        },
+      });
+    }
     agentExternalAgents = externalAgents;
     /* PH19 ruling 2: the API keeps a run *directory*. The reporter reads the
      * launcher's own durable rows — the rows the log is written from — and
@@ -1041,9 +1099,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     /* A retried close is live work: its cut reads through this channel. */
     filesystem?.ports.port1.ref();
     filesystem?.ports.port2.ref();
-    agentRunReporter?.close();
-    agentRunReporter = undefined;
-    agentExternalAgents = [];
     const failures: unknown[] = [];
     const settle = async (operation: Promise<unknown> | undefined, retire: () => void): Promise<void> => {
       try {
@@ -1053,6 +1108,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         failures.push(error);
       }
     };
+    /* No job starts from here on: a start the closing channel still admits would begin as the host goes away. The
+     * gate is up at the call; the wait lets a start already past it settle before the host closes under it. A start
+     * that outlasts the wait keeps the gate up, and the stop carries on to close the host: said, not failed. */
+    await settle(
+      machines?.host.quiesce().catch((error: unknown) => {
+        if (!(error instanceof MachineHostStartInFlightError)) {
+          throw error;
+        }
+        emit({
+          type: 'warning',
+          code: 'MACHINE_HOST',
+          message: 'A machine job was still starting when Tau Host stopped; check the machine.',
+        });
+      }),
+      () => undefined,
+    );
+    agentRunReporter?.close();
+    agentRunReporter = undefined;
+    agentExternalAgents = [];
+    /* The runs end with the host; nothing streams once it closes. */
+    stopKeepingAwake?.();
+    stopKeepingAwake = undefined;
     await settle(server?.close(), () => {
       agentServer = undefined;
     });

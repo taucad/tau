@@ -30,7 +30,7 @@ export type {
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
-export { defaultConfigDirectory } from '#credential-store.js';
+export { defaultConfigDirectory, defaultPayloadStore } from '#credential-store.js';
 export { hostDescriptorPath, hostSessionCookieName, startAgentServer } from '#agent-server.js';
 export type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
 export { startRunReporter } from '#run-reporter.js';
@@ -79,14 +79,16 @@ export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
 export {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  defaultMachineProviders,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   probeCertificateTrust,
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
-export { openLocalMachines, openSharedMachineHost } from '#local-machines.js';
+export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
 export type {
   LocalMachines,
   LocalMachinesRefusal,
@@ -94,6 +96,8 @@ export type {
   OpenSharedMachineHostOptions,
   SharedMachineHost,
 } from '#local-machines.js';
+export { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
+export type { KeepAwakeBlocker, KeepAwakeRelease, KeepAwakeWhileStreamingOptions } from '#keep-awake.js';
 export { completeMachineBinding } from '#machine-binding-ceremony.js';
 export type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
 export {
@@ -105,6 +109,13 @@ export {
 export type { SecretVault, SecretVaultFacts, SecretVaultKind, SecretVaultWriteOptions } from '#secret-vault.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
+export { prepareKernelToolName } from '#prepare-kernel-tool.js';
+export type { HostPrepareKernel, HostPrepareKernelProgress } from '#agent-tools.js';
+export type {
+  RuntimeChildNativeKernels,
+  RuntimeChildWorker,
+  RuntimeChildWorkerLaunch,
+} from '#runtime-child-supervisor.js';
 export {
   acpAdapterEnvironment,
   acpAdapterOverrideVariable,

@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import type * as FileUtils from '@taucad/utils/file';
+import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 const tree = vi.hoisted(() => ({ current: new Map<string, FileEntry>() }));
@@ -19,6 +20,7 @@ const editorSend = vi.hoisted(() => vi.fn());
 const overrideUnit = vi.hoisted(() => vi.fn(async () => undefined));
 const readRawBytes = vi.hoisted(() => vi.fn(async () => new Uint8Array([0x50, 0x4b, 0x03, 0x04])));
 const downloadBlob = vi.hoisted(() => vi.fn());
+const revealInFileManager = vi.hoisted(() => vi.fn());
 
 vi.mock('@taucad/utils/file', async (importOriginal) => ({
   ...(await importOriginal<typeof FileUtils>()),
@@ -36,6 +38,11 @@ const actorStub = vi.hoisted(() => {
   };
 });
 
+vi.mock('#hooks/use-native-file-manager.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof NativeFileManager>()),
+  useRevealInFileManager: (projectId: string | undefined) =>
+    projectId === undefined ? undefined : { label: 'Reveal in Finder', icon: 'finder', reveal: revealInFileManager },
+}));
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => tree.current,
   useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
@@ -133,6 +140,7 @@ beforeEach(() => {
   overrideUnit.mockClear();
   readRawBytes.mockClear();
   downloadBlob.mockClear();
+  revealInFileManager.mockClear();
   tree.current = new Map<string, FileEntry>([
     directory('.agents', project(true)),
     directory('.agents/skills', project(true)),
@@ -218,6 +226,23 @@ describe('Files tree provenance rows (north star W4)', () => {
     await userEvent.keyboard('{Escape}');
     await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'node_modules' }) });
     expect(within(await screen.findByRole('menu')).queryByText('Copy to project')).not.toBeInTheDocument();
+  });
+
+  it('reveals project files in the native file manager but never an overlay or mount', async () => {
+    renderTree();
+
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'main.scad' }) });
+    await userEvent.click(within(await screen.findByRole('menu')).getByText('Reveal in Finder'));
+    expect(revealInFileManager).toHaveBeenCalledExactlyOnceWith('main.scad');
+
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'node_modules' }) });
+    expect(within(await screen.findByRole('menu')).queryByText('Reveal in Finder')).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+
+    await expand('.agents');
+    await expand('skills');
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'cad-openscad' }) });
+    expect(within(await screen.findByRole('menu')).queryByText('Reveal in Finder')).not.toBeInTheDocument();
   });
 
   it('dims a records row, keeps it collapsed and describes why it is not saved', async () => {

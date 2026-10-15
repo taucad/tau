@@ -40,6 +40,35 @@ updates:
           - 'major'
           - 'minor'
           - 'patch'
+      # Vitest core, browser providers, coverage and UI require matching releases.
+      vitest:
+        applies-to: 'version-updates'
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
+        update-types:
+          - 'major'
+          - 'minor'
+          - 'patch'
+      # Auth adapters and UI packages declare peers on the auth core/plugins.
+      auth:
+        applies-to: 'version-updates'
+        patterns:
+          - 'better-auth'
+          - '@better-auth/*'
+          - '@better-auth-ui/*'
+        update-types:
+          - 'minor'
+          - 'patch'
+      # The Vite plugin and optional compiler must satisfy each other's peers.
+      react-compiler:
+        applies-to: 'version-updates'
+        patterns:
+          - '@vitejs/plugin-react'
+          - 'oxc-transform-react'
+        update-types:
+          - 'minor'
+          - 'patch'
       react:
         applies-to: 'version-updates'
         patterns:
@@ -109,7 +138,6 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
       - 'automated'
 
   - package-ecosystem: 'docker-compose'
@@ -125,8 +153,6 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
-      - 'infrastructure'
       - 'automated'
 
   - package-ecosystem: 'docker-compose'
@@ -142,53 +168,5 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
       - 'search'
       - 'automated'
-
-  # Active native manifests; provenance-controlled sources and frozen fixtures stay separate.
-  - package-ecosystem: 'cargo'
-    directories:
-      - '/packages/geospec-engine-native/rust'
-      - '/packages/geospec-engine-native/bindings/emscripten'
-      - '/packages/geospec-engine-native/bindings/node'
-      - '/packages/geospec-engine-native/bindings/python'
-      - '/packages/geospec-engine-native/bindings/wasm'
-      - '/packages/geospec-engine-native/native/cache-host'
-      - '/packages/geospec-engine-native/native/manifold-rust/adapter'
-      - '/packages/geospec-engine-native/native/occt/rust'
-      - '/packages/geospec-engine-native/native/runtime'
-    schedule:
-      interval: 'weekly'
-      day: 'monday'
-      time: '12:00'
-      timezone: 'Etc/UTC'
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: 'chore(root)'
-    groups:
-      cargo-minor-patch:
-        applies-to: 'version-updates'
-        patterns: ['*']
-        update-types: ['minor', 'patch']
-      cargo-security:
-        applies-to: 'security-updates'
-        patterns: ['*']
-  - package-ecosystem: 'pip'
-    directory: '/packages/geospec-engine-native/bindings/python'
-    schedule:
-      interval: 'weekly'
-      day: 'monday'
-      time: '13:00'
-      timezone: 'Etc/UTC'
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: 'chore(root)'
-    groups:
-      python-minor-patch:
-        applies-to: 'version-updates'
-        patterns: ['*']
-        update-types: ['minor', 'patch']
-      python-security:
-        applies-to: 'security-updates'
-        patterns: ['*']

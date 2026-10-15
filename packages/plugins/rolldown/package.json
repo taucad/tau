@@ -1,6 +1,6 @@
 {
   "name": "@taucad/rolldown",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Native Node and WASM browser Rolldown bundler plugin for Tau",
   "type": "module",
   "sideEffects": false,

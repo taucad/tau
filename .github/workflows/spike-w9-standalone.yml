@@ -4,9 +4,10 @@
 # Each job writes the project the UI's createInitialProject makes (scripts/spikes/native-deps/w9-create-project.mts)
 # into a bare directory outside the checkout and runs it with the native toolchain only:
 # - build123d: `uv sync --locked`, then `uv run main.py`, on Linux x64 and macOS arm64;
-# - PicoGK: `dotnet restore --locked-mode`, then `dotnet run` on macOS arm64 (upstream PicoGK's native engine ships
-#   for osx-arm64 and win-x64 only). The template's `Library.Go` opens PicoGK's viewer and keeps it open, so the job
-#   passes once PicoGK has started the model's task and the process is still running, and then closes it.
+# - PicoGK: `dotnet restore --locked-mode` and `dotnet build` on macOS arm64 (upstream PicoGK's native engine ships
+#   for osx-arm64 and win-x64 only). The template's `Library.Go` opens PicoGK's OpenGL viewer, which a hosted runner
+#   cannot create, so the same .csproj and lock then run scripts/spikes/native-deps/w9-picogk-headless.cs, which
+#   exports an STL from the locked PicoGK engine and asserts its volume and size.
 # Results are the step summary. W23 replaces these jobs with the standalone-project check in ci.yml.
 name: Spike W9 (standalone projects)
 
@@ -16,6 +17,7 @@ on:
     paths:
       - .github/workflows/spike-w9-standalone.yml
       - scripts/spikes/native-deps/w9-create-project.mts
+      - scripts/spikes/native-deps/w9-picogk-headless.cs
       - apps/ui/app/constants/project.constants.ts
       - packages/plugins/build123d/project/**
       - packages/plugins/picogk/project/**
@@ -108,7 +110,7 @@ jobs:
       - name: Create the project Tau creates
         run: node --import @oxc-node/core/register scripts/spikes/native-deps/w9-create-project.mts --kernel picogk --name 'Mounting Bracket v2' --out "$PROJECT"
 
-      - name: dotnet restore --locked-mode, then dotnet run
+      - name: dotnet restore --locked-mode, dotnet build, then run headless
         working-directory: ${{ env.PROJECT }}
         run: |
           {
@@ -117,31 +119,21 @@ jobs:
             ls -1
             dotnet --version
           } >> "$GITHUB_STEP_SUMMARY"
+          # The project as created: restore exactly its lock and compile its main.cs against NuGet PicoGK.
           dotnet restore --locked-mode | tee restore.log
-          log="$HOME/Documents/PicoGK.log"
-          rm -f "$log"
-          dotnet run --no-restore > run.log 2>&1 &
-          pid=$!
-          status=fail
-          for _ in $(seq 1 240); do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              wait "$pid" && status=exited-0 || status="exited-$?"
-              break
-            fi
-            if grep -q 'Starting tasks' "$log" 2>/dev/null; then
-              sleep 5
-              kill -0 "$pid" 2>/dev/null && status=running
-              break
-            fi
-            sleep 1
-          done
-          kill "$pid" 2>/dev/null || true
+          dotnet build --no-restore -warnaserror | tee build.log
+          ls bin/Debug/net10.0/runtimes/osx-arm64/native/picogk.*.dylib | tee native.log
+          # Its main.cs calls Library.Go, which opens an OpenGL viewer the runner cannot create. The same .csproj and
+          # lock run a headless entry instead, which exports an STL and asserts it.
+          headless="$RUNNER_TEMP/picogk-headless"
+          mkdir -p "$headless"
+          cp ./*.csproj packages.lock.json "$headless/"
+          cp "$GITHUB_WORKSPACE/scripts/spikes/native-deps/w9-picogk-headless.cs" "$headless/main.cs"
+          (cd "$headless" && dotnet restore --locked-mode && dotnet run --no-restore -- "$headless/sphere.stl") | tee run.log
           {
-            tail -n 2 restore.log
-            echo "dotnet run: $status"
-            tail -n 20 run.log
-            echo '--- PicoGK.log'
-            tail -n 40 "$log" 2>/dev/null || echo '(no log)'
+            tail -n 1 restore.log
+            grep -E 'Warn|Error|Build succeeded' build.log
+            cat native.log
+            tail -n 3 run.log
             echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          [[ "$status" == running || "$status" == exited-0 ]]
+          } >> "$GITHUB_STEP_SUMMARY"

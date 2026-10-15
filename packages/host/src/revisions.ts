@@ -526,11 +526,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       ...toolchain,
       ...(options.checkoutMutation === undefined ? {} : { checkoutMutation: options.checkoutMutation }),
       ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
-      ...(options.remoteCredential === undefined
-        ? { remoteCredential: () => channelWriteCredential ?? channelRemoteCredential }
-        : {
-            remoteCredential: () => channelWriteCredential ?? channelRemoteCredential ?? options.remoteCredential?.(),
-          }),
+      remoteCredential: () => channelWriteCredential ?? channelRemoteCredential ?? options.remoteCredential?.(),
     });
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
   const emitChannel = (event: AgentChannelRevisionEvent): void => {
@@ -1329,13 +1325,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         return null;
       case 'pushGithub': {
         const held = channelCredential(request);
+        const credentialExpiry = Date.parse(optionalText(request, 'expiresAt') ?? '');
         if (
           channelWriteCredential !== undefined ||
           held === undefined ||
           !('authorization' in held) ||
-          optionalText(request, 'expiresAt') === undefined ||
-          !Number.isFinite(Date.parse(optionalText(request, 'expiresAt') ?? '')) ||
-          Date.parse(optionalText(request, 'expiresAt') ?? '') <= Date.now()
+          !(credentialExpiry > Date.now())
         ) {
           throw new Error('This GitHub push has no valid repository credential, or another push is running.');
         }

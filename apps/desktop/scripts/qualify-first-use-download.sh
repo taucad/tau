@@ -266,13 +266,22 @@ sleep 2
   --predicate 'subsystem BEGINSWITH "com.apple.syspolicy" OR process == "syspolicyd" OR process == "CoreServicesUIAgent"' \
   >"$OUT/syspolicy-log.txt" 2>&1 || true
 log_lines=$(grep -vc '^Timestamp' "$OUT/syspolicy-log.txt" || true)
-ui_agent=$(grep -c 'CoreServicesUIAgent' "$OUT/syspolicy-log.txt" || true)
-grep -E 'python3|dotnet|Tau\.PicoGK|picogk|/payloads/|Tau\.app' "$OUT/syspolicy-log.txt" >"$OUT/syspolicy-excerpt.txt" || true
+# The log redacts paths as <private>, so lines are tied to the run by process id: the workers and
+# their Tau parents, as the sampler saw them.
+pids=$(cat "$OUT"/ps-build123d.txt "$OUT"/ps-picogk.txt 2>/dev/null | awk '{ print $3; print $5 }' | sort -u | tr '\n' ' ')
+pid_pattern=$(printf '%s\n' $pids | sed 's/.*/(pid |\\[)&([^0-9]|$)/' | paste -sd'|' -)
+{
+  [[ -z "$pid_pattern" ]] || grep -E "$pid_pattern" "$OUT/syspolicy-log.txt" || true
+  grep -E 'python3|dotnet|Tau\.PicoGK|picogk|/payloads/|Tau\.app' "$OUT/syspolicy-log.txt" || true
+} | sort -u >"$OUT/syspolicy-excerpt.txt"
+grep -E ' CoreServicesUIAgent\[' "$OUT/syspolicy-log.txt" >"$OUT/coreservicesuiagent.txt" || true
+ui_agent=$(wc -l <"$OUT/coreservicesuiagent.txt" | tr -d ' ')
+ui_prompts=$(grep -ciE 'gatekeeper|GK|quarantin|prompt|alert|malware|unidentified|verify' "$OUT/coreservicesuiagent.txt" || true)
 prompts=$(grep -ciE 'prompt|user override|denied|reject|not allowed|malware|blocked' "$OUT/syspolicy-excerpt.txt" || true)
 assessments=$(grep -ciE 'assess|evaluat|scan|GK ' "$OUT/syspolicy-log.txt" || true)
 verdict=FAIL
-if [[ "$ui_agent" -eq 0 && "$prompts" -eq 0 ]]; then verdict=PASS; fi
-cell syspolicy "$verdict" "$log_lines syspolicy log lines in the window, $(wc -l <"$OUT/syspolicy-excerpt.txt" | tr -d ' ') name the app or a worker, $prompts of those prompt, deny or reject; lines that mention an assessment, evaluation or scan: $assessments; CoreServicesUIAgent lines $ui_agent"
+if [[ "$ui_prompts" -eq 0 && "$prompts" -eq 0 ]]; then verdict=PASS; fi
+cell syspolicy "$verdict" "$log_lines syspolicy log lines in the window, $(wc -l <"$OUT/syspolicy-excerpt.txt" | tr -d ' ') name the app, a worker or one of their pids ($pids), $prompts of those prompt, deny or reject; lines that mention an assessment, evaluation or scan: $assessments; CoreServicesUIAgent lines $ui_agent, of them about Gatekeeper, quarantine or a prompt $ui_prompts"
 
 # --- Quarantined copy -----------------------------------------------------------------------
 echo "→ quarantined clone of the store"
@@ -332,7 +341,10 @@ node -e '
     console.log(`::notice title=W12 xattr listing::${escape(xattr.slice(0, 3800))}`);
     const excerpt = fs.readFileSync(`${out}/syspolicy-excerpt.txt`, "utf8");
     const log = fs.readFileSync(`${out}/syspolicy-log.txt`, "utf8");
-    console.log(`::notice title=W12 log show excerpt::${escape(`${excerpt.split("\n").slice(0, 25).join("\n")}\n--- first lines of the whole window ---\n${log.split("\n").slice(0, 15).join("\n")}`.slice(0, 3800))}`);
+    const noise = /com\.apple\.xpc|CoreFoundation|CoreAnalytics|looking up ticket|completing lookup/;
+    const notable = log.split("\n").filter((l) => !noise.test(l)).slice(0, 20).join("\n");
+    const agent = fs.readFileSync(`${out}/coreservicesuiagent.txt`, "utf8").split("\n").slice(0, 10).join("\n");
+    console.log(`::notice title=W12 log show excerpt::${escape(`--- lines naming the app, a worker or their pids ---\n${excerpt.split("\n").slice(0, 15).join("\n")}\n--- CoreServicesUIAgent ---\n${agent}\n--- the window without xpc, prefs and ticket-lookup lines ---\n${notable}`.slice(0, 3800))}`);
     const negative = fs.readFileSync(`${out}/syspolicy-log-quarantined.txt`, "utf8");
     console.log(`::notice title=W12 quarantined-copy log::${escape(negative.split("\n").filter((l) => /python3|dotnet|PicoGK|payloads|quarantin|reject|deny/i.test(l)).slice(0, 25).join("\n").slice(0, 3800) || "no matching lines")}`);
     const sampled = (k) => (fs.existsSync(`${out}/ps-${k}.txt`) ? fs.readFileSync(`${out}/ps-${k}.txt`, "utf8") : "");

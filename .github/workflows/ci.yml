@@ -450,7 +450,10 @@ jobs:
   # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs on macOS
   # when the native projects are affected and on every push to `main`, as the native-darwin row does.
   standalone:
-    name: Standalone projects (${{ matrix.ecosystem }})
+    name: Standalone projects (${{ matrix.ecosystem }})${{ matrix.ecosystem == 'kcl' && ' [quarantined]' || '' }}
+    # Quarantine only Zoo/KCL until CI has renewable Tau Pro authentication and a Zoo token.
+    # Restore failure gating after provisioning both credentials and a successful live KCL run.
+    continue-on-error: ${{ matrix.ecosystem == 'kcl' }}
     strategy:
       fail-fast: false
       matrix:

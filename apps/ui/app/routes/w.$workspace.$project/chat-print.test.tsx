@@ -834,8 +834,10 @@ describe('Print pane prepare and send', () => {
         options: { ...machineSliceOptions, preset: 'fine' },
       });
     });
-    expect(mockWriteFiles).toHaveBeenCalledExactlyOnceWith({
-      [slicePath]: { content: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) },
+    await waitFor(() => {
+      expect(mockWriteFiles).toHaveBeenCalledExactlyOnceWith({
+        [slicePath]: { content: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) },
+      });
     });
 
     // The numbers people read stay in view; the rest folds into Details, summarised by the part's size.

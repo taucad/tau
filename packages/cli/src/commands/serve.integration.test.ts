@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -38,6 +38,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
+import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-testing';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
@@ -46,6 +47,8 @@ const builtBin = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 const agentToken = 'serve-native-agent-token-at-least-32-characters';
 /** Milliseconds one agent run may take: kernel loads, a preparation and a cold native worker. */
 const runLimit = 420_000;
+/** Milliseconds the darwin-arm64 run (tier 4b) may take: two real preparations and two cold native workers. */
+const realRunLimit = 900_000;
 
 const disposers: Array<() => Promise<void> | void> = [];
 
@@ -244,7 +247,7 @@ const startServe = async (options: {
 };
 
 /** Run one agent turn over the daemon and wait for it to settle. */
-const runAgent = async (origin: URL): Promise<string | undefined> => {
+const runAgent = async (origin: URL, limit = runLimit): Promise<string | undefined> => {
   const client = createAgentChannelClient({
     connect: () =>
       new WebSocket(new URL('/agent', origin).href.replace('http:', 'ws:'), {
@@ -264,7 +267,7 @@ const runAgent = async (origin: URL): Promise<string | undefined> => {
   });
   expect(started).toMatchObject({ status: 'applied', effect: 'durable' });
   const settled = new Set(['completed', 'failed', 'cancelled']);
-  const deadline = performance.now() + runLimit - 30_000;
+  const deadline = performance.now() + limit - 30_000;
   for (let attempt = 0; ; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- polling the run projection is sequential.
     const answer = await client.execute({
@@ -553,5 +556,204 @@ registerHooks({
       expect(answers.get('call-3')).not.toMatch(permissionRefusal);
     },
     runLimit,
+  );
+});
+
+/*
+ * Tier 4b (W11, D30): the same daemon on a darwin-arm64 host with real bytes and real models. The store starts empty;
+ * one `prepare_kernel` per kernel over the daemon prepares Build123d (from the seed `build123d:seed` fills, the
+ * digest-keyed cache the `native-darwin` job restores) and PicoGK (Microsoft's .NET runtime and the published Tau
+ * layer, downloaded from the manifest's origins). Then a real `.py` and a real `.cs` model evaluate and export geometry
+ * from workers the daemon started in the sandbox. Each model fails its evaluation if its worker can open a socket, and
+ * a loopback canary must see no connection: the worker keeps zero egress (I7). It runs only where the `native-darwin`
+ * CI job opts in with `TAU_NATIVE_DARWIN=1`.
+ */
+const nativeDarwin =
+  process.env['TAU_NATIVE_DARWIN'] === '1' && process.platform === 'darwin' && process.arch === 'arm64';
+
+/** A loopback listener the models try to reach; it counts every connection it accepts. */
+const startCanary = async (): Promise<{ readonly port: number; readonly connections: () => number }> => {
+  let connections = 0;
+  const server = createServer((_request, response) => {
+    response.writeHead(204).end();
+  });
+  server.on('connection', () => {
+    connections += 1;
+  });
+  return { port: await listen(server), connections: () => connections };
+};
+
+const egressCheckedPython = (canaryPort: number): string => `import socket
+from dataclasses import dataclass
+
+from build123d import Box
+
+
+@dataclass(frozen=True)
+class Params:
+    width: float = 10.0
+
+
+def reachable():
+    for address in (("1.1.1.1", 53), ("127.0.0.1", ${String(canaryPort)})):
+        try:
+            socket.create_connection(address, timeout=5).close()
+            return "%s:%d" % address
+        except Exception:
+            pass
+    return None
+
+
+def main(params: Params):
+    leak = reachable()
+    if leak is not None:
+        raise RuntimeError("worker egress allowed to " + leak)
+    return Box(params.width, 20, 30)
+`;
+
+const egressCheckedCsharp = (canaryPort: number): string => `using System;
+using System.ComponentModel.DataAnnotations;
+using System.Net.Sockets;
+using System.Numerics;
+using PicoGK;
+
+var leak = Egress.Reachable();
+if (leak.Length > 0)
+{
+    throw new InvalidOperationException("worker egress allowed to " + leak);
+}
+
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm));
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    public static float VoxelSizeMm { get; set; } = 1.0f;
+
+    [Range(1.0, 100.0)]
+    public static float RadiusMm { get; set; } = 20.0f;
+}
+
+public static class Egress
+{
+    public static string Reachable()
+    {
+        foreach (var (host, port) in new[] { ("1.1.1.1", 53), ("127.0.0.1", ${String(canaryPort)}) })
+        {
+            try
+            {
+                using var client = new TcpClient();
+                if (client.ConnectAsync(host, port).Wait(5000))
+                {
+                    return host + ":" + port;
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+        return "";
+    }
+}
+`;
+
+/** The bounding-box extents of the GLB an `export_model` answer names, in metres, smallest first. */
+const exportedExtents = async (workspace: string, answer: string | undefined): Promise<number[]> => {
+  const artifactPath = /"artifactPath":"(?<path>[^"]+)"/u.exec(answer ?? '')?.groups?.['path'];
+  if (artifactPath === undefined) {
+    throw new Error(`The export answer names no artifact: ${answer ?? '(none)'}`);
+  }
+  const glb = new Uint8Array(await readFile(join(workspace, artifactPath)));
+  const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
+  return [...(bounds?.size ?? [])].toSorted((left, right) => left - right);
+};
+
+describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier 4b, native-darwin)', () => {
+  let scratch = '';
+
+  beforeAll(async () => {
+    scratch = await mkdtemp(join(tmpdir(), 'tau-serve-native-darwin-'));
+  });
+
+  afterAll(async () => {
+    await rm(scratch, { recursive: true, force: true });
+  });
+
+  it(
+    'should refuse .py and .cs from an empty store, prepare each kernel once over the daemon, then evaluate and export both models with no egress',
+    async ({ annotate }) => {
+      const root = await mkdtemp(join(scratch, 'real-'));
+      const workspace = join(root, 'workspace');
+      await mkdir(workspace, { recursive: true });
+      const canary = await startCanary();
+      await writeFile(join(workspace, 'main.py'), egressCheckedPython(canary.port));
+      await writeFile(join(workspace, 'main.cs'), egressCheckedCsharp(canary.port));
+      await writeFile(
+        join(workspace, 'tau.json'),
+        `${JSON.stringify({ id: 'proj_servenative0002', name: 'serve native darwin' })}\n`,
+      );
+      const script: ToolCall[] = [
+        { name: 'evaluate_model', input: { targetFile: 'main.py' } },
+        { name: 'evaluate_model', input: { targetFile: 'main.cs' } },
+        { name: 'prepare_kernel', input: { kernel: 'build123d' } },
+        { name: 'prepare_kernel', input: { kernel: 'picogk' } },
+        { name: 'evaluate_model', input: { targetFile: 'main.py' } },
+        { name: 'evaluate_model', input: { targetFile: 'main.cs' } },
+        { name: 'export_model', input: { targetFile: 'main.py', to: 'glb' } },
+        { name: 'export_model', input: { targetFile: 'main.cs', to: 'glb' } },
+      ];
+      const gateway = await startScriptedGateway(script);
+      const origin = await startServe({
+        workspace,
+        relayUrl: await startStubRelay(),
+        gatewayUrl: gateway.url,
+        environment: {
+          TAU_CONFIG_DIR: await configDirectoryWithCredential(root),
+          /* Open acquisition: Build123d's bytes come from the seed when it is present, PicoGK's from its origins. */
+          TAU_ACQUISITION: '',
+          TAU_PAYLOAD_DIR: seedPresent ? seedDirectory : '',
+          TAU_PAYLOAD_MIRROR: '',
+          TAU_PAYLOAD_MIRROR_NO_FALLBACK: '',
+          TAU_PAYLOAD_TARGET: '',
+        },
+      });
+
+      const started = performance.now();
+      const state = await runAgent(origin, realRunLimit);
+      await annotate(`agent run settled ${String(state)} in ${String(Math.round(performance.now() - started))} ms`);
+      const answers = gateway.answers();
+      process.stderr.write(`serve native darwin answers: ${JSON.stringify(Object.fromEntries(answers))}\n`);
+
+      expect(state).toBe('completed');
+      expect(issueCodes(answers.get('call-1'))[0]).toBe('KERNEL_NOT_PREPARED');
+      expect(answers.get('call-1')).toContain('"kernel":"build123d"');
+      expect(issueCodes(answers.get('call-2'))[0]).toBe('KERNEL_NOT_PREPARED');
+      expect(answers.get('call-2')).toContain('"kernel":"picogk"');
+      expect(answers.get('call-3')).toMatch(/"status":"ready"/u);
+      expect(answers.get('call-3')).toContain('"kernel":"build123d"');
+      expect(answers.get('call-4')).toMatch(/"status":"ready"/u);
+      expect(answers.get('call-4')).toContain('"kernel":"picogk"');
+      for (const call of ['call-5', 'call-6']) {
+        expect(answers.get(call), call).toMatch(/"status":"ready"/u);
+        expect(issueCodes(answers.get(call)), call).toEqual([]);
+        expect(answers.get(call), call).not.toMatch(permissionRefusal);
+      }
+      expect(await exportedExtents(workspace, answers.get('call-7'))).toEqual([
+        expect.closeTo(0.01, 6),
+        expect.closeTo(0.02, 6),
+        expect.closeTo(0.03, 6),
+      ]);
+      const sphere = await exportedExtents(workspace, answers.get('call-8'));
+      expect(sphere).toHaveLength(3);
+      for (const extent of sphere) {
+        expect(extent).toBeGreaterThan(0.038);
+        expect(extent).toBeLessThan(0.042);
+      }
+      expect(canary.connections()).toBe(0);
+    },
+    realRunLimit,
   );
 });

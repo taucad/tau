@@ -33,6 +33,7 @@ import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/
 import { defaultMachineProviders, openSharedMachineHost } from '@taucad/host';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
+import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-testing';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
@@ -1704,4 +1705,319 @@ registerHooks({
     },
     kernelCallLimit,
   );
+});
+
+/*
+ * Tier 4b (W5, D30): the same server on a darwin-arm64 host with real bytes. Nothing is synthetic: the store starts
+ * empty, `prepare_kernel` downloads each kernel's pinned closure from the origins its manifest names (Build123d's
+ * CPython and wheels; Microsoft's .NET runtime and the published Tau PicoGK layer), and the next calls evaluate a real
+ * `.py` and a real `.cs` model to geometry. Each model first tries to reach the network and fails its evaluation if it
+ * can, and a loopback canary must see no connection: the worker keeps zero egress (I7). It downloads about 210 MB, so
+ * it runs only where the `native-darwin` CI job opts in with `TAU_NATIVE_DARWIN=1`.
+ */
+const nativeDarwin =
+  process.env['TAU_NATIVE_DARWIN'] === '1' && process.platform === 'darwin' && process.arch === 'arm64';
+
+/** Milliseconds one real preparation may take: the download, the unpack, the seal and its `compileall`. */
+const realPrepareLimit = 600_000;
+
+/** A loopback listener the models try to reach; it counts every connection it accepts. */
+const startCanary = async (): Promise<{ readonly port: number; readonly connections: () => number }> => {
+  let connections = 0;
+  const server = createServer((_request, response) => {
+    response.writeHead(204).end();
+  });
+  server.on('connection', () => {
+    connections += 1;
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  disposers.push(
+    async () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => {
+          resolve();
+        });
+      }),
+  );
+  return { port: (server.address() as AddressInfo).port, connections: () => connections };
+};
+
+/** A Build123d model that refuses to evaluate when its worker can open a socket to the network or the canary. */
+const egressCheckedPython = (canaryPort: number): string => `import socket
+from dataclasses import dataclass
+
+from build123d import Box
+
+
+@dataclass(frozen=True)
+class Params:
+    width: float = 10.0
+
+
+def reachable():
+    for address in (("1.1.1.1", 53), ("127.0.0.1", ${String(canaryPort)})):
+        try:
+            socket.create_connection(address, timeout=5).close()
+            return "%s:%d" % address
+        except Exception:
+            pass
+    return None
+
+
+def main(params: Params):
+    leak = reachable()
+    if leak is not None:
+        raise RuntimeError("worker egress allowed to " + leak)
+    return Box(params.width, 20, 30)
+`;
+
+/** A PicoGK model, a 20 mm sphere, that refuses to evaluate when its worker can open a socket. */
+const egressCheckedCsharp = (canaryPort: number): string => `using System;
+using System.ComponentModel.DataAnnotations;
+using System.Net.Sockets;
+using System.Numerics;
+using PicoGK;
+
+var leak = Egress.Reachable();
+if (leak.Length > 0)
+{
+    throw new InvalidOperationException("worker egress allowed to " + leak);
+}
+
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm));
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    public static float VoxelSizeMm { get; set; } = 1.0f;
+
+    [Range(1.0, 100.0)]
+    public static float RadiusMm { get; set; } = 20.0f;
+}
+
+public static class Egress
+{
+    public static string Reachable()
+    {
+        foreach (var (host, port) in new[] { ("1.1.1.1", 53), ("127.0.0.1", ${String(canaryPort)}) })
+        {
+            try
+            {
+                using var client = new TcpClient();
+                if (client.ConnectAsync(host, port).Wait(5000))
+                {
+                    return host + ":" + port;
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+        return "";
+    }
+}
+`;
+
+/** The exported GLB's bounding-box extents in metres, smallest first, so the check does not depend on axis order. */
+const sortedExtents = async (glb: Uint8Array<ArrayBuffer>): Promise<number[]> => {
+  const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
+  return [...(bounds?.size ?? [])].toSorted((left, right) => left - right);
+};
+
+describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b, native-darwin)', () => {
+  let served: Served;
+  let client: Client;
+  let store = '';
+  let project = '';
+  let canary: Awaited<ReturnType<typeof startCanary>>;
+
+  const callOn = async (
+    params: CallToolRequest['params'],
+    options: {
+      readonly onprogress?: (progress: { progress: number; total?: number }) => void;
+      readonly signal?: AbortSignal;
+    } = {},
+  ): Promise<CallToolResult> =>
+    CallToolResultSchema.parse(await client.callTool(params, undefined, { timeout: realPrepareLimit, ...options }));
+
+  const closuresIn = async (): Promise<string[]> => {
+    const entries = await entriesOf(store);
+    return entries.filter((entry) => entry.includes('closures/') && entry.endsWith('receipt.json'));
+  };
+
+  beforeAll(async () => {
+    canary = await startCanary();
+    project = join(scratch, 'native-darwin');
+    await mkdir(project);
+    await writeFile(join(project, 'main.py'), egressCheckedPython(canary.port));
+    await writeFile(join(project, 'main.cs'), egressCheckedCsharp(canary.port));
+    store = await mkdtemp(join(tmpdir(), 'mcp-native-darwin-store-'));
+    disposers.push(async () => rm(store, { recursive: true, force: true }));
+    /* Built by assignment so no environment key is a source literal. The managed profile is cleared: the manifests'
+     * own origins, this host's target, an empty store. */
+    const env: Record<string, string> = {};
+    env['TAU_CONFIG_DIR'] = store;
+    env['TAU_ACQUISITION'] = '';
+    env['TAU_PAYLOAD_DIR'] = '';
+    env['TAU_PAYLOAD_MIRROR'] = '';
+    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '';
+    env['TAU_PAYLOAD_TARGET'] = '';
+    served = launch(project, undefined, { env });
+    disposers.push(stopIfRunning(served));
+    disposers.push(async () => {
+      const directory = process.env['TAU_TEST_FRAME_LOG_DIR'];
+      if (directory !== undefined && directory !== '') {
+        await mkdir(directory, { recursive: true });
+        await writeFile(
+          join(directory, 'native-darwin-mcp.frames.jsonl'),
+          served
+            .frames()
+            .map((frame) => JSON.stringify(frame))
+            .join('\n'),
+        );
+      }
+    });
+    client = new Client({ name: 'tau-mcp-integration-native-darwin', version: '1' });
+    await connect(client, served);
+  }, kernelCallLimit);
+
+  it(
+    'should refuse .py and .cs with KERNEL_NOT_PREPARED from an empty store',
+    async () => {
+      const python = await callOn({ name: 'evaluate_model', arguments: { targetFile: 'main.py' } });
+      const csharp = await callOn({ name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+
+      expect(kernelIssuesOf(python)[0]).toMatchObject({
+        code: 'KERNEL_NOT_PREPARED',
+        details: { kernel: 'build123d', prepare: { tool: 'prepare_kernel', input: { kernel: 'build123d' } } },
+      });
+      expect(kernelIssuesOf(csharp)[0]).toMatchObject({
+        code: 'KERNEL_NOT_PREPARED',
+        details: { kernel: 'picogk', prepare: { tool: 'prepare_kernel', input: { kernel: 'picogk' } } },
+      });
+      expect(await closuresIn()).toEqual([]);
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should stop a real download when the client cancels, leaving no closure',
+    async ({ annotate }) => {
+      const controller = new AbortController();
+      const firstProgress = Promise.withResolvers<void>();
+      const pending = callOn(
+        { name: 'prepare_kernel', arguments: { kernel: 'build123d' } },
+        {
+          signal: controller.signal,
+          onprogress: () => {
+            firstProgress.resolve();
+          },
+        },
+      );
+      await firstProgress.promise;
+      const cancelledAt = performance.now();
+      controller.abort();
+
+      await expect(pending).rejects.toThrow();
+      await annotate(`cancelled ${String(Math.round(performance.now() - cancelledAt))} ms after the first progress`);
+      const cancelled = served
+        .frames()
+        .filter(({ direction }) => direction === 'client->server')
+        .map(({ frame }) => JSON.parse(frame) as { method?: string })
+        .filter(({ method }) => method === 'notifications/cancelled');
+      expect(cancelled).toHaveLength(1);
+      expect(await closuresIn()).toEqual([]);
+    },
+    realPrepareLimit,
+  );
+
+  for (const [index, kernel] of (['build123d', 'picogk'] as const).entries()) {
+    it(
+      `should prepare ${kernel} from its pinned origins with one prepare_kernel, reporting progress`,
+      async ({ annotate }) => {
+        const progress: Array<{ progress: number; total?: number }> = [];
+        const started = performance.now();
+        const ready = await callOn(
+          { name: 'prepare_kernel', arguments: { kernel } },
+          { onprogress: (report) => progress.push(report) },
+        );
+        await annotate(`${kernel} prepared in ${String(Math.round(performance.now() - started))} ms`);
+
+        expect(ready.isError ?? false, textOf(ready)).toBe(false);
+        expect(ready.structuredContent).toMatchObject({
+          status: 'ready',
+          kernel,
+          closureIntegrity: expect.stringMatching(/^sha256-[\w+/]+=*$/u) as string,
+          treeIntegrity: expect.stringMatching(/^sha256-[\w+/]+=*$/u) as string,
+        });
+        expect(progress.length).toBeGreaterThanOrEqual(3);
+        for (const [step, report] of progress.entries()) {
+          expect(report.progress).toBeGreaterThanOrEqual(progress[step - 1]?.progress ?? 0);
+        }
+        /* One sealed closure per prepared kernel. */
+        expect(await closuresIn()).toHaveLength(index + 1);
+      },
+      realPrepareLimit,
+    );
+  }
+
+  it(
+    'should evaluate the .py model with Build123d and export its 10 x 20 x 30 mm box',
+    async ({ annotate }) => {
+      const started = performance.now();
+      const evaluated = await callOn({ name: 'evaluate_model', arguments: { targetFile: 'main.py' } });
+      await annotate(`main.py evaluated in ${String(Math.round(performance.now() - started))} ms`);
+      expect(evaluated.structuredContent, textOf(evaluated)).toMatchObject({ status: 'ready' });
+      expect(kernelIssuesOf(evaluated)).toEqual([]);
+
+      const exported = await callOn({ name: 'export_model', arguments: { targetFile: 'main.py', to: 'glb' } });
+      expect(exported.isError ?? false, textOf(exported)).toBe(false);
+      const artifactPath = (exported.structuredContent as { files?: Array<{ artifactPath: string }> } | undefined)
+        ?.files?.[0]?.artifactPath;
+      const glb = new Uint8Array(await readFile(join(project, artifactPath ?? '')));
+
+      expect(await sortedExtents(glb)).toEqual([
+        expect.closeTo(0.01, 6),
+        expect.closeTo(0.02, 6),
+        expect.closeTo(0.03, 6),
+      ]);
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should evaluate the .cs model with PicoGK and export its 40 mm sphere',
+    async ({ annotate }) => {
+      const started = performance.now();
+      const evaluated = await callOn({ name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+      await annotate(`main.cs evaluated in ${String(Math.round(performance.now() - started))} ms`);
+      expect(evaluated.structuredContent, textOf(evaluated)).toMatchObject({ status: 'ready' });
+      expect(kernelIssuesOf(evaluated)).toEqual([]);
+
+      const exported = await callOn({ name: 'export_model', arguments: { targetFile: 'main.cs', to: 'glb' } });
+      expect(exported.isError ?? false, textOf(exported)).toBe(false);
+      const artifactPath = (exported.structuredContent as { files?: Array<{ artifactPath: string }> } | undefined)
+        ?.files?.[0]?.artifactPath;
+      const glb = new Uint8Array(await readFile(join(project, artifactPath ?? '')));
+
+      /* A voxel sphere of radius 20 mm at 1 mm voxels: 40 mm across within a voxel either way. */
+      const extents = await sortedExtents(glb);
+      expect(extents).toHaveLength(3);
+      for (const extent of extents) {
+        expect(extent).toBeGreaterThan(0.038);
+        expect(extent).toBeLessThan(0.042);
+      }
+    },
+    kernelCallLimit,
+  );
+
+  it('should keep both workers from reaching the network or the loopback canary', () => {
+    expect(canary.connections()).toBe(0);
+  });
 });

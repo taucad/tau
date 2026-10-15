@@ -42,6 +42,29 @@
         }
       ]
     },
+    "test:native-darwin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": [
+        "build",
+        "^copy-assets",
+        {
+          "projects": ["build123d"],
+          "target": "seed"
+        }
+      ],
+      "metadata": {
+        "description": "Tier 4b of the native kernels on darwin-arm64 (charter D30, the native-darwin CI job): from an empty store, tau mcp and tau serve each prepare Build123d and PicoGK with real bytes and evaluate a real .py and .cs model to geometry. Kept off the default test target because it downloads about 210 MB and needs a darwin-arm64 host."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/cli",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/commands/mcp.integration.test.ts src/commands/serve.integration.test.ts --testNamePattern 'tier 4b'",
+        "env": {
+          "TAU_NATIVE_DARWIN": "1",
+          "TAU_E2E_CLI_BUILT": "true"
+        }
+      }
+    },
     "test:ds3": {
       "executor": "nx:run-commands",
       "options": {

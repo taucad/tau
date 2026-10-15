@@ -47,6 +47,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     },
   );
 
+  // Re-hashing every file of a ~900 MB closure takes seconds; the per-launch check never does this.
   it('should verify the sealed closure intact, file by file', async () => {
     const host = createPreparationHost({
       plugins: [{ package: '@taucad/build123d', deployment, directory: packageRoot }],
@@ -59,7 +60,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     } finally {
       host.dispose();
     }
-  });
+  }, 300_000);
 
   it('should import OCP and build123d inside the sandbox', async () => {
     const options = build123dOptionsSchema.parse(build123dOptionsFromClosure(sealed));

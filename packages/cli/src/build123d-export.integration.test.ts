@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -81,7 +81,9 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'tau-build123d-export-'));
-    await writeFile(join(root, 'main.py'), model);
+    // The model's directory is the workspace the kernel mirrors, so the payload store stays outside it.
+    await mkdir(join(root, 'project'));
+    await writeFile(join(root, 'project', 'main.py'), model);
     // A bare PATH and an empty config directory: nothing on the machine supplies Python or a prepared closure.
     /* eslint-disable @typescript-eslint/naming-convention -- environment variable names are not camelCase. */
     environment = {
@@ -98,7 +100,7 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
   });
 
   it('should refuse before preparation, prepare from the seed, then export valid geometry', async () => {
-    const input = join(root, 'main.py');
+    const input = join(root, 'project', 'main.py');
     const output = join(root, 'model.glb');
 
     const refused = await runCli(['export', input, '--ext=glb', `--output=${output}`, '--json'], environment);

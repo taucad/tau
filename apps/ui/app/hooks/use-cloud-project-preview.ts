@@ -3,6 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 
+class PreviewResponseError extends Error {
+  public readonly status: number;
+
+  public constructor(status: number) {
+    super(`Saved preview unavailable (${String(status)})`);
+    this.status = status;
+  }
+}
+
 const previewMaximumBytes = 256 * 1024;
 const previewRequests: Array<() => void> = [];
 let activePreviewRequests = 0;
@@ -24,7 +33,7 @@ export const fetchCloudProjectPreview = async (projectId: string, signal: AbortS
       { credentials: 'include', cache: 'no-store', signal: requestSignal },
     );
     if (!response.ok) {
-      throw new Error(`Saved preview unavailable (${String(response.status)})`);
+      throw new PreviewResponseError(response.status);
     }
     if (response.status === 204) {
       return undefined;
@@ -74,6 +83,7 @@ export const useCloudProjectPreview = (
   url: string | undefined;
   isLoading: boolean;
   isFailed: boolean;
+  canRetry: boolean;
   retry: () => Promise<unknown>;
 } => {
   const userId = useRevisionSessionUser()?.id;
@@ -100,8 +110,14 @@ export const useCloudProjectPreview = (
   }, [query.data]);
   return {
     url: !query.isError && query.data && source?.blob === query.data ? source.url : undefined,
-    isLoading: query.isFetching && !query.data,
+    isLoading: query.isFetching,
     isFailed: query.isError,
+    // Access/client failures need the project or service repaired, not repeated image requests.
+    canRetry:
+      !(query.error instanceof PreviewResponseError) ||
+      query.error.status === 408 ||
+      query.error.status === 429 ||
+      query.error.status >= 500,
     retry: query.refetch,
   };
 };

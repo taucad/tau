@@ -184,6 +184,8 @@ type CreateProjectFromKernel = CreateProjectChatOptions & {
  * Use this when cloning, remixing, or importing a project.
  */
 type CreateProjectFromData = CreateProjectChatOptions & {
+  /** Wait for the remote manifest before choosing the first view. */
+  deferInitialView?: boolean;
   /** The project metadata to use */
   project: Omit<ProjectManifest, '$schema' | 'id'>;
   /** The files for the project */
@@ -1570,6 +1572,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
               ...attachmentSourceOf(options),
             }),
         editorState: options.editorState,
+        deferInitialView: 'project' in options && options.deferInitialView,
         files,
         storage: pendingStorage,
       });

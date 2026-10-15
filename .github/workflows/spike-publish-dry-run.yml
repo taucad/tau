@@ -14,8 +14,9 @@
 # its publishable closure without the GeoSpec engine (D36), install the tarballs into a clean npm
 # application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
 #
-# Difference from `publish.yml`, a finding for W16: it installs Chromium before the gate
-# (`scripts:check-pack-install` launches it).
+# Differences from `publish.yml`, findings for W16: it installs Chromium before the gate
+# (`scripts:check-pack-install` launches it) and uv (`desktop:prepare-build123d-python`, in the
+# gate's graph, resolves its wheels with uv; run 38668092247 failed with `spawnSync uv ENOENT`).
 name: Spike publish dry run
 
 on:
@@ -99,6 +100,13 @@ jobs:
       - name: Install Chromium for the pack-install check
         if: env.SPIKE_GATE == 'true'
         run: pnpm exec playwright install --with-deps chromium
+
+      # prepare-build123d-python resolves its wheels with uv, as in release-build.yml.
+      - name: Install uv
+        if: env.SPIKE_GATE == 'true'
+        run: |
+          command -v uv || pipx install uv
+          uv --version
 
       - name: Run the release gate
         if: env.SPIKE_GATE == 'true'

@@ -196,6 +196,8 @@ For alpha, beta, and release candidate versions:
 - Publish under a dist-tag (`next`, `alpha`, `beta`, `rc`) so `npm install @taucad/runtime` always resolves to the latest stable version
 - Prerelease versions follow the format `X.Y.Z-alpha.N`
 - Prereleases do not generate changelog entries in the stable changelog
+- A beta train of the whole fixed group runs `nx release version prerelease --preid beta --first-release` with git and staging disabled, which keeps the version plans for the next stable release; the `package-release` skill owns the exact command
+- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` before Trusted Publishing can publish it
 
 ## Operator Publish Handoff
 
@@ -226,16 +228,15 @@ pnpm registry:check
 pnpm runtime:npm-local-smoke
 NX_CLOUD=false pnpm nx release --dry-run --skip-publish --first-release
 pnpm nx release --skip-publish --first-release
-git push origin main --follow-tags
 ```
 
-The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
+`main` accepts changes only through pull requests, so the operator pushes the release commit on a branch, squash-merges its pull request once CI is green, and tags the merge commit `v<version>` (the local tag Nx created points at the pre-merge commit). The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. When the tag ruleset prevents the tag, dispatching on `main` at the merge commit publishes the same versions, because the publish reads them from the package manifests. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
 
 ```bash
 npm dist-tag add '<package>@<released-version>' latest
 ```
 
-The first successful train publication claims the decided names `geospec` and `@taucad/geospec-engine`. Do not publish placeholder packages merely to reserve either name.
+The first successful train publication claims the decided names `geospec` and `@taucad/geospec-engine`. Do not publish placeholder packages merely to reserve either name; the Trusted Publishing bootstrap placeholder is the only exception.
 
 ### Superseded Package Deprecations
 

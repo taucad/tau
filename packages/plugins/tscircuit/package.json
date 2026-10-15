@@ -1,6 +1,6 @@
 {
   "name": "@taucad/tscircuit",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "tscircuit EDA kernel for Tau: TSX circuits rendered to 3D boards, schematic and PCB SVG, with BOM, netlist and circuit JSON exports",
   "type": "module",
   "sideEffects": false,

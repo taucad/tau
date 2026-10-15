@@ -1,13 +1,20 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { inc } from 'semver';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import runtimePackage from '@taucad/runtime/package.json' with { type: 'json' };
 import { runtimePluginAbiVersion } from '@taucad/runtime/plugin';
 import { loadTauPlugin, loadTauPluginConfig } from '#plugin-loader.js';
 
 /* One past the ABI this CLI was built against: the value has to move with the
  * constant, or the case stops proving a refusal the moment the ABI is bumped. */
 const incompatibleAbiVersion = runtimePluginAbiVersion + 1;
+
+/* Peer ranges follow the bundled runtime, so a release bump cannot break them:
+ * one admits the bundled version, the other starts at the next major. */
+const bundledRuntimePeerRange = `^${runtimePackage.version}`;
+const futureRuntimePeerRange = `^${inc(runtimePackage.version, 'major')}`;
 
 const runtimePluginEntryUrl = new URL('../../runtime/src/plugins/plugin-entry.ts', import.meta.url).href;
 
@@ -166,7 +173,7 @@ describe('Tau plugin loading', () => {
   it('accepts prerelease peer ranges using includePrerelease semantics', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const root = await installFixture('prerelease-plugin', pluginSource('prerelease-plugin'), {
-      peerDependencies: { '@taucad/runtime': '^0.1.0-beta.0' },
+      peerDependencies: { '@taucad/runtime': bundledRuntimePeerRange },
     });
 
     await loadTauPlugin('prerelease-plugin', root);
@@ -176,19 +183,19 @@ describe('Tau plugin loading', () => {
   it('warns when the bundled runtime misses the plugin peer range', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const root = await installFixture('future-plugin', pluginSource('future-plugin'), {
-      peerDependencies: { '@taucad/runtime': '^0.2.0-beta.0' },
+      peerDependencies: { '@taucad/runtime': futureRuntimePeerRange },
     });
 
     await loadTauPlugin('future-plugin', root);
     expect(warn).toHaveBeenCalledWith(
-      'Tau plugin "future-plugin" declares @taucad/runtime peer "^0.2.0-beta.0", but this CLI bundles 0.1.0-beta.1.',
+      `Tau plugin "future-plugin" declares @taucad/runtime peer "${futureRuntimePeerRange}", but this CLI bundles ${runtimePackage.version}.`,
     );
   });
 
   it('checks configured plugin instances against their installed package manifests', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const root = await installFixture('@example/configured', pluginSource('@example/configured'), {
-      peerDependencies: { '@taucad/runtime': '^0.2.0-beta.0' },
+      peerDependencies: { '@taucad/runtime': futureRuntimePeerRange },
     });
     await writeProjectModule(
       'tau.config.mjs',
@@ -201,7 +208,7 @@ describe('Tau plugin loading', () => {
 
     await loadTauPluginConfig('./tau.config.mjs', root);
     expect(warn).toHaveBeenCalledWith(
-      'Tau plugin "@example/configured" declares @taucad/runtime peer "^0.2.0-beta.0", but this CLI bundles 0.1.0-beta.1.',
+      `Tau plugin "@example/configured" declares @taucad/runtime peer "${futureRuntimePeerRange}", but this CLI bundles ${runtimePackage.version}.`,
     );
   });
 

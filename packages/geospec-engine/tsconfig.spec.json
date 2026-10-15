@@ -15,7 +15,6 @@
   },
   "include": [
     "vitest.config.ts",
-    "experiments/performance-lab/*.ts",
     "scripts/coverage-source-policy.test.mts",
     "scripts/generate-provenance.mjs",
     "tsdown.config.ts",

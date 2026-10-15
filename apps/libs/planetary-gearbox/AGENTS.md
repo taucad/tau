@@ -47,6 +47,6 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 - `assets/` is frozen data: change it only by re-running the export scripts in `apps/www/scripts`, then update `apps/www/asset-provenance.json`.
-- Consumers: `apps/www` (copies the geometry assets into `dist/_www/assets`), `apps/ui` (`app/components/geometry/gearbox`).
+- Consumers: `apps/www` (copies the geometry assets into `build/client/_www/assets`), `apps/ui` (`app/components/geometry/gearbox`).
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.

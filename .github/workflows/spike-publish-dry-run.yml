@@ -1,11 +1,10 @@
 # Spikes S20 and S21 (native-dependency-resolution charter, D28, W16): `publish.yml` with its
-# publish step removed. It plans the release gate, produces the GeoSpec artifacts and runs the
-# complete release gate on the macOS producer, then runs the dependency-ordered dry-run publish on
-# Ubuntu. Nothing is published: the job holds no npm token and the publish step is gone.
+# publish step removed. It runs the release gate and the dependency-ordered dry-run publish on
+# Ubuntu. Nothing is published: the job holds no npm token and the publish step is gone. The
+# GeoSpec engine is the published `geospec-engine` catalog pin, installed with the workspace.
 #
 # S20 (gate): a dispatch, or a pull request that changes this file. S21 (gitChecks): a dispatch
-# with `gate` off skips the producer and the gate, takes the GeoSpec products from the newest green
-# `ci.yml` push run on `main`, and dry-runs the publish with pnpm's git checks on or off. With
+# with `gate` off skips the gate and dry-runs the publish with pnpm's git checks on or off. With
 # `tag-checkout` it first pushes a throwaway `spike-publish-<run id>` tag (never `v*`) at the
 # dispatched commit, dry-runs on that tag's checkout, the way `publish.yml` runs on a release tag,
 # and deletes the tag afterwards.
@@ -14,9 +13,7 @@
 # its publishable closure without the GeoSpec engine (D36), install the tarballs into a clean npm
 # application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
 #
-# Differences from `publish.yml`, each a finding for W16: the producer uses the shared
-# `geospec-producer` action (the inline copy in `publish.yml` lacks the retained OCCT preparation
-# and the Nx Cloud token, so it compiles OCCT twice), and installs Chromium before the gate
+# Difference from `publish.yml`, a finding for W16: it installs Chromium before the gate
 # (`scripts:check-pack-install` launches it).
 name: Spike publish dry run
 
@@ -24,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       gate:
-        description: 'Run the macOS producer and the release gate (S20); off runs only the dry-run publish (S21)'
+        description: 'Run the release gate (S20); off runs only the dry-run publish (S21)'
         type: boolean
         default: true
       git-checks:
@@ -40,10 +37,6 @@ on:
         description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-15'
         type: boolean
         default: true
-      products-sha:
-        description: 'Without the gate: the main commit whose green ci.yml run supplies the GeoSpec products (default: the newest)'
-        required: false
-        default: ''
   pull_request:
     paths:
       - '.github/workflows/spike-publish-dry-run.yml'
@@ -80,104 +73,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$SPIKE_TAG" -f sha="$GITHUB_SHA" --jq .ref
 
-  plan:
-    name: Plan release artifact prerequisites
-    if: github.event_name == 'pull_request' || inputs.gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      geospec-required: ${{ steps.geospec.outputs.geospec-required }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Plan expanded release gate
-        id: geospec
-        run: |
-          mkdir -p out/artifacts/geospec-native-engine/plan
-          pnpm nx run scripts:release-gate --graph=out/artifacts/geospec-native-engine/plan/release.json
-          pnpm nx run-many -t pkgcheck --projects tag:type:package --graph=out/artifacts/geospec-native-engine/plan/packages.json
-          pnpm nx run scripts:plan-geospec-ci -- out/artifacts/geospec-native-engine/plan/*.json
-
-  geospec-producer:
-    env:
-      GEOSPEC_WORKERS: 1
-    name: Produce GeoSpec artifacts and run the release gate (macos-15)
-    needs: [plan]
-    if: needs.plan.outputs.geospec-required == 'true'
-    runs-on: macos-15
-    timeout-minutes: 240
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
-          save-pnpm-store: 'false'
-
-      - name: Prepare GeoSpec engine products
-        uses: ./.github/actions/geospec-producer
-
-      - name: Upload complete current-source transport
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: spike-geospec-ci-${{ github.sha }}
-          path: |
-            packages/geospec-engine-native/bindings/node/generated/index.d.ts
-            packages/geospec-engine-native/bindings/node/generated/index.js
-            packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node
-            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs
-            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
-            out/artifacts/geospec-native-engine/ci
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-
-      - name: Prepare current installed GeoSpec consumer
-        env:
-          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
-        run: |
-          pnpm nx run-many -t require-geospec-delivery --parallel=1
-          pnpm nx run scripts:prepare-geospec-test-consumer
-          node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
-
-      - name: Install Chromium for the pack-install check
-        run: pnpm exec playwright install chromium
-
-      - name: Run the complete release gate on the artifact host
-        run: |
-          set -o pipefail
-          started=$(date +%s)
-          pnpm nx run scripts:release-gate --skip-nx-cache 2>&1 | tee "$RUNNER_TEMP/release-gate.log"
-          echo "::notice title=S20 release gate::green in $(( $(date +%s) - started )) s"
-
-      - name: Report the pack-install numbers
-        if: always()
-        run: |
-          grep -E 'tau export|README quick start|npm install:|Imported [0-9]+ published|zod:|TGZ .*MiB|failed|Error' "$RUNNER_TEMP/release-gate.log" | tail -80 || true
-          glb=$(grep -Eo 'tau export main.ts --ext=glb: [0-9]+ bytes' "$RUNNER_TEMP/release-gate.log" | tail -1 || true)
-          quick=$(grep -Eo 'README quick start: .*' "$RUNNER_TEMP/release-gate.log" | tail -1 || true)
-          echo "::notice title=S20 GLB::${glb:-no tau export line}; ${quick:-no quick start line}"
-
-      - name: Upload the release gate log
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: spike-release-gate-${{ github.sha }}
-          path: ${{ runner.temp }}/release-gate.log
-          if-no-files-found: ignore
-
+  # A run Dependabot triggered (an Actions bump to this file) skips the dry run; a
+  # maintainer's push or re-run runs it.
   dry-run:
     name: Dry-run the publish (ubuntu-latest)
-    needs: [throwaway-tag, plan, geospec-producer]
-    if: ${{ !cancelled() && needs.throwaway-tag.result != 'failure' }}
+    needs: [throwaway-tag]
+    if: >-
+      !cancelled() && needs.throwaway-tag.result != 'failure' &&
+      (github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -188,16 +91,6 @@ jobs:
       GEOSPEC_WORKERS: 1
       NPM_CONFIG_PROVENANCE: true
     steps:
-      - name: Require artifact producer success
-        if: env.SPIKE_GATE == 'true'
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
-          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
-        run: |
-          test "$PLAN_RESULT" = success
-          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
-
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -206,40 +99,13 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
 
-      - name: Download same-run GeoSpec transport
-        if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: spike-geospec-ci-${{ github.sha }}
-          path: .
-
-      - name: Verify GeoSpec transport against this checkout
-        if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required == 'true'
-        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
-
-      - name: Find the newest green main CI run
-        id: products
-        if: env.SPIKE_GATE != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PRODUCTS_SHA: ${{ inputs.products-sha }}
-        run: |
-          sha=${PRODUCTS_SHA:-$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha')}
-          echo "GeoSpec products from main $sha"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-      - name: GeoSpec products from main
-        if: env.SPIKE_GATE != 'true'
-        uses: ./.github/actions/geospec-artifact-from-main
-        with:
-          sha: ${{ steps.products.outputs.sha }}
-          github-token: ${{ github.token }}
+      - name: Install Chromium for the pack-install check
+        if: env.SPIKE_GATE == 'true'
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run the release gate
-        if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required != 'true'
+        if: env.SPIKE_GATE == 'true'
         run: pnpm nx run scripts:release-gate
 
       - name: Assert pnpm is the publisher
@@ -300,7 +166,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: >-
+          ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
@@ -311,23 +179,6 @@ jobs:
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
-
-      # `@taucad/host` builds against the GeoSpec engine it peers optionally, so the build needs the products.
-      - name: Find the newest green main CI run
-        id: products
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PRODUCTS_SHA: ${{ inputs.products-sha }}
-        run: |
-          sha=${PRODUCTS_SHA:-$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha')}
-          echo "GeoSpec products from main $sha"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-      - name: GeoSpec products from main
-        uses: ./.github/actions/geospec-artifact-from-main
-        with:
-          sha: ${{ steps.products.outputs.sha }}
-          github-token: ${{ github.token }}
 
       # The CLI's build graph omits packages it reaches only through peers (`@taucad/camera`), so build them all.
       - name: Build every publishable package

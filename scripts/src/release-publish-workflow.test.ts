@@ -26,14 +26,12 @@ const runScripts = (source: string): string[] => {
 
 const scripts = runScripts(workflow);
 const commands = scripts.join('\n');
-const planPkgcheck =
-  'pnpm nx run-many -t pkgcheck --projects tag:type:package --graph=out/artifacts/geospec-native-engine/plan/packages.json';
 const projectSelector = /(?:^|\s)(?:-p|--projects)(?:\s|=|$)/u;
 
 const releaseCommandViolations = (runValues: readonly string[]): string[] => {
   const logicalLines = runValues.flatMap((run) => run.replaceAll(/\\\r?\n[ \t]*/gu, ' ').split('\n'));
   const selectedNxCommands = logicalLines.filter(
-    (line) => /\b(?:pnpm )?nx\b/u.test(line) && line.trim() !== planPkgcheck && projectSelector.test(line),
+    (line) => /\b(?:pnpm )?nx\b/u.test(line) && projectSelector.test(line),
   );
   return [
     ...selectedNxCommands,
@@ -57,7 +55,7 @@ describe('release publish workflow', () => {
     expect(commands).toContain('nx run scripts:release-gate');
   });
 
-  it('rejects direct and continued publish selection while allowing plan pkgcheck', () => {
+  it('rejects direct and continued publish selection', () => {
     for (const command of [
       'run: pnpm nx release publish --tag=beta --projects=some-package',
       'run: pnpm nx release publish --tag=beta --projects some-package',
@@ -77,7 +75,6 @@ describe('release publish workflow', () => {
           --projects some-package
 `;
     expect(releaseCommandViolations(runScripts(foldedPublish))).not.toEqual([]);
-    expect(releaseCommandViolations([`mkdir -p out/plan\n${planPkgcheck}`])).toEqual([]);
   });
 
   it('gates, asserts the publisher, dry-runs, then publishes', () => {

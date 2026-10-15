@@ -47,6 +47,11 @@
 (***************************************************************************)
 (* A deliberate stopped turn continues only after Prompt was issued and the same vendor session restores.
    The implementation persists acpPromptedRequestId at settlement; fresh fallback has no continuation prompt. *)
+(* Grok vendor notifications and selected permission/planning presentation leave
+   the lease, acquisition, and settlement abstraction unchanged (Stutter).
+   Session/prompt/attempt fences and permission downgrades are checked by the
+   adapter and projection conformance tests; vendor tool behavior is not an
+   assertion of this lease model. *)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Keys, Runs, Limit, MaxProcs, ONE_RUN,

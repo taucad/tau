@@ -102,6 +102,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
         asJson({
           type: 'acp-session',
           agentId: input.agentId,
+          ...(state.hostId === undefined ? {} : { hostId: state.hostId }),
           commands: state.commands,
           configOptions: state.configOptions,
           ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
@@ -150,6 +151,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
     const agent = { id: input.adapter.id, displayName: input.adapter.displayName };
     const projection = createTurnProjection({
       turn: seams,
+      requestId: input.requestId,
       createId: effects.createId,
       agentId: input.adapter.id,
       ...(input.adapter.nativeToolName ? { nativeToolName: input.adapter.nativeToolName } : {}),
@@ -378,6 +380,10 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
       switch (command.type) {
         case 'update': {
           projection.update(command.update);
+          return;
+        }
+        case 'grokNotification': {
+          projection.grokNotification(command.notification);
           return;
         }
         case 'sessionState': {

@@ -151,11 +151,12 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
     id: 'grok',
     displayName: 'Grok Build',
     cli: 'grok',
-    args: ['--no-auto-update', 'agent', 'stdio'],
+    /* Permission notifications are process-scoped: never share a leader with other chats. */
+    args: ['--no-auto-update', 'agent', '--no-leader', 'stdio'],
     configEnv: ['GROK_HOME'],
     /* Official @xai-official/grok release verified with an unauthenticated
      * initialize; includes per-session pluginDirs for Tau's system skills. */
-    minimumCliVersion: '1.0.41',
+    minimumCliVersion: '1.0.52',
     loginCommand: 'grok login',
   },
 ];
@@ -168,6 +169,8 @@ export type AcpAdapter = AcpAgentProfile & {
   readonly defaultModel?: string | undefined;
   /** The agent's own reasoning choices from the same discovery session. */
   readonly thoughtLevel?: ExternalAgentDescriptor['thoughtLevel'];
+  /** Verified non-model controls from the discovery session. */
+  readonly configOptions?: ExternalAgentDescriptor['configOptions'];
 } & (
     | {
         readonly package: string;
@@ -447,6 +450,13 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
         ? undefined
         : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
     const thoughtLevel = thoughtLevelOf(thoughtOption);
+    const configOptions = (session.configOptions ?? [])
+      .filter((option) => option.category !== 'model' && option.category !== 'thought_level')
+      .flatMap((option) => {
+        const parsed = externalAgentDescriptorSchema.shape.configOptions.unwrap().element.safeParse(option);
+        return parsed.success ? [parsed.data] : [];
+      })
+      .slice(0, 32);
     const models: Array<ExternalAgentDescriptor['models'][number]> = [];
     for (const model of choice?.models ?? []) {
       if (Date.now() >= deadline) {
@@ -475,6 +485,7 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
             ...(choice.currentValue === undefined ? {} : { defaultModel: choice.currentValue }),
           }),
       ...(thoughtLevel === undefined ? {} : { thoughtLevel }),
+      ...(configOptions.length === 0 ? {} : { configOptions }),
     };
   } catch {
     return adapter;
@@ -540,6 +551,7 @@ export const externalAgentDescriptors = (
     models: [...(adapter.models ?? [])],
     ...(adapter.defaultModel === undefined ? {} : { defaultModel: adapter.defaultModel }),
     ...(adapter.thoughtLevel === undefined ? {} : { thoughtLevel: adapter.thoughtLevel }),
+    ...(adapter.configOptions === undefined ? {} : { configOptions: adapter.configOptions }),
   })),
   ...discovery.refused.map((refusal) => ({
     id: refusal.id,

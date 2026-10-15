@@ -65,6 +65,22 @@ import {
 import type { AcpAgentFacts, AcpLimitReset, AcpSessionFailure, AcpSessionPresentation } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import {
+  grokAutoAvailability,
+  grokControlOptions,
+  grokControlsSupported,
+  grokPermissionConfigId,
+  grokPermissionMetadata,
+  grokPermissionModeOf,
+  grokPermissionNotification,
+  grokPlanningConfigId,
+  grokPlanningModeOf,
+  grokPlanningRequest,
+} from '#acp/grok-controls.js';
+import type { GrokNotification } from '#acp/grok-notifications.js';
+import { grokFailureOf } from '#acp/grok-notifications.js';
+import { grokPromptUsageOf } from '#acp/grok-usage.js';
+import type { GrokPromptUsage } from '#acp/grok-usage.js';
+import {
   busyContextSchema,
   closingContextSchema,
   childContextSchema as contextSchema,
@@ -135,6 +151,8 @@ export type AcpLend = {
 
 /** What a child is spawned with, besides its first lend. */
 export type AcpOpening = {
+  /** Admitted placement identity; configuration never crosses hosts. */
+  readonly hostId?: string | undefined;
   readonly adapter: AcpAdapter;
   readonly cwd: string;
   readonly mcpServers: readonly McpServer[];
@@ -178,6 +196,7 @@ export type AcpCallMethod =
   | 'session/load'
   | 'session/resume'
   | 'session/set_config_option'
+  | 'session/set_mode'
   | 'session/prompt'
   | 'session/close';
 
@@ -226,6 +245,7 @@ export type AcpConnectionCommand =
       };
     }[AcpCallMethod]
   | { readonly type: 'notify'; readonly method: 'session/cancel'; readonly params: { readonly sessionId: string } }
+  | ({ readonly type: 'notify' } & ReturnType<typeof grokPermissionNotification>)
   | ({ readonly type: 'respond'; readonly id: string } & AcpVendorAnswer)
   | { readonly type: 'terminate' }
   | { readonly type: 'kill' };
@@ -250,12 +270,19 @@ export type AcpLentTurnInput = {
 /** Commands the lent turn receives. */
 export type AcpLentTurnCommand =
   | { readonly type: 'update'; readonly update: SessionUpdate }
+  | { readonly type: 'grokNotification'; readonly notification: GrokNotification }
   | { readonly type: 'sessionState'; readonly presentation: AcpSessionPresentation }
   | ({ readonly type: 'serve'; readonly id: string } & AcpVendorRequest)
   | { readonly type: 'loginComplete'; readonly elicitationId: string }
   | {
       readonly type: 'flush';
-      readonly report?: { readonly usage?: AcpUsage | undefined; readonly model?: string | undefined } | undefined;
+      readonly report?:
+        | {
+            readonly usage?: AcpUsage | undefined;
+            readonly model?: string | undefined;
+            readonly grokUsage?: GrokPromptUsage | undefined;
+          }
+        | undefined;
     }
   | { readonly type: 'record'; readonly record: JsonObject; readonly required: boolean };
 
@@ -325,6 +352,8 @@ export const acpSessionIgnoredEvents = {
     ['busy.recording', 'cancel'],
     ['closing', 'cancel'],
     ['closing', 'close'],
+    ['*', 'grokNotification'],
+    ['*', 'grokSettings'],
   ],
 } as const satisfies Readonly<Record<string, ReadonlyArray<readonly [state: string, eventType: string]>>>;
 
@@ -515,11 +544,16 @@ const lifecycleDirectories = (context: AcpSessionContext) => {
   const { directories } = context;
   return {
     ...(supportsDirectories && directories.length > 0 ? { additionalDirectories: [...directories] } : {}),
-    ...(supportsPluginDirectories
+    ...(supportsPluginDirectories || context.grokControls
       ? {
           _meta: {
             /* Tau's revision host owns the working tree for both resume and load. */
             'x.ai/restore_code': false,
+            ...(context.grokControls
+              ? grokPermissionMetadata(
+                  grokPermissionModeOf(context.opening?.configuration?.[grokPermissionConfigId]) ?? 'ask',
+                )
+              : {}),
             ...(directories.length > 0 ? { pluginDirs: directories.map((directory) => `${directory}/.agents`) } : {}),
           },
         }
@@ -590,9 +624,30 @@ const restore = (
 
 type SessionAnswer = Pick<AgentRequestResponsesByMethod['session/new'], 'configOptions' | 'modes'>;
 
+/* Preserve adapter-owned choices across vendor model/reasoning refreshes. */
+const withGrokControls = (
+  context: AcpSessionContext,
+  options: readonly SessionConfigOption[] | undefined,
+  selection: Readonly<Record<string, string | boolean>> = {},
+): readonly SessionConfigOption[] | undefined => {
+  if (!context.grokControls) {
+    return options;
+  }
+  const value = (id: string) =>
+    selection[id] ?? context.configOptions?.find((option) => option.id === id)?.currentValue;
+  return [
+    ...(options ?? []).filter((option) => option.id !== grokPermissionConfigId && option.id !== grokPlanningConfigId),
+    ...grokControlOptions({
+      permission: grokPermissionModeOf(value(grokPermissionConfigId)) ?? 'ask',
+      planning: grokPlanningModeOf(value(grokPlanningConfigId)) ?? 'default',
+      autoAvailable: context.grokAutoAvailable,
+    }),
+  ];
+};
+
 /* The session the restore ladder answered with, as context. */
 const adopt = (context: AcpSessionContext, sessionId: string, answer: SessionAnswer) => {
-  const configOptions = answer.configOptions ?? undefined;
+  const configOptions = withGrokControls(context, answer.configOptions ?? undefined);
   const modeId = answer.modes?.currentModeId ?? context.presentation.modeId;
   return {
     acpSessionId: sessionId,
@@ -642,6 +697,7 @@ export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): Json
   const { limit } = context;
   return {
     acpSessionId: context.acpSessionId ?? '',
+    ...(context.presentation.hostId === undefined ? {} : { hostId: context.presentation.hostId }),
     acpPromptedRequestId: context.promptedRequestId ?? null,
     cwd: context.cwd,
     ...(context.mode === undefined ? {} : { mode: context.mode }),
@@ -700,6 +756,7 @@ const promptOf = (context: AcpSessionContext, lent: AcpLend): readonly ContentBl
 
 type ConfigStep =
   | { readonly configId: string; readonly params: AgentRequestParamsByMethod['session/set_config_option'] }
+  | { readonly configId: string; readonly modeId: 'default' | 'plan' }
   | { readonly failure: AcpFailure }
   | undefined;
 
@@ -727,6 +784,13 @@ const configStep = (context: AcpSessionContext, lent: AcpLend, configured: reado
     }
   }
   for (const [configId, value] of Object.entries(configuration ?? {})) {
+    if (context.grokControls && (configId === grokPermissionConfigId || configId === grokPlanningConfigId)) {
+      const valid = configId === grokPlanningConfigId ? grokPlanningModeOf(value) : grokPermissionModeOf(value);
+      if (valid === undefined || (valid === 'auto' && context.grokAutoAvailable !== true)) {
+        return { failure: unavailable(`Grok does not currently offer ${configId}=${String(value)}.`) };
+      }
+      continue;
+    }
     const option = configOptions?.find((candidate) => candidate.id === configId);
     if (option?.category === 'model' && model !== undefined && value !== model) {
       return {
@@ -762,15 +826,45 @@ const configStep = (context: AcpSessionContext, lent: AcpLend, configured: reado
       };
     }
   }
+  if (context.grokControls && !configured.includes(grokPlanningConfigId)) {
+    const modeId =
+      grokPlanningModeOf(configuration?.[grokPlanningConfigId]) ??
+      grokPlanningModeOf(configOptions?.find((option) => option.id === grokPlanningConfigId)?.currentValue) ??
+      'default';
+    return { configId: grokPlanningConfigId, modeId };
+  }
   return undefined;
 };
 
 /* The fold every `session/update` gets, whatever state it lands in. */
-const folded = (context: AcpSessionContext, update: SessionUpdate) => ({
-  presentation: presentationAfter(context.presentation, update),
-  ...(update.sessionUpdate === 'config_option_update' ? { configOptions: update.configOptions } : {}),
-  ...(update.sessionUpdate === 'usage_update' ? { limit: claudeLimitReset(context.limit, update._meta) } : {}),
-});
+const folded = (context: AcpSessionContext, update: SessionUpdate) => {
+  const configOptions = withGrokControls(
+    context,
+    update.sessionUpdate === 'config_option_update' ? update.configOptions : context.configOptions,
+    update.sessionUpdate === 'current_mode_update' ? { [grokPlanningConfigId]: update.currentModeId } : {},
+  );
+  return {
+    presentation: {
+      ...presentationAfter(context.presentation, update),
+      ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+    },
+    configOptions,
+    ...(update.sessionUpdate === 'usage_update' ? { limit: claudeLimitReset(context.limit, update._meta) } : {}),
+  };
+};
+
+const grokSettingsAfter = (context: AcpSessionContext, params: JsonObject) => {
+  const grokAutoAvailable = grokAutoAvailability(context.grokAutoAvailable, params);
+  const configOptions = withGrokControls({ ...context, grokAutoAvailable }, context.configOptions);
+  return {
+    grokAutoAvailable,
+    configOptions,
+    presentation: {
+      ...context.presentation,
+      ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+    },
+  };
+};
 
 const ownUpdate = (context: AcpSessionContext, sessionId: string): boolean =>
   context.acpSessionId === undefined || sessionId === context.acpSessionId;
@@ -809,6 +903,7 @@ const lend = (lent: AcpLend) =>
     target: '#busy',
     context: {
       lent,
+      grokFailure: undefined,
       outcome: undefined,
       configured: none,
       promptedRequestId: undefined,
@@ -958,7 +1053,13 @@ const configureOrPrompt = (context: AcpBusyContext, enq: Enqueue, patch: Partial
       context: {
         ...patch,
         configured: [...next.configured, step.configId],
-        ...ask(next, enq, { method: 'session/set_config_option', params: step.params }),
+        ...ask(
+          next,
+          enq,
+          'modeId' in step
+            ? grokPlanningRequest(next.acpSessionId ?? '', step.modeId)
+            : { method: 'session/set_config_option', params: step.params },
+        ),
       },
     } as const;
   }
@@ -967,12 +1068,41 @@ const configureOrPrompt = (context: AcpBusyContext, enq: Enqueue, patch: Partial
   if ('code' in blocks) {
     return flush(next, enq, { ...patch, outcome: failed(blocks) });
   }
+  const selectedPermission =
+    grokPermissionModeOf(next.lent.configuration?.[grokPermissionConfigId]) ??
+    grokPermissionModeOf(next.configOptions?.find((option) => option.id === grokPermissionConfigId)?.currentValue) ??
+    'ask';
+  if (next.grokControls && selectedPermission === 'auto' && next.grokAutoAvailable !== true) {
+    return flush(next, enq, {
+      ...patch,
+      outcome: failed(unavailable('Grok Auto approval is not currently available.')),
+    });
+  }
+  const configOptions = withGrokControls(next, next.configOptions, { [grokPermissionConfigId]: selectedPermission });
+  const presentation = {
+    ...next.presentation,
+    ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+  };
+  if (next.grokControls) {
+    /* Explicit every turn, including Ask: warm resume metadata cannot downgrade. */
+    enq.sendTo('connection', { type: 'notify', ...grokPermissionNotification(selectedPermission) });
+    enq.sendTo('lentTurn', { type: 'sessionState', presentation });
+  }
   return {
     target: 'prompting',
     context: {
       ...patch,
+      configOptions,
+      presentation,
       promptedRequestId: next.lent.requestId,
-      ...ask(next, enq, { method: 'session/prompt', params: { sessionId: next.acpSessionId ?? '', prompt: blocks } }),
+      ...ask(next, enq, {
+        method: 'session/prompt',
+        params: {
+          sessionId: next.acpSessionId ?? '',
+          prompt: blocks,
+          ...(next.adapter.id === 'grok' ? { _meta: { promptId: next.lent.requestId } } : {}),
+        },
+      }),
     },
   } as const;
 };
@@ -1010,6 +1140,8 @@ const skillsPublished = (
               ? { ...clientCapabilities, fs: { readTextFile: false, writeTextFile: false } }
               : clientCapabilities,
           clientInfo: { name: 'tau-host', version: '1' },
+          // Grok scopes runtime permission updates by its vendor origin metadata.
+          ...(context.adapter.id === 'grok' ? { _meta: { clientIdentifier: 'tau-host', clientVersion: '1' } } : {}),
         },
       }),
     },
@@ -1075,7 +1207,7 @@ const machineDefinition = setup({
 
 const acpSessionMachineDefinition = machineDefinition.createMachine({
   id: 'acpSession',
-  version: '2',
+  version: '3',
   context: ({ input }: Readonly<{ input: AcpSessionInput }>) => ({
     key: input.key,
     parentRef: input.parentRef,
@@ -1091,11 +1223,15 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
     directories: [],
     facts: { protocolVersion, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
     pluginDirectories: false,
+    grokControls: false,
     ...(input.opening.acpSessionId === undefined ? {} : { acpSessionId: input.opening.acpSessionId }),
     contextLost: false,
     fresh: false,
     configOptions: undefined,
-    presentation: emptySessionPresentation,
+    presentation: {
+      ...emptySessionPresentation,
+      ...(input.opening.hostId === undefined ? {} : { hostId: input.opening.hostId }),
+    },
     priorUsage: input.opening.priorUsage,
     limit: input.opening.limit,
     calls: 0,
@@ -1145,6 +1281,14 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
     sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate'>) =>
       ownUpdate(context, event.sessionId) ? { context: folded(context, event.update) } : {},
     ),
+    /* No active prompt owns these replayed/late vendor events. */
+    grokNotification: refines('Stutter', () => ({})),
+    grokSettings: refines('Stutter', ({ context, event }: On<'grokSettings'>) => {
+      if (context.adapter.id !== 'grok') {
+        return {};
+      }
+      return { context: grokSettingsAfter(context, event.params) };
+    }),
     vendorRequest: refines('Stutter', ({ event }: On<'vendorRequest'>, enq: Enqueue) => {
       refuseVendor(enq, event.id, event.request);
       return {};
@@ -1222,10 +1366,11 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                     agentInfo: initialized.agentInfo ?? undefined,
                   };
                   const pluginDirectories = initialized._meta?.['x.ai/pluginDirs'] === true;
-                  const next = { ...context, facts, pluginDirectories };
+                  const grokControls = grokControlsSupported(context.adapter.id, initialized._meta ?? undefined);
+                  const next = { ...context, facts, pluginDirectories, grokControls };
                   const refusal = refusalOf(next);
                   return refusal === undefined
-                    ? restore(next, enq, { from: 'resuming', patch: { facts, pluginDirectories } })
+                    ? restore(next, enq, { from: 'resuming', patch: { facts, pluginDirectories, grokControls } })
                     : abandonOpen(next, enq, refusal);
                 }),
               },
@@ -1310,12 +1455,46 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
         }),
       },
       on: {
+        grokSettings: refines('Stutter', ({ context, event }: On<'grokSettings', AcpBusyContext>, enq: Enqueue) => {
+          if (context.adapter.id !== 'grok') {
+            return {};
+          }
+          const patch = grokSettingsAfter(context, event.params);
+          enq.sendTo('lentTurn', { type: 'sessionState', presentation: patch.presentation });
+          return { context: patch };
+        }),
+        grokNotification: refines(
+          'Stutter',
+          ({ context, event }: On<'grokNotification', AcpBusyContext>, enq: Enqueue) => {
+            const { notification } = event;
+            if (
+              context.adapter.id !== 'grok' ||
+              context.outcome !== undefined ||
+              notification.sessionId !== context.acpSessionId ||
+              notification._meta?.isReplay === true ||
+              context.promptedRequestId !== context.lent.requestId ||
+              (notification._meta?.promptId !== undefined && notification._meta.promptId !== context.lent.requestId)
+            ) {
+              return {};
+            }
+            enq.sendTo('lentTurn', { type: 'grokNotification', notification });
+            const failure = grokFailureOf(notification.update);
+            return failure ? { context: { grokFailure: { ...failure, severity: 'error' } } } : {};
+          },
+        ),
         sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate', AcpBusyContext>, enq: Enqueue) => {
           if (!ownUpdate(context, event.sessionId)) {
             return {};
           }
           enq.sendTo('lentTurn', { type: 'update', update: event.update });
-          return { context: folded(context, event.update) };
+          const patch = folded(context, event.update);
+          if (
+            event.update.sessionUpdate === 'config_option_update' ||
+            event.update.sessionUpdate === 'current_mode_update'
+          ) {
+            enq.sendTo('lentTurn', { type: 'sessionState', presentation: patch.presentation });
+          }
+          return { context: patch };
         }),
         vendorAnswered: refines('Stutter', ({ context, event }: On<'vendorAnswered', AcpBusyContext>, enq: Enqueue) => {
           if (event.permission && !context.permissions.includes(event.id)) {
@@ -1380,10 +1559,28 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
               if ('error' in event.answer) {
                 return flush(context, enq, { outcome: failed(failureOfCall(context, event.answer.error)) });
               }
+              if (event.answer.method === 'session/set_mode') {
+                const mode =
+                  grokPlanningModeOf(context.lent.configuration?.[grokPlanningConfigId]) ??
+                  grokPlanningModeOf(
+                    context.configOptions?.find((option) => option.id === grokPlanningConfigId)?.currentValue,
+                  ) ??
+                  'default';
+                const configOptions = withGrokControls(context, context.configOptions, {
+                  [grokPlanningConfigId]: mode,
+                });
+                const presentation = {
+                  ...context.presentation,
+                  modeId: mode,
+                  configOptions: (configOptions ?? []).map((option) => asJson(option)),
+                };
+                enq.sendTo('lentTurn', { type: 'sessionState', presentation });
+                return configureOrPrompt(context, enq, { configOptions, presentation, pending: undefined });
+              }
               if (event.answer.method !== 'session/set_config_option') {
                 return {};
               }
-              const { configOptions } = event.answer.result;
+              const configOptions = withGrokControls(context, event.answer.result.configOptions) ?? [];
               const presentation = {
                 ...context.presentation,
                 configOptions: configOptions.map((option) => asJson(option)),
@@ -1417,7 +1614,13 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                   return {};
                 }
                 if ('error' in event.answer) {
-                  return flush(context, enq, { outcome: failed(failureOfCall(context, event.answer.error)) });
+                  const ended = context.grokFailure
+                    ? stopped(context, context.grokFailure, { meta: undefined, at: event.at })
+                    : undefined;
+                  return flush(context, enq, {
+                    outcome: failed(ended?.failure ?? failureOfCall(context, event.answer.error)),
+                    ...(ended ? { limit: ended.limit } : {}),
+                  });
                 }
                 if (event.answer.method !== 'session/prompt') {
                   return {};
@@ -1426,7 +1629,11 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                 /* Read back, not echoed: the model the agent actually finished on (V6). */
                 const model = modelChoice(context.configOptions)?.currentValue ?? context.lent.model;
                 const usage = promptUsageOf(answered, context.adapter.id, context.priorUsage);
-                const report = { usage, model };
+                const report = {
+                  usage,
+                  model,
+                  ...(context.adapter.id === 'grok' ? { grokUsage: grokPromptUsageOf(answered._meta) } : {}),
+                };
                 /* A typed failure ends the turn `end_turn`: the stop reason alone would
                  * record a usage limit as a completed turn. */
                 const stop = airSessionFailureOf(answered._meta);
@@ -1635,7 +1842,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
               if (event.answer.method !== 'session/set_config_option') {
                 return {};
               }
-              const { configOptions } = event.answer.result;
+              const configOptions = withGrokControls(context, event.answer.result.configOptions) ?? [];
               enq.emit({
                 type: 'modelProbed',
                 requestId: context.probeRequestId ?? '',

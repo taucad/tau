@@ -141,11 +141,13 @@ export const externalTurnOf = (
  *
  * @param events - The chat's durable events.
  * @param agentId - Agent this turn selected; a different agent gets its own session.
+ * @param hostId - Admitted placement; only records owned by that host may restore its session.
  * @returns The record the runner resumes from, or `undefined` for a first turn.
  */
 export const externalSessionOf = (
   events: readonly AgentLogEvent[],
   agentId: string,
+  hostId?: string,
 ): (JsonObject & ExternalSessionState) | undefined => {
   /* Reduced, not raw: `remember` records the session id by *replacing* the
    * user message's envelope, so only the reducer's view carries it. */
@@ -159,7 +161,12 @@ export const externalSessionOf = (
     /* The most recent marker that actually *names* a session: only the turn
      * that opened one records it, and every later turn of the same session
      * carries a bare marker. */
-    if (!marker || marker.agentId !== agentId || typeof marker['acpSessionId'] !== 'string') {
+    if (
+      !marker ||
+      marker.agentId !== agentId ||
+      typeof marker['acpSessionId'] !== 'string' ||
+      (hostId !== undefined && marker['hostId'] !== hostId)
+    ) {
       continue;
     }
     const { kind: _kind, runKind: _runKind, ...state } = marker;

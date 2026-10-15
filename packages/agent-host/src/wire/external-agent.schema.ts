@@ -35,33 +35,44 @@ export const externalAgentRefusalCodes = [
 /** One {@link externalAgentRefusalCodes} value. @public */
 export type ExternalAgentRefusalCode = (typeof externalAgentRefusalCodes)[number];
 
-/** The agent's own pre-session reasoning choice, read from its discovery session. */
-const externalAgentThoughtValueSchema = z.strictObject({
+/** One bounded value reported by the agent's discovery session. */
+const externalAgentConfigValueSchema = z.strictObject({
   value: z.string().max(128),
   name: z.string().max(128),
   description: z.string().max(512).nullish(),
 });
 
-const externalAgentThoughtLevelSchema = z.strictObject({
-  type: z.literal('select'),
+const externalAgentConfigBaseSchema = z.strictObject({
   id: z.string().min(1).max(128),
   name: z.string().min(1).max(128),
-  category: z.literal('thought_level'),
+  category: z.string().min(1).max(128).nullish(),
   description: z.string().max(512).nullish(),
+});
+
+const externalAgentSelectConfigSchema = externalAgentConfigBaseSchema.extend({
+  type: z.literal('select'),
   currentValue: z.string().max(128),
   options: z.union([
-    z.array(externalAgentThoughtValueSchema).max(16),
+    z.array(externalAgentConfigValueSchema).max(16),
     z
       .array(
         z.strictObject({
           group: z.string().max(128),
           name: z.string().max(128),
-          options: z.array(externalAgentThoughtValueSchema).max(16),
+          options: z.array(externalAgentConfigValueSchema).max(16),
         }),
       )
       .max(16),
   ]),
 });
+
+const externalAgentThoughtLevelSchema = externalAgentSelectConfigSchema.extend({
+  category: z.literal('thought_level'),
+});
+const externalAgentConfigOptionSchema = z.discriminatedUnion('type', [
+  externalAgentSelectConfigSchema,
+  externalAgentConfigBaseSchema.extend({ type: z.literal('boolean'), currentValue: z.boolean() }),
+]);
 
 /**
  * One external agent, exactly as every tier carries it (VSC1).
@@ -107,6 +118,8 @@ export const externalAgentDescriptorSchema = z.strictObject({
   defaultModel: z.string().min(1).max(128).optional(),
   /** The probe's own reasoning choices, available before the first chat session. */
   thoughtLevel: externalAgentThoughtLevelSchema.optional(),
+  /** Verified non-model controls from the discovery session, available before the first turn. */
+  configOptions: z.array(externalAgentConfigOptionSchema).max(32).optional(),
   /** Present exactly when this agent cannot be started; `models` is then empty. */
   refusal: z.enum(externalAgentRefusalCodes).optional(),
 });

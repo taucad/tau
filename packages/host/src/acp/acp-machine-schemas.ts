@@ -19,8 +19,11 @@ import type {
   AcpVendorRequest,
 } from '#acp/acp-session.machine.js';
 import type { AcpAcquire, AcpSlot } from '#acp/acp-sessions.machine.js';
-import type { AcpAgentFacts, AcpLimitReset, AcpSessionPresentation } from '#acp/session.js';
+import type { AcpAgentFacts, AcpLimitReset, AcpSessionPresentation, AcpSessionFailure } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
+import type { GrokNotification } from '#acp/grok-notifications.js';
+import type { JsonObject } from '@taucad/agent-host';
+import type { GrokPromptUsage } from '#acp/grok-usage.js';
 
 const json = <T>() => z.custom<T>();
 
@@ -41,6 +44,8 @@ export const childEventSchemas = {
     answer: json<AcpAnswer | { readonly method: AcpCallMethod; readonly error: AcpCallError }>(),
   }),
   sessionUpdate: z.object({ sessionId: z.string(), update: json<SessionUpdate>() }),
+  grokNotification: z.object({ notification: json<GrokNotification>() }),
+  grokSettings: z.object({ params: json<JsonObject>() }),
   vendorRequest: z.object({ id: z.string(), request: json<AcpVendorRequest>() }),
   elicitationComplete: z.object({ elicitationId: z.string() }),
   adapterExited: z.object({ stderr: z.string() }),
@@ -79,6 +84,8 @@ export const childContextSchema = z.object({
   facts: json<AcpAgentFacts>(),
   /* Grok loads skills from a plugin's `skills/` directory (`_meta['x.ai/pluginDirs']`). */
   pluginDirectories: z.boolean(),
+  grokControls: z.boolean(),
+  grokAutoAvailable: z.boolean().optional(),
   /* The session the record names until the restore ladder answers; then the one this child prompts. */
   acpSessionId: z.string().optional(),
   contextLost: z.boolean(),
@@ -119,7 +126,15 @@ export const busyContextSchema = childContextSchema.extend({
   configured: z.array(z.string()),
   /* Permission requests awaiting the person, answered `cancelled` on cancel. */
   permissions: z.array(z.string()),
-  report: json<{ readonly usage?: AcpUsage | undefined; readonly model?: string | undefined } | undefined>(),
+  report: json<
+    | {
+        readonly usage?: AcpUsage | undefined;
+        readonly model?: string | undefined;
+        readonly grokUsage?: GrokPromptUsage | undefined;
+      }
+    | undefined
+  >(),
+  grokFailure: json<AcpSessionFailure | undefined>(),
   /* The prompt's usage, the baseline once its report is durable. */
   answered: json<AcpUsage | undefined>(),
   closeAfter: z.boolean(),

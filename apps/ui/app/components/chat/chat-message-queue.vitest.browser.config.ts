@@ -15,6 +15,7 @@ export default defineConfig({
     include: [
       'app/components/chat/chat-message-queue.browser.test.tsx',
       'app/components/chat/chat-questions.browser.test.tsx',
+      'app/components/chat/chat-acp-activity.browser.test.tsx',
     ],
     fileParallelism: false,
     browser: {

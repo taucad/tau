@@ -10,6 +10,23 @@ import { useFeature } from '#flags/use-feature.js';
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;
 
+/** Only Grok's unqualified fallback labels change; scoped choices retain their wording and identity. */
+const permissionLabel = (approval: AgentHostApproval, option: AgentHostApproval['options'][number]): string => {
+  if (approval.agentId !== 'grok') {
+    return option.name;
+  }
+  if (option.optionId === 'always-allow' && option.kind === 'allow_always' && option.name === 'always allow') {
+    return 'Always allow';
+  }
+  if (option.optionId === 'allow-once' && option.kind === 'allow_once' && option.name === 'allow once') {
+    return 'Allow once';
+  }
+  if (option.optionId === 'reject-once' && option.kind === 'reject_once' && option.name === 'reject once') {
+    return 'Deny';
+  }
+  return option.name;
+};
+
 const tauPermissionTitles = new Map<string, string>([
   ['evaluate_model', 'Render model'],
   ['test_model', 'Run tests'],
@@ -228,7 +245,7 @@ export function ChatPermissionRequest({
                   void respond(option.kind?.startsWith('allow') ?? true, option.optionId);
                 }}
               >
-                {option.name}
+                {permissionLabel(approval, option)}
               </Button>
             ))
           ) : (

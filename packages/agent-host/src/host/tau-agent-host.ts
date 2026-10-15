@@ -1271,7 +1271,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (agent !== undefined) {
         /* The chat's own session (VSC3). A rewind keeps the selection and drops the vendor session, which holds a
          * turn Tau has just retracted. */
-        const remembered = externalSessionOf(events, agent.id);
+        const remembered = externalSessionOf(
+          events,
+          agent.id,
+          typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
+        );
         let state: JsonObject | undefined = remembered;
         if (rewind !== undefined) {
           await closeExternalChat(chatId);
@@ -1466,7 +1470,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             /* The session this chat reached, not the one its admission asked for: `remember` replaces the user
              * message's envelope, which only the reducer's view carries. */
             const state =
-              mode === 'start' ? admission?.state : (externalSessionOf(events, agentId) ?? admission?.state);
+              mode === 'start'
+                ? admission?.state
+                : (externalSessionOf(
+                    events,
+                    agentId,
+                    typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
+                  ) ?? admission?.state);
             const remember = async (remembered: JsonObject): Promise<void> => {
               const current = externalTurnOf(await log.read());
               const message =

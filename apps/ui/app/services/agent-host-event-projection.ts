@@ -5,7 +5,12 @@ import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessa
 import { userProviderMessageSchema } from '@taucad/agent-host';
 import { externalAgentStopSchema } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
-import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
+import {
+  acpActivityDataSchema,
+  acpSessionDataSchema,
+  billingInvocationStatusSchema,
+  usageDataSchema,
+} from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
@@ -233,6 +238,10 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
    * to know that the missing charge is a fact and not a gap. */
   const tauInternal = isRecord(metadata.tauInternal) ? metadata.tauInternal : undefined;
   const agent = tauInternal?.['origin'] === 'external' ? tauInternal['agentId'] : undefined;
+  const vendorReport =
+    typeof agent === 'string'
+      ? usageDataSchema.shape.vendorReport.safeParse(tauInternal?.['vendorPromptUsage']).data
+      : undefined;
   return [
     {
       type: 'data-usage',
@@ -242,6 +251,7 @@ const usageChunks = (message: AssistantProviderMessage): UIMessageChunk[] => {
         id,
         ...(typeof agent === 'string' ? { agent } : {}),
         ...billingIdentity(tauInternal),
+        ...(vendorReport === undefined ? {} : { vendorReport }),
         model: metadata.responseModel ?? metadata.model ?? 'unknown',
         inputTokens: usage.input,
         outputTokens: usage.output,
@@ -417,6 +427,13 @@ const assistantChunks = (
         chunks.push({ type: 'data-acp-session', id, data: parsed.data });
       }
     }
+    if (value['type'] === 'acp-activity') {
+      const id = `${message.id}:acp-activity:${String(index)}`;
+      const parsed = acpActivityDataSchema.safeParse({ ...value, id });
+      if (parsed.success) {
+        chunks.push({ type: 'data-acp-activity', id, data: parsed.data });
+      }
+    }
     // Tool-call blocks are projected from their explicit tool-input log row.
   }
   chunks.push(...usageChunks(message));
@@ -550,12 +567,20 @@ const messageChunks = (
 };
 
 /** Read the latest ACP session record for the selected agent from durable UI messages. @public */
-export const latestAcpSessionData = (messages: readonly MyUIMessage[], agentId: string): AcpSessionData | undefined => {
+export const latestAcpSessionData = (
+  messages: readonly MyUIMessage[],
+  agentId: string,
+  hostId?: string,
+): AcpSessionData | undefined => {
   for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
     const parts = messages[messageIndex]?.parts ?? [];
     for (let partIndex = parts.length - 1; partIndex >= 0; partIndex--) {
       const part = parts[partIndex];
-      if (part?.type === 'data-acp-session' && part.data.agentId === agentId) {
+      if (
+        part?.type === 'data-acp-session' &&
+        part.data.agentId === agentId &&
+        (hostId === undefined || part.data.hostId === hostId)
+      ) {
         return part.data;
       }
     }

@@ -1,0 +1,57 @@
+# Spike S33 (native-dependency-resolution charter, wave 2, Q36): `tau install` against a Verdaccio mirror with zero
+# requests to registry.npmjs.org. Spike code under scripts/spikes/native-deps/linux/s33; the run's evidence is the
+# uploaded artifact and the job summary. Installed packages are data: lifecycle scripts never run.
+name: Spike S33 (npm mirror)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s33-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s33:
+    name: S33 tau install against Verdaccio
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Run the cells
+        run: scripts/spikes/native-deps/linux/s33/run.sh "$RUNNER_TEMP/s33" "$RUNNER_TEMP/evidence"
+      - name: Collect the summary
+        if: always()
+        run: |
+          e="$RUNNER_TEMP/evidence"
+          {
+            cat "$e/verdaccio-image.txt" "$e/warm.txt" "$e/online-tree.txt" "$e/tamper.txt" 2>/dev/null
+            echo "== cells"; cat "$e/cells.jsonl" 2>/dev/null
+            for c in online rewrite fresh prefix-own-host prefix-public-url tampered; do
+              echo "== $c stdout"; head -c 600 "$e/$c.out" 2>/dev/null; echo
+              echo "== $c stderr (tail)"; tail -c 900 "$e/$c.err" 2>/dev/null; echo
+              echo "== $c origins"; jq -r '.origin + " permitted=" + (.permitted|tostring) + " rewritten=" + (.rewritten|tostring)' "$e/$c-fetch.jsonl" 2>/dev/null | sort | uniq -c
+            done
+            echo "== resolved hosts in the rewrite lock after install"; jq -r '.packages[] | .resolved // empty' "$e/rewrite-package-lock-after.json" 2>/dev/null | sed -E 's#^(https?://[^/]+).*#\1#' | sort | uniq -c
+          } > "$e/s33-summary.txt"
+          { echo '```'; cat "$e/s33-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S33' "$RUNNER_TEMP/evidence/s33-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s33-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

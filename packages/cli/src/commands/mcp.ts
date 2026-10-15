@@ -20,8 +20,8 @@ import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
 import { childEnvironment } from '#child-environment.js';
-import { composeNativeKernels, openNativePreparation, refusedKernels } from '#native-kernels.js';
-import type { NativeComposition } from '#native-kernels.js';
+import type * as NativeKernels from '#native-kernels.js';
+import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /**
@@ -196,8 +196,15 @@ export const mcpCommand = defineCommand({
     /* The native kernels every new runtime thread composes, read from the store's receipts once per generation; a
      * profile no host can honour leaves the native kernels out rather than every CAD tool. */
     let composition: Promise<NativeComposition> | undefined;
+    /* Loaded on first use: the native packages' entries import their kernels, which `initialize` must not wait for. */
+    let nativeModule: Promise<typeof NativeKernels> | undefined;
+    const native = async (): Promise<typeof NativeKernels> => {
+      nativeModule ??= import('#native-kernels.js');
+      return nativeModule;
+    };
     const composeOrNone = async (): Promise<NativeComposition> => {
       try {
+        const { composeNativeKernels } = await native();
         return await composeNativeKernels();
       } catch (error) {
         process.stderr.write(`tau mcp: serving without native kernels: ${String(error)}\n`);
@@ -373,7 +380,15 @@ export const mcpCommand = defineCommand({
     const checkouts = new Map<string, { readonly cwd: string }>();
     /* `get_parameters` and `apply_parameter_operation`: one actor per entry, writing its sidecar. */
     const parameters = openLocalParameterActors({ runtimeClient: clientFor });
-    const preparation = openNativePreparation();
+    let preparation: Promise<NativePreparation> | undefined;
+    const startPreparation = async (): Promise<NativePreparation> => {
+      const { openNativePreparation } = await native();
+      return openNativePreparation();
+    };
+    const openPreparation = async (): Promise<NativePreparation> => {
+      preparation ??= startPreparation();
+      return preparation;
+    };
     const tools = createHostToolRegistry({
       workspaceRoot,
       checkouts,
@@ -383,7 +398,8 @@ export const mcpCommand = defineCommand({
       ...(machines === undefined ? {} : { machines: machines.facet, projectIdOf: machines.projectOf }),
       /* In this process, with its unrestricted fetch (D4); a ready kernel is composed by every later call. */
       prepareKernel: async ({ kernel }, { signal, onProgress }) => {
-        const outcome = await preparation.prepare(kernel, { signal, onProgress });
+        const opened = await openPreparation();
+        const outcome = await opened.prepare(kernel, { signal, onProgress });
         if (outcome.status === 'ready') {
           await retireClients();
         }
@@ -398,6 +414,11 @@ export const mcpCommand = defineCommand({
      */
     const invokeComposed: typeof tools.invoke = async (invocation) => {
       const result = await tools.invoke(invocation);
+      /* A refusal can only come from a runtime thread, which loaded the module already. */
+      if (nativeModule === undefined) {
+        return result;
+      }
+      const { composeNativeKernels, refusedKernels } = await native();
       const refused = refusedKernels(result.content);
       if (refused.size === 0) {
         return result;
@@ -463,7 +484,10 @@ export const mcpCommand = defineCommand({
         process.stderr.write(`tau mcp: the printer store did not close: ${String(error)}\n`);
       });
       await clients.closeAll();
-      await preparation.dispose();
+      if (preparation !== undefined) {
+        const opened = await preparation;
+        await opened.dispose();
+      }
     };
     await Promise.race([close().catch(() => undefined), sleep(shutdownGrace)]);
     // oxlint-disable-next-line unicorn/no-process-exit -- a kernel thread that ignores termination would keep the event loop alive; the protocol is already closed, so no reader is truncated.

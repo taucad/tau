@@ -23,6 +23,7 @@ import type { TauMcpServerOptions } from '@taucad/mcp';
 import type { HostToolInvocation, HostToolResult, ToolRegistry } from '@taucad/agent-host';
 
 import { serveLocalHostMcp } from '#mcp-server.js';
+import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 const served = vi.hoisted(() => ({ options: undefined as TauMcpServerOptions | undefined, closed: 0 }));
 
@@ -254,6 +255,50 @@ describe('serveLocalHostMcp', () => {
     } finally {
       await local.close();
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should offer prepare_kernel as open-world and idempotent, and forward its progress reports to the client', async () => {
+    const registry: ToolRegistry = {
+      list: () => [
+        { name: prepareKernelToolName, description: 'Prepare.', inputSchema: { type: 'object', properties: {} } },
+      ],
+      invoke: async (invocation) => {
+        invocation.onUpdate?.({
+          content: { progress: 10, total: 30, message: 'downloading dotnet (0/2)' },
+          isError: false,
+        });
+        invocation.onUpdate?.({ content: { note: 'not a progress report' }, isError: false });
+        invocation.onUpdate?.({ content: { progress: 30, total: 30 }, isError: false });
+        return { content: { status: 'ready', kernel: 'picogk' }, isError: false };
+      },
+    };
+    const local = await serveLocalHostMcp({ workspaceRoot: '/default', registry, checkouts: new Map() });
+    try {
+      const reports: unknown[] = [];
+      const result = await served.options?.dispatch(
+        { toolName: prepareKernelToolName, args: { kernel: 'picogk' } },
+        {
+          toolCallId: 'prepare-1',
+          progress: async (report) => {
+            reports.push(report);
+          },
+        },
+      );
+
+      expect(served.options?.hostTools).toEqual([
+        expect.objectContaining({
+          name: prepareKernelToolName,
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        }),
+      ]);
+      expect(reports).toEqual([
+        { progress: 10, total: 30, message: 'downloading dotnet (0/2)' },
+        { progress: 30, total: 30 },
+      ]);
+      expect(result).toEqual({ success: true, status: 'ready', kernel: 'picogk' });
+    } finally {
+      await local.close();
     }
   });
 });

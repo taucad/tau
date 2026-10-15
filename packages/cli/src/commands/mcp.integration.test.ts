@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- one stdio server suite: the native-kernel scenarios share its launcher, frames and mirror */
 /**
  * `tau mcp` the way a Codex or Claude Code plugin runs it: a child process
  * speaking MCP over stdio, driven by the SDK client Claude Code embeds.
@@ -11,13 +12,18 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { gzipSync } from 'node:zlib';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -26,6 +32,7 @@ import { CallToolResultSchema, ElicitRequestSchema, JSONRPCMessageSchema } from 
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { defaultMachineProviders, openSharedMachineHost } from '@taucad/host';
 import { connectMachineChannel } from '@taucad/runtime/machine';
+import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
@@ -40,11 +47,18 @@ const kernelCallLimit = 300_000;
 /** A kernel module, by the `<name>.kernel.ts` file name every runtime kernel carries. */
 const kernelModule = /\/[^/]+\.kernel\.(?:ts|mjs|js)$/u;
 
-/** A loader hook that appends each module URL the server resolves to `TAU_TEST_RESOLVE_LOG`. */
+/**
+ * A loader hook that appends each module URL the server resolves to the log its registration names. The path rides
+ * the registration, not the environment: `tau mcp` starts its runtime threads with an allowlisted environment (X9).
+ */
 const resolveLogHook = `import { appendFileSync } from 'node:fs';
+let log;
+export const initialize = (path) => {
+  log = path;
+};
 export const resolve = async (specifier, context, next) => {
   const resolved = await next(specifier, context);
-  appendFileSync(process.env.TAU_TEST_RESOLVE_LOG, resolved.url + '\\n');
+  appendFileSync(log, resolved.url + '\\n');
   return resolved;
 };
 `;
@@ -173,11 +187,14 @@ beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'mcp-integration-'));
   disposers.push(async () => rm(scratch, { recursive: true, force: true }));
   await writeFile(join(scratch, 'resolve-log.mjs'), resolveLogHook);
-  await writeFile(
-    join(scratch, 'register.mjs'),
-    `import { register } from 'node:module';\nregister(${JSON.stringify(pathToFileURL(join(scratch, 'resolve-log.mjs')).href)});\n`,
-  );
 });
+
+/** One JSON-RPC frame on a server's stdio. */
+type Frame = {
+  readonly at: number;
+  readonly direction: 'client->server' | 'server->client';
+  readonly frame: string;
+};
 
 /** One `tau mcp` child and the SDK transport over its stdio. */
 type Served = {
@@ -186,6 +203,8 @@ type Served = {
   readonly exited: Promise<number | undefined>;
   readonly stdout: () => string;
   readonly stderr: () => string;
+  /** Every JSON-RPC frame in either direction, with milliseconds since launch: the evidence a scenario keeps. */
+  readonly frames: () => readonly Frame[];
   /** Each kernel module the child has resolved so far. */
   readonly kernelModules: () => Promise<readonly string[]>;
 };
@@ -204,13 +223,22 @@ let launches = 0;
 const launch = (
   projectDirectory?: string,
   viewerPage?: string,
-  extra: { readonly env?: Record<string, string>; readonly args?: readonly string[] } = {},
+  extra: {
+    readonly env?: Record<string, string>;
+    readonly args?: readonly string[];
+    /** Further modules the server imports first, such as a test's own loader hooks. */
+    readonly imports?: readonly string[];
+  } = {},
 ): Served => {
   launches += 1;
   const resolveLog = join(scratch, `resolved-${String(launches)}.log`);
+  const register = join(scratch, `register-${String(launches)}.mjs`);
+  writeFileSync(
+    register,
+    `import { register } from 'node:module';\nregister(${JSON.stringify(pathToFileURL(join(scratch, 'resolve-log.mjs')).href)}, { data: ${JSON.stringify(resolveLog)} });\n`,
+  );
   /* Built by assignment so no environment key is a source literal. */
   const env: NodeJS.ProcessEnv = { ...process.env };
-  env['TAU_TEST_RESOLVE_LOG'] = resolveLog;
   /* Without one the server starts as Codex starts it, naming no project, even when this test runs under Claude Code. */
   if (projectDirectory === undefined) {
     delete env['CLAUDE_PROJECT_DIR'];
@@ -227,7 +255,8 @@ const launch = (
       '--import',
       'tsx',
       '--import',
-      pathToFileURL(join(scratch, 'register.mjs')).href,
+      pathToFileURL(register).href,
+      ...(extra.imports ?? []).flatMap((specifier) => ['--import', specifier]),
       binPath,
       'mcp',
       ...(extra.args ?? []),
@@ -237,6 +266,8 @@ const launch = (
   let stdout = '';
   let stderr = '';
   let unread = '';
+  const frames: Frame[] = [];
+  const started = performance.now();
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
@@ -256,6 +287,7 @@ const launch = (
         for (let end = unread.indexOf('\n'); end !== -1; end = unread.indexOf('\n')) {
           const line = unread.slice(0, end);
           unread = unread.slice(end + 1);
+          frames.push({ at: Math.round(performance.now() - started), direction: 'server->client', frame: line });
           try {
             transport.onmessage?.(JSONRPCMessageSchema.parse(JSON.parse(line)));
           } catch (error) {
@@ -268,7 +300,9 @@ const launch = (
       });
     },
     send: async (message) => {
-      child.stdin.write(`${JSON.stringify(message)}\n`);
+      const frame = JSON.stringify(message);
+      frames.push({ at: Math.round(performance.now() - started), direction: 'client->server', frame });
+      child.stdin.write(`${frame}\n`);
     },
     /* What a host does to stop a stdio server: close its input. */
     close: async () => {
@@ -281,6 +315,7 @@ const launch = (
     exited,
     stdout: () => stdout,
     stderr: () => stderr,
+    frames: () => frames,
     kernelModules: async () => {
       const resolved = await readFile(resolveLog, 'utf8');
       return resolved.split('\n').filter((url) => kernelModule.test(url));
@@ -1204,6 +1239,468 @@ describe('tau mcp idle release', () => {
       await client.close();
       const { code } = await exitWithin(served, 10_000);
       expect(code).toBe(0);
+    },
+    kernelCallLimit,
+  );
+});
+
+/*
+ * Native kernels over MCP (charter W5 tier 4a, D7), on any host, with a synthetic PicoGK closure: the checked-in
+ * kernel row and payload destinations, two in-test archives shaped like Microsoft's runtime and the Tau layer plus a
+ * notices archive, served by a loopback mirror under no-fallback for a forced darwin-arm64 target. A sync loader hook
+ * (`module.registerHooks`) points `@taucad/picogk/tau-plugin.json` at the synthetic manifest in the server's threads
+ * only; Build123d keeps its real manifest, so its refusal names the real download. No client cancellation is relied
+ * on beyond the SDK's own `notifications/cancelled` (X9: Codex sends none).
+ */
+
+/** One regular file of a synthetic payload archive. */
+type ArchiveMember = { readonly name: string; readonly bytes: Uint8Array<ArrayBuffer>; readonly executable?: boolean };
+
+/** A gzipped ustar archive of regular files, the shape every PicoGK payload has. */
+const tarGz = (members: readonly ArchiveMember[]): Uint8Array<ArrayBuffer> => {
+  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
+  for (const { name, bytes, executable } of members) {
+    const header = Buffer.alloc(512);
+    header.write(name, 0);
+    header.write(`${(executable === true ? 0o755 : 0o644).toString(8).padStart(7, '0')}\0`, 100);
+    header.write('0000000\0', 108);
+    header.write('0000000\0', 116);
+    header.write(`${bytes.length.toString(8).padStart(11, '0')}\0`, 124);
+    header.write('00000000000\0', 136);
+    header.write('0', 156);
+    header.write('ustar\u000000', 257);
+    header.fill(0x20, 148, 156);
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148);
+    blocks.push(header, Buffer.from(bytes), Buffer.alloc((512 - (bytes.length % 512)) % 512));
+  }
+  return new Uint8Array(gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)])));
+};
+
+const text = (value: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(value, 'utf8'));
+/* Incompressible, so each payload streams long enough to report progress more than once. */
+const filler = (): Uint8Array<ArrayBuffer> => new Uint8Array(randomBytes(384 * 1024));
+
+const runtimeVersion = '10.0.11';
+const synthetic = {
+  dotnet: tarGz([
+    { name: 'dotnet', bytes: text('muxer'), executable: true },
+    { name: `host/fxr/${runtimeVersion}/libhostfxr.dylib`, bytes: text('hostfxr') },
+    { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libhostpolicy.dylib`, bytes: text('hostpolicy') },
+    { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libcoreclr.dylib`, bytes: text('coreclr') },
+    { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libclrjit.dylib`, bytes: text('clrjit') },
+    { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/System.Private.CoreLib.dll`, bytes: text('corelib') },
+    { name: 'filler.bin', bytes: filler() },
+  ]),
+  worker: tarGz([
+    { name: 'Tau.PicoGK.Worker.dll', bytes: text('worker') },
+    { name: 'Tau.PicoGK.Worker.runtimeconfig.json', bytes: text('{}') },
+    { name: 'Tau.PicoGK.Worker.deps.json', bytes: text('{}') },
+    { name: 'PicoGK.dll', bytes: text('picogk') },
+    { name: 'filler.bin', bytes: filler() },
+  ]),
+  notices: tarGz([{ name: 'filler.bin', bytes: filler() }]),
+} as const;
+const destinations = { dotnet: 'dotnet', worker: 'tau-worker', notices: 'tau-notices' } as const;
+const hexOf = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+const syntheticBytes = Object.values(synthetic).reduce((sum, bytes) => sum + bytes.byteLength, 0);
+
+/** The PicoGK manifest with its kernel row, and one darwin-arm64 variant pinning the synthetic archives. */
+const syntheticManifest = {
+  schemaVersion: 1,
+  kernels: { picogk: { requires: ['runtime'], extensions: ['cs'] } },
+  dependencies: {
+    runtime: [
+      {
+        target: { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
+        payloads: Object.entries(synthetic).map(([name, bytes]) => ({
+          name,
+          integrity: `sha256-${createHash('sha256').update(bytes).digest('base64')}`,
+          byteLength: bytes.byteLength,
+          format: 'tar.gz',
+          /* Never fetched: the mirror serves every payload, with no fallback. */
+          origin: { kind: 'url', urls: [`https://payloads.invalid/${name}.tar.gz`] },
+          destination: destinations[name as keyof typeof destinations],
+        })),
+      },
+    ],
+  },
+};
+
+/** Build123d's real download for the forced target, the bytes its refusal must name. */
+const build123dBytes = (() => {
+  const deployment = parsePluginDeployment(
+    JSON.parse(readFileSync(createRequire(import.meta.url).resolve('@taucad/build123d/tau-plugin.json'), 'utf8')),
+    '@taucad/build123d tau-plugin.json',
+  );
+  const indicators = detectHostIndicators();
+  const selection =
+    indicators === undefined
+      ? undefined
+      : selectVariant(deployment.dependencies['engine'] ?? [], indicators, { target: 'darwin-arm64' });
+  return selection?.status === 'selected'
+    ? selection.variant.payloads.reduce((sum, payload) => sum + payload.byteLength, 0)
+    : undefined;
+})();
+
+/** One request the mirror answered, by blob. */
+type MirrorRequest = { readonly hex: string; completed: boolean; closed: boolean };
+
+/** A digest-addressed loopback mirror that streams each blob in small chunks and can hold one blob mid-stream. */
+const startMirror = async () => {
+  const blobs = new Map(Object.values(synthetic).map((bytes) => [hexOf(bytes), bytes]));
+  const requests: MirrorRequest[] = [];
+  let stalled: { readonly hex: string; readonly gate: PromiseWithResolvers<void> } | undefined;
+  const server = createServer((request, response) => {
+    const hex = /\/blobs\/sha256\/(?<hex>[\da-f]{64})$/u.exec(request.url ?? '')?.groups?.['hex'] ?? '';
+    const bytes = blobs.get(hex);
+    if (bytes === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    const record: MirrorRequest = { hex, completed: false, closed: false };
+    requests.push(record);
+    response.once('close', () => {
+      record.closed = true;
+    });
+    response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(bytes.length) });
+    /* Sent in chunks with pauses, so a preparation reports progress more than once. */
+    const stream = async (): Promise<void> => {
+      const chunk = 16 * 1024;
+      for (let offset = 0; offset < bytes.length; offset += chunk) {
+        const hold = stalled?.hex === hex && offset > 0 ? stalled : undefined;
+        if (hold !== undefined) {
+          stalled = undefined;
+          // oxlint-disable-next-line no-await-in-loop -- the stream waits where the test holds it.
+          await hold.gate.promise;
+        }
+        if (record.closed) {
+          return;
+        }
+        response.write(bytes.subarray(offset, offset + chunk));
+        // oxlint-disable-next-line no-await-in-loop -- a slow link, so progress is reported more than once.
+        await sleep(25);
+      }
+      response.end();
+      record.completed = true;
+    };
+    void stream();
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${String(port)}/`,
+    requests,
+    /** Hold the next request for `hex` after its first chunk; resolve the returned gate to let it go on. */
+    stall: (hex: string): PromiseWithResolvers<void> => {
+      const gate = Promise.withResolvers<void>();
+      stalled = { hex, gate };
+      return gate;
+    },
+    close: async () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => {
+          resolve();
+        });
+      }),
+  };
+};
+
+/** Poll `condition` every 50 ms for up to `limit` ms. */
+const until = async (condition: () => boolean | Promise<boolean>, what: string, limit = 60_000): Promise<void> => {
+  const deadline = performance.now() + limit;
+  // oxlint-disable-next-line no-await-in-loop -- polling another process's effect.
+  while (!(await condition())) {
+    if (performance.now() > deadline) {
+      throw new Error(`${what} did not happen within ${String(limit)} ms`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- ditto.
+    await sleep(50);
+  }
+};
+
+/** Every path under a folder, relative to it; empty when it does not exist. */
+const entriesOf = async (folder: string): Promise<string[]> => {
+  try {
+    return await readdir(folder, { recursive: true });
+  } catch {
+    return [];
+  }
+};
+
+/** The `kernelIssues` codes and details of an `evaluate_model` answer. */
+const kernelIssuesOf = (result: CallToolResult): Array<{ code?: string; details?: Record<string, unknown> }> => {
+  const content = result.structuredContent as {
+    kernelIssues?: Array<{ code?: string; details?: Record<string, unknown> }>;
+  };
+  return content.kernelIssues ?? [];
+};
+
+describe('tau mcp native kernels (W5 tier 4a)', () => {
+  let mirror: Awaited<ReturnType<typeof startMirror>>;
+  let project = '';
+  let rosterHook = '';
+
+  /** The server environment for one payload store: the loopback mirror only, a forced darwin-arm64 target. */
+  const nativeEnvironment = (configDirectory: string): Record<string, string> => {
+    /* Built by assignment so no environment key is a source literal. */
+    const env: Record<string, string> = {};
+    env['TAU_CONFIG_DIR'] = configDirectory;
+    env['TAU_PAYLOAD_MIRROR'] = mirror.url;
+    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '1';
+    env['TAU_PAYLOAD_TARGET'] = 'darwin-arm64';
+    env['TAU_ACQUISITION'] = '';
+    env['TAU_PAYLOAD_DIR'] = '';
+    /* A loopback mirror must bypass any proxy the runner sets (S7). */
+    env['NO_PROXY'] = '127.0.0.1,localhost';
+    env['no_proxy'] = '127.0.0.1,localhost';
+    return env;
+  };
+
+  const callOn = async (
+    client: Client,
+    params: CallToolRequest['params'],
+    options: {
+      readonly onprogress?: (progress: { progress: number; total?: number }) => void;
+      readonly signal?: AbortSignal;
+    } = {},
+  ): Promise<CallToolResult> =>
+    CallToolResultSchema.parse(await client.callTool(params, undefined, { timeout: kernelCallLimit, ...options }));
+
+  /** Keep a server's frame log where `TAU_TEST_FRAME_LOG_DIR` names, as the scenario's evidence. */
+  const keepFrames = async (name: string, served: Served): Promise<void> => {
+    const directory = process.env['TAU_TEST_FRAME_LOG_DIR'];
+    if (directory === undefined || directory === '') {
+      return;
+    }
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, `${name}.frames.jsonl`),
+      served
+        .frames()
+        .map((frame) => JSON.stringify(frame))
+        .join('\n'),
+    );
+    await writeFile(join(directory, `${name}.mirror.json`), JSON.stringify(mirror.requests, undefined, 1));
+  };
+
+  beforeAll(async () => {
+    mirror = await startMirror();
+    disposers.push(mirror.close);
+    project = join(scratch, 'native');
+    await mkdir(project);
+    await writeFile(
+      join(project, 'main.py'),
+      'from build123d import Box\n\n\ndef main():\n    return Box(10, 20, 30)\n',
+    );
+    await writeFile(join(project, 'main.cs'), 'using PicoGK;\n\npublic static class Model {}\n');
+    const manifest = join(scratch, 'picogk-tau-plugin.json');
+    await writeFile(manifest, JSON.stringify(syntheticManifest));
+    rosterHook = join(scratch, 'native-roster.mjs');
+    await writeFile(
+      rosterHook,
+      `import { registerHooks } from 'node:module';
+registerHooks({
+  resolve: (specifier, context, next) =>
+    specifier === '@taucad/picogk/tau-plugin.json'
+      ? { url: ${JSON.stringify(pathToFileURL(manifest).href)}, shortCircuit: true }
+      : next(specifier, context),
+});
+`,
+    );
+  });
+
+  describe('one server preparing PicoGK itself', () => {
+    let served: Served;
+    let client: Client;
+    let store = '';
+
+    beforeAll(async () => {
+      store = await mkdtemp(join(tmpdir(), 'mcp-native-store-'));
+      disposers.push(async () => rm(store, { recursive: true, force: true }));
+      served = launch(project, undefined, {
+        env: nativeEnvironment(store),
+        imports: [pathToFileURL(rosterHook).href],
+      });
+      disposers.push(stopIfRunning(served));
+      disposers.push(async () => keepFrames('prepare-in-server', served));
+      client = new Client({ name: 'tau-mcp-integration-native', version: '1' });
+      await connect(client, served);
+    }, kernelCallLimit);
+
+    it('should answer initialize and list prepare_kernel with its annotations before any download', async () => {
+      const { tools } = await client.listTools();
+
+      expect(tools.find(({ name }) => name === 'prepare_kernel')).toMatchObject({
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        inputSchema: { required: ['kernel'] },
+      });
+      const entries = await entriesOf(store);
+      expect(mirror.requests).toEqual([]);
+      expect(entries.filter((entry) => entry.includes('closures'))).toEqual([]);
+    });
+
+    it(
+      'should refuse .py and .cs with KERNEL_NOT_PREPARED naming the exact call and the bytes it downloads',
+      async () => {
+        const python = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.py' } });
+        const csharp = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+
+        expect(build123dBytes).toBeGreaterThan(0);
+        expect(kernelIssuesOf(python)[0]).toMatchObject({
+          code: 'KERNEL_NOT_PREPARED',
+          details: {
+            kernel: 'build123d',
+            package: '@taucad/build123d',
+            extension: '.py',
+            byteLength: build123dBytes,
+            prepare: { tool: 'prepare_kernel', input: { kernel: 'build123d' } },
+          },
+        });
+        expect(kernelIssuesOf(csharp)[0]).toMatchObject({
+          code: 'KERNEL_NOT_PREPARED',
+          details: {
+            kernel: 'picogk',
+            byteLength: syntheticBytes,
+            prepare: { tool: 'prepare_kernel', input: { kernel: 'picogk' } },
+          },
+        });
+        /* Read-only tools never download (I5). */
+        expect(mirror.requests).toEqual([]);
+      },
+      kernelCallLimit,
+    );
+
+    it('should refuse an unknown kernel, naming the kernels that can be prepared', async () => {
+      const result = await callOn(client, { name: 'prepare_kernel', arguments: { kernel: 'cadquery' } });
+
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain(
+        "No native kernel is called 'cadquery'. Kernels that can be prepared: build123d, picogk.",
+      );
+    });
+
+    it(
+      'should keep the verified payloads of a cancelled preparation, so the next call fetches only the rest',
+      async () => {
+        const worker = hexOf(synthetic.worker);
+        const dotnet = hexOf(synthetic.dotnet);
+        const gate = mirror.stall(worker);
+        const controller = new AbortController();
+        const pending = callOn(
+          client,
+          { name: 'prepare_kernel', arguments: { kernel: 'picogk' } },
+          { signal: controller.signal },
+        );
+
+        await until(
+          () => mirror.requests.some((request) => request.hex === dotnet && request.completed),
+          'the runtime payload download',
+        );
+        await until(() => mirror.requests.some((request) => request.hex === worker), 'the layer request');
+        controller.abort();
+        await expect(pending).rejects.toThrow();
+        /* The server stops the held download: the cancellation reached its fetch. */
+        await until(
+          () => mirror.requests.some((request) => request.hex === worker && request.closed && !request.completed),
+          'the layer download to stop',
+          30_000,
+        );
+        gate.resolve();
+        const cancelled = served
+          .frames()
+          .filter(({ direction }) => direction === 'client->server')
+          .map(({ frame }) => JSON.parse(frame) as { method?: string })
+          .filter(({ method }) => method === 'notifications/cancelled');
+        expect(cancelled).toHaveLength(1);
+        const kept = await entriesOf(store);
+        expect(kept.some((entry) => entry.endsWith(dotnet))).toBe(true);
+        expect(kept.filter((entry) => entry.includes('closures'))).toEqual([]);
+
+        const progress: Array<{ progress: number; total?: number }> = [];
+        const ready = await callOn(
+          client,
+          { name: 'prepare_kernel', arguments: { kernel: 'picogk' } },
+          { onprogress: (report) => progress.push(report) },
+        );
+
+        expect(ready.isError ?? false, textOf(ready)).toBe(false);
+        expect(ready.structuredContent).toMatchObject({
+          status: 'ready',
+          kernel: 'picogk',
+          closureIntegrity: expect.stringMatching(/^sha256-[\w+/]+=*$/u) as string,
+          treeIntegrity: expect.stringMatching(/^sha256-[\w+/]+=*$/u) as string,
+        });
+        expect(progress.length).toBeGreaterThanOrEqual(3);
+        expect(progress.every(({ total }) => total === syntheticBytes)).toBe(true);
+        for (const [index, report] of progress.entries()) {
+          expect(report.progress).toBeGreaterThan(progress[index - 1]?.progress ?? 0);
+        }
+        /* The runtime payload was fetched once; only the layer, which was cut off, was fetched again. */
+        expect(mirror.requests.filter(({ hex }) => hex === dotnet)).toHaveLength(1);
+        expect(mirror.requests.filter(({ hex }) => hex === worker)).toHaveLength(2);
+      },
+      kernelCallLimit,
+    );
+
+    it(
+      'should compose PicoGK from the prepared closure on the next call, and keep refusing Build123d',
+      async () => {
+        const csharp = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+        const python = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.py' } });
+
+        expect(kernelIssuesOf(csharp).map(({ code }) => code)).not.toContain('KERNEL_NOT_PREPARED');
+        expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/picogk\.kernel\.(?:ts|mjs|js)$/u));
+        expect(kernelIssuesOf(python)[0]).toMatchObject({
+          code: 'KERNEL_NOT_PREPARED',
+          details: { kernel: 'build123d' },
+        });
+      },
+      kernelCallLimit,
+    );
+  });
+
+  it(
+    'should use a closure `tau prepare` sealed in another process on the next call, with no prepare_kernel',
+    async () => {
+      const store = await mkdtemp(join(tmpdir(), 'mcp-native-store-'));
+      disposers.push(async () => rm(store, { recursive: true, force: true }));
+      const env = nativeEnvironment(store);
+      const served = launch(project, undefined, { env, imports: [pathToFileURL(rosterHook).href] });
+      disposers.push(stopIfRunning(served));
+      const client = new Client({ name: 'tau-mcp-integration-native-other', version: '1' });
+      await connect(client, served);
+
+      const before = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+      const prepared = await new Promise<{ code: number | undefined; stdout: string }>((resolve, reject) => {
+        const child = spawn(
+          process.execPath,
+          ['--import', 'tsx', '--import', pathToFileURL(rosterHook).href, binPath, 'prepare', 'picogk', '--json'],
+          { cwd: repoRoot, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] },
+        );
+        let stdout = '';
+        child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+          stdout += chunk;
+        });
+        child.once('error', reject);
+        child.once('exit', (code) => {
+          resolve({ code: code ?? undefined, stdout });
+        });
+      });
+      const after = await callOn(client, { name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+      await keepFrames('prepare-in-other-process', served);
+
+      expect(kernelIssuesOf(before)[0]).toMatchObject({ code: 'KERNEL_NOT_PREPARED' });
+      expect(prepared.code, prepared.stdout).toBe(0);
+      expect(JSON.parse(prepared.stdout)).toMatchObject({ status: 'ready', kernel: 'picogk' });
+      expect(kernelIssuesOf(after).map(({ code }) => code)).not.toContain('KERNEL_NOT_PREPARED');
+      expect(
+        served.frames().some(({ frame }) => frame.includes('"prepare_kernel"') && frame.includes('tools/call')),
+      ).toBe(false);
+      await client.close();
     },
     kernelCallLimit,
   );

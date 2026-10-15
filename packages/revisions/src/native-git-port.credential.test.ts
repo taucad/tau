@@ -74,6 +74,8 @@ const helperFixture = async (authenticated = true): Promise<HelperFixture> => {
         ...(credential === undefined ? {} : { remoteCredential: credential }),
       });
       await port.init({ author });
+      execFileSync('git', ['config', 'user.name', author.name], { cwd: repositoryPath });
+      execFileSync('git', ['config', 'user.email', author.email], { cwd: repositoryPath });
       await port.setRemote({ name: 'origin', url: fixture.url });
       execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${helperLog}; }; f`], {
         cwd: repositoryPath,

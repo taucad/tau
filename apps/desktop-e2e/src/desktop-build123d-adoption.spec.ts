@@ -388,6 +388,9 @@ test.skipIf(!enabled)(
           .find((parts) => parts.length === 34);
       });
       expect(planetaryParts).toHaveLength(34);
+      if (planetaryParts === undefined) {
+        throw new Error('The planetary renderer did not expose its 34 leaf components');
+      }
       const ringRow = page.locator('[data-model-component-row][data-model-component-id="occurrence:ring"]');
       await expectVisible(ringRow);
       await expect
@@ -426,6 +429,31 @@ test.skipIf(!enabled)(
           2,
         ),
       );
+
+      // A fresh image service must populate native part previews without the
+      // earlier agent screenshot or a manual retry warming its worker first.
+      await page.reload();
+      await expectVisible(page.getByText('Weight · 0 of 34 parts known', { exact: true }), 120_000);
+      const planetaryPartIds = planetaryParts.map((part) => part.id);
+      await expect
+        .poll(
+          async () =>
+            page.locator('[data-model-component-row]').evaluateAll((rows, ids) => {
+              const parts = rows.filter(
+                (part) => part instanceof HTMLElement && ids.includes(part.dataset['modelComponentId'] ?? ''),
+              );
+              return (
+                parts.length >= 5 &&
+                parts.every((part) => {
+                  const image = part.querySelector('img');
+                  return image?.complete === true && image.naturalWidth > 0;
+                })
+              );
+            }, planetaryPartIds),
+          { timeout: 120_000 },
+        )
+        .toBe(true);
+      await session.capture(`build123d-planetary-reloaded-${runId}`);
     } catch (error) {
       await session.capture('build123d-adoption-failure');
       throw error;

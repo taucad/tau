@@ -99,7 +99,7 @@ describe('publishable()', () => {
     expect(names).toHaveLength(53);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
-    for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {
+    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'geospec-engine']) {
       expect(names).toContain(name);
     }
 

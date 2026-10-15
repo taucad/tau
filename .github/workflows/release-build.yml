@@ -353,6 +353,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # The Tau PicoGK layer (charter W4, D13): the framework-dependent ReadyToRun
+      # worker with the engine prepare-picogk-dotnet built and ad-hoc signed, as a
+      # deterministic tar.gz digested with its record. Built before verification so
+      # verify-macos-release launches it through the runtime archive's dotnet muxer;
+      # picogk-layer-release and picogk-layer-mirror publish it by digest.
+      - name: Build the Tau PicoGK layer
+        if: matrix.arch == 'arm64'
+        run: pnpm nx run picogk:prepare-layer
+
+      - name: Upload the Tau PicoGK layer
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: picogk-layer-darwin-arm64
+          path: |
+            out/picogk-layer/darwin-arm64/tau-picogk-layer-darwin-arm64.tar.gz
+            out/picogk-layer/darwin-arm64/tau-layer.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify the signed package
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -367,6 +387,174 @@ jobs:
           if [ -n "${TAU_SIGNING_KEYCHAIN:-}" ]; then
             security delete-keychain "$TAU_SIGNING_KEYCHAIN" || true
           fi
+
+  # One immutable GitHub Release per layer digest, created draft → upload →
+  # publish and never clobbered (charter I13, DEL-20): a rerun or a later desktop
+  # release that builds the same bytes finds the published release and only
+  # re-verifies it. The composed tau-plugin.json is the pin a follow-up PR lands.
+  picogk-layer-release:
+    needs: [resolve, desktop-macos]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Publish the Tau PicoGK layer release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: picogk-layer-darwin-arm64
+          path: out/picogk-layer/darwin-arm64
+      - name: Verify the layer against its record and compose the pin
+        id: layer
+        run: |
+          set -euo pipefail
+          node --import @oxc-node/core/register packages/plugins/picogk/scripts/compose-tau-plugin.mts \
+            --layer out/picogk-layer/darwin-arm64/tau-layer.json \
+            --archive out/picogk-layer/darwin-arm64/tau-picogk-layer-darwin-arm64.tar.gz \
+            --write out/picogk-layer/tau-plugin.json --outputs >> "$GITHUB_OUTPUT"
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: Create, fill and publish the layer release
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          LAYER_TAG: ${{ steps.layer.outputs.tag }}
+          LAYER_ASSET: ${{ steps.layer.outputs.asset }}
+          LAYER_SHA256: ${{ steps.layer.outputs.sha256 }}
+          LAYER_DIR: out/picogk-layer/darwin-arm64
+        run: |
+          set -euo pipefail
+          # gh resolves a draft by its tag name too, so an interrupted run's draft is reused.
+          if ! draft=$(gh release view "$LAYER_TAG" --json isDraft --jq .isDraft 2> "$RUNNER_TEMP/release-error"); then
+            if ! grep -qi 'release not found' "$RUNNER_TEMP/release-error"; then cat "$RUNNER_TEMP/release-error" >&2; exit 1; fi
+            gh release create "$LAYER_TAG" --draft --target "$(git rev-parse HEAD)" --latest=false \
+              --title "$LAYER_TAG" \
+              --notes "Tau PicoGK layer for darwin-arm64, sha256 $LAYER_SHA256. Immutable: pinned by the tau-plugin.json of @taucad/picogk."
+            draft=true
+          fi
+          assets=$(gh release view "$LAYER_TAG" --json assets --jq '[.assets[].name] | join(" ")')
+          for name in "$LAYER_ASSET" tau-layer.json; do
+            if [[ " $assets " != *" $name "* ]]; then
+              if [ "$draft" != true ]; then
+                echo "::error::$LAYER_TAG is published without $name; published assets are never replaced."
+                exit 1
+              fi
+              gh release upload "$LAYER_TAG" "$LAYER_DIR/$name"
+            fi
+          done
+          gh release download "$LAYER_TAG" --pattern "$LAYER_ASSET" --dir "$RUNNER_TEMP/released"
+          echo "$LAYER_SHA256  $RUNNER_TEMP/released/$LAYER_ASSET" | sha256sum --check --strict
+          if [ "$draft" = true ]; then
+            gh release edit "$LAYER_TAG" --draft=false --latest=false
+          fi
+          {
+            echo "### Tau PicoGK layer"
+            echo
+            echo "- sha256 \`$LAYER_SHA256\`"
+            echo "- release \`$LAYER_TAG\`"
+            echo "- pin: the \`picogk-tau-plugin\` artifact (\`tau-plugin.json\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: picogk-tau-plugin
+          path: out/picogk-layer/tau-plugin.json
+          if-no-files-found: error
+          retention-days: 30
+
+  # The same bytes under `blobs/sha256/<hex>` of the public content bucket, the
+  # digest-addressed layout cdn.tau.new serves (D2, D25). Written once with
+  # If-None-Match and never replaced. The upload credential (go-live SEC-9) lives
+  # on the `payloads` environment; until the operator sets it this job only
+  # verifies the layer and says why it skipped.
+  picogk-layer-mirror:
+    needs: [resolve, desktop-macos]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Mirror the Tau PicoGK layer to cdn.tau.new
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: payloads
+      deployment: false
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.PAYLOAD_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PAYLOAD_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      PAYLOAD_R2_ENDPOINT: ${{ vars.PAYLOAD_R2_ENDPOINT }}
+      PAYLOAD_R2_BUCKET: ${{ vars.PAYLOAD_R2_BUCKET || 'tau-prod-content' }}
+      PAYLOAD_CDN_BASE: https://cdn.tau.new/
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: picogk-layer-darwin-arm64
+          path: layer
+      - name: Verify the layer against its record
+        id: layer
+        run: |
+          set -euo pipefail
+          sha256=$(jq -r .sha256 layer/tau-layer.json)
+          asset=$(jq -r .asset layer/tau-layer.json)
+          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] && [ "$asset" = tau-picogk-layer-darwin-arm64.tar.gz ]
+          echo "$sha256  layer/$asset" | sha256sum --check --strict
+          {
+            echo "sha256=$sha256"
+            echo "asset=$asset"
+            echo "key=blobs/sha256/$sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Require the payload upload credential
+        id: credential
+        run: |
+          missing=()
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY PAYLOAD_R2_ENDPOINT; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice title=Tau PicoGK layer not mirrored::The payloads environment lacks the secrets PAYLOAD_R2_ACCESS_KEY_ID and PAYLOAD_R2_SECRET_ACCESS_KEY or the variable PAYLOAD_R2_ENDPOINT (missing: ${missing[*]}; go-live SEC-9). The layer is published on its GitHub Release only; rerun this job once they are set."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Write the layer once under its digest
+        if: steps.credential.outputs.available == 'true'
+        env:
+          KEY: ${{ steps.layer.outputs.key }}
+          SHA256: ${{ steps.layer.outputs.sha256 }}
+          ASSET: ${{ steps.layer.outputs.asset }}
+        run: |
+          set -euo pipefail
+          s3() { aws --endpoint-url "$PAYLOAD_R2_ENDPOINT" s3api "$@"; }
+          if s3 get-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
+            echo "$SHA256  $RUNNER_TEMP/existing" | sha256sum --check --strict
+            echo "::notice::$KEY already holds these bytes; nothing written."
+          else
+            if ! grep -Eq '\((NoSuchKey|404)\)' "$RUNNER_TEMP/get-error"; then cat "$RUNNER_TEMP/get-error" >&2; exit 1; fi
+            s3 put-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
+              --content-type application/gzip --cache-control 'public, max-age=31536000, immutable' \
+              --if-none-match '*' > /dev/null
+          fi
+      - name: Read the layer back from cdn.tau.new
+        if: steps.credential.outputs.available == 'true'
+        env:
+          KEY: ${{ steps.layer.outputs.key }}
+          SHA256: ${{ steps.layer.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/public" "$PAYLOAD_CDN_BASE$KEY"
+          echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
   desktop-portable:
     needs: [resolve, verify-app]

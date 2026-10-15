@@ -7,6 +7,7 @@ it('keeps the approved issue registry exact and validates only its members', () 
     'KERNEL_BINDING_FAILED',
     'KERNEL_CAPABILITY_MISSING',
     'KERNEL_NOT_PREPARED',
+    'LIBRARY_VERSION_MISMATCH',
     'KERNEL_REALM_CONFLICT',
     'TRANSCODER_CAPABILITY_MISSING',
     'TRANSCODER_OPTIONS_INVALID',

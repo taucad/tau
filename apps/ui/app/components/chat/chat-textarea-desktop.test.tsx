@@ -240,7 +240,7 @@ describe('ChatTextareaBar', () => {
   });
 
   it('should offer discovered Grok permissions before the first turn and store the selected execution', async () => {
-    // jsdom omits the browser scrolling primitive used by the real command menu.
+    // JSDOM omits the browser scrolling primitive used by the real command menu.
     globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
     execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'grok' };
     placements.current = [

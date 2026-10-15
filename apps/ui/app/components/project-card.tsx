@@ -12,7 +12,7 @@ import { cn } from '@taucad/ui/utils/cn';
 type ProjectCardProps = React.ComponentProps<typeof Card> & {
   readonly linkLabel: string;
 } & (
-    | { readonly to: To; readonly onOpen?: never; readonly isOpening?: never }
+    | { readonly to: To; readonly onOpen?: never; readonly isOpening?: boolean }
     | { readonly to?: never; readonly onOpen: () => void; readonly isOpening: boolean }
   );
 
@@ -81,6 +81,12 @@ export function ProjectCard({
           onPointerEnter={warmWorkspace}
           onPointerDown={warmWorkspace}
           onFocus={warmWorkspace}
+          aria-busy={isOpening}
+          onClick={(event) => {
+            if (isOpening) {
+              event.preventDefault();
+            }
+          }}
         >
           <span className='sr-only'>{linkLabel}</span>
         </Link>

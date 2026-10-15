@@ -145,10 +145,14 @@ export type ReceiptFile = {
 };
 
 /**
- * Which source served a payload's bytes; not part of any identity.
+ * Which source served a payload's bytes; not part of any identity. `store` is a blob the store already held, so
+ * nothing was read from any other source; its location is the blob's store-relative path.
  * @public
  */
-export type PayloadAcquisition = { readonly kind: 'origin' | 'mirror' | 'seed'; readonly location: string };
+export type PayloadAcquisition = {
+  readonly kind: 'store' | 'origin' | 'mirror' | 'seed';
+  readonly location: string;
+};
 
 /**
  * What the store records for one sealed closure, written last inside staging so its presence is the seal.

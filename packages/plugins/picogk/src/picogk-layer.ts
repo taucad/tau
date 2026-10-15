@@ -18,7 +18,7 @@ const hex64 = z.string().regex(/^[\da-f]{64}$/u);
  */
 export const picogkLayerRecordSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     target: z.literal('darwin-arm64'),
     /** File name of the `.tar.gz` beside the record. */
     asset: z.string().regex(/^tau-picogk-layer-darwin-arm64\.tar\.gz$/u),
@@ -30,6 +30,21 @@ export const picogkLayerRecordSchema = z
     dotnetRuntimeVersion: z.string().min(1),
     readyToRun: z.boolean(),
     sourceFilesSha256: hex64,
+    /**
+     * The engine receipt's `sourceSha256`: native source pins, patches, build profile and toolchain (compiler, SDK,
+     * CMake and Ninja, by version and binary digest). Equal inputs build equal layer bytes (X26).
+     */
+    nativeSourceSha256: hex64,
+    /** The build toolchain by version, for reading; `nativeSourceSha256` is what pins it. */
+    toolchain: z
+      .object({
+        dotnetSdk: z.string().min(1),
+        compiler: z.string().min(1),
+        sdk: z.string().min(1),
+        cmake: z.string().min(1),
+        ninja: z.string().min(1),
+      })
+      .strict(),
   })
   .strict();
 

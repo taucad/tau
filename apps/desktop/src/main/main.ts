@@ -110,6 +110,7 @@ import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
+  revealPathChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -1126,6 +1127,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   });
 
+  /* A file opens in its default app under `openPath`, so a file or folder the
+   * person names inside a project is selected in its parent instead. */
+  ipcMain.handle(revealPathChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || path.includes('\0')) {
+      throw new Error('Desktop shell refused the reveal request.');
+    }
+    const target = roots.canonical(path);
+    if (target === undefined) {
+      throw new Error('Reopen this folder from Tau before revealing it in the file manager.');
+    }
+    await stat(target);
+    shell.showItemInFolder(target);
+  });
+
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
     if (!trusted(event.senderFrame)) {
       return undefined;
@@ -1787,15 +1802,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
       await updater.install();
     }
   };
-  Menu.getApplicationMenu()?.items[0]?.submenu?.insert(
-    1,
-    new MenuItem({
-      label: 'Check for Updates…',
-      click: () => {
-        void checkForUpdates();
-      },
-    }),
-  );
+  const applicationMenu = Menu.getApplicationMenu();
+  const appSubmenu = applicationMenu?.items[0]?.submenu;
+  if (applicationMenu && appSubmenu) {
+    appSubmenu.insert(
+      1,
+      new MenuItem({
+        label: 'Check for Updates…',
+        click: () => {
+          void checkForUpdates();
+        },
+      }),
+    );
+    // Native menus must be reinstalled after adding items.
+    Menu.setApplicationMenu(applicationMenu);
+  }
 };
 
 /* Electron fires `ready` only after the main ESM module finishes evaluating, so

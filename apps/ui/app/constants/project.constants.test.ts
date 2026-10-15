@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { KernelProvider } from '@taucad/runtime';
 import { createInitialProject } from '#constants/project.constants.js';
 import type { CreateInitialProjectResult } from '#constants/project.constants.js';
-import { getEmptyCode, getKernelOption, getMainFile } from '#utils/kernel.utils.js';
+import {
+  getEmptyCode,
+  getKernelDependencies,
+  getKernelOption,
+  getKernelProjectTemplate,
+  getMainFile,
+} from '#utils/kernel.utils.js';
 
 describe('createInitialProject', () => {
   it('should return fresh file buffers and a minimal module manifest', () => {
@@ -13,13 +19,13 @@ describe('createInitialProject', () => {
       projectName: 'First',
       mainFileName: 'main.ts',
       emptyCodeContent: firstInput,
-      language: 'typescript',
+      ecosystem: 'npm',
     });
     const second = createInitialProject({
       projectName: 'First',
       mainFileName: 'main.ts',
       emptyCodeContent: secondInput,
-      language: 'typescript',
+      ecosystem: 'npm',
     });
 
     const firstMain = first.files['main.ts']?.content;
@@ -52,7 +58,7 @@ describe('createInitialProject', () => {
       ...options,
       mainFileName: 'main.ts',
       emptyCodeContent: new TextEncoder().encode(''),
-      language: 'typescript',
+      ecosystem: 'npm',
     });
     return JSON.parse(new TextDecoder().decode(files['package.json']?.content));
   };
@@ -92,7 +98,7 @@ describe('createInitialProject', () => {
       projectName: 'Plate',
       mainFileName: 'main.ts',
       emptyCodeContent: new TextEncoder().encode(''),
-      language: 'typescript',
+      ecosystem: 'npm',
       dependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
     });
 
@@ -100,33 +106,88 @@ describe('createInitialProject', () => {
     expect(packageJsonOf({ projectName: 'Plate' })).not.toHaveProperty('scripts');
   });
 
-  const createForKernel = (kernel: KernelProvider): CreateInitialProjectResult =>
+  const decode = (content: Uint8Array<ArrayBuffer> | undefined): string => new TextDecoder().decode(content);
+
+  const createForKernel = async (kernel: KernelProvider, projectName = 'Plate'): Promise<CreateInitialProjectResult> =>
     createInitialProject({
-      projectName: 'Plate',
+      projectName,
       mainFileName: getMainFile(kernel),
       emptyCodeContent: new TextEncoder().encode(getEmptyCode(kernel)),
-      language: getKernelOption(kernel).language,
-      dependencies: kernel === 'replicad' ? { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' } : {},
+      ecosystem: getKernelOption(kernel).ecosystem,
+      dependencies: await getKernelDependencies(kernel),
+      template: await getKernelProjectTemplate(kernel),
     });
 
-  it.each<[KernelProvider, string]>([
-    ['openscad', 'main.scad'],
-    ['picogk', 'main.cs'],
-    ['build123d', 'main.py'],
-    ['zoo', 'main.kcl'],
-  ])('should write no package.json for the %s kernel, whose language npm does not serve', (kernel, mainFile) => {
-    expect(Object.keys(createForKernel(kernel).files)).toEqual([mainFile]);
+  it.each<[KernelProvider, string[]]>([
+    ['openscad', ['main.scad']],
+    ['zoo', ['main.kcl', 'project.toml']],
+    ['build123d', ['main.py', 'pylock.toml', 'pyproject.toml', 'uv.lock']],
+    ['picogk', ['MountingBracketV2.csproj', 'main.cs', 'packages.lock.json']],
+    ['replicad', ['main.ts', 'package.json']],
+  ])('should give a %s project the files its ecosystem reads: %j', async (kernel, paths) => {
+    const { files } = await createForKernel(kernel, 'Mounting Bracket v2');
+
+    expect(Object.keys(files).sort()).toEqual(paths);
   });
 
-  it('should keep the replicad project unchanged: its main file and a package.json declaring replicad', () => {
-    const { files } = createForKernel('replicad');
+  it('should keep the replicad project unchanged: its main file and a package.json declaring replicad', async () => {
+    const { files } = await createForKernel('replicad');
 
-    expect(Object.keys(files).sort()).toEqual(['main.ts', 'package.json']);
-    expect(JSON.parse(new TextDecoder().decode(files['package.json']?.content))).toEqual({
+    expect(JSON.parse(decode(files['package.json']?.content))).toEqual({
       name: 'plate',
       private: true,
       type: 'module',
       dependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
     });
+  });
+
+  it('should name a build123d project in pyproject.toml and uv.lock, keeping uv.lock sorted by name', async () => {
+    const template = await getKernelProjectTemplate('build123d');
+    const { files } = await createForKernel('build123d', 'Zebra Hinge');
+    const pyproject = decode(files['pyproject.toml']?.content);
+    const lock = decode(files['uv.lock']?.content);
+    const lockedNames = [...lock.matchAll(/^\[\[package\]\]\nname = "(.*)"$/gmu)].map(([, name]) => String(name));
+
+    expect(pyproject).toBe(template?.['pyproject.toml']?.replace('name = "tau-project"', 'name = "zebra-hinge"'));
+    expect(pyproject).toContain('dependencies = [\n  "build123d==0.11.1",\n  "cadquery-ocp-novtk==7.9.3.1.1",\n]');
+    expect(decode(files['pylock.toml']?.content)).toBe(template?.['pylock.toml']);
+    expect(lock).toContain('[[package]]\nname = "zebra-hinge"\nversion = "0.1.0"\nsource = { virtual = "." }\n');
+    expect(lock).not.toContain('tau-project');
+    expect(lockedNames.at(-1)).toBe('zebra-hinge');
+    expect(lockedNames).toEqual(lockedNames.toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0)));
+    expect(lock.length).toBe(template?.['uv.lock']?.replace('tau-project', 'zebra-hinge').length);
+  });
+
+  it.each([
+    ['Mounting Bracket v2', 'MountingBracketV2'],
+    ['  Café déjà vu!  ', 'CafeDejaVu'],
+    ['3d printed clip', 'Project3dPrintedClip'],
+    ['日本', 'TauProject'],
+  ])(
+    'should name the PicoGK project file for %j %s.csproj, with the template and lock verbatim',
+    async (name, base) => {
+      const template = await getKernelProjectTemplate('picogk');
+      const { files } = await createForKernel('picogk', name);
+
+      expect(decode(files[`${base}.csproj`]?.content)).toBe(template?.['project.csproj']);
+      expect(decode(files['packages.lock.json']?.content)).toBe(template?.['packages.lock.json']);
+    },
+  );
+
+  it("should write Zoo's project.toml for a KCL project, in millimetres", async () => {
+    const { files } = await createForKernel('zoo');
+
+    expect(decode(files['project.toml']?.content)).toBe('[settings.modeling]\nbase_unit = "mm"\n');
+  });
+
+  it('should refuse a pypi or nuget project without its kernel template', () => {
+    expect(() =>
+      createInitialProject({
+        projectName: 'Plate',
+        mainFileName: 'main.py',
+        emptyCodeContent: new TextEncoder().encode(''),
+        ecosystem: 'pypi',
+      }),
+    ).toThrow("A pypi project starts from its kernel's template, which has no pyproject.toml.");
   });
 });

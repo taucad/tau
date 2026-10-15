@@ -8,7 +8,7 @@ import { composeManifest, layerPayload, manifestText, picogkLayerRecordSchema } 
 import type { PicogkLayerRecord } from '#picogk-layer.js';
 
 const record: PicogkLayerRecord = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   target: 'darwin-arm64',
   asset: 'tau-picogk-layer-darwin-arm64.tar.gz',
   sha256: '0123456789abcdef'.repeat(4),
@@ -19,6 +19,14 @@ const record: PicogkLayerRecord = {
   dotnetRuntimeVersion: '10.0.11',
   readyToRun: true,
   sourceFilesSha256: 'f'.repeat(64),
+  nativeSourceSha256: 'e'.repeat(64),
+  toolchain: {
+    dotnetSdk: '10.0.400',
+    compiler: 'Apple clang version 17.0.0 (clang-1700.6.3.2)',
+    sdk: '26.2',
+    cmake: 'cmake version 4.4.4',
+    ninja: '1.13.2',
+  },
 };
 const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../tau-plugin.json'), 'utf8')) as Record<
   string,

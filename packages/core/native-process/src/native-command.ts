@@ -1,8 +1,12 @@
-import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 
 import { processEnvironment, terminateProcessTree } from '#native-process-session.js';
-import { acquireNativeSandbox, launchInNativeSandbox, releaseNativeSandbox } from '#native-sandbox.js';
+import {
+  acquireNativeSandbox,
+  launchInNativeSandbox,
+  releaseNativeSandbox,
+  spawnInNativeSandbox,
+} from '#native-sandbox.js';
 import type { NativeSandboxLaunch } from '#native-sandbox.js';
 
 /** Characters of each output stream kept; a longer stream keeps its tail. */
@@ -48,14 +52,9 @@ export const runInNativeSandbox = async (command: NativeSandboxCommand): Promise
   command.signal?.throwIfAborted();
   acquireNativeSandbox();
   try {
-    const [executable, ...commandArguments] = await launchInNativeSandbox(command);
-    const child = spawn(executable!, commandArguments, {
+    const child = spawnInNativeSandbox(await launchInNativeSandbox(command), {
       cwd: command.workingDirectory,
-      detached: process.platform !== 'win32',
       env: processEnvironment(command.writablePath),
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.end();
     const stdout = new StringDecoder('utf8');

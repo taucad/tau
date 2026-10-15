@@ -39,6 +39,45 @@ const subscribeConnectivity = (listener: () => void): (() => void) => {
 const readOnline = (): boolean => globalThis.navigator.onLine;
 const serverOnline = (): boolean => true;
 
+/** Longest wait for an idle period after load before installing anyway. Milliseconds. */
+const installIdleLimit = 10_000;
+
+/**
+ * Run `start` once the page has loaded and the main thread is idle.
+ *
+ * Installing precaches the usage shell's whole asset list. Started at
+ * hydration, that download competed with the requests the page needs to open
+ * on a first visit over a slow link.
+ *
+ * @param start - Called once, after load and idle.
+ * @returns Cancels a start that has not run yet.
+ */
+const afterLoadAndIdle = (start: () => void): (() => void) => {
+  let cancelIdle: (() => void) | undefined;
+  const scheduleIdle = (): void => {
+    if ('requestIdleCallback' in globalThis) {
+      const idleCallback = requestIdleCallback(start, { timeout: installIdleLimit });
+      cancelIdle = () => {
+        cancelIdleCallback(idleCallback);
+      };
+      return;
+    }
+    const idleTimer = setTimeout(start, 0);
+    cancelIdle = () => {
+      clearTimeout(idleTimer);
+    };
+  };
+  if (document.readyState === 'complete') {
+    scheduleIdle();
+  } else {
+    globalThis.addEventListener('load', scheduleIdle, { once: true });
+  }
+  return () => {
+    globalThis.removeEventListener('load', scheduleIdle);
+    cancelIdle?.();
+  };
+};
+
 const isOfflineShellMessage = (data: unknown): data is OfflineShellMessage =>
   typeof data === 'object' && data !== null && (data as { type?: unknown }).type === offlineShellMessageType;
 
@@ -73,9 +112,12 @@ export function OfflineShell(): React.JSX.Element | undefined {
         setStatus('failed');
       }
     };
-    // async-iife: bootstrap -- installing must never block the view the reader came for.
-    void install();
+    const cancelInstall = afterLoadAndIdle(() => {
+      // async-iife: bootstrap -- installing must never block the view the reader came for.
+      void install();
+    });
     return () => {
+      cancelInstall();
       container.removeEventListener('message', onMessage);
     };
   }, []);

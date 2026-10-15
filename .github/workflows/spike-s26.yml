@@ -1,0 +1,129 @@
+# Spike S26 (native dependency charter, I9/D8/EQ8): preparation is byte-deterministic.
+#
+# On each runner, two stores at different paths prepare the same closures with the built CLI
+# (store A from the origins, store B's build123d offline from the seed), then `diff -r` the trees
+# and compare the receipts' identity fields; build123d also against its golden darwin-arm64
+# receipt. The compare job checks the two runner images give one treeIntegrity per kernel. The
+# seed round trip (`--bundle` on A, `--seed` on an air-gapped B) is blocked on W19: tau prepare
+# has neither flag yet. Deleted when W21 lands.
+name: Spike S26 (deterministic preparation)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/spike-s26.yml
+      - scripts/spikes/native-deps/store-spike.mts
+      - scripts/spikes/native-deps/s26-determinism.mts
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-s26-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  s26:
+    name: S26 two stores (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    outputs:
+      macos-15: ${{ steps.tree.outputs.macos-15 }}
+      macos-26: ${{ steps.tree.outputs.macos-26 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      # The same digest-keyed seed the native-darwin job keeps (D30); restore only.
+      - name: Identify the Build123d darwin-arm64 closure
+        id: seed-key
+        run: |
+          digest=$(node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync } from "node:fs";
+            const manifest = JSON.parse(readFileSync("packages/plugins/build123d/tau-plugin.json", "utf8"));
+            const pins = Object.values(manifest.dependencies).flat()
+              .filter(({ target }) => target.os === "darwin" && target.arch === "arm64")
+              .flatMap(({ payloads }) => payloads.map(({ integrity }) => integrity))
+              .toSorted();
+            console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
+          ')
+          echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the seed
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/cache/build123d-seed
+          key: ${{ steps.seed-key.outputs.key }}
+
+      - name: Fill the seed from the pinned origins
+        run: pnpm nx run build123d:seed --outputStyle=static
+
+      - name: Build the CLI
+        run: pnpm nx run cli:build --outputStyle=static
+
+      - name: Run the spike
+        run: |
+          set -o pipefail
+          node --import @oxc-node/core/register scripts/spikes/native-deps/s26-determinism.mts \
+            --work "$RUNNER_TEMP/s26" --out "$RUNNER_TEMP/out" --label "${{ matrix.os }}" 2>&1 | tee "$RUNNER_TEMP/console.log"
+
+      - name: Record this runner's trees
+        id: tree
+        if: always()
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          trees=$(cat "$RUNNER_TEMP"/out/s26-*-tree.txt 2>/dev/null | tr '\n' ';')
+          echo "$OS=$trees" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/out/s26-summary.txt" 2>/dev/null || echo 'no summary'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh "S26 ${{ matrix.os }}" "$RUNNER_TEMP/out/s26-summary.txt"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s26-evidence-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/console.log
+          retention-days: 30
+
+  compare:
+    name: S26 across runner images
+    needs: [s26]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare the trees
+        env:
+          MACOS_15: ${{ needs.s26.outputs.macos-15 }}
+          MACOS_26: ${{ needs.s26.outputs.macos-26 }}
+        run: |
+          line="S26 cross-image: macos-15 [$MACOS_15] macos-26 [$MACOS_26] => "
+          if [ -n "$MACOS_15" ] && [ "$MACOS_15" = "$MACOS_26" ]; then line+="identical"; else line+="DIFFERENT or missing"; fi
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=S26 cross-image::$line"

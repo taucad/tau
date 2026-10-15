@@ -284,7 +284,11 @@ export type DesktopBridge = {
   readonly directories?: {
     readonly openLabel: string;
     readonly openIcon: 'finder' | 'file-explorer' | 'folder';
+    /** Label for selecting a file or folder in its parent, e.g. `Reveal in Finder`. */
+    readonly revealLabel: string;
     open(path: string): Promise<void>;
+    /** Select a file or folder inside a granted root in the file manager. */
+    reveal(path: string): Promise<void>;
   };
   readonly dialog: {
     /**

@@ -21,6 +21,7 @@ import { CloudProjectPreview } from '#components/project-library/cloud-project-p
 import { ArrowRight, Cloud, Users } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Loader } from '@taucad/ui/components/loader';
 import { CardFooter, CardHeader } from '@taucad/ui/components/card';
 import {
   isCloudProjectPending,
@@ -136,8 +137,7 @@ export function OnTauCloudMark(): React.JSX.Element {
 
 /**
  * *Open* for a project only Tau Cloud holds: clones it under the remote's id.
- * Drawn as the local project's *Open* beside it: `→ Open` on a card, `Open →`
- * in a list row.
+ * Drawn as the local project's *Open* beside it, with a trailing activity indicator.
  *
  * @param props - The row, the open verb, which reports its own failure, and
  * whether it sits on a card.
@@ -156,7 +156,6 @@ export function OpenCloudProjectButton({
   readonly isCard?: boolean;
 }): React.JSX.Element {
   const [isOpening, setIsOpening] = useState(false);
-  const arrow = isOpening ? undefined : <ArrowRight aria-hidden className='size-4' />;
   return (
     <Button
       size={isCard ? 'default' : 'sm'}
@@ -173,10 +172,9 @@ export function OpenCloudProjectButton({
         }
       }}
     >
-      {isCard ? arrow : undefined}
       {isOpening ? 'Opening…' : 'Open'}
       <span className='sr-only'> {entry.name}</span>
-      {isCard ? undefined : arrow}
+      {isOpening ? <Loader /> : <ArrowRight aria-hidden />}
     </Button>
   );
 }
@@ -259,8 +257,8 @@ export function CloudProjectCard({
       <CardFooter className='mt-auto'>
         <Button asChild variant='outline'>
           <span aria-hidden='true' className='pointer-events-none'>
-            {isOpening ? null : <ArrowRight className='size-4' />}
             {isOpening ? 'Opening…' : 'Open'}
+            {isOpening ? <Loader /> : <ArrowRight />}
           </span>
         </Button>
       </CardFooter>

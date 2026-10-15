@@ -448,3 +448,56 @@ describe('approval through the client (blueprint E9, W11)', () => {
     expect([silent.outcome, urlOnly.outcome]).toEqual(['no form', 'no form']);
   });
 });
+
+describe('progress on a host tool (D7)', () => {
+  /**
+   * Call one host tool whose dispatch reports three steps, with or without a progress listener.
+   *
+   * @param listen - Whether the client asks for progress.
+   * @returns What the client heard, and whether the dispatch was given a reporter.
+   */
+  const callWithProgress = async (listen: boolean) => {
+    let offered = false;
+    const client = await connect({
+      hostTools: [{ name: 'prepare_kernel', description: 'Prepare.', inputSchema: { type: 'object' } }],
+      dispatch: async (_call, options) => {
+        offered = options.progress !== undefined;
+        for (const progress of [10, 20, 30]) {
+          // oxlint-disable-next-line no-await-in-loop -- reports are ordered.
+          await options.progress?.({ progress, total: 30, message: `step ${String(progress / 10)}` });
+        }
+        return { success: true, status: 'ready' };
+      },
+    });
+    const heard: Array<{ progress: number; total?: number; message?: string }> = [];
+    try {
+      const result = await client.callTool(
+        { name: 'prepare_kernel', arguments: { kernel: 'picogk' } },
+        undefined,
+        listen ? { onprogress: (report) => heard.push(report) } : {},
+      );
+      return { heard, offered, result };
+    } finally {
+      await client.close();
+    }
+  };
+
+  it('should send each report as notifications/progress to a client that sent a progressToken', async () => {
+    const { heard, offered, result } = await callWithProgress(true);
+
+    expect(offered).toBe(true);
+    expect(heard).toEqual([
+      { progress: 10, total: 30, message: 'step 1' },
+      { progress: 20, total: 30, message: 'step 2' },
+      { progress: 30, total: 30, message: 'step 3' },
+    ]);
+    expect(result.structuredContent).toEqual({ status: 'ready' });
+  });
+
+  it('should give the dispatch no reporter when the client sent no progressToken', async () => {
+    const { heard, offered } = await callWithProgress(false);
+
+    expect(offered).toBe(false);
+    expect(heard).toEqual([]);
+  });
+});

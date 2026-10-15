@@ -77,6 +77,26 @@ describe('kernel configuration identity', () => {
     expect(languageFromKernel.openscad).toBe('openscad');
   });
 
+  it('gives every offering the package ecosystem its users know, npm only for JavaScript and TypeScript', () => {
+    const ecosystems = Object.fromEntries(kernelConfigurations.map(({ id, ecosystem }) => [id, ecosystem]));
+
+    expect(ecosystems).toEqual({
+      picogk: 'nuget',
+      picovoxel: 'npm',
+      build123d: 'pypi',
+      openscad: 'none',
+      replicad: 'npm',
+      manifold: 'npm',
+      zoo: 'kcl',
+      jscad: 'npm',
+      opencascadejs: 'npm',
+      tscircuit: 'npm',
+    });
+    for (const { language, ecosystem } of kernelConfigurations) {
+      expect(ecosystem === 'npm').toBe(['javascript', 'jsx', 'typescript', 'tsx'].includes(language));
+    }
+  });
+
   it('rejects engine ids as catalog ids', () => {
     // Engine ids come from `defineKernel({ id })` (e.g. `openrscad` for `.scad`,
     // `opencascade` for the OCCT kernel) and never appear in this catalog.

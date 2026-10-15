@@ -1,14 +1,32 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation } from 'react-router';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectListItem } from '#types/project-library.types.js';
+
+const routerContent = createContext<React.ReactNode>(null);
+
+function RouterContent(): React.ReactNode {
+  return useContext(routerContent);
+}
+
+function TestRouter({
+  children,
+  initialEntries = ['/projects'],
+}: React.PropsWithChildren<{ readonly initialEntries?: string[] }>): React.JSX.Element {
+  const [router] = useState(() => createMemoryRouter([{ path: '*', Component: RouterContent }], { initialEntries }));
+  return (
+    <routerContent.Provider value={children}>
+      <RouterProvider router={router} />
+    </routerContent.Provider>
+  );
+}
 
 const mockProject: ProjectListItem = {
   ...projectToManifest({
@@ -138,12 +156,12 @@ function renderCard(
 ): RenderResult {
   const { project = mockProject, ...cardProperties } = properties;
   return render(
-    <MemoryRouter initialEntries={['/projects']}>
+    <TestRouter initialEntries={['/projects']}>
       <TooltipProvider>
         <ProjectLibraryCard project={project} actions={mockActions} {...cardProperties} />
       </TooltipProvider>
       <LocationProbe />
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 
@@ -151,6 +169,41 @@ describe('ProjectLibraryCard live preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     providerMountCount = 0;
+  });
+
+  it('should show opening activity until local navigation settles and ignore repeated opens', async () => {
+    const ready = Promise.withResolvers<void>();
+    const loader = vi.fn(async () => ready.promise);
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/projects',
+          element: (
+            <TooltipProvider>
+              <ProjectLibraryCard project={mockProject} actions={mockActions} />
+            </TooltipProvider>
+          ),
+        },
+        { path: '/w/home/library', loader, element: <h1>Opened project</h1> },
+      ],
+      { initialEntries: ['/projects'] },
+    );
+    render(<RouterProvider router={router} />);
+    try {
+      await userEvent.click(screen.getByRole('link', { name: 'Open Library Preview Demo' }));
+      const opening = screen.getByRole('link', { name: 'Opening… Library Preview Demo', busy: true });
+      expect(screen.getByText('Opening…')).toBeVisible();
+      await userEvent.click(opening);
+      expect(loader).toHaveBeenCalledOnce();
+      await act(async () => {
+        ready.resolve();
+        await ready.promise;
+      });
+      expect(await screen.findByRole('heading', { name: 'Opened project' })).toBeVisible();
+    } finally {
+      ready.resolve();
+      router.dispose();
+    }
   });
 
   it('should focus and select the inline name from Rename, save with Enter, and cancel with Escape', async () => {
@@ -264,12 +317,12 @@ describe('ProjectLibraryCard live preview', () => {
     };
 
     view.rerender(
-      <MemoryRouter initialEntries={['/projects']}>
+      <TestRouter initialEntries={['/projects']}>
         <TooltipProvider>
           <ProjectLibraryCard project={nextProject} actions={mockActions} />
         </TooltipProvider>
         <LocationProbe />
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     const provider = screen.getByTestId('file-manager-provider');

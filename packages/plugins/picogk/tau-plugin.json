@@ -1,5 +1,5 @@
 {
-  "//": "PicoGK runtime closure (D6, R2 Variant B): Microsoft's .NET runtime archive verbatim, pinned by the sha512 releases.json publishes, plus the Tau framework-dependent layer (ReadyToRun worker, patched PicoGK.dll, Roslyn, SkiaSharp, the Tau-built engine) that the macOS release job builds, ad-hoc signs, digests and uploads to cdn.tau.new blobs/ and an immutable GitHub Release. `dotnet/` and `tau-worker/` are siblings under the closure root. The worker pin is rewritten from the release job's layer record by scripts/compose-tau-plugin.mts; until the first release run it names the empty digest, so preparation fails closed and publish.yml skips only that pin with a notice.",
+  "//": "PicoGK runtime closure (D6, R2 Variant B): Microsoft's .NET runtime archive verbatim, pinned by the sha512 releases.json publishes, plus the Tau framework-dependent layer (ReadyToRun worker, patched PicoGK.dll, Roslyn, SkiaSharp, the Tau-built engine) that the macOS release job builds, ad-hoc signs, digests and uploads to cdn.tau.new blobs/ and an immutable GitHub Release. `dotnet/` and `tau-worker/` are siblings under the closure root. The worker pin is rewritten from a published layer's record (tau-layer.json on its picogk-layer-<16 hex> release) by scripts/compose-tau-plugin.mts, never by hand; publish.yml proves both URLs serve the pinned bytes.",
   "schemaVersion": 1,
   "kernels": {
     "picogk": {
@@ -32,17 +32,18 @@
           },
           {
             "name": "worker",
-            "integrity": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
-            "byteLength": 1,
+            "integrity": "sha256-zV/fZmm47gheQJE5DSI3hpW8wF/YohtN5JLSGjz89vE=",
+            "byteLength": 24431764,
             "format": "tar.gz",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://cdn.tau.new/blobs/sha256/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                "https://github.com/taucad/tau/releases/download/picogk-layer-e3b0c44298fc1c14/tau-picogk-layer-darwin-arm64.tar.gz"
+                "https://cdn.tau.new/blobs/sha256/cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-cd5fdf6669b8ee08/tau-picogk-layer-darwin-arm64.tar.gz"
               ]
             },
-            "destination": "tau-worker"
+            "destination": "tau-worker",
+            "unpackedByteLength": 66910071
           }
         ]
       }

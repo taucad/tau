@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 import { createPreparationHost, parsePluginDeployment } from '@taucad/runtime/preparation/node';
 
-import { picogkOptionsFromClosure } from '#picogk-closure.js';
+import { picogkLaunchSet, picogkOptionsFromClosure } from '#picogk-closure.js';
 import { composeManifest, picogkLayerRecordSchema } from '#picogk-layer.js';
 import type { PicogkClosureOptions } from '#picogk-closure.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
@@ -25,7 +25,7 @@ const prepareClosure = async (): Promise<PicogkClosureOptions> => {
   >;
   const deployment = parsePluginDeployment(composeManifest(manifest, record), 'picogk native test manifest');
   const host = createPreparationHost({
-    plugins: [{ package: '@taucad/picogk', deployment }],
+    plugins: [{ package: '@taucad/picogk', deployment, launchSet: picogkLaunchSet }],
     store: resolve(workspaceRoot, 'out/cache/picogk/store'),
     seed: resolve(layerRoot, 'seed'),
   });

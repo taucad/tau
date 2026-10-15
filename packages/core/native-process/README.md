@@ -65,6 +65,7 @@ once per runtime operation, however many of a render's calls ask for it.
 | `NativeWorkerReportedError`     | Preserves structured issues returned by the native worker.                                                           |
 | `NativeRuntimeUnavailableError` | Thrown (code `NATIVE_RUNTIME_UNAVAILABLE`) when the operating-system sandbox cannot start; the worker never runs.    |
 | `launchInNativeSandbox`         | Wraps one host-owned executable and argument vector in the fixed Tau sandbox profile.                                |
+| `spawnInNativeSandbox`          | Spawns a `launchInNativeSandbox` vector, handing `bwrap` its link-refusing seccomp program on Linux.                 |
 | `nativeSandboxPolicy`           | The fixed capability profile: bundled runtime and source snapshot readable, one private writable root, no network.   |
 | `createWorkspaceMirror`         | Disposable projection of the injected filesystem into a private native workspace.                                    |
 | `processEnvironment`            | Constructs the child environment from the supported platform values.                                                 |
@@ -82,6 +83,13 @@ writes only to its private artifact directory (which also serves as its `HOME` a
 no network. The operating system enforces the boundary; there is no trust prompt and no unsandboxed
 fallback. When the platform sandbox or one of its prerequisites is missing, `start()` rejects with
 `NativeRuntimeUnavailableError` and the next request retries.
+
+A worker may not create a symbolic or hard link, not even inside its writable root. The process that
+asked for the worker often reads and writes that root too, and Node's permission model follows a
+link it finds there. On Linux `bwrap` loads a seccomp program that refuses `link`, `symlink`,
+`linkat`, `symlinkat` and `io_uring_setup`. The program arrives on file descriptor 3, so spawn a
+`launchInNativeSandbox` vector with `spawnInNativeSandbox`. On macOS the Seatbelt profile ends with
+`(deny file-write-create (vnode-type SYMLINK))` and `(deny file-link)`.
 
 | Host  | Mechanism                              | Prerequisites                                                             |
 | ----- | -------------------------------------- | ------------------------------------------------------------------------- |

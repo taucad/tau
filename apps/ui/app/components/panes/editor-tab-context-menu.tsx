@@ -9,7 +9,9 @@ import {
   closeAllPanelsInGroup,
   copyPathToClipboard,
 } from '#components/panes/tab-context-menu-actions.js';
+import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
+import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 
 type EditorPanelParameters = {
@@ -25,6 +27,8 @@ type EditorPanelParameters = {
 export function WorkbenchTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
   const { api } = properties;
   const { editorRef, projectRef } = useProject();
+  const projectId = useSelector(projectRef, (state) => state.context.project?.id);
+  const revealInFileManager = useRevealInFileManager(projectId);
 
   const filePath = (properties.params as EditorPanelParameters | undefined)?.filePath;
 
@@ -145,6 +149,16 @@ export function WorkbenchTabContextMenu(properties: IDockviewPanelHeaderProps): 
             <FolderTree />
             Reveal in File Tree
           </ContextMenuItem>
+          {revealInFileManager ? (
+            <ContextMenuItem
+              onSelect={() => {
+                void revealInFileManager.reveal(filePath);
+              }}
+            >
+              <NativeFileManagerIcon icon={revealInFileManager.icon} />
+              {revealInFileManager.label}
+            </ContextMenuItem>
+          ) : null}
         </>
       ) : null}
     </>

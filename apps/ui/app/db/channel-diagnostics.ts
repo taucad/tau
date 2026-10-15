@@ -1,5 +1,6 @@
 /* oxlint-disable tau-lint/no-direct-indexeddb -- Browser-local channel lifecycle evidence must survive failure of the filesystem channel it diagnoses. Separate bounded store; no portable project content. */
 import { metaConfig } from '#constants/meta.constants.js';
+import { readBuildIdentity } from '#lib/build-identity.js';
 
 /** Metadata only: never pass errors, command payloads, prompts or credentials here. */
 export type ChannelDiagnostic = {
@@ -49,7 +50,7 @@ const knownCodes = new Set(['CHANNEL_CLOSED', 'PEER_CLOSED', 'PEER_GONE', 'PEER_
 const recordOf = (event: ChannelDiagnostic): SavedChannelDiagnostic => ({
   event: event.event,
   recordedAt: Date.now(),
-  build: String(typeof tauBuildId === 'number' ? tauBuildId : 0),
+  build: readBuildIdentity(),
   tabId: event.tabId.slice(0, 128),
   hostId: event.hostId?.slice(0, 128),
   projectId: event.projectId?.slice(0, 128),

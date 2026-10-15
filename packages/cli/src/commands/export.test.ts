@@ -16,10 +16,10 @@ vi.mock('@taucad/runtime/node', async (importOriginal) => ({
 vi.mock('#cli-runtime.js', () => ({
   createCliRuntime: vi.fn(async () => ({ plugins: [] })),
 }));
-const preparation = vi.hoisted(() => ({ inspect: vi.fn() }));
+const preparation = vi.hoisted(() => ({ inspectLaunch: vi.fn() }));
 vi.mock('@taucad/runtime/preparation/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimePreparation>()),
-  createPreparationHost: vi.fn(() => ({ inspect: preparation.inspect })),
+  createPreparationHost: vi.fn(() => ({ inspectLaunch: preparation.inspectLaunch })),
 }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
@@ -223,11 +223,9 @@ describe('exportCommand', () => {
         'dotnet/dotnet',
         'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
         'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
-        'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
-        'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
         'tau-worker/Tau.PicoGK.Worker.dll',
-        'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
         'tau-worker/PicoGK.dll',
+        'tau-worker/picogk.26.2.dylib',
       ].map((path) => file(path)),
     };
     const csharpInput = async (): Promise<string> => {
@@ -236,17 +234,17 @@ describe('exportCommand', () => {
       return path;
     };
     const inspected = (state: unknown): void => {
-      preparation.inspect.mockResolvedValueOnce({ selection: { package: '@taucad/picogk' }, revision: 1, state });
+      preparation.inspectLaunch.mockResolvedValueOnce(state);
     };
 
     it('composes the kernel from the prepared closure, launched through the dotnet muxer', async () => {
-      inspected({ status: 'ready', attemptId: 'a', receipts: { runtime: receipt } });
+      inspected({ status: 'ready', closures: { runtime: receipt } });
       exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
       const command = await importExportCommand();
 
       await runCommand(command, { rawArgs: [await csharpInput(), '--ext=glb'] });
 
-      expect(preparation.inspect).toHaveBeenCalledWith({ package: '@taucad/picogk', dependencies: ['runtime'] });
+      expect(preparation.inspectLaunch).toHaveBeenCalledWith({ package: '@taucad/picogk', dependencies: ['runtime'] });
       const { createCliRuntime } = await importedCliRuntime();
       expect(createCliRuntime.mock.calls.at(-1)?.[0]).toMatchObject({
         picogk: {
@@ -300,7 +298,7 @@ describe('exportCommand', () => {
 
       await runCommand(command, { rawArgs: [inputPath, '--ext=glb'] });
 
-      expect(preparation.inspect).not.toHaveBeenCalled();
+      expect(preparation.inspectLaunch).not.toHaveBeenCalled();
     });
   });
 

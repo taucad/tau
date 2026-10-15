@@ -1,18 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import {
-  ChevronRight,
-  Cloud,
-  Copy,
-  FolderOpen,
-  PanelsTopLeft,
-  Forward,
-  EllipsisVertical,
-  Pencil,
-  SquarePen,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { ChevronRight, Cloud, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -68,8 +55,7 @@ import {
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
 
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
+import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
 
 const projectsPerPage = 5;
 
@@ -271,23 +257,7 @@ function ProjectNavigationItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
-  const directories = project.locator.backend === 'node' ? desktopBridge()?.directories : undefined;
-  const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
-  const openDirectory = async (): Promise<void> => {
-    if (!directories || isOpeningDirectory) {
-      return;
-    }
-    setIsOpeningDirectory(true);
-    try {
-      await directories.open(await desktopWorkspaceRoot(project.id));
-    } catch (error) {
-      toast.error(`Could not open ${project.name}`, {
-        description: error instanceof Error ? error.message : 'Try opening the folder again.',
-      });
-    } finally {
-      setIsOpeningDirectory(false);
-    }
-  };
+  const openInFileManager = useOpenProjectInFileManager(project);
   const navigate = useNavigate();
   const location = useLocation();
   const chatsId = `project-chats-${project.id}`;
@@ -350,22 +320,16 @@ function ProjectNavigationItem({
         <SquarePen aria-hidden />
         New chat
       </Item>
-      {directories ? (
+      {openInFileManager ? (
         <Item
-          disabled={isOpeningDirectory}
-          aria-busy={isOpeningDirectory}
+          disabled={openInFileManager.isOpening}
+          aria-busy={openInFileManager.isOpening}
           onSelect={() => {
-            void openDirectory();
+            void openInFileManager.open();
           }}
         >
-          {directories.openIcon === 'finder' ? (
-            <SvgIcon id='finder' aria-hidden />
-          ) : directories.openIcon === 'file-explorer' ? (
-            <PanelsTopLeft aria-hidden />
-          ) : (
-            <FolderOpen aria-hidden />
-          )}
-          {directories.openLabel}
+          <NativeFileManagerIcon icon={openInFileManager.icon} />
+          {openInFileManager.label}
         </Item>
       ) : null}
       <Separator />

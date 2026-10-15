@@ -97,6 +97,13 @@ describe('desktopEnvironment', () => {
     });
   });
 
+  it.each([
+    ['false', false],
+    ['true', true],
+  ])('should publish TAU_DEBUG=%s to the renderer as %s', (raw, expected) => {
+    expect(clientEnvironment({ TAU_DEBUG: raw })['TAU_DEBUG']).toBe(expected);
+  });
+
   it('publishes the machines opt-in for an unlocked qualification build', () => {
     expect(clientEnvironment({ TAU_MACHINES_ENABLED: 'true' })).toMatchObject({ TAU_MACHINES_ENABLED: 'true' });
   });

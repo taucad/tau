@@ -6,7 +6,7 @@ import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/n
 import type { ClosureReceipt, ReceiptFile, SealClosureInput } from '@taucad/runtime/preparation/node';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { build123dOptionsFromClosure, createBuild123dSeal } from '#build123d-closure.js';
+import { build123dLaunchSet, build123dOptionsFromClosure, createBuild123dSeal } from '#build123d-closure.js';
 import { build123dOptionsSchema } from '#build123d.schemas.js';
 
 const hex = (digit: string): string => digit.repeat(64);
@@ -60,6 +60,15 @@ describe('build123dOptionsFromClosure', () => {
       ],
       runtimePath: '/store/closures/sha256/abc',
     });
+  });
+
+  it('should name the interpreter and the worker scripts as its launch set, and map its launch index alike', () => {
+    const full = receiptOf([...closureFiles, row('python/lib/python3.13/os.py', 'e')]);
+    const launchSet = build123dLaunchSet();
+    const index = { ...full, files: full.files.filter(({ path }) => launchSet.includes(path)) };
+
+    expect(launchSet.toSorted()).toEqual(closureFiles.map(({ path }) => path));
+    expect(build123dOptionsFromClosure(index)).toEqual(build123dOptionsFromClosure(full));
   });
 
   it('should refuse a closure without the worker scripts', () => {

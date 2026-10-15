@@ -77,6 +77,21 @@ const picoGkHostedPatch = resolve(dotnetProjectRoot, 'PicoGK.hosted.patch');
 const nativeSourceRoot = resolve(dotnetProjectRoot, 'native');
 const topologySchema = resolve(workspaceRoot, 'packages/core/geometry/schema/tau-cad-topology.schema.json');
 
+/**
+ * MSBuild properties that make the published assemblies a function of their sources and the pinned SDK (X26): no git
+ * commit in the informational version, no SourceLink or source-control query, and workspace paths mapped to `/_/`.
+ * Global properties also reach the PicoGK project reference, whose source sits under `out/cache` inside the checkout.
+ */
+const reproducibleProperties = [
+  '-p:Deterministic=true',
+  '-p:IncludeSourceRevisionInInformationalVersion=false',
+  '-p:EnableSourceLink=false',
+  '-p:EnableSourceControlManagerQueries=false',
+  // Without source-control queries there are no SourceRoot items to derive the path map from; set it directly.
+  '-p:DeterministicSourcePaths=false',
+  `-p:PathMap=${workspaceRoot}/=/_/`,
+];
+
 const digest = async (path: string, algorithm: 'sha256' | 'sha512' = 'sha256'): Promise<string> =>
   createHash(algorithm)
     .update(await readFile(path))
@@ -390,7 +405,17 @@ const prepareNative = async (): Promise<string> => {
     '-sNO_LZMA=1',
     '-sNO_ZSTD=1',
   ];
-  const profile = { target: 'darwin-arm64', sourceDateEpoch, commonFlags, bloscFlags, tbbFlags, boostFlags };
+  // Apple's ar, ranlib and ld write zero member dates under ZERO_AR_DATE, so the static archives do not carry build times.
+  const zeroArDate = '1';
+  const profile = {
+    target: 'darwin-arm64',
+    sourceDateEpoch,
+    zeroArDate,
+    commonFlags,
+    bloscFlags,
+    tbbFlags,
+    boostFlags,
+  };
   const patchSha256 = await digest(resolve(nativeSourceRoot, 'Runtime.patch'));
   const fingerprint = createHash('sha256').update(JSON.stringify({ sources, toolchain, profile }));
   for (const path of [...(await filesUnder(nativeSourceRoot)), import.meta.filename]) {
@@ -409,6 +434,13 @@ const prepareNative = async (): Promise<string> => {
   const root = resolve(cacheRoot, `native-${sourceSha256}`);
   const engineRoot = resolve(cacheRoot, `native-engine-${engineSha256}`);
   const output = resolve(root, 'resources');
+  // The libraries are renamed, re-linked and signed here before `output` replaces it atomically.
+  const staging = `${output}.${String(process.pid)}.tmp`;
+  /**
+   * A path as the receipt records it: the staging directory under its final name and workspace paths relative, so the
+   * shipped receipt holds no process id or checkout location.
+   */
+  const recordedPath = (value: string): string => value.replaceAll(staging, output).replaceAll(`${workspaceRoot}/`, '');
   const verifyFiles = async (directory: string, files: readonly HashedFile[]): Promise<boolean> => {
     if (files.length === 0) {
       return false;
@@ -463,6 +495,7 @@ const prepareNative = async (): Promise<string> => {
   };
   const environment: NodeJS.ProcessEnv = { ...process.env };
   environment['SOURCE_DATE_EPOCH'] = sourceDateEpoch;
+  environment['ZERO_AR_DATE'] = zeroArDate;
   environment['LC_ALL'] = 'C';
   environment['CXX'] = compilerPath;
   for (const name of [
@@ -484,7 +517,11 @@ const prepareNative = async (): Promise<string> => {
     readonly arguments: readonly string[];
     readonly cwd?: string;
   }): void => {
-    commands.push(options);
+    commands.push({
+      command: options.command,
+      arguments: options.arguments.map(recordedPath),
+      ...(options.cwd === undefined ? {} : { cwd: recordedPath(options.cwd) }),
+    });
     execFileSync(options.command, [...options.arguments], { cwd: options.cwd, env: environment, stdio: 'inherit' });
   };
   const dependencyPins = [source('blosc'), source('tbb'), source('boost')];
@@ -647,22 +684,21 @@ const prepareNative = async (): Promise<string> => {
       arguments: ['--build', build, '--target', 'picogk', 'tau-picogk-readback', '--parallel', '2'],
     });
   }
-  const temporary = `${output}.${String(process.pid)}.tmp`;
-  await rm(temporary, { recursive: true, force: true });
-  await mkdir(temporary, { recursive: true });
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
   await Promise.all([
     cp(
       compiledEngine === undefined
         ? resolve(build, 'lib/picogk.26.2.dylib')
         : resolve(compiledEngine.directory, 'picogk.26.2.dylib'),
-      resolve(temporary, 'picogk.26.2.dylib'),
+      resolve(staging, 'picogk.26.2.dylib'),
       { dereference: true },
     ),
     cp(
       compiledEngine === undefined
         ? resolve(build, 'tau-picogk-readback.dylib')
         : resolve(compiledEngine.directory, 'tau-picogk-readback.dylib'),
-      resolve(temporary, 'tau-picogk-readback.dylib'),
+      resolve(staging, 'tau-picogk-readback.dylib'),
       {
         dereference: true,
       },
@@ -671,14 +707,14 @@ const prepareNative = async (): Promise<string> => {
       compiledEngine === undefined
         ? resolve(dependencies, 'lib/libtbb.12.dylib')
         : resolve(compiledEngine.directory, 'libtbb.12.dylib'),
-      resolve(temporary, 'libtbb.12.dylib'),
+      resolve(staging, 'libtbb.12.dylib'),
       { dereference: true },
     ),
   ]);
   const libraries = ['picogk.26.2.dylib', 'tau-picogk-readback.dylib', 'libtbb.12.dylib'];
   const linkedLibraries: Record<string, readonly string[]> = {};
   const auditAndSign = (name: string): void => {
-    const library = resolve(temporary, name);
+    const library = resolve(staging, name);
     run({ command: 'install_name_tool', arguments: ['-id', `@loader_path/${name}`, library] });
     const links = execFileSync('otool', ['-L', library], { encoding: 'utf8' })
       .split('\n')
@@ -718,24 +754,30 @@ const prepareNative = async (): Promise<string> => {
   ];
   await Promise.all(
     licenses.map(async ([name, path, outputName]) =>
-      cp(resolve(sourceRoot(name!), path!), resolve(temporary, outputName!)),
+      cp(resolve(sourceRoot(name!), path!), resolve(staging, outputName!)),
     ),
   );
-  await cp(resolve(sourceRoot('blosc'), 'LICENSES'), resolve(temporary, 'Blosc-LICENSES'), { recursive: true });
-  await cp(resolve(nativeSourceRoot, 'licenses/Zstd-LICENSE'), resolve(temporary, 'Zstd-LICENSE'));
+  await cp(resolve(sourceRoot('blosc'), 'LICENSES'), resolve(staging, 'Blosc-LICENSES'), { recursive: true });
+  await cp(resolve(nativeSourceRoot, 'licenses/Zstd-LICENSE'), resolve(staging, 'Zstd-LICENSE'));
   await cp(
     resolve(nativeSourceRoot, 'licenses/Zstd-license-receipt.json'),
-    resolve(temporary, 'Zstd-license-receipt.json'),
+    resolve(staging, 'Zstd-license-receipt.json'),
   );
-  const nativeFiles = await filesUnder(temporary);
+  const nativeFiles = await filesUnder(staging);
   const files = await Promise.all(
-    nativeFiles.map(async (path) => ({ name: relative(temporary, path), sha256: await digest(path) })),
+    nativeFiles.map(async (path) => ({ name: relative(staging, path), sha256: await digest(path) })),
   );
+  /*
+   * The shipped receipt names the dependency libraries it ships (libtbb). The static archives are linked into the engine
+   * and are a function of the pins, toolchain and profile recorded beside them; their hashes stay in the dependency
+   * cache's own receipt, which decides whether that cache is reused.
+   */
+  const shippedDependencyFiles = dependencyFiles.filter((file) => !file.name.endsWith('.a'));
   await writeFile(
-    resolve(temporary, 'tau-picogk-native-build.json'),
+    resolve(staging, 'tau-picogk-native-build.json'),
     `${JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         sourceSha256,
         engineSha256,
         preparerSha256,
@@ -748,7 +790,7 @@ const prepareNative = async (): Promise<string> => {
           toolchain,
           profile,
           dependencySha256,
-          dependencyFiles,
+          dependencyFiles: shippedDependencyFiles,
           dependencyCommands,
           commands,
         },
@@ -758,7 +800,7 @@ const prepareNative = async (): Promise<string> => {
         toolchain,
         profile,
         dependencySha256,
-        dependencyFiles,
+        dependencyFiles: shippedDependencyFiles,
         dependencyCommands,
         commands,
         linkedLibraries,
@@ -770,7 +812,7 @@ const prepareNative = async (): Promise<string> => {
     )}\n`,
   );
   await rm(output, { recursive: true, force: true });
-  await rename(temporary, output);
+  await rename(staging, output);
   if (compiledEngine === undefined) {
     await mkdir(engineRoot, { recursive: true });
     const receipt = JSON.parse(await readFile(resolve(output, 'tau-picogk-native-build.json'), 'utf8')) as {
@@ -843,7 +885,10 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
   const nugetRoot = resolve(cacheRoot, 'nuget-packages');
   buildEnvironment['NUGET_PACKAGES'] = nugetRoot;
-  const projectProperties = [`-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`];
+  const projectProperties = [
+    `-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`,
+    ...reproducibleProperties,
+  ];
   const lockProperties = ['-p:RestorePackagesWithLockFile=true', `-p:NuGetLockFilePath=${target.lockFile}`];
   execFileSync(
     dotnet,
@@ -1111,15 +1156,20 @@ const assertRuntimePinPublished = async (pin: { sha512: string; url: string }): 
   }
 };
 
-/** Whether the layer, its record and the seed were built from these sources and are byte-intact. */
-const layerIsCurrent = async (output: string, expectedSourceDigest: string): Promise<boolean> => {
+/** Whether the layer, its record and the seed were built from these sources and toolchain and are byte-intact. */
+const layerIsCurrent = async (
+  output: string,
+  expected: { readonly sourceFilesSha256: string; readonly nativeSourceSha256: string },
+): Promise<boolean> => {
   try {
     const record = JSON.parse(await readFile(resolve(output, 'tau-layer.json'), 'utf8')) as {
       readonly sha256: string;
       readonly sourceFilesSha256: string;
+      readonly nativeSourceSha256?: string;
     };
     return (
-      record.sourceFilesSha256 === expectedSourceDigest &&
+      record.sourceFilesSha256 === expected.sourceFilesSha256 &&
+      record.nativeSourceSha256 === expected.nativeSourceSha256 &&
       (await digest(resolve(output, layerAsset))) === record.sha256 &&
       (await digest(resolve(layerRoot, 'seed/blobs/sha256', record.sha256))) === record.sha256 &&
       existsSync(resolve(layerRoot, 'seed/tau-seed.json'))
@@ -1141,7 +1191,25 @@ const prepareLayer = async (): Promise<void> => {
   const selfContained = resolve(resourceRoot, 'darwin-arm64');
   const output = resolve(layerRoot, 'darwin-arm64');
   const expectedSourceDigest = await sourceDigest();
-  if (await layerIsCurrent(output, expectedSourceDigest)) {
+  // The engine dylibs prepareNative built and ad-hoc signed; the cached build is reused. Its receipt names the native
+  // inputs, the toolchain among them, so a runner-image toolchain change is a declared input change of the layer.
+  const nativeRoot = await prepareNative();
+  const nativeReceipt = JSON.parse(await readFile(resolve(nativeRoot, 'tau-picogk-native-build.json'), 'utf8')) as {
+    readonly sourceSha256: string;
+    readonly toolchain: {
+      readonly compiler: string;
+      readonly sdk: string;
+      readonly cmake: string;
+      readonly ninja: string;
+    };
+  };
+  const firstLine = (text: string): string => text.split('\n', 1)[0]!.trim();
+  if (
+    await layerIsCurrent(output, {
+      sourceFilesSha256: expectedSourceDigest,
+      nativeSourceSha256: nativeReceipt.sourceSha256,
+    })
+  ) {
     console.log(`The Tau PicoGK layer is current: ${resolve(output, layerAsset)}`);
     return;
   }
@@ -1160,6 +1228,7 @@ const prepareLayer = async (): Promise<void> => {
     '-p:PublishReadyToRun=true',
     '-p:SelfContained=false',
     '-p:UseAppHost=false',
+    ...reproducibleProperties,
   ];
   execFileSync(
     dotnet,
@@ -1202,8 +1271,6 @@ const prepareLayer = async (): Promise<void> => {
   if (existsSync(resolve(tree, 'Tau.PicoGK.Worker')) || !existsSync(resolve(tree, 'Tau.PicoGK.Worker.dll'))) {
     throw new Error('The framework-dependent publish must produce Tau.PicoGK.Worker.dll and no apphost.');
   }
-  // The engine dylibs prepareNative built and ad-hoc signed; the cached build is reused.
-  const nativeRoot = await prepareNative();
   const nativeNames = await readdir(nativeRoot);
   await Promise.all([
     ...nativeNames.map(async (name) => cp(resolve(nativeRoot, name), resolve(tree, name), { recursive: true })),
@@ -1213,7 +1280,7 @@ const prepareLayer = async (): Promise<void> => {
   const archive = await deterministicTarGz(tree);
   const sha256 = createHash('sha256').update(archive.bytes).digest('hex');
   const record = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     target: 'darwin-arm64',
     asset: layerAsset,
     sha256,
@@ -1224,6 +1291,14 @@ const prepareLayer = async (): Promise<void> => {
     dotnetRuntimeVersion,
     readyToRun: true,
     sourceFilesSha256: expectedSourceDigest,
+    nativeSourceSha256: nativeReceipt.sourceSha256,
+    toolchain: {
+      dotnetSdk: dotnetVersion,
+      compiler: firstLine(nativeReceipt.toolchain.compiler),
+      sdk: nativeReceipt.toolchain.sdk,
+      cmake: firstLine(nativeReceipt.toolchain.cmake),
+      ninja: nativeReceipt.toolchain.ninja,
+    },
   };
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });

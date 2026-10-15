@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ClosureReceipt, ReceiptFile } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
-import { picogkOptionsFromClosure } from '#picogk-closure.js';
+import { picogkLaunchSet, picogkOptionsFromClosure } from '#picogk-closure.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
 
 const root = '/store/closures/sha256/0123';
@@ -63,20 +63,29 @@ describe('picogkOptionsFromClosure', () => {
     expect(picogkOptionsSchema.parse(options)).toEqual(options);
   });
 
+  it('names the files the process loads first as its launch set, and maps its launch index as its receipt', () => {
+    const launchSet = picogkLaunchSet(closureFiles);
+    const index = { ...receipt(), files: closureFiles.filter(({ path }) => launchSet.includes(path)) };
+
+    expect(launchSet).toEqual([
+      'dotnet/dotnet',
+      'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
+      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
+      'tau-worker/PicoGK.dll',
+      'tau-worker/Tau.PicoGK.Worker.dll',
+      'tau-worker/picogk.26.2.dylib',
+    ]);
+    expect(picogkOptionsFromClosure(index)).toEqual(picogkOptionsFromClosure(receipt()));
+  });
+
   it('hashes only the named launch resources at each launch', () => {
     const { resourceFiles } = picogkOptionsFromClosure(receipt());
 
     expect(resourceFiles.map(({ path }) => path.slice(root.length + 1))).toEqual([
       'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libclrjit.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
       'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
       'tau-worker/PicoGK.dll',
-      'tau-worker/Tau.PicoGK.Worker.deps.json',
       'tau-worker/Tau.PicoGK.Worker.dll',
-      'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
-      'tau-worker/libSkiaSharp.dylib',
       'tau-worker/picogk.26.2.dylib',
     ]);
     expect(resourceFiles.find(({ path }) => path.endsWith('PicoGK.dll'))).toEqual({
@@ -89,21 +98,13 @@ describe('picogkOptionsFromClosure', () => {
   it.each([
     ['dotnet/dotnet', 'dotnet/dotnet'],
     ['tau-worker/Tau.PicoGK.Worker.dll', 'tau-worker/Tau.PicoGK.Worker.dll'],
-    ['tau-worker/Tau.PicoGK.Worker.runtimeconfig.json', 'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json'],
     ['tau-worker/PicoGK.dll', 'tau-worker/PicoGK.dll'],
     ['dotnet/host/fxr/10.0.11/libhostfxr.dylib', 'dotnet/host/fxr/<version>/libhostfxr'],
     [
       'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
       'dotnet/shared/Microsoft.NETCore.App/<version>/libhostpolicy',
     ],
-    [
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/<version>/libcoreclr',
-    ],
-    [
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
-      'dotnet/shared/Microsoft.NETCore.App/<version>/System.Private.CoreLib.dll',
-    ],
+    ['tau-worker/picogk.26.2.dylib', 'tau-worker/picogk.<version>.dylib'],
   ])('refuses a closure without %s and names the repair', (absent, named) => {
     expect(() => picogkOptionsFromClosure(receipt(closureFiles.filter(({ path }) => path !== absent)))).toThrow(
       `The PicoGK closure at ${root} has no ${named}. Run \`tau prepare picogk --verify\` to repair it.`,

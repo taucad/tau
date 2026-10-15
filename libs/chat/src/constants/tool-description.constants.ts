@@ -156,7 +156,7 @@ Returns each answer and who settled it. Unless status is "answered", proceed wit
 
 Call it when a JavaScript or TypeScript model imports an npm package that package.json does not list (pass it in add), when an import fails with package-not-locked or package-not-installed, or when the person asks to add, remove or upgrade a package. Until it runs, those imports fail or fall back to a CDN bundle; building never installs.
 
-add sets dependencies[name] to a range ("^4.0.3"), as \`npm install name@range\`; remove deletes names, as \`npm uninstall\`; upgrade re-resolves the named packages to the newest version their ranges allow. With none of them it installs what package.json and the lock already say. Only the npm registry is used, and package scripts never run.
+add sets dependencies[name] to a range ("^4.0.3"), as \`npm install name@range\`; remove deletes names, as \`npm uninstall\`; upgrade re-resolves the named packages to the newest version their ranges allow. With none of them it installs what package.json and the lock already say. Only the npm registry is used, and package scripts never run. A Python or C# project declares its packages in pyproject.toml or its .csproj instead; there it refuses with manifest-conflict, naming that file, and writes nothing.
 
 Returns whether each file changed, the direct dependencies as locked, and issues whose messages name the fix. When resolution is refused (no-matching-version, peer-conflict, manifest-conflict) nothing is written; a package that fails to download is reported and the rest still install.`,
   [toolName.listMachines]:

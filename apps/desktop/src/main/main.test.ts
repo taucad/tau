@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
   openDirectoryChannel,
+  revealPathChannel,
   machinesChannels,
   quitChannels,
   servicesPortRelayTag,
@@ -23,6 +24,7 @@ import {
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 
+type UpdateMenuItem = { label: string; click?: () => void };
 const originalTitle = process.title;
 const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -93,12 +95,16 @@ const state = vi.hoisted(() => ({
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
+  updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
+  installedUpdateMenuItems: [] as UpdateMenuItem[],
+  updaterCheck: vi.fn(async () => undefined),
+  updaterInstall: vi.fn(async () => undefined),
 }));
 
 vi.mock('#main/updater.js', () => ({
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
-    return { check: async () => undefined, install: async () => undefined, status: () => 'disabled' };
+    return { check: state.updaterCheck, install: state.updaterInstall, status: () => 'Update ready' };
   },
 }));
 
@@ -189,9 +195,19 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
-  Menu: { getApplicationMenu: vi.fn(() => undefined) },
-  MenuItem: vi.fn(function MenuItem() {
-    return {};
+  Menu: {
+    getApplicationMenu: vi.fn(() => ({
+      items: [
+        { submenu: { insert: (index: number, item: UpdateMenuItem) => state.updateMenuItems.splice(index, 0, item) } },
+      ],
+    })),
+    setApplicationMenu: vi.fn(() => {
+      // Electron's native menu does not reflect additions until it is installed again.
+      state.installedUpdateMenuItems = [...state.updateMenuItems];
+    }),
+  },
+  MenuItem: vi.fn(function MenuItem(options: UpdateMenuItem) {
+    return options;
   }),
   autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
@@ -233,7 +249,7 @@ vi.mock('electron', () => ({
       webRequest: {},
     },
   },
-  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => '') },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   utilityProcess: { fork: vi.fn() },
 }));
 
@@ -390,6 +406,8 @@ afterEach(async () => {
   state.autoQuiesce = true;
   state.autoForced = false;
   state.prepareToRestart = undefined;
+  state.updateMenuItems = [{ label: 'About Tau' }];
+  state.installedUpdateMenuItems = [];
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
   state.ready = undefined;
@@ -448,6 +466,23 @@ describe('desktop main compute owner', () => {
   };
 
   it(
+    'should expose a native update action that can resume a deferred installation',
+    async () => {
+      await bootstrap();
+      await vi.waitFor(() => {
+        expect(state.installedUpdateMenuItems.map((item) => item.label)).toEqual(['About Tau', 'Check for Updates…']);
+      });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      state.installedUpdateMenuItems[1]!.click!();
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledOnce();
+        expect(state.updaterInstall).toHaveBeenCalledOnce();
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'settles restart without normal quit stealing the updater finalizer',
     async () => {
       await bootstrap();
@@ -495,6 +530,23 @@ describe('desktop main compute owner', () => {
     expect(shell.openPath).not.toHaveBeenCalled();
     vi.mocked(shell.openPath).mockResolvedValueOnce('No file manager available');
     await expect(open({ senderFrame: {} }, directory)).rejects.toThrow('No file manager available');
+  }, 120_000);
+
+  it('should reveal only granted files and folders in the file manager', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'main.ts'), '');
+    const { shell } = await import('electron');
+    const reveal = state.handlers.get(revealPathChannel)!;
+    await expect(reveal({ senderFrame: {} }, join(directory, 'main.ts'))).resolves.toBeUndefined();
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(join(await realpath(directory), 'main.ts'));
+    vi.mocked(shell.showItemInFolder).mockClear();
+    await expect(reveal({ senderFrame: {} }, join(tmpdir(), 'outside.ts'))).rejects.toThrow('Reopen this folder');
+    await expect(reveal({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(reveal({ senderFrame: {} }, join(directory, 'missing.ts'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(reveal({ senderFrame: {} }, join(directory, 'escape', 'x'))).rejects.toThrow('Reopen this folder');
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
   }, 120_000);
 
   it(

@@ -16,7 +16,7 @@ const runtimeManifestSchema = z.object({
   pythonSha256: sha256,
   workerPath: relativeResourcePath,
   workerSha256: sha256,
-  supportFiles: z.array(z.object({ path: relativeResourcePath, sha256 })).length(2),
+  supportFiles: z.array(z.object({ path: relativeResourcePath, sha256 })).length(4),
 });
 
 const inside = (root: string, path: string): string => {

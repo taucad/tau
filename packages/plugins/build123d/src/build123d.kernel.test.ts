@@ -21,6 +21,8 @@ const kernelOptions = {
   supportFiles: [
     { path: '/analyzer.py', sha256: 'c'.repeat(64) },
     { path: '/glb.py', sha256: 'd'.repeat(64) },
+    { path: '/native_materials.py', sha256: 'd'.repeat(64) },
+    { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
   ],
 };
 const parameterDeclaration = {
@@ -219,6 +221,91 @@ describe('Build123d kernel lifecycle errors', () => {
         context,
       ),
     ).rejects.toThrow(/stale/);
+  });
+
+  it('should surface preserved unsupported mechanism intent in the Kinematics pane', async () => {
+    const context = createContext();
+    const diagnostic = {
+      code: 'UNSUPPORTED_MECHANISM',
+      path: '/mechanismIntent/connections',
+      message: 'Closed graph',
+      recovery: 'Inspect the retained intent.',
+    };
+    context.session.request.mockResolvedValue({
+      artifactPath: '/private/model.glb',
+      byteLength: 3,
+      mechanismDiagnostics: [diagnostic],
+    });
+    const result = await definition.render?.(
+      { view: 'model', handle: { sessionGeneration: 2, handleId: 'shape' }, options: renderOptions },
+      runtime,
+      context,
+    );
+    expect(result).toMatchObject({
+      content: new Uint8Array([1, 2, 3]),
+      issues: [
+        {
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: { producer: { kernelId: 'build123d' }, mechanism: diagnostic },
+        },
+      ],
+    });
+  });
+
+  it('rejects invalid native coupling ratios, cycles and clip timing before render or export delivery', async () => {
+    const joints = {
+      first: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 1, 0] },
+      second: { type: 'revolute', parent: 'arm', child: 'tool', origin: [0, 0, 0], axis: [0, 1, 0] },
+    };
+    const base = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: [] }, arm: { components: ['arm'] }, tool: { components: ['tool'] } },
+      joints,
+    };
+    for (const invalid of [
+      { ...base, couplings: [{ driver: 'first', follower: 'second', ratio: 'invalid' }] },
+      {
+        ...base,
+        couplings: [
+          { driver: 'first', follower: 'second', ratio: 1 },
+          { driver: 'second', follower: 'first', ratio: 1 },
+        ],
+      },
+      { ...base, animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 2, coordinates: { first: 1 } }] }] },
+    ]) {
+      const context = createContext();
+      context.session.request.mockResolvedValue({
+        artifactPath: '/private/model.glb',
+        byteLength: 3,
+        mechanism: invalid,
+      });
+      const handle = { sessionGeneration: 2, handleId: 'shape' };
+      for (const result of [
+        definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
+        definition.export!(
+          {
+            exportId: 'glb',
+            handle,
+            options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+          },
+          runtime,
+          context,
+        ),
+      ]) {
+        await expect(result).rejects.toMatchObject({
+          issues: [
+            expect.objectContaining({
+              code: 'INVALID_ANNOTATION',
+              severity: 'error',
+              details: expect.objectContaining({ producer: { kernelId: 'build123d' } }),
+            }),
+          ],
+        });
+      }
+    }
   });
 
   it('handles mesh/export worker failures and GLB export naming', async () => {

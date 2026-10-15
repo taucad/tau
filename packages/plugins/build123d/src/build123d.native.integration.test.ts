@@ -6,13 +6,14 @@ import { resolve } from 'node:path';
 
 import { createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import { validateTauCadTopology } from '@taucad/geometry-core';
-import type { TauCadTopologyPayload } from '@taucad/geometry-core';
+import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import {
   createTestRuntimeClient,
   extractGltfFromResult,
   getBoundingBoxFromInspect,
   getGeometryStatsFromInspect,
   getInspectReport,
+  glbToDocument,
   getSignedVolumeFromGlb,
   validateGlbData,
 } from '@taucad/runtime-testing';
@@ -154,6 +155,107 @@ const readTopology = (
 };
 
 describe('Build123d native kernel', () => {
+  it('reopens exported native assembly intent and invalidates an imported part on an image-only edit', async () => {
+    const red = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    const blue = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC',
+        'base64',
+      ),
+    );
+    const files = {
+      'main.py': `from dataclasses import dataclass
+from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
+from reusable import textured_part
+
+@dataclass(frozen=True)
+class Params:
+    size: float = 10.0
+
+def main(params):
+    base = Box(params.size, params.size, 2)
+    rotor = textured_part(params.size)
+    RevoluteJoint("shaft", base, Axis.Z, angle_reference=(1, 1, 0))
+    RigidJoint("mount", rotor)
+    base.joints["shaft"].connect_to(rotor.joints["mount"], angle=22.5)
+    return Compound(children=[base, rotor], label="Module")
+
+def motion(model):
+    base, rotor = model.children
+    joint = base.joints["shaft"]
+    return {"ground": base, "occurrence_ids": {"base": base, "rotor": rotor},
+            "animations": [{"id": "turn", "duration": 1, "keyframes": [
+                {"time": 0, "coordinates": {joint: 0}},
+                {"time": 1, "coordinates": {joint: 90}}]}]}
+`,
+      'reusable.py': `from pathlib import Path
+from build123d import Box
+from bd_materials import FinishedMaterial, metals
+from threejs_materials import PbrProperties, PbrMaps, PbrValues
+
+__tau__ = {"dependencies": ["finish.png"]}
+
+def textured_part(size):
+    result = Box(size, 2, 2)
+    result.label = "Reusable rotor"
+    result.material = FinishedMaterial(metals.aluminum().material, pbr=PbrProperties(
+        "finish", "Finish", "test", "", "CC0", values=PbrValues(roughness=0.4),
+        maps=PbrMaps(color="finish.png"), maps_dir=Path(__file__).parent))
+    return result
+`,
+      'finish.png': red,
+    };
+    const client = createTestRuntimeClient({ runtime, files });
+    const exportAssembly = async (image: Uint8Array<ArrayBuffer>) => {
+      const document = client.open({ source: { files: { ...files, 'finish.png': image }, entry: 'main.py' } });
+      try {
+        const exported = await document.export('glb');
+        assert.ok(exported.success);
+        const bytes = Uint8Array.from(exported.files[0]!.bytes);
+        const reopened = await glbToDocument(bytes);
+        const payload = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
+        expect(payload).toMatchObject({
+          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:base', connections: [expect.any(Object)] },
+          mechanism: { animations: [{ id: 'turn' }] },
+        });
+        const textures = reopened.getRoot().listTextures();
+        expect(textures).toHaveLength(1);
+        expect(textures[0]!.getImage()).toEqual(image);
+        expect(
+          reopened
+            .getRoot()
+            .listMaterials()
+            .some((material) => material.getBaseColorTexture() !== null),
+        ).toBe(true);
+        expect(
+          reopened
+            .getRoot()
+            .listMeshes()
+            .flatMap((mesh) => mesh.listPrimitives())
+            .some((primitive) => primitive.getAttribute('TEXCOORD_0') !== null),
+        ).toBe(true);
+        return { bytes, payload };
+      } finally {
+        document.close();
+      }
+    };
+    try {
+      const initial = await exportAssembly(red);
+      const edited = await exportAssembly(blue);
+      expect(edited.bytes).not.toEqual(initial.bytes);
+      expect(edited.payload?.['mechanismIntent']).toEqual(initial.payload?.['mechanismIntent']);
+      expect(edited.payload?.['mechanism']).toEqual(initial.payload?.['mechanism']);
+      expect(await getSignedVolumeFromGlb(edited.bytes)).toBeCloseTo(await getSignedVolumeFromGlb(initial.bytes), 12);
+    } finally {
+      await client.shutdown();
+    }
+  }, 180_000);
+
   it('admits declared units without changing native values or geometry', async () => {
     const previousPath = process.env['PATH'];
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
@@ -240,7 +342,7 @@ describe('Build123d native kernel', () => {
       const { json, payload } = readTopology(glb);
       expect(payload.components).toEqual([
         expect.objectContaining({
-          id: 'component:housing',
+          id: 'occurrence:path/0',
           name: 'Housing',
           selector: 'node/0',
           color: expect.arrayContaining([expect.any(Number)]),
@@ -507,21 +609,21 @@ describe('Build123d native kernel', () => {
       const { json, payload } = readTopology(initial);
       expect(payload.components).toEqual([
         expect.objectContaining({
-          id: 'component:assembly',
+          id: 'occurrence:path/0',
           name: 'Assembly',
           kind: 'assembly',
-          childIds: ['component:left', 'component:right'],
+          childIds: ['occurrence:path/0/0', 'occurrence:path/0/1'],
         }),
         expect.objectContaining({
-          id: 'component:left',
-          parentId: 'component:assembly',
+          id: 'occurrence:path/0/0',
+          parentId: 'occurrence:path/0',
           color: [1, 0, 0, 1],
           faceGroups: expect.any(Array),
           edgeGroups: expect.any(Array),
         }),
         expect.objectContaining({
-          id: 'component:right',
-          parentId: 'component:assembly',
+          id: 'occurrence:path/0/1',
+          parentId: 'occurrence:path/0',
           color: [0, 0, 1, 1],
           faceGroups: expect.any(Array),
           edgeGroups: expect.any(Array),

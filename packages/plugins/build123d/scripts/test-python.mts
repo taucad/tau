@@ -25,7 +25,9 @@ const pythonRoot = resolve(repoRoot, 'packages/plugins/build123d/python');
 const targetRoot = resolve(repoRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
 const pythonExecutable = resolve(targetRoot, process.platform === 'win32' ? 'python.exe' : 'bin/python3');
 const reportRoot = resolve(repoRoot, 'out/reports/coverage/packages/plugins/build123d-python');
-const measuredFiles = ['analyzer.py', 'glb.py', 'worker.py'].map((name) => resolve(pythonRoot, name));
+const measuredFiles = ['analyzer.py', 'glb.py', 'worker.py', 'native_materials.py', 'mechanisms.py'].map((name) =>
+  resolve(pythonRoot, name),
+);
 
 const run = (arguments_: readonly string[]): void => {
   const environment: NodeJS.ProcessEnv = { ...process.env };

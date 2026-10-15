@@ -4136,6 +4136,9 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../../core/cache
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../kinematics
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../core/native-process

@@ -1,7 +1,9 @@
 # Native CAD runtime. Every direct dependency is pinned; uv resolves and hashes every wheel below.
-build123d==0.11.1
-cadquery-ocp-novtk==7.9.3.1.1
+build123d==0.13.0
+cadquery-ocp-novtk==8.0.1.0.0
 # `glb.py` imports numpy itself, so it is a direct dependency and not build123d's to drop.
 numpy==2.5.2
+# Native material resource validation and GLB PBR serialization use the public library directly.
+threejs-materials==1.2.4
 # Test instrumentation is bundled so release-matrix tests use the exact shipped interpreter offline.
 coverage==7.10.7

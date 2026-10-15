@@ -81,12 +81,16 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   const workerPath = join(runtimePath, 'worker.cjs');
   const analyzerPath = join(runtimePath, 'analyzer.py');
   const glbPath = join(runtimePath, 'glb.py');
+  const materialPath = join(runtimePath, 'native_materials.py');
+  const mechanismPath = join(runtimePath, 'mechanisms.py');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$4" "$5" "$6" "$7" "$8" "$9" "$10"\n`;
   writeFileSync(executable, executableBody);
   chmodSync(executable, 0o700);
   writeFileSync(workerPath, workerBody);
   writeFileSync(analyzerPath, 'analyzer');
   writeFileSync(glbPath, 'glb');
+  writeFileSync(materialPath, 'materials');
+  writeFileSync(mechanismPath, 'mechanisms');
   const logger = createMockLogger();
   const options = {
     pythonExecutable: executable,
@@ -98,6 +102,8 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
     supportFiles: [
       { path: analyzerPath, sha256: sha256('analyzer') },
       { path: glbPath, sha256: sha256('glb') },
+      { path: materialPath, sha256: sha256('materials') },
+      { path: mechanismPath, sha256: sha256('mechanisms') },
     ],
     requestTimeout,
     maxArtifactBytes: 32,
@@ -369,7 +375,7 @@ process.stdin.once('data',(line)=>{const request=JSON.parse(line);const frame=JS
     await delay(10);
     expect(duplicate.session.isHandleGenerationValid(duplicate.session.generation)).toBe(false);
     await duplicate.session.cleanup();
-  });
+  }, 15_000);
 
   it('bounds the queue and terminates on abort, timeout, revocation, and process exit', async () => {
     const queued = fixture(

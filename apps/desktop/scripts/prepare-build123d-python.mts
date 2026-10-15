@@ -144,7 +144,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     throw new Error(`Unsupported Python resource target: ${targetName}`);
   }
   const output = resolve(resourceRoot, targetName);
-  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py'] as const;
+  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'] as const;
   const sourceFilesSha256 = createHash('sha256');
   const sourceContents = await Promise.all(
     [
@@ -252,10 +252,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   );
   const workerSha256 = await digest(resolve(workerRoot, 'worker.py'));
   const supportFiles = await Promise.all(
-    ['analyzer.py', 'glb.py'].map(async (name) => ({
-      path: `tau-worker/${name}`,
-      sha256: await digest(resolve(workerRoot, name)),
-    })),
+    workerFiles
+      .filter((name) => name !== 'worker.py')
+      .map(async (name) => ({
+        path: `tau-worker/${name}`,
+        sha256: await digest(resolve(workerRoot, name)),
+      })),
   );
   await writeFile(
     resolve(temporary, 'tau-runtime-manifest.json'),

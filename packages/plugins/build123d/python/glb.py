@@ -82,7 +82,12 @@ def validate_glb(payload: bytes) -> None:
             raise ValueError("Generated GLB accessor references an invalid buffer view")
 
 
-def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: dict[str, dict[str, Any]]) -> None:
+def write_glb(
+    path: Path,
+    topology_components: list[dict[str, Any]],
+    mesh_data: dict[str, dict[str, Any]],
+    topology_metadata: dict[str, Any] | None = None,
+) -> None:
     """Write meshes and their canonical TAU_cad_topology payload."""
 
     binary = _Buffer()
@@ -90,19 +95,46 @@ def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: 
     meshes: list[dict[str, Any]] = []
     nodes: list[dict[str, Any]] = []
     materials: list[dict[str, Any]] = []
+    native_material_indices: dict[str, int] = {}
+    resources: dict[str, Any] = {}
+    extensions_used = {"TAU_cad_topology", "KHR_materials_unlit"}
+    native_pbrs = {
+        component_id: data["nativeMaterial"].pbr
+        for component_id, data in mesh_data.items()
+        if data.get("nativeMaterial") is not None and data["nativeMaterial"].pbr is not None
+    }
+    if native_pbrs:
+        from threejs_materials import collect_gltf_textures
+
+        # Collect once under unique occurrence IDs, never authored material names.
+        # Upstream owns PBR conversion and texture deduplication. Tau owns the
+        # surface association; generic node injection would also texture edges.
+        collected = collect_gltf_textures(native_pbrs, binary=True)
+        native = json.loads(collected.to_json())
+        blob = collected.binary_blob() or b""
+        view_indices = []
+        for view in native.get("bufferViews", []):
+            start = view.get("byteOffset", 0)
+            view_indices.append(binary.add(blob[start : start + view["byteLength"]]))
+        for image in native.get("images", []):
+            image["bufferView"] = view_indices[image["bufferView"]]
+        materials.extend(native["materials"])
+        native_material_indices = {material["name"]: index for index, material in enumerate(materials)}
+        resources = {key: native[key] for key in ("images", "textures", "samplers", "extensionsRequired") if key in native}
+        extensions_used.update(native.get("extensionsUsed", []))
 
     def accessor(values: list[float] | list[int], kind: str) -> int:
-        if kind == "VEC3":
+        if kind in {"VEC2", "VEC3"}:
             view = binary.add(_floats(values), 34962)  # type: ignore[arg-type]
-            minimum, maximum = _bounds(values)  # type: ignore[arg-type]
             item = {
                 "bufferView": view,
                 "componentType": 5126,
-                "count": len(values) // 3,
+                "count": len(values) // (2 if kind == "VEC2" else 3),
                 "type": kind,
-                "min": minimum,
-                "max": maximum,
             }
+            if kind == "VEC3":
+                minimum, maximum = _bounds(values)  # type: ignore[arg-type]
+                item.update({"min": minimum, "max": maximum})
         else:
             view = binary.add(_uints(values), 34963)  # type: ignore[arg-type]
             item = {"bufferView": view, "componentType": 5125, "count": len(values), "type": "SCALAR"}
@@ -120,18 +152,20 @@ def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: 
         primitives: list[dict[str, Any]] = []
         color = data["color"]
         component["color"] = color
-        surface_material = len(materials)
-        materials.append(
-            {
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [_linear(color[0]), _linear(color[1]), _linear(color[2]), color[3]],
-                    "metallicFactor": 0,
-                    "roughnessFactor": 0.65,
-                },
-                "doubleSided": True,
-                "alphaMode": "BLEND" if color[3] < 1 else "OPAQUE",
-            }
-        )
+        surface_material = native_material_indices.get(component["id"])
+        if surface_material is None:
+            surface_material = len(materials)
+            materials.append(
+                {
+                    "pbrMetallicRoughness": {
+                        "baseColorFactor": [_linear(color[0]), _linear(color[1]), _linear(color[2]), color[3]],
+                        "metallicFactor": 0,
+                        "roughnessFactor": 0.65,
+                    },
+                    "doubleSided": True,
+                    "alphaMode": "BLEND" if color[3] < 1 else "OPAQUE",
+                }
+            )
         if data["indices"]:
             primitive_index = len(primitives)
             primitives.append(
@@ -139,6 +173,7 @@ def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: 
                     "attributes": {
                         "POSITION": accessor(data["positions"], "VEC3"),
                         "NORMAL": accessor(data["normals"], "VEC3"),
+                        **({"TEXCOORD_0": accessor(data["uvs"], "VEC2")} if data.get("uvs") else {}),
                     },
                     "indices": accessor(data["indices"], "SCALAR"),
                     "material": surface_material,
@@ -202,7 +237,8 @@ def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: 
         )
 
     topology = json.dumps(
-        {"schemaVersion": 1, "components": topology_components}, separators=(",", ":"), ensure_ascii=False
+        {**(topology_metadata or {}), "schemaVersion": 1, "components": topology_components},
+        separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
     topology_view = binary.add(topology)
     document = {
@@ -215,7 +251,8 @@ def write_glb(path: Path, topology_components: list[dict[str, Any]], mesh_data: 
         "accessors": accessors,
         "bufferViews": binary.views,
         "buffers": [{"byteLength": len(binary.data)}],
-        "extensionsUsed": ["TAU_cad_topology", "KHR_materials_unlit"],
+        "extensionsUsed": sorted(extensions_used),
+        **resources,
         "extensions": {
             "TAU_cad_topology": {
                 "schemaVersion": 1,

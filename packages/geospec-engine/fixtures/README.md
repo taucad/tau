@@ -1,6 +1,6 @@
 # GeoSpec Fixture Corpus
 
-The committed, adversarial STEP fixture corpus and its manifests — the red/green contract for selector and relationship evidence, and the conformance corpus for the GeoSpec AP242 profile. The compiled engine verifies it: the Rust tests under `packages/geospec-engine-native/native/occt/rust/tests/` read these `model.step` files, and `fixtures/finite-contact/original44.tsv` there ports the manifests' relationship rows. Blueprint: `docs/research/geospec-fixture-acceptance-blueprint.md`; fixture semantics are transcribed from the V8 audit's fixture acceptance specs (`docs/research/v8-engine-brep-current-manufacturability-audit.md`), which remain normative.
+The committed, adversarial STEP fixture corpus and its manifests — the red/green contract for selector and relationship evidence, and the conformance corpus for the GeoSpec AP242 profile. The compiled engine verifies it: in [taucad/geospec](https://github.com/taucad/geospec), the Rust tests under `packages/geospec-engine/native/occt/rust/tests/` read these `model.step` files, and `fixtures/finite-contact/original44.tsv` there ports the manifests' relationship rows. Blueprint: `docs/research/geospec-fixture-acceptance-blueprint.md`; fixture semantics are transcribed from the V8 audit's fixture acceptance specs (`docs/research/v8-engine-brep-current-manufacturability-audit.md`), which remain normative.
 
 ## Layout
 

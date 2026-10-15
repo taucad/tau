@@ -3,7 +3,7 @@
 The `geospec` CLI and the Node worker pool for the [`geospec`](../geospec) matcher API.
 
 `geospec` owns canonical authoring, selectors, diagnostics and host integration.
-Geometry runs in the shared [compiled engine](../geospec-engine-native/README.md);
+Geometry runs in the shared compiled engine, [`geospec-engine`](https://github.com/taucad/geospec/tree/main/packages/geospec-engine) on npm;
 this package spawns it, one engine per pool worker, and reports the run.
 
 Authored `*.geospec.ts` files never import this package. A spec depends on the Apache-2.0 substrate only.

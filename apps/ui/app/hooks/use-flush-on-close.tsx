@@ -34,6 +34,12 @@ type UnloadContextValue = {
   flushProducers: () => Promise<void>;
 };
 
+/** Flatten only presentation; the aggregate retains its original error tree. */
+const refusalMessages = (reason: unknown, fallback: string): string[] =>
+  reason instanceof AggregateError && reason.errors.length > 0
+    ? reason.errors.flatMap((error: unknown) => refusalMessages(error, fallback))
+    : [reason instanceof Error ? reason.message : fallback];
+
 /** Run one stage's callbacks in the phase that can still await, and wait for every one to settle. */
 const flushStage = async (registrations: readonly FlushRegistration[], stage: FlushStage): Promise<void> => {
   const outcomes = await Promise.allSettled(
@@ -47,7 +53,7 @@ const flushStage = async (registrations: readonly FlushRegistration[], stage: Fl
     // The quit hold shows this message: it names what is not saved, not the stage.
     throw new AggregateError(
       reasons,
-      reasons.map((reason) => (reason instanceof Error ? reason.message : `${stage} flush failed`)).join(' '),
+      [...new Set(reasons.flatMap((reason) => refusalMessages(reason, `${stage} flush failed`)))].join(' '),
     );
   }
 };

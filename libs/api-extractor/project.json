@@ -160,6 +160,9 @@
         "{workspaceRoot}/packages/plugins/*/agent/*.md",
         "{workspaceRoot}/packages/geospec/agent/doctrine.md",
         "{workspaceRoot}/packages/workbench/agent/doctrine.md",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/packages/geospec/package.json",
+        "{workspaceRoot}/packages/workbench/package.json",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],

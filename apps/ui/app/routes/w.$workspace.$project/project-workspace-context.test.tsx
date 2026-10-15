@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { act, fireEvent, render } from '@testing-library/react';
+import { createPortal } from 'react-dom';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
@@ -78,6 +79,93 @@ describe('ProjectWorkspaceProvider', () => {
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
+  it.each(['replace', 'gap', 'moved'] as const)(
+    'should preserve recovery focus across header %s without stealing it',
+    (mode) => {
+      function Header(): React.JSX.Element {
+        const { registerRecordRecoveryFocus } = useProjectWorkspace();
+        return (
+          <button ref={registerRecordRecoveryFocus} type='button'>
+            Share
+          </button>
+        );
+      }
+      const tree = (header: string | undefined) => (
+        <ProjectWorkspaceProvider>
+          <Probe />
+          {header && <Header key={header} />}
+          <button type='button'>Export</button>
+        </ProjectWorkspaceProvider>
+      );
+      const view = render(tree('old'));
+      act(() => {
+        workspace.restoreRecordRecoveryFocus();
+      });
+      expect(screen.getByRole('button', { name: 'Share' })).toHaveFocus();
+      if (mode !== 'replace') {
+        view.rerender(tree(undefined));
+        if (mode === 'moved') {
+          screen.getByRole('button', { name: 'Export' }).focus();
+        } else {
+          act(() => {
+            workspace.restoreRecordRecoveryFocus();
+          });
+        }
+      }
+      view.rerender(tree('replacement'));
+      expect(screen.getByRole('button', { name: mode === 'moved' ? 'Export' : 'Share' })).toHaveFocus();
+      const restore = workspace.restoreRecordRecoveryFocus;
+      view.unmount();
+      expect(() => {
+        restore();
+      }).not.toThrow();
+      expect(document.body).toHaveFocus();
+    },
+  );
+
+  it.each(['request-after-detach', 'focused-before-detach', 'moved-before-detach'] as const)(
+    'should preserve recovery across external header removal: %s',
+    (mode) => {
+      const oldContainer = document.createElement('div');
+      const nextContainer = document.createElement('div');
+      document.body.append(oldContainer, nextContainer);
+      function Header({ container }: { readonly container: HTMLElement }): React.JSX.Element {
+        const { registerRecordRecoveryFocus } = useProjectWorkspace();
+        return createPortal(
+          <button ref={registerRecordRecoveryFocus} type='button'>
+            Share
+          </button>,
+          container,
+        );
+      }
+      const tree = (container: HTMLElement) => (
+        <ProjectWorkspaceProvider>
+          <Probe />
+          <Header container={container} />
+          <button type='button'>Export</button>
+        </ProjectWorkspaceProvider>
+      );
+      const view = render(tree(oldContainer));
+      if (mode !== 'request-after-detach') {
+        act(() => {
+          workspace.restoreRecordRecoveryFocus();
+        });
+        if (mode === 'moved-before-detach') {
+          screen.getByRole('button', { name: 'Export' }).focus();
+        }
+      }
+      oldContainer.remove();
+      if (mode === 'request-after-detach') {
+        act(() => {
+          workspace.restoreRecordRecoveryFocus();
+        });
+      }
+      view.rerender(tree(nextContainer));
+      expect(screen.getByRole('button', { name: mode === 'moved-before-detach' ? 'Export' : 'Share' })).toHaveFocus();
+      view.unmount();
+      nextContainer.remove();
+    },
+  );
   it('opens a Preview drawer and delivers Export once its workbench mounts on mobile', () => {
     state.isMobile = true;
     const reveal = vi.fn();

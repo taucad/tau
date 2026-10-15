@@ -3,7 +3,7 @@
  *
  * The bridge wire carries no server timestamps, so an entry holds only what
  * the client can observe: which method, on which proxy, how long the whole
- * round trip took and how it settled. Queueing, handler time and reply
+ * round trip has taken and whether it settled. Queueing, handler time and reply
  * delivery are not separable from here. Entries never hold arguments, paths,
  * contents or error messages; a rejection keeps only its machine-readable
  * `code`.
@@ -24,7 +24,7 @@ const maxSlowCalls = 50;
 
 /**
  * One filesystem bridge call that took at least
- * {@link slowFileSystemBridgeCallThreshold} to settle.
+ * {@link slowFileSystemBridgeCallThreshold} while pending or before settlement.
  *
  * @public
  */
@@ -36,14 +36,15 @@ export type SlowFileSystemBridgeCall = {
   readonly method: string;
   /** Milliseconds since the Unix epoch when the client issued the call. */
   readonly startedAt: number;
-  /** Milliseconds from issuing the call to its settlement, as the client saw it. */
+  /** Milliseconds from issuing the call to now (pending) or settlement, as the client saw it. */
   readonly duration: number;
-  readonly outcome: 'resolved' | 'rejected';
+  readonly outcome: 'pending' | 'resolved' | 'rejected';
   /** The rejection's `code`, when it carried a string one. */
   readonly errorCode?: string;
 };
 
 const slowCalls: SlowFileSystemBridgeCall[] = [];
+const starts = new WeakMap<SlowFileSystemBridgeCall, number>();
 let nextCallId = 0;
 let nextConnectionId = 0;
 
@@ -70,32 +71,53 @@ export const timeFileSystemBridgeCall = async (
 ): Promise<unknown> => {
   const startedAt = Date.now();
   const start = performance.now();
-  const settle = (outcome: SlowFileSystemBridgeCall['outcome'], error?: unknown): void => {
+  let callId: number | undefined;
+  const record = (outcome: SlowFileSystemBridgeCall['outcome'], error?: unknown): void => {
     const duration = performance.now() - start;
     if (duration < slowFileSystemBridgeCallThreshold) {
       return;
     }
+    callId ??= nextCallId++;
     const errorCode = errorCodeOf(error);
-    slowCalls.push({
-      callId: nextCallId++,
+    const entry: SlowFileSystemBridgeCall = {
+      callId,
       connectionId,
       method,
       startedAt,
       duration,
       outcome,
       ...(errorCode === undefined ? {} : { errorCode }),
-    });
+    };
+    const previous = slowCalls.findIndex((retained) => retained.callId === callId);
+    if (previous !== -1) {
+      slowCalls.splice(previous, 1);
+    }
+    slowCalls.push(entry);
+    starts.set(entry, start);
     if (slowCalls.length > maxSlowCalls) {
       slowCalls.shift();
     }
+    try {
+      // The renderer's existing console forwarding reaches desktop's rotating diagnostic log.
+      // No arguments, file paths, contents or raw errors cross this seam. Server phases are unknown.
+      // oxlint-disable-next-line no-console -- Bounded operational evidence consumed by the existing host diagnostic sink.
+      console.warn(`[filesystem-bridge] ${JSON.stringify({ ...entry, phase: 'round-trip' })}`);
+    } catch {
+      // A failed diagnostic sink must never change a filesystem result.
+    }
   };
+  const timer = setTimeout(() => {
+    record('pending');
+  }, slowFileSystemBridgeCallThreshold);
   try {
     const result = await pending();
-    settle('resolved');
+    record('resolved');
     return result;
   } catch (error) {
-    settle('rejected', error);
+    record('rejected', error);
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -105,4 +127,8 @@ export const timeFileSystemBridgeCall = async (
  * @returns A copy of the retained entries.
  * @public
  */
-export const slowFileSystemBridgeCalls = (): readonly SlowFileSystemBridgeCall[] => [...slowCalls];
+export const slowFileSystemBridgeCalls = (): readonly SlowFileSystemBridgeCall[] =>
+  slowCalls.map((entry) => ({
+    ...entry,
+    duration: entry.outcome === 'pending' ? performance.now() - starts.get(entry)! : entry.duration,
+  }));

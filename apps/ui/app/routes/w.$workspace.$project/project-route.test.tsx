@@ -8,6 +8,7 @@ import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
@@ -660,10 +661,43 @@ describe('project route session identity', () => {
         closeFlushMilliseconds: 100,
       });
     await expect(flush()).rejects.toThrow('checked workbench write unavailable');
-    expect(order).toEqual(['parameters', 'workbench']);
+    expect(order).toEqual(['workbench']);
     offline = false;
     await flush();
-    expect(order).toEqual(['parameters', 'workbench', 'parameters', 'workbench', 'project', 'editor']);
+    expect(order).toEqual(['workbench', 'workbench', 'parameters', 'project', 'editor']);
+  });
+
+  it('should keep the real parameter service usable after record confirmation refuses close', async () => {
+    const parameters = createParameterSetService({
+      rootDirectory: '/project',
+      client: mock<Parameters<typeof createParameterSetService>[0]['client']>(),
+      watchReady: vi.fn(),
+    });
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    try {
+      await expect(
+        sessionsModule.flushProjectSessionPersistence({
+          parameterService: parameters,
+          projectRef: project,
+          editorRef: editor,
+          flushWorkbenchRecords: async () => {
+            throw new Error('Pane layout is not confirmed saved.');
+          },
+          closeFlushMilliseconds: 100,
+        }),
+      ).rejects.toThrow('Pane layout is not confirmed saved.');
+      const operation = await parameters.prepareFileOperation({
+        kind: 'move',
+        oldPath: 'main.ts',
+        newPath: 'renamed.ts',
+      });
+      await operation.rollback();
+      expect(project.send).not.toHaveBeenCalled();
+      expect(editor.send).not.toHaveBeenCalled();
+    } finally {
+      await parameters.close();
+    }
   });
 
   it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {

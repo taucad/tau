@@ -9,6 +9,8 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
+import type { EntryPathChange } from '#workbench-records/entries-store.js';
+import { slowWriteMilliseconds } from '#workbench-records/record-health.js';
 import { readRecordIssues, subscribeRecordIssues } from '#workbench-records/record-issues.js';
 import { EntriesSyncHost, EntryOwner } from '#routes/w.$workspace.$project/entries-sync-host.js';
 
@@ -89,6 +91,93 @@ describe('entry owner reconciliation', () => {
     nextWatchReady = undefined;
     watchClosures.length = 0;
   });
+  it('should bound the registered project-close flush without discarding a pending entries write', async () => {
+    hostFiles.set(
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout: 30_000 } },
+        }),
+      ),
+    );
+    const applied = vi.fn();
+    let closeFlush: (() => Promise<unknown>) | undefined;
+    let changePaths: ((change: EntryPathChange) => Promise<boolean>) | undefined;
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map(),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      entriesRecord: undefined,
+      setEntriesRecord: applied,
+      registerWorkbenchRecordProducer: (flush: () => Promise<unknown>) => {
+        closeFlush = flush;
+        return () => {
+          closeFlush = undefined;
+        };
+      },
+      registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => {
+        changePaths = change;
+        return () => {
+          changePaths = undefined;
+        };
+      },
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    await waitFor(() => {
+      expect(applied).toHaveBeenCalled();
+    });
+    const authority = Promise.withResolvers<void>();
+    const write = hostFiles.writeFileChecked.getMockImplementation()!;
+    hostFiles.writeFileChecked.mockImplementationOnce(async (input) => {
+      await authority.promise;
+      return write(input);
+    });
+    let rename: Promise<boolean> | undefined;
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        rename = changePaths!({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+        await Promise.resolve();
+      });
+      let refusal: unknown;
+      const waiting = (async () => {
+        try {
+          await closeFlush!();
+        } catch (error) {
+          refusal = error;
+        }
+      })();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(slowWriteMilliseconds);
+      });
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as Error).message).toBe('Model display settings are not confirmed saved.');
+      expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'a.ts': { renderTimeout: 30_000 } } },
+      });
+      await act(async () => {
+        authority.resolve();
+        await rename;
+        await waiting;
+      });
+      await expect(closeFlush!()).resolves.toBeUndefined();
+      expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'b.ts': { renderTimeout: 30_000 } } },
+      });
+      expect(readRecordIssues('p')).toEqual([]);
+    } finally {
+      await act(async () => {
+        authority.resolve();
+        await rename;
+      });
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([0, 600_000])('should map durable renderTimeout %i to the runtime operation event', (renderTimeout) => {
     const send = vi.fn();
     const cad = {

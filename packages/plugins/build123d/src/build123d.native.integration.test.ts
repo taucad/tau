@@ -89,6 +89,10 @@ const v8Source = readFileSync(
   resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/v8-engine-brep/main.py'),
   'utf8',
 );
+const planetarySource = readFileSync(
+  resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py'),
+  'utf8',
+);
 const assemblySource = `from dataclasses import dataclass
 from build123d import Box, Color, Compound
 from dimensions import width
@@ -142,6 +146,105 @@ const readTopology = (
 };
 
 describe.runIf(seedPresent)('Build123d native kernel', () => {
+  it('exports the canonical planetary assembly with native motion and round-trips all 34 STEP solids', async () => {
+    const client = createTestRuntimeClient({ runtime, files: { 'main.py': planetarySource } });
+    const document = client.open({ source: { path: 'main.py' } });
+    try {
+      const exported = await document.export('glb');
+      assert.ok(exported.success);
+      const bytes = Uint8Array.from(exported.files[0].bytes);
+      const { json, payload } = readTopology(bytes);
+      expect(payload.components.filter(({ kind }) => kind === 'part')).toHaveLength(34);
+      expect(payload.components.filter(({ kind }) => kind === 'assembly')).toHaveLength(5);
+      expect(payload.mechanismDiagnostics ?? []).toEqual([]);
+      expect(payload.mechanismIntent?.connections.length).toBeGreaterThanOrEqual(5);
+      expect(
+        payload.mechanism?.couplings
+          ?.map((coupling) => ('ratio' in coupling ? coupling.ratio : 0))
+          .toSorted((left, right) => left - right),
+      ).toEqual([-0.75, -0.75, -0.75, 0.25]);
+      expect(
+        validateTauCadTopology(payload, {
+          nodes: json.nodes.map(({ mesh }) => ({ meshIndex: mesh })),
+          meshes: json.meshes.map(({ primitives }) =>
+            primitives.map(({ mode = 4, indices }) => ({
+              mode,
+              indexCount: indices === undefined ? 0 : json.accessors[indices]!.count,
+            })),
+          ),
+        }),
+      ).toEqual([]);
+      const step = await document.export('step');
+      assert.ok(step.success);
+      const restored = client.open({
+        source: {
+          entry: 'main.py',
+          files: {
+            'model.step': Uint8Array.from(step.files[0].bytes),
+            'planetary.py': planetarySource,
+            'main.py': `from dataclasses import dataclass
+from math import isclose
+from pathlib import Path
+from build123d import import_step
+from planetary import main as original_model, Params as PlanetParams
+
+@dataclass(frozen=True)
+class Params:
+    bounds_tolerance: float = 1e-5
+
+__tau__ = {"dependencies": ["model.step"]}
+
+def main(params):
+    assembly = import_step(Path(__file__).with_name("model.step"))
+    if len(assembly.solids()) != 34:
+        raise ValueError("STEP round-trip must preserve exactly 34 native solids")
+    original = original_model(PlanetParams())
+    def leaves(model):
+        return {tuple(part.label.replace(" ", "_") for part in node.path[1:]): node
+                for node in model.descendants if not node.children}
+    expected, actual = leaves(original), leaves(assembly)
+    if expected.keys() != actual.keys() or len(actual) != 34:
+        raise ValueError("STEP must preserve every named occurrence path")
+    for path, before in expected.items():
+        after = actual[path]
+        if not isclose(before.volume, after.volume, rel_tol=1e-8, abs_tol=1e-6):
+            raise ValueError(f"STEP changed native leaf volume: {path}")
+        for row in range(1, 4):
+            for column in range(1, 5):
+                left = before.global_location.wrapped.Transformation().Value(row, column)
+                right = after.global_location.wrapped.Transformation().Value(row, column)
+                if not isclose(left, right, rel_tol=1e-9, abs_tol=1e-7):
+                    raise ValueError(f"STEP changed occurrence placement: {path}")
+        def bounds(shape):
+            placed = shape.moved(shape.location.inverse() * shape.global_location)
+            box = placed.bounding_box()
+            return (*box.min, *box.max)
+        if any(abs(left - right) > params.bounds_tolerance for left, right in zip(bounds(before), bounds(after), strict=True)):
+            raise ValueError(f"STEP changed world-space native bounds: {path}")
+    return assembly
+`,
+          },
+        },
+      });
+      try {
+        const outcome = await restored.view('model').rendering();
+        expect(outcome.superseded).toBe(false);
+        if (outcome.superseded) {
+          throw new Error('STEP reimport was superseded');
+        }
+        assert.ok(outcome.rendering.success, outcome.rendering.success ? undefined : JSON.stringify(outcome.rendering));
+        const restoredBytes = extractGltfFromResult(outcome.rendering);
+        assert.ok(restoredBytes);
+        expect(readTopology(restoredBytes).payload.components.filter(({ kind }) => kind === 'part')).toHaveLength(34);
+      } finally {
+        restored.close();
+      }
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  }, 180_000);
+
   it('reopens exported native assembly intent and invalidates an imported part on an image-only edit', async () => {
     const red = Uint8Array.from(
       Buffer.from(
@@ -203,7 +306,7 @@ def textured_part(size):
       try {
         const exported = await document.export('glb');
         assert.ok(exported.success);
-        const bytes = Uint8Array.from(exported.files[0]!.bytes);
+        const bytes = Uint8Array.from(exported.files[0].bytes);
         const reopened = await glbToDocument(bytes);
         const payload = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
         expect(payload).toMatchObject({

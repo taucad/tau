@@ -4,7 +4,7 @@ A native build123d port of Tau's Replicad planetary gear example. The default mo
 
 ## Open and explore
 
-Open this directory as a project in **Tau desktop**, then open `main.py` in the viewer and **Model** in the workbench. Select or isolate a `Planet Unit` to act on its ten descendants. Edit parameters in the Parameters pane to rebuild a static pose.
+Open this directory as a project in **Tau desktop**, then open `main.py` in the viewer and **Model** in the workbench. Select or isolate a `Planet Unit` to act on its ten descendants. Edit parameters in the Parameters pane to set the authored initial pose. Open **Kinematics** to scrub the sun input or play the four-turn clip without rebuilding geometry.
 
 | Parameter     | Default | Meaning                                                               |
 | ------------- | ------- | --------------------------------------------------------------------- |
@@ -33,9 +33,15 @@ Planetary Gear System
         └── Front / Rear Socket Screw
 ```
 
-`Part` contains manufactured solid geometry; `Compound(children=...)` declares product structure. `planet_unit()` returns a complete module-local assembly, including a named mounting joint. Parent locations position the unit and carrier. Product grouping does not imply rigidity: the gear rotates around the pin.
+`Part` contains manufactured solid geometry; `Compound(children=...)` declares product structure. Native joints connect the fixed ring to the sun and carrier, the carrier to each planet unit, and each unit to its rotating gear. Hardware stays with the unit while its gear spins. The root exposes native joint aliases `input`, `carrier`, `output` and `planet-1` through `planet-3`; callers can reach these endpoints without private child paths.
 
-**Copying caveat, build123d 0.11.1:** `copy(Compound)` shares its root native shape while copying descendants. Reusing that assembly root caused the STEP exporter to append its children repeatedly: this stage read back as 94 solids. The port creates fresh assembly containers with copied leaf Parts; corrected STEP reads back as 34 solids, five assemblies and 39 nodes. Leaf geometry is reused; nested assembly definition reuse is not established by this pattern.
+The optional Tau `motion(model)` supplement supplies stable occurrence IDs, ring ground, gear couplings and the clip. It references the actual native objects returned by `main`. It does not replace native attachment or placement. Coordinate values are deltas from the parameter-authored pose.
+
+For the fixed 24/24/72 tooth counts, the fixed-ring Willis relation gives carrier/sun = 24/(24+72) = 1/4. Planet spin relative to carrier is −(24/24)×(1−1/4) = −3/4 of sun rotation; adding carrier motion gives world planet spin −1/2. These ratios derive from the named tooth-count constants. Tooth counts are not exposed parameters in this reference. There is one independent sun coordinate and four coupled followers. The eight-second clip advances the sun 1440° (four turns).
+
+Native `connect_to` changes child placement without rebuilding the containing Compound BRep. The example reattaches the unit children after that placement, then places each complete unit before constructing its parent. This keeps root geometry and the hierarchy-derived rendering/export consistent.
+
+**Historical copying caveat, build123d 0.11.1:** `copy(Compound)` shares its root native shape while copying descendants. Reusing that assembly root caused the STEP exporter to append its children repeatedly: this stage read back as 94 solids. The port creates fresh assembly containers with copied leaf Parts; corrected STEP reads back as 34 solids, five assemblies and 39 nodes. Leaf geometry is reused; nested assembly definition reuse is not established by this pattern.
 
 ## Observed transport
 
@@ -43,28 +49,26 @@ Planetary Gear System
 - Tau Model pane: correct nested rows, colors, individual thumbnails, subtree selection and isolation.
 - GLB: 39 topology components, but **34 flat glTF nodes**. The Tau extension supplies hierarchy; ordinary glTF consumers do not receive an assembly node tree.
 - STEP: 39 nodes / 34 solids / 19 product definitions after the container correction; advanced pose is 174 × 174 × 72 mm.
-- Native mounting joints remain Python authoring data. Tau's build123d adapter does not currently export them as interfaces or mechanisms. This example has no live playback contract.
-- The adapter exports base color; the original Replicad PBR metalness/roughness factors are not carried by native `Color`. Engineering material/density is unspecified, so Tau correctly shows unknown weight.
+- Build123D 0.13 native connected joints now export reusable local interfaces, public descendant aliases, physical connection intent and the compiled Tau playback mechanism. Canonical GLB carries the four couplings and animation; STEP remains geometry/assembly transport.
+- This reference deliberately retains its native `Color` appearance. The adapter separately supports native `Shape.material` and embedded texture GLB; changing this model to a material catalog is unnecessary for the planetary motion qualification. Engineering material/density remains unspecified.
 
-## Reproduce the spike
+## Reproduce the qualification
 
-From the Tau root, using the prepared native resource (adjust the platform target):
+Prepare the pinned native closure and run the native integration suite from the Tau root:
 
 ```sh
-pnpm nx run desktop:prepare-build123d-python
-apps/desktop/resources/python/darwin-arm64/bin/python3 \
-  docs/research/artifacts/replicad-structured-assembly-blueprint/runs/2026-10-01-build123d-planetary/probe.py \
-  "$PWD" out/research/build123d-planetary
+pnpm nx run build123d:seed
+pnpm nx test build123d --watch=false build123d.native.integration.test.ts
 ```
 
-The probe lives in optional Tau Brain; ordinary modeling needs only `main.py` and `tau.json`. It checks two poses, native validity, ownership, GLB structure and STEP read-back. Measured build/mesh/export/read-back takes 22–25 seconds per pose after import on the spike host; geometry alone took about six seconds. No GeoSpec suite or manufacturing-clearance certification is claimed for this port.
+The integration case reads this canonical `main.py`, checks 34 parts and five assemblies, admits the shared mechanism contract, verifies the coupling ratios, exports GLB and round-trips STEP. Default and `input_angle=30` native probes retain 34 solids and 39 STEP nodes. Desktop qualification additionally checks the fixed ring and rendered sun/carrier/planet rotation ratios while the clip plays. Geometry construction remains the expensive step; playback updates only transforms. No manufacturing-clearance or engineering physical-property certification is claimed.
 
-This is a **reference** row, matching the existing build123d V8: the general example-thumbnail runtime does not compose the native build123d kernel. It is not a browser builtin or a Community showcase. Promote it to a public model only when that native example host is composed and its thumbnail/health gates run.
+This remains a **reference** row: the general example-thumbnail runtime does not compose the native Build123D kernel. It is not a browser builtin or Community showcase. Its native desktop/reference classification is unchanged.
 
 ## Provenance and adaptations
 
 Original: `taucad/tau`, `libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts`, source revision `f14c35969ec40a34d35db5505ec42978296fb0c5`, **Apache-2.0** (Tau repository license). This is an in-repository Python adaptation, not copied upstream build123d example code.
 
-The gear equations and dimensions are retained. build123d uses native spline interpolation, fillets/chamfers, booleans and revolutions; it does not reuse Replicad tessellation. Flat output has been replaced by native Parts and a nested Compound tree. Python parameters use snake_case. The live Replicad mechanism export and PBR factors are intentionally not presented as implemented in build123d.
+The gear equations and dimensions are retained. build123d uses native spline interpolation, fillets/chamfers, booleans and revolutions; it does not reuse Replicad tessellation. Flat output has been replaced by native Parts and a nested Compound tree. Python parameters use snake_case. Live motion now uses native Build123D joints plus the narrow Tau motion supplement. The existing colors are retained; physical material properties are separate work.
 
-The research owner is `docs/research/replicad-structured-assembly-blueprint.md`; its 2026-10-01 planetary run records the measured findings and their consequences for the proposed TypeScript API.
+Historical owner: `docs/research/replicad-structured-assembly-blueprint.md` (2026-10-01 port). Current qualification owner: `docs/research/build123d-kinematics-blueprint.md`, run `2026-10-15-completion`.

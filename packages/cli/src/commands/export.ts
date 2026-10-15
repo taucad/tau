@@ -1,21 +1,13 @@
 import { defineCommand } from 'citty';
 import { resolve, basename, dirname, extname } from 'node:path';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
-import { defaultPayloadStore } from '@taucad/host';
-import {
-  createPreparationHost,
-  detectHostIndicators,
-  parsePluginDeployment,
-  readManagedPreparation,
-} from '@taucad/runtime/preparation/node';
 import { fileExtensionSet } from '@taucad/runtime/types';
 import type { ExportResult } from '@taucad/runtime';
 import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
-import type { PicogkKernelOptions } from '@taucad/picogk';
 import { loadCliRuntime } from '#runtime-options.js';
+import { nativeKernelFor } from '#native-kernels.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
@@ -48,61 +40,6 @@ const parseJsonObject = (flag: string, input: string | undefined): Record<string
 const capabilityMissingCodes = new Set(['KERNEL_CAPABILITY_MISSING', 'TRANSCODER_CAPABILITY_MISSING']);
 
 /** Why the PicoGK kernel was left out of the runtime for an input it would have handled. */
-type PicogkUnavailable = { readonly code: 'KERNEL_NOT_PREPARED' | 'UNSUPPORTED_TARGET'; readonly message: string };
-
-/**
- * The PicoGK kernel's options from its prepared closure in the payload store, when the input is a file the kernel
- * handles. Only the store is read: nothing is downloaded, and no environment variable names a resource directory.
- * @param extension - The input file's extension, without the dot.
- * @returns The options, why the kernel cannot run, or nothing when PicoGK is not installed or not for this input.
- */
-const preparedPicogk = async (
-  extension: string,
-): Promise<{ readonly options: PicogkKernelOptions } | PicogkUnavailable | undefined> => {
-  let manifestPath: string;
-  try {
-    manifestPath = createRequire(import.meta.url).resolve('@taucad/picogk/tau-plugin.json');
-  } catch {
-    return undefined;
-  }
-  const deployment = parsePluginDeployment(
-    JSON.parse(await readFile(manifestPath, 'utf8')),
-    '@taucad/picogk tau-plugin.json',
-  );
-  const kernel = Object.entries(deployment.kernels).find(([, row]) => row.extensions.includes(extension));
-  if (kernel === undefined) {
-    return undefined;
-  }
-  const [name, { requires }] = kernel;
-  let managed: ReturnType<typeof readManagedPreparation>;
-  try {
-    managed = readManagedPreparation(process.env);
-  } catch (error) {
-    throw cliError('MANAGED_PROFILE_INVALID', error instanceof Error ? error.message : String(error), exitCodes.usage);
-  }
-  const indicators = detectHostIndicators();
-  const host = createPreparationHost({
-    plugins: [{ package: '@taucad/picogk', deployment, directory: dirname(manifestPath) }],
-    store: defaultPayloadStore(),
-    ...(indicators === undefined ? {} : { indicators }),
-    ...(managed.seed === undefined ? {} : { seed: managed.seed }),
-    selection: managed.selection,
-  });
-  const { state } = await host.inspect({ package: '@taucad/picogk', dependencies: requires });
-  const receipt = state.status === 'ready' ? state.receipts['runtime'] : undefined;
-  if (receipt !== undefined) {
-    const { picogkOptionsFromClosure } = await import('@taucad/picogk');
-    return { options: picogkOptionsFromClosure(receipt) };
-  }
-  if (state.status === 'blocked' && state.reason === 'unsupported-target') {
-    return { code: 'UNSUPPORTED_TARGET', message: state.message };
-  }
-  return {
-    code: 'KERNEL_NOT_PREPARED',
-    message: `The ${name} kernel is not prepared on this machine. Run \`tau prepare ${name}\` once, then export again.`,
-  };
-};
-
 /**
  * `tau export` command.
  *
@@ -229,17 +166,15 @@ export const exportCommand = defineCommand({
     profileLedger?.checkpoint('cli.prepare');
 
     const projectRoot = process.cwd();
-    const picogkPreparation = await preparedPicogk(extname(inputPath).slice(1));
-    const picogk =
-      picogkPreparation !== undefined && 'options' in picogkPreparation ? picogkPreparation.options : undefined;
-    const picogkUnavailable =
-      picogkPreparation !== undefined && 'code' in picogkPreparation ? picogkPreparation : undefined;
+    // The native kernel for this input, from the payload store's receipts; nothing is downloaded.
+    const native = await nativeKernelFor(extname(inputPath).slice(1));
+    const unprepared = native !== undefined && 'code' in native ? native : undefined;
     authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot,
       plugin: args.plugin,
       config: args.config,
-      ...(picogk ? { picogk } : {}),
+      ...(native !== undefined && !('code' in native) && native),
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     profileLedger?.checkpoint('cli.load-configured-plugins');
@@ -312,8 +247,8 @@ export const exportCommand = defineCommand({
       runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
 
       if (!result.success) {
-        if (picogkUnavailable !== undefined && result.issues.some(({ code }) => code === 'KERNEL_CAPABILITY_MISSING')) {
-          throw cliError(picogkUnavailable.code, picogkUnavailable.message, exitCodes.refused);
+        if (unprepared !== undefined && result.issues.some(({ code }) => code === 'KERNEL_CAPABILITY_MISSING')) {
+          throw cliError(unprepared.code, unprepared.message, exitCodes.refused);
         }
         const messages = result.issues
           .map((issue) =>

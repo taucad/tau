@@ -42,6 +42,8 @@ A `PluginDeployment` maps each dependency name to one `DependencyVariant` per `D
 - `collectGarbage` takes a `CollectGarbageInput` and returns a `GarbageReport` of closures no host links, old orphan blobs and abandoned staging.
 - `dispose` aborts running attempts.
 
+A `PreparationPlugin` may declare a `seal` step, which the host runs after every payload of a closure is unpacked and before the receipt is written. It receives a `SealClosureInput` (the package, dependency, target, closure root and the payload files) and may only add files, which the host receipts so `treeIntegrity` covers them; Build123d compiles its bytecode there. Returning a `SealClosureRefusal`, such as `missing-system-library`, ends preparation `blocked` with nothing sealed.
+
 `readStoreGeneration` returns a token that changes whenever the store seals or removes a closure, so a host can drop cached lookups.
 
 ## Receipts

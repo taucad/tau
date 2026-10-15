@@ -6,6 +6,7 @@ import { Topic } from '@taucad/events';
 import { admitCapacityWrite, measureCapacityDomain } from '@taucad/filesystem';
 
 import { computeClosureIntegrity, computeTreeIntegrity } from '#preparation/closure-receipt.js';
+import { runSealStep, SealRefused } from '#preparation/closure-seal.js';
 import { verifyClosureTree } from '#preparation/closure-verify.js';
 import { detectHostIndicators } from '#preparation/host-indicators.js';
 import { acquirePayload, locallyAvailable, OfflineMiss } from '#preparation/payload-source.js';
@@ -400,6 +401,8 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     readonly variant: DependencyVariant;
     readonly payloads: readonly string[];
     readonly extra: readonly string[];
+    /** Run the plugin's seal step again once the payloads are restored. */
+    readonly reseal: boolean;
     readonly offline: boolean;
     readonly signal: AbortSignal;
   }): Promise<void> => {
@@ -427,6 +430,26 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       await Promise.all(
         input.extra.map(async (path) => rm(join(receipt.root, ...path.split('/')), { recursive: true, force: true })),
       );
+      if (input.reseal) {
+        // The seal step's files derive from the payloads' files, so every one is removed and the step runs again over
+        // the repaired closure; a step that skips files it finds present then never keeps a stale one.
+        await Promise.all(
+          receipt.files
+            .filter((row) => row.payload === undefined)
+            .map(async (row) => rm(join(receipt.root, ...row.path.split('/')), { force: true })),
+        );
+        const resealed = await runSealStep({
+          plugin: input.plugin,
+          dependency: receipt.dependency,
+          target: receipt.target,
+          root: receipt.root,
+          files: receipt.files.filter((row) => row.payload !== undefined),
+          signal,
+        });
+        if ('refusal' in resealed) {
+          throw new SealRefused(resealed.refusal);
+        }
+      }
       await advanceGeneration(layout);
     } finally {
       await rm(staging, { recursive: true, force: true });
@@ -455,13 +478,24 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     const variant = declared.get(input.key);
     const named = new Set(found.changed.map((row) => row.payload));
     const order = (variant?.payloads ?? []).map(({ name }) => name);
-    const payloads = named.has(undefined) ? order : order.filter((name) => named.has(name));
+    // A row with no payload was written by the seal step: rerunning it restores the row, unless the plugin has none.
+    const sealedRowChanged = named.has(undefined);
+    const payloads = sealedRowChanged && plugin.seal === undefined ? order : order.filter((name) => named.has(name));
     const files = [...found.changed.map((row) => row.path), ...found.extra].toSorted().slice(0, reportedFileLimit);
     if (!input.repair || variant === undefined) {
       return { ...base, status: 'stale', payloads, files };
     }
     try {
-      await repairClosure({ plugin, receipt, variant, payloads, extra: found.extra, offline: input.offline, signal });
+      await repairClosure({
+        plugin,
+        receipt,
+        variant,
+        payloads,
+        extra: found.extra,
+        reseal: plugin.seal !== undefined && (sealedRowChanged || payloads.length > 0),
+        offline: input.offline,
+        signal,
+      });
     } catch (error) {
       if (error instanceof OfflineMiss) {
         return { ...base, status: 'stale', payloads, files };
@@ -658,7 +692,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const received = new Map<Integrity, number>();
       let completedPayloads = 0;
       let lastProgress = 0;
-      const progress = (phase: 'downloading' | 'verifying' | 'extracting', payload: string, force: boolean): void => {
+      const progress = (
+        phase: 'downloading' | 'verifying' | 'extracting' | 'sealing',
+        payload: string,
+        force: boolean,
+      ): void => {
         const now = Date.now();
         if (!force && now - lastProgress < progressInterval) {
           return;
@@ -721,10 +759,27 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       });
 
       for (const item of work) {
-        const files = item.variant.payloads
+        const unpacked = item.variant.payloads
           .flatMap(({ name }) => rows.get(item.key)?.get(name) ?? [])
           .toSorted((left, right) => (left.path < right.path ? -1 : 1));
+        if (plugin.seal !== undefined) {
+          progress('sealing', item.dependency, true);
+        }
         // oxlint-disable-next-line no-await-in-loop -- one seal per dependency
+        const sealed = await runSealStep({
+          plugin,
+          dependency: item.dependency,
+          target: item.variant.target,
+          root: join(attemptStaging, item.key),
+          files: unpacked,
+          signal,
+        });
+        if ('refusal' in sealed) {
+          const { reason, message, detail } = sealed.refusal;
+          return finish({ status: 'blocked', attemptId, reason, message, ...(detail === undefined ? {} : { detail }) });
+        }
+        const files = [...unpacked, ...sealed.rows].toSorted((left, right) => (left.path < right.path ? -1 : 1));
+        // oxlint-disable-next-line no-await-in-loop -- ditto
         const treeIntegrity = await computeTreeIntegrity(files);
         const root = join(layout.closures, item.key);
         const receipt: ClosureReceipt = {
@@ -761,6 +816,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       }
       if (error instanceof OfflineMiss) {
         return finish({ status: 'blocked', attemptId, reason: 'offline-miss', message: error.message });
+      }
+      if (error instanceof SealRefused) {
+        const { reason, message, detail } = error.refusal;
+        return finish({ status: 'blocked', attemptId, reason, message, ...(detail === undefined ? {} : { detail }) });
       }
       const failure =
         error instanceof PreparationError
@@ -867,6 +926,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           repair: input.repair === true,
           offline: input.offline === true,
           signal: input.signal,
+        }).catch((error: unknown) => {
+          throw error instanceof SealRefused
+            ? new PreparationError('EXTRACTION_REFUSED', error.message, { cause: error })
+            : error;
         });
         results.push(verified);
       }

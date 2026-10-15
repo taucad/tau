@@ -1,6 +1,6 @@
 // Tier-2 scenarios of the preparation host (W2 oracle, T1): a real store on disk, in-test archives and a hermetic
 // registry `fetch`. The global `fetch` is replaced by a tripwire, so no scenario can reach the network.
-import { lstat, mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import { measureCapacityDomain } from '@taucad/filesystem';
@@ -15,7 +15,9 @@ import type {
   CreatePreparationHostOptions,
   PluginPreparation,
   PreparationHost,
+  PreparationPlugin,
   PrepareOutcome,
+  SealClosureRefusal,
 } from '#preparation/preparation-host.types.js';
 import type { DependencyPayload, DependencyVariant, HostIndicators } from '#preparation/preparation.types.js';
 
@@ -79,6 +81,7 @@ const scenario = async (
     ) => readonly DependencyVariant[];
     readonly serve?: boolean;
     readonly host?: Partial<CreatePreparationHostOptions>;
+    readonly seal?: PreparationPlugin['seal'];
   } = {},
 ): Promise<Scenario> => {
   const directory = await temporaryDirectory('tau-preparation-');
@@ -88,9 +91,10 @@ const scenario = async (
   await writeFile(hostPath, '// host installation\n');
   const bytes = pythonPayloadBytes();
   const payloads = pythonPayloads(bytes);
-  const plugin = pluginOf(packageName, {
-    engine: options.variants?.(payloads) ?? [{ target: linuxTarget, payloads }],
-  });
+  const plugin = {
+    ...pluginOf(packageName, { engine: options.variants?.(payloads) ?? [{ target: linuxTarget, payloads }] }),
+    ...(options.seal === undefined ? {} : { seal: options.seal }),
+  };
   const registry = createFakeRegistry();
   if (options.serve !== false) {
     servePayloads(
@@ -244,6 +248,121 @@ describe('createPreparationHost', () => {
         expect(state.completedBytes).toBeLessThanOrEqual(totalBytes);
       }
       expect(new Set(preparing.map((state) => state.attemptId)).size).toBe(1);
+    });
+  });
+
+  describe('seal step', () => {
+    const bytecode = 'python/lib/python3.13/__pycache__/os.cpython-313.pyc';
+
+    it('should receipt the files the seal step adds with normalised modes and cover them in treeIntegrity', async () => {
+      const seen: Array<{ readonly root: string; readonly files: readonly string[] }> = [];
+      const { store, host, events } = await scenario({
+        seal: async ({ root, files }) => {
+          seen.push({ root, files: files.map(({ path }) => path) });
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          await writeFile(join(root, ...bytecode.split('/')), 'compiled', { mode: 0o600 });
+          return undefined;
+        },
+      });
+
+      const receipt = readyReceipt(await prepare(host));
+
+      const row = receipt.files.find(({ path }) => path === bytecode);
+      expect(row).toEqual({ path: bytecode, byteLength: 8, sha256: sha256Hex(utf8('compiled')), mode: 0o644 });
+      const written = await stat(join(receipt.root, ...bytecode.split('/')));
+      expect(written.mode % 0o1000).toBe(0o644);
+      expect(receipt.treeIntegrity).toBe(await computeTreeIntegrity(receipt.files));
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.root.startsWith(join(store, 'tmp'))).toBe(true);
+      expect(seen[0]?.files).toEqual(receipt.files.filter(({ path }) => path !== bytecode).map(({ path }) => path));
+      expect(events.some(({ state }) => state.status === 'preparing' && state.phase === 'sealing')).toBe(true);
+    });
+
+    it("should end blocked with the seal step's refusal, seal nothing and keep the verified blobs", async () => {
+      const { store, bytes, host } = await scenario({
+        seal: async () => ({
+          reason: 'missing-system-library',
+          message: 'needs libGL.so.1',
+          detail: { library: 'libGL.so.1' },
+        }),
+      });
+
+      const outcome = await prepare(host);
+
+      expect(outcome).toMatchObject({
+        status: 'blocked',
+        reason: 'missing-system-library',
+        message: 'needs libGL.so.1',
+        detail: { library: 'libGL.so.1' },
+      });
+      expect(await entriesOf(join(store, 'closures', 'sha256'))).toEqual([]);
+      expect(await entriesOf(join(store, 'tmp'))).toEqual([]);
+      expect(await exists(blobPath(store, bytes.python))).toBe(true);
+    });
+
+    it('should remove and regenerate every sealed file when a repair finds one damaged', async () => {
+      let runs = 0;
+      const { host } = await scenario({
+        // Like bytecode compilation, the step leaves a file it finds present untouched.
+        seal: async ({ root }) => {
+          runs += 1;
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          if (!(await exists(join(root, ...bytecode.split('/'))))) {
+            await writeFile(join(root, ...bytecode.split('/')), 'compiled');
+          }
+          return undefined;
+        },
+      });
+      const receipt = readyReceipt(await prepare(host));
+      await writeFile(join(receipt.root, ...bytecode.split('/')), 'tampered');
+
+      const [stale] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
+      const [repaired] = await host.verify({
+        package: packageName,
+        repair: true,
+        offline: true,
+        signal: AbortSignal.timeout(prepareTimeout),
+      });
+      const [intact] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
+
+      expect(stale).toMatchObject({ status: 'stale', payloads: [], files: [bytecode] });
+      expect(repaired).toMatchObject({ status: 'repaired', payloads: [] });
+      expect(intact).toMatchObject({ status: 'intact' });
+      expect(runs).toBe(2);
+    });
+
+    it("should end blocked with the seal step's refusal when a newer Tau repairs a closure on a host that lost a library", async () => {
+      let libraryPresent = true;
+      const refusal: SealClosureRefusal = {
+        reason: 'missing-system-library',
+        message: 'needs libGL.so.1',
+        detail: { library: 'libGL.so.1' },
+      };
+      const { host, reopen } = await scenario({
+        seal: async ({ root }) => {
+          if (!libraryPresent) {
+            return refusal;
+          }
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          await writeFile(join(root, ...bytecode.split('/')), 'compiled');
+          return undefined;
+        },
+      });
+      const receipt = readyReceipt(await prepare(host));
+      await writeFile(join(receipt.root, ...bytecode.split('/')), 'tampered');
+      libraryPresent = false;
+      const upgraded = reopen({ tauVersion: '2.0.0' });
+
+      await expect(prepare(upgraded, { offline: true })).resolves.toMatchObject({ status: 'blocked', ...refusal });
+      await expectPreparationError(
+        upgraded.verify({
+          package: packageName,
+          repair: true,
+          offline: true,
+          signal: AbortSignal.timeout(prepareTimeout),
+        }),
+        'EXTRACTION_REFUSED',
+      );
     });
   });
 

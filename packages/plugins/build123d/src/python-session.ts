@@ -30,12 +30,15 @@ const brepMediaType = 'application/vnd.opencascade.brep';
 /**
  * Host-owned paths, integrity evidence, and limits for one Python session.
  *
- * The interpreter lives at `<runtime>/bin/python3`; that runtime root is the only host
- * path the sandbox lets the worker read besides its workspace mirror.
+ * The interpreter lives at `<runtime>/bin/python3`; that runtime root, or the closure root a
+ * sealed closure names as `runtimePath`, is the only host path the sandbox lets the worker read
+ * besides its workspace mirror.
  */
 export type PythonSessionOptions = {
   readonly pythonExecutable: string;
   readonly workerPath: string;
+  /** The root the sandbox may read; defaults to the interpreter's prefix (`<runtime>/bin/python3`). */
+  readonly runtimePath?: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
   readonly pythonSha256: string;
@@ -117,7 +120,7 @@ export class PythonSession {
         '--parent-pid',
         String(process.pid),
       ],
-      runtimePath: resolve(dirname(options.pythonExecutable), '..'),
+      runtimePath: options.runtimePath ?? resolve(dirname(options.pythonExecutable), '..'),
       workspacePath: options.workspacePath,
       artifactPath: options.artifactPath,
       resources: [

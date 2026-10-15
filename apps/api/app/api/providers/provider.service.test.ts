@@ -10,7 +10,7 @@ import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.sch
  * guarding for string content, crashing with "content.findIndex is not a
  * function" when an AIMessage has string content (the default shape).
  *
- * Patched in `patches/@langchain__openai@1.4.0.patch`. This test ensures
+ * Patched in `tools/pnpm/patches/@langchain__openai@1.4.0.patch`. This test ensures
  * the fix holds across dependency updates.
  */
 describe('OpenAI Responses API converter', () => {

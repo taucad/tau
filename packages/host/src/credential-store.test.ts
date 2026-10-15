@@ -2,9 +2,11 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  defaultConfigDirectory,
+  defaultPayloadStore,
   hostCredentialPath,
   readHostCredential,
   removeHostCredential,
@@ -36,5 +38,26 @@ describe('host credential store', () => {
     expect(await readFile(hostCredentialPath(), 'utf8')).not.toContain('authorization');
     await removeHostCredential();
     expect(await readHostCredential()).toBeUndefined();
+  });
+});
+
+describe('defaultPayloadStore', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should be <TAU_CONFIG_DIR>/payloads when the one override is set', () => {
+    vi.stubEnv('TAU_CONFIG_DIR', '/srv/tau-config');
+
+    expect(defaultPayloadStore()).toBe(join('/srv/tau-config', 'payloads'));
+  });
+
+  it.runIf(process.platform === 'linux')('should live under the XDG data root, never the config root, on Linux', () => {
+    vi.stubEnv('TAU_CONFIG_DIR', '');
+    vi.stubEnv('XDG_CONFIG_HOME', '/home/user/.config');
+    vi.stubEnv('XDG_DATA_HOME', '/home/user/.local/share');
+
+    expect(defaultPayloadStore()).toBe('/home/user/.local/share/tau/payloads');
+    expect(defaultPayloadStore().startsWith(defaultConfigDirectory())).toBe(false);
   });
 });

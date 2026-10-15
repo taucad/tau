@@ -17,7 +17,7 @@ Applicability:
 | R    | Read `AGENTS.md`, manifests, lockfiles, workflows, release files, docs, remotes, branch, and status.                                              |
 | B    | Placeholder repository contains no product implementation worth preserving.                                                                       |
 | Q    | Repo slug, npm name, description, license, toolchain, artifact policy, env prefix, Vale pack, docs flag, benchmark axes, and host legs are bound. |
-| R    | `repos.yaml` entry exists; an explicit `branch:` names every non-default branch.                                                                  |
+| R    | `tools/repositories/catalog.yaml` entry exists; an explicit `branch:` names every non-default branch.                                             |
 | R    | Repository, npm package, trusted publisher, Vercel project, and ruleset state are recorded.                                                       |
 | Q    | Any existing license, public API, visibility, or publisher conflict is surfaced before edits.                                                     |
 

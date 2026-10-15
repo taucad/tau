@@ -13,7 +13,7 @@ const baseConfig: UserConfig = {
   ],
   copy: [
     { from: '../../license', to: 'dist', rename: 'LICENSE' },
-    { from: '../../license-deps', to: 'dist', rename: 'THIRD_PARTY_LICENSES.md' },
+    { from: '../../docs/licensing/third-party-licenses.md', to: 'dist', rename: 'THIRD_PARTY_LICENSES.md' },
     { from: 'NOTICE', to: 'dist' },
   ],
   sourcemap: false,

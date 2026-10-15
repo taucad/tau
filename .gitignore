@@ -106,3 +106,6 @@ fixtures/mocker/*/.cache/
 # Local temporary artifacts
 /tmp/
 /temp/
+
+# Generated Husky hook wrappers
+tools/git-hooks/_/

@@ -1071,14 +1071,14 @@ importers:
         specifier: 9.6.1
         version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
       '@rjsf/core':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
       '@rjsf/utils':
-        specifier: 5.24.13
-        version: 5.24.13(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
       '@rjsf/validator-ajv8':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@shikijs/langs-precompiled':
         specifier: ^3.23.0
         version: 3.23.0
@@ -2895,14 +2895,14 @@ importers:
   examples/electron:
     dependencies:
       '@rjsf/core':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
       '@rjsf/utils':
-        specifier: 5.24.13
-        version: 5.24.13(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
       '@rjsf/validator-ajv8':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
@@ -2956,14 +2956,14 @@ importers:
   examples/nextjs:
     dependencies:
       '@rjsf/core':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
       '@rjsf/utils':
-        specifier: 5.24.13
-        version: 5.24.13(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
       '@rjsf/validator-ajv8':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -3023,14 +3023,14 @@ importers:
         specifier: catalog:react-router8
         version: 8.3.0(react-router@8.3.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(typescript@5.9.3)
       '@rjsf/core':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
       '@rjsf/utils':
-        specifier: 5.24.13
-        version: 5.24.13(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
       '@rjsf/validator-ajv8':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -3625,8 +3625,13 @@ importers:
         specifier: ^8.18.1
         version: 8.18.2
 
+  packages/core/archive: {}
+
   packages/core/bundler:
     dependencies:
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../archive
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../filesystem
@@ -4899,6 +4904,9 @@ importers:
       '@standard-schema/spec':
         specifier: 'catalog:'
         version: 1.1.0
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../core/archive
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
@@ -5184,11 +5192,14 @@ importers:
         specifier: ^10.7.7
         version: 10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
       '@rjsf/core':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
       '@rjsf/utils':
-        specifier: 5.24.13
-        version: 5.24.13(react@19.2.7)
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
+      '@rjsf/validator-ajv8':
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/camera':
         specifier: workspace:*
         version: link:../camera
@@ -5250,9 +5261,6 @@ importers:
       '@react-three/fiber':
         specifier: 9.6.1
         version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      '@rjsf/validator-ajv8':
-        specifier: 5.24.13
-        version: 5.24.13(@rjsf/utils@5.24.13(react@19.2.7))
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp
@@ -11813,24 +11821,24 @@ packages:
     resolution: {integrity: sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw==}
     engines: {node: '>= 10'}
 
-  '@rjsf/core@5.24.13':
-    resolution: {integrity: sha512-ONTr14s7LFIjx2VRFLuOpagL76sM/HPy6/OhdBfq6UukINmTIs6+aFN0GgcR0aXQHFDXQ7f/fel0o/SO05Htdg==}
-    engines: {node: '>=14'}
+  '@rjsf/core@6.11.0':
+    resolution: {integrity: sha512-8Hp3nd2RysjfmxHKy3/1GJtdAaDBt9VkU/c+pSXrs332BvliJM/Tp/QXTTnHYKYUSi1klFTygnvq1ujSefpcug==}
+    engines: {node: '>=20'}
     peerDependencies:
-      '@rjsf/utils': ^5.24.x
-      react: ^16.14.0 || >=17
+      '@rjsf/utils': ^6.11.0
+      react: '>=18'
 
-  '@rjsf/utils@5.24.13':
-    resolution: {integrity: sha512-rNF8tDxIwTtXzz5O/U23QU73nlhgQNYJ+Sv5BAwQOIyhIE2Z3S5tUiSVMwZHt0julkv/Ryfwi+qsD4FiE5rOuw==}
-    engines: {node: '>=14'}
+  '@rjsf/utils@6.11.0':
+    resolution: {integrity: sha512-jWYFXmPR5OVehb66Z2RDJFEgI7b7YSXe0FIco5kb7noqaDmjMOMFu4MnDKXPJLLdOW6YRd3MYZCbIPWvJeua4g==}
+    engines: {node: '>=20'}
     peerDependencies:
-      react: ^16.14.0 || >=17
+      react: '>=18'
 
-  '@rjsf/validator-ajv8@5.24.13':
-    resolution: {integrity: sha512-oWHP7YK581M8I5cF1t+UXFavnv+bhcqjtL1a7MG/Kaffi0EwhgcYjODrD8SsnrhncsEYMqSECr4ZOEoirnEUWw==}
-    engines: {node: '>=14'}
+  '@rjsf/validator-ajv8@6.11.0':
+    resolution: {integrity: sha512-pTzuYODewEE3qkTC5UwGvVvG0eetq72/h+rP9PsjPhF1lp2KZ5WrR44a29ipSnMTP2vorO80AvC/O9AXvBfVYw==}
+    engines: {node: '>=20'}
     peerDependencies:
-      '@rjsf/utils': ^5.24.x
+      '@rjsf/utils': ^6.11.0
 
   '@rolldown/binding-android-arm64@1.0.3':
     resolution: {integrity: sha512-454rs7jHngixp/NMxd5srYD57OnzSlZ/eFTETjORQHLwJG1lRtmNOJcBerZlfu4GjKqeq8aCCIQrMdHyhI51Hw==}
@@ -14189,6 +14197,9 @@ packages:
     resolution: {integrity: sha512-VSdkwnJRr8Yv9UgB2aXB3VUPWwd6Oqnn0hycFwhg9pZgWxJXb7JmhsiXe9tmpMwjHFxli12PGcz9aI63YYloGQ==}
     engines: {node: '>=18.0.0'}
 
+  '@x0k/json-schema-merge@1.1.0':
+    resolution: {integrity: sha512-QA8fHqP7e+Lvi4ih8X9r1ZnITC2Lo0uhh5qpP8yM7l6HYs7KljtMfoljSRh52jfU55oXSyO4/GhMyjqh8rQjWQ==}
+
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
@@ -15694,12 +15705,6 @@ packages:
   compression@1.8.2:
     resolution: {integrity: sha512-o8vI5RE5A6EVVOd9o41jKp41aJom+QTEO/Bx8MYNjexMo/Bv2WOjUfZr+aL0WnYSgymUy6zeguqLTsIhV0gMvQ==}
     engines: {node: '>= 0.8.0'}
-
-  compute-gcd@1.2.1:
-    resolution: {integrity: sha512-TwMbxBNz0l71+8Sc4czv13h4kEqnchV9igQZBi6QUaz09dnz13juGnnaWWJTRsP3brxOoxeB4SA2WELLw1hCtg==}
-
-  compute-lcm@1.1.2:
-    resolution: {integrity: sha512-OFNPdQAXnQhDSKioX8/XYT6sdUlXwpeMjfd6ApxMJfyZ4GxmLR1xvMERctlYhlHwIiz6CSpBc2+qYKjHGZw4TQ==}
 
   compute-scroll-into-view@3.1.1:
     resolution: {integrity: sha512-VRhuHOLoKYOy4UbilLbUzbYg93XLjv2PncJC50EuTWPA3gaja1UjBsUP/D/9/juV3vQFr6XBEzn9KCAHdUvOHw==}
@@ -17237,6 +17242,10 @@ packages:
 
   fast-equals@5.4.4:
     resolution: {integrity: sha512-d9/I4rfMfUlO9HOkQqLJgfyRM4siqk1SF3Gjxm4OAMZzV+kCKHe1t/bHxn3xtCPHs3HCQFcvqzkTuanzqECQxw==}
+    engines: {node: '>=6.0.0'}
+
+  fast-equals@6.1.1:
+    resolution: {integrity: sha512-VA9UvhVec1yj1UqkCLBCXgFBLbd6Pww2RGLa9biAHfl+/aOU9jTeP3idEtLLFouJIGDeugAxD/GhzHpjOSq4oA==}
     engines: {node: '>=6.0.0'}
 
   fast-fifo@1.3.2:
@@ -19066,13 +19075,6 @@ packages:
   json-rpc-2.0@1.8.1:
     resolution: {integrity: sha512-BmN42JKn6FI36pcMMzHCXQhpKNEfbeqgSIcUYHKnifq0/4Ey6PDinovwUOgajT7NsgUtpWdDXaCWlpI4LHXN3g==}
 
-  json-schema-compare@0.2.2:
-    resolution: {integrity: sha512-c4WYmDKyJXhs7WWvAWm3uIYnfyWFoIp+JEoX34rctVvEkMYCPGhXtvmFFXiffBbxfZsvQ0RNnV5H7GvDF5HCqQ==}
-
-  json-schema-merge-allof@0.8.1:
-    resolution: {integrity: sha512-CTUKmIlPJbsWfzRRnOXz+0MjIqvnleIXwFTzz+t9T86HnYX/Rozria6ZVGLktAU9e+NygNljveP+yxqtQp/Q4w==}
-    engines: {node: '>=12.0.0'}
-
   json-schema-ref-resolver@3.0.1:
     resolution: {integrity: sha512-w+HwgljXpVwZ3IidoUR1qPZxSOQ+NRQWuVe6a5pe8XbHsNZE4UAwVPUvzZagn7yBKbJtt6UJnRFYbNTRPZI45Q==}
 
@@ -19738,13 +19740,22 @@ packages:
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
 
-  markdown-to-jsx@7.7.17:
-    resolution: {integrity: sha512-7mG/1feQ0TX5I7YyMZVDgCC/y2I3CiEhIRQIhyov9nGBP5eoVrOXXHuL5ZP8GRfxVZKRiXWJgwXkb9It+nQZfQ==}
-    engines: {node: '>= 10'}
+  markdown-to-jsx@9.10.3:
+    resolution: {integrity: sha512-J5/NCmNYQ0ExsnThzvF3F1fSzNYLgROcW2diUqRqoIoiyhoy8DSI06jLuMYk0c86SQd/FiVYJrV6tIgci9S2tQ==}
+    engines: {node: '>= 18'}
     peerDependencies:
-      react: '>= 0.14.0'
+      react: '>= 16.0.0'
+      react-native: '*'
+      solid-js: '>=1.0.0'
+      vue: '>=3.0.0'
     peerDependenciesMeta:
       react:
+        optional: true
+      react-native:
+        optional: true
+      solid-js:
+        optional: true
+      vue:
         optional: true
 
   marked-terminal@7.3.0:
@@ -24357,21 +24368,6 @@ packages:
   validate-npm-package-name@5.0.1:
     resolution: {integrity: sha512-OljLrQ9SQdOUqTaQxqL5dEfZWrXExyyWsozYlAWFawPVNuD83igl7uJD2RTkNMbniIYgt8l81eCJGIdQF7avLQ==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
-
-  validate.io-array@1.0.6:
-    resolution: {integrity: sha512-DeOy7CnPEziggrOO5CZhVKJw6S3Yi7e9e65R1Nl/RTN1vTQKnzjfvks0/8kQ40FP/dsjRAOd4hxmJ7uLa6vxkg==}
-
-  validate.io-function@1.0.2:
-    resolution: {integrity: sha512-LlFybRJEriSuBnUhQyG5bwglhh50EpTL2ul23MPIuR1odjO7XaMLFV8vHGwp7AZciFxtYOeiSCT5st+XSPONiQ==}
-
-  validate.io-integer-array@1.0.0:
-    resolution: {integrity: sha512-mTrMk/1ytQHtCY0oNO3dztafHYyGU88KL+jRxWuzfOmQb+4qqnWmI+gykvGp8usKZOM0H7keJHEbRaFiYA0VrA==}
-
-  validate.io-integer@1.0.5:
-    resolution: {integrity: sha512-22izsYSLojN/P6bppBqhgUDjCkr5RY2jd+N2a3DCAUey8ydvrZ/OkGvFPR7qfOpwR2LC5p4Ngzxz36g5Vgr/hQ==}
-
-  validate.io-number@1.0.3:
-    resolution: {integrity: sha512-kRAyotcbNaSYoDnXvb4MHg/0a1egJdLwS6oJ38TJY7aw9n93Fl/3blIXdyYvPOp55CNxywooG/3BcrwNrBpcSg==}
 
   varint@6.0.0:
     resolution: {integrity: sha512-cXEIW6cfr15lFv563k4GuVuW/fiwjknytD37jIOLSdSWuOI6WnO/oKwmP2FQTU2l01LP8/M5TSAJpzUaGe3uWg==}
@@ -32427,31 +32423,30 @@ snapshots:
 
   '@resvg/resvg-wasm@2.6.2': {}
 
-  '@rjsf/core@5.24.13(@rjsf/utils@5.24.13(react@19.2.7))(react@19.2.7)':
+  '@rjsf/core@6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)':
     dependencies:
-      '@rjsf/utils': 5.24.13(react@19.2.7)
-      lodash: 4.18.1
-      lodash-es: 4.18.1
-      markdown-to-jsx: 7.7.17(react@19.2.7)
-      prop-types: 15.8.1
+      '@rjsf/utils': 6.11.0(react@19.2.7)
+      markdown-to-jsx: 9.10.3(react@19.2.7)
       react: 19.2.7
+    transitivePeerDependencies:
+      - react-native
+      - solid-js
+      - vue
 
-  '@rjsf/utils@5.24.13(react@19.2.7)':
+  '@rjsf/utils@6.11.0(react@19.2.7)':
     dependencies:
-      json-schema-merge-allof: 0.8.1
+      '@x0k/json-schema-merge': 1.1.0
+      fast-equals: 6.1.1
+      fast-uri: 4.2.2
       jsonpointer: 5.0.1
-      lodash: 4.18.1
-      lodash-es: 4.18.1
       react: 19.2.7
       react-is: 18.3.1
 
-  '@rjsf/validator-ajv8@5.24.13(@rjsf/utils@5.24.13(react@19.2.7))':
+  '@rjsf/validator-ajv8@6.11.0(@rjsf/utils@6.11.0(react@19.2.7))':
     dependencies:
-      '@rjsf/utils': 5.24.13(react@19.2.7)
+      '@rjsf/utils': 6.11.0(react@19.2.7)
       ajv: 8.20.0
       ajv-formats: 2.1.1(ajv@8.20.0)
-      lodash: 4.18.1
-      lodash-es: 4.18.1
 
   '@rolldown/binding-android-arm64@1.0.3':
     optional: true
@@ -34933,6 +34928,10 @@ snapshots:
       '@whatwg-node/promise-helpers': 1.3.2
       tslib: 2.8.1
 
+  '@x0k/json-schema-merge@1.1.0':
+    dependencies:
+      '@types/json-schema': 7.0.15
+
   '@xmldom/xmldom@0.8.15': {}
 
   '@xmldom/xmldom@0.9.12': {}
@@ -36410,19 +36409,6 @@ snapshots:
       vary: 1.1.2
     transitivePeerDependencies:
       - supports-color
-
-  compute-gcd@1.2.1:
-    dependencies:
-      validate.io-array: 1.0.6
-      validate.io-function: 1.0.2
-      validate.io-integer-array: 1.0.0
-
-  compute-lcm@1.1.2:
-    dependencies:
-      compute-gcd: 1.2.1
-      validate.io-array: 1.0.6
-      validate.io-function: 1.0.2
-      validate.io-integer-array: 1.0.0
 
   compute-scroll-into-view@3.1.1: {}
 
@@ -38218,6 +38204,8 @@ snapshots:
   fast-deep-equal@3.1.3: {}
 
   fast-equals@5.4.4: {}
+
+  fast-equals@6.1.1: {}
 
   fast-fifo@1.3.2: {}
 
@@ -40568,16 +40556,6 @@ snapshots:
 
   json-rpc-2.0@1.8.1: {}
 
-  json-schema-compare@0.2.2:
-    dependencies:
-      lodash: 4.18.1
-
-  json-schema-merge-allof@0.8.1:
-    dependencies:
-      compute-lcm: 1.1.2
-      json-schema-compare: 0.2.2
-      lodash: 4.18.1
-
   json-schema-ref-resolver@3.0.1:
     dependencies:
       dequal: 2.0.3
@@ -41265,7 +41243,7 @@ snapshots:
 
   markdown-table@3.0.4: {}
 
-  markdown-to-jsx@7.7.17(react@19.2.7):
+  markdown-to-jsx@9.10.3(react@19.2.7):
     optionalDependencies:
       react: 19.2.7
 
@@ -46831,21 +46809,6 @@ snapshots:
       spdx-expression-parse: 3.0.1
 
   validate-npm-package-name@5.0.1: {}
-
-  validate.io-array@1.0.6: {}
-
-  validate.io-function@1.0.2: {}
-
-  validate.io-integer-array@1.0.0:
-    dependencies:
-      validate.io-array: 1.0.6
-      validate.io-integer: 1.0.5
-
-  validate.io-integer@1.0.5:
-    dependencies:
-      validate.io-number: 1.0.3
-
-  validate.io-number@1.0.3: {}
 
   varint@6.0.0: {}
 

@@ -20,7 +20,7 @@ describe('paseo deletion', () => {
         'apps/**/*.{ts,tsx,mts,mjs,js,json,yaml,md}',
         'libs/**/*.{ts,tsx,mts,mjs,js,json,yaml,md}',
         'packages/**/*.{ts,tsx,mts,mjs,js,json,yaml,md}',
-        'patches/*',
+        'tools/pnpm/patches/*',
         'package.json',
         'pnpm-workspace.yaml',
         'pnpm-lock.yaml',

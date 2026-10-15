@@ -125,10 +125,14 @@ const runCli = async (
 describe('tau CLI dist (real binary)', () => {
   let workspace: string;
 
+  /* `cli:test` depends on `cli:build`, so Nx builds the binary before this suite. A nested `nx build` here would
+   * inherit the outer run's `NX_SKIP_NX_CACHE` and rebuild the CLI's whole dependency graph inside the hook. */
   beforeAll(async () => {
-    await execFileAsync('pnpm', ['nx', 'build', 'cli'], { cwd: repoRoot });
+    if (!existsSync(cliBinPath)) {
+      throw new Error(`${cliBinPath} is missing: run \`pnpm nx test cli\`, which builds the CLI first.`);
+    }
     workspace = await mkdtemp(join(tmpdir(), 'tau-cli-dist-'));
-  }, 180_000);
+  });
 
   afterAll(async () => {
     if (workspace) {

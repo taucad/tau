@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useResizeHandles } from '#components/panes/use-resize-handles.js';
 import type { ResizeHandle } from '#components/panes/use-resize-handles.js';
@@ -9,7 +9,7 @@ function Harness({
   content = 'Ready',
   hasSecondSash = false,
 }: {
-  readonly describeHandle: (sash: HTMLElement) => ResizeHandle;
+  readonly describeHandle: (sash: HTMLElement) => ResizeHandle | undefined;
   readonly content?: string;
   readonly hasSecondSash?: boolean;
 }): React.JSX.Element {
@@ -42,6 +42,33 @@ afterEach(() => {
 });
 
 describe('useResizeHandles', () => {
+  it('should remove separator semantics when an adjacent pane becomes unavailable', async () => {
+    vi.useFakeTimers();
+    const handle: ResizeHandle = {
+      label: 'Resize sidebar',
+      orientation: 'vertical',
+      value: 224,
+      minimum: 192,
+      maximum: 480,
+      resize: vi.fn(),
+    };
+    let available = true;
+    const { container, rerender } = render(<Harness describeHandle={() => (available ? handle : undefined)} />);
+    await deliverMutations();
+    const sash = screen.getByRole('separator', { name: 'Resize sidebar' });
+    available = false;
+    rerender(<Harness describeHandle={() => (available ? handle : undefined)} />);
+    sash.classList.add('sash-disabled');
+    await deliverMutations();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    expect(sash).not.toHaveAttribute('aria-valuenow');
+    expect(sash).toHaveAttribute('tabindex', '-1');
+    available = true;
+    sash.classList.remove('sash-disabled');
+    await deliverMutations();
+    expect(within(container).getByRole('separator')).toHaveAttribute('aria-valuenow', '224');
+  });
+
   it('should ignore content changes while retaining dynamic and keyboard resize semantics', async () => {
     vi.useFakeTimers();
     let value = 200;

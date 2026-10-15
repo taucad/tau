@@ -143,7 +143,7 @@ jobs:
       matrix:
         os: >-
           ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
-          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-26"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

@@ -23,7 +23,7 @@ Agents need current owners, applicable invariants and meaningful checks close to
 
 ### 1. Keep one authority per kind of content
 
-System, developer and current user instructions take precedence over repository material. `DESIGN.md` governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skill procedures. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement the resulting task contract. Resolve contradictions at the owning source.
+System, developer and current user instructions take precedence over repository material. `docs/policy/design-policy.md` governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skill procedures. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement the resulting task contract. Resolve contradictions at the owning source.
 
 - Root `AGENTS.md` owns repository operation, the current architecture map and conditional policy router.
 - Nearest justified nested `AGENTS.md` owns local entrypoints, checks and operational invariants.

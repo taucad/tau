@@ -43,10 +43,16 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
   }
 
   return (
-    <div className={cn('absolute inset-0 size-full', '[--nav-height:calc(var(--spacing)*10)]', 'md:hidden')}>
+    <Tabs
+      value={activeTab}
+      onValueChange={handleTabChange}
+      className={cn('absolute inset-0 block size-full', '[--nav-height:calc(var(--spacing)*10)]', 'md:hidden')}
+    >
       {/* Main viewer - always visible */}
-      <div
-        className='relative h-full transition-all duration-200 ease-linear'
+      <TabsContent
+        forceMount
+        value='model'
+        className='relative m-0 h-full transition-all duration-200 ease-linear data-[state=inactive]:block'
         style={{
           paddingBottom: isModelTab ? '0' : `calc(${Number(activeSnapPoint) - 0.07} * 100dvh)`,
         }}
@@ -62,7 +68,7 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
         {/* Floating Action Button */}
         <div
           className={cn(
-            'absolute right-4 bottom-[calc(var(--nav-height)+var(--spacing)*4)] z-10',
+            'absolute bottom-[calc(var(--nav-height)+var(--spacing)*4)] left-4 z-10',
             !isModelTab && 'hidden',
           )}
         >
@@ -71,7 +77,7 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             Edit
           </Button>
         </div>
-      </div>
+      </TabsContent>
 
       <Drawer
         handleOnly
@@ -103,13 +109,11 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             height: '100%',
           }}
         >
-          <Tabs
-            value={activeTab}
+          <div
             className='flex h-full flex-col p-0'
             style={{
               height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint)} * 100dvh - var(--spacing)*12)`,
             }}
-            onValueChange={handleTabChange}
           >
             <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col overflow-hidden p-4'>
               <PreviewFiles files={files} />
@@ -117,20 +121,17 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             <TabsContent enableAnimation={false} value='parameters' className='flex h-full flex-col overflow-hidden'>
               <PreviewParameters />
             </TabsContent>
-            <TabsContent enableAnimation={false} value='model' className='flex h-full flex-col' />
             <TabsContent enableAnimation={false} value='details' className='flex h-full flex-col overflow-y-auto'>
               <PreviewDetails project={project} hasGeometry={Boolean(artifact)} cadRef={cadRef} />
             </TabsContent>
-          </Tabs>
+          </div>
         </DrawerContent>
       </Drawer>
 
       {/* Navigation tabs */}
       <div className={cn('pointer-events-auto fixed right-0 bottom-0 left-0 z-50')}>
-        <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <PreviewNav className='h-(--nav-height)' />
-        </Tabs>
+        <PreviewNav className='h-(--nav-height)' />
       </div>
-    </div>
+    </Tabs>
   );
 });

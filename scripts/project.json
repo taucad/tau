@@ -34,6 +34,7 @@
     },
     "validate-workspace-root": {
       "executor": "nx:run-commands",
+      "cache": false,
       "options": {
         "command": "node scripts/src/validate-workspace-root.ts"
       }
@@ -91,7 +92,7 @@
     "validate-dead-code": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "NX_DAEMON=false knip --max-issues 317"
+        "command": "NX_DAEMON=false knip --config tools/quality/knip.config.ts --max-issues 317"
       }
     },
     "test": {
@@ -143,6 +144,7 @@
             "units",
             "parameters",
             "runtime",
+            "archive-core",
             "bundler-core",
             "esbuild",
             "geospec",

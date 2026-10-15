@@ -1,0 +1,78 @@
+{
+  "//": "The API guide's build123d design manifest (5 of 51 darwin-arm64 payloads) with its pins made concrete: the interpreter integrity is the python-build-standalone 20260901 SHA256SUMS digest transcoded to SRI, the two wheels are the cp313 macosx_11_0_arm64 pins of requirements.lock, and the three worker files are the plugin's python/*.py at the time of writing.",
+  "schemaVersion": 1,
+  "kernels": { "build123d": { "requires": ["engine"], "extensions": ["py"] } },
+  "dependencies": {
+    "engine": [
+      {
+        "target": { "runtime": "native", "os": "darwin", "arch": "arm64", "minimumOsVersion": "12.0" },
+        "payloads": [
+          {
+            "name": "python",
+            "integrity": "sha256-uQVKnT1U9MtVc9RJB/3bKYdLCJCb3nPynyhoz4ciI+4=",
+            "byteLength": 25293188,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1
+          },
+          {
+            "name": "cadquery-ocp-novtk",
+            "integrity": "sha256-IoeBLyE69wIPi7xpsH1gOeUp9eDhVMAZIiGv8/2sZnY=",
+            "byteLength": 62295929,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f7/80/dc46dac2ebb6ae6bcce27bc7f717438b99897199be25323cda559a76e0a1/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages"
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-UsgI+WSE9VcaXMhjd1zlAkfBffs7A2H47WtLBFb4AIA=",
+            "byteLength": 11896845,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/60/f2d208d366f263f39c6e69ed309290717aab41078b6d04c9be2a84fa2a07/numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages"
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-ifN6N2RqoTMX6bz6eGCmKFz/hwToXIGi12Sl2eAuzL0=",
+            "byteLength": 47187,
+            "format": "raw",
+            "origin": { "kind": "packagePath", "path": "python/worker.py" },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
+            "byteLength": 24322,
+            "format": "raw",
+            "origin": { "kind": "packagePath", "path": "python/analyzer.py" },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
+            "byteLength": 9907,
+            "format": "raw",
+            "origin": { "kind": "packagePath", "path": "python/glb.py" },
+            "destination": "tau-worker"
+          }
+        ]
+      }
+    ]
+  }
+}

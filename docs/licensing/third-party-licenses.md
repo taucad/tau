@@ -1,0 +1,182 @@
+# Third-Party Licenses
+
+This file lists the third-party dependencies distributed with the published `@taucad/runtime`
+artifact — its production and optional dependency closure, plus that of the workspace libraries
+bundled into it — and their respective licenses. It ships inside the artifact as
+`THIRD_PARTY_LICENSES.md`.
+
+## Licensing Overview
+
+All Tau-authored source is **[Apache-2.0](https://github.com/taucad/tau/blob/main/license)**, including the applications,
+libraries, tools, examples, GeoSpec engine, and other published packages.
+Repository licensing details: **[Licensing overview](https://github.com/taucad/tau/blob/main/docs/licensing/overview.md)**.
+
+Some third-party dependencies impose additional obligations on **combined
+distributions** that include them:
+
+- **LGPL-2.1 / LGPL-3.0 libraries** (see sections below) — Library-style
+  copyleft; satisfied by attribution and source availability.
+
+By using Tau, you agree to comply with the license terms of all included dependencies.
+
+*Generated on 2026-10-13*
+
+## Summary
+
+| License | Count |
+|---------|-------|
+| (MIT OR GPL-3.0-or-later) | 1 |
+| Apache-2.0 | 2 |
+| (MIT AND BSD-3-Clause) | 1 |
+| (MIT AND Zlib) | 1 |
+| (MIT OR CC0-1.0) | 1 |
+| BSD-3-Clause | 4 |
+| ISC | 6 |
+| SEE LICENSE IN LICENSE.md | 1 |
+| WTFPL OR ISC | 1 |
+| MIT | 75 |
+
+## (MIT OR GPL-3.0-or-later)
+
+> This package is dual-licensed. Tau uses it under the **MIT License** terms.
+
+- **jszip** v3.10.2 — [Repository](https://github.com/Stuk/jszip)
+
+## Apache-2.0
+
+> Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.
+
+- **clean-git-ref** v2.0.1 — [Repository](https://github.com/TheSavior/clean-git-ref)
+- **crc-32** v1.2.2 — [Repository](https://github.com/SheetJS/js-crc32)
+
+## (MIT AND BSD-3-Clause)
+
+- **sha.js** v2.4.12 — [Repository](https://github.com/crypto-browserify/sha.js)
+
+## (MIT AND Zlib)
+
+- **pako** v1.0.11 — [Repository](https://github.com/nodeca/pako)
+
+## (MIT OR CC0-1.0)
+
+> This package is dual-licensed. Tau uses it under the **MIT License** terms.
+
+- **type-fest** v4.41.0 — [Repository](https://github.com/sindresorhus/type-fest)
+
+## BSD-3-Clause
+
+- **csv-stringify** v1.1.2 — [Repository](http://www.github.com/adaltas/node-csv-stringify)
+- **ieee754** v1.2.1 — [Repository](https://github.com/feross/ieee754)
+- **source-map-js** v1.2.2 — [Repository](https://github.com/7rulnik/source-map-js)
+- **stream-transform** v0.1.2 — [Repository](http://www.github.com/wdavidw/node-stream-transform)
+
+## ISC
+
+- **@msgpack/msgpack** v3.1.3 — [Repository](https://github.com/msgpack/msgpack-javascript)
+- **graceful-fs** v4.2.11 — [Repository](https://github.com/isaacs/node-graceful-fs)
+- **inherits** v2.0.4 — [Repository](https://github.com/isaacs/inherits)
+- **once** v1.4.0 — [Repository](https://github.com/isaacs/once)
+- **sax** v1.1.6 — [Repository](https://github.com/isaacs/sax-js)
+- **wrappy** v1.0.2 — [Repository](https://github.com/npm/wrappy)
+
+## SEE LICENSE IN LICENSE.md
+
+- **@lhncbc/ucum-lhc** v7.1.10 — [Repository](https://github.com/lhncbc/ucum-lhc)
+
+## WTFPL OR ISC
+
+- **is-integer** v1.0.7 — [Repository](https://github.com/parshap/js-is-integer)
+
+## MIT
+
+- **@cfworker/json-schema** v4.1.1 — [Repository](https://github.com/cfworker/cfworker)
+- **@json-structure/sdk** v0.7.0 — [Repository](https://github.com/json-structure/sdk)
+- **@standard-schema/spec** v1.1.0 — [Repository](https://github.com/standard-schema/standard-schema)
+- **@types/json-schema** v7.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **abort-controller** v3.0.0 — [Repository](https://github.com/mysticatea/abort-controller)
+- **async-lock** v1.4.1 — [Repository](https://github.com/rogierschouten/async-lock)
+- **available-typed-arrays** v1.0.7 — [Repository](https://github.com/inspect-js/available-typed-arrays)
+- **base64-js** v1.5.1 — [Repository](https://github.com/beatgammit/base64-js)
+- **buffer** v6.0.3 — [Repository](https://github.com/feross/buffer)
+- **call-bind** v1.0.9 — [Repository](https://github.com/ljharb/call-bind)
+- **call-bind-apply-helpers** v1.0.2 — [Repository](https://github.com/ljharb/call-bind-apply-helpers)
+- **call-bound** v1.0.4 — [Repository](https://github.com/ljharb/call-bound)
+- **cdn-resolve** v2.1.2 — [Repository](https://github.com/luxass/cdn-resolve)
+- **coffeescript** v2.7.0 — [Repository](https://github.com/jashkenas/coffeescript)
+- **core-util-is** v1.0.3 — [Repository](https://github.com/isaacs/core-util-is)
+- **csv-parse** v7.0.3 — [Repository](https://github.com/adaltas/node-csv)
+- **decompress-response** v6.0.0 — [Repository](https://github.com/sindresorhus/decompress-response)
+- **deepmerge** v4.3.1 — [Repository](https://github.com/TehShrike/deepmerge)
+- **define-data-property** v1.1.4 — [Repository](https://github.com/ljharb/define-data-property)
+- **diff3** v0.0.3 — [Repository](https://github.com/axosoft/diff3)
+- **dunder-proto** v1.0.1 — [Repository](https://github.com/es-shims/dunder-proto)
+- **es-define-property** v1.0.1 — [Repository](https://github.com/ljharb/es-define-property)
+- **es-errors** v1.3.0 — [Repository](https://github.com/ljharb/es-errors)
+- **es-object-atoms** v1.1.1 — [Repository](https://github.com/ljharb/es-object-atoms)
+- **escape-html** v1.0.3 — [Repository](https://github.com/component/escape-html)
+- **event-target-shim** v5.0.1 — [Repository](https://github.com/mysticatea/event-target-shim)
+- **events** v3.3.0 — [Repository](https://github.com/Gozala/events)
+- **for-each** v0.3.5 — [Repository](https://github.com/Raynos/for-each)
+- **function-bind** v1.1.2 — [Repository](https://github.com/Raynos/function-bind)
+- **get-intrinsic** v1.3.0 — [Repository](https://github.com/ljharb/get-intrinsic)
+- **get-proto** v1.0.1 — [Repository](https://github.com/ljharb/get-proto)
+- **gopd** v1.2.0 — [Repository](https://github.com/ljharb/gopd)
+- **has-property-descriptors** v1.0.2 — [Repository](https://github.com/inspect-js/has-property-descriptors)
+- **has-symbols** v1.1.0 — [Repository](https://github.com/inspect-js/has-symbols)
+- **has-tostringtag** v1.0.2 — [Repository](https://github.com/inspect-js/has-tostringtag)
+- **hasown** v2.0.4 — [Repository](https://github.com/inspect-js/hasOwn)
+- **ignore** v5.3.2 — [Repository](https://github.com/kaelzhang/node-ignore)
+- **immediate** v3.0.6 — [Repository](https://github.com/calvinmetcalf/immediate)
+- **is-callable** v1.2.7 — [Repository](https://github.com/inspect-js/is-callable)
+- **is-finite** v1.1.0 — [Repository](https://github.com/sindresorhus/is-finite)
+- **is-typed-array** v1.1.15 — [Repository](https://github.com/inspect-js/is-typed-array)
+- **isarray** v1.0.0 — [Repository](https://github.com/juliangruber/isarray)
+- **isarray** v2.0.5 — [Repository](https://github.com/juliangruber/isarray)
+- **isomorphic-git** v1.38.5 — [Repository](https://github.com/isomorphic-git/isomorphic-git)
+- **js-tokens** v9.0.1 — [Repository](https://github.com/lydell/js-tokens)
+- **jsonfile** v2.4.0 — [Repository](https://github.com/jprichardson/node-jsonfile)
+- **lie** v3.3.0 — [Repository](https://github.com/calvinmetcalf/lie)
+- **lodash.get** v4.4.2 — [Repository](https://github.com/lodash/lodash)
+- **math-intrinsics** v1.1.0 — [Repository](https://github.com/es-shims/math-intrinsics)
+- **mimic-response** v3.1.0 — [Repository](https://github.com/sindresorhus/mimic-response)
+- **minimist** v1.2.8 — [Repository](https://github.com/minimistjs/minimist)
+- **minimisted** v2.0.1 — [Repository](https://github.com/kt3k/minimisted)
+- **nanoid** v5.1.16 — [Repository](https://github.com/ai/nanoid)
+- **pify** v4.0.1 — [Repository](https://github.com/sindresorhus/pify)
+- **possible-typed-array-names** v1.1.0 — [Repository](https://github.com/ljharb/possible-typed-array-names)
+- **process** v0.11.10 — [Repository](https://github.com/shtylman/node-process)
+- **process-nextick-args** v2.0.1 — [Repository](https://github.com/calvinmetcalf/process-nextick-args)
+- **readable-stream** v2.3.8 — [Repository](https://github.com/nodejs/readable-stream)
+- **readable-stream** v4.8.0 — [Repository](https://github.com/nodejs/readable-stream)
+- **safe-buffer** v5.1.2 — [Repository](https://github.com/feross/safe-buffer)
+- **safe-buffer** v5.2.1 — [Repository](https://github.com/feross/safe-buffer)
+- **set-function-length** v1.2.2 — [Repository](https://github.com/ljharb/set-function-length)
+- **setimmediate** v1.0.5 — [Repository](https://github.com/YuzuJS/setImmediate)
+- **simple-concat** v1.0.1 — [Repository](https://github.com/feross/simple-concat)
+- **simple-get** v4.0.1 — [Repository](https://github.com/feross/simple-get)
+- **string_decoder** v1.1.1 — [Repository](https://github.com/nodejs/string_decoder)
+- **string_decoder** v1.3.0 — [Repository](https://github.com/nodejs/string_decoder)
+- **string-to-stream** v1.1.1 — [Repository](https://github.com/feross/string-to-stream)
+- **strip-literal** v3.1.0 — [Repository](https://github.com/antfu/strip-literal)
+- **to-buffer** v1.2.2 — [Repository](https://github.com/browserify/to-buffer)
+- **typed-array-buffer** v1.0.3 — [Repository](https://github.com/inspect-js/typed-array-buffer)
+- **util-deprecate** v1.0.2 — [Repository](https://github.com/TooTallNate/util-deprecate)
+- **which-typed-array** v1.1.24 — [Repository](https://github.com/inspect-js/which-typed-array)
+- **ws** v8.22.0 — [Repository](https://github.com/websockets/ws)
+- **xmldoc** v0.4.0 — [Repository](https://github.com/nfarina/xmldoc)
+
+---
+
+## Source Code Availability
+
+The complete source code for Tau, including all modifications to third-party components,
+is available at: https://github.com/taucad/tau
+
+For GPL-licensed components, you may obtain the corresponding source code by:
+1. Cloning the repository: `git clone https://github.com/taucad/tau.git`
+2. Downloading from: https://github.com/taucad/tau/archive/refs/heads/main.zip
+
+---
+
+Please [file an issue](https://github.com/taucad/tau/issues/new) if you think a license
+or credits are missing or misrepresented!

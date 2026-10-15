@@ -576,6 +576,17 @@ jobs:
           secrets: |
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
+      - name: Verify host dependency image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: packages/host/Dockerfile
+          target: deps
+          cache-from: |
+            type=gha,scope=host-deps
+            type=gha
+          cache-to: type=gha,scope=host-deps,mode=max
+
       - name: Migrate the smoke database
         run: |
           docker run --rm --network host \

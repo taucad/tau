@@ -16,7 +16,7 @@ Resolve the owning research item and read [Durable research artifacts](../create
 Gather from the user message:
 
 - **Repos to clone**: GitHub URLs, `owner/repo` slugs, or blog post references
-- **Group tag**: Which `repos.yaml` group these belong to (or create a new group)
+- **Group tag**: Which group in the public `tools/repositories/catalog.yaml` or optional private `repos/tau-brain/repos.yaml` catalog these belong to (or create a new group)
 - **Mining scope**: What to extract — architecture, browser APIs, performance patterns, build systems, API design, POSIX compliance, etc.
 - **Integration target**: Which Tau system the findings relate to (filesystem, runtime, AI, rendering, etc.)
 
@@ -30,7 +30,7 @@ Use the `repos` skill to add and clone all identified repos:
 pnpm repos add <owner/repo> -g <group> --clone
 ```
 
-If repos are already tracked in `repos.yaml`, just clone:
+If repos are already tracked in the public `tools/repositories/catalog.yaml` or optional private `repos/tau-brain/repos.yaml` catalog, just clone:
 
 ```bash
 pnpm repos clone <name>

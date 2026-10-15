@@ -904,6 +904,64 @@ describe('ProjectLibrary', () => {
       return { search: () => currentSearch };
     };
 
+    it('should remain on the next page after queued table updates settle', async () => {
+      mockUseProjectsResult = {
+        ...createUseProjectsResult(),
+        projects: Array.from({ length: 44 }, (_, index) =>
+          makeProject(`proj_${String(index).padStart(21, '0')}`, `Project ${index}`),
+        ),
+      };
+      renderAt('/projects');
+      fireEvent.click(screen.getByRole('button', { name: 'Go to next page' }));
+      await waitFor(() => {
+        expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'Project 43' } });
+      await waitFor(() => {
+        expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+      });
+    });
+
+    it('should preserve search, sorting and column choices while switching views', async () => {
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.scrollIntoView = vi.fn();
+      const route = renderAt('/projects?q=Gearbox&sort=name:asc');
+      expect(screen.getByRole('searchbox', { name: 'Search projects' })).toHaveValue('Gearbox');
+      expect(screen.queryByRole('button', { name: 'Toggle columns' })).not.toBeInTheDocument();
+      const controls = screen.getByRole('group', { name: 'Project controls' });
+      expect(within(controls).getByRole('button', { name: 'Sort' })).toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Table' }));
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Toggle columns' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Description' }));
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Grid' }));
+      expect(screen.getByRole('searchbox', { name: 'Search projects' })).toHaveValue('Gearbox');
+      expect(route.search()).toContain('sort=name:asc');
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Table' }));
+      expect(screen.queryByRole('columnheader', { name: 'Description' })).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'missing' } });
+      expect(screen.getByRole('heading', { name: 'No matching projects' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+      expect(route.search()).not.toContain('q=');
+      expect(screen.getByRole('table')).toBeInTheDocument();
+    });
+
+    it('should use busy table rows for table loading without claiming an empty library', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      mockCookieValues[cookieName.projectViewMode] = 'table';
+      renderAt('/projects');
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getAllByRole('row')).toHaveLength(9);
+      expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    });
+
     it('lists trashed projects on arrival at /projects?trash=1', () => {
       useProjectsOptions.length = 0;
       renderAt('/projects?trash=1');

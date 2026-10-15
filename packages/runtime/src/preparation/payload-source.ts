@@ -322,19 +322,18 @@ const fromCandidate = async (
 ): Promise<{
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly key: string;
-  readonly acquiredFrom?: PayloadAcquisition;
+  readonly acquiredFrom: PayloadAcquisition;
 }> => {
   switch (candidate.kind) {
     case 'store': {
-      const verified = await readVerified(
-        { path: join(context.layout.blobs, candidate.key), expectedKey: candidate.key },
-        payload,
-        context,
-      );
-      const recorded = await readOptional(sourcePath(context.layout, candidate.key));
+      // The store already held these bytes, so no other source served them, whatever first brought them in.
       return {
-        ...verified,
-        ...(recorded === undefined ? {} : { acquiredFrom: JSON.parse(recorded) as PayloadAcquisition }),
+        ...(await readVerified(
+          { path: join(context.layout.blobs, candidate.key), expectedKey: candidate.key },
+          payload,
+          context,
+        )),
+        acquiredFrom: { kind: 'store', location: `blobs/sha256/${candidate.key}` },
       };
     }
     case 'seed': {
@@ -430,7 +429,7 @@ export const acquirePayload = async (
     try {
       // oxlint-disable-next-line no-await-in-loop -- sources are tried in order; the first verified one wins
       const acquired = await fromCandidate(candidate, payload, context);
-      const acquiredFrom = acquired.acquiredFrom ?? { kind: 'origin', location: locationOf(candidate) };
+      const { acquiredFrom } = acquired;
       if (candidate.kind !== 'store') {
         // oxlint-disable-next-line no-await-in-loop -- publish before extraction so a later attempt reuses it
         await publishBlob(context.layout, {

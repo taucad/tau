@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +12,7 @@ import {
   nativePreparationPlugins,
   openNativePreparation,
   refusedKernels,
+  verifyStoreClosure,
 } from '#native-kernels.js';
 
 /* The stores each preparation host is opened over; the hosts themselves are the real ones. */
@@ -51,6 +53,34 @@ describe('native kernels from the payload store', () => {
     expect(build123d?.deployment.kernels).toHaveProperty('build123d');
     expect(build123d?.seal).toBeTypeOf('function');
     expect(picogk).not.toHaveProperty('seal');
+    expect(build123d?.launchSet?.([])).toEqual([
+      'python/bin/python3',
+      'tau-worker/worker.py',
+      'tau-worker/analyzer.py',
+      'tau-worker/glb.py',
+    ]);
+    expect(picogk?.launchSet).toBeTypeOf('function');
+  });
+
+  it('should name what differs when a worker exits before its handshake, and the repair', async () => {
+    const root = join(configDirectory, 'closure');
+    await mkdir(join(root, 'lib'), { recursive: true });
+    const sha256 = createHash('sha256').update('bytes').digest('hex');
+    await writeFile(join(root, 'lib', 'a.pyc'), 'bytes', { mode: 0o644 });
+    await writeFile(
+      join(root, 'receipt.json'),
+      JSON.stringify({ files: [{ path: 'lib/a.pyc', byteLength: 5, sha256, mode: 0o644 }] }),
+    );
+    const signal = AbortSignal.timeout(10_000);
+
+    await expect(verifyStoreClosure(root, signal)).resolves.toBeUndefined();
+    await writeFile(join(root, 'lib', 'a.pyc'), 'BYTES');
+    await expect(verifyStoreClosure(root, signal)).resolves.toEqual({
+      files: ['lib/a.pyc'],
+      remedy: 'Run `tau prepare --verify` to repair it.',
+    });
+    await rm(join(root, 'receipt.json'));
+    await expect(verifyStoreClosure(root, signal)).resolves.toMatchObject({ files: ['receipt.json'] });
   });
 
   it('should refuse an unprepared Build123d model with the command that prepares it, downloading nothing', async () => {

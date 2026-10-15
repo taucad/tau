@@ -1,5 +1,6 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
 export {
+  installNativeRuntimeVerifier,
   installNativeWorkerLauncher,
   NativeProcessSession,
   NativeWorkerReportedError,
@@ -14,6 +15,8 @@ export type {
   NativeProcessResource,
   NativeProcessSessionOptions,
   NativeProtocolResponse,
+  NativeRuntimeDamage,
+  NativeRuntimeVerifier,
   NativeWorkerEnd,
   NativeWorkerLaunch,
   NativeWorkerLauncher,

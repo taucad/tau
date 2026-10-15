@@ -29,13 +29,14 @@ import {
   NativeProcessSession,
   NativeRuntimeUnavailableError,
   nativeSandboxPolicy,
+  installNativeRuntimeVerifier,
   installNativeWorkerLauncher,
   NativeWorkerReportedError,
   processEnvironment,
   startNativeWorker,
   terminateProcessTree,
 } from '#index.js';
-import type { NativeWorkerLaunch } from '#index.js';
+import type { NativeRuntimeVerifier, NativeWorkerLaunch } from '#index.js';
 
 const fsOverrides = vi.hoisted(() => ({
   readFile: undefined as undefined | (() => Promise<Uint8Array<ArrayBuffer>>),
@@ -794,6 +795,37 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     expect(duplicate.session.isGenerationValid(1)).toBe(false);
     await duplicate.session.cleanup();
   }, 15_000);
+
+  it('should re-verify the runtime when the worker exits before its handshake and name what differs', async () => {
+    const verifier = vi.fn<NativeRuntimeVerifier>(async () => ({
+      files: ['lib/a.pyc', 'lib/b.pyc', 'lib/c.pyc', 'lib/d.pyc', 'lib/e.pyc', 'lib/f.pyc'],
+      remedy: 'Run the repair.',
+    }));
+    installNativeRuntimeVerifier(verifier);
+    try {
+      const damaged = fixture('process.exit(7);');
+      await expect(request(damaged.session)).rejects.toThrow(
+        `Test native exited (7) before it was ready, and re-verifying its runtime at ${damaged.options.runtimePath} found files that differ from their receipt: lib/a.pyc, lib/b.pyc, lib/c.pyc, lib/d.pyc, lib/e.pyc and 1 more. Run the repair.`,
+      );
+      expect(verifier).toHaveBeenCalledWith(damaged.options.runtimePath, expect.any(AbortSignal));
+      await damaged.session.cleanup();
+
+      // Nothing found: the exit stands as it was.
+      verifier.mockResolvedValueOnce(undefined);
+      const intact = fixture('process.exit(7);');
+      await expect(request(intact.session)).rejects.toThrow(/^Test native exited \(7\)\.$/u);
+      await intact.session.cleanup();
+
+      // An exit after the handshake is not evidence about the runtime.
+      verifier.mockClear();
+      const later = fixture(`${ready}process.stdin.once('data',()=>process.exit(3));${keepAlive}`);
+      await expect(request(later.session)).rejects.toThrow(/^Test native exited \(3\)\.$/u);
+      expect(verifier).not.toHaveBeenCalled();
+      await later.session.cleanup();
+    } finally {
+      installNativeRuntimeVerifier(undefined);
+    }
+  });
 
   it('cancels cooperatively when a request names a cancel method, and kills when it cannot', async () => {
     // The worker answers the cancel notification itself; the process is never recycled.

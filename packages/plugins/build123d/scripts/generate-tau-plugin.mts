@@ -42,7 +42,7 @@ import {
 } from '@taucad/runtime/preparation/node';
 import type { DependencyPayload, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
 
-import { sealBuild123dClosure } from '#build123d-closure.js';
+import { build123dLaunchSet, sealBuild123dClosure } from '#build123d-closure.js';
 
 // oxlint-disable-next-line no-restricted-imports -- The generator's own sibling module; scripts have no `#` alias.
 import * as generator from './tau-plugin-generator.mjs';
@@ -597,7 +597,15 @@ const runGolden = async (seed: string, storeOption?: string): Promise<void> => {
   const store = storeOption ?? (await mkdtemp(join(tmpdir(), 'tau-build123d-golden-')));
   try {
     const host = createPreparationHost({
-      plugins: [{ package: packageName, deployment, directory: packageRoot, seal: sealBuild123dClosure }],
+      plugins: [
+        {
+          package: packageName,
+          deployment,
+          directory: packageRoot,
+          seal: sealBuild123dClosure,
+          launchSet: build123dLaunchSet,
+        },
+      ],
       store,
       seed,
     });

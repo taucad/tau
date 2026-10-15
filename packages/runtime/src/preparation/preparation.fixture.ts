@@ -197,7 +197,8 @@ export const pythonPayloadBytes = (): {
   python: tarGz(
     { name: 'python/bin/python3.13', data: 'interpreter', mode: 0o755 },
     { name: 'python/bin/python3', linkname: 'python3.13', mode: 0o777 },
-    { name: 'python/lib/python3.13/os.py', data: 'import abc\n' },
+    // Group-writable, as some wheels and archives ship their files: the closure must not keep that bit (S30).
+    { name: 'python/lib/python3.13/os.py', data: 'import abc\n', mode: 0o664 },
   ),
   demo: wheel('demo', {
     'demo/__init__.py': 'VALUE = 1\n',

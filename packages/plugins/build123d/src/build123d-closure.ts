@@ -5,7 +5,12 @@ import { join, relative, sep } from 'node:path';
 import { runInNativeSandbox } from '@taucad/native-process-core';
 import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/native-process-core';
 import { PreparationError, systemLibraryRefusal } from '@taucad/runtime/preparation/node';
-import type { ClosureReceipt, SealClosureInput, SealClosureRefusal } from '@taucad/runtime/preparation/node';
+import type {
+  ClosureLaunch,
+  ReceiptFile,
+  SealClosureInput,
+  SealClosureRefusal,
+} from '@taucad/runtime/preparation/node';
 import type { z } from 'zod';
 
 import type { build123dOptionsSchema } from '#build123d.schemas.js';
@@ -14,6 +19,11 @@ import type { build123dOptionsSchema } from '#build123d.schemas.js';
 const pythonPath = 'python/bin/python3';
 /** Closure-relative directory the worker and its four support modules unpack into. */
 const workerDirectory = 'tau-worker';
+/** Closure-relative worker entry point and its four support modules. */
+const workerPath = `${workerDirectory}/worker.py`;
+const supportPaths = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map(
+  (name) => `${workerDirectory}/${name}`,
+);
 const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
 /** Characters of a failed command's standard error kept in the error message. */
 const reportedOutput = 2000;
@@ -24,7 +34,7 @@ const reportedOutput = 2000;
  */
 export type Build123dClosureOptions = z.input<typeof build123dOptionsSchema> & { readonly runtimePath: string };
 
-const rowOf = (receipt: ClosureReceipt, path: string): ClosureReceipt['files'][number] => {
+const rowOf = (receipt: ClosureLaunch, path: string): ReceiptFile => {
   const row = receipt.files.find((file) => file.path === path);
   if (row === undefined) {
     throw new Error(
@@ -34,14 +44,24 @@ const rowOf = (receipt: ClosureReceipt, path: string): ClosureReceipt['files'][n
   return row;
 };
 
-const absolute = (receipt: ClosureReceipt, path: string): string => join(receipt.root, ...path.split('/'));
+const absolute = (receipt: ClosureLaunch, path: string): string => join(receipt.root, ...path.split('/'));
+
+/**
+ * Build123d's launch set: the interpreter and the five worker scripts, which every launch hashes.
+ * The preparation host records their rows in the closure's launch index, so a launch never reads the 22,000-row
+ * receipt; the rest of the closure is re-verified when the worker exits before its handshake.
+ * @returns Closure-relative paths.
+ * @public
+ */
+export const build123dLaunchSet = (): readonly string[] => [pythonPath, workerPath, ...supportPaths];
 
 /**
  * Map a sealed `engine` closure to the options `build123dKernel` already takes: the interpreter, the worker and its
  * four support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
  * sandbox may read. The session hashes exactly these files at launch (D8), so the per-launch check stays O(1).
  *
- * @param receipt - The receipt of the closure `tau prepare build123d` sealed.
+ * @param receipt - The closure `tau prepare build123d` sealed: its receipt, or the launch view a preparation host's
+ *   `inspectLaunch` reads from its launch index.
  * @returns Options that `build123dOptionsSchema` accepts.
  * @throws {Error} When the receipt lacks the interpreter or a worker script.
  * @public
@@ -57,12 +77,10 @@ const absolute = (receipt: ClosureReceipt, path: string): string => join(receipt
  * }
  * ```
  */
-export const build123dOptionsFromClosure = (receipt: ClosureReceipt): Build123dClosureOptions => {
+export const build123dOptionsFromClosure = (receipt: ClosureLaunch): Build123dClosureOptions => {
   const python = rowOf(receipt, pythonPath);
-  const worker = rowOf(receipt, `${workerDirectory}/worker.py`);
-  const support = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map((name) =>
-    rowOf(receipt, `${workerDirectory}/${name}`),
-  );
+  const worker = rowOf(receipt, workerPath);
+  const support = supportPaths.map((path) => rowOf(receipt, path));
   return {
     pythonExecutable: absolute(receipt, python.path),
     pythonSha256: python.sha256,

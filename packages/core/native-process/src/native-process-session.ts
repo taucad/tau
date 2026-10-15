@@ -329,6 +329,58 @@ export const installNativeWorkerLauncher = (launcher: NativeWorkerLauncher | und
   Reflect.set(globalThis, launcherSlot, launcher);
 };
 
+/**
+ * What re-verifying a native runtime found: the files that differ from the record it was sealed with, and what the
+ * user can do about it.
+ * @public
+ */
+export type NativeRuntimeDamage = {
+  /** Paths relative to the runtime root, sorted. */
+  readonly files: readonly string[];
+  /** One sentence naming the repair, such as the command that re-verifies and repairs the runtime. */
+  readonly remedy: string;
+};
+
+/**
+ * Re-verifies a native runtime root in full, file by file, against the record it was sealed with.
+ * @public
+ * @param runtimePath - The launch's runtime root.
+ * @param signal - Aborts the check.
+ * @returns The damage found, or `undefined` when the runtime is intact or is not one the verifier knows.
+ */
+export type NativeRuntimeVerifier = (
+  runtimePath: string,
+  signal: AbortSignal,
+) => Promise<NativeRuntimeDamage | undefined>;
+
+const verifierSlot = Symbol.for('@taucad/native-process-core/runtime-verifier');
+
+/** Damaged files a refusal names; the rest are counted. */
+const reportedDamagedFiles = 5;
+
+/** Bound on one re-verification after a failed handshake: seconds normally, never a hang. Milliseconds. */
+const reverificationTimeout = 300_000;
+
+const installedVerifier = (): NativeRuntimeVerifier | undefined => {
+  const verifier: unknown = Reflect.get(globalThis, verifierSlot);
+  return typeof verifier === 'function' ? (verifier as NativeRuntimeVerifier) : undefined;
+};
+
+/**
+ * Re-verify a session's runtime with `verifier` whenever its worker exits before the handshake (D8).
+ *
+ * A launch hashes only the executable and the few files the process loads first; anything else that is damaged
+ * surfaces as a worker that exits before it is ready. The session then runs the verifier over its runtime root and,
+ * when it finds damage, fails with an error that names the files and the remedy instead of the bare exit status.
+ * Held process-wide, like the worker launcher, so every copy of this package sees it.
+ *
+ * @public
+ * @param verifier - The verifier, or `undefined` to report bare exits again.
+ */
+export const installNativeRuntimeVerifier = (verifier: NativeRuntimeVerifier | undefined): void => {
+  Reflect.set(globalThis, verifierSlot, verifier);
+};
+
 const verifyResourceDigests = async (launch: NativeWorkerLaunch): Promise<void> => {
   const resources = [
     { path: launch.executablePath, sha256: launch.executableSha256, label: launch.executableName },
@@ -646,9 +698,12 @@ export class NativeProcessSession<Issue> {
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       this.onStderr(chunk);
     });
+    // Set by the end handler, which TypeScript cannot see run before the catch below.
+    const handshake = { exitedBeforeReady: false };
     // async-iife: bootstrap -- the worker's end fails whatever it was serving; nothing awaits it.
     void (async () => {
       const end = await child.ended;
+      handshake.exitedBeforeReady = this.child === child && this.resolveReady !== undefined && !('error' in end);
       this.fail(
         child,
         'error' in end
@@ -662,9 +717,42 @@ export class NativeProcessSession<Issue> {
     handshakeTimer.unref();
     try {
       await this.ready;
+    } catch (error) {
+      throw handshake.exitedBeforeReady ? await this.reverified(error) : error;
     } finally {
       clearTimeout(handshakeTimer);
     }
+  }
+
+  /* D8: a worker that exits before its handshake is evidence of damage the launch check does not hash. Re-verify the
+   * whole runtime and name what differs; with no verifier, or nothing found, the exit stands as it was. */
+  private async reverified(error: unknown): Promise<unknown> {
+    const verifier = installedVerifier();
+    if (verifier === undefined) {
+      return error;
+    }
+    let damage: NativeRuntimeDamage | undefined;
+    try {
+      damage = await verifier(this.options.runtimePath, AbortSignal.timeout(reverificationTimeout));
+    } catch (verificationError) {
+      this.options.logger.debug(
+        `${this.options.sessionName} runtime re-verification failed: ${verificationError instanceof Error ? verificationError.message : String(verificationError)}`,
+      );
+      return error;
+    }
+    if (damage === undefined || damage.files.length === 0) {
+      return error;
+    }
+    const shown = damage.files.slice(0, reportedDamagedFiles).join(', ');
+    const more =
+      damage.files.length > reportedDamagedFiles
+        ? ` and ${String(damage.files.length - reportedDamagedFiles)} more`
+        : '';
+    const exit = error instanceof Error ? error.message.replace(/\.$/u, '') : String(error);
+    return new Error(
+      `${exit} before it was ready, and re-verifying its runtime at ${this.options.runtimePath} found files that differ from their receipt: ${shown}${more}. ${damage.remedy}`,
+      { cause: error },
+    );
   }
 
   private async send<Result, Event = never>(request: NativeProcessRequest<Result, Event>): Promise<Result> {

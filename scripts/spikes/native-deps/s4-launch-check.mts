@@ -13,9 +13,18 @@
  */
 
 /* oxlint-disable no-await-in-loop -- samples and tampering cases run one at a time against one store. */
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
@@ -300,9 +309,32 @@ const main = async (): Promise<void> => {
   }
   const build123d = receiptOf(store, '@taucad/build123d', 'engine');
   const picogk = receiptOf(store, '@taucad/picogk', 'runtime');
-  // What the composition parses: the whole receipt of each closure.
+  // What the composition reads (X29): each closure's launch index and the head of its receipt, not the whole receipt.
+  const indexOf = (receipt: SealedReceipt): string => {
+    const path = join(receipt.root, 'launch.json');
+    if (!existsSync(path)) {
+      return `${receipt.package} NO launch index (full receipt ${String(statSync(join(receipt.root, 'receipt.json')).size)} bytes)`;
+    }
+    const index = JSON.parse(readFileSync(path, 'utf8')) as {
+      files: ReadonlyArray<{ path: string; byteLength: number }>;
+    };
+    const bytes = index.files.reduce((sum, file) => sum + file.byteLength, 0);
+    return `${receipt.package} ${String(statSync(path).size)} bytes, ${String(index.files.length)} rows (${index.files.map((file) => file.path).join(', ')}; ${String(Math.round(bytes / 1e5) / 10)} MB hashed), receipt ${String(statSync(join(receipt.root, 'receipt.json')).size)} bytes not parsed`;
+  };
+  summary.line(`launch indexes read at compose: ${[build123d, picogk].map((receipt) => indexOf(receipt)).join('; ')}`);
+  // S30's tar finding: a row whose mode a umask can change does not survive a tar seed.
+  const modes = (receipt: SealedReceipt): Record<string, number> => {
+    const counts: Record<string, number> = {};
+    for (const file of receipt.files as ReadonlyArray<{ mode: number; symlinkTarget?: string }>) {
+      if (file.symlinkTarget === undefined) {
+        const key = file.mode.toString(8);
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    return counts;
+  };
   summary.line(
-    `receipts parsed at compose: ${[build123d, picogk].map((receipt) => `${receipt.package} ${String(statSync(join(receipt.root, 'receipt.json')).size)} bytes, ${String(receipt.files.length)} rows`).join('; ')}`,
+    `receipt row modes: ${[build123d, picogk].map((receipt) => `${receipt.package} ${JSON.stringify(modes(receipt))}`).join('; ')}`,
   );
   const verify = async (): Promise<Record<string, unknown>> => {
     const run = await runTau(['prepare', '--verify', '--json'], { configDirectory, killTimeout: 15 * 60_000 });
@@ -428,6 +460,52 @@ const main = async (): Promise<void> => {
       };
     },
   });
+
+  // Seeds (S30, X30): the sealed closures copied into an empty store by APFS clone and by tar, then a full offline
+  // re-verification with no blobs to repair from: each must report every closure intact (exit 0).
+  for (const [label, seedClosures] of [
+    [
+      'clone',
+      (target: string): void => {
+        execFileSync('/bin/cp', ['-c', '-R', join(store, 'closures'), join(target, 'closures')]);
+      },
+    ],
+    [
+      'tar',
+      (target: string): void => {
+        const archive = join(work, 'closures.tar');
+        execFileSync('tar', ['-cf', archive, '-C', store, 'closures']);
+        execFileSync('tar', ['-xf', archive, '-C', target]);
+        rmSync(archive, { force: true });
+      },
+    ],
+  ] as const) {
+    await runCase({
+      summary,
+      records,
+      name: `seed by ${label} then verify offline`,
+      expectation: 'exit 0, every closure intact',
+      step: async () => {
+        const seededConfig = join(realpathSync(work), `seed-${label}`);
+        rmSync(seededConfig, { recursive: true, force: true });
+        mkdirSync(join(seededConfig, 'payloads'), { recursive: true });
+        seedClosures(join(seededConfig, 'payloads'));
+        const run = await runTau(['prepare', '--verify', '--offline', '--json'], {
+          configDirectory: seededConfig,
+          killTimeout: 15 * 60_000,
+        });
+        rmSync(seededConfig, { recursive: true, force: true });
+        // The first line is the verify report (statuses and named files), even when the run then refuses.
+        return {
+          exitCode: run.exitCode,
+          milliseconds: run.milliseconds,
+          report: run.stdout.trim().split('\n')[0] ?? '',
+          outcome: tail(run.stdout, 400),
+          stderr: tail(run.stderr, 300),
+        };
+      },
+    });
+  }
 
   writeFileSync(
     join(out, 's4-records.json'),

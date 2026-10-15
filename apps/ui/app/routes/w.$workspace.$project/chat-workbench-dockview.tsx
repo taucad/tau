@@ -1268,7 +1268,6 @@ export const FileEditor = memo(function ({
   const fileManager = useFileManager();
   const { contentService } = fileManager;
   const { modelService, markerService } = useMonacoServices();
-  const planModeEnabled = useFeature('planMode');
   const handledSaveCompletion = useRef<Promise<void> | undefined>(undefined);
   // Resolve the live path via the stable paneId. The path param the
   // panel was created with is a starting hint only — once the panel is
@@ -1460,7 +1459,7 @@ export const FileEditor = memo(function ({
                 head: result.head,
                 revision: result.revision,
               },
-        options: { planModeEnabled, readOnly },
+        options: { readOnly },
       });
       const paneState = normalizeFilePaneState({
         parameters: paneParameters,

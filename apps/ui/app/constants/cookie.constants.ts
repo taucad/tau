@@ -1,5 +1,4 @@
 import type { ConstantRecord } from '@taucad/types';
-import { metaConfig } from '#constants/meta.constants.js';
 
 /**
  * Cookie names.
@@ -97,9 +96,6 @@ export const cookieName = {
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',
 } as const;
-
-/** Web-only consent cookie, intentionally outside the ordinary preference API. */
-export const consentCookieName = `${metaConfig.cookiePrefix}cookie-consent`;
 
 /**
  * Union of all cookie names.

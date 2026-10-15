@@ -82,6 +82,22 @@ test('has no consent UI and applies only the decision recorded by the website', 
   await expect.poll(storedIdentifiers).toBeGreaterThan(0);
 });
 
+test('changes the shared decision from Help → Cookie preferences', async () => {
+  await target.navigate('/');
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
+  await target.click(selectors.getByRole('button', { name: 'Help', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Cookie preferences' }));
+  await target.click(selectors.getByRole('checkbox', { name: 'Product analytics' }));
+  await target.click(selectors.getByRole('button', { name: 'Save', exact: true }));
+  await expect.poll(consentStatus).toBe('accepted');
+
+  await target.click(selectors.getByRole('button', { name: 'Help', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Cookie preferences' }));
+  await target.click(selectors.getByRole('checkbox', { name: 'Product analytics' }));
+  await target.click(selectors.getByRole('button', { name: 'Save', exact: true }));
+  await expect.poll(consentStatus).toBe('declined');
+});
+
 test('treats Global Privacy Control as a hard analytics decline', async () => {
   await target.navigate('/');
   await target.addCookies([

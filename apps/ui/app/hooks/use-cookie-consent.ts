@@ -1,21 +1,19 @@
 import { useSyncExternalStore } from 'react';
 import { useRouteLoaderData } from 'react-router';
-import { consentCookieName } from '#constants/cookie.constants.js';
+import { consentChannelName, consentCookieName } from '@taucad/consent';
 import type { RootLoaderData } from '#root-layout.js';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';
 import { recordRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
-import type { ConsentStatus } from '#lib/cookie-consent.lib.js';
+import type { ConsentStatus } from '@taucad/consent';
 
 type ConsentLoaderData = RootLoaderData & {
   readonly consentStatus: ConsentStatus;
   readonly globalPrivacyControl?: boolean;
 };
 
-/** The marketing site posts here after it writes a decision, so open app tabs re-read the cookie. */
-const consentChannelName = 'tau-cookie-consent';
-
 /*
- * The cookie is the source of truth; these signals only prompt a re-read.
+ * The cookie is the source of truth; these signals only prompt a re-read. `writeConsent` posts on the
+ * channel, including from this document.
  * Cookie Store reports foreground changes where supported; focus and visibility
  * cover browsers without it after the next activation.
  */
@@ -44,8 +42,8 @@ const subscribe = (listener: () => void): (() => void) => {
 };
 
 /**
- * Web-only analytics consent, read from the cookie the marketing site (`apps/www`) writes.
- * The app has no consent UI of its own; visitors give, change and withdraw consent on the website.
+ * Web-only analytics consent, read from the shared `@taucad/consent` cookie. The website's consent panel
+ * and the app's Help → Cookie preferences dialog both write it; every write is announced on the channel.
  *
  * @returns The effective decision, overridden by Global Privacy Control.
  */

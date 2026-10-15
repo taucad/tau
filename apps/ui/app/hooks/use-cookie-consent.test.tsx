@@ -3,7 +3,7 @@ import * as Cookies from 'es-cookie';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
-import { consentCookieName } from '#constants/cookie.constants.js';
+import { consentCookieName } from '@taucad/consent';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { readConsentStatus, readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { resetRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';

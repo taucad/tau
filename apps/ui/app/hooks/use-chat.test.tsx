@@ -313,7 +313,7 @@ function createComposerWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ChatComposerProvider surface='marketing'>{children}</ChatComposerProvider>
+        <ChatComposerProvider surface='library'>{children}</ChatComposerProvider>
       </ChatSessionStoreProvider>
     );
   };

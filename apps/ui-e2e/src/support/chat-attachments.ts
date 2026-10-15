@@ -277,11 +277,6 @@ export const prepareComposerPage = async (): Promise<void> => {
   });
 };
 
-/** Dismiss the cookie banner when it is shown. */
-export const dismissCookies = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
-};
-
 /**
  * Pick a catalog model through the composer's own selector.
  *

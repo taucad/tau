@@ -89,7 +89,7 @@ function PostHogLifecycle({ isActive }: { readonly isActive: boolean }): undefin
 
 /** Web analytics boundary: stable ancestry, PostHog only after accepted consent. */
 export function WebAnalyticsProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const [consentStatus] = useCookieConsent();
+  const consentStatus = useCookieConsent();
   const isActive = consentStatus === 'accepted' && posthogConfig.apiKey !== '';
   const analytics = useMemo<Analytics>(
     () => ({

@@ -15,7 +15,6 @@ export const meta: MetaFunction = () => [
 
 export const handle: Handle = {
   enableOverflowY: true,
-  enablePageFooter: false,
   enablePageWrapper: true,
 };
 

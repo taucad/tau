@@ -1,56 +1,25 @@
-import * as Cookies from 'es-cookie';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useRouteLoaderData } from 'react-router';
-import { Topic } from '@taucad/events';
 import { consentCookieName } from '#constants/cookie.constants.js';
 import type { RootLoaderData } from '#root-layout.js';
-import { parseStoredConsent, readConsentStatus } from '#lib/cookie-consent.lib.js';
-import { isGlobalPrivacyControlEnabled, recordRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
+import { readConsentStatus } from '#lib/cookie-consent.lib.js';
+import { recordRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
 import type { ConsentStatus } from '#lib/cookie-consent.lib.js';
-
-type StoredConsent = {
-  readonly status: Exclude<ConsentStatus, 'unknown'>;
-  readonly version: 1;
-};
 
 type ConsentLoaderData = RootLoaderData & {
   readonly consentStatus: ConsentStatus;
   readonly globalPrivacyControl?: boolean;
 };
 
-const consentLifetimeDays = 365;
-/** Other documents of this origin re-read the cookie when a decision is written. */
+/** The marketing site posts here after it writes a decision, so open app tabs re-read the cookie. */
 const consentChannelName = 'tau-cookie-consent';
-const consentTopic = new Topic<void>({ name: 'cookie-consent' });
-
-const writeConsentStatus = (status: Exclude<ConsentStatus, 'unknown'>): void => {
-  const effectiveStatus = isGlobalPrivacyControlEnabled() ? 'declined' : status;
-  const stored: StoredConsent = { status: effectiveStatus, version: 1 };
-  const attributes = {
-    expires: consentLifetimeDays,
-    path: '/',
-    sameSite: 'lax',
-  } as const;
-  if (globalThis.location.protocol === 'https:') {
-    Cookies.set(consentCookieName, JSON.stringify(stored), { ...attributes, secure: true });
-  } else {
-    Cookies.set(consentCookieName, JSON.stringify(stored), attributes);
-  }
-  consentTopic.emit();
-  if (typeof BroadcastChannel !== 'undefined') {
-    const channel = new BroadcastChannel(consentChannelName);
-    channel.postMessage(effectiveStatus);
-    channel.close();
-  }
-};
 
 /*
  * The cookie is the source of truth; these signals only prompt a re-read.
- * Cookie Store reports foreground expiry where supported; focus and visibility
+ * Cookie Store reports foreground changes where supported; focus and visibility
  * cover browsers without it after the next activation.
  */
 const subscribe = (listener: () => void): (() => void) => {
-  const unsubscribe = consentTopic.subscribe(listener);
   const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(consentChannelName);
   const cookieStore = Reflect.get(globalThis, 'cookieStore') as EventTarget | undefined;
   const onCookieChange = (event: Event): void => {
@@ -67,7 +36,6 @@ const subscribe = (listener: () => void): (() => void) => {
   globalThis.addEventListener('focus', listener);
   document.addEventListener('visibilitychange', listener);
   return () => {
-    unsubscribe();
     channel?.close();
     cookieStore?.removeEventListener('change', onCookieChange);
     globalThis.removeEventListener('focus', listener);
@@ -75,19 +43,15 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
-/** Web-only analytics consent, kept separate from ordinary UI preferences. */
-export function useCookieConsent(): readonly [ConsentStatus, (status: Exclude<ConsentStatus, 'unknown'>) => void] {
+/**
+ * Web-only analytics consent, read from the cookie the marketing site (`apps/www`) writes.
+ * The app has no consent UI of its own; visitors give, change and withdraw consent on the website.
+ *
+ * @returns The effective decision, overridden by Global Privacy Control.
+ */
+export function useCookieConsent(): ConsentStatus {
   const loaderData = useRouteLoaderData<ConsentLoaderData>('root');
   // Before the first client snapshot, so hydration never resolves a stale acceptance.
   recordRequestGlobalPrivacyControl(loaderData?.globalPrivacyControl === true);
-  const status = useSyncExternalStore(subscribe, readConsentStatus, () => loaderData?.consentStatus ?? 'unknown');
-
-  useEffect(() => {
-    const stored = parseStoredConsent(Cookies.get(consentCookieName));
-    if (stored.legacy && stored.status !== 'unknown') {
-      writeConsentStatus(stored.status);
-    }
-  }, []);
-
-  return [status, writeConsentStatus] as const;
+  return useSyncExternalStore(subscribe, readConsentStatus, () => loaderData?.consentStatus ?? 'unknown');
 }

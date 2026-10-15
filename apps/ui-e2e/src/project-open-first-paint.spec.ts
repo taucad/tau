@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { dismissCookies } from '#support/chat-attachments.js';
 
 /**
  * What a person sees while a project opens (editor loading splash removal
@@ -91,7 +90,6 @@ test('opens a project without a page-wide editor splash, a blank workspace, or C
   await target.setViewport({ width: 1440, height: 960 });
   await target.addInitScript(recordFirstPaint);
   await target.navigate('/projects/new');
-  await dismissCookies();
 
   await target.fill(selectors.getByCss('input#project-name'), 'First paint');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));

@@ -25,10 +25,6 @@ const openProject = async (): Promise<Readonly<Record<string, string>>> => {
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(`/__e2e/project-file-tree?workspace=${workspace}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
-  if (await target.isVisible(decline)) {
-    await target.click(decline);
-  }
   await expect
     .poll(
       async () => {

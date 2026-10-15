@@ -108,12 +108,10 @@ const desktopSourceOverrides = new Map([
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
-  ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
-  ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
 ]);
 
 const selfHostSourceOverrides = new Map([

@@ -6,10 +6,7 @@ import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
 
 /**
  * Context passed to a function-form `enablePageWrapper` so a route can decide
- * its chrome from the resolved auth state and active feature flags. Flags are
- * included so a route can keep its legacy (unflagged) chrome behaviour — e.g.
- * the home route only drops the app shell for anonymous viewers once the
- * marketing landing flag is on.
+ * its chrome from the resolved auth state and active feature flags.
  */
 export type PageChromeContext = {
   readonly authState: ResolvedAuth;
@@ -54,10 +51,6 @@ export type Handle = {
    * Enable overflow-y on the page. Use this when you have scrollable content in the page.
    */
   enableOverflowY?: boolean;
-  /**
-   * Enable page footer.
-   */
-  enablePageFooter?: boolean;
 };
 
 export type TypedUiMatch = UIMatch & {

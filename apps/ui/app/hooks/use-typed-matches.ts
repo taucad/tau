@@ -23,7 +23,6 @@ export function useTypedMatches<Selected>(
       enablePageHeader: [],
       enableOverflowY: [],
       providers: [],
-      enablePageFooter: [],
     };
 
     // Get all possible handle properties from all matches

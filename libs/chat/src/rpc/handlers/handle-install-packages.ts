@@ -65,6 +65,31 @@ const toIssues = (issues: readonly PackageIssue[]): InstallPackagesOutput['issue
 };
 
 /**
+ * A Python or C# project's package manifest, read from the project root: npm serves neither language, so
+ * `install_packages` refuses rather than writing a package.json nothing reads (charter D35). A root that has a
+ * package.json, or none of these files, is an npm project.
+ * @param fileSystem - The project's record filesystem, rooted at the project.
+ * @returns The language and the manifest the person edits instead, or undefined for an npm project.
+ */
+const nonNpmManifest = async (
+  fileSystem: RpcFileSystem,
+): Promise<{ readonly language: 'Python' | 'C#'; readonly manifest: string } | undefined> => {
+  const entries = await fileSystem.readdir('');
+  const names = entries.filter(({ type }) => type !== 'dir').map(({ name }) => name);
+  if (names.includes('package.json')) {
+    return undefined;
+  }
+  if (names.some((name) => name === 'pyproject.toml' || name.endsWith('.py'))) {
+    return { language: 'Python', manifest: 'pyproject.toml' };
+  }
+  const csproj = names.find((name) => name.endsWith('.csproj'));
+  if (csproj !== undefined || names.some((name) => name.endsWith('.cs'))) {
+    return { language: 'C#', manifest: csproj ?? "the project's .csproj" };
+  }
+  return undefined;
+};
+
+/**
  * Install the project's packages: edit package.json, write package-lock.json, then unpack every locked tarball.
  *
  * Refusals are issues in a success result, so the agent reads one shape. The two manifest writes are checked
@@ -82,6 +107,27 @@ export async function handleInstallPackages(
   signal: AbortSignal = new AbortController().signal,
 ): Promise<InstallPackagesRpcResult> {
   try {
+    const native = await nonNpmManifest(fileSystem);
+    if (native !== undefined) {
+      const names = [...Object.keys(input.add ?? {}), ...(input.remove ?? []), ...(input.upgrade ?? [])];
+      const packages = names.length === 0 ? 'packages' : names.join(', ');
+      const declaration =
+        native.language === 'Python'
+          ? `Declare ${packages} in ${native.manifest} [project] dependencies and run uv sync`
+          : `Add a PackageReference for ${packages} to ${native.manifest} and run dotnet restore`;
+      return {
+        success: true,
+        manifestChanged: false,
+        lockChanged: false,
+        packages: [],
+        issues: [
+          {
+            code: 'manifest-conflict',
+            message: `This is a ${native.language} project: install_packages installs npm packages into package.json, so it wrote nothing. ${declaration} to use them outside Tau. Inside Tau the kernel runs only the libraries it ships, so importing any other package fails.`,
+          },
+        ],
+      };
+    }
     const filesystem = toBundlerFileSystem(fileSystem);
     const installed = await installPackages({
       filesystem,

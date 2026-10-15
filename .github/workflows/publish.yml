@@ -29,6 +29,15 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # The release gate runs every package's tests, which the CI test lanes run with
+      # the Linux sandbox toolchain (Bubblewrap, ripgrep, uv for build123d wheels),
+      # and check-pack-install drives the installed consumer in Chromium.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
       # A native plugin's tau-plugin.json is published with the package; every URL it
       # pins must already serve exactly the pinned bytes (charter I13, DEL-20).
       - name: Prove every pinned payload URL serves its bytes

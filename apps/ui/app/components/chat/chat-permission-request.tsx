@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Check, ChevronDown, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
 import { isRecord } from '@taucad/utils/schema';
 import { Button } from '@taucad/ui/components/button';
+import { Loader } from '@taucad/ui/components/loader';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -51,23 +52,30 @@ export function permissionContent(approval: AgentHostApproval): {
   };
 }
 
-/** Compact permission surface; acknowledgement never claims that the operation completed. */
-export function ChatPermissionRequest({
-  approval,
-  name,
-  outcome,
-  onRespond,
-  review,
-}: {
+type ChatPermissionRequestProps = {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
   /** Where the approval is given instead, when it cannot be given here; Deny still answers here. */
   readonly review?: Readonly<{ label: string; onClick: () => void }> | undefined;
-}): React.JSX.Element {
+};
+
+/** Compact permission surface; acknowledgement never claims that the operation completed. */
+export function ChatPermissionRequest(props: ChatPermissionRequestProps): React.JSX.Element {
+  return <PermissionRequest key={props.approval.interruptId} {...props} />;
+}
+
+function PermissionRequest({
+  approval,
+  name,
+  outcome,
+  onRespond,
+  review,
+}: ChatPermissionRequestProps): React.JSX.Element {
   const isDebug = useFeature('tauDebug');
-  const [isSending, setIsSending] = useState(false);
+  const [pendingResponse, setPendingResponse] = useState<string | boolean>();
+  const isSending = outcome === undefined && pendingResponse !== undefined;
   const [failure, setFailure] = useState<string>();
   const sending = useRef(false);
   const content = permissionContent(approval);
@@ -77,26 +85,28 @@ export function ChatPermissionRequest({
       return;
     }
     sending.current = true;
-    setIsSending(true);
+    setPendingResponse(optionId ?? approved);
     setFailure(undefined);
     try {
       await onRespond(approved, optionId);
       // Keep actions disabled until the durable resolution removes this request.
     } catch (error) {
       sending.current = false;
-      setIsSending(false);
+      setPendingResponse(undefined);
       setFailure(error instanceof Error ? error.message : 'The host did not accept that decision.');
     }
   };
   const isSettled = outcome !== undefined;
   const status =
-    outcome === 'approved'
-      ? 'Request allowed'
-      : outcome === 'denied'
-        ? 'Request denied'
-        : outcome === 'cancelled'
-          ? 'Request cancelled'
-          : 'Request closed';
+    approval.providerPermission && (outcome === 'approved' || outcome === 'denied')
+      ? 'Response recorded · provider saving unverified'
+      : outcome === 'approved'
+        ? 'Request allowed'
+        : outcome === 'denied'
+          ? 'Request denied'
+          : outcome === 'cancelled'
+            ? 'Request cancelled'
+            : 'Request closed';
   const StatusIcon = outcome === 'approved' ? Check : CircleX;
   return (
     <section
@@ -154,7 +164,7 @@ export function ChatPermissionRequest({
           </CollapsibleContent>
         </Collapsible>
       ) : null}
-      {failure ? (
+      {failure && !isSettled ? (
         <p role='alert' className='text-xs/5'>
           Your response was not saved. Try again.{isDebug ? ` ${failure}` : ''}
         </p>
@@ -175,17 +185,21 @@ export function ChatPermissionRequest({
                 variant={option.optionId === focused?.optionId ? 'default' : 'outline'}
                 autoFocus={option.optionId === focused?.optionId}
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === option.optionId}
                 onClick={() => {
                   void respond(option.kind?.startsWith('allow') ?? true, option.optionId);
                 }}
               >
                 {option.name}
+                {isSending && pendingResponse === option.optionId ? (
+                  <Loader className='motion-reduce:animate-none' />
+                ) : null}
               </Button>
             ))
           ) : (
             <>
               {review ? (
-                <Button size='xs' autoFocus onClick={review.onClick}>
+                <Button size='xs' autoFocus disabled={isSending} onClick={review.onClick}>
                   {review.label}
                 </Button>
               ) : (
@@ -193,22 +207,26 @@ export function ChatPermissionRequest({
                   size='xs'
                   autoFocus
                   disabled={isSending}
+                  aria-busy={isSending && pendingResponse === true}
                   onClick={() => {
                     void respond(true);
                   }}
                 >
                   Approve
+                  {isSending && pendingResponse === true ? <Loader className='motion-reduce:animate-none' /> : null}
                 </Button>
               )}
               <Button
                 size='xs'
                 variant='outline'
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === false}
                 onClick={() => {
                   void respond(false);
                 }}
               >
                 Deny
+                {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
             </>
           )}

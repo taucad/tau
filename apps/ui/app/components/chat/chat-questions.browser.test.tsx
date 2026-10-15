@@ -59,6 +59,11 @@ it.each(['', 'dark', 'dark black', 'dark high-contrast'])(
     expect(region.scrollWidth).toBeLessThanOrEqual(region.clientWidth);
     expect(screen.getByRole('button', { name: 'Allow' }).getBoundingClientRect().height).toBe(24);
     expect(screen.queryByText('Request details')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Allow for this session' }));
+    expect(screen.getByRole('button', { name: 'Allow for this session', busy: true })).toBeDisabled();
+    expect(screen.getAllByRole('button', { busy: true })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
+    expect(region.scrollWidth).toBeLessThanOrEqual(region.clientWidth);
     await page.screenshot({
       path: `../../../../../out/test-results/message-queue/permission-${theme.replaceAll(' ', '-') || 'light'}.png`,
     });

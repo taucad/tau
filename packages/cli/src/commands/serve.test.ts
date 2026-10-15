@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { defaultPayloadStore } from '@taucad/host';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -98,6 +99,8 @@ describe('serveNativeKernels', () => {
     });
     await expect(kernels.native.closureRoots()).resolves.toEqual(['/store/closures/sha256/a']);
     expect(kernels.native.start).toBe(startNativeWorker);
+    /* The broker resolves the store's real path itself, so a store under a link launches (macOS's `/tmp`). */
+    expect(kernels.native.store).toBe(defaultPayloadStore());
     await kernels.dispose();
     expect(nativeKernels.opened).toBe(0);
 

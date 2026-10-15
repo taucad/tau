@@ -295,6 +295,7 @@ export const serveNativeKernels = (): {
     native: {
       /* Beside the payload store and outside TMPDIR, which each runtime child may write. */
       directory: join(dirname(defaultPayloadStore()), 'runtime-children'),
+      store: defaultPayloadStore(),
       compose,
       closureRoots: async () => {
         const { closureRoots } = await compose();

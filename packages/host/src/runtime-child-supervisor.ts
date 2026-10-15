@@ -85,6 +85,12 @@ export type RuntimeChildNativeKernels = {
    */
   readonly directory: string;
   /**
+   * The payload store's root. The broker resolves it to its real path once, when a child starts, so a store reached
+   * through a symbolic link (macOS's `/tmp`, a linked home or `TAU_CONFIG_DIR`) still launches, while a closure whose
+   * real path leaves the store does not.
+   */
+  readonly store: string;
+  /**
    * What a new child composes, handed over in its `start` frame as `native`: read from the store's receipts, never
    * downloading. Read again for every child, so a child started after a preparation composes the prepared kernel.
    */
@@ -130,21 +136,24 @@ const isWithin = (root: string, candidate: string): boolean => {
 };
 
 /**
- * Why a child's launch is refused, or nothing: the runtime root must be a sealed closure in the store, everything
- * the worker runs must lie inside it, and the worker's workspace and writable root inside the child's own directory.
+ * Why a child's launch is refused, or nothing: the runtime root must be a sealed closure in the store, spelled as the
+ * daemon composed it or as its real path, whose real path lies inside the store's; everything the worker runs must lie
+ * inside it, and the worker's workspace and writable root inside the child's own directory.
  * The child can still rewrite its directory after this check, so the sandbox never grants these two paths: it grants
  * the daemon's directory that holds them ({@link startRuntimeChild}).
  *
  * @param launch - The child's request.
- * @param closureRoots - The store's sealed closures, now.
- * @param privateDirectory - The child's private temp directory (a real path).
+ * @param closureRoots - The store's sealed closures, now, as the daemon composed them.
+ * @param directories - The store's real path, or `undefined` when it could not be resolved, and the child's private
+ *   temp directory (a real path).
  * @returns The refusal, or `undefined` to start it.
  */
 const launchRefusal = async (
   launch: RuntimeChildWorkerLaunch,
   closureRoots: readonly string[],
-  privateDirectory: string,
+  directories: { readonly store: string | undefined; readonly privateDirectory: string },
 ): Promise<string | undefined> => {
+  const { store, privateDirectory } = directories;
   const real = async (path: string): Promise<string | undefined> => {
     try {
       return await realpath(path);
@@ -153,12 +162,21 @@ const launchRefusal = async (
     }
   };
   const runtimePath = await real(launch.runtimePath);
-  const sealed = await Promise.all(closureRoots.map(async (root) => real(root)));
-  if (runtimePath === undefined || !sealed.includes(runtimePath) || runtimePath !== launch.runtimePath) {
+  const sealed = await Promise.all(closureRoots.map(async (root) => ({ root, real: await real(root) })));
+  const closure = sealed.find((candidate) => runtimePath !== undefined && candidate.real === runtimePath);
+  /* Real paths on both sides, inside the real store; and only the daemon's spelling or the real one, so a link of the
+   * child's own that resolves into a closure is not one. */
+  if (
+    store === undefined ||
+    runtimePath === undefined ||
+    closure === undefined ||
+    !isWithin(store, runtimePath) ||
+    (launch.runtimePath !== closure.root && launch.runtimePath !== runtimePath)
+  ) {
     return `${launch.runtimePath} is not a closure sealed in the payload store.`;
   }
   const escaped = [launch.executablePath, ...launch.resources.map(({ path }) => path)].find(
-    (path) => !isWithin(runtimePath, path),
+    (path) => !isWithin(launch.runtimePath, path),
   );
   if (escaped !== undefined) {
     return `${escaped} is outside the sealed closure.`;
@@ -179,15 +197,20 @@ const launchRefusal = async (
  *
  * @param child - The forked runtime child.
  * @param native - The daemon's native kernels.
- * @param directories - The child's private temp directory, and either the daemon-created directory that holds it
- *   (each worker's sandbox root) or why there is none safe to grant.
+ * @param directories - The store's real path (`undefined` when it could not be resolved), the child's private temp
+ *   directory, and either the daemon-created directory that holds it (each worker's sandbox root) or why there is none
+ *   safe to grant.
  */
 const brokerNativeWorkers = (
   child: ChildProcess,
   native: RuntimeChildNativeKernels,
-  directories: { readonly privateDirectory: string; readonly sandboxRoot: string | { readonly refusal: string } },
+  directories: {
+    readonly store: string | undefined;
+    readonly privateDirectory: string;
+    readonly sandboxRoot: string | { readonly refusal: string };
+  },
 ): void => {
-  const { privateDirectory, sandboxRoot } = directories;
+  const { store, privateDirectory, sandboxRoot } = directories;
   const workers = new Map<string, Promise<RuntimeChildWorker | undefined>>();
   const send = (frame: Readonly<Record<string, unknown>>): void => {
     if (child.connected) {
@@ -199,7 +222,7 @@ const brokerNativeWorkers = (
     try {
       const refusal =
         typeof sandboxRoot === 'string'
-          ? await launchRefusal(request, await native.closureRoots(), privateDirectory)
+          ? await launchRefusal(request, await native.closureRoots(), { store, privateDirectory })
           : sandboxRoot.refusal;
       if (refusal !== undefined || typeof sandboxRoot !== 'string') {
         throw new Error(`Tau Host refused a native worker launch: ${refusal}`);
@@ -470,6 +493,8 @@ export const startRuntimeChild = async (options: {
   if (options.native !== undefined) {
     await mkdir(temporaryDirectory);
   }
+  /* Resolved once: a store that does not exist yet holds no closure, and a child composed then launches none. */
+  const store = options.native === undefined ? undefined : await realpath(options.native.store).catch(() => undefined);
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
     env: {
@@ -489,7 +514,7 @@ export const startRuntimeChild = async (options: {
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   if (options.native !== undefined) {
-    brokerNativeWorkers(child, options.native, { privateDirectory: temporaryDirectory, sandboxRoot });
+    brokerNativeWorkers(child, options.native, { store, privateDirectory: temporaryDirectory, sandboxRoot });
   }
   const exited = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
     child.once('exit', (exitCode, signal) => {

@@ -2424,6 +2424,7 @@ describe('startHostDaemon runtime child per root and session', () => {
         modulePath: proofChild,
         native: {
           directory: join(temporaryDirectory, 'children'),
+          store: join(temporaryDirectory, 'store'),
           compose,
           closureRoots: async () => [],
           start: vi.fn(),

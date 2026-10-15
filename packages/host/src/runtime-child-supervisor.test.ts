@@ -281,6 +281,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       args: [proofPath, JSON.stringify(requests)],
       native: {
         directory,
+        store: join(scratch, 'store'),
         compose: async () => ({ unavailable: [], closureRoots: [sealed] }),
         closureRoots: async () => [sealed],
         start,
@@ -322,6 +323,63 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(started?.sandboxRoot).toBe(dirname(childTemporaryDirectory));
   });
 
+  it('launches from a store reached through a symbolic link, and still refuses a closure whose real path leaves the store', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-linked-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    /* The store sits under a link, as one under macOS's `/tmp` (a link to `/private/tmp`) or a linked home does. */
+    const realParent = join(scratch, 'real');
+    await mkdir(realParent);
+    const linkedParent = join(scratch, 'linked');
+    await symlink(realParent, linkedParent);
+    const store = join(linkedParent, 'store');
+    const { closure: sealed, launchFrom } = await sealedClosure(linkedParent);
+    const sealedReal = join(realParent, 'store', 'closures', 'sha256', 'a'.repeat(64));
+    /* A closure entry in the store that is itself a link to a tree outside the store. */
+    const { closure: outside } = await sealedClosure(join(scratch, 'outside'), 'c'.repeat(64));
+    const escaping = join(store, 'closures', 'sha256', 'd'.repeat(64));
+    await symlink(outside, escaping);
+    /* A link the daemon never composed, resolving into the sealed closure. */
+    const alias = join(scratch, 'alias');
+    await symlink(sealed, alias);
+    const requests = [
+      { name: 'linked', launch: launchFrom() },
+      { name: 'real', launch: launchFrom({ runtimePath: sealedReal, executablePath: join(sealedReal, 'worker.sh') }) },
+      { name: 'escaping', launch: launchFrom({ runtimePath: escaping, executablePath: join(escaping, 'worker.sh') }) },
+      { name: 'alias', launch: launchFrom({ runtimePath: alias, executablePath: join(alias, 'worker.sh') }) },
+    ];
+    const start = vi.fn(async (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) =>
+      spawnUncontained(launch),
+    );
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify(requests)],
+      native: {
+        directory,
+        store,
+        compose: async () => ({ unavailable: [], closureRoots: [sealed, escaping] }),
+        closureRoots: async () => [sealed, escaping],
+        start,
+      },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    await child.close();
+
+    const ran = { started: true, stdout: 'worker ready\nechoed through the daemon\n', end: { exitCode: 0 } };
+    expect(proof.outcomes['linked']).toEqual(ran);
+    expect(proof.outcomes['real']).toEqual(ran);
+    expect(proof.outcomes['escaping']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${escaping} is not a closure sealed in the payload store.`,
+    });
+    expect(proof.outcomes['alias']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${alias} is not a closure sealed in the payload store.`,
+    });
+    /* The worker starts from the path as the launch spelled it; the sandbox grants its real path beside it. */
+    expect(start.mock.calls.map(([launch]) => launch.runtimePath)).toEqual([sealed, sealedReal]);
+  });
+
   it('grants a worker only the directory the daemon created, even when a checked path is redirected to elsewhere', async () => {
     const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-swap-');
     const proofPath = join(daemonTemporaryDirectory, 'proof.json');
@@ -338,7 +396,13 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const child = await startRuntimeChild({
       modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
       args: [proofPath, JSON.stringify([{ name: 'swapped', launch: launchFrom() }])],
-      native: { directory, compose: async () => ({ unavailable: [] }), closureRoots: async () => [closure], start },
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [closure],
+        start,
+      },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
     const [launched] = start.mock.calls[0] ?? [];
@@ -357,7 +421,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
   });
 
   it('reclaims the child directories a gone daemon left in its native directory, and keeps those of a running one', async () => {
-    const { daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-sweep-');
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-sweep-');
     const proofPath = join(daemonTemporaryDirectory, 'proof.json');
     /* A process that has exited: its id names no running daemon. */
     const gone = spawn(process.execPath, ['-e', '']);
@@ -385,7 +449,13 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const child = await startRuntimeChild({
       modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
       args: [proofPath, '[]'],
-      native: { directory, compose: async () => ({ unavailable: [] }), closureRoots: async () => [], start: vi.fn() },
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [],
+        start: vi.fn(),
+      },
     });
     const whileRunning = await readdir(directory);
     await child.close();
@@ -413,7 +483,13 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const child = await startRuntimeChild({
       modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
       args: [proofPath, JSON.stringify([{ name: 'inside', launch: launchFrom() }])],
-      native: { directory, compose: async () => ({ unavailable: [] }), closureRoots: async () => [closure], start },
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [closure],
+        start,
+      },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
     await child.close();
@@ -436,6 +512,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       args: [refusedProof, JSON.stringify([{ name: 'refused', launch }])],
       native: {
         directory,
+        store: join(scratch, 'store'),
         compose: async () => {
           throw new Error('the store cannot be read');
         },

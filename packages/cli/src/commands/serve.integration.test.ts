@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -676,10 +676,9 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
 
   beforeAll(async () => {
     /* A short root: the daemon's temp directory sits inside it, and the sandbox runtime listens on a Unix socket
-     * there, whose path macOS limits to 104 bytes; the runner's own temp directory is already about 50. Resolved,
-     * because macOS's `/tmp` is a symbolic link and the daemon launches workers only from a store path that is
-     * already real. */
-    scratch = await mkdtemp(join(process.platform === 'darwin' ? await realpath('/tmp') : tmpdir(), 'tsd-'));
+     * there, whose path macOS limits to 104 bytes; the runner's own temp directory is already about 50. Not resolved:
+     * macOS's `/tmp` is a link to `/private/tmp`, so the store is reached through a link, as a linked home is. */
+    scratch = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'tsd-'));
   });
 
   afterAll(async () => {

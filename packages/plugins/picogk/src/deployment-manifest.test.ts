@@ -7,7 +7,7 @@ import type { DependencyPayload } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import { layerUrls, manifestText } from '#picogk-layer.js';
+import { layerUrls } from '#picogk-layer.js';
 
 const text = readFileSync(resolve(import.meta.dirname, '../tau-plugin.json'), 'utf8');
 const deployment = parsePluginDeployment(JSON.parse(text), '@taucad/picogk tau-plugin.json');
@@ -24,8 +24,7 @@ const hex = (integrity: string): string =>
   Buffer.from(integrity.slice(integrity.indexOf('-') + 1), 'base64').toString('hex');
 
 describe('tau-plugin.json', () => {
-  it('is canonical and parses as schema v1', () => {
-    expect(manifestText(JSON.parse(text) as Record<string, unknown>)).toBe(text);
+  it('parses as schema v1', () => {
     expect(deployment.schemaVersion).toBe(1);
   });
 

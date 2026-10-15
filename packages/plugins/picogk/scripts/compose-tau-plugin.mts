@@ -56,15 +56,16 @@ const main = async (): Promise<number> => {
       return 1;
     }
   }
-  const current = await readFile(manifestPath, 'utf8');
-  const composed = manifestText(composeManifest(JSON.parse(current) as Record<string, unknown>, record));
+  const current = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  const composed = composeManifest(current, record);
   if (values.check) {
-    if (composed !== current) {
+    // Compared as data: the checked-in file is formatted by the repository's formatter, not by this script.
+    if (JSON.stringify(composed) !== JSON.stringify(current)) {
       console.error(`${manifestPath} does not pin the layer ${record.sha256}; run this script without --check.`);
       return 1;
     }
   } else {
-    await writeFile(values.write === undefined ? manifestPath : resolve(values.write), composed);
+    await writeFile(values.write === undefined ? manifestPath : resolve(values.write), manifestText(composed));
   }
   if (values.outputs) {
     const [cdnUrl, releaseUrl] = layerUrls(record);

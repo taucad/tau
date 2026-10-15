@@ -183,7 +183,7 @@ for kernel in build123d picogk; do
   download_detail+="$kernel exit $status, status '${readiness:-none}' in ${seconds} s, $(field "$OUT/prepare-$kernel.json" byteLength) bytes, closureIntegrity $(field "$OUT/prepare-$kernel.json" closureIntegrity); "
   tail -5 "$OUT/prepare-$kernel.stderr.txt" || true
 done
-closures=$(find "$STORE/closures" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+closures=$(find "$STORE/closures" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' ')
 download_detail+="sealed closures in the store: $closures"
 cell download "$($download_ok && echo PASS || echo FAIL)" "$download_detail"
 
@@ -216,10 +216,14 @@ if [[ "$files" -gt 0 && "$quarantined" -eq 0 && "$helpers" -gt 0 && "$helper_hit
 cell quarantine "$verdict" "$files store files probed, $quarantined carry com.apple.quarantine; $helpers launched helpers, every xattr -p exit non-zero: $([[ "$helper_hits" -eq 0 ]] && echo yes || echo no)"
 
 # --- Ready inside sandbox-exec ---------------------------------------------------------------
-# A sampler records the worker processes and their parents while each export runs.
+# A sampler records the worker processes, each with its parent's executable, while each export
+# runs. sandbox-exec applies the profile and then executes the worker in its own process, so the
+# worker's parent is the process that spawned sandbox-exec.
 sample() {
   while :; do
-    ps -axo pid=,ppid=,command= | grep -E 'sandbox-exec|python3|dotnet|Tau.PicoGK' | grep -v grep | sed "s|^|$(date +%T) |" || true
+    ps -axo pid=,ppid=,command= | grep -E 'python3|dotnet|Tau.PicoGK' | grep -v grep | while read -r pid ppid command; do
+      printf '%s pid %s parent %s (%s): %s\n' "$(date +%T)" "$pid" "$ppid" "$(ps -o comm= -p "$ppid" 2>/dev/null || echo gone)" "$command"
+    done || true
     sleep 0.2
   done
 }
@@ -246,10 +250,10 @@ for pair in build123d:py picogk:cs; do
   ext=${pair##*:}
   read -r status seconds < <(export_model "$kernel" "$CONFIG_DIR" "$MODELS/$ext/main.$ext" "$OUT/$kernel.glb")
   bytes=$(stat -f %z "$OUT/$kernel.glb" 2>/dev/null || echo 0)
-  sandboxed=$(grep -c 'sandbox-exec' "$OUT/ps-$kernel.txt" || true)
   workers=$(grep -cE 'python3|dotnet' "$OUT/ps-$kernel.txt" || true)
-  if [[ $status -ne 0 || "$bytes" -eq 0 ]]; then ready_ok=false; fi
-  ready_detail+="$kernel export exit $status in ${seconds} s, GLB $bytes bytes, sampled sandbox-exec lines $sandboxed, worker lines $workers; "
+  under_tau=$(grep -cF "(${TAU_BIN})" "$OUT/ps-$kernel.txt" || true)
+  if [[ $status -ne 0 || "$bytes" -eq 0 || "$under_tau" -eq 0 ]]; then ready_ok=false; fi
+  ready_detail+="$kernel export exit $status in ${seconds} s, GLB $bytes bytes, worker samples $workers, of them with the notarised Tau binary as parent $under_tau; "
   tail -3 "$OUT/export-$kernel.stderr.txt" || true
 done
 WINDOW_END="$(stamp)"
@@ -265,9 +269,10 @@ log_lines=$(grep -vc '^Timestamp' "$OUT/syspolicy-log.txt" || true)
 ui_agent=$(grep -c 'CoreServicesUIAgent' "$OUT/syspolicy-log.txt" || true)
 grep -E 'python3|dotnet|Tau\.PicoGK|picogk|/payloads/|Tau\.app' "$OUT/syspolicy-log.txt" >"$OUT/syspolicy-excerpt.txt" || true
 prompts=$(grep -ciE 'prompt|user override|denied|reject|not allowed|malware|blocked' "$OUT/syspolicy-excerpt.txt" || true)
+assessments=$(grep -ciE 'assess|evaluat|scan|GK ' "$OUT/syspolicy-log.txt" || true)
 verdict=FAIL
 if [[ "$ui_agent" -eq 0 && "$prompts" -eq 0 ]]; then verdict=PASS; fi
-cell syspolicy "$verdict" "$log_lines syspolicy log lines in the window, $(wc -l <"$OUT/syspolicy-excerpt.txt" | tr -d ' ') name the app or a worker, $prompts of those prompt, deny or reject, CoreServicesUIAgent lines $ui_agent"
+cell syspolicy "$verdict" "$log_lines syspolicy log lines in the window, $(wc -l <"$OUT/syspolicy-excerpt.txt" | tr -d ' ') name the app or a worker, $prompts of those prompt, deny or reject; lines that mention an assessment, evaluation or scan: $assessments; CoreServicesUIAgent lines $ui_agent"
 
 # --- Quarantined copy -----------------------------------------------------------------------
 echo "→ quarantined clone of the store"
@@ -321,7 +326,7 @@ node -e '
   fs.writeFileSync(`${out}/summary.md`, `${md.join("\n")}\n`);
   const escape = (text) => text.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   if (annotate === "1") {
-    const host = fs.readFileSync(`${out}/host-facts.txt`, "utf8").split("\n")[1] ?? "";
+    console.log(`::notice title=W12 host facts::${escape(fs.readFileSync(`${out}/host-facts.txt`, "utf8").slice(0, 3800))}`);
     console.log(`::notice title=W12 cells::${escape(cells.map((c) => `${c.verdict} ${c.name}: ${c.detail}`).join("\n").slice(0, 3800))}`);
     const xattr = fs.readFileSync(`${out}/xattr-helpers.txt`, "utf8");
     console.log(`::notice title=W12 xattr listing::${escape(xattr.slice(0, 3800))}`);

@@ -8,12 +8,12 @@ import {
   getProviderFacingToolInputSchemas,
   toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
+import { installPackagesInputSchema } from '#schemas/tools/install-packages.tool.schema.js';
 import {
   getPrintProfilesInputSchema,
   machineActionInputSchema,
   requestJobInputSchema,
 } from '#schemas/tools/machine.tool.schema.js';
-import { installPackagesInputSchema } from '#schemas/tools/install-packages.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
@@ -164,6 +164,9 @@ describe('provider-facing tool schema compatibility', () => {
     expect(schema.required ?? []).toEqual([]);
     expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
     expect(toolDescriptions[toolName.installPackages]).toContain('package-not-locked');
+    expect(toolDescriptions[toolName.installPackages]).toContain(
+      'A Python or C# project declares its packages in pyproject.toml or its .csproj instead; there it refuses with manifest-conflict',
+    );
     expect(toolDescriptions[toolName.installPackages]).toContain(
       'when a JavaScript or TypeScript model imports an npm package that package.json does not list',
     );

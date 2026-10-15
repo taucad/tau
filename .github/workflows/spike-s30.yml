@@ -1,0 +1,96 @@
+# Spike S30 (native dependency charter, D10/E6/Q11): first-use unpack from a desktop seed.
+#
+# Assembles Tau.app/Contents/Resources/payloads in the seed layout (blobs/sha256 plus
+# tau-seed.json) from the build123d seed and PicoGK's verified origin blobs (W6's layout does
+# not exist yet), then prepares both kernels offline from it into an empty store: cold (purged),
+# warm, and with the seed blobs APFS-cloned into the store first (/bin/cp -c -R). Records time,
+# the df disk delta, the store's du and quarantine attributes. Two more legs seed the sealed closures
+# themselves (APFS clone of the tree, and an uncompressed tar), as D10/W6 ship them. Deleted when W6 lands.
+name: Spike S30 (desktop seed first use)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/spike-s30.yml
+      - scripts/spikes/native-deps/store-spike.mts
+      - scripts/spikes/native-deps/s30-desktop-seed.mts
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-s30-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  s30:
+    name: S30 desktop seed first use (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      # The same digest-keyed seed the native-darwin job keeps (D30); restore only.
+      - name: Identify the Build123d darwin-arm64 closure
+        id: seed-key
+        run: |
+          digest=$(node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync } from "node:fs";
+            const manifest = JSON.parse(readFileSync("packages/plugins/build123d/tau-plugin.json", "utf8"));
+            const pins = Object.values(manifest.dependencies).flat()
+              .filter(({ target }) => target.os === "darwin" && target.arch === "arm64")
+              .flatMap(({ payloads }) => payloads.map(({ integrity }) => integrity))
+              .toSorted();
+            console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
+          ')
+          echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the seed
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/cache/build123d-seed
+          key: ${{ steps.seed-key.outputs.key }}
+
+      - name: Fill the seed from the pinned origins
+        run: pnpm nx run build123d:seed --outputStyle=static
+
+      - name: Build the CLI
+        run: pnpm nx run cli:build --outputStyle=static
+
+      - name: Run the spike
+        run: |
+          set -o pipefail
+          node --import @oxc-node/core/register scripts/spikes/native-deps/s30-desktop-seed.mts \
+            --work "$RUNNER_TEMP/s30" --out "$RUNNER_TEMP/out" 2>&1 | tee "$RUNNER_TEMP/console.log"
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/out/s30-summary.txt" 2>/dev/null || echo 'no summary'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh "S30" "$RUNNER_TEMP/out/s30-summary.txt"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s30-evidence
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/console.log
+          retention-days: 30

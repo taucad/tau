@@ -17,7 +17,7 @@ import {
   seedPresent,
   storeDirectory,
 } from '#build123d-closure.fixture.js';
-import { build123dOptionsFromClosure } from '#index.js';
+import { build123dLaunchSet, build123dOptionsFromClosure } from '#index.js';
 import { build123dOptionsSchema } from '#build123d.schemas.js';
 
 type GoldenEntry = { readonly closureIntegrity: string; readonly treeIntegrity: string; readonly fileCount: number };
@@ -50,7 +50,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
   // Re-hashing every file of a ~900 MB closure takes seconds; the per-launch check never does this.
   it('should verify the sealed closure intact, file by file', async () => {
     const host = createPreparationHost({
-      plugins: [{ package: '@taucad/build123d', deployment, directory: packageRoot }],
+      plugins: [{ package: '@taucad/build123d', deployment, directory: packageRoot, launchSet: build123dLaunchSet }],
       store: storeDirectory,
       seed: seedDirectory,
     });

@@ -294,9 +294,11 @@ describe('getClientEnvironment', () => {
       'SENTRY_ENVIRONMENT',
       'TAU_API_URL',
       'TAU_BILLING_ENVIRONMENT',
+      'TAU_BUILD_ID',
       'TAU_DEBUG',
       'TAU_FRONTEND_URL',
       'TAU_GIT_REMOTE_ALLOW_PRIVATE',
+      'TAU_MACHINES_ENABLED',
       'TAU_WEBSOCKET_URL',
     ]);
   });
@@ -324,7 +326,9 @@ describe('window.ENV host contract', () => {
       TAU_API_URL: 'https://api.host.test',
       TAU_WEBSOCKET_URL: 'wss://socket.host.test',
       TAU_FRONTEND_URL: 'https://host.test',
+      TAU_BUILD_ID: '1792000000000',
       TAU_DEBUG: true,
+      TAU_MACHINES_ENABLED: false,
       TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
       TAU_BILLING_ENVIRONMENT: 'staging',
       NODE_ENV: 'production',

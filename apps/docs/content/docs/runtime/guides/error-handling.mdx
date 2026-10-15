@@ -53,6 +53,10 @@ A successful result may still carry error-severity findings, warnings, or inform
 | `declaration`    | A second declaration of `group`, usually a duplicate copy of the kernel package, already holds it.                                  | Deduplicate the kernel package, or host it in its own worker.                                                    |
 | `runtime`        | The group token or the realm's shared state comes from an `@taucad/runtime` copy of another plugin ABI (`heldAbi`, `requestedAbi`). | Install one `@taucad/runtime` version (a peer dependency of every kernel), or host the kernel in its own worker. |
 
+`KERNEL_NOT_PREPARED` means a native kernel handles the file but its runtime closure (an interpreter and wheels, or a .NET runtime) is not in this machine's payload store. Nothing was downloaded. `details` names the `kernel`, its `package`, the file's `extension`, the `byteLength` that preparing downloads, and `prepare`, the exact call that fixes it: `{ tool: 'prepare_kernel', input: { kernel } }` over MCP, or `tau prepare <kernel>` in a terminal. Evaluate again once it is prepared.
+
+`LIBRARY_VERSION_MISMATCH` is a warning on a successful evaluation: the project's own manifest pins a library at a version other than the one the native kernel runs, so the project would run a different library outside Tau. `details.manifest` names the file (`pyproject.toml` or the `.csproj`), `details.library` the library, `details.declared` the pinned version and `details.runs` the kernel's version, and `location` points at the pin. Set the pin to `details.runs`.
+
 ### 3. Handle operational rejection
 
 ```typescript

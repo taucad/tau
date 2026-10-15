@@ -72,6 +72,7 @@
     "electron": "^43.5.1",
     "electron-vite": "catalog:electron-vite8",
     "vite": "catalog:electron-vite8",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@taucad/xstate-testing": "workspace:*"
   }
 }

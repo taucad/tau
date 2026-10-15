@@ -7,7 +7,6 @@ import {
   standardMachineActions,
 } from '@taucad/runtime/machine';
 import type {
-  MachineAcceptedContainer,
   MachineActionDefinition,
   MachineActionQualification,
   MachineComponent,
@@ -98,9 +97,6 @@ const accepted: Extract<MachineManifestDefinition['jobs'], { type: 'supported' }
     extensions: ['.gcode.3mf'],
   },
 ];
-
-/** The one container contract both printers accept. @internal */
-export const bambuAcceptedContainers: readonly MachineAcceptedContainer[] = accepted;
 
 /** The qualification profile of the controls proven on the workshop X1C. @internal */
 export const bambuX1cHardwareProfile = 'x1c-hardware-2026-10';

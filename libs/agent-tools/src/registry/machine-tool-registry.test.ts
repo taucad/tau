@@ -628,7 +628,7 @@ describe('machine tool registry', () => {
       expect(result.content).toContain(line);
     });
 
-    it('should leave the job awaiting approval in Tau when the host could not ask the person', async () => {
+    it('should leave the request awaiting approval in Tau when the host could not ask the person', async () => {
       const fixture = fixtureClient();
       const approve = vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => {
         throw Object.assign(new Error('The agent app could not ask the person.'), { code: 'APPROVAL_UNAVAILABLE' });
@@ -639,6 +639,7 @@ describe('machine tool registry', () => {
         approve,
       });
       expect(approve).toHaveBeenCalledOnce();
+      expect(fixture.resolveJob).not.toHaveBeenCalled();
       expect(fixture.withdrawJob).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         isError: false,

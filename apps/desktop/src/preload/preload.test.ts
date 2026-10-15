@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
   openDirectoryChannel,
+  revealPathChannel,
   quitChannels,
   slicersChannels,
   windowFullscreenChannel,
@@ -44,8 +45,9 @@ vi.mock('@taucad/runtime/electron/preload', () => ({
 
 type QuitApi = Readonly<{
   isReady(): boolean;
-  onAsk(handler: () => void): () => void;
-  reportQuiesced(forced: boolean): void;
+  onNavigate(handler: (route: string) => void): () => void;
+  onAsk(handler: (attemptId: string) => void): () => void;
+  reportQuiesced(attemptId: string, forced: boolean): void;
 }>;
 
 const quitApi = (): QuitApi => {
@@ -55,7 +57,7 @@ const quitApi = (): QuitApi => {
 
 const askBeforeRendererMounts = (): void => {
   for (const listener of state.listeners.get(quitChannels.ask) ?? []) {
-    listener();
+    listener({}, 'attempt-1');
   }
 };
 
@@ -83,7 +85,25 @@ describe('desktop preload quit bridge', () => {
     askBeforeRendererMounts();
     quitApi().onAsk(handler);
 
-    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledExactlyOnceWith('attempt-1');
+  });
+});
+
+describe('desktop machine navigation bridge', () => {
+  it('buffers a machine route until the app subscribes and ignores unrelated routes', () => {
+    for (const listener of state.listeners.get(quitChannels.navigate) ?? []) {
+      listener({}, '/machines/host/machine');
+      listener({}, 'https://example.com');
+    }
+    const handler = vi.fn();
+    const unsubscribe = quitApi().onNavigate(handler);
+    expect(handler).toHaveBeenCalledExactlyOnceWith('/machines/host/machine');
+    unsubscribe();
+  });
+  it('returns the exact attempt and forced decision to main', () => {
+    vi.mocked(ipcRenderer.send).mockClear();
+    quitApi().reportQuiesced('attempt-2', true);
+    expect(ipcRenderer.send).toHaveBeenCalledExactlyOnceWith(quitChannels.quiesced, 'attempt-2', true);
   });
 });
 
@@ -170,7 +190,13 @@ describe('desktop preload Quick Look bridge', () => {
 describe('native directory access', () => {
   it('should advertise the native file manager and forward the selected directory', async () => {
     const tau = state.exposed.get('tau') as {
-      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+      directories: {
+        openLabel: string;
+        openIcon: string;
+        revealLabel: string;
+        open(path: string): Promise<void>;
+        reveal(path: string): Promise<void>;
+      };
     };
     expect(tau.directories.openLabel).toBe(
       process.platform === 'darwin'
@@ -184,6 +210,15 @@ describe('native directory access', () => {
     );
     await tau.directories.open('/picked/Project');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
+    expect(tau.directories.revealLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Reveal in Finder'
+        : process.platform === 'win32'
+          ? 'Reveal in File Explorer'
+          : 'Reveal in file manager',
+    );
+    await tau.directories.reveal('/picked/Project/main.ts');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(revealPathChannel, '/picked/Project/main.ts');
   });
 });
 

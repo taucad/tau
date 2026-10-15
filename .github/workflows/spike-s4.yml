@@ -1,0 +1,98 @@
+# Spike S4 (native dependency charter, D8/Q33/Q75): the O(1) receipt check at first-session start.
+#
+# Prepares build123d (from the digest-keyed seed) and PicoGK (from its origins) into an empty
+# store with the built CLI, times the launch check (compose both kernels from their receipts, then
+# hash the executable and the kernel-named resources) in fresh processes, page cache warm and
+# purged, and probes tampering: a flipped byte in each executable and in a named resource, a
+# corrupted resource the check does not hash (does a re-verification follow the handshake failure
+# and name it?) and a deleted .pyc. Nothing downloaded is executed except by tau prepare and the
+# sandboxed kernel workers, as in the native-darwin job. Results are the step summary, notice
+# annotations and the uploaded artifact. Deleted when W21 lands.
+name: Spike S4 (launch receipt check)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/spike-s4.yml
+      - scripts/spikes/native-deps/store-spike.mts
+      - scripts/spikes/native-deps/s4-launch-check.mts
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-s4-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  s4:
+    name: S4 launch receipt check (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      # The same digest-keyed seed the native-darwin job keeps (D30); restore only.
+      - name: Identify the Build123d darwin-arm64 closure
+        id: seed-key
+        run: |
+          digest=$(node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync } from "node:fs";
+            const manifest = JSON.parse(readFileSync("packages/plugins/build123d/tau-plugin.json", "utf8"));
+            const pins = Object.values(manifest.dependencies).flat()
+              .filter(({ target }) => target.os === "darwin" && target.arch === "arm64")
+              .flatMap(({ payloads }) => payloads.map(({ integrity }) => integrity))
+              .toSorted();
+            console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
+          ')
+          echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the seed
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/cache/build123d-seed
+          key: ${{ steps.seed-key.outputs.key }}
+
+      - name: Fill the seed from the pinned origins
+        run: pnpm nx run build123d:seed --outputStyle=static
+
+      - name: Build the CLI
+        run: pnpm nx run cli:build --outputStyle=static
+
+      - name: Run the spike
+        run: |
+          set -o pipefail
+          node --import @oxc-node/core/register scripts/spikes/native-deps/s4-launch-check.mts \
+            --work "$RUNNER_TEMP/s4" --out "$RUNNER_TEMP/out" 2>&1 | tee "$RUNNER_TEMP/console.log"
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/out/s4-summary.txt" 2>/dev/null || echo 'no summary'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh "S4" "$RUNNER_TEMP/out/s4-summary.txt"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s4-evidence
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/console.log
+          retention-days: 30

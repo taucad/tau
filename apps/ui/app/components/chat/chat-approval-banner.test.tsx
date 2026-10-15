@@ -13,7 +13,7 @@ import { agentApprovalToolName } from '#services/agent-host-event-projection.js'
 const respondToToolApproval = vi.fn(async () => undefined);
 let messages: readonly MyUIMessage[] = [];
 let isDebug = false;
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => isDebug }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'machines' || isDebug }));
 let activeExecution: CombinedChatState['activeExecution'];
 let machines: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
 

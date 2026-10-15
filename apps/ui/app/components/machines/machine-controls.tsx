@@ -41,8 +41,8 @@ import { Parameters } from '@taucad/viewer/parameters/parameters';
 import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { rjsfDefaultFormStateBehavior } from '@taucad/viewer/parameters/rjsf-utils';
 import { ParametersBoolean } from '@taucad/viewer/parameters/parameters-boolean';
-import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import { describeOutcome, failureCodeOf } from '#components/print/machine-facts.js';
+import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
@@ -53,9 +53,9 @@ import {
   formIncomplete,
   useCompiledConfigurationManifest,
   useNow,
-} from '#routes/w.$workspace.$project/chat-print-section.js';
-import type { ResolvedSchema } from '#routes/w.$workspace.$project/chat-print-section.js';
-import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
+} from '#components/machines/machine-section.js';
+import type { ResolvedSchema } from '#components/machines/machine-section.js';
+import { formatAge } from '#components/machines/machine-summary.js';
 
 /** Statuses in which a run owns the machine: motion, tools and the spindle stay with it. */
 const runOwnedStates: ReadonlySet<string> = new Set(['starting', 'running', 'paused', 'finishing']);
@@ -463,7 +463,7 @@ export function Consequences({
 
 const group = (title: string, children: React.ReactNode): React.JSX.Element => (
   <div role='group' aria-label={title} className='flex min-w-0 flex-col gap-2'>
-    <h4 className='text-xs font-medium text-muted-foreground'>{title}</h4>
+    <h3 className='text-xs font-medium text-muted-foreground'>{title}</h3>
     {children}
   </div>
 );
@@ -1124,12 +1124,24 @@ function OwnActionForm({
     );
     return isRecord(values) ? values : {};
   }, [declared]);
-  const manifest = useCompiledConfigurationManifest(
+  const {
+    manifest,
+    error: formError,
+    retry: retryForm,
+  } = useCompiledConfigurationManifest(
     control.entry.providerId,
     `action/${descriptor.componentId}/${descriptor.id}`,
     declared,
   );
-  const [changed, setChanged] = useState<Record<string, unknown>>({});
+  const [draft, setDraft] = useState<{ identity: string; values: Record<string, unknown> }>({
+    identity: formText,
+    values: {},
+  });
+  const hasChangedSchema = draft.identity !== formText;
+  const changed = hasChangedSchema ? {} : draft.values;
+  const setChanged = (values: Record<string, unknown>): void => {
+    setDraft({ identity: formText, values });
+  };
   /* What would be sent, as JSON: a cleared optional field drops out and a list entry not yet chosen reads as null, so
    * the schema names it here rather than the send failing on a value JSON cannot carry. */
   const values = useMemo(
@@ -1141,7 +1153,28 @@ function OwnActionForm({
   const incomplete = useMemo(() => formIncomplete(declared.schema, values), [values, declared]);
   return (
     <div className='flex min-w-0 flex-col gap-1'>
-      {manifest === undefined ? (
+      {hasChangedSchema ? (
+        <PrintNotice tone='warning' role='alert'>
+          The machine changed this form. Your previous values were cleared. Review the fields before sending.
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setChanged({});
+            }}
+          >
+            Review updated form
+          </Button>
+        </PrintNotice>
+      ) : null}
+      {formError ? (
+        <PrintNotice tone='error' role='alert'>
+          This form could not be prepared: {formError}
+          <Button size='xs' variant='outline' onClick={retryForm}>
+            Retry form
+          </Button>
+        </PrintNotice>
+      ) : manifest === undefined ? (
         <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
           Preparing the form…
         </p>
@@ -1173,7 +1206,13 @@ function OwnActionForm({
           componentId={descriptor.componentId}
           action={descriptor.id}
           parameters={values}
-          incomplete={incomplete}
+          incomplete={
+            hasChangedSchema
+              ? 'Review the updated form first.'
+              : manifest === undefined || projection.status !== 'usable'
+                ? 'This form is not ready. Refresh the machine and try again.'
+                : incomplete
+          }
         />
       </div>
     </div>
@@ -1708,13 +1747,13 @@ function CameraView({
   readonly failure?: string;
   readonly shouldCapture?: boolean;
 }): React.JSX.Element {
+  const isSupported = entry.descriptor.capabilities.components.some((component) => component.kind === 'camera');
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [still, setStill] = useState<Readonly<{ url: string; capturedAt: string; expiresAt: string }>>();
   const captureAbort = useRef<AbortController | undefined>(undefined);
   const hasAttempted = useRef(false);
   const now = useNow();
-  const isSupported = entry.descriptor.capabilities.components.some((component) => component.kind === 'camera');
 
   useEffect(
     () => () => {
@@ -1809,10 +1848,14 @@ function CameraView({
         ) : (
           <div className='flex min-h-24 flex-col items-center justify-center gap-2 p-3 text-center text-xs text-muted-foreground'>
             <Camera aria-hidden className='size-5' />
-            <Button type='button' size='xs' variant='outline' disabled={isBusy} onClick={capture}>
-              {isBusy ? busyGlyph : null}
-              Capture still
-            </Button>
+            {isSupported ? (
+              <Button type='button' size='xs' variant='outline' disabled={isBusy} onClick={capture}>
+                {isBusy ? busyGlyph : null}
+                Capture still
+              </Button>
+            ) : (
+              <span>Still capture is unavailable for this printer.</span>
+            )}
           </div>
         )}
         {still ? (
@@ -1853,7 +1896,6 @@ export function FailureEvidence({
   ].sort();
   const failure =
     codes.length > 0 ? codes.join(', ') : entry.snapshot.run?.state === 'failed' ? 'Print failed' : undefined;
-  /* A machine without a camera has no evidence to capture. */
   if (failure === undefined || !entry.descriptor.capabilities.components.some(({ kind }) => kind === 'camera')) {
     return undefined;
   }

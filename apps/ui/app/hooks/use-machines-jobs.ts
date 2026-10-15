@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
+import { machineObservation } from '#services/machine-observation.js';
 import type { MachineClient, MachineJob, MachineJobState } from '@taucad/runtime/machine';
 
 const terminalStates: ReadonlySet<MachineJobState> = new Set(['started', 'denied', 'withdrawn', 'rejected', 'failed']);
@@ -25,9 +26,6 @@ export const isOpenJob = (job: Pick<MachineJob, 'state'>): boolean => !terminalS
  */
 export const startedRunIdOf = ({ run, receipt }: Pick<MachineJob, 'run' | 'receipt'>): string | undefined =>
   run?.runId ?? (receipt?.kind === 'start' && receipt.status === 'accepted' ? receipt.runId : undefined);
-
-const byNewest = (left: MachineJob, right: MachineJob): number =>
-  Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.jobId.localeCompare(right.jobId);
 
 /**
  * Fold one journaled job into the projection keyed by job id; an older record never replaces a newer one.
@@ -60,11 +58,6 @@ export type JobsView = Readonly<{
 export const firstResync = 500;
 /** The longest wait between resyncs. Milliseconds. @public */
 export const longestResync = 30_000;
-/** This many watches ending without news within {@link stallWindow} say the updates stopped. */
-const stallEndings = 3;
-/** Milliseconds. */
-const stallWindow = 60_000;
-
 /**
  * Wait, unless the wait is aborted first.
  *
@@ -99,75 +92,22 @@ export const pause = async (milliseconds: number, signal: AbortSignal): Promise<
  * @returns The live jobs.
  * @public
  */
-export const useMachinesJobs = (client: MachineClient | undefined, machineId: string | undefined): JobsView => {
-  const [records, setRecords] = useState<ReadonlyMap<string, MachineJob>>(new Map());
-  const [error, setError] = useState<string>();
-  /* The machine whose watch stalled: another machine's view starts unstalled. */
-  const [stalledFor, setStalledFor] = useState<string>();
-
-  useEffect(() => {
-    if (client === undefined || machineId === undefined) {
-      return;
-    }
-    const abort = new AbortController();
-    const { signal } = abort;
-    const fold = (jobs: readonly MachineJob[]): void => {
-      setRecords((current) => {
-        let next = current;
-        for (const job of jobs) {
-          next = reduceJobs(next, job);
-        }
-        return next;
-      });
-    };
-    /* Read through a call: the abort lands while awaiting, which narrowing on the property cannot see. */
-    const isAborted = (): boolean => signal.aborted;
-    const observe = async (): Promise<void> => {
-      let wait = firstResync;
-      /* When each watch since the last news ended. */
-      let endings: number[] = [];
-      while (!isAborted()) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- each resync lists, then watches, in order; never in parallel.
-          const initial = await client.listJobs({ machineId, signal });
-          if (isAborted()) {
-            return;
-          }
-          setError(undefined);
-          fold(initial);
-          // oxlint-disable-next-line no-await-in-loop -- the watch runs until it ends; the next resync follows it.
-          for await (const job of client.watchJobs({ machineId, signal })) {
-            fold([job]);
-            wait = firstResync;
-            endings = [];
-            setStalledFor(undefined);
-          }
-          const now = Date.now();
-          endings = [...endings.filter((at) => now - at < stallWindow), now];
-          if (endings.length >= stallEndings && !isAborted()) {
-            setStalledFor(machineId);
-          }
-        } catch (error_) {
-          if (isAborted()) {
-            return;
-          }
-          setError(error_ instanceof Error ? error_.message : String(error_));
-        }
-        // oxlint-disable-next-line no-await-in-loop -- the backoff between resyncs is the point of the loop.
-        await pause(wait, signal);
-        wait = Math.min(wait * 2, longestResync);
-      }
-    };
-    // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the ledger watch.
-    void observe();
-    return () => {
-      abort.abort();
-    };
-  }, [client, machineId]);
-
-  const jobs = useMemo(
-    () => [...records.values()].filter((job) => job.machineId === machineId).sort(byNewest),
-    [machineId, records],
+export const useMachinesJobs = (
+  client: MachineClient | undefined,
+  machineId: string | undefined,
+  hostId?: string,
+): JobsView => {
+  const store = useMemo(
+    () => (client === undefined || machineId === undefined ? undefined : machineObservation(client, machineId, hostId)),
+    [client, machineId, hostId],
   );
-  return { jobs, error, isStalled: stalledFor !== undefined && stalledFor === machineId };
+  const view = useSyncExternalStore(
+    store?.subscribe ?? noSubscribe,
+    store?.getSnapshot ?? noSnapshot,
+    store?.getSnapshot ?? noSnapshot,
+  );
+  return view === undefined ? emptyJobs : { jobs: view.jobs, error: view.error, isStalled: view.attempt >= 3 };
 };
+const emptyJobs: JobsView = { jobs: [], error: undefined, isStalled: false };
+const noSubscribe = (): (() => void) => () => undefined;
+const noSnapshot = (): undefined => undefined;

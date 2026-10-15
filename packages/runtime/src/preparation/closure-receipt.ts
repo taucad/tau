@@ -44,3 +44,95 @@ export const computeTreeIntegrity = async (files: readonly ReceiptFile[]): Promi
       .map((file) => receiptRow(file))
       .join('\n'),
   );
+
+/**
+ * Closure-relative path of the launch index: the seal step writes it beside `receipt.json`, and it is itself a receipt
+ * row, so `treeIntegrity` covers it and a full re-verification catches a changed index like any other file.
+ * @internal
+ */
+export const launchIndexPath = 'launch.json';
+
+/**
+ * The compact launch index (D8, ruling X29): the receipt rows of the files a kernel's process loads first, which the
+ * launch check hashes, and nothing else. A launch reads this instead of the full receipt, so its cost does not grow
+ * with the closure.
+ * @internal
+ */
+export type LaunchIndex = {
+  readonly schemaVersion: 1;
+  readonly package: string;
+  readonly dependency: string;
+  readonly closureIntegrity: Integrity;
+  /** The launch set's receipt rows, sorted by path. */
+  readonly files: readonly ReceiptFile[];
+};
+
+/**
+ * The bytes of a closure's launch index. They depend only on the rows, so the same closure writes the same index on
+ * every host (I9).
+ * @internal
+ * @param index - The index.
+ * @returns The file's text.
+ */
+export const renderLaunchIndex = (index: LaunchIndex): string =>
+  `${JSON.stringify(
+    {
+      schemaVersion: index.schemaVersion,
+      package: index.package,
+      dependency: index.dependency,
+      closureIntegrity: index.closureIntegrity,
+      files: index.files
+        .toSorted((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+        .map((file) => ({
+          path: file.path,
+          byteLength: file.byteLength,
+          sha256: file.sha256,
+          mode: file.mode,
+          ...(file.symlinkTarget === undefined ? {} : { symlinkTarget: file.symlinkTarget }),
+          ...(file.payload === undefined ? {} : { payload: file.payload }),
+        })),
+    },
+    undefined,
+    2,
+  )}\n`;
+
+const isReceiptFile = (value: unknown): value is ReceiptFile => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const file = value as Partial<Record<keyof ReceiptFile, unknown>>;
+  return (
+    typeof file.path === 'string' &&
+    typeof file.byteLength === 'number' &&
+    typeof file.sha256 === 'string' &&
+    typeof file.mode === 'number' &&
+    (file.symlinkTarget === undefined || typeof file.symlinkTarget === 'string')
+  );
+};
+
+/**
+ * Parse a launch index's text.
+ * @internal
+ * @param text - The file's text.
+ * @returns The index, or `undefined` when it is not one.
+ */
+export const parseLaunchIndex = (text: string): LaunchIndex | undefined => {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const index = value as Partial<Record<keyof LaunchIndex, unknown>>;
+  return index.schemaVersion === 1 &&
+    typeof index.package === 'string' &&
+    typeof index.dependency === 'string' &&
+    typeof index.closureIntegrity === 'string' &&
+    Array.isArray(index.files) &&
+    index.files.every((file) => isReceiptFile(file))
+    ? (index as LaunchIndex)
+    : undefined;
+};

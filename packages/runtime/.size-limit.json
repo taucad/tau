@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 226.4 kB brotli on 2026-10-15 (machines contract revision 3 and the Node preparation host, which adds 17.27 kB)",
+    "name": "total (ESM JS) — measured 229.07 kB brotli on 2026-10-15; approved 230 kB combined budget for Machines and the Node preparation host with its launch index and repair",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
     "limit": "230 kB"
   },

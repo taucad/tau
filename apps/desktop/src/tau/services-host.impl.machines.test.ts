@@ -1,3 +1,4 @@
+import type { StreamingMachine } from '#shared/machine-shutdown.js';
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -216,15 +217,15 @@ const machinesHarness = async () => {
   };
 
   /** Main's question before a quit: the machines a streamed run is feeding. */
-  const streaming = async (requestId: string): Promise<readonly string[]> => {
+  const streaming = async (requestId: string): Promise<readonly StreamingMachine[]> => {
     host.handleMessage(frame({ type: 'machines-streaming', requestId }));
-    return answer(requestId).promise as Promise<readonly string[]>;
+    return answer(requestId).promise as Promise<readonly StreamingMachine[]>;
   };
 
   /** Main's keep-awake poll: the same answer, holding nothing. */
-  const peek = async (requestId: string): Promise<readonly string[]> => {
+  const peek = async (requestId: string): Promise<readonly StreamingMachine[]> => {
     host.handleMessage(frame({ type: 'machines-streaming-peek', requestId }));
-    return answer(requestId).promise as Promise<readonly string[]>;
+    return answer(requestId).promise as Promise<readonly StreamingMachine[]>;
   };
 
   const bindSimulator = async (
@@ -288,11 +289,28 @@ describe('createServicesHost — machines', () => {
   beforeEach(() => {
     /* The desktop picks the keychain on macOS; no test may touch a person's keychain. */
     vi.stubEnv('TAU_SECRET_VAULT', 'file');
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'true');
     runtimeOptions.length = 0;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it('refuses direct machine ports and binding without opening the store or providers when disabled', async () => {
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'false');
+    const machines = await machinesHarness();
+    try {
+      await expect(machines.connect().listProviders({})).rejects.toThrow('Machines are not available');
+      await expect(machines.completeCeremony('disabled-binding', 'ceremony')).resolves.toMatchObject({
+        code: 'MACHINES_DISABLED',
+      });
+      expect(runtimeOptions).toHaveLength(0);
+      expect(existsSync(machines.store)).toBe(false);
+      expect(await machines.streaming('disabled-quit')).toEqual([]);
+    } finally {
+      await machines.cleanup();
+    }
   });
 
   it('should serve a connection that names no project, bind the simulator without keeping its code, and close on quiesce', async () => {
@@ -443,12 +461,16 @@ describe('createServicesHost — machines', () => {
     const machines = await machinesHarness();
     try {
       await expect(machines.streaming('before-open')).resolves.toEqual([]);
+      machines.host.handleMessage(frame({ type: 'machines-resume', attemptId: 'before-open' }));
       const client = machines.connect();
       await machines.bindSimulator(client);
       /* The host's own answer: the simulator streams nothing. */
       await expect(machines.streaming('idle')).resolves.toEqual([]);
       streaming.names = ['Router', 'Mill'];
-      await expect(machines.streaming('streaming')).resolves.toEqual(['Router', 'Mill']);
+      await expect(machines.streaming('streaming')).resolves.toEqual([
+        expect.objectContaining({ machineId: 'router', name: 'Router' }),
+        expect.objectContaining({ machineId: 'mill', name: 'Mill' }),
+      ]);
     } finally {
       streaming.names = undefined;
       await machines.cleanup();
@@ -463,7 +485,9 @@ describe('createServicesHost — machines', () => {
       await machines.bindSimulator(client);
       streaming.names = ['Router'];
       gate.length = 0;
-      await expect(machines.peek('streaming')).resolves.toEqual(['Router']);
+      await expect(machines.peek('streaming')).resolves.toEqual([
+        expect.objectContaining({ machineId: 'router', name: 'Router' }),
+      ]);
       /* Read only: unlike the quit question, starts were never stopped. */
       expect(gate).toEqual(['read']);
     } finally {
@@ -481,7 +505,11 @@ describe('createServicesHost — machines', () => {
       streaming.names = ['Router'];
       gate.length = 0;
       await expect(machines.host.quiesce()).rejects.toMatchObject({
-        refusal: { type: 'quiesce-refused', reason: 'streaming', machines: ['Router'] },
+        refusal: {
+          type: 'quiesce-refused',
+          reason: 'streaming',
+          machines: [expect.objectContaining({ machineId: 'router', name: 'Router' })],
+        },
       });
       /* Starts stop before the runs are read, so none begins in between, and go again when nothing closes. */
       expect(gate).toEqual(['quiesce', 'read', 'resume']);
@@ -499,8 +527,12 @@ describe('createServicesHost — machines', () => {
 
       /* The person chose to quit anyway: the machine host closes with the rest, starting nothing first. */
       gate.length = 0;
-      await machines.host.quiesce({ quitIfStreamingUnknown: true });
-      expect(gate).toEqual(['quiesce', 'read']);
+      void machines.streaming('force');
+      await vi.waitFor(() => {
+        expect(machines.log).toHaveBeenCalledWith('machines.streaming-unread', expect.any(String), 'warn');
+      });
+      await machines.host.quiesce({ attemptId: 'force', forceMachines: true });
+      expect(gate).toEqual(['quiesce', 'read', 'read']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
       streaming.names = undefined;
@@ -521,15 +553,19 @@ describe('createServicesHost — machines', () => {
       await expect(machines.streaming('kept-open')).resolves.toEqual([]);
       expect(gate).toEqual(['quiesce', 'read']);
       /* The person kept Tau open: starts go again, so the window can still start a job. */
-      machines.host.handleMessage(frame({ type: 'machines-resume' }));
+      machines.host.handleMessage(frame({ type: 'machines-resume', attemptId: 'kept-open' }));
       expect(gate).toEqual(['quiesce', 'read', 'resume']);
 
       gate.length = 0;
       await expect(machines.streaming('quit')).resolves.toEqual([]);
-      /* A stream the store now reported could not have begun under the hold: the answer main acted on stands. */
+      /* Holding admission never proves that an existing stream is empty. */
       streaming.names = ['Router'];
-      await machines.host.quiesce();
-      expect(gate).toEqual(['quiesce', 'read']);
+      await expect(machines.host.quiesce({ attemptId: 'quit', forceMachines: false })).rejects.toMatchObject({
+        refusal: { reason: 'streaming' },
+      });
+      expect(gate).toEqual(['quiesce', 'read', 'read']);
+      await machines.host.quiesce({ attemptId: 'quit', forceMachines: true });
+      expect(gate).toEqual(['quiesce', 'read', 'read', 'read']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
       streaming.names = undefined;
@@ -553,7 +589,11 @@ describe('createServicesHost — machines', () => {
 
       /* *Quit anyway*: the machine host closes with the rest, and starts stay held until it does. */
       gate.length = 0;
-      await machines.host.quiesce({ quitIfStreamingUnknown: true });
+      void machines.streaming('force');
+      await vi.waitFor(() => {
+        expect(machines.log).toHaveBeenCalledWith('machines.streaming-unread', expect.any(String), 'warn');
+      });
+      await machines.host.quiesce({ attemptId: 'force', forceMachines: true });
       expect(gate).toEqual(['quiesce']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
@@ -563,7 +603,7 @@ describe('createServicesHost — machines', () => {
   }, 30_000);
 
   /* A4-7: main's question when the machine host cannot say, and when main calls the quit off before it answers. */
-  it("should let go of main's question's hold when the host cannot say, or when main calls the quit off first", async () => {
+  it('should retain an unknown assessment fence and release a cancelled late hold', async () => {
     const machines = await machinesHarness();
     try {
       const client = machines.connect();
@@ -572,11 +612,14 @@ describe('createServicesHost — machines', () => {
 
       quiescing.isStartInFlight = true;
       gate.length = 0;
-      /* Unanswered: main's bound asks the person; this question holds nothing meanwhile. */
+      /* Unanswered: main's review retains the start fence. */
       void machines.streaming('unknown');
       await vi.waitFor(() => {
-        expect(gate).toEqual(['quiesce', 'resume']);
+        expect(machines.log).toHaveBeenCalledWith('machines.streaming-unread', 'MACHINE_HOST_START_IN_FLIGHT', 'warn');
       });
+      expect(gate).toEqual(['quiesce']);
+      machines.host.handleMessage(frame({ type: 'machines-resume', attemptId: 'unknown' }));
+      expect(gate).toEqual(['quiesce', 'resume']);
       expect(machines.log).toHaveBeenCalledWith('machines.streaming-unread', 'MACHINE_HOST_START_IN_FLIGHT', 'warn');
       quiescing.isStartInFlight = false;
 
@@ -588,7 +631,7 @@ describe('createServicesHost — machines', () => {
       await vi.waitFor(() => {
         expect(gate).toEqual(['quiesce']);
       });
-      machines.host.handleMessage(frame({ type: 'machines-resume' }));
+      machines.host.handleMessage(frame({ type: 'machines-resume', attemptId: 'called-off' }));
       quiescing.release = undefined;
       release.resolve();
       await vi.waitFor(() => {

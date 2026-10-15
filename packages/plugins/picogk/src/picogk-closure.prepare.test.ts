@@ -74,7 +74,7 @@ const hex = (algorithm: 'sha256' | 'sha512', bytes: Uint8Array<ArrayBuffer>): st
   createHash(algorithm).update(bytes).digest('hex');
 const sha512Integrity = `sha512-${createHash('sha512').update(runtimeArchive).digest('base64')}`;
 const layerRecord: PicogkLayerRecord = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   target: 'darwin-arm64',
   asset: 'tau-picogk-layer-darwin-arm64.tar.gz',
   sha256: hex('sha256', layerArchive),
@@ -85,6 +85,8 @@ const layerRecord: PicogkLayerRecord = {
   dotnetRuntimeVersion: runtimeVersion,
   readyToRun: true,
   sourceFilesSha256: '0'.repeat(64),
+  nativeSourceSha256: '1'.repeat(64),
+  toolchain: { dotnetSdk: '10.0.400', compiler: 'clang', sdk: '26.2', cmake: 'cmake version 4.4.4', ninja: '1.13.2' },
 };
 const darwinArm64: HostIndicators = {
   os: 'darwin',
@@ -157,15 +159,9 @@ describe('PicoGK closure preparation', () => {
     }
     expect(options.resourceFiles.map(({ path }) => path.slice(receipt!.root.length + 1))).toEqual([
       'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libclrjit.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
       'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
       'tau-worker/PicoGK.dll',
-      'tau-worker/Tau.PicoGK.Worker.deps.json',
       'tau-worker/Tau.PicoGK.Worker.dll',
-      'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
-      'tau-worker/libSkiaSharp.dylib',
       'tau-worker/picogk.26.2.dylib',
     ]);
   });

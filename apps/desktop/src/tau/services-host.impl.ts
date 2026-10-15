@@ -1,3 +1,5 @@
+import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
+import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /**
  * Services-utility behaviour (work item E7), separated from its entry so it is
  * testable in a plain Node vitest run.
@@ -290,7 +292,7 @@ export type ServicesHostOptions = {
     result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string; code?: string }>,
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
-  readonly machinesStreaming?: (requestId: string, machines: readonly string[]) => void;
+  readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -309,7 +311,7 @@ export type ServicesHostQuiesceOutcome =
  * could not tell whether one is and main did not say the person chose to quit anyway.
  */
 export type QuiesceRefusal =
-  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming'; machines: readonly string[] }>
+  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming'; machines: readonly StreamingMachine[] }>
   | Readonly<{ type: 'quiesce-refused'; reason: 'streaming-unknown'; message: string }>;
 
 /** What {@link ServicesHost.quiesce} throws when it refuses; nothing was closed, and a later quiesce asks again. */
@@ -342,7 +344,7 @@ export type ServicesHost = {
    * Refused first, with nothing closed, while a streamed run feeds a machine, or while that cannot be read unless
    * `quitIfStreamingUnknown` says the person chose to quit anyway ({@link ServicesQuiesceRefusedError}).
    */
-  quiesce(options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void>;
+  quiesce(options?: MachineQuitDecision): Promise<void>;
   /** Release project runtimes when the owning utility exits. */
   dispose(): void;
 };
@@ -354,6 +356,7 @@ export type ServicesHost = {
  * @returns The host.
  */
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
+  const machinesEnabled = isMachinesFeatureEnabled(process.env['TAU_MACHINES_ENABLED']);
   const log =
     options.log ??
     ((event: string, detail?: unknown, level?: 'info' | 'warn'): void => {
@@ -415,6 +418,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let heldStarts: (() => void) | undefined;
   /* Counts main's quit questions and call-offs, so a hold that lands after its quit was called off lets go at once. */
   let quitAttempt = 0;
+  let activeQuitRequest: string | undefined;
   const releaseHeldStarts = (): void => {
     heldStarts?.();
     heldStarts = undefined;
@@ -667,6 +671,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
   const ensureMachineHost = (): Promise<MachineHostServices> => {
+    if (!machinesEnabled) {
+      return Promise.reject(Object.assign(new Error(machinesDisabledMessage), { code: 'MACHINES_DISABLED' }));
+    }
+    if (activeQuitRequest !== undefined && machineHost === undefined) {
+      return Promise.reject(new Error('Tau is reviewing a quit request. Cancel quitting to connect a machine.'));
+    }
     if (machinesDirectory === undefined) {
       return Promise.reject(new Error('The desktop services host has no machine directory.'));
     }
@@ -700,14 +710,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    *
    * @returns The machines' names; none while the store is not open here.
    */
-  const streamingMachines = async (): Promise<readonly string[]> => {
+  const streamingMachines = async (): Promise<readonly StreamingMachine[]> => {
     const pending = machineHost;
     if (pending === undefined) {
       return [];
     }
-    const { host } = await pending;
+    const { host, identity } = await pending;
     const streaming = await host.streamingMachines();
-    return streaming.map(({ name }) => name);
+    return streaming.map(({ machineId, name }) => ({ hostId: identity.hostId, machineId, name }));
   };
 
   /**
@@ -777,7 +787,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         port,
         ownedElsewhere
           ? Object.assign(new Error('MACHINE_STORE_OWNED_ELSEWHERE'), { code: 'MACHINE_STORE_OWNED_ELSEWHERE' })
-          : new Error(reason),
+          : error instanceof Error
+            ? error
+            : new Error(reason),
       );
       return;
     }
@@ -989,11 +1001,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     /* The agent's own machines facet: served by this utility's machine host
      * over an in-process channel once it opens, on an agent session of its own
      * beside the window's. One per actor, so every host it opens offers the same one. */
-    const machines = localMachineFacet(async (port) => serveMachines(port, 'agent'));
+    const machines = machinesEnabled ? localMachineFacet(async (port) => serveMachines(port, 'agent')) : undefined;
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
-      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), machines }),
+      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), ...(machines ? { machines } : {}) }),
       serve: (connectionId, host) => {
         const port = takeConnection(connectionId);
         if (port === undefined) {
@@ -1044,7 +1056,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       // async-iife: bootstrap -- completion has no caller; quiesce and dispose also await this actor.
       void settleRetired();
       mcpEndpoints.delete(route);
-      machines.close();
+      machines?.close();
       const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
       for (const root of runtimeClients.keys()) {
         if (root === workspaceRoot || root === checkoutsRoot || root.startsWith(`${checkoutsRoot}${sep}`)) {
@@ -1106,7 +1118,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to return to.
         void (async (): Promise<void> => {
           try {
-            await quiesce({ quitIfStreamingUnknown: frame['quitIfStreamingUnknown'] === true });
+            await quiesce(
+              typeof frame['attemptId'] === 'string'
+                ? { attemptId: frame['attemptId'], forceMachines: frame['forceMachines'] === true }
+                : undefined,
+            );
             quiesced?.({ type: 'quiesced' });
           } catch (error) {
             if (error instanceof ServicesQuiesceRefusedError) {
@@ -1148,6 +1164,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to await the directory read.
         void (async () => {
           quitAttempt += 1;
+          activeQuitRequest = requestId;
           const attempt = quitAttempt;
           let resume: (() => void) | undefined;
           /* Lets go of this question's own hold only; `resume` does nothing twice. */
@@ -1170,17 +1187,20 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
               heldStarts = resume;
             }
             const machines = await streamingMachines();
-            if (machines.length > 0) {
-              /* Main refuses this quit; starts go on. */
-              letGo();
-            }
             machinesStreaming?.(requestId, machines);
           } catch (error) {
             /* A start still in flight: its gate is still up, and this question lets go of it as of any other hold. */
             if (error instanceof MachineHostStartInFlightError) {
               resume = error.resume;
             }
-            letGo();
+            if (attempt !== quitAttempt) {
+              letGo();
+              return;
+            }
+            if (resume !== undefined && heldStarts !== resume) {
+              releaseHeldStarts();
+              heldStarts = resume;
+            }
             /* Unanswered, main's bound decides; the reason stays in the log. */
             log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
           }
@@ -1207,7 +1227,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       case 'machines-resume': {
         /* Main called its quit off after asking: admit starts again. */
+        if (frame['attemptId'] !== activeQuitRequest) {
+          return;
+        }
         quitAttempt += 1;
+        activeQuitRequest = undefined;
         releaseHeldStarts();
         return;
       }
@@ -1371,7 +1395,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
   };
 
-  const beginQuiesce = async (quitIfStreamingUnknown: boolean): Promise<void> => {
+  const beginQuiesce = async (decision: MachineQuitDecision | undefined): Promise<void> => {
+    const forceMachines = decision?.forceMachines === true && decision.attemptId === activeQuitRequest;
+    if (decision !== undefined && decision.attemptId !== activeQuitRequest) {
+      throw new ServicesQuiesceRefusedError({
+        type: 'quiesce-refused',
+        reason: 'streaming-unknown',
+        message: 'The machine host changed. Review quitting again.',
+      });
+    }
     quiescing = true;
     /* Q-streamed-host, authoritative. When main's question held starts and found nothing streaming, that answer
      * still holds: nothing to read again. Otherwise (the store opened since, or a quiesce main did not ask before)
@@ -1382,25 +1414,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     heldStarts = undefined;
     let resumeStarts = held ?? ((): void => undefined);
     const refuse = (refusal: QuiesceRefusal): never => {
-      resumeStarts();
+      if (decision?.attemptId === activeQuitRequest && activeQuitRequest !== undefined) {
+        heldStarts = resumeStarts;
+      } else {
+        resumeStarts();
+      }
       quiescing = false;
       quiescence = undefined;
       throw new ServicesQuiesceRefusedError(refusal);
     };
-    let streaming: readonly string[] = [];
+    let streaming: readonly StreamingMachine[] = [];
     try {
       const opened = machineHost;
       if (held === undefined && opened !== undefined) {
         const { host } = await opened;
         resumeStarts = await host.quiesce();
       }
-      streaming = held === undefined ? await streamingMachines() : [];
+      streaming = await streamingMachines();
     } catch (error) {
       /* A start still in flight keeps the gate up: *Quit anyway* closes with no start admitted; a refusal lifts it. */
       if (error instanceof MachineHostStartInFlightError) {
         resumeStarts = error.resume;
       }
-      if (!quitIfStreamingUnknown) {
+      if (!forceMachines) {
         refuse({
           type: 'quiesce-refused',
           reason: 'streaming-unknown',
@@ -1408,7 +1444,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
       }
     }
-    if (streaming.length > 0) {
+    if (streaming.length > 0 && !forceMachines) {
       refuse({ type: 'quiesce-refused', reason: 'streaming', machines: streaming });
     }
     const failures: unknown[] = [];
@@ -1446,10 +1482,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   // Deliberately non-async: every caller observes the same close settlement.
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
-  const quiesce = (options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void> => {
+  const quiesce = (options?: MachineQuitDecision): Promise<void> => {
     quiescence ??= disposed
       ? Promise.reject(new Error('The services host was forcibly disposed before graceful quiescence.'))
-      : beginQuiesce(options?.quitIfStreamingUnknown === true);
+      : beginQuiesce(options);
     return quiescence;
   };
 

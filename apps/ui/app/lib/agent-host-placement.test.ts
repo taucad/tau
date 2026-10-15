@@ -77,6 +77,20 @@ describe('discoverOriginAgentHost', () => {
       discoverOriginAgentHost({ fetch: respond as unknown as typeof fetch, origin: 'http://127.0.0.1:7777' }),
     ).resolves.toBeUndefined();
   });
+
+  it('should not ask the origin when the build says no daemon serves it', async () => {
+    vi.stubEnv('TAU_ORIGIN_AGENT_HOST', 'absent');
+    const fetchMock = vi.fn(async () => jsonResponse(descriptor));
+
+    try {
+      await expect(
+        discoverOriginAgentHost({ fetch: fetchMock as unknown as typeof fetch, origin: 'https://taucad.dev' }),
+      ).resolves.toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('localAgentHostId', () => {

@@ -21,9 +21,10 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
+import { readBuildIdentity } from '#lib/build-identity.js';
 
-/** The page's build, the worker's hello `build` (I32); the timestamp `vite.config.ts` injects, as `build-skew.ts` reads it. */
-export const agentHostWorkerBuild = String(typeof tauBuildId === 'number' ? tauBuildId : 0);
+/** The worker's hello and leadership `build` (I32), compared for equality between workers (`#lib/build-identity`). */
+export const agentHostWorkerBuild = readBuildIdentity();
 
 type AgentHostCapabilityChecks = {
   readonly worker: boolean;
@@ -95,6 +96,8 @@ export type AgentHostProjectProvide = {
   readonly hostId: string;
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
+  /** Deployment-controlled machine tool admission, absent means disabled. */
+  readonly machinesEnabled?: boolean;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly computeStorePort?: MessagePort | undefined;
   /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
@@ -365,6 +368,7 @@ const provideSchema = z.strictObject({
   hostId: nonEmptyString,
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
+  machinesEnabled: z.boolean().optional(),
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
   revisionsPort: messagePortSchema.optional(),

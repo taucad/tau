@@ -23,6 +23,9 @@ export const agentHostSessionChannels = {
 /** Open a granted directory in the operating system's file manager. */
 export const openDirectoryChannel = 'tau:open-directory';
 
+/** Select a granted file or directory in the operating system's file manager. */
+export const revealPathChannel = 'tau:reveal-path';
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 
@@ -39,6 +42,7 @@ export const windowFullscreenChannel = 'tau:window-fullscreen';
  */
 export const quitChannels = {
   ask: 'tau:quit:ask',
+  navigate: 'tau:machines:navigate',
   quiesced: 'tau:quit:quiesced',
 } as const;
 
@@ -106,7 +110,7 @@ export type AppIconTheme = 'light' | 'dark';
 /** What main puts behind {@link bootstrapArgumentPrefix}. */
 export type DesktopBootstrap = {
   /** The `window.ENV` allowlist, resolved in main. */
-  readonly env: Record<string, string>;
+  readonly env: Record<string, string | boolean>;
   /** `app.getPath('userData')/home` — known at preload time, per L2's contract. */
   readonly homeRoot: string;
   /** Capability advertisement used by the shared renderer's product catalog. */

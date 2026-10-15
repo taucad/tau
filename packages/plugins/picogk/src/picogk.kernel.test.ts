@@ -312,6 +312,35 @@ describe('PicoGK kernel', () => {
     );
   });
 
+  it('warns when a root .csproj references PicoGK at a version the kernel does not run', async () => {
+    const value = context();
+    value.mirror.sync.mockResolvedValueOnce(['Plate.csproj', 'main.cs', 'tools/Other.csproj']);
+    value.session.request.mockResolvedValueOnce(buildResult());
+    const project = createMockKernelRuntime({
+      filesystemOverrides: {
+        readFileResult: '<Project>\n  <PackageReference Include="PicoGK" Version="2.2.0" />\n</Project>\n',
+      },
+    });
+
+    const result = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, project, value);
+
+    expect(project.filesystem.mocks.readFile.mock.calls).toEqual([['Plate.csproj', 'utf8']]);
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        code: 'LIBRARY_VERSION_MISMATCH',
+        severity: 'warning',
+        location: { fileName: 'Plate.csproj', startLineNumber: 2, startColumn: 1 },
+        details: {
+          producer: { kernelId: 'picogk' },
+          manifest: 'Plate.csproj',
+          library: 'PicoGK',
+          declared: '2.2.0',
+          runs: '2.3.0',
+        },
+      }),
+    ]);
+  });
+
   it('returns parameters, canonical inline geometry, immutable handles, and GLB exports', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce({

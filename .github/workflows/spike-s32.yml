@@ -1,0 +1,51 @@
+# Spike S32 (native-dependency-resolution charter, wave 2, Q49, Q50, Q52), the cells that need no product change:
+# `tau serve` stays up offline with a warning, and pages in Chromium, WebKit and Firefox reach a loopback daemon.
+# Spike code under scripts/spikes/native-deps/linux/s32; the run's evidence is the uploaded artifact and the job
+# summary.
+name: Spike S32 (daemon hand-off)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s32-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s32:
+    name: S32 offline daemon and rung-5 reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Install the three browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Run the cells
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          node scripts/spikes/native-deps/linux/s32/run.ts "$RUNNER_TEMP/evidence" offline rung5
+      - name: Summarise
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s32-summary.txt" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S32' "$RUNNER_TEMP/evidence/s32-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s32-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

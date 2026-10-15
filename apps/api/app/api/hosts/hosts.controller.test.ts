@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 
 import { HostsController, pairingsPerIpPerWindow } from '#api/hosts/hosts.controller.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
@@ -47,6 +48,25 @@ describe('HostsController worker affinity', () => {
     );
 
     await expect(controller.getWorkerAffinity('Bearer revoked')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});
+
+describe('HostsController device list', () => {
+  it('lists a signed-out caller no devices without asking the directory', async () => {
+    const listDevices = vi.fn(async () => []);
+    const controller = new HostsController(mock<HostsService>({ listDevices }), createRateLimiter());
+
+    await expect(controller.listDevices(undefined)).resolves.toStrictEqual([]);
+    expect(listDevices).not.toHaveBeenCalled();
+  });
+
+  it('lists a signed-in caller their own devices', async () => {
+    const listDevices = vi.fn(async () => []);
+    const controller = new HostsController(mock<HostsService>({ listDevices }), createRateLimiter());
+
+    await controller.listDevices('owner-1');
+
+    expect(listDevices).toHaveBeenCalledWith('owner-1');
   });
 });
 

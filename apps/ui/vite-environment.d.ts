@@ -17,6 +17,13 @@ interface ImportMetaEnv {
    * left undefined under `mode === 'test'` so unit tests can stub it.
    */
   readonly TAU_TARGET?: 'web' | 'desktop';
+  /**
+   * `'absent'` in the web build (`vite.config.ts`), whose origin is the static
+   * site and never a `tau serve` daemon, so the page skips asking it for a
+   * `/.well-known/tau-host` descriptor. Undefined elsewhere, and under
+   * `mode === 'test'`.
+   */
+  readonly TAU_ORIGIN_AGENT_HOST?: 'absent';
 }
 
 declare module '*?base64' {

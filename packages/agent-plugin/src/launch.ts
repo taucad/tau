@@ -16,6 +16,9 @@ import type { TauCliCommand } from '#resolve-tau-cli.js';
 
 const requiredNodeMajor = 24;
 
+/** The proxy variables Node's `fetch` reads under `NODE_USE_ENV_PROXY=1`. */
+const proxyVariables = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'] as const;
+
 const launch = (): void => {
   if (Number.parseInt(process.versions.node, 10) < requiredNodeMajor) {
     process.stderr.write(
@@ -47,6 +50,10 @@ const launch = (): void => {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (existsSync(viewerPage)) {
     env['TAU_VIEWER_PAGE'] = viewerPage;
+  }
+  /* Node's fetch honours a proxy only when told so at start (D9): `tau mcp` prepares native kernels with it. */
+  if (proxyVariables.some((name) => (process.env[name] ?? '') !== '') && env['NODE_USE_ENV_PROXY'] === undefined) {
+    env['NODE_USE_ENV_PROXY'] = '1';
   }
   /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. */
   const args = [...cli.args, ...process.argv.slice(2)];

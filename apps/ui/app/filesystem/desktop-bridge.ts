@@ -46,8 +46,9 @@ type DesktopShell = {
   /** The quit hold's renderer half (D31, P49). */
   readonly quit?: {
     isReady(): boolean;
-    onAsk(handler: () => void): () => void;
-    reportQuiesced(forced: boolean): void;
+    onAsk(handler: (attemptId: string) => void): () => void;
+    reportQuiesced(attemptId: string, forced: boolean): void;
+    onNavigate(handler: (route: string) => void): () => void;
   };
   readonly directories?: DesktopBridge['directories'];
   readonly dialog: DesktopBridge['dialog'];
@@ -190,17 +191,17 @@ export const onDesktopFullscreenChange = (listener: () => void): (() => void) =>
  * @returns The unsubscribe.
  * @public
  */
-export const onDesktopQuitRequested = (handler: () => void): (() => void) => {
+export const onDesktopQuitRequested = (handler: (attemptId: string) => void): (() => void) => {
   const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.quit?.onAsk(handler) ?? ((): void => undefined);
 };
 
 /** Tell main every session has closed, or that the person cut it short. @public */
-export const reportDesktopQuiesced = (forced: boolean): void => {
+export const reportDesktopQuiesced = (attemptId: string, forced: boolean): void => {
   if (!isDesktopBuildTarget()) {
     return;
   }
-  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(forced);
+  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(attemptId, forced);
 };
 
 /**
@@ -283,7 +284,11 @@ export type DesktopBridge = {
   readonly directories?: {
     readonly openLabel: string;
     readonly openIcon: 'finder' | 'file-explorer' | 'folder';
+    /** Label for selecting a file or folder in its parent, e.g. `Reveal in Finder`. */
+    readonly revealLabel: string;
     open(path: string): Promise<void>;
+    /** Select a file or folder inside a granted root in the file manager. */
+    reveal(path: string): Promise<void>;
   };
   readonly dialog: {
     /**
@@ -464,4 +469,10 @@ export const nodeHomeRoot = (): string => {
     throw new Error('The node filesystem backend is only available in the desktop app.');
   }
   return bridge.nodeFs.homeRoot;
+};
+
+/** Machine navigation preserves the live document and its project sessions. */
+export const onDesktopMachineNavigation = (handler: (route: string) => void): (() => void) => {
+  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  return shell?.quit?.onNavigate(handler) ?? ((): void => undefined);
 };

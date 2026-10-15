@@ -144,6 +144,15 @@ describe('tau CLI dist (real binary)', () => {
     }
   });
 
+  it.each(['serve', 'mcp'])('refuses %s machine opt-in while the deployment flag is off', async (command) => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['TAU_MACHINES_ENABLED'] = 'false';
+    environment['TAU_HOST_MACHINES'] = 'true';
+    const result = await runCli([command, '--machines'], environment);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('Machines are not available in this release.');
+  });
+
   it('should ship a hashbang executable at dist/bin/tau.mjs', async () => {
     const head = await readFile(cliBinPath, 'utf8');
 

@@ -295,6 +295,7 @@ vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({
   ProjectExportAction: () => null,
 }));
+vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ ProjectPrintRouteIntent: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
 }));

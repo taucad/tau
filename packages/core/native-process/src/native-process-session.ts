@@ -4,11 +4,17 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
+import type { Readable, Writable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
-import { acquireNativeSandbox, launchInNativeSandbox, releaseNativeSandbox } from '#native-sandbox.js';
+import {
+  acquireNativeSandbox,
+  launchInNativeSandbox,
+  releaseNativeSandbox,
+  spawnInNativeSandbox,
+} from '#native-sandbox.js';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
@@ -254,10 +260,242 @@ export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams
   });
 };
 
+/** Everything one native worker launch needs: what runs, the digests it must match and the paths it may use. @public */
+export type NativeWorkerLaunch = {
+  readonly executablePath: string;
+  readonly executableSha256: string;
+  /** Names the executable in an integrity failure. */
+  readonly executableName: string;
+  readonly arguments: readonly string[];
+  /** Read-only root that holds the executable and every resource. */
+  readonly runtimePath: string;
+  readonly resources: readonly NativeProcessResource[];
+  /** The mirrored workspace, readable and the working directory. */
+  readonly workspacePath: string;
+  /** The single writable root. */
+  readonly artifactPath: string;
+  /** Attributes sandbox violations to this launch. */
+  readonly commandId: string;
+  /**
+   * A directory that holds `workspacePath` and `artifactPath` and that only the process starting the worker can
+   * replace. When set, the sandbox grants this directory instead of those two paths. A requester that can rewrite
+   * its own directory then cannot redirect the worker's grants between the broker's check and the spawn.
+   */
+  readonly sandboxRoot?: string;
+};
+
+/** How a native worker ended: its exit code or signal, or the error that kept it from starting. @public */
+export type NativeWorkerEnd =
+  | { readonly exitCode?: number; readonly signal?: NodeJS.Signals }
+  | { readonly error: Error };
+
+/** A started, sandboxed native worker, wherever it was spawned. @public */
+export type NativeWorkerProcess = {
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  /** Settles once, when the worker exits or fails to start. */
+  readonly ended: Promise<NativeWorkerEnd>;
+  /** Stop the worker's process tree, gracefully and then by force; settles once it has ended. */
+  terminate(): Promise<void>;
+};
+
+/** Starts one native worker for a session. @public */
+export type NativeWorkerLauncher = (launch: NativeWorkerLaunch) => Promise<NativeWorkerProcess>;
+
+/*
+ * A process-wide slot, keyed on the global symbol registry rather than held in a module binding: a host installs its
+ * launcher once, and every copy of this package the runtime loads (one per plugin that bundles it) must see it.
+ */
+const launcherSlot = Symbol.for('@taucad/native-process-core/worker-launcher');
+
+const installedLauncher = (): NativeWorkerLauncher | undefined => {
+  const launcher: unknown = Reflect.get(globalThis, launcherSlot);
+  return typeof launcher === 'function' ? (launcher as NativeWorkerLauncher) : undefined;
+};
+
+/**
+ * Route every native worker this process starts through `launcher` instead of spawning it here.
+ *
+ * A host process that may not spawn (a runtime child under Node's permission model without `--allow-child-process`)
+ * installs a launcher that asks a process holding that authority to start the worker on its behalf, through
+ * {@link startNativeWorker}: verifying the digests, wrapping it in the sandbox and spawning it there. Sessions then
+ * neither read the runtime root nor start the sandbox in this process.
+ *
+ * @public
+ * @param launcher - The launcher, or `undefined` to spawn in this process again.
+ */
+export const installNativeWorkerLauncher = (launcher: NativeWorkerLauncher | undefined): void => {
+  Reflect.set(globalThis, launcherSlot, launcher);
+};
+
+/**
+ * What re-verifying a native runtime found: the files that differ from the record it was sealed with, and what the
+ * user can do about it.
+ * @public
+ */
+export type NativeRuntimeDamage = {
+  /** Paths relative to the runtime root, sorted. */
+  readonly files: readonly string[];
+  /** One sentence naming the repair, such as the command that re-verifies and repairs the runtime. */
+  readonly remedy: string;
+};
+
+/**
+ * Re-verifies a native runtime root in full, file by file, against the record it was sealed with.
+ * @public
+ * @param runtimePath - The launch's runtime root.
+ * @param signal - Aborts the check.
+ * @returns The damage found, or `undefined` when the runtime is intact or is not one the verifier knows.
+ */
+export type NativeRuntimeVerifier = (
+  runtimePath: string,
+  signal: AbortSignal,
+) => Promise<NativeRuntimeDamage | undefined>;
+
+const verifierSlot = Symbol.for('@taucad/native-process-core/runtime-verifier');
+
+/** Damaged files a refusal names; the rest are counted. */
+const reportedDamagedFiles = 5;
+
+/** Bound on one re-verification after a failed handshake: seconds normally, never a hang. Milliseconds. */
+const reverificationTimeout = 300_000;
+
+const installedVerifier = (): NativeRuntimeVerifier | undefined => {
+  const verifier: unknown = Reflect.get(globalThis, verifierSlot);
+  return typeof verifier === 'function' ? (verifier as NativeRuntimeVerifier) : undefined;
+};
+
+/**
+ * Re-verify a session's runtime with `verifier` whenever its worker exits before the handshake (D8).
+ *
+ * A launch hashes only the executable and the few files the process loads first; anything else that is damaged
+ * surfaces as a worker that exits before it is ready. The session then runs the verifier over its runtime root and,
+ * when it finds damage, fails with an error that names the files and the remedy instead of the bare exit status.
+ * Held process-wide, like the worker launcher, so every copy of this package sees it.
+ *
+ * @public
+ * @param verifier - The verifier, or `undefined` to report bare exits again.
+ */
+export const installNativeRuntimeVerifier = (verifier: NativeRuntimeVerifier | undefined): void => {
+  Reflect.set(globalThis, verifierSlot, verifier);
+};
+
+const verifyResourceDigests = async (launch: NativeWorkerLaunch): Promise<void> => {
+  const resources = [
+    { path: launch.executablePath, sha256: launch.executableSha256, label: launch.executableName },
+    ...launch.resources,
+  ];
+  const escaped = resources.find(({ path }) => !isDescendant(launch.runtimePath, path));
+  if (escaped) {
+    throw new Error(`${escaped.label} is outside the native runtime root.`);
+  }
+  const verifiedResources = await Promise.all(
+    resources.map(async (resource) => ({ ...resource, actual: await fileSha256(resource.path) })),
+  );
+  const mismatched = verifiedResources.find(({ actual, sha256 }) => actual !== sha256.toLowerCase());
+  if (mismatched) {
+    throw new Error(`${mismatched.label} failed its SHA-256 integrity check.`);
+  }
+};
+
+const verifyResources = async (launch: NativeWorkerLaunch): Promise<void> => {
+  /* D24: the runtime root ships inside the signed bundle, so its digests are a property of the
+   * installed payload rather than of a session. Sweeping per session charged every opened project
+   * a fresh 167 MiB hash of bytes another session had already verified in this process. */
+  const fingerprint = createHash('sha256')
+    .update(
+      [
+        launch.runtimePath,
+        launch.executablePath,
+        launch.executableSha256,
+        ...launch.resources.map(({ path, sha256 }) => `${path}\u0000${sha256}`),
+      ].join('\u0000'),
+    )
+    .digest('hex');
+  let verified = verifiedRuntimePayloads.get(fingerprint);
+  if (verified === undefined) {
+    verified = verifyResourceDigests(launch);
+    verifiedRuntimePayloads.set(fingerprint, verified);
+  }
+  try {
+    await verified;
+  } catch (error) {
+    /* Only a pass describes the payload. A failed read (a closure still being sealed, EMFILE) is forgotten, so the
+     * next launch hashes again instead of failing until the process restarts. */
+    if (verifiedRuntimePayloads.get(fingerprint) === verified) {
+      verifiedRuntimePayloads.delete(fingerprint);
+    }
+    throw error;
+  }
+};
+
+/* Wrap a verified launch in the sandbox and spawn it; nothing is spawned when the sandbox cannot wrap it. */
+const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerProcess> => {
+  const vector = await launchInNativeSandbox({
+    executablePath: launch.executablePath,
+    arguments: launch.arguments,
+    readablePaths: [launch.runtimePath, launch.sandboxRoot ?? launch.workspacePath],
+    writablePath: launch.sandboxRoot ?? launch.artifactPath,
+    workingDirectory: launch.workspacePath,
+    commandId: launch.commandId,
+  });
+  const child = spawnInNativeSandbox(vector, {
+    cwd: launch.workspacePath,
+    env: processEnvironment(launch.artifactPath),
+  });
+  const ended = new Promise<NativeWorkerEnd>((resolve) => {
+    child.once('error', (error) => {
+      resolve({ error });
+    });
+    child.once('exit', (code, signal) => {
+      resolve({ ...(code === null ? {} : { exitCode: code }), ...(signal === null ? {} : { signal }) });
+    });
+  });
+  return {
+    stdin: child.stdin,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    ended,
+    terminate: async () => terminateProcessTree(child),
+  };
+};
+
+/**
+ * Start one native worker in this process: check the executable and resources against their digests, wrap the
+ * launch in the fixed Tau sandbox, and spawn it. The sandbox runtime is held until the worker ends.
+ *
+ * A process that brokers launches for a permission-limited one calls this for each request it accepts; the
+ * requesting process installs a launcher that reaches it ({@link installNativeWorkerLauncher}).
+ *
+ * @public
+ * @param launch - The launch.
+ * @returns The started worker.
+ * @throws {NativeRuntimeUnavailableError} When the sandbox cannot start; nothing is spawned.
+ * @throws {Error} When a file is outside the runtime root or fails its digest.
+ */
+export const startNativeWorker: NativeWorkerLauncher = async (launch) => {
+  await verifyResources(launch);
+  acquireNativeSandbox();
+  let worker: NativeWorkerProcess;
+  try {
+    worker = await spawnContained(launch);
+  } catch (error) {
+    await releaseNativeSandbox();
+    throw error;
+  }
+  // async-iife: bootstrap -- the lease ends with the worker; nothing awaits it.
+  void (async () => {
+    await worker.ended;
+    await releaseNativeSandbox().catch(() => undefined);
+  })();
+  return worker;
+};
+
 /** One warm, serialized, generation-scoped native worker session. @public */
 export class NativeProcessSession<Issue> {
   public generation = 0;
-  private child: ChildProcessWithoutNullStreams | undefined;
+  private child: NativeWorkerProcess | undefined;
   private ready: Promise<void> | undefined;
   private resolveReady: (() => void) | undefined;
   private rejectReady: ((reason: unknown) => void) | undefined;
@@ -358,7 +596,7 @@ export class NativeProcessSession<Issue> {
       return;
     }
     this.fail(child, reason);
-    await terminateProcessTree(child);
+    await child.terminate();
   }
 
   /** Gracefully stop the worker and force-kill any remaining descendant tree. */
@@ -395,56 +633,35 @@ export class NativeProcessSession<Issue> {
         // Forced termination below is the cleanup fallback.
       }
     }
-    await terminateProcessTree(child);
+    await child.terminate();
   }
 
   private requestTermination(error: Error): void {
     this.termination = this.recycle(error);
   }
 
-  private async verifyResources(): Promise<void> {
-    /* D24: the runtime root ships inside the signed bundle, so its digests are a property of the
-     * installed payload rather than of a session. Sweeping per session charged every opened project
-     * a fresh 167 MiB hash of bytes another session had already verified in this process. */
-    const fingerprint = createHash('sha256')
-      .update(
-        [
-          this.options.runtimePath,
-          this.options.executablePath,
-          this.options.executableSha256,
-          ...this.options.resources.map(({ path, sha256 }) => `${path}\u0000${sha256}`),
-        ].join('\u0000'),
-      )
-      .digest('hex');
-    const verified = verifiedRuntimePayloads.get(fingerprint) ?? this.verifyResourceDigests();
-    verifiedRuntimePayloads.set(fingerprint, verified);
-    await verified;
+  private launch(): NativeWorkerLaunch {
+    return {
+      executablePath: this.options.executablePath,
+      executableSha256: this.options.executableSha256,
+      executableName: this.options.executableName,
+      arguments: this.options.arguments,
+      runtimePath: this.options.runtimePath,
+      resources: this.options.resources,
+      workspacePath: this.options.workspacePath,
+      artifactPath: this.options.artifactPath,
+      commandId: `${this.options.sessionName}#${String(this.generation + 1)}`,
+    };
   }
 
-  private async verifyResourceDigests(): Promise<void> {
-    const resources = [
-      { path: this.options.executablePath, sha256: this.options.executableSha256, label: this.options.executableName },
-      ...this.options.resources,
-    ];
-    const escaped = resources.find(({ path }) => !isDescendant(this.options.runtimePath, path));
-    if (escaped) {
-      throw new Error(`${escaped.label} is outside the native runtime root.`);
+  /* Verify, lease and spawn here; or, with a launcher installed, let the process that brokers launches do all three. */
+  private async startWorker(): Promise<NativeWorkerProcess> {
+    const launch = this.launch();
+    const launcher = installedLauncher();
+    if (launcher !== undefined) {
+      return launcher(launch);
     }
-    const verifiedResources = await Promise.all(
-      resources.map(async (resource) => ({ ...resource, actual: await fileSha256(resource.path) })),
-    );
-    const mismatched = verifiedResources.find(({ actual, sha256 }) => actual !== sha256.toLowerCase());
-    if (mismatched) {
-      throw new Error(`${mismatched.label} failed its SHA-256 integrity check.`);
-    }
-  }
-
-  private async start(): Promise<void> {
-    if (this.child && this.ready) {
-      await this.ready;
-      return;
-    }
-    await this.verifyResources();
+    await verifyResources(launch);
     // A cleanup() during verification already closed the session; a lease taken now would never be released.
     if (this.closed) {
       throw new Error(`${this.options.sessionName} session is closed.`);
@@ -453,15 +670,19 @@ export class NativeProcessSession<Issue> {
       this.sandboxLeased = true;
       acquireNativeSandbox();
     }
-    // Fail closed: when the sandbox cannot wrap the worker, nothing is spawned.
-    const [command, ...commandArguments] = await launchInNativeSandbox({
-      executablePath: this.options.executablePath,
-      arguments: this.options.arguments,
-      readablePaths: [this.options.runtimePath, this.options.workspacePath],
-      writablePath: this.options.artifactPath,
-      workingDirectory: this.options.workspacePath,
-      commandId: `${this.options.sessionName}#${String(this.generation + 1)}`,
-    });
+    return spawnContained(launch);
+  }
+
+  private async start(): Promise<void> {
+    if (this.child && this.ready) {
+      await this.ready;
+      return;
+    }
+    const child = await this.startWorker();
+    if (this.closed) {
+      await child.terminate();
+      throw new Error(`${this.options.sessionName} session is closed.`);
+    }
     this.generation += 1;
     this.stdout = '';
     this.stderr = '';
@@ -470,14 +691,6 @@ export class NativeProcessSession<Issue> {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
-    const child = spawn(command!, commandArguments, {
-      cwd: this.options.workspacePath,
-      detached: process.platform !== 'win32',
-      env: processEnvironment(this.options.artifactPath),
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
     this.child = child;
     child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       this.onStdout(chunk);
@@ -485,21 +698,61 @@ export class NativeProcessSession<Issue> {
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       this.onStderr(chunk);
     });
-    child.once('error', (error) => {
-      this.fail(child, error);
-    });
-    child.once('exit', (code, signal) => {
-      this.fail(child, new Error(`${this.options.sessionName} exited (${code === null ? signal : String(code)}).`));
-    });
+    // Set by the end handler, which TypeScript cannot see run before the catch below.
+    const handshake = { exitedBeforeReady: false };
+    // async-iife: bootstrap -- the worker's end fails whatever it was serving; nothing awaits it.
+    void (async () => {
+      const end = await child.ended;
+      handshake.exitedBeforeReady = this.child === child && this.resolveReady !== undefined && !('error' in end);
+      this.fail(
+        child,
+        'error' in end
+          ? end.error
+          : new Error(`${this.options.sessionName} exited (${String(end.exitCode ?? end.signal)}).`),
+      );
+    })();
     const handshakeTimer = setTimeout(() => {
       this.requestTermination(new Error(`${this.options.sessionName} handshake timed out.`));
     }, this.options.requestTimeout || 120_000);
     handshakeTimer.unref();
     try {
       await this.ready;
+    } catch (error) {
+      throw handshake.exitedBeforeReady ? await this.reverified(error) : error;
     } finally {
       clearTimeout(handshakeTimer);
     }
+  }
+
+  /* D8: a worker that exits before its handshake is evidence of damage the launch check does not hash. Re-verify the
+   * whole runtime and name what differs; with no verifier, or nothing found, the exit stands as it was. */
+  private async reverified(error: unknown): Promise<unknown> {
+    const verifier = installedVerifier();
+    if (verifier === undefined) {
+      return error;
+    }
+    let damage: NativeRuntimeDamage | undefined;
+    try {
+      damage = await verifier(this.options.runtimePath, AbortSignal.timeout(reverificationTimeout));
+    } catch (verificationError) {
+      this.options.logger.debug(
+        `${this.options.sessionName} runtime re-verification failed: ${verificationError instanceof Error ? verificationError.message : String(verificationError)}`,
+      );
+      return error;
+    }
+    if (damage === undefined || damage.files.length === 0) {
+      return error;
+    }
+    const shown = damage.files.slice(0, reportedDamagedFiles).join(', ');
+    const more =
+      damage.files.length > reportedDamagedFiles
+        ? ` and ${String(damage.files.length - reportedDamagedFiles)} more`
+        : '';
+    const exit = error instanceof Error ? error.message.replace(/\.$/u, '') : String(error);
+    return new Error(
+      `${exit} before it was ready, and re-verifying its runtime at ${this.options.runtimePath} found files that differ from their receipt: ${shown}${more}. ${damage.remedy}`,
+      { cause: error },
+    );
   }
 
   private async send<Result, Event = never>(request: NativeProcessRequest<Result, Event>): Promise<Result> {
@@ -687,7 +940,7 @@ export class NativeProcessSession<Issue> {
     }
   }
 
-  private fail(child: ChildProcessWithoutNullStreams, error: Error): void {
+  private fail(child: NativeWorkerProcess, error: Error): void {
     if (this.child !== child) {
       return;
     }

@@ -123,6 +123,8 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 
 Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one.
 
+Native kernels are composed from the payload store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it in the server's process with progress and cancellation, then replaces each project's thread once its in-flight calls finish. A runtime `tau prepare` sealed meanwhile is picked up on the next call. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
+
 ```bash
 tau mcp --project ./bracket
 tau mcp --operation-timeout 120 --idle-release 300

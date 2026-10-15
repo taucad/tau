@@ -29,7 +29,7 @@ import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
-import type { HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
+import type { HostPrepareKernel, HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import {
@@ -54,7 +54,7 @@ import type { ProjectHost } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
-import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
+import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
@@ -185,6 +185,12 @@ export type HostDaemonAgentOptions = {
   /** Default system prompt; one admission may override it. */
   readonly systemPrompt: string;
   /**
+   * The native kernel preparation behind `prepare_kernel` (D7, D37), in this process with its unrestricted network.
+   * A `ready` outcome replaces every agent root's runtime child, so the next call composes the prepared kernel. Omit
+   * it and the tool is not offered.
+   */
+  readonly prepareKernel?: HostPrepareKernel | undefined;
+  /**
    * Offer the `test_model` tool. Defaults to `true`, which still yields the
    * tool only where the native GeoSpec engine resolves — `false` withholds it
    * from an installation that has the engine, so the surface is this host's
@@ -235,7 +241,16 @@ export type HostDaemonAgentOptions = {
 /** Options for {@link startHostDaemon}. @public */
 export type HostDaemonOptions = {
   readonly relayUrl: URL;
-  readonly runtimeHost: { readonly modulePath: string; readonly args?: readonly string[] };
+  readonly runtimeHost: {
+    readonly modulePath: string;
+    readonly args?: readonly string[];
+    /**
+     * Native kernels (Build123d, PicoGK) the runtime children compose from the payload store (D37). The child may
+     * not spawn, so this daemon starts each native worker on its behalf, only from a sealed closure and only through
+     * the OS sandbox. Absent, the children compose no native kernel.
+     */
+    readonly native?: RuntimeChildNativeKernels;
+  };
   /**
    * The runtime child's Zoo proxy. With a session token, the daemon sends the
    * child a Zoo-scoped token (never the session) and keeps it current.
@@ -938,6 +953,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
       ...(agent.testModel === false ? { geospecRunner: false } : {}),
+      /* A child composes the native kernels once, at its start: a prepared kernel reaches a root on its next call
+       * only through a new child, so every root's child is replaced once the preparation is ready (D7, D37). */
+      ...(agent.prepareKernel === undefined
+        ? {}
+        : {
+            prepareKernel: async (input, context) => {
+              const outcome = await agent.prepareKernel!(input, context);
+              if (outcome.status === 'ready') {
+                await Promise.allSettled(agentRuntimes.keys().map(async (root) => agentRuntimes.close(root)));
+              }
+              return outcome;
+            },
+          }),
       /* The MCP url is only known once the server is listening, so it is read per run. */
       ...(discovery.agents.length > 0
         ? {

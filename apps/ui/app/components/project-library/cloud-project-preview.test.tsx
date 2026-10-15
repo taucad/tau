@@ -53,6 +53,7 @@ describe('cloud project preview recovery', () => {
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.getByRole('img', { name: 'Saved preview of Cloud cube' })).toHaveAttribute('src', 'blob:recovered');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved preview')).not.toBeInTheDocument();
   });
 
   it('should keep a project with no saved image neutral and allow retry of a corrupt image', () => {

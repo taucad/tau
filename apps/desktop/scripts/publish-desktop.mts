@@ -225,7 +225,8 @@ const main = async (): Promise<void> => {
       '--key',
       `latest/${archive}`,
       '--copy-source',
-      `${bucket}/releases/${encodeURIComponent(tag)}/${archive}`,
+      // The AWS CLI URL-encodes the copy source itself; a pre-encoded `@` becomes `%2540` and misses the key.
+      `${bucket}/releases/${tag}/${archive}`,
       '--metadata-directive',
       'REPLACE',
       '--cache-control',

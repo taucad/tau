@@ -25,17 +25,15 @@ import {
   Consequences,
   RemedyButton,
   declaredAction,
-} from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { MaterialSlots, materialInUse } from '#routes/w.$workspace.$project/chat-print-materials.js';
-import {
-  PrintDisclosure,
-  PrintRow,
-  PrintStage,
-  StaleBadge,
-  useNow,
-} from '#routes/w.$workspace.$project/chat-print-section.js';
-import { formatRemaining, readableStage } from '#routes/w.$workspace.$project/chat-print-summary.js';
+} from '#components/machines/machine-controls.js';
+import { MaterialSlots, materialInUse } from '#components/machines/machine-materials.js';
+import { PrintDisclosure, PrintRow, PrintStage, StaleBadge, useNow } from '#components/machines/machine-section.js';
+import { formatRemaining, readableStage } from '#components/machines/machine-summary.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
+
+const focusLinkedJob: React.RefCallback<HTMLElement> = (element): void => {
+  element?.focus();
+};
 
 /**
  * Whether a component's observation is past the time the host said it stays valid.
@@ -283,7 +281,7 @@ function TemperatureGroup({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>Temperatures</h4>
+        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>Temperatures</h3>
         {isStale ? <StaleBadge /> : null}
       </div>
       <dl className='grid grid-cols-3 gap-x-3 gap-y-1'>
@@ -340,9 +338,9 @@ function OtherReadings({
       {observations.map(({ componentId, group, readings }) => (
         <div key={`${componentId}:${group}`} className='flex min-w-0 flex-col gap-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>
+            <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>
               {components.find((component) => component.id === componentId)?.label ?? componentId}
-            </h4>
+            </h3>
             {isObservationStale({ entry, componentId, group, now }) ? <StaleBadge /> : null}
           </div>
           <dl className='flex flex-col gap-1'>
@@ -390,7 +388,7 @@ function Position({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex items-center justify-between gap-2 text-xs'>
-        <h4 className='font-medium'>{title}</h4>
+        <h3 className='font-medium'>{title}</h3>
         <span className='flex items-center gap-2'>
           {isObservationStale({ entry, componentId: motionId, group: positionGroup, now }) ? <StaleBadge /> : null}
           <Badge
@@ -914,16 +912,32 @@ const kindWords = { stop: 'Stop', hold: 'Jog while held', transfer: 'Send the pr
 export function HistoryStage({
   entry,
   jobs,
+  sourceLink,
+  selectedJobId,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly jobs: readonly MachineJob[];
+  readonly sourceLink?: ((job: MachineJob) => React.ReactNode) | undefined;
+  readonly selectedJobId?: string | undefined;
 }): React.JSX.Element {
+  const linkedIndex = jobs.findIndex((job) => job.jobId === selectedJobId);
+  const linkedKey = linkedIndex === -1 ? undefined : selectedJobId;
+  const [revealed, setRevealed] = useState<string>();
+  const [page, setPage] = useState(0);
+  if (linkedKey !== undefined && revealed !== linkedKey) {
+    setRevealed(linkedKey);
+    setPage(Math.floor(linkedIndex / 20));
+  }
+  const pages = Math.max(1, Math.ceil(jobs.length / 20));
+  const currentPage = Math.min(page, pages - 1);
   const { operations } = entry.snapshot;
   const count = jobs.length + operations.length;
   return (
     <PrintStage
+      key={linkedKey}
       icon={History}
       title='History'
+      isDefaultOpen={selectedJobId !== undefined && jobs.some((job) => job.jobId === selectedJobId)}
       summary={count === 0 ? 'Nothing yet' : `${String(count)} ${count === 1 ? 'entry' : 'entries'}`}
     >
       {count === 0 ? (
@@ -933,8 +947,15 @@ export function HistoryStage({
       ) : null}
       {jobs.length > 0 ? (
         <ul aria-label='Jobs' className='flex flex-col gap-1 text-xs'>
-          {jobs.map((job) => (
-            <li key={job.jobId} className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+          {jobs.slice(currentPage * 20, currentPage * 20 + 20).map((job) => (
+            <li
+              key={job.jobId}
+              tabIndex={selectedJobId === job.jobId ? -1 : undefined}
+              aria-label={selectedJobId === job.jobId ? 'Linked job history' : undefined}
+              ref={selectedJobId === job.jobId ? focusLinkedJob : undefined}
+              className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 focus-visible:focus-outline'
+            >
+              {sourceLink?.(job)}
               <span className='font-medium'>
                 {job.state === 'started' && job.run !== undefined ? outcomeWords[job.run.outcome] : jobWords[job.state]}
               </span>
@@ -947,6 +968,33 @@ export function HistoryStage({
             </li>
           ))}
         </ul>
+      ) : null}
+      {pages > 1 ? (
+        <nav aria-label='Job history pages' className='flex items-center gap-2'>
+          <Button
+            size='xs'
+            variant='outline'
+            disabled={currentPage === 0}
+            onClick={() => {
+              setPage(currentPage - 1);
+            }}
+          >
+            Previous
+          </Button>
+          <span className='text-xs'>
+            Page {currentPage + 1} of {pages}
+          </span>
+          <Button
+            size='xs'
+            variant='outline'
+            disabled={currentPage >= pages - 1}
+            onClick={() => {
+              setPage(currentPage + 1);
+            }}
+          >
+            Next
+          </Button>
+        </nav>
       ) : null}
       {operations.length > 0 ? (
         <ol aria-label='Operations' className='flex flex-col gap-1 text-xs'>

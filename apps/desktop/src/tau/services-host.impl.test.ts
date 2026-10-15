@@ -1084,10 +1084,22 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
   const candidateCheckout = (cwd: string): TauHost.TurnCheckout => ({ cwd, mode: 'candidate', baseRevisionId: '' });
 
+  it('withholds the agent machine facet when the deployment is disabled', async () => {
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'false');
+    try {
+      const { host, workspaceRoot } = await configuredHost();
+      connect(host, workspaceRoot);
+      expect(toolRegistryCalls.at(-1)!.machines).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   /* The agent's tools ride an agent session of their own (CA-2): a person's acts are not theirs to call. */
   it("should serve the agent tools' machines on an agent session that reads but refuses every person's act", async () => {
     /* The desktop picks the keychain on macOS; no test may touch a person's keychain. */
     vi.stubEnv('TAU_SECRET_VAULT', 'file');
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'true');
     try {
       const machinesDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-machines-'));
       workspaces.push(machinesDirectory);

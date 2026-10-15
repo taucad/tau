@@ -13,7 +13,7 @@ import {
 } from '@taucad/runtime/preparation/node';
 import type { ClosureReceipt, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
 
-import { sealBuild123dClosure } from '#build123d-closure.js';
+import { build123dLaunchSet, sealBuild123dClosure } from '#build123d-closure.js';
 
 const packageName = '@taucad/build123d';
 export const packageRoot = resolve(import.meta.dirname, '..');
@@ -54,7 +54,15 @@ export const seedPresent: boolean =
  */
 export const prepareFromSeed = async (): Promise<ClosureReceipt> => {
   const host = createPreparationHost({
-    plugins: [{ package: packageName, deployment, directory: packageRoot, seal: sealBuild123dClosure }],
+    plugins: [
+      {
+        package: packageName,
+        deployment,
+        directory: packageRoot,
+        seal: sealBuild123dClosure,
+        launchSet: build123dLaunchSet,
+      },
+    ],
     store: storeDirectory,
     seed: seedDirectory,
   });

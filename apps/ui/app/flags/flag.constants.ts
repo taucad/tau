@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMachinesFeatureEnabled } from '@taucad/types/constants';
 import { ENV } from '#environment.config.js';
 
 /**
@@ -29,6 +30,12 @@ export type FlagDefinition = {
 const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
 
 export const flagRegistry = {
+  machines: {
+    schema: z.boolean().default(isMachinesFeatureEnabled(ENV.TAU_MACHINES_ENABLED)),
+    showInExperimental: false,
+    label: 'Machines',
+    description: 'Connect machines and use the Print workbench after deployment qualification.',
+  },
   automaticReload: {
     schema: z.boolean().default(false),
     showInExperimental: false,

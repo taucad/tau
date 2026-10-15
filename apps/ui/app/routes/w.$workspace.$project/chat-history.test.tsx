@@ -234,7 +234,7 @@ vi.mock('#hooks/use-skills-catalog.js', () => ({ useSkillsCatalog: skillsCatalog
 const capturedVirtuoso: {
   totalCount?: number;
   itemContent?: (index: number) => React.ReactNode;
-  followOutput?: (atBottom: boolean) => 'auto' | false;
+  followOutput?: () => 'auto' | false;
   initialTopMostItemIndex?: { index: string; align: string };
 } = {};
 const scrollToIndexMock = vi.fn();
@@ -243,7 +243,7 @@ vi.mock('react-virtuoso', () => ({
     readonly data: readonly unknown[];
     readonly initialTopMostItemIndex: { index: string; align: string };
     readonly itemContent: (index: number, item: unknown) => React.ReactNode;
-    readonly followOutput: (atBottom: boolean) => 'auto' | false;
+    readonly followOutput: () => 'auto' | false;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
   }) => {
     capturedVirtuoso.initialTopMostItemIndex = properties.initialTopMostItemIndex;
@@ -516,8 +516,7 @@ describe('ChatHistory — turn group rendering', () => {
     setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
     const view = render(<ChatHistory />);
     expect(capturedVirtuoso.initialTopMostItemIndex).toEqual({ index: 'LAST', align: 'end' });
-    expect(capturedVirtuoso.followOutput?.(true)).toBe('auto');
-    expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
+    expect(capturedVirtuoso.followOutput?.()).toBe('auto');
     setMockMessages([message('u1', 'user'), message('a1', 'assistant'), message('u2', 'user')]);
     view.rerender(<ChatHistory className='updated' />);
     expect(scrollToIndexMock).not.toHaveBeenCalled();

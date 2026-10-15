@@ -756,7 +756,8 @@ def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -
     copied = BRepBuilderAPI_Copy()
     copied.Perform(shape.wrapped, True, False)
     detached = _cast_shape(copied.Shape())
-    located = detached.moved(shape.location.inverse() * shape.global_location)
+    # The copied BRep retains its local placement; replace it with the world placement.
+    located = detached.located(shape.global_location)
     surface = tessellate_surface(located, linear_tolerance, angular_tolerance)
 
     lines: list[float] = []

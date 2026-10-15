@@ -1375,40 +1375,6 @@
       ]
     },
     {
-      "bom-ref": "5af912717ec9a3348b5bee2fc8872d35ea4525fa5c87e86395af7dc2afd5d524",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "5af912717ec9a3348b5bee2fc8872d35ea4525fa5c87e86395af7dc2afd5d524"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "5b934c45c252844a91d69fda3a34cff5e7307e1db10d77cb10a3980312c74713",
       "type": "library",
       "name": "scikit-learn",
@@ -2981,6 +2947,40 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "c71ffb9201319733f59ec7aba89344f0c5fe88bb3dc675b7bc4430f9a8ac5dd6",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c71ffb9201319733f59ec7aba89344f0c5fe88bb3dc675b7bc4430f9a8ac5dd6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },

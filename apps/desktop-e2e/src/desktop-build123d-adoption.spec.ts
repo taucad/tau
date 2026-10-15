@@ -319,10 +319,27 @@ test.skipIf(!enabled)(
               };
             }
           ).__TAU_KINEMATICS_TEST__;
+          const sceneBridge = (
+            globalThis as typeof globalThis & {
+              __TAU_SECTION_VIEW_TEST__?: {
+                getRenderedModelComponentSurfaceBounds(id: string): { min: number[]; max: number[] } | undefined;
+              };
+            }
+          ).__TAU_SECTION_VIEW_TEST__;
           return {
             coordinates: bridge?.getState('file:main.py')?.coordinates,
             matrices: ['ring', 'sun', 'carrier-front', 'planet-1-gear', 'planet-2-gear', 'planet-3-gear'].map((id) =>
               bridge?.getComponentWorldMatrix('file:main.py', `occurrence:${id}`),
+            ),
+            // These centrally symmetric gears and pins have their bore-axis midpoint at the surface bounds center.
+            // Read rendered vertices, not joint metadata: a correct pivot can still carry incorrectly baked geometry.
+            boreCenters: [1, 2, 3].map((planet) =>
+              ['gear', 'pin'].map((role) => {
+                const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(
+                  `occurrence:planet-${planet}-${role}`,
+                );
+                return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
+              }),
             ),
           };
         });
@@ -337,6 +354,52 @@ test.skipIf(!enabled)(
         .toBe(true);
       await expect.poll(async () => page.locator('[data-driver-control]').count()).toBe(1);
       const planetaryInitial = await planetary();
+      const driver = page.locator('[data-driver-control]').getByRole('spinbutton');
+      const assertPlanetaryPose = async (angle: number) => {
+        await driver.fill(String(angle));
+        await driver.press('Enter');
+        await expect
+          .poll(async () => {
+            const state = await planetary();
+            if (Math.abs((Object.values(state.coordinates ?? {})[0] ?? Infinity) - angle) >= 1e-6) {
+              return false;
+            }
+            return [1, 0.25, -0.5, -0.5, -0.5].every((ratio, index) => {
+              const matrix = state.matrices[index + 1];
+              if (!matrix) {
+                return false;
+              }
+              const expected = (angle * ratio * Math.PI) / 180;
+              const observed = Math.atan2(matrix[8]!, matrix[0]!);
+              return Math.abs(Math.atan2(Math.sin(observed - expected), Math.cos(observed - expected))) < 1e-6;
+            });
+          })
+          .toBe(true);
+        const state = await planetary();
+        expect(state.matrices[0]).toEqual(planetaryInitial.matrices[0]);
+        for (const [index, ratio] of [1, 0.25, -0.5, -0.5, -0.5].entries()) {
+          const matrix = state.matrices[index + 1]!;
+          const expected = (angle * ratio * Math.PI) / 180;
+          const observed = Math.atan2(matrix[8]!, matrix[0]!);
+          expect(Math.abs(Math.atan2(Math.sin(observed - expected), Math.cos(observed - expected)))).toBeLessThan(1e-6);
+        }
+        const errors = state.boreCenters.map(([gear, pin]) => {
+          expect(gear).toBeDefined();
+          expect(pin).toBeDefined();
+          return Math.hypot(...gear!.map((value, index) => value - pin![index]!));
+        });
+        // 0.0001 mm admits Float32 meshing roundoff while detecting independent geometry/pivot drift.
+        expect(
+          errors.every((error) => error < 1e-7),
+          JSON.stringify({ angle, errors }),
+        ).toBe(true);
+        return { ...state, centerErrorsMeters: errors };
+      };
+      const anchorPoses: Array<Awaited<ReturnType<typeof assertPlanetaryPose>>> = [];
+      for (const angle of [0, 61.21, -84.18, -720]) {
+        // oxlint-disable-next-line no-await-in-loop -- Each requested UI pose must settle before measuring its vertices.
+        anchorPoses.push(await assertPlanetaryPose(angle));
+      }
       const time = page.getByRole('slider', { name: 'Time', exact: true });
       await time.press('Home');
       await time.press('ArrowRight');
@@ -421,6 +484,7 @@ test.skipIf(!enabled)(
             originalAuthoredEntry: 'reusable-assembly.py',
             source: planetarySource,
             initial: planetaryInitial,
+            anchorPoses,
             firstPose: planetaryFirstPose,
             secondPose: planetarySecondPose,
             parts: planetaryParts,
@@ -454,6 +518,42 @@ test.skipIf(!enabled)(
         )
         .toBe(true);
       await session.capture(`build123d-planetary-reloaded-${runId}`);
+
+      // A nonzero authored placement must remain the reference pose, not be applied twice during playback.
+      const nonzeroSource = planetarySource.replace('input_angle: float = 0.0', 'input_angle: float = 30.0');
+      expect(nonzeroSource).not.toBe(planetarySource);
+      try {
+        writeFileSync(join(projectRoot, 'main.py'), nonzeroSource);
+        await page.reload();
+        await expectVisible(page.getByText('Weight · 0 of 34 parts known', { exact: true }), 120_000);
+        await page.keyboard.press('Control+m');
+        await expectVisible(page.getByTestId('kinematics-pane'));
+        await driver.fill('0');
+        await driver.press('Enter');
+        await expect
+          .poll(
+            async () => {
+              const state = await planetary();
+              const center = state.boreCenters[0]?.[1];
+              const original = anchorPoses[0]?.boreCenters[0]?.[1];
+              return center && original ? Math.hypot(...center.map((value, index) => value - original[index]!)) : 0;
+            },
+            { timeout: 120_000 },
+          )
+          .toBeGreaterThan(0.001);
+        const nonzeroPoses = [];
+        for (const angle of [0, 61.21, -84.18, -720]) {
+          // oxlint-disable-next-line no-await-in-loop -- Each pose belongs to this newly built reference geometry.
+          nonzeroPoses.push(await assertPlanetaryPose(angle));
+        }
+        const nonzeroDirectory = await session.capture(`build123d-planetary-reference-30-${runId}`);
+        writeFileSync(
+          join(nonzeroDirectory, 'anchor-poses.json'),
+          JSON.stringify({ referenceDegrees: 30, nonzeroPoses }, null, 2),
+        );
+      } finally {
+        writeFileSync(join(projectRoot, 'main.py'), planetarySource);
+      }
     } catch (error) {
       await session.capture('build123d-adoption-failure');
       throw error;

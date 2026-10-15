@@ -245,6 +245,10 @@ export type SectionViewTestBridgeApi = Readonly<{
   getModelComponents(): SectionViewTestModelComponent[];
   getModelVisibility(): SectionViewTestModelVisibility;
   getRenderedModelComponentState(componentId: string): SectionViewTestRenderedModelComponentState;
+  /** Actual triangle vertices in the presented world frame, including the live mechanism pose. */
+  getRenderedModelComponentSurfaceBounds(
+    componentId: string,
+  ): Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }> | undefined;
   projectModelComponent(componentId: string): SectionViewTestProjectedPoint[];
   hideModelComponent(componentId: string): void;
   isolateModelComponent(componentId: string): void;
@@ -315,6 +319,34 @@ export function getSectionViewTestRenderedModelComponentState(
     surfaceMaterialOpacities,
     edgeMaterialOpacities,
   };
+}
+
+/** Read actual surface vertices; fat-line proxy bounds do not describe CAD geometry. */
+export function getRenderedModelComponentSurfaceBounds(
+  scene: THREE.Object3D,
+  componentId: string,
+): Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }> | undefined {
+  const bounds = new THREE.Box3();
+  const point = new THREE.Vector3();
+  scene.updateWorldMatrix(true, true);
+  scene.traverse((object) => {
+    if (
+      !(object instanceof THREE.Mesh) ||
+      object.type === 'LineSegments2' ||
+      getModelComponentIdInHierarchy(object) !== componentId
+    ) {
+      return;
+    }
+    const geometry = object.geometry as THREE.BufferGeometry;
+    if (!('position' in geometry.attributes)) {
+      return;
+    }
+    const position = geometry.getAttribute('position');
+    for (let index = 0; index < position.count; index++) {
+      bounds.expandByPoint(point.fromBufferAttribute(position, index).applyMatrix4(object.matrixWorld));
+    }
+  });
+  return bounds.isEmpty() ? undefined : { min: bounds.min.toArray(), max: bounds.max.toArray() };
 }
 
 export const getSectionViewTestControlState = ({
@@ -814,6 +846,9 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getRenderedModelComponentState(componentId) {
         return getSectionViewTestRenderedModelComponentState(scene, componentId);
+      },
+      getRenderedModelComponentSurfaceBounds(componentId) {
+        return getRenderedModelComponentSurfaceBounds(scene, componentId);
       },
       projectModelComponent(componentId) {
         const { camera, gl } = get();

@@ -5,6 +5,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import {
   getSectionViewTestControlState,
+  getRenderedModelComponentSurfaceBounds,
   getSectionViewTestRenderedModelComponentState,
   getSectionViewTestCapOverlapDiagnostics,
   getSectionViewTestCapPerformanceDiagnostics,
@@ -222,6 +223,39 @@ describe('getSectionViewTestRenderedModelComponentState', () => {
       edge.material.dispose();
       presentation.geometry.dispose();
       presentation.material.dispose();
+    }
+  });
+});
+
+describe('getRenderedModelComponentSurfaceBounds', () => {
+  it('should measure transformed surface vertices and ignore fat-line proxy geometry', () => {
+    const scene = new THREE.Scene();
+    const parent = new THREE.Group();
+    parent.position.set(10, 20, 30);
+    parent.rotation.z = Math.PI / 2;
+    const surface = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 6), new THREE.MeshBasicMaterial());
+    surface.position.set(5, 0, 0);
+    const edgeGeometry = new LineSegmentsGeometry();
+    edgeGeometry.setPositions([-100, 0, 0, 100, 0, 0]);
+    const edge = new LineSegments2(edgeGeometry, new LineMaterial());
+    setModelComponentOwner(parent, { unitId: 'unit:main', componentId: 'component:gear' });
+    parent.add(surface, edge);
+    scene.add(parent);
+    try {
+      const bounds = getRenderedModelComponentSurfaceBounds(scene, 'component:gear');
+      expect(bounds).toBeDefined();
+      for (const [index, value] of [8, 24, 27].entries()) {
+        expect(bounds?.min[index]).toBeCloseTo(value, 10);
+      }
+      for (const [index, value] of [12, 26, 33].entries()) {
+        expect(bounds?.max[index]).toBeCloseTo(value, 10);
+      }
+      expect(getRenderedModelComponentSurfaceBounds(scene, 'component:absent')).toBeUndefined();
+    } finally {
+      surface.geometry.dispose();
+      surface.material.dispose();
+      edge.geometry.dispose();
+      edge.material.dispose();
     }
   });
 });

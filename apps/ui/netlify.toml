@@ -25,12 +25,12 @@
 #
 # NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production at build time would make pnpm
 # skip devDependencies (including @swc/core). Nx needs a TS transpiler to load
-# plugin config files — this flag uses Node's native type stripping instead.
+# plugin config files. Load tsx for workspace imports that native stripping cannot resolve.
 
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
@@ -46,13 +46,13 @@ NX_NO_CLOUD = "true"
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [context.branch-deploy]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [dev]
 command = "pnpm nx dev ui"

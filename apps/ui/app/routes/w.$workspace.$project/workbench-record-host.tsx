@@ -393,8 +393,12 @@ export function WorkbenchRecordHost(): React.JSX.Element {
       });
     };
   }, [store]);
-  useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
-  useFlushOnClose(async () => confirmFlush(store.flush, 'Pane layout is not confirmed saved.'), { stage: 'producer' });
+  const flushAtClose = useCallback(
+    async () => confirmFlush(store.flush, 'Pane layout is not confirmed saved.'),
+    [store],
+  );
+  useEffect(() => registerWorkbenchRecordProducer(flushAtClose), [registerWorkbenchRecordProducer, flushAtClose]);
+  useFlushOnClose(flushAtClose, { stage: 'producer' });
   useEffect(() => {
     const current = store.intendedLayout();
     if (

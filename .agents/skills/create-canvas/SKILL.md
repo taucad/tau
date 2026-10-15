@@ -15,7 +15,7 @@ description: >-
    Compose [Create Research](../create-research/SKILL.md) for the owner/index and
    [artifact contract](../create-research/artifacts.md) for evidence. Write through
    `docs/research/artifacts/<subject>/`; never create a competing Brain checkout.
-2. Read [DESIGN.md](../../../DESIGN.md) as the canonical design authority,
+2. Read [docs/policy/design-policy.md](../../../docs/policy/design-policy.md) as the canonical design authority,
    especially People and progressive disclosure, Composition and visible
    affordances, and Design and critique workflow. Read applicable AGENTS chains
    and its UI, color, accessibility, React and TypeScript policy routes.
@@ -31,7 +31,7 @@ description: >-
   [authoring.md](authoring.md). Reuse an existing scene before creating a new one.
 - Launch previews through Portless with a stable scene name using the shared
   `canvas:dev` command in that contract; deliver its verified named localhost URL.
-- Apply the canvas review guidance in [DESIGN.md](../../../DESIGN.md#design-and-critique-workflow).
+- Apply the canvas review guidance in [docs/policy/design-policy.md](../../../docs/policy/design-policy.md#design-and-critique-workflow).
   [authoring.md](authoring.md#styling-baseline) locates the retained reference;
   the reference does not define a second set of design rules.
 - Import actual `@taucad/ui/components/<component>` exports. Compile

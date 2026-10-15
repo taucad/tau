@@ -10,6 +10,8 @@ export const searchParameterName = {
   /* Library */
   // Whether the project library also lists trashed projects.
   trash: 'trash',
+  // Project collection sort field and direction.
+  sort: 'sort',
 
   /* Community */
   // The Community search text, absent when empty.

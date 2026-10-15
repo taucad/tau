@@ -1,0 +1,121 @@
+name: 'Release assets'
+description: >-
+  Attaches files to an existing GitHub Release without ever replacing an asset,
+  then optionally publishes it (charter I13, go-live DEL-20). Immutable releases
+  accept assets only while a release is a draft, so a release is created as a
+  draft, filled and verified, and published last. An asset of the same name that
+  already holds the same sha256 is accepted, which makes a rerun succeed; a
+  different digest refuses. A published immutable release that lacks a file
+  refuses too; a release published before immutability (its `immutable` flag is
+  false) may still receive a missing file, never a replacement.
+
+inputs:
+  tag:
+    description: 'Tag name of the release (a draft is found by its tag name too)'
+    required: true
+  files:
+    description: 'Newline-separated paths or globs; each must match at least one file'
+    required: false
+    default: ''
+  publish:
+    description: "'true' publishes a draft once every file is verified"
+    required: false
+    default: 'false'
+  latest:
+    description: "'true' marks the release latest when publishing (or on a rerun that finds it published)"
+    required: false
+    default: 'false'
+  github-token:
+    description: 'Token with contents: write, which can also see drafts'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Attach, verify and publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        ASSET_FILES: ${{ inputs.files }}
+        PUBLISH: ${{ inputs.publish }}
+        LATEST: ${{ inputs.latest }}
+      run: |
+        set -euo pipefail
+        id=$(gh release view "$TAG" --json databaseId --jq .databaseId) \
+          || { echo "::error::$TAG has no GitHub Release (draft or published) to attach to."; exit 1; }
+        release() { gh api "repos/$GH_REPO/releases/$id"; }
+        release > "$RUNNER_TEMP/release.json"
+        draft=$(jq -r .draft "$RUNNER_TEMP/release.json")
+        immutable=$(jq -r '.immutable // false' "$RUNNER_TEMP/release.json")
+
+        # The sha256 GitHub recorded for an asset, or the digest of its bytes
+        # when the asset predates server-side digests.
+        remote_sha() {
+          local digest asset_id
+          digest=$(jq -r --arg name "$1" '.assets[] | select(.name == $name) | .digest // empty' "$RUNNER_TEMP/release.json")
+          if [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]; then echo "${BASH_REMATCH[1]}"; return; fi
+          asset_id=$(jq -r --arg name "$1" '.assets[] | select(.name == $name) | .id' "$RUNNER_TEMP/release.json")
+          gh api -H 'Accept: application/octet-stream' "repos/$GH_REPO/releases/assets/$asset_id" | sha256sum | cut -d' ' -f1
+        }
+
+        shopt -s nullglob
+        files=()
+        while IFS= read -r pattern; do
+          if [ -z "$pattern" ]; then continue; fi
+          # shellcheck disable=SC2206 # the pattern is a glob on purpose
+          matches=($pattern)
+          if [ "${#matches[@]}" -eq 0 ]; then echo "::error::$pattern matches no file to attach to $TAG."; exit 1; fi
+          files+=("${matches[@]}")
+        done <<< "$ASSET_FILES"
+
+        # An asset already present must hold the same bytes; it is never replaced.
+        missing=()
+        for file in "${files[@]}"; do
+          name=$(basename "$file")
+          state=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .state' "$RUNNER_TEMP/release.json")
+          if [ -z "$state" ]; then missing+=("$file"); continue; fi
+          if [ "$state" != uploaded ]; then
+            echo "::error::$TAG holds an incomplete $name (state $state); it is never replaced here."
+            exit 1
+          fi
+          local_sha=$(sha256sum "$file" | cut -d' ' -f1)
+          served=$(remote_sha "$name")
+          if [ "$served" != "$local_sha" ]; then
+            echo "::error::$TAG already holds $name with sha256 $served, not $local_sha; release assets are never replaced."
+            exit 1
+          fi
+          echo "$name already attached, sha256 $local_sha"
+        done
+
+        if [ "${#missing[@]}" -gt 0 ]; then
+          if [ "$draft" != true ] && [ "$immutable" = true ]; then
+            echo "::error::$TAG is published and immutable without ${missing[*]}; publish a new release instead."
+            exit 1
+          fi
+          if [ "$draft" != true ]; then
+            echo "::notice::$TAG was published before immutable releases; adding the missing ${missing[*]}."
+          fi
+          for file in "${missing[@]}"; do gh release upload "$TAG" "$file"; done
+          # Verify what the release now serves for each uploaded file.
+          release > "$RUNNER_TEMP/release.json"
+          for file in "${missing[@]}"; do
+            name=$(basename "$file")
+            local_sha=$(sha256sum "$file" | cut -d' ' -f1)
+            served=$(remote_sha "$name")
+            if [ "$served" != "$local_sha" ]; then
+              echo "::error::$TAG serves $name with sha256 ${served:-none} after upload, not $local_sha."
+              exit 1
+            fi
+            echo "$name attached, sha256 $local_sha"
+          done
+        fi
+
+        if [ "$PUBLISH" = true ]; then
+          if [ "$draft" = true ]; then
+            gh release edit "$TAG" --draft=false --latest="$LATEST"
+          elif [ "$LATEST" = true ]; then
+            gh release edit "$TAG" --latest
+          fi
+        fi

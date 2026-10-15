@@ -9,12 +9,13 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    // On GitHub Actions a failure also becomes a check-run annotation, readable without the job log.
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/packages/plugins/build123d',
       include: ['src/**/*'],
-      exclude: ['src/**/*.{test,spec,test-d}.ts'],
+      exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/**/*.fixture.ts'],
       thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
     },
   },

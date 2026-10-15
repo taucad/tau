@@ -12,6 +12,22 @@ describe('confirmFlush', () => {
     );
   });
 
+  it.each(['sync', 'async'])(
+    'should name a %s rejection while preserving the authority error as its cause',
+    async (mode) => {
+      const cause = new Error('connection lost');
+      await expect(
+        // oxlint-disable-next-line promise-function-async -- Exercise a synchronous throw at the callback boundary.
+        confirmFlush(() => {
+          if (mode === 'sync') {
+            throw cause;
+          }
+          return Promise.reject(cause);
+        }, 'View settings for main.cs are not confirmed saved.'),
+      ).rejects.toMatchObject({ name: 'Error', message: 'View settings for main.cs are not confirmed saved.', cause });
+    },
+  );
+
   it('stops waiting for a write that never answers', async () => {
     vi.useFakeTimers();
     try {

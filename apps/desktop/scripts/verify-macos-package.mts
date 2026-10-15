@@ -397,6 +397,165 @@ const verifyPicoGkNoticesAndTrims = (
   }
 };
 
+/** Where `picogk:prepare-layer` writes the Tau PicoGK layer, its record and the offline seed. */
+const picoGkLayerRoot = resolve(workspaceRoot, 'out/picogk-layer');
+
+/**
+ * The Tau PicoGK layer the macOS release job publishes (charter W4, D6), when this job built it: its archive matches
+ * its record, it is framework-dependent (no apphost, no `dotnet` launcher, no symbols) and it unpacks beside
+ * Microsoft's runtime archive into the closure layout `tau prepare picogk` seals, where the archive's `dotnet` muxer
+ * is the launcher. The inverse of the bundled resource's apphost rule above.
+ * @returns The muxer and the worker assembly to probe, or nothing when no layer was built.
+ */
+const verifyPicoGkLayer = (): readonly string[] | undefined => {
+  const recordPath = resolve(picoGkLayerRoot, 'darwin-arm64/tau-layer.json');
+  if (!existsSync(recordPath)) {
+    return undefined;
+  }
+  const record = JSON.parse(readFileSync(recordPath, 'utf8')) as {
+    readonly asset: string;
+    readonly sha256: string;
+    readonly protocolVersion: number;
+    readonly dotnetRuntimeVersion: string;
+  };
+  const archive = resolve(picoGkLayerRoot, 'darwin-arm64', basename(record.asset));
+  if (sha256(archive) !== record.sha256 || record.protocolVersion !== picoGkWireProtocol) {
+    throw new Error(`The Tau PicoGK layer ${archive} does not match its record or the worker protocol.`);
+  }
+  const seed = JSON.parse(readFileSync(resolve(picoGkLayerRoot, 'seed/tau-seed.json'), 'utf8')) as {
+    readonly closures: ReadonlyArray<{ readonly payloads: ReadonlyArray<{ readonly blob: string }> }>;
+  };
+  const runtimeBlob = seed.closures[0]?.payloads[0]?.blob;
+  if (runtimeBlob === undefined || !/^blobs\/sha256\/[\da-f]{64}$/u.test(runtimeBlob)) {
+    throw new Error('The PicoGK layer seed does not index the .NET runtime archive.');
+  }
+  const closure = mkdtempSync(resolve(tmpdir(), 'tau-picogk-closure-'));
+  const layer = resolve(closure, 'tau-worker');
+  mkdirSync(resolve(closure, 'dotnet'));
+  mkdirSync(layer);
+  run('tar', ['-xzf', resolve(picoGkLayerRoot, 'seed', runtimeBlob), '-C', resolve(closure, 'dotnet')]);
+  run('tar', ['-xzf', archive, '-C', layer]);
+  const layerPaths = filesUnder(layer);
+  if (
+    layerPaths.some((path) => ['dotnet', 'Tau.PicoGK.Worker'].includes(basename(path))) ||
+    layerPaths.some((path) => path.endsWith('.pdb') || path.endsWith('.xml')) ||
+    !existsSync(resolve(layer, 'Tau.PicoGK.Worker.dll'))
+  ) {
+    throw new Error(
+      'The Tau PicoGK layer must be the framework-dependent worker assembly, with no apphost or symbols.',
+    );
+  }
+  const muxer = resolve(closure, 'dotnet/dotnet');
+  if (
+    !existsSync(muxer) ||
+    !existsSync(resolve(closure, `dotnet/shared/Microsoft.NETCore.App/${record.dotnetRuntimeVersion}`))
+  ) {
+    throw new Error(`The .NET runtime archive does not carry the dotnet muxer and ${record.dotnetRuntimeVersion}.`);
+  }
+  const sbom = JSON.parse(readFileSync(resolve(layer, 'tau-picogk-sbom.cdx.json'), 'utf8')) as {
+    readonly components?: ReadonlyArray<{ readonly name: string }>;
+  };
+  verifyPicoGkNoticesAndTrims(layer, layerPaths, sbom.components?.some(({ name }) => name === 'SkiaSharp') === true);
+  return [muxer, resolve(layer, 'Tau.PicoGK.Worker.dll')];
+};
+
+/**
+ * Drive a PicoGK worker command through `analyze`, `build` and `shutdown` with an empty environment and check the
+ * sphere artifact against the digest the worker reports.
+ * @param command - The executable and the arguments before the worker's own.
+ * @param label - What the command is, for error messages.
+ */
+const probePicoGkWorker = (command: readonly string[], label: string): void => {
+  const picoGkProbe = mkdtempSync(resolve(tmpdir(), 'tau-picogk-probe-'));
+  const picoGkWorkspace = resolve(picoGkProbe, 'workspace');
+  const picoGkArtifacts = resolve(picoGkProbe, 'artifacts');
+  mkdirSync(picoGkWorkspace);
+  mkdirSync(picoGkArtifacts);
+  writeFileSync(
+    resolve(picoGkWorkspace, 'main.cs'),
+    `using System.Numerics;
+using PicoGK;
+Library.Go(1f, () =>
+{
+    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3f), 0);
+});
+`,
+  );
+  const picoGkInput = [
+    {
+      protocolVersion: picoGkWireProtocol,
+      requestId: 'verify-analyze',
+      method: 'analyze',
+      params: { entryPath: 'main.cs' },
+    },
+    {
+      protocolVersion: picoGkWireProtocol,
+      requestId: 'verify-build',
+      method: 'build',
+      params: { entryPath: 'main.cs', parameters: {} },
+    },
+    { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
+  ]
+    .map((request) => JSON.stringify(request))
+    .join('\n');
+  const picoGkRun = spawnSync(
+    'env',
+    [
+      '-i',
+      'LANG=C.UTF-8',
+      ...command,
+      '--workspace',
+      picoGkWorkspace,
+      '--artifacts',
+      picoGkArtifacts,
+      '--parent-pid',
+      String(process.pid),
+    ],
+    { encoding: 'utf8', input: `${picoGkInput}\n`, timeout: 300_000 },
+  );
+  if (picoGkRun.error !== undefined || picoGkRun.status !== 0) {
+    rmSync(picoGkProbe, { recursive: true, force: true });
+    throw new Error(`The ${label} failed its JIT/native probe:\n${picoGkRun.stdout}${picoGkRun.stderr}`, {
+      cause: picoGkRun.error,
+    });
+  }
+  const picoGkFrames = picoGkRun.stdout
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const picoGkReady = picoGkFrames.find((frame) => frame['type'] === 'ready');
+  const picoGkBuild = picoGkFrames.find((frame) => frame['requestId'] === 'verify-build');
+  const picoGkResult = picoGkBuild?.['result'] as
+    | {
+        readonly artifactPath?: unknown;
+        readonly byteLength?: unknown;
+        readonly sha256?: unknown;
+        readonly prototypes?: unknown;
+        readonly occurrences?: unknown;
+      }
+    | undefined;
+  const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
+  if (
+    picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
+    !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
+    typeof picoGkResult?.byteLength !== 'number' ||
+    picoGkResult.byteLength <= 0 ||
+    typeof picoGkResult.sha256 !== 'string' ||
+    !Array.isArray(picoGkResult.prototypes) ||
+    picoGkResult.prototypes.length !== 1 ||
+    !Array.isArray(picoGkResult.occurrences) ||
+    picoGkResult.occurrences.length !== 1 ||
+    !existsSync(picoGkArtifact) ||
+    readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
+    sha256(picoGkArtifact) !== picoGkResult.sha256
+  ) {
+    rmSync(picoGkProbe, { recursive: true, force: true });
+    throw new Error(`The ${label} did not complete a valid Roslyn/JIT/native sphere build: ${picoGkRun.stdout}`);
+  }
+  rmSync(picoGkProbe, { recursive: true, force: true });
+};
+
 const verifyPicoGkResource = (): string => {
   const target = 'darwin-arm64';
   const root = resolve(appPath, `Contents/Resources/picogk/${target}`);
@@ -722,96 +881,12 @@ if (architecture === 'arm64') {
       throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
     }
   }
-  const picoGkProbe = mkdtempSync(resolve(tmpdir(), 'tau-picogk-probe-'));
-  const picoGkWorkspace = resolve(picoGkProbe, 'workspace');
-  const picoGkArtifacts = resolve(picoGkProbe, 'artifacts');
-  mkdirSync(picoGkWorkspace);
-  mkdirSync(picoGkArtifacts);
-  writeFileSync(
-    resolve(picoGkWorkspace, 'main.cs'),
-    `using System.Numerics;
-using PicoGK;
-Library.Go(1f, () =>
-{
-    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3f), 0);
-});
-`,
-  );
-  const picoGkInput = [
-    {
-      protocolVersion: picoGkWireProtocol,
-      requestId: 'verify-analyze',
-      method: 'analyze',
-      params: { entryPath: 'main.cs' },
-    },
-    {
-      protocolVersion: picoGkWireProtocol,
-      requestId: 'verify-build',
-      method: 'build',
-      params: { entryPath: 'main.cs', parameters: {} },
-    },
-    { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
-  ]
-    .map((request) => JSON.stringify(request))
-    .join('\n');
-  const picoGkRun = spawnSync(
-    'env',
-    [
-      '-i',
-      'LANG=C.UTF-8',
-      picoGkWorker,
-      '--workspace',
-      picoGkWorkspace,
-      '--artifacts',
-      picoGkArtifacts,
-      '--parent-pid',
-      String(process.pid),
-    ],
-    { encoding: 'utf8', input: `${picoGkInput}\n`, timeout: 300_000 },
-  );
-  if (picoGkRun.error !== undefined || picoGkRun.status !== 0) {
-    rmSync(picoGkProbe, { recursive: true, force: true });
-    throw new Error(`The packaged PicoGK worker failed its JIT/native probe:\n${picoGkRun.stdout}${picoGkRun.stderr}`, {
-      cause: picoGkRun.error,
-    });
+  probePicoGkWorker([picoGkWorker], 'packaged PicoGK worker');
+  const layerCommand = verifyPicoGkLayer();
+  if (layerCommand !== undefined) {
+    probePicoGkWorker(layerCommand, 'Tau PicoGK layer launched through the dotnet muxer');
+    rmSync(dirname(dirname(layerCommand[0]!)), { recursive: true, force: true });
   }
-  const picoGkFrames = picoGkRun.stdout
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-  const picoGkReady = picoGkFrames.find((frame) => frame['type'] === 'ready');
-  const picoGkBuild = picoGkFrames.find((frame) => frame['requestId'] === 'verify-build');
-  const picoGkResult = picoGkBuild?.['result'] as
-    | {
-        readonly artifactPath?: unknown;
-        readonly byteLength?: unknown;
-        readonly sha256?: unknown;
-        readonly prototypes?: unknown;
-        readonly occurrences?: unknown;
-      }
-    | undefined;
-  const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
-  if (
-    picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
-    !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
-    typeof picoGkResult?.byteLength !== 'number' ||
-    picoGkResult.byteLength <= 0 ||
-    typeof picoGkResult.sha256 !== 'string' ||
-    !Array.isArray(picoGkResult.prototypes) ||
-    picoGkResult.prototypes.length !== 1 ||
-    !Array.isArray(picoGkResult.occurrences) ||
-    picoGkResult.occurrences.length !== 1 ||
-    !existsSync(picoGkArtifact) ||
-    readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
-    sha256(picoGkArtifact) !== picoGkResult.sha256
-  ) {
-    rmSync(picoGkProbe, { recursive: true, force: true });
-    throw new Error(
-      `The packaged PicoGK worker did not complete a valid Roslyn/JIT/native sphere build: ${picoGkRun.stdout}`,
-    );
-  }
-  rmSync(picoGkProbe, { recursive: true, force: true });
 }
 if (!unsigned) {
   for (const helper of ['Tau Helper', 'Tau Helper (GPU)', 'Tau Helper (Plugin)', 'Tau Helper (Renderer)']) {

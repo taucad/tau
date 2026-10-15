@@ -7,7 +7,7 @@ description: Create or revise monochrome product SVG icons in Tau's existing spr
 
 ## Define and draw
 
-1. Read `DESIGN.md`, the applicable `AGENTS.md` chain, and the current `apps/ui/app/components/icons/raw/parts.svg`. Search existing raw IDs and Lucide before drawing. Reuse an existing icon when it communicates the requested action or object clearly; reserve custom glyphs for missing domain concepts.
+1. Read `docs/policy/design-policy.md`, the applicable `AGENTS.md` chain, and the current `apps/ui/app/components/icons/raw/parts.svg`. Search existing raw IDs and Lucide before drawing. Reuse an existing icon when it communicates the requested action or object clearly; reserve custom glyphs for missing domain concepts.
 2. Record each concept's name, intended meaning, smallest displayed size and neighboring icons. Sketch at a 24 × 24 viewBox with Parts' 1.5-unit `currentColor` stroke, round caps and joins. Use simple geometry and consistent endpoints. Convey meaning through shape; do not rely on color, a tiny letter, or a tooltip to distinguish two glyphs.
 3. Save one `apps/ui/app/components/icons/raw/<name>.svg` per new icon. Keep the SVG monochrome, without a background box, embedded text, raster content, remote references or fixed width/height. Filename is the sprite ID. Do not edit generated files.
 4. For a set, put every icon in one visual contact sheet through [create-canvas](../create-canvas/SKILL.md). Compare at 16, 20 and 24 px in light, dark, black and high-contrast themes. Check silhouette, optical balance, line collisions, clipping and pairwise distinction. Keep the design evidence beside its research owner when the task has one.

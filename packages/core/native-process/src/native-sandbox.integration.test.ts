@@ -16,7 +16,7 @@ import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { createMockLogger } from '@taucad/runtime-testing';
 import { describe, expect, it } from 'vitest';
 
-import { launchInNativeSandbox, NativeProcessSession, nativeSandboxPolicy } from '#index.js';
+import { launchInNativeSandbox, NativeProcessSession, nativeSandboxPolicy, runInNativeSandbox } from '#index.js';
 
 const writeRuleBlocks = /\((allow|deny) file-write\*\n((?:\s+\((?:subpath|literal) "[^"]*"\)\n)+)/g;
 
@@ -175,6 +175,38 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
       for (const path of Object.values(paths)) {
         rmSync(path, { force: true });
       }
+    }
+  }, 60_000);
+
+  it('should run one command to completion inside the sandbox and report its exit and output', async () => {
+    const id = randomUUID();
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-command-')));
+    const writablePath = join(root, 'writable');
+    mkdirSync(writablePath);
+    const homeCanary = join(homedir(), `.tau-command-canary-${id}`);
+    writeFileSync(homeCanary, 'secret');
+    const script = [
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.env.TMPDIR + '/written.txt', 'ok');",
+      `let read = 'allowed'; try { fs.readFileSync(${JSON.stringify(homeCanary)}); } catch (error) { read = error.code; }`,
+      "process.stdout.write(read); process.stderr.write('to-stderr'); process.exit(7);",
+    ].join('\n');
+    try {
+      const result = await runInNativeSandbox({
+        executablePath: process.execPath,
+        arguments: ['-e', script],
+        readablePaths: [dirname(process.execPath)],
+        writablePath,
+        workingDirectory: writablePath,
+        commandId: `command#${id}`,
+      });
+      expect(result.exitCode, result.stderr).toBe(7);
+      expect(hiddenRead).toContain(result.stdout);
+      expect(result.stderr).toContain('to-stderr');
+      expect(readFileSync(join(writablePath, 'written.txt'), 'utf8')).toBe('ok');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(homeCanary, { force: true });
     }
   }, 60_000);
 

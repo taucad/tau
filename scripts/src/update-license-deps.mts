@@ -1,5 +1,5 @@
 /**
- * Script to generate the license-deps file.
+ * Script to generate docs/licensing/third-party-licenses.md.
  *
  * It walks the dependency closure that actually ships in the published
  * `@taucad/runtime` artifact (the file is copied into its dist as
@@ -18,7 +18,7 @@ import { bundledLibraries, workspace } from '@taucad/nx';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
 const runtimeDirectory = join(rootDirectory, 'packages/runtime');
-const outputFile = join(rootDirectory, 'license-deps');
+const outputFile = join(rootDirectory, 'docs/licensing/third-party-licenses.md');
 
 export type PackageInfo = {
   name: string;
@@ -422,9 +422,9 @@ function generateMarkdown(groups: LicenseGroup[]): string {
     '',
     '## Licensing Overview',
     '',
-    'All Tau-authored source is **[Apache-2.0](./license)**, including the applications,',
+    'All Tau-authored source is **[Apache-2.0](https://github.com/taucad/tau/blob/main/license)**, including the applications,',
     'libraries, tools, examples, GeoSpec engine, and other published packages.',
-    'Repository licensing details: **[LICENSING.md](./LICENSING.md)**.',
+    'Repository licensing details: **[Licensing overview](https://github.com/taucad/tau/blob/main/docs/licensing/overview.md)**.',
     '',
     'Some third-party dependencies impose additional obligations on **combined',
     'distributions** that include them:',
@@ -493,7 +493,7 @@ const stripGeneratedDate = (content: string): string =>
 /**
  * Main function.
  *
- * --check: validate that license-deps is up to date without writing (for CI)
+ * --check: validate that the third-party inventory is up to date without writing (for CI)
  */
 async function main(): Promise<void> {
   const isCheck = process.argv.includes('--check');
@@ -527,9 +527,9 @@ async function main(): Promise<void> {
     const normalizedGenerated = stripGeneratedDate(markdown);
 
     if (normalizedExisting === normalizedGenerated) {
-      console.log('\nlicense-deps is up to date.');
+      console.log(`\n${outputFile} is up to date.`);
     } else {
-      console.error('\n\u001B[31mERROR\u001B[0m  license-deps is out of date. Run: pnpm update-license-deps\n');
+      console.error(`\n\u001B[31mERROR\u001B[0m  ${outputFile} is out of date. Run: pnpm update-license-deps\n`);
       process.exit(1);
     }
     return;

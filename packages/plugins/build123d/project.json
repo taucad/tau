@@ -13,12 +13,42 @@
         "cwd": "{projectRoot}"
       }
     },
+    "generate-tau-plugin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts"
+      },
+      "configurations": {
+        "check": {
+          "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts --check"
+        }
+      }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts seed"
+      }
+    },
+    "golden-tau-plugin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["seed"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts golden"
+      }
+    },
     "test": {
-      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }]
+      "dependsOn": ["seed"]
     },
     "test-python": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }],
+      "dependsOn": ["seed"],
       "outputs": ["{workspaceRoot}/out/reports/coverage/packages/plugins/build123d-python"],
       "options": {
         "cwd": ".",
@@ -27,7 +57,7 @@
     },
     "benchmark-native": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }],
+      "dependsOn": ["seed"],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts"

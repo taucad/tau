@@ -23,9 +23,10 @@ import type { NewMachineBindingRecord, NodeMachineStore } from '#host/node-machi
 import { createNodeMachineHost } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
-import type { MachinePreparedPrint } from '#machines/machine-client.js';
-import type { MachineArtifactReference, MachineDescriptor, MachineSnapshot } from '#machines/machine.js';
-import type { PrintRequest } from '#machines/print-request.js';
+import type { MachineJob, MachinePreparedJob } from '#machines/machine-jobs.js';
+import type { MachineSnapshot } from '#machines/machine-observation.js';
+import { fixtureDescriptor, fixtureReport } from '#machines/machine-session.fixture.js';
+import type { MachineArtifactReference, MachineCandidate, MachineDescriptor } from '#machines/machine.js';
 
 const temporaryDirectories: string[] = [];
 const stores: Array<NodeMachineStore<Operation>> = [];
@@ -45,31 +46,19 @@ const operationSchema = z.strictObject({ type: z.literal('fixture'), value: z.st
 type Operation = z.infer<typeof operationSchema>;
 const observedAt = '2026-09-14T00:00:00.000Z';
 const digest = (digit: string): ContentDigest => `sha256:${digit.repeat(64)}` as ContentDigest;
-const descriptorFor = (physicalId: string): MachineDescriptor => ({
-  id: physicalId,
-  name: 'Fixture X1C',
-  vendor: 'fixture',
-  model: 'X1C',
-  technology: 'additive.fff',
-  firmware: '01.08.02.00',
-  accepts: [],
-  operations: ['observe'],
-  ratedEnvelope: { width: 0.256, depth: 0.256, height: 0.256, unit: 'm' },
-  printableEnvelope: { width: 0.256, depth: 0.256, height: 0.256, unit: 'm' },
-  tools: [],
-  materialSystem: { kind: 'ams', slotCount: 16 },
-  bedTypes: ['textured-plate'],
-});
-const snapshot: MachineSnapshot = {
-  connection: 'connected',
-  readiness: 'idle',
-  observedAt,
-  setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+const descriptorFor = (physicalId: string): MachineDescriptor => {
+  const reported = fixtureDescriptor(physicalId);
+  return {
+    ...reported,
+    name: 'Fixture X1C',
+    capabilities: { ...reported.capabilities, revision: digest('9'), incarnation: 'incarnation-1', qualifications: [] },
+  };
 };
-const candidateFor = (id: string, serial: string, seenAt = observedAt) => ({
+const snapshot: MachineSnapshot = { ...fixtureReport({ observedAt }), operations: [] };
+const candidateFor = (id: string, serial: string, seenAt = observedAt): MachineCandidate => ({
   id,
   name: `Printer ${id}`,
-  endpoint: { address: `${id}.local`, interface: 'manual' },
+  endpoint: { transport: 'network', address: `${id}.local`, interface: 'manual' },
   claimedIdentity: { serial, model: 'X1C' },
   observedAt: seenAt,
   expiresAt: '2026-09-14T00:01:00.000Z',
@@ -96,7 +85,7 @@ const artifact: MachineArtifactReference = {
   contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
   selectedMember: 'Metadata/plate_1.gcode',
 };
-const preparedFor = (machineId: string, preparedId: string, expiresAt: string): MachinePreparedPrint => ({
+const preparedFor = (machineId: string, preparedId: string, expiresAt: string): MachinePreparedJob => ({
   preparedId,
   preparedDigest: digest('3'),
   configurationDigest: digest('4'),
@@ -110,20 +99,18 @@ const preparedFor = (machineId: string, preparedId: string, expiresAt: string): 
   preparedAt: observedAt,
   expiresAt,
 });
-const requestFor = (
-  machineId: string,
-  requestId: string,
-  state: PrintRequest['state'] = 'awaiting-approval',
-): PrintRequest => ({
-  requestId,
+const jobFor = (machineId: string, jobId: string, state: MachineJob['state'] = 'awaiting-approval'): MachineJob => ({
+  version: 1,
+  jobId,
   machineId,
   artifact,
   configuration: {},
   requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
-  summary: { fileName: 'part.gcode.3mf' },
   state,
   createdAt: observedAt,
   updatedAt: observedAt,
+  program: { name: 'part.gcode.3mf', facts: { process: 'fff' } },
+  checks: [],
 });
 
 const openStore = async (
@@ -146,6 +133,15 @@ const openStore = async (
   return { store, onError, close };
 };
 
+// Fixture journals hold plain JSON; the bounded clone is the parser an older host's replay applied.
+const plainJson = (value: unknown): CacheValue =>
+  cloneBoundedJson(value, {
+    code: 'FIXTURE_JSON',
+    maximumDepth: 64,
+    maximumNodes: 100_000,
+    maximumCharacters: 1_000_000,
+  });
+
 /** Write a legacy journal as an older host did, in the event log's frame format. */
 const writeLegacyJournal = async (root: string, events: readonly CacheValue[]): Promise<string> => {
   const directory = join(root, 'authority');
@@ -158,14 +154,7 @@ const writeLegacyJournal = async (root: string, events: readonly CacheValue[]): 
         /* The fixture writes the legacy journal before any host owns the store. */
       },
     },
-    // The bounded clone is the parser an older host's replay applied to its plain JSON events.
-    parse: (value): CacheValue =>
-      cloneBoundedJson(value, {
-        code: 'FIXTURE_JSON',
-        maximumDepth: 64,
-        maximumNodes: 100_000,
-        maximumCharacters: 1_000_000,
-      }),
+    parse: plainJson,
   });
   for (const event of events) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- the journal is written in order.
@@ -200,14 +189,15 @@ const writeMigrationJournals = async (
     configuration: {},
     connection: { secretRef: `vault:machine/bambu/${physicalId}`, serviceTrust: {} },
   });
-  const upsert = (workspaceId: string, machineId: string, physicalId: string) => ({
-    type: 'machine-directory-upserted',
-    hostId: 'host',
-    authorityId: 'authority',
-    workspaceId,
-    revision: 1,
-    entry: { machineId, providerId: 'bambu', descriptor: descriptorFor(physicalId), snapshot, freshness: 'current' },
-  });
+  const upsert = (workspaceId: string, machineId: string, physicalId: string): CacheValue =>
+    plainJson({
+      type: 'machine-directory-upserted',
+      hostId: 'host',
+      authorityId: 'authority',
+      workspaceId,
+      revision: 1,
+      entry: { machineId, providerId: 'bambu', descriptor: descriptorFor(physicalId), snapshot, freshness: 'current' },
+    });
   const effect = (type: string, operationId: string): CacheValue => ({ type, operationId });
   const result = (operationId: string, status: string): CacheValue => ({
     type: 'machine-effect-result',
@@ -302,44 +292,41 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const root = await temporaryDirectory();
     const first = await openStore(root);
     const { record, log } = await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    expect(record).toMatchObject({ version: 1, id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-1' });
+    expect(record).toMatchObject({ version: 2, id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-1' });
     await log.append({ type: 'fixture', value: 'effect' });
     const preparation = await first.store.writePreparation({
-      version: 1,
+      version: 2,
       prepared: preparedFor('workshop-x1c', 'prepared-1', '2026-09-14T00:10:00.000Z'),
       providerId: 'bambu',
       configuration: { plate: 1 },
       providerData: { memberMd5: 'fixture' },
     });
-    const request = await first.store.writeRequest(requestFor('workshop-x1c', 'request-1'));
+    const job = await first.store.writeJob(jobFor('workshop-x1c', 'request-1'));
     await first.close();
 
     const machine = join(root, 'workshop-x1c');
     expect(await mode(machine)).toBe(0o700);
     expect(await mode(join(machine, 'preparations'))).toBe(0o700);
-    expect(await mode(join(machine, 'requests'))).toBe(0o700);
+    expect(await mode(join(machine, 'jobs'))).toBe(0o700);
     for (const file of [
       join(root, 'store.json'),
       join(machine, 'machine.json'),
-      join(machine, 'operations.jsonl'),
+      join(machine, 'journal.jsonl'),
       join(machine, 'preparations', 'prepared-1.json'),
-      join(machine, 'requests', 'request-1.json'),
+      join(machine, 'jobs', 'request-1.json'),
     ]) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- each file is checked on its own.
       expect(await mode(file), file).toBe(0o600);
     }
     expect(JSON.parse(await readFile(join(root, 'store.json'), 'utf8'))).toEqual({ version: 1 });
     expect(JSON.parse(await readFile(join(machine, 'machine.json'), 'utf8'))).toMatchObject({
-      version: 1,
+      version: 2,
       id: 'workshop-x1c',
       name: 'Workshop X1C',
       connection: { secretRef: 'vault:machine/bambu/physical-1' },
       last: { descriptor: { id: 'physical-1' }, observedAt },
     });
-    expect(JSON.parse(await readFile(join(machine, 'requests', 'request-1.json'), 'utf8'))).toEqual({
-      version: 1,
-      request,
-    });
+    expect(JSON.parse(await readFile(join(machine, 'jobs', 'request-1.json'), 'utf8'))).toEqual(job);
     const leftovers = await readdir(machine);
     expect(leftovers.filter((name) => name.endsWith('.tmp'))).toEqual([]);
 
@@ -348,7 +335,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const [loaded] = second.store.machines;
     expect(loaded?.record).toEqual(record);
     expect(loaded?.preparations).toEqual([preparation]);
-    expect(loaded?.requests).toEqual([request]);
+    expect(loaded?.jobs).toEqual([job]);
     expect(loaded?.operations.status).toBe('open');
     if (loaded?.operations.status === 'open') {
       await expect(loaded.operations.log.replay({ cursor: 0, limit: 10 })).resolves.toMatchObject({
@@ -356,6 +343,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
       });
     }
     expect(second.onError).not.toHaveBeenCalled();
+    const testing = await second.store.writeMachine({ ...record, testing: true });
+    await second.close();
+    const third = await openStore(root);
+    expect(third.store.machines[0]?.record).toEqual(testing);
+    expect(testing.testing).toBe(true);
   });
 
   it('should give each new machine the first free slug of its name and keep the name', async () => {
@@ -404,26 +396,26 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const root = await temporaryDirectory();
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    const escaping = requestFor('workshop-x1c', '../../escape');
-    await first.store.writeRequest(escaping);
+    const escaping = jobFor('workshop-x1c', '../../escape');
+    await first.store.writeJob(escaping);
     await first.close();
-    expect(await readdir(join(root, 'workshop-x1c', 'requests'))).toEqual([machineStoreFileName('../../escape')]);
+    expect(await readdir(join(root, 'workshop-x1c', 'jobs'))).toEqual([machineStoreFileName('../../escape')]);
     expect(await sortedEntries(root)).toEqual(['authority', 'store.json', 'workshop-x1c']);
     const second = await openStore(root);
-    expect(second.store.machines[0]?.requests).toEqual([escaping]);
+    expect(second.store.machines[0]?.jobs).toEqual([escaping]);
   });
 
-  it('should keep two request ids that differ only in case apart', async () => {
+  it('should keep two job ids that differ only in case apart', async () => {
     const root = await temporaryDirectory();
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    const upper = await first.store.writeRequest(requestFor('workshop-x1c', 'job-A', 'started'));
-    const lower = await first.store.writeRequest(requestFor('workshop-x1c', 'job-a'));
+    const upper = await first.store.writeJob(jobFor('workshop-x1c', 'job-A', 'started'));
+    const lower = await first.store.writeJob(jobFor('workshop-x1c', 'job-a'));
     await first.close();
-    expect(await sortedEntries(join(root, 'workshop-x1c', 'requests'))).toHaveLength(2);
+    expect(await sortedEntries(join(root, 'workshop-x1c', 'jobs'))).toHaveLength(2);
     const second = await openStore(root);
-    expect(second.store.machines[0]?.requests).toEqual(expect.arrayContaining([upper, lower]));
-    expect(second.store.machines[0]?.requests).toHaveLength(2);
+    expect(second.store.machines[0]?.jobs).toEqual(expect.arrayContaining([upper, lower]));
+    expect(second.store.machines[0]?.jobs).toHaveLength(2);
     expect(second.onError).not.toHaveBeenCalled();
   });
 
@@ -433,56 +425,50 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Printer A', 'physical-a'));
     await first.store.createMachine(bindingFor('Printer B', 'physical-b'));
-    await first.store.writeRequest(requestFor('printer-a', 'request-1'));
+    await first.store.writeJob(jobFor('printer-a', 'request-1'));
     await first.store.writePreparation({
-      version: 1,
+      version: 2,
       prepared: preparedFor('printer-a', 'prepared-1', '2026-09-14T00:10:00.000Z'),
       providerId: 'bambu',
       configuration: {},
       providerData: {},
     });
     await first.close();
-    const requests = join(root, 'printer-a', 'requests');
+    const requests = join(root, 'printer-a', 'jobs');
     await writeFile(join(requests, 'request-1.json'), 'not json');
     await writeFile(join(root, 'printer-b', 'machine.json'), '{"version":2}');
     await writeFile(join(root, 'printer-a', 'preparations', 'prepared-1.json'), '{"version":1}');
     // A valid record reached through a link is refused like any other.
-    await writeFile(
-      join(outside, 'request-2.json'),
-      JSON.stringify({ version: 1, request: requestFor('printer-a', 'request-2') }),
-    );
+    await writeFile(join(outside, 'request-2.json'), JSON.stringify(jobFor('printer-a', 'request-2')));
     await symlink(join(outside, 'request-2.json'), join(requests, 'request-2.json'));
-    // A request filed under the wrong name is refused too: its file name is not its id.
-    await writeFile(
-      join(requests, 'request-9.json'),
-      JSON.stringify({ version: 1, request: requestFor('printer-a', 'request-3') }),
-    );
+    // A job filed under the wrong name is refused too: its file name is not its id.
+    await writeFile(join(requests, 'request-9.json'), JSON.stringify(jobFor('printer-a', 'request-3')));
 
     const second = await openStore(root);
     expect(second.store.machines.map(({ record }) => record.id)).toEqual(['printer-a']);
-    expect(second.store.machines[0]?.requests).toEqual([]);
+    expect(second.store.machines[0]?.jobs).toEqual([]);
     expect(second.store.machines[0]?.preparations).toEqual([]);
     expect(invalidPaths(second.onError).toSorted()).toEqual([
+      'printer-a/jobs/request-1.json',
+      'printer-a/jobs/request-2.json',
+      'printer-a/jobs/request-9.json',
       'printer-a/preparations/prepared-1.json',
-      'printer-a/requests/request-1.json',
-      'printer-a/requests/request-2.json',
-      'printer-a/requests/request-9.json',
       'printer-b/machine.json',
     ]);
-    await expect(second.store.writeRequest(requestFor('printer-a', 'request-1'))).rejects.toThrow(
+    await expect(second.store.writeJob(jobFor('printer-a', 'request-1'))).rejects.toThrow(
       'MACHINE_STORE_RECORD_INVALID',
     );
-    await expect(second.store.writeRequest(requestFor('printer-b', 'request-4'))).rejects.toThrow(
+    await expect(second.store.writeJob(jobFor('printer-b', 'request-4'))).rejects.toThrow(
       'MACHINE_STORE_UNKNOWN_MACHINE',
     );
-    await second.store.writeRequest(requestFor('printer-a', 'request-5'));
+    await second.store.writeJob(jobFor('printer-a', 'request-5'));
     expect(await readFile(join(requests, 'request-1.json'), 'utf8')).toBe('not json');
     expect(await readFile(join(root, 'printer-b', 'machine.json'), 'utf8')).toBe('{"version":2}');
     const link = await lstat(join(requests, 'request-2.json'));
     expect(link.isSymbolicLink()).toBe(true);
   });
 
-  it('should refuse a machine.json whose last-known identity has an unknown key or an out-of-bounds value', async () => {
+  it('should drop a last-known identity with an unknown key or an out-of-bounds value and keep its binding', async () => {
     const root = await temporaryDirectory();
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Printer A', 'physical-a'));
@@ -496,25 +482,59 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
       await writeFile(path, edited);
       return edited;
     };
-    const unknownKey = await edit('printer-a', '"bedTypes": [', '"extra": true,\n      "bedTypes": [');
+    const unknownKey = await edit('printer-a', '"firmware": ', '"extra": true,\n      "firmware": ');
     const oversized = await edit('printer-b', '"name": "Fixture X1C"', `"name": "${'x'.repeat(257)}"`);
     const second = await openStore(root);
-    expect(second.store.machines).toEqual([]);
-    expect(invalidPaths(second.onError).toSorted()).toEqual(['printer-a/machine.json', 'printer-b/machine.json']);
+    expect(second.store.machines.map(({ record }) => [record.id, record.last])).toEqual([
+      ['printer-a', undefined],
+      ['printer-b', undefined],
+    ]);
+    expect(second.onError).not.toHaveBeenCalled();
     expect(await readFile(join(root, 'printer-a', 'machine.json'), 'utf8')).toBe(unknownKey);
     expect(await readFile(join(root, 'printer-b', 'machine.json'), 'utf8')).toBe(oversized);
+  });
+
+  it('should read a version 1 binding stored before endpoints named their transport, and write it as version 2', async () => {
+    const root = await temporaryDirectory();
+    const first = await openStore(root);
+    await first.store.createMachine(bindingFor('Printer A', 'physical-a'));
+    await first.close();
+    const path = join(root, 'printer-a', 'machine.json');
+    const stored = JSON.parse(await readFile(path, 'utf8')) as {
+      version: number;
+      candidate: { endpoint: Record<string, unknown> };
+    };
+    stored.version = 1;
+    delete stored.candidate.endpoint['transport'];
+    await writeFile(path, JSON.stringify(stored, undefined, 2));
+    const second = await openStore(root);
+    expect(second.store.machines.map(({ record }) => record.candidate.endpoint)).toEqual([
+      { transport: 'network', address: 'candidate-physical-a.local', interface: 'manual' },
+    ]);
+    expect(second.onError).not.toHaveBeenCalled();
+    const [machine] = second.store.machines;
+    if (!machine) {
+      throw new Error('expected the binding');
+    }
+    await second.store.writeMachine({ ...machine.record, name: 'Printer A' });
+    await second.close();
+    // An older Tau reads only version 1, so it refuses the rewritten record by its version and keeps the file.
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+      version: 2,
+      candidate: { endpoint: { transport: 'network' } },
+    });
   });
 
   it("should refuse a FIFO in a record's place without waiting on it", async () => {
     const root = await temporaryDirectory();
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    await first.store.writeRequest(requestFor('workshop-x1c', 'request-1'));
+    await first.store.writeJob(jobFor('workshop-x1c', 'request-1'));
     await first.close();
-    execFileSync('mkfifo', [join(root, 'workshop-x1c', 'requests', 'request-2.json')]);
+    execFileSync('mkfifo', [join(root, 'workshop-x1c', 'jobs', 'request-2.json')]);
     const second = await openStore(root);
-    expect(second.store.machines[0]?.requests.map(({ requestId }) => requestId)).toEqual(['request-1']);
-    expect(invalidPaths(second.onError)).toEqual(['workshop-x1c/requests/request-2.json']);
+    expect(second.store.machines[0]?.jobs.map(({ jobId }) => jobId)).toEqual(['request-1']);
+    expect(invalidPaths(second.onError)).toEqual(['workshop-x1c/jobs/request-2.json']);
   });
 
   it('should delete expired preparations when it opens', async () => {
@@ -527,7 +547,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     ] as const) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- preparations are written one at a time.
       await first.store.writePreparation({
-        version: 1,
+        version: 2,
         prepared: preparedFor('workshop-x1c', preparedId, expiresAt),
         providerId: 'bambu',
         configuration: {},
@@ -565,12 +585,12 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const removedAt = Date.parse(observedAt);
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    await first.store.writeRequest(requestFor('workshop-x1c', 'request-1', 'started'));
+    await first.store.writeJob(jobFor('workshop-x1c', 'request-1', 'started'));
     await first.store.removeMachine('workshop-x1c');
     const history = join(root, `workshop-x1c.removed-${removedAt}`);
-    expect(await sortedEntries(history)).toEqual(['machine.json', 'operations.jsonl', 'requests']);
-    expect(await readdir(join(history, 'requests'))).toEqual(['request-1.json']);
-    await expect(first.store.writeRequest(requestFor('workshop-x1c', 'request-2'))).rejects.toThrow(
+    expect(await sortedEntries(history)).toEqual(['jobs', 'journal.jsonl', 'machine.json']);
+    expect(await readdir(join(history, 'jobs'))).toEqual(['request-1.json']);
+    await expect(first.store.writeJob(jobFor('workshop-x1c', 'request-2'))).rejects.toThrow(
       'MACHINE_STORE_UNKNOWN_MACHINE',
     );
     // The id is free again, and a second removal in the same millisecond keeps both histories.
@@ -596,7 +616,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     // The crash came mid-write: only the temporary file of the first `machine.json` is there.
     await writeFile(join(root, 'half-bound', '.machine.json.00000000-0000-4000-8000-000000000000.tmp'), '{"version":1');
     await mkdir(join(root, 'orphan'), { mode: 0o700 });
-    await writeFile(join(root, 'orphan', 'operations.jsonl'), '');
+    await writeFile(join(root, 'orphan', 'journal.jsonl'), '');
     const { store, onError } = await openStore(root);
     expect(store.machines).toEqual([]);
     expect(invalidPaths(onError)).toEqual(['orphan/machine.json']);
@@ -618,7 +638,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
       await log.append({ type: 'fixture', value: name });
     }
     await first.close();
-    const corrupt = join(root, 'printer-a', 'operations.jsonl');
+    const corrupt = join(root, 'printer-a', 'journal.jsonl');
     const bytes = `not a frame\n${await readFile(corrupt, 'utf8')}`;
     await writeFile(corrupt, bytes);
     const second = await openStore(root);
@@ -638,18 +658,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const before = [await readFile(storeJournal), await readFile(desktopJournal)];
 
     const first = await openStore(root, { legacyStoreRoots: [desktop, root], now: '2026-09-26T08:00:00.000Z' });
-    const imported = first.store.machines.map(({ record, requests }) => ({
+    const imported = first.store.machines.map(({ record, jobs }) => ({
       id: record.id,
       name: record.name,
       physicalId: record.physicalId,
       last: record.last?.descriptor.id,
-      requests: requests.length,
+      jobs: jobs.length,
     }));
     expect(imported).toEqual([
-      { id: 'desk-x1c', name: 'Desk X1C', physicalId: 'physical-desktop', last: undefined, requests: 0 },
-      { id: 'studio-x1c', name: 'studio-x1c', physicalId: 'physical-project', last: undefined, requests: 0 },
-      { id: 'twice-late', name: 'Twice late', physicalId: 'physical-twice', last: undefined, requests: 0 },
-      { id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-host', last: 'physical-host', requests: 0 },
+      { id: 'desk-x1c', name: 'Desk X1C', physicalId: 'physical-desktop', last: undefined, jobs: 0 },
+      { id: 'studio-x1c', name: 'studio-x1c', physicalId: 'physical-project', last: undefined, jobs: 0 },
+      { id: 'twice-late', name: 'Twice late', physicalId: 'physical-twice', last: undefined, jobs: 0 },
+      { id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-host', last: 'physical-host', jobs: 0 },
     ]);
     expect(first.store.machines.find(({ record }) => record.id === 'workshop-x1c')?.record).toMatchObject({
       boundAt: observedAt,
@@ -708,7 +728,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           freshness,
           id: descriptor.id,
           firmware: descriptor.firmware,
-          operations: descriptor.operations.length,
+          actions: descriptor.capabilities.actions.length,
           connection: reported.connection,
         })),
       ).toEqual([
@@ -718,7 +738,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           freshness: 'stale',
           id: 'physical-desktop',
           firmware: 'unknown',
-          operations: 0,
+          actions: 0,
           connection: 'disconnected',
         },
         {
@@ -727,7 +747,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           freshness: 'stale',
           id: 'physical-project',
           firmware: 'unknown',
-          operations: 0,
+          actions: 0,
           connection: 'disconnected',
         },
         {
@@ -736,7 +756,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           freshness: 'stale',
           id: 'physical-twice',
           firmware: 'unknown',
-          operations: 0,
+          actions: 0,
           connection: 'disconnected',
         },
         {
@@ -744,8 +764,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           name: 'Workshop X1C',
           freshness: 'stale',
           id: 'physical-host',
-          firmware: '01.08.02.00',
-          operations: 1,
+          firmware: '01.00.00.00',
+          actions: 4,
           connection: 'connected',
         },
       ]);
@@ -796,7 +816,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const root = await temporaryDirectory();
     await writeLegacyJournal(root, [
       legacyBinding('Workshop X1C', 'physical-1'),
-      {
+      plainJson({
         type: 'machine-directory-upserted',
         hostId: 'host',
         authorityId: 'authority',
@@ -809,7 +829,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
           snapshot,
           freshness: 'current',
         },
-      },
+      }),
       legacyBinding('Garage X1C', 'physical-2'),
     ]);
     await initializeStore(root);
@@ -826,7 +846,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
       ['workshop-x1c', 'physical-1'],
     ]);
     expect(await readFile(join(root, 'workshop-x1c', 'machine.json'))).toEqual(written);
-    expect(await sortedEntries(join(root, 'garage-x1c'))).toEqual(['machine.json', 'operations.jsonl']);
+    expect(await sortedEntries(join(root, 'garage-x1c'))).toEqual(['journal.jsonl', 'machine.json']);
     expect(second.onError).not.toHaveBeenCalled();
     await second.close();
     const third = await openStore(root);

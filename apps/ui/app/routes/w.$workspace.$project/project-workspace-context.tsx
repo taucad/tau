@@ -39,6 +39,9 @@ export type WorkbenchPanelId =
 export type WorkbenchUtilityPanelId = Exclude<WorkbenchPanelId, 'files'>;
 
 type ProjectWorkspaceContextValue = {
+  /** Survives Dockview header replacement during reviewed layout recovery. */
+  registerRecordRecoveryFocus: React.RefCallback<HTMLButtonElement>;
+  restoreRecordRecoveryFocus: () => void;
   openPanel: (panelId: WorkbenchPanelId) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
@@ -147,27 +150,83 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   revisions: 'revisions',
 };
 
-export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+export function ProjectWorkspaceProvider({
+  children,
+  workbenchMode = 'responsive',
+  onWorkbenchOpen,
+}: {
+  readonly children: React.ReactNode;
+  readonly workbenchMode?: 'responsive' | 'pane';
+  readonly onWorkbenchOpen?: () => void;
+}): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const providerActiveRef = useRef(true);
+  const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
+  const pendingRecordRecoveryFocus = useRef(false);
+  const recordRecoveryHadFocus = useRef(false);
+  useEffect(() => {
+    const trackFocus = (event: FocusEvent): void => {
+      recordRecoveryHadFocus.current = event.target === recordRecoveryFocusRef.current;
+    };
+    // Dockview may detach a portal container before React releases its refs.
+    document.addEventListener('focusin', trackFocus);
+    return () => {
+      document.removeEventListener('focusin', trackFocus);
+    };
+  }, []);
+  // oxlint-disable-next-line no-restricted-types -- React callback refs receive null on detach.
+  const registerRecordRecoveryFocus = useCallback((node: HTMLButtonElement | null): void => {
+    if (
+      !node &&
+      (recordRecoveryFocusRef.current === document.activeElement ||
+        (recordRecoveryHadFocus.current && document.activeElement === document.body))
+    ) {
+      pendingRecordRecoveryFocus.current = true;
+    }
+    recordRecoveryFocusRef.current = node;
+    if (node && pendingRecordRecoveryFocus.current) {
+      pendingRecordRecoveryFocus.current = false;
+      // Header replacement may briefly leave focus on body. Respect any focus the person moved elsewhere.
+      if (document.activeElement === document.body && !node.closest('[inert]')) {
+        node.focus();
+      }
+    }
+  }, []);
+  const restoreRecordRecoveryFocus = useCallback((): void => {
+    if (!providerActiveRef.current) {
+      return;
+    }
+    const target = recordRecoveryFocusRef.current;
+    pendingRecordRecoveryFocus.current = !target?.isConnected;
+    if (target?.isConnected && !target.closest('[inert]')) {
+      target.focus();
+    }
+  }, []);
   const location = useLocation();
   const routeKey = location.key;
   const isMobile = useIsMobile();
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const pendingFilesRef = useRef<string | undefined>(undefined);
+  const pendingPreviewPanel = useRef<{ route: string; panel: WorkbenchPanelId } | undefined>(undefined);
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
     if (committedRouteKeyRef.current !== routeKey) {
       pendingFilesRef.current = undefined;
+      pendingPreviewPanel.current = undefined;
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
+      pendingRecordRecoveryFocus.current = false;
+      recordRecoveryHadFocus.current = false;
     }
   }, [routeKey]);
-  const providerActiveRef = useRef(true);
   useLayoutEffect(() => {
     providerActiveRef.current = true;
     return () => {
       providerActiveRef.current = false;
+      pendingRecordRecoveryFocus.current = false;
+      recordRecoveryHadFocus.current = false;
+      pendingPreviewPanel.current = undefined;
       pendingFilesRef.current = undefined;
     };
   }, []);
@@ -261,6 +320,15 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const openPanel = useCallback(
     (panelId: WorkbenchPanelId) => {
       pendingFilesRef.current = undefined;
+      if (workbenchMode === 'pane') {
+        onWorkbenchOpen?.();
+        if (openerRef.current) {
+          openerRef.current(panelId);
+        } else {
+          pendingPreviewPanel.current = { route: routeKey, panel: panelId };
+        }
+        return;
+      }
       if (isMobile) {
         const mobilePanel = mobilePanelByWorkbenchPanel[panelId];
         if (mobilePanel) {
@@ -277,7 +345,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
         layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
       }
     },
-    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey],
+    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],
   );
 
   const connectWorkbench = useCallback(
@@ -286,6 +354,11 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
         return () => undefined;
       }
       openerRef.current = opener;
+      const pendingPreview = pendingPreviewPanel.current;
+      pendingPreviewPanel.current = undefined;
+      if (pendingPreview?.route === routeKey) {
+        opener(pendingPreview.panel);
+      }
       const pendingFiles = pendingFilesRef.current;
       pendingFilesRef.current = undefined;
       if (pendingFiles !== undefined && pendingFiles === routeKey) {
@@ -405,8 +478,26 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   }, [editorRef, openPanel]);
 
   const value = useMemo(
-    () => ({ openPanel, setWorkbenchOpen, setChatOpen, connectWorkbench, registerLayoutController, layoutController }),
-    [connectWorkbench, layoutController, openPanel, registerLayoutController, setChatOpen, setWorkbenchOpen],
+    () => ({
+      openPanel,
+      setWorkbenchOpen,
+      setChatOpen,
+      connectWorkbench,
+      registerLayoutController,
+      layoutController,
+      registerRecordRecoveryFocus,
+      restoreRecordRecoveryFocus,
+    }),
+    [
+      connectWorkbench,
+      layoutController,
+      openPanel,
+      registerLayoutController,
+      setChatOpen,
+      setWorkbenchOpen,
+      registerRecordRecoveryFocus,
+      restoreRecordRecoveryFocus,
+    ],
   );
   return (
     <ProjectWorkspaceContext.Provider value={value}>

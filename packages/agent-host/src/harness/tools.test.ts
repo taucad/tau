@@ -118,7 +118,7 @@ describe('EagerDispatch', () => {
     }));
     const seen: Array<HostToolInvocation['approve']> = [];
     const registry: ToolRegistry = {
-      list: () => [{ name: 'request_print', description: 'Print', inputSchema: { type: 'object' } }],
+      list: () => [{ name: 'request_job', description: 'Request a job', inputSchema: { type: 'object' } }],
       invoke: async (invocation) => {
         seen.push(invocation.approve);
         return { content: null, isError: false };

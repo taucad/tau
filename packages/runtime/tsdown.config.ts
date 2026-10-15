@@ -11,7 +11,7 @@ export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; 
     rename: 'LICENSE',
   },
   {
-    from: '../../license-deps',
+    from: '../../docs/licensing/third-party-licenses.md',
     to: outDirectory,
     rename: 'THIRD_PARTY_LICENSES.md',
   },
@@ -36,6 +36,7 @@ const baseConfig: UserConfig = {
     'src/machines/settings.ts',
     'src/host/index.ts',
     'src/host/node.ts',
+    'src/preparation/node.ts',
     'src/types/index.ts',
     'src/plugins/plugin-entry.ts',
     'src/plugins/kernel-plugin-entry.ts',

@@ -24,6 +24,7 @@ import {
   Menu,
   MenuItem,
   net,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   screen,
@@ -36,11 +37,13 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
   discoverAcpAgents,
   externalAgentDescriptors,
+  keepAwakeWhileStreaming,
   projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
@@ -112,7 +115,7 @@ import {
   slicersChannels,
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
-import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
+import type { AppIconTheme, DesktopMachineBindingFailure } from '#shared/desktop-bootstrap.js';
 import {
   generatedImageIpcChannel,
   isQuickLookEnabled,
@@ -252,11 +255,13 @@ const quitMarginMilliseconds = 3000;
  * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
  * rule 9's nesting holds whatever those bounds become: the host's reason
  * lands before this wait's. Projects close in parallel, so the per-project
- * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ * bound is the whole bound. The utility's quiesce first waits for machine job
+ * starts already admitted, before any project closes, so that wait adds on.
+ * After it the durable queue is the guarantee (D28).
  *
  * @internal
  */
-export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + machineStartWaitMilliseconds + quitMarginMilliseconds;
 
 /*
  * The page's own close steps before its sync flush: `cancelRuns`, then
@@ -275,6 +280,19 @@ const rendererCloseStepsMilliseconds = 2 * 10_000;
  * should hear "timed out" rather than wait on a spinner.
  */
 const machineBindingMilliseconds = 60_000;
+
+/**
+ * How long quit waits for the utility to say whether a program is streaming. The utility first quiesces the machine
+ * host, which waits up to {@link machineStartWaitMilliseconds} for job starts already admitted, so this bound sits
+ * above that wait.
+ */
+const machineStreamingMilliseconds = machineStartWaitMilliseconds + 2000;
+
+/**
+ * How often main asks whether a program is streaming, to keep the computer awake while one does: well inside the
+ * shortest idle-sleep timer an operating system offers (one minute).
+ */
+const keepAwakeIntervalMilliseconds = 20_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -721,6 +739,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
   });
+  /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
+  const stopKeepingAwake = keepAwakeWhileStreaming({
+    streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
+    blocker: {
+      hold: () => {
+        const id = powerSaveBlocker.start('prevent-app-suspension');
+        return () => {
+          powerSaveBlocker.stop(id);
+        };
+      },
+    },
+    intervalMilliseconds: keepAwakeIntervalMilliseconds,
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
   const agentHostSessionInput = (
     event: IpcMainInvokeEvent,
     payload: unknown,
@@ -766,14 +800,28 @@ const bootstrapElectronApp = async (): Promise<void> => {
     ) {
       throw new Error('Desktop shell refused invalid machine binding completion.');
     }
-    return services.completeMachineBinding(
-      {
-        ceremonyId,
-        ...(address === undefined ? {} : { address }),
-        ...(accessCode === undefined ? {} : { accessCode }),
-      },
-      machineBindingMilliseconds,
-    );
+    try {
+      return await services.completeMachineBinding(
+        {
+          ceremonyId,
+          ...(address === undefined ? {} : { address }),
+          ...(accessCode === undefined ? {} : { accessCode }),
+        },
+        machineBindingMilliseconds,
+      );
+    } catch (error) {
+      /* Resolved, not thrown: an error crossing the context bridge keeps only its message, and the host's typed code
+       * is what the renderer reads. */
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      return {
+        status: 'failed',
+        ...(code === undefined ? {} : { code }),
+        message: error instanceof Error ? error.message : String(error),
+      } satisfies DesktopMachineBindingFailure;
+    }
   });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
@@ -1109,8 +1157,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
        * wrong directory is worse than no agent host. Machines need no root:
-       * printers belong to the per-user store, and a print request names its
-       * own project. */
+       * printers belong to the per-user store, and a job names its own
+       * project. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');
@@ -1360,7 +1408,47 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     return response === 1;
   };
+  /**
+   * Q-streamed-host: a program this app feeds line by line would stop mid-run, so there is no *Quit anyway*.
+   *
+   * @param machines - The machines a streamed run is feeding.
+   */
+  const refuseWhileStreaming = async (machines: readonly string[]): Promise<void> => {
+    log.log('info', 'main.quit-refused-streaming', { machines: machines.length });
+    await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `A program is streaming to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(machines)}; stop it first.`,
+      detail: 'Tau sends the program as the machine runs it. Quitting now would stop the machine mid-run.',
+    });
+  };
+  /**
+   * The person decides when Tau could not read whether a program is streaming: never a silent quit.
+   *
+   * @returns Whether to quit regardless.
+   */
+  const askToQuitWhileStreamingUnknown = async (): Promise<boolean> => {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: "Tau can't tell whether a program is streaming to a machine.",
+      detail: 'If one is, quitting now would stop the machine mid-run. Check your machines before you quit.',
+    });
+    return response === 1;
+  };
   const executeShutdown = async (): Promise<boolean> => {
+    /* Quit is called off: Tau stays open, and the utility starts machine jobs again (its streaming answer held
+     * them, so the renderer could quiesce on an answer that stays true). */
+    const keepOpen = (): false => {
+      services.resumeMachineStarts();
+      quitting = false;
+      shutdown = undefined;
+      return false;
+    };
     try {
       /*
        * The quit hold (D31, W19).
@@ -1372,6 +1460,28 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * edits of a quit were recorded by nothing. A timeout or negative
        * acknowledgement leaves the app live so the same owners can retry.
        */
+      /*
+       * Q-streamed-host, before anything is quiesced: this app feeds a
+       * streamed program line by line for its whole run, so quitting would
+       * stop the machine mid-run. There is no *Quit anyway*; the person
+       * stops the program first. An unanswered question asks the person.
+       * From this question the utility starts no machine job until it
+       * closes or `keepOpen` calls the quit off, so "nothing streams" stays
+       * true while the renderer quiesces, which it cannot undo.
+       */
+      let streaming: readonly string[] | undefined;
+      try {
+        streaming = await services.streamingMachines(machineStreamingMilliseconds);
+      } catch (error) {
+        log.log('error', 'main.streaming-unknown', error);
+      }
+      const quitIfStreamingUnknown = streaming === undefined;
+      if (streaming === undefined ? !(await askToQuitWhileStreamingUnknown()) : streaming.length > 0) {
+        if (streaming !== undefined) {
+          await refuseWhileStreaming(streaming);
+        }
+        return keepOpen();
+      }
       /*
        * The renderer's half first (P49): the browser-side registry owns the
        * file manager, compute admission and every `chat-session`, and only
@@ -1385,12 +1495,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
         rendererOutcome === 'timeout' &&
         !(await askToQuitAnyway('This window did not finish closing its projects.'))
       ) {
-        quitting = false;
-        shutdown = undefined;
-        return false;
+        return keepOpen();
       }
       forced ||= rendererOutcome === 'timeout';
-      const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
+      let utilityOutcome = await services.quiesce(quitQuiesceMilliseconds, { quitIfStreamingUnknown });
+      if (utilityOutcome.status === 'streaming-unknown') {
+        log.log('error', 'main.streaming-unknown', utilityOutcome.message);
+        if (await askToQuitWhileStreamingUnknown()) {
+          utilityOutcome = await services.quiesce(quitQuiesceMilliseconds, { quitIfStreamingUnknown: true });
+        }
+      }
+      if (utilityOutcome.status === 'streaming' || utilityOutcome.status === 'streaming-unknown') {
+        if (utilityOutcome.status === 'streaming') {
+          await refuseWhileStreaming(utilityOutcome.machines);
+        }
+        return keepOpen();
+      }
       log.log(
         utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
         'main.quiesce',
@@ -1402,9 +1522,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         utilityOutcome.status !== 'no-utility' &&
         !(await askToQuitAnyway('Tau could not finish saving every open project.'))
       ) {
-        quitting = false;
-        shutdown = undefined;
-        return false;
+        return keepOpen();
       }
       try {
         showOpenFileImport = undefined;
@@ -1416,6 +1534,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       } catch (error) {
         log.log('error', 'main.shutdown', error);
       }
+      stopKeepingAwake();
       try {
         await services.dispose();
       } catch (error) {
@@ -1445,10 +1564,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       shutdownComplete = true;
       return true;
     } catch (error) {
-      quitting = false;
-      shutdown = undefined;
       log.log('error', 'main.shutdown', error);
-      return false;
+      return keepOpen();
     }
   };
   const prepareToQuit = async (): Promise<boolean> => {

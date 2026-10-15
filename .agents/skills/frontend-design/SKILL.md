@@ -6,7 +6,7 @@ license: Complete terms in LICENSE.txt
 
 # Frontend Design
 
-Read [DESIGN.md](../../../DESIGN.md) before designing. It owns Tau's visual
+Read [docs/policy/design-policy.md](../../../docs/policy/design-policy.md) before designing. It owns Tau's visual
 language, personas, progressive disclosure, visible affordances, copy and
 design/critique workflow. Follow its policy routes and use current product
 components and tokens.
@@ -18,5 +18,5 @@ images to a reviewer-accessible location and verify that they render in the PR;
 local file paths or screenshots shown only in chat do not satisfy this step.
 
 For a research canvas, compose [Create Canvas](../create-canvas/SKILL.md) for
-authoring, preview and evidence. Keep design requirements in DESIGN.md rather
+authoring, preview and evidence. Keep design requirements in docs/policy/design-policy.md rather
 than adding a second set here.

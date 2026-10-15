@@ -42,7 +42,7 @@ defaults:
 jobs:
   seed:
     name: S14 seed (producers, origin fetch, cache save)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - &write-scripts
@@ -753,7 +753,7 @@ jobs:
   s14:
     name: S14 ${{ matrix.role }} (restore or fetch, prepare, native suites)
     needs: seed
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -883,6 +883,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Keep macOS 15 deliberately: S15 compares older-host compatibility with the default build host.
         runner: [macos-15, macos-26]
     env:
       BOGUS_ROOT: /Users/runner/s15-bogus-dotnet-root

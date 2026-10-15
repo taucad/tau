@@ -65,14 +65,9 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
  * packages bundle into the SSR output.
  *
  * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
- *
- * `noExternal`: `@rjsf/*` ships bundled CJS whose named exports node's
- * cjs-module-lexer cannot see, so an external SSR import of
- * `customizeValidator` (and the `@rjsf/utils` names it re-imports) crashes the
- * server at boot.
  */
 export const uiSsrOptions = {
-  noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js', /^@rjsf\//u],
+  noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 

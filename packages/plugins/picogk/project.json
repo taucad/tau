@@ -10,8 +10,31 @@
         {
           "projects": ["desktop"],
           "target": "prepare-picogk-dotnet"
-        }
+        },
+        "prepare-layer"
       ]
+    },
+    "prepare-layer": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "prepare-picogk-dotnet"
+        }
+      ],
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts --target darwin-arm64 --layer"
+      }
+    },
+    "check-payload-urls": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node scripts/src/check-payload-urls.ts packages/plugins/picogk/tau-plugin.json"
+      }
     },
     "test-dotnet": {
       "executor": "nx:run-commands",

@@ -50,6 +50,8 @@ const options = {
   logger: createMockLogger(),
 };
 
+const workerArguments = ['--workspace', '/workspace', '--artifacts', '/artifacts', '--parent-pid', String(process.pid)];
+
 describe('PicogkSession', () => {
   it('configures the shared native session and validates protocol frames', async () => {
     const session = new PicogkSession(options);
@@ -127,6 +129,25 @@ describe('PicogkSession', () => {
     };
     expect(request.parseResult('value')).toBe('value');
     expect(() => request.parseResult('wrong')).toThrow();
+  });
+
+  it('runs the worker under the given runtime root, after the muxer arguments, and defaults the root to its directory', () => {
+    expect(
+      new PicogkSession({
+        ...options,
+        workerExecutable: '/closure/dotnet/dotnet',
+        workerArguments: ['/closure/tau-worker/Tau.PicoGK.Worker.dll'],
+        runtimePath: '/closure',
+      }),
+    ).toBeInstanceOf(PicogkSession);
+    expect(sessionMock.options).toMatchObject({
+      executablePath: '/closure/dotnet/dotnet',
+      runtimePath: '/closure',
+      arguments: ['/closure/tau-worker/Tau.PicoGK.Worker.dll', ...workerArguments],
+    });
+
+    expect(new PicogkSession({ ...options, workerExecutable: '/runtime/worker' })).toBeInstanceOf(PicogkSession);
+    expect(sessionMock.options).toMatchObject({ runtimePath: '/runtime', arguments: workerArguments });
   });
 
   it('maps worker issues and delegates artifact/lifecycle operations', async () => {

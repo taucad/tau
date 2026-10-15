@@ -61,7 +61,8 @@ describe('DesktopTitlebarControls', () => {
       'bg-transparent',
       'pl-(--desktop-titlebar-inset)',
       'pr-1',
-      '[app-region:no-drag]',
+      '[&_button]:[app-region:no-drag]',
+      '[&_a]:[app-region:no-drag]',
     );
     expect(controls).not.toHaveClass('pl-22', 'pr-2');
     expect(controls).not.toHaveClass('border-b', '[app-region:drag]');

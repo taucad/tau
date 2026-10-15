@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 6.2 kB brotli on 2026-09-03",
+    "name": "total (ESM JS) \u2014 measured 8.28 kB brotli on 2026-10-15; build123dOptionsFromClosure and the sandboxed seal step add 2.08 kB",
     "path": "dist/**/*.mjs",
-    "limit": "7 kB"
+    "limit": "8.5 kB"
   }
 ]

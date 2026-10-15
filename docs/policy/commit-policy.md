@@ -207,7 +207,7 @@ Each commit should represent a single, coherent change. Do not combine unrelated
 
 ### Automated
 
-- **`commit-msg` hook** (`.husky/commit-msg`): Validates scope against known project names at commit time. Rejects invalid scopes with the full list of valid options.
+- **`commit-msg` hook** (`tools/git-hooks/commit-msg`): Validates scope against known project names at commit time. Rejects invalid scopes with the full list of valid options.
 - **`scripts/src/validate-project-names.ts`**: CI check ensuring `project.json` names match directory and `package.json` names — keeps the scope source of truth consistent.
 
 ### AI-Assisted

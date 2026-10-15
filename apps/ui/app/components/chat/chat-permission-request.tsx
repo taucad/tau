@@ -45,7 +45,9 @@ export function permissionContent(approval: AgentHostApproval): {
         ? isOpaque
           ? 'Ask the agent to describe this action before allowing it.'
           : undefined
-        : 'This starts a physical print.',
+        : approval.context.jobId === undefined
+          ? 'This acts on a physical machine.'
+          : 'This starts a job on a physical machine.',
   };
 }
 
@@ -55,11 +57,14 @@ export function ChatPermissionRequest({
   name,
   outcome,
   onRespond,
+  review,
 }: {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
+  /** Where the approval is given instead, when it cannot be given here; Deny still answers here. */
+  readonly review?: Readonly<{ label: string; onClick: () => void }> | undefined;
 }): React.JSX.Element {
   const isDebug = useFeature('tauDebug');
   const [isSending, setIsSending] = useState(false);
@@ -179,16 +184,22 @@ export function ChatPermissionRequest({
             ))
           ) : (
             <>
-              <Button
-                size='xs'
-                autoFocus
-                disabled={isSending}
-                onClick={() => {
-                  void respond(true);
-                }}
-              >
-                Approve
-              </Button>
+              {review ? (
+                <Button size='xs' autoFocus onClick={review.onClick}>
+                  {review.label}
+                </Button>
+              ) : (
+                <Button
+                  size='xs'
+                  autoFocus
+                  disabled={isSending}
+                  onClick={() => {
+                    void respond(true);
+                  }}
+                >
+                  Approve
+                </Button>
+              )}
               <Button
                 size='xs'
                 variant='outline'

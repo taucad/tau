@@ -1,5 +1,4 @@
-import type { MachineManifest } from '@taucad/runtime/machine';
-import type { Quantity } from '@taucad/units/quantity';
+import type { MachineFffProcess } from '@taucad/runtime/machine';
 import type { SliceBounds } from '#components/printer/printer-summary.js';
 
 const axes = ['X', 'Y', 'Z'] as const;
@@ -19,7 +18,7 @@ export type BuildVolumeFit =
  */
 export const fitsBuildVolume = (
   bounds: SliceBounds,
-  buildVolume: MachineManifest['geometry']['buildVolume'],
+  buildVolume: MachineFffProcess['geometry']['buildVolume'],
 ): BuildVolumeFit => {
   const limits = [buildVolume.x, buildVolume.y, buildVolume.z] as const;
   for (const [index, axis] of axes.entries()) {
@@ -56,7 +55,7 @@ export type PlateFit = BuildVolumeFit & Readonly<{ message: string }>;
  */
 export const fitsPlate = (
   summary: Readonly<{ bounds: SliceBounds; partBounds: SliceBounds | undefined }>,
-  buildVolume: MachineManifest['geometry']['buildVolume'],
+  buildVolume: MachineFffProcess['geometry']['buildVolume'],
 ): PlateFit => {
   // ponytail: skirts and brims are not part extrusions, so a brim past the plate edge passes; add their kinds if a
   // slicer ever places one there.
@@ -133,13 +132,6 @@ export const formatRemaining = (seconds: number): string => {
 export const formatFilament = (millimetres: number): string =>
   millimetres >= 1000 ? `${(millimetres / 1000).toFixed(1)} m` : `${String(Math.round(millimetres))} mm`;
 
-const unitSymbols: ReadonlyMap<string, string> = new Map([
-  ['Cel', '°C'],
-  ['mm', 'mm'],
-  ['m', 'm'],
-  ['%', '%'],
-]);
-
 /**
  * Who sliced an artifact, as the person reads it: "Bambu Studio 02.08.02.61".
  *
@@ -149,22 +141,6 @@ const unitSymbols: ReadonlyMap<string, string> = new Map([
  */
 export const formatProducer = (producer: Readonly<{ name: string; version?: string }>): string =>
   producer.version === undefined ? producer.name : `${producer.name} ${producer.version}`;
-
-/** A snapshot quantity or a manifest quantity: both carry a value and a UCUM unit code. @public */
-export type PrintQuantity = Quantity | Readonly<{ value: number; unit: string }>;
-
-/**
- * A native quantity in its own unit, rounded for reading: "215 °C", "0.4 mm".
- *
- * @param quantity - Any admitted quantity.
- * @returns The value and its unit symbol.
- * @public
- */
-export const formatQuantity = (quantity: PrintQuantity): string => {
-  const code = typeof quantity.unit === 'string' ? quantity.unit : quantity.unit.code;
-  const value = typeof quantity.value === 'number' ? Math.round(quantity.value * 100) / 100 : quantity.value;
-  return `${String(value)} ${unitSymbols.get(code) ?? code}`;
-};
 
 /**
  * A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one.
@@ -207,38 +183,3 @@ export const shortDigest = (digest: string): string => {
   const [algorithm, hex] = digest.split(':', 2);
   return hex === undefined ? digest : `${algorithm ?? ''}:${hex.slice(0, 8)}…`;
 };
-
-/**
- * The material slot as the printer labels it: unit letter plus slot number ("A1"), or "Ext" for the external spool.
- *
- * @param slot - The zero-based protocol slot.
- * @param manifest - The machine's material system, when known.
- * @returns "A1" for a multi-unit system, "Ext" for its external spool, "Slot 1" otherwise.
- * @public
- */
-export const materialSlotLabel = (slot: number, manifest: MachineManifest | undefined): string => {
-  if (slot === manifest?.materialSystem.externalSpoolSlot) {
-    return 'Ext';
-  }
-  const slotsPerUnit = manifest?.materialSystem.slotsPerUnit ?? 0;
-  if (slotsPerUnit <= 0) {
-    return `Slot ${String(slot + 1)}`;
-  }
-  const unit = Math.floor(slot / slotsPerUnit);
-  return `${String.fromCodePoint(65 + unit)}${String((slot % slotsPerUnit) + 1)}`;
-};
-
-/**
- * Where a material sits, for a sentence: "in A2 and A1", or "on the external spool".
- *
- * @param slots - The protocol slots, in the order the print names them.
- * @param manifest - The machine's material system, when known.
- * @returns The phrase that follows "PLA is loaded".
- * @public
- */
-export const materialSlotPlace = (slots: readonly number[], manifest: MachineManifest | undefined): string =>
-  slots.length === 1 && slots[0] === manifest?.materialSystem.externalSpoolSlot
-    ? 'on the external spool'
-    : `in ${new Intl.ListFormat('en', { type: 'conjunction' }).format(
-        slots.map((slot) => materialSlotLabel(slot, manifest)),
-      )}`;

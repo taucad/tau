@@ -10,7 +10,7 @@
  * It hosts four concerns, one dedicated port each. Renderer filesystem,
  * runtime filesystem, agent tools, and revision preparation all derive rooted
  * clients from one internal authority channel. The machines concern serves
- * the node machine host — the real Bambu provider beside the simulator — over
+ * the node machine host — the real Bambu, Grbl and Carvera providers beside their simulators — over
  * the same broker, from the per-user machine store every Tau host on this
  * computer shares; it needs no project. The agent host is ruling C3's
  * **launcher 2**: `createProjectHost` from `@taucad/host`, the same composition the
@@ -40,14 +40,15 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
-import { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
 import {
   completeMachineBinding,
   createMachineSecretStore,
   createNodeMachineRuntime,
   createProjectHostActor,
+  defaultMachineProviders,
   keyedResource,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   openSecretVault,
@@ -65,8 +66,9 @@ import type {
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
-import { createNodeMachineHost } from '@taucad/runtime/host/node';
-import type { NodeMachineHost } from '@taucad/runtime/host/node';
+import { createNodeMachineHost, MachineHostStartInFlightError } from '@taucad/runtime/host/node';
+import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
+import { machineChannelProtocolVersion, withMachineCode } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -120,6 +122,7 @@ type MachineHostServices = Readonly<{
   admission: HostAdmissionAuthority;
   identity: MachineHostIdentity;
   secrets: MachineSecretStore;
+  providers: CreateNodeMachineHostInput['providers'];
 }>;
 
 type RuntimeFileSystemDisposer = {
@@ -284,8 +287,10 @@ export type ServicesHostOptions = {
   /** Reply to main with one binding ceremony's outcome, or why it failed. */
   readonly machineBindingCompleted?: (
     requestId: string,
-    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string }>,
+    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string; code?: string }>,
   ) => void;
+  /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
+  readonly machinesStreaming?: (requestId: string, machines: readonly string[]) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -296,7 +301,27 @@ export type ServicesHostOptions = {
 /** Result returned to main after a graceful quiesce request. */
 export type ServicesHostQuiesceOutcome =
   | Readonly<{ type: 'quiesced' }>
-  | Readonly<{ type: 'quiesce-failed'; message: string }>;
+  | Readonly<{ type: 'quiesce-failed'; message: string }>
+  | QuiesceRefusal;
+
+/**
+ * Quiescence refused before anything closed (Q-streamed-host): a streamed run is feeding a machine, or this utility
+ * could not tell whether one is and main did not say the person chose to quit anyway.
+ */
+export type QuiesceRefusal =
+  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming'; machines: readonly string[] }>
+  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming-unknown'; message: string }>;
+
+/** What {@link ServicesHost.quiesce} throws when it refuses; nothing was closed, and a later quiesce asks again. */
+export class ServicesQuiesceRefusedError extends Error {
+  public readonly refusal: QuiesceRefusal;
+
+  public constructor(refusal: QuiesceRefusal) {
+    super(refusal.reason === 'streaming' ? 'A program is streaming to a machine.' : refusal.message);
+    this.name = 'ServicesQuiesceRefusedError';
+    this.refusal = refusal;
+  }
+}
 
 /** The services host, seen by its entry and by tests. */
 export type ServicesHost = {
@@ -313,8 +338,11 @@ export type ServicesHost = {
    * so closing it takes the `close` cut and then awaits W13's `awaitSyncSettled`
    * through `ProjectRevisions.release()`. This never reimplements that wait; it
    * is the one place that lets it finish before the process goes.
+   *
+   * Refused first, with nothing closed, while a streamed run feeds a machine, or while that cannot be read unless
+   * `quitIfStreamingUnknown` says the person chose to quit anyway ({@link ServicesQuiesceRefusedError}).
    */
-  quiesce(): Promise<void>;
+  quiesce(options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void>;
   /** Release project runtimes when the owning utility exits. */
   dispose(): void;
 };
@@ -341,6 +369,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     legacyMachinesDirectory,
     machineBindingCompleted,
     machinesDirectory,
+    machinesStreaming,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -380,13 +409,23 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let disposed = false;
   let quiescing = false;
   let quiescence: Promise<void> | undefined;
+  /* Main's quit question holds the machine host's starts from its read until quit closes the host or main calls the
+   * quit off (`machines-resume`), so the "nothing streams" main acts on before the renderer quiesces stays true:
+   * the utility's quiesce then has nothing new to find and never refuses after the renderer let go. */
+  let heldStarts: (() => void) | undefined;
+  /* Counts main's quit questions and call-offs, so a hold that lands after its quit was called off lets go at once. */
+  let quitAttempt = 0;
+  const releaseHeldStarts = (): void => {
+    heldStarts?.();
+    heldStarts = undefined;
+  };
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
-   * A print request names its project by `tau.json` id; these are the project
+   * A job names its project by `tau.json` id; these are the project
    * roots each id was last found at. */
   let machineHost: Promise<MachineHostServices> | undefined;
   let projectRoots = new Map<string, readonly string[]>();
@@ -551,7 +590,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /**
-   * Read a print request's file from the project it names: each of the
+   * Read a job's file from the project it names: each of the
    * project's roots, then its checkouts under the workspace's
    * `.tau/checkouts/<projectId>`, where a candidate turn's slice lands. Every
    * read goes through the internal authority, which refuses an unadmitted root.
@@ -590,13 +629,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const vault = openSecretVault({ directory: storeRoot, env: process.env });
     const secrets = createMachineSecretStore({ vault, legacyDirectory: storeRoot });
     log('machines.vault', { kind: vault.kind });
+    const providers = await defaultMachineProviders();
     const host = await createNodeMachineHost({
       storeRoot,
       ...(legacyMachinesDirectory === undefined ? {} : { legacyStoreRoots: [legacyMachinesDirectory] }),
       ...identity,
       admission,
-      providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()],
+      providers,
       runtime: createNodeMachineRuntime({
+        // ponytail: no native serial driver yet, so the real Grbl provider discovers nothing; add `serialport` here.
         secrets,
         /* The last scan's roots first; a miss, or roots that no longer hold
          * the file, rescans once, since projects appear, move and go. */
@@ -621,7 +662,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       },
     });
     log('machine-host-opened', { hostId: identity.hostId });
-    return { host, admission, identity, secrets };
+    return { host, admission, identity, secrets, providers };
   };
 
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
@@ -654,14 +695,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /**
+   * The machines a streamed run is feeding now, by name: the host's own answer (Q-streamed-host). Quitting would cut
+   * such a run mid-way, and main keeps the computer awake while one runs.
+   *
+   * @returns The machines' names; none while the store is not open here.
+   */
+  const streamingMachines = async (): Promise<readonly string[]> => {
+    const pending = machineHost;
+    if (pending === undefined) {
+      return [];
+    }
+    const { host } = await pending;
+    const streaming = await host.streamingMachines();
+    return streaming.map(({ name }) => name);
+  };
+
+  /**
    * Answer a machines connection the store cannot serve: every call and stream
    * rejects with `reason`, so the renderer can say why, and the channel closes
    * a moment after its first refusal, so the next call dials again and retries
    * the store.
    *
-   * ponytail: repeats the machines protocol's hello literal, which the client
-   * checks; if that protocol's version moves, a refusal reads as a failed
-   * handshake instead of its code.
+   * Says the machines protocol's own hello, so the client reads the refusal's
+   * code rather than a failed handshake.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
    * @param reason - Why the store is unavailable; its `code`, when it has one, travels with it.
@@ -682,7 +738,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const server = createChannelServer({
       port: wrapMessagePortMain(port),
       sessionKey: 'machines-refused',
-      hello: { server: 'machines', protocolVersion: 1 },
+      hello: { server: 'machines', protocolVersion: machineChannelProtocolVersion },
       impl: {
         call: async () => {
           throw refusal();
@@ -698,12 +754,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * Bind one renderer or agent connection to the machine host over the transferred port.
    *
    * A machines connection names no project: printers belong to the store, and a
-   * print request names its own project. While another Tau app owns the store,
+   * job names its own project. While another Tau app owns the store,
    * the connection is answered `MACHINE_STORE_OWNED_ELSEWHERE`.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
+   * @param caller - Who the session is for: the window's person, granted every operation, or the agent, whose
+   * session the host issues as an agent with {@link machineAgentGrants}, whatever its calls claim.
    */
-  const serveMachines = async (port: UtilityPort): Promise<void> => {
+  const serveMachines = async (port: UtilityPort, caller: 'person' | 'agent'): Promise<void> => {
     let services: MachineHostServices;
     try {
       services = await ensureMachineHost();
@@ -727,7 +785,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       port.close();
       return;
     }
-    const session = services.host.issueSession({ actor: { kind: 'user', id: 'desktop' }, grants: machineRouteGrants });
+    const session = services.host.issueSession(
+      caller === 'agent'
+        ? { actor: { kind: 'agent', id: 'tau' }, grants: machineAgentGrants }
+        : { actor: { kind: 'user', id: 'desktop' }, grants: machineRouteGrants },
+    );
     /* `@taucad/rpc` reports the port's death to the channel server, which
      * closes itself; the session is revoked with it. */
     const channel = services.host.serve({ port: wrapMessagePortMain(port), session });
@@ -825,7 +887,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return {
       workspaceRoot,
       /* The renderer's project id is the project's `tau.json` id: every slice
-       * `request_print` records names it, and the artifact reader finds the
+       * `request_job` records names it, and the artifact reader finds the
        * project by it. */
       projectId,
       /* Desktop projects are immediate children of their connected workspace.
@@ -925,9 +987,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     const route = `/mcp/${randomUUID()}`;
     /* The agent's own machines facet: served by this utility's machine host
-     * over an in-process channel once it opens, on a session of its own beside
-     * the window's. One per actor, so every host it opens offers the same one. */
-    const machines = localMachineFacet(async (port) => serveMachines(port));
+     * over an in-process channel once it opens, on an agent session of its own
+     * beside the window's. One per actor, so every host it opens offers the same one. */
+    const machines = localMachineFacet(async (port) => serveMachines(port, 'agent'));
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
@@ -1044,9 +1106,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to return to.
         void (async (): Promise<void> => {
           try {
-            await quiesce();
+            await quiesce({ quitIfStreamingUnknown: frame['quitIfStreamingUnknown'] === true });
             quiesced?.({ type: 'quiesced' });
           } catch (error) {
+            if (error instanceof ServicesQuiesceRefusedError) {
+              log('quiesce-refused', error.refusal);
+              quiesced?.(error.refusal);
+              return;
+            }
             const message = error instanceof Error ? error.message : String(error);
             log('quiesce-failed', message);
             quiesced?.({ type: 'quiesce-failed', message });
@@ -1073,6 +1140,77 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         return;
       }
+      case 'machines-streaming': {
+        const { requestId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the directory read.
+        void (async () => {
+          quitAttempt += 1;
+          const attempt = quitAttempt;
+          let resume: (() => void) | undefined;
+          /* Lets go of this question's own hold only; `resume` does nothing twice. */
+          const letGo = (): void => {
+            if (heldStarts === resume) {
+              heldStarts = undefined;
+            }
+            resume?.();
+          };
+          try {
+            const opened = machineHost;
+            if (opened !== undefined) {
+              const { host } = await opened;
+              resume = await host.quiesce();
+              if (attempt !== quitAttempt) {
+                letGo();
+                return;
+              }
+              releaseHeldStarts();
+              heldStarts = resume;
+            }
+            const machines = await streamingMachines();
+            if (machines.length > 0) {
+              /* Main refuses this quit; starts go on. */
+              letGo();
+            }
+            machinesStreaming?.(requestId, machines);
+          } catch (error) {
+            /* A start still in flight: its gate is still up, and this question lets go of it as of any other hold. */
+            if (error instanceof MachineHostStartInFlightError) {
+              resume = error.resume;
+            }
+            letGo();
+            /* Unanswered, main's bound decides; the reason stays in the log. */
+            log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
+          }
+        })();
+        return;
+      }
+      case 'machines-streaming-peek': {
+        /* Whether a program streams now, so main keeps the computer awake while one does. Unlike the quit
+         * question, it holds no start: it only reads. */
+        const { requestId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the directory read.
+        void (async () => {
+          try {
+            machinesStreaming?.(requestId, await streamingMachines());
+          } catch (error) {
+            /* Unanswered, main's bound decides and keeps what it held; the reason stays in the log. */
+            log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
+          }
+        })();
+        return;
+      }
+      case 'machines-resume': {
+        /* Main called its quit off after asking: admit starts again. */
+        quitAttempt += 1;
+        releaseHeldStarts();
+        return;
+      }
       case 'machine-binding-complete': {
         /* The secret half of the ceremony, and the only frame that carries a
          * code: pinned from the endpoint the provider connects to, never the
@@ -1084,10 +1222,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to await the ceremony.
         void (async () => {
           try {
-            const { host, secrets } = await ensureMachineHost();
+            const { host, secrets, providers } = await ensureMachineHost();
             const outcome = await completeMachineBinding({
               host,
               secrets,
+              providers,
               ceremonyId,
               ...(typeof accessCode === 'string' ? { accessCode } : {}),
               onEvent: ({ type, providerId }) => {
@@ -1096,9 +1235,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             });
             machineBindingCompleted?.(requestId, { outcome });
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            /* The ceremony's refusals are thrown as `new Error('<CODE>')`; main and the renderer read `code` only. */
+            const refusal = withMachineCode(error);
+            const message = refusal instanceof Error ? refusal.message : String(refusal);
+            const code =
+              typeof refusal === 'object' && refusal !== null && 'code' in refusal && typeof refusal.code === 'string'
+                ? refusal.code
+                : undefined;
             log('machines.binding-failed', message, 'warn');
-            machineBindingCompleted?.(requestId, { error: message });
+            machineBindingCompleted?.(requestId, { error: message, ...(code === undefined ? {} : { code }) });
           }
         })();
         return;
@@ -1226,8 +1371,46 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
   };
 
-  const beginQuiesce = async (): Promise<void> => {
+  const beginQuiesce = async (quitIfStreamingUnknown: boolean): Promise<void> => {
     quiescing = true;
+    /* Q-streamed-host, authoritative. When main's question held starts and found nothing streaming, that answer
+     * still holds: nothing to read again. Otherwise (the store opened since, or a quiesce main did not ask before)
+     * read here, with starts held, because a stream may have begun. Closing the machine host would cut it mid-run,
+     * so nothing closes; a later quit asks again. The machine host starts no job from here on, so none begins
+     * between the answer and its close. */
+    const held = heldStarts;
+    heldStarts = undefined;
+    let resumeStarts = held ?? ((): void => undefined);
+    const refuse = (refusal: QuiesceRefusal): never => {
+      resumeStarts();
+      quiescing = false;
+      quiescence = undefined;
+      throw new ServicesQuiesceRefusedError(refusal);
+    };
+    let streaming: readonly string[] = [];
+    try {
+      const opened = machineHost;
+      if (held === undefined && opened !== undefined) {
+        const { host } = await opened;
+        resumeStarts = await host.quiesce();
+      }
+      streaming = held === undefined ? await streamingMachines() : [];
+    } catch (error) {
+      /* A start still in flight keeps the gate up: *Quit anyway* closes with no start admitted; a refusal lifts it. */
+      if (error instanceof MachineHostStartInFlightError) {
+        resumeStarts = error.resume;
+      }
+      if (!quitIfStreamingUnknown) {
+        refuse({
+          type: 'quiesce-refused',
+          reason: 'streaming-unknown',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (streaming.length > 0) {
+      refuse({ type: 'quiesce-refused', reason: 'streaming', machines: streaming });
+    }
     const failures: unknown[] = [];
     const fileSystemDisposers = [...nodeFileSystemDisposers];
     const runtimeDisposers = [...runtimeFileSystemDisposers];
@@ -1263,10 +1446,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   // Deliberately non-async: every caller observes the same close settlement.
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
-  const quiesce = (): Promise<void> => {
+  const quiesce = (options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void> => {
     quiescence ??= disposed
       ? Promise.reject(new Error('The services host was forcibly disposed before graceful quiescence.'))
-      : beginQuiesce();
+      : beginQuiesce(options?.quitIfStreamingUnknown === true);
     return quiescence;
   };
 
@@ -1461,7 +1644,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         case 'machines': {
           // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
-          void serveMachines(port);
+          void serveMachines(port, 'person');
           return;
         }
         default: {

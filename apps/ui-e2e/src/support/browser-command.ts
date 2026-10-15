@@ -2878,7 +2878,7 @@ export const uiWriteArtifactChunk: BrowserCommand<
   if (bytes.length > 65_536) {
     throw new Error('Fixture artifact chunk exceeds bound.');
   }
-  await mkdir(outputRoot, { recursive: true });
+  await mkdir(resolve(destination, '..'), { recursive: true });
   const file = await open(destination, offset === 0 ? 'w' : 'r+');
   try {
     const stat = await file.stat();

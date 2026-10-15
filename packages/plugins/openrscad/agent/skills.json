@@ -4,7 +4,7 @@
       "slug": "cad-openscad",
       "name": "OpenSCAD authoring",
       "description": "Guides OpenSCAD model authoring in main.scad with idiomatic CSG and adaptive tessellation. Use when creating or editing .scad geometry.",
-      "version": "0.1.0-beta.1",
+      "version": "0.1.0-beta.2",
       "whenToUse": "Use when creating or editing .scad geometry.",
       "directory": "cad-openscad",
       "files": [

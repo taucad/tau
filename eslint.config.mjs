@@ -1117,7 +1117,7 @@ const config = [
           message:
             'Reserved engineering vocabulary in rendered copy (policy rule 1). Say it in product ' +
             'words: a Revision, a Branch, Current, Restore, Switch, Merge, Discard, Work in, Sync. ' +
-            'See docs/policy/revisions-policy.md (rule 1) and DESIGN.md.',
+            'See docs/policy/revisions-policy.md (rule 1) and docs/policy/design-policy.md.',
         },
         {
           selector: 'JSXText[value=/\\bHEAD\\b/]',

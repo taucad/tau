@@ -175,6 +175,8 @@ describe('startAgentServer', () => {
     });
     const session = Object.freeze({}) as HostSessionHandle;
     const host: NodeMachineHost = {
+      quiesce: async () => () => undefined,
+      streamingMachines: async () => [],
       issueSession: () => session,
       admitRoute: () => ({
         hostId: 'host',

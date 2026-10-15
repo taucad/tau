@@ -95,4 +95,4 @@ verdict. Platform support is limited to actually qualified compiled artifacts.
 commercial and competing products, subject to the Apache licence and notice requirements.
 
 Running this engine puts no license obligation on your specs, your models, or your verdicts. See
-[LICENSING.md](../../LICENSING.md) at the repository root for the repository-wide licensing policy.
+[Licensing](../../docs/licensing/overview.md) for the repository-wide licensing policy.

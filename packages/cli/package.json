@@ -1,6 +1,6 @@
 {
   "name": "@taucad/cli",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "CLI for @taucad/runtime",
   "type": "module",
   "sideEffects": [
@@ -71,8 +71,8 @@
     "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/assimp": "workspace:*",
-    "@taucad/bambu": "workspace:*",
     "@taucad/brep": "workspace:*",
+    "@taucad/build123d": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
@@ -105,6 +105,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/runtime-testing": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

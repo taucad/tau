@@ -1,7 +1,7 @@
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing.js';
 import type { FileChange } from '@nx/devkit';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,7 +30,7 @@ const copy = (source: string, target: string): void => {
   cpSync(resolve(repositoryRoot, source), target);
 };
 
-const compileGeneratedPlugins = async (): Promise<void> => {
+const checkGeneratedPlugins = async (mode: 'typecheck' | 'build'): Promise<void> => {
   const root = mkdtempSync(join(tmpdir(), 'tau-plugin-generator-'));
   try {
     const fixtureChanges = await Promise.all(
@@ -45,29 +45,42 @@ const compileGeneratedPlugins = async (): Promise<void> => {
       }),
     );
     const changes = fixtureChanges.flat();
-    copy('tsconfig.base.json', join(root, 'tsconfig.base.json'));
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'));
     const treeModule = (await import(nxTreeModule)) as {
       flushChanges: (root_: string, changes: FileChange[]) => void;
     };
     treeModule.flushChanges(root, changes);
+    copy('tools/typescript/base.json', join(root, 'tools/typescript/base.json'));
 
     for (const name of ['compiled-job', 'compiled-machine', 'compiled-mixed']) {
-      execFileSync(
-        join(repositoryRoot, 'node_modules/.bin/tsgo'),
-        [
-          '--noEmit',
-          '--composite',
-          'false',
-          '--incremental',
-          'false',
-          '--skipLibCheck',
-          'true',
-          '-p',
-          join(root, 'packages/plugins', name, 'tsconfig.spec.json'),
-        ],
-        { cwd: root, encoding: 'utf8', stdio: 'pipe' },
-      );
+      const projectRoot = join(root, 'packages/plugins', name);
+      if (mode === 'build') {
+        execFileSync(join(repositoryRoot, 'node_modules/.bin/tsdown'), [], {
+          cwd: projectRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+        expect(readFileSync(join(projectRoot, 'dist/index.d.mts'), 'utf8')).toContain(' as plugin');
+        continue;
+      }
+
+      for (const compiler of ['tsc', 'tsgo']) {
+        execFileSync(
+          join(repositoryRoot, 'node_modules/.bin', compiler),
+          [
+            '--noEmit',
+            '--composite',
+            'false',
+            '--incremental',
+            'false',
+            '--skipLibCheck',
+            'true',
+            '-p',
+            join(projectRoot, 'tsconfig.spec.json'),
+          ],
+          { cwd: root, encoding: 'utf8', stdio: 'pipe' },
+        );
+      }
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -298,9 +311,19 @@ describe('plugin generator', () => {
     expect(machine).toContain("from '@taucad/runtime/configuration'");
     expect(machine).toContain("from '@taucad/runtime/machine'");
     expect(machine).toContain("from 'zod'");
-    expect(machine).toContain('input.configuration.logicalId');
+    expect(machine).toContain('schema: z.object({}),');
+    expect(machine).not.toContain('logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
-    expect(machine).toContain('const manifest: MachineManifest = {');
+    expect(machine).toContain('const manifest: MachineManifestDefinition = {');
+    /* Manifest v3 under provider ABI 2: no actions declared yet, no holds, no jobs, and a declared stop. */
+    expect(machine).toContain('  version: 3,');
+    expect(machine).toContain('  actions: [],');
+    expect(machine).toContain('  holds: [],');
+    expect(machine).toContain("  jobs: { type: 'unsupported' },");
+    expect(machine).toContain(
+      "  stop: {\n    motion: 'halts',\n    spindle: 'none',\n    heaters: 'none',\n    position: 'kept',\n    recovery: [],\n  },",
+    );
+    expect(machine).toContain('  protocolVersion: 2,');
     expect(machine).toContain('  manifest,\n  bindingConfiguration,');
 
     const readme = readText(tree, `${root}/README.md`);
@@ -330,7 +353,12 @@ describe('plugin generator', () => {
 
   it.each([
     { role: 'job', factory: 'jobFixtureJob', projection: 'ExpandPluginJobs', schemaField: 'enabled' },
-    { role: 'machine', factory: 'machineFixtureMachine', projection: 'ExpandPluginMachines', schemaField: 'logicalId' },
+    {
+      role: 'machine',
+      factory: 'machineFixtureMachine',
+      projection: 'ExpandPluginMachines',
+      schemaField: 'machine.binding',
+    },
   ] as const)(
     'generates a callable schema-bearing $role-only toolkit',
     async ({ role, factory, projection, schemaField }) => {
@@ -409,8 +437,12 @@ describe('plugin generator', () => {
   });
 
   it('typechecks emitted job-only, machine-only, and mixed packages with negative schema witnesses', async () => {
-    await compileGeneratedPlugins();
-  }, 30_000);
+    await checkGeneratedPlugins('typecheck');
+  }, 120_000);
+
+  it('should build portable declarations for job-only, machine-only, and mixed packages', async () => {
+    await checkGeneratedPlugins('build');
+  }, 120_000);
 
   it('fails a full creation collision before changing existing bytes', async () => {
     const tree = createTreeWithEmptyWorkspace();

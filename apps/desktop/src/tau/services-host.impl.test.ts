@@ -1084,6 +1084,64 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
   const candidateCheckout = (cwd: string): TauHost.TurnCheckout => ({ cwd, mode: 'candidate', baseRevisionId: '' });
 
+  /* The agent's tools ride an agent session of their own (CA-2): a person's acts are not theirs to call. */
+  it("should serve the agent tools' machines on an agent session that reads but refuses every person's act", async () => {
+    /* The desktop picks the keychain on macOS; no test may touch a person's keychain. */
+    vi.stubEnv('TAU_SECRET_VAULT', 'file');
+    try {
+      const machinesDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-machines-'));
+      workspaces.push(machinesDirectory);
+      const { host, workspaceRoot } = await configuredHost({}, { machinesDirectory });
+      connect(host, workspaceRoot);
+      const facet = toolRegistryCalls.at(-1)!.machines;
+      if (facet?.available !== true) {
+        throw new Error('The utility offered its agent tools no machines facet.');
+      }
+
+      await expect(facet.list({})).resolves.toMatchObject({ entries: [] });
+      const person = { kind: 'user', id: 'person', label: 'Person' } as const;
+      await expect(facet.setTesting({ machineId: 'any', enabled: true, requestedBy: person })).rejects.toThrow(
+        'ROUTE_DENIED',
+      );
+      await expect(
+        facet.approveAction({
+          machineId: 'any',
+          operationId: 'op-1',
+          intent: {
+            componentId: 'controller',
+            action: 'controller.wake',
+            version: 1,
+            expectedRunId: null,
+            parameters: {},
+          },
+          decision: 'approve',
+          approvedBy: person,
+        }),
+      ).rejects.toThrow('ROUTE_DENIED');
+      await expect(
+        facet.beginHold({
+          machineId: 'any',
+          componentId: 'gantry',
+          capabilityRevision: '1',
+          operationId: 'hold-1',
+          hold: 'motion.jog',
+          version: 1,
+          parameters: { axis: 'x', direction: 1, feed: 100 },
+          requestedBy: person,
+          attended: true,
+        }),
+      ).rejects.toThrow('ROUTE_DENIED');
+      /* Deciding a job is a person's (R16), a denial included. */
+      await expect(facet.resolveJob({ jobId: 'any', decision: 'deny', resolvedBy: person })).rejects.toThrow(
+        'ROUTE_DENIED',
+      );
+      const discovery = facet.discover({ providerId: 'bambu-simulator', configuration: {} });
+      await expect(discovery[Symbol.asyncIterator]().next()).rejects.toThrow('ROUTE_DENIED');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('should report a closed runtime port as a host exit, not an explicit terminate', async () => {
     const broker = runtimePortBroker();
     const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort: broker.requestRuntimePort });

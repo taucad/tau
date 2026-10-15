@@ -4,11 +4,8 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { sidebarDefaultOpen, sidebarPreferredWidth } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 
-/*
- * ponytail: the grid classes repeat `projectGridClassName` (`components/project-grid.tsx`) instead of importing
- * it, because the root gate renders this and that module would pull the card and preview graph into every page.
- */
-const gridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+import { projectGridClassName } from '#components/project-grid-layout.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * What `/community` shows while the root file-manager mount starts, which is
@@ -34,7 +31,7 @@ export function CommunityPageSkeleton(): React.JSX.Element {
         />
       ) : null}
       <div aria-hidden='true' className='min-w-0 flex-1 overflow-hidden'>
-        <div className='h-12 md:h-9' />
+        <div className={cn('h-12', isSidebarOpen ? 'md:hidden' : 'md:h-9')} />
         <PageContent className='space-y-3'>
           <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-3'>
             <Skeleton className='h-9 w-44' />
@@ -48,7 +45,7 @@ export function CommunityPageSkeleton(): React.JSX.Element {
               <Skeleton key={index} className='h-13 w-40 rounded-md sm:w-56' />
             ))}
           </div>
-          <div className={gridClassName}>
+          <div className={projectGridClassName}>
             {Array.from({ length: 10 }, (_, index) => (
               <div key={index} className='overflow-hidden rounded-xl border'>
                 <Skeleton className='aspect-4/3 w-full rounded-none' />

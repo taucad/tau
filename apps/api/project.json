@@ -13,13 +13,13 @@
     "deploy": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly deploy --config ./apps/api/fly.staging.toml --dockerfile ./apps/api/Dockerfile"
+        "command": "fly deploy --config ./apps/api/fly.staging.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore"
       }
     },
     "deploy:prod": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly deploy --config ./apps/api/fly.prod.toml --dockerfile ./apps/api/Dockerfile"
+        "command": "fly deploy --config ./apps/api/fly.prod.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore"
       }
     },
     "serve": {

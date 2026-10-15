@@ -17,7 +17,8 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    // On GitHub Actions a failure also becomes a check-run annotation, readable without the job log.
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/packages/cli',

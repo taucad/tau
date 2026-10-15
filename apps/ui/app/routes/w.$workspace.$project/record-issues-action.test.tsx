@@ -1,8 +1,11 @@
+import { createRef } from 'react';
+import { workbenchRecords } from '@taucad/workbench';
+import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { publishRecordIssue } from '#workbench-records/record-issues.js';
+import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
 
 const state = vi.hoisted(() => ({ debug: false }));
@@ -50,14 +53,16 @@ const publish = (id: string, value: RecordIssue | undefined): void => {
 const renderAction = () =>
   render(
     <TooltipProvider>
-      <RecordIssuesAction />
+      <RecordIssuesAction fallbackFocus={() => undefined} />
     </TooltipProvider>,
   );
 
 afterEach(() => {
-  for (const id of ['entries', 'view', 'layout']) {
-    publishRecordIssue('radial', id, undefined);
-  }
+  act(() => {
+    for (const id of ['entries', 'view', 'layout']) {
+      publishRecordIssue('radial', id, undefined);
+    }
+  });
   state.debug = false;
   editorSend.mockReset();
 });
@@ -130,6 +135,7 @@ describe('RecordIssuesAction', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Save not confirmed · 1 record' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry save' }));
+    expect(screen.getByRole('listitem', { name: 'Pane layout' })).toHaveTextContent('not yet confirmed saved');
     expect(retrySave).not.toHaveBeenCalled();
     expect(screen.getByText('Still waiting for the original write. No replacement write started.')).toBeDefined();
   });
@@ -186,3 +192,123 @@ describe('RecordIssuesAction', () => {
     });
   });
 });
+
+it.each([false, true])(
+  'should describe invalid entries without guessing the active baseline, prior-valid=%s',
+  async (hasBaseline) => {
+    const valid = { version: 1, entries: { 'main.cs': { renderTimeout: 180_000 } } } as const;
+    let bytes = encoder.encode(hasBaseline ? workbenchRecords.entries.serialize(valid) : '{broken');
+    const store = createWorkbenchEntriesStore({
+      root: '/records-copy',
+      files: {
+        exists: async () => true,
+        readFile: async () => bytes,
+        writeFileChecked: async () => {
+          throw new Error('No write expected');
+        },
+      },
+      onChange: (snapshot) => {
+        const status = recordIssueState(snapshot.refusal, undefined);
+        publishRecordIssue('radial', 'entries', status ? issue({ state: status, bytes: snapshot.bytes }) : undefined);
+      },
+      onError: () => undefined,
+    });
+    renderAction();
+    try {
+      await act(async () => {
+        await store.read();
+      });
+      bytes = encoder.encode('{broken');
+      await act(async () => {
+        await store.read();
+      });
+      expect(store.snapshot().record).toEqual(hasBaseline ? valid : undefined);
+      await userEvent.click(screen.getByRole('button', { name: 'Settings not applied · 1 record' }));
+      const row = await screen.findByRole('listitem', { name: 'Model display settings' });
+      expect(row).not.toHaveTextContent('Default settings are in use');
+      expect(row).not.toHaveTextContent('values loaded before are still in use');
+      expect(row).toHaveTextContent('The file could not be applied');
+    } finally {
+      store.dispose();
+    }
+  },
+);
+
+it.each(['immediate', 'delayed', 'moved', 'surviving', 'cancel', 'escape'] as const)(
+  'should restore keyboard focus after %s Reset',
+  async (mode) => {
+    const fallback = createRef<HTMLButtonElement>();
+    render(
+      <TooltipProvider>
+        <RecordIssuesAction fallbackFocus={() => fallback.current?.focus()} />
+        <button ref={fallback} type='button'>
+          Share
+        </button>
+        <button type='button'>Export</button>
+      </TooltipProvider>,
+    );
+    const gate = Promise.withResolvers<void>();
+    const reset = vi.fn(async () => {
+      if (mode === 'delayed' || mode === 'moved') {
+        await gate.promise;
+      }
+      publishRecordIssue('radial', 'entries', undefined);
+      return true;
+    });
+    publish('entries', issue({ bytes: encoder.encode('{broken'), reset }));
+    if (mode === 'surviving') {
+      publish('view', issue({ kind: 'view', path: 'view', state: 'newer' }));
+    }
+    const user = userEvent.setup();
+    const trigger = screen.getByRole('button', { name: /Settings not applied/u });
+    act(() => {
+      trigger.focus();
+    });
+    await user.keyboard('{Enter}');
+    const more = await screen.findByRole('button', { name: 'More actions for Model display settings' });
+    act(() => {
+      more.focus();
+    });
+    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
+    const dialog = await screen.findByRole('alertdialog');
+    if (mode === 'escape') {
+      await user.keyboard('{Escape}');
+    } else {
+      act(() => {
+        within(dialog)
+          .getByRole('button', { name: mode === 'cancel' ? 'Cancel' : 'Reset settings' })
+          .focus();
+      });
+      await user.keyboard('{Enter}');
+    }
+    if (mode === 'moved') {
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+      });
+      act(() => {
+        screen.getByRole('button', { name: 'Export' }).focus();
+      });
+    }
+    if (mode === 'delayed' || mode === 'moved') {
+      await act(async () => {
+        gate.resolve();
+        await gate.promise;
+      });
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    const expected =
+      mode === 'moved'
+        ? screen.getByRole('button', { name: 'Export' })
+        : mode === 'immediate' || mode === 'delayed'
+          ? screen.getByRole('button', { name: 'Share' })
+          : screen.getByRole('button', { name: /Settings not applied/u });
+    await waitFor(() => {
+      expect(expected).toHaveFocus();
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(reset).toHaveBeenCalledTimes(mode === 'cancel' || mode === 'escape' ? 0 : 1);
+  },
+);

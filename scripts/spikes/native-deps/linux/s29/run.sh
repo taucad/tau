@@ -116,8 +116,8 @@ ENTRYPOINT ["node", "/app/dist/bin/tau.mjs"]
 DOCKER
     build_step "$evidence/image-docker-build.log" docker build -t tau-s29-seed "$work/image"
     docker image inspect tau-s29-seed --format '{{.Size}} {{.Id}}' | tee "$evidence/image-size.txt"
-    docker image inspect node:24-slim --format '{{index .RepoDigests 0}}' | tee "$evidence/image-base.txt"
-    du -sb "$work/image/app" "$work/image/config" | tee "$evidence/image-layers.txt"
+    { docker image inspect node:24-slim --format '{{json .RepoDigests}} {{.Id}}' || true; } | tee "$evidence/image-base.txt"
+    { du -sb "$work/image/app" "$work/image/config" "$work/image/config/payloads" || true; } | tee "$evidence/image-layers.txt"
     for step in "image-inspect prepare --inspect --json" "image-prepare prepare build123d --json" "image-verify prepare build123d --verify --offline --json"; do
       read -r label args <<<"$step"
       code=0

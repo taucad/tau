@@ -1,6 +1,6 @@
 import { ChildProcess } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createActor, createCallbackLogic } from 'xstate';
+import { createActor, setup } from 'xstate';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
@@ -27,26 +27,30 @@ describe('ACP adapter connection', () => {
     });
     const events: AcpSessionEvent[] = [];
     const parent = createActor(
-      createCallbackLogic<AcpSessionEvent>(({ receive }) => {
-        receive((event) => events.push(event));
+      setup({
+        types: { events: {} as AcpSessionEvent },
+        actors: { adapter: createAdapterConnection() },
+      }).createMachine({
+        invoke: {
+          id: 'adapter',
+          src: 'adapter',
+          input: {
+            adapter: {
+              id: 'grok',
+              displayName: 'Grok',
+              package: 'fixture',
+              version: '1.0.52',
+              configEnv: [],
+              modulePath: '/unused',
+            },
+            cwd: '/unused',
+          },
+        },
+        on: { '*': { actions: ({ event }) => events.push(event) } },
       }),
     );
     parent.start();
-    const actor = createActor(createAdapterConnection(), {
-      parent,
-      input: {
-        adapter: {
-          id: 'grok',
-          displayName: 'Grok',
-          package: 'fixture',
-          version: '1.0.52',
-          configEnv: [],
-          modulePath: '/unused',
-        },
-        cwd: '/unused',
-      },
-    });
-    actor.start();
+    const actor = parent.getSnapshot().children.adapter!;
     try {
       actor.send({ type: 'notify', ...grokPermissionNotification('ask') });
       actor.send({
@@ -67,7 +71,6 @@ describe('ACP adapter connection', () => {
       child.emit('exit');
       expect(events.filter((event) => event.type === 'adapterExited')).toHaveLength(1);
     } finally {
-      actor.stop();
       parent.stop();
     }
   });

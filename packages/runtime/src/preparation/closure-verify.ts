@@ -1,5 +1,5 @@
 /* oxlint-disable no-bitwise -- permission bits are a bit field. */
-import { lstat, readdir, readlink } from 'node:fs/promises';
+import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import { hashFile } from '#preparation/preparation-store.js';
@@ -47,7 +47,10 @@ const rowMatches = async (root: string, row: ReceiptFile, signal: AbortSignal): 
  * @param signal - Aborts the walk.
  * @returns The rows that no longer match and the files the receipt does not list.
  */
-export const verifyClosureTree = async (receipt: ClosureReceipt, signal: AbortSignal): Promise<TreeDifferences> => {
+export const verifyClosureTree = async (
+  receipt: Pick<ClosureReceipt, 'root' | 'files'>,
+  signal: AbortSignal,
+): Promise<TreeDifferences> => {
   const listed = new Set(receipt.files.map((row) => row.path));
   const entries = await readdir(receipt.root, { recursive: true, withFileTypes: true });
   const extra = entries
@@ -70,4 +73,39 @@ export const verifyClosureTree = async (receipt: ClosureReceipt, signal: AbortSi
   };
   await Promise.all(Array.from({ length: verifyConcurrency }, lane));
   return { changed: changed.toSorted((left, right) => (left.path < right.path ? -1 : 1)), extra };
+};
+
+/**
+ * Re-verify one sealed closure against the receipt beside it, file by file: what a host runs when a kernel's worker
+ * exits before its handshake (D8), so the refusal can name the damaged file. Seconds, never per launch.
+ * @param root - The closure root, which holds `receipt.json`.
+ * @param signal - Aborts the walk.
+ * @returns Closure-relative paths of the files that are missing, differ from their rows or are not listed, sorted;
+ *   empty when the closure is intact; `undefined` when `root` holds no readable receipt (it is not sealed).
+ * @public
+ * @example <caption>Name what a failed handshake found</caption>
+ * ```typescript
+ * import { reverifyClosure } from '@taucad/runtime/preparation/node';
+ *
+ * const damaged = await reverifyClosure(closureRoot, AbortSignal.timeout(300_000));
+ * ```
+ */
+export const reverifyClosure = async (root: string, signal: AbortSignal): Promise<readonly string[] | undefined> => {
+  let files: unknown;
+  try {
+    files = (JSON.parse(await readFile(join(root, 'receipt.json'), 'utf8')) as { readonly files?: unknown }).files;
+  } catch {
+    return undefined;
+  }
+  const rows = (value: unknown): value is ReceiptFile[] =>
+    Array.isArray(value) &&
+    value.every((row: unknown) => {
+      const file = (typeof row === 'object' ? (row ?? {}) : {}) as Partial<Record<keyof ReceiptFile, unknown>>;
+      return typeof file.path === 'string' && typeof file.sha256 === 'string' && typeof file.byteLength === 'number';
+    });
+  if (!rows(files)) {
+    return undefined;
+  }
+  const found = await verifyClosureTree({ root, files }, signal);
+  return [...found.changed.map((row) => row.path), ...found.extra].toSorted();
 };

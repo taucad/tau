@@ -159,15 +159,9 @@ describe('PicoGK closure preparation', () => {
     }
     expect(options.resourceFiles.map(({ path }) => path.slice(receipt!.root.length + 1))).toEqual([
       'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libclrjit.dylib',
-      'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
       'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
       'tau-worker/PicoGK.dll',
-      'tau-worker/Tau.PicoGK.Worker.deps.json',
       'tau-worker/Tau.PicoGK.Worker.dll',
-      'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
-      'tau-worker/libSkiaSharp.dylib',
       'tau-worker/picogk.26.2.dylib',
     ]);
   });

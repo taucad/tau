@@ -3,14 +3,16 @@
  *
  * A published plugin manifest must never name a payload that is missing, moved or different (charter I13, go-live
  * DEL-20): `publish.yml` runs this through each native plugin's `check-payload-urls` target before the train. Every
- * URL is checked, not only the first, because hosts fall back through them in order.
+ * URL is checked, not only the first, because hosts fall back through them in order. A payload pinned to the digest of
+ * zero bytes is the fail-closed placeholder a plugin carries until its first layer is published (preparation refuses
+ * it): its URLs are skipped with a notice naming the package, and every other pin of the manifest is still checked.
  *
  * Usage: node scripts/src/check-payload-urls.ts <tau-plugin.json>…
  * Exit codes: 0 every URL verified; 1 a URL failed or a manifest is unreadable; 2 usage.
  */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** One pinned URL and what it must serve. */
@@ -22,6 +24,16 @@ export type PinnedUrl = {
 };
 
 const sriPattern = /^(?<algorithm>sha256|sha384|sha512)-(?<digest>[A-Za-z\d+/]+={0,2})$/u;
+
+/**
+ * Whether an SRI string pins the digest of zero bytes: the placeholder no real payload can match.
+ * @param integrity - An SRI string.
+ * @returns True for the empty digest of sha256, sha384 or sha512.
+ */
+export const isPlaceholderIntegrity = (integrity: string): boolean => {
+  const algorithm = sriPattern.exec(integrity)?.groups?.['algorithm'];
+  return algorithm !== undefined && integrity === `${algorithm}-${createHash(algorithm).digest('base64')}`;
+};
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -94,17 +106,47 @@ export const checkPinnedUrl = async (pin: PinnedUrl, transport: typeof fetch): P
   return hash.digest('base64') === digest ? undefined : `${pin.url} does not match ${pin.integrity}`;
 };
 
+// The package that ships a manifest, for notices; the manifest path when no package.json sits beside it.
+const packageName = async (path: string): Promise<string> => {
+  try {
+    const manifest = JSON.parse(await readFile(join(dirname(path), 'package.json'), 'utf8')) as { name?: unknown };
+    return typeof manifest.name === 'string' ? manifest.name : path;
+  } catch {
+    return path;
+  }
+};
+
 /**
- * Check every pinned URL of some manifests.
+ * Check every pinned URL of some manifests, skipping placeholder pins with a notice.
  * @param paths - `tau-plugin.json` paths.
  * @param transport - The `fetch` to use.
+ * @param notice - Receives one line per skipped placeholder payload.
  * @returns One line per URL that does not serve its pinned bytes.
  */
-export const checkPayloadUrls = async (paths: readonly string[], transport: typeof fetch): Promise<string[]> => {
+export const checkPayloadUrls = async (
+  paths: readonly string[],
+  transport: typeof fetch,
+  notice: (message: string) => void = (message) => {
+    console.log(`::notice title=Placeholder payload pin::${message}`);
+  },
+): Promise<string[]> => {
   const failures: string[] = [];
   for (const path of paths) {
     // oxlint-disable-next-line no-await-in-loop -- manifests are read and checked one at a time
-    const pins = pinnedUrls(JSON.parse(await readFile(path, 'utf8')));
+    const allPins = pinnedUrls(JSON.parse(await readFile(path, 'utf8')));
+    const placeholders = [
+      ...new Set(allPins.filter((pin) => isPlaceholderIntegrity(pin.integrity)).map((pin) => pin.payload)),
+    ];
+    if (placeholders.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one small read per manifest with a placeholder
+      const name = await packageName(path);
+      for (const payload of placeholders) {
+        notice(
+          `${name} pins ${payload} to the fail-closed placeholder (the digest of zero bytes); its URLs are not checked until a real pin lands.`,
+        );
+      }
+    }
+    const pins = allPins.filter((pin) => !isPlaceholderIntegrity(pin.integrity));
     // oxlint-disable-next-line no-await-in-loop -- each manifest's URLs are checked together
     const results = await Promise.all(pins.map(async (pin) => checkPinnedUrl(pin, transport)));
     failures.push(

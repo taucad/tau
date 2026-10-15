@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { checkPayloadUrls, pinnedUrls } from '#check-payload-urls.js';
+import { checkPayloadUrls, isPlaceholderIntegrity, pinnedUrls } from '#check-payload-urls.js';
 
 const bytes = new TextEncoder().encode('tau layer');
 const integrity = (algorithm: 'sha256' | 'sha512', data: Uint8Array<ArrayBuffer>) =>
@@ -80,6 +80,32 @@ describe('check-payload-urls', () => {
     ).resolves.toEqual([]);
   });
 
+  it('skips a placeholder pin with a notice naming the package and still checks every real pin', async () => {
+    const placeholder = integrity('sha256', new Uint8Array());
+    const value = manifest(['https://real.test/x']);
+    value.dependencies.runtime[0]!.payloads.push({
+      name: 'layer',
+      integrity: placeholder,
+      byteLength: 1,
+      format: 'tar.gz',
+      origin: { kind: 'url', urls: ['https://cdn.test/blobs/sha256/e3b0'] },
+      destination: 'l',
+    });
+    const path = await write(value);
+    await writeFile(join(path, '..', 'package.json'), JSON.stringify({ name: '@taucad/example' }));
+    const notices: string[] = [];
+
+    await expect(
+      checkPayloadUrls([path], serve({ 'https://real.test/x': 404 }), (message) => notices.push(message)),
+    ).resolves.toEqual(['runtime/worker: https://real.test/x answered HTTP 404']);
+    expect(notices).toEqual([
+      '@taucad/example pins runtime/layer to the fail-closed placeholder (the digest of zero bytes); its URLs are not checked until a real pin lands.',
+    ]);
+    expect(isPlaceholderIntegrity(integrity('sha512', new Uint8Array()))).toBe(true);
+    expect(isPlaceholderIntegrity(integrity('sha512', bytes))).toBe(false);
+    expect(isPlaceholderIntegrity('md5-x')).toBe(false);
+  });
+
   it('names each url that is missing, unreachable, short, long or different', async () => {
     const other = new TextEncoder().encode('tau lager');
     const path = await write(
@@ -108,15 +134,6 @@ describe('check-payload-urls', () => {
       'runtime/worker: https://short.test/x served 8 bytes, not the pinned 9',
       'runtime/worker: https://long.test/x serves more than the pinned 9 bytes',
       `runtime/worker: https://other.test/x does not match ${integrity('sha512', bytes)}`,
-    ]);
-  });
-
-  it('refuses the pending empty-digest pin of an unpublished layer', async () => {
-    const empty = new Uint8Array();
-    const path = await write(manifest(['https://cdn.test/blobs/sha256/e3b0'], integrity('sha256', empty), 1));
-
-    await expect(checkPayloadUrls([path], serve({ 'https://cdn.test/blobs/sha256/e3b0': 404 }))).resolves.toEqual([
-      'runtime/worker: https://cdn.test/blobs/sha256/e3b0 answered HTTP 404',
     ]);
   });
 });

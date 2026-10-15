@@ -15,7 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- this private script helper has no package import mapping.
 import { replaceResourceDirectory, verifyOcpWheel } from './build123d-wheel-integrity.mjs';
 
@@ -236,8 +236,9 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   const temporary = resolve(resourceRoot, `.${targetName}.${String(process.pid)}.tmp`);
   await rm(temporary, { recursive: true, force: true });
   await mkdir(temporary, { recursive: true });
-  // GNU tar interprets the colon in a Windows drive-qualified archive as a remote host.
-  execFileSync('tar', ['-xzf', basename(archive), '-C', temporary, '--strip-components=1'], {
+  // Git Bash tar needs relative POSIX paths: a drive colon means a remote archive, and -C rejects backslashes.
+  const extractionPath = relative(dirname(archive), temporary).split(sep).join('/');
+  execFileSync('tar', ['-xzf', basename(archive), '-C', extractionPath, '--strip-components=1'], {
     cwd: dirname(archive),
     stdio: 'inherit',
   });

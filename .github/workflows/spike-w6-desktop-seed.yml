@@ -1,7 +1,7 @@
 # Lane W6 oracles (native dependency charter, phase 1; D10, D24, ruling X30): the desktop ships its native kernels'
 # sealed closures under Contents/Resources/payloads and seeds the payload store from them by clonefile.
 #
-# On macos-15 this packages the ad-hoc signed app, runs the package verifier (whose native roots are now the shipped
+# On macos-26 this packages the ad-hoc signed app, runs the package verifier (whose native roots are now the shipped
 # closures: their keys equal the tau-plugin.json pins and each re-verifies against its receipt), then runs
 # desktop-e2e's desktop-store-seed.spec.ts against the package with the payload mirror at a closed port and no
 # fallback: first launch seeds by clone, a second launch copies nothing, and a .py export runs from the seeded store.
@@ -35,8 +35,8 @@ defaults:
 
 jobs:
   seed:
-    name: Package, verify and seed (macos-15)
-    runs-on: macos-15
+    name: Package, verify and seed (macos-26)
+    runs-on: macos-26
     timeout-minutes: 150
     env:
       GEOSPEC_WORKERS: 1

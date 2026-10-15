@@ -238,6 +238,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',
+        'apps/ui/app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'apps/ui/chat-revision-marker.vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',

@@ -101,7 +101,9 @@ case "$phase" in
     build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx build cli --outputStyle=static"
     rm -rf "$work/image"
     mkdir -p "$work/image"
-    build_step "$evidence/image-deploy.log" bash -c "cd '$REPO_ROOT' && pnpm --filter=@taucad/cli --prod deploy '$work/image/app' --legacy"
+    # The host's optional peer `geospec@^0.1.0-beta.0` is not on npm (only 0.0.0), so a legacy deploy that auto-installs
+    # peers resolves it from the registry and fails; the image does not need the optional peer.
+    build_step "$evidence/image-deploy.log" bash -c "cd '$REPO_ROOT' && pnpm --filter=@taucad/cli --prod deploy '$work/image/app' --legacy --config.auto-install-peers=false"
     cp -a "$baked" "$work/image/config"
     cat >"$work/image/Dockerfile" <<'DOCKER'
 FROM node:24-slim

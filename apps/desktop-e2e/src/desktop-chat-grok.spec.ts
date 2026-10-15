@@ -65,7 +65,7 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expectVisible(permissionControl);
       await permissionControl.click();
       await page.getByRole('option', { name: /^Always approve(?:\s|$)/u }).click();
-      await expect.poll(() => permissionControl.getAttribute('aria-label')).toBe('Mode: Always approve');
+      await expect.poll(async () => permissionControl.getAttribute('aria-label')).toBe('Mode: Always approve');
       await session.capture('grok-permissions-before-first-turn');
       const slug = await submitPrompt(
         page,

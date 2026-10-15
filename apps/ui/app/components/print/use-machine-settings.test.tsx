@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { MachineManifest } from '@taucad/runtime/machine';
+import type { MachineManifest, MachineProvider } from '@taucad/runtime/machine';
 import type { MachineSettingsService, MachineSettingsRecord, MachineSettingsSave } from '@taucad/types';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { useMachineSettings } from '#components/print/use-machine-settings.js';
@@ -13,6 +13,8 @@ afterEach(() => {
   manager.store = undefined;
 });
 const manifest = mock<MachineManifest>({ identity: mock<MachineManifest['identity']>({ typeId: 'bambu.x1c' }) });
+// The hook reads the provider's manifest and its own settings form; this provider declares none.
+const provider = mock<MachineProvider>({ manifest, settingsConfiguration: undefined });
 
 describe('mounted machine settings acquisition', () => {
   it('should keep closed observation health when a queued dirty save acknowledges', async () => {
@@ -37,7 +39,7 @@ describe('mounted machine settings acquisition', () => {
       }),
       () => undefined,
     );
-    const hook = renderHook(() => useMachineSettings(manifest));
+    const hook = renderHook(() => useMachineSettings(provider));
     await waitFor(() => {
       expect(hook.result.current.record?.profiles['default']?.name).toBe('Saved');
     });
@@ -76,7 +78,7 @@ describe('mounted machine settings acquisition', () => {
       readMachineSettings: vi.fn(async () => ({ status: 'absent' }) as const),
     });
     manager.store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
-    const hook = renderHook(() => useMachineSettings(manifest));
+    const hook = renderHook(() => useMachineSettings(provider));
     expect(service.readMachineSettings).not.toHaveBeenCalled();
     await act(async () => {
       first.reject(new Error('registration denied'));

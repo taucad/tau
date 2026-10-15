@@ -13,7 +13,8 @@ vi.mock('#bambu.host.js', () => {
 });
 
 // Importing the provider module is not the behavior under test; keep it outside the per-test budget.
-const { bambuA1MiniMachine, bambuMachine, bambuSubmissionConfiguration } = await import('#bambu.machine.js');
+const { bambuA1MiniMachine, bambuMachine } = await import('#bambu.machine.js');
+const { bambuSubmissionConfiguration } = await import('#bambu.manifest.js');
 
 describe('bambuMachine', () => {
   it('declares diameters as positive millimetre quantities rather than editable metadata objects', async () => {
@@ -44,14 +45,21 @@ describe('bambuMachine', () => {
     const definition = await resolveRuntimePluginDefinition('machine', bambuA1MiniMachine());
     expect(definition.manifest).toMatchObject({
       identity: { model: 'a1-mini' },
-      geometry: {
-        buildVolume: { x: 180, y: 180, z: 180 },
-        kinematics: 'cartesian-bedslinger',
-        bedMotion: 'y',
-        enclosure: { enclosed: false },
-      },
-      bed: { maximumTemperature: { value: 80 } },
-      materialSystem: { slotsPerUnit: 4, drying: false },
+      processes: [
+        {
+          type: 'fff',
+          geometry: {
+            buildVolume: { x: 180, y: 180, z: 180 },
+            kinematics: 'cartesian-bedslinger',
+            bedMotion: 'y',
+            enclosure: { enclosed: false },
+          },
+          bed: { maximumTemperature: { value: 80 } },
+        },
+      ],
+    });
+    expect(definition.manifest.components.find(({ kind }) => kind === 'material-system')).toMatchObject({
+      units: [{ id: 'ams-a', slots: [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }, { id: 'a4' }] }, { id: 'external' }],
     });
     const schema = definition.submissionConfiguration.manifest.legacyProjection.inputSchema;
     expect(schema).toMatchObject({ properties: { expectedModel: { const: 'A1 mini' }, amsMapping: { maxItems: 4 } } });
@@ -60,14 +68,16 @@ describe('bambuMachine', () => {
     expect(loaded.count).toBe(0);
     const registration = bambuMachine();
     expect(() => structuredClone(registration)).not.toThrow();
-    expect(JSON.stringify(registration)).not.toMatch(/mqtt|ftp|secret|certificate/iu);
+    // The manifest names the services a binding pins (ids only); nothing else about the transport or a secret.
+    const { services, ...connection } = registration.manifest.connection;
+    expect(services?.map(({ id }) => id)).toEqual(['mqtt', 'camera']);
+    expect(JSON.stringify({ ...registration, manifest: { ...registration.manifest, connection } })).not.toMatch(
+      /mqtt|ftp|secret|certificate/iu,
+    );
     const definition = await resolveRuntimePluginDefinition('machine', registration);
     const iterator = definition
       .discover(
-        {
-          configuration: { logicalId: 'workshop-x1c' },
-          signal: new AbortController().signal,
-        },
+        { configuration: {}, signal: new AbortController().signal },
         {
           clock: { now: () => '2026-09-14T00:00:00.000Z' },
           async *listenDatagrams() {

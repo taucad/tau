@@ -380,24 +380,24 @@ export type HostToolRegistryOptions = {
   readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
   /**
    * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
-   * attached project, or the daemon's served root. Every artifact `request_print`
+   * attached project, or the daemon's served root. Every artifact `request_job`
    * slices names it, which is how a machine host finds the file again. Omit it
-   * and `request_print` is not offered: a host that cannot name its project
+   * and the job tools are not offered: a host that cannot name its project
    * never guesses one.
    */
   readonly projectId?: string | undefined;
   /**
    * Names the project each root holds, for a host whose calls name their own folder: `tau mcp`, where Codex names
-   * the thread's folder per call and the folder the server started in may hold no project. Asked when a print tool
+   * the thread's folder per call and the folder the server started in may hold no project. Asked when a job tool
    * is called, so the slice lands in the calling root and names that root's project, which the machine host then
-   * reads it from. With it `request_print` is offered whatever `workspaceRoot` holds, a root that names no project
-   * refuses the print, and `projectId` is not used.
+   * reads it from. With it `request_job` is offered whatever `workspaceRoot` holds, a root that names no project
+   * refuses the job, and `projectId` is not used.
    */
   readonly projectIdOf?: ((workspaceRoot: string) => Promise<string | undefined>) | undefined;
 };
 
-/** The tools that name the project a print artifact belongs to. */
-const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestPrint, 'prepare_machine_print']);
+/** The tools that name the project a job's artifact belongs to. */
+const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestJob, toolName.checkJob]);
 
 /**
  * Build the daemon's tool registry.
@@ -594,7 +594,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
-    /* `request_print` needs every leg of the print path: the project id here
+    /* `request_job` needs every leg of the print path: the project id here
      * names the artifact's project, and the registry offers the tool only when
      * a runtime to slice with and a machine to ask are attached too. A
      * candidate turn's slice lands in its checkout, which the machine host
@@ -699,7 +699,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         return {
           content: {
             errorCode: 'PROJECT_NOT_NAMED',
-            message: `${root} holds no tau.json, so nothing in it can be printed. Print from a Tau project folder.`,
+            message: `${root} holds no tau.json, so nothing in it can run on a machine. Request jobs from a Tau project folder.`,
           },
           isError: true,
         };

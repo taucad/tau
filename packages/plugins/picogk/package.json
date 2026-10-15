@@ -20,6 +20,7 @@
     "dist",
     "dotnet",
     "agent",
+    "tau-plugin.json",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
@@ -41,6 +42,7 @@
       "default": "./agent/skills.json"
     },
     "./agent/*": "./agent/*",
+    "./tau-plugin.json": "./tau-plugin.json",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -56,6 +58,7 @@
         "default": "./agent/skills.json"
       },
       "./agent/*": "./agent/*",
+      "./tau-plugin.json": "./tau-plugin.json",
       "./package.json": "./package.json"
     },
     "imports": {}

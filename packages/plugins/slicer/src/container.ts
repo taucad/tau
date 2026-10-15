@@ -13,6 +13,7 @@
 import { strToU8, Unzip, UnzipInflate, unzipSync, zipSync } from 'fflate';
 import type { Zippable } from 'fflate';
 
+import { bambuPlates } from '#bambu-studio/types.js';
 import { md5Hex, sha256Hex } from '#hashes.js';
 
 /** The plate member every print-ready Bambu container carries. @public */
@@ -52,6 +53,9 @@ const filamentColorSetting = /^;\s*filament_colour\s*=\s*(.+?)\s*$/mu;
 // Some slicers append an alpha byte; the colour is the first three.
 const filamentColorEntry = /^#([\dA-F]{6})(?:[\dA-F]{2})?$/iu;
 const maximumFilamentColors = 64;
+// Each fact lands in a `; key = value` G-code comment: no list separators, quotes or line breaks.
+const settingText = /^[\w .+-]{1,64}$/u;
+const isMillimetres = (value: number): boolean => Number.isFinite(value) && value > 0 && value <= 10;
 // Bambu Studio writes its config block at the head of the plate, Orca at the tail.
 const configScanBytes = 64 * 1024;
 // ZIP stores DOS local time; a fixed date keeps the archive byte-identical across runs and zones.
@@ -63,14 +67,28 @@ export type WriteBambuContainerInput = Readonly<{
   gcode: Uint8Array<ArrayBuffer> | string;
   /** Part name recorded in the 3MF model and the plate metadata. */
   modelName: string;
-  /** Build plate identifier recorded in the plate metadata. */
+  /**
+   * Build plate identifier recorded in the plate metadata; a Bambu plate id (`'textured-pei'`) is also recorded as
+   * Bambu Studio's `curr_bed_type` (`Textured PEI Plate`).
+   */
   plate?: string;
+  /** Bambu Studio's `printer_model` the plate was sliced for, such as `Bambu Lab X1 Carbon`. */
+  printerModel?: string;
+  /** Nozzle diameter the plate was sliced for, in millimetres (`nozzle_diameter`). */
+  nozzleDiameter?: number;
+  /** Material per filament, in filament order, such as `PLA` (`filament_type`). */
+  filamentTypes?: readonly string[];
+  /** Filament diameter per filament, in filament order, in millimetres (`filament_diameter`). */
+  filamentDiameters?: readonly number[];
   /** PNG bytes for the plate thumbnail. */
   thumbnail?: Uint8Array<ArrayBuffer>;
   /**
-   * `#RRGGBB` per filament, in filament order: entry *i* is the colour tool `T<i>` prints. Recorded as the
-   * `filament_colour` setting in a config block at the head of the plate G-code, and per filament in
-   * `Metadata/slice_info.config`. Nothing is recorded when absent or empty.
+   * `#RRGGBB` per filament, in filament order: entry *i* is the colour tool `T<i>` prints (`filament_colour`).
+   * Nothing is recorded when absent or empty.
+   *
+   * Every fact given here is recorded where Bambu Studio records it, so a printer's job checks can read what the
+   * plate was sliced for: as a setting in a config block at the head of the plate G-code, and each filament's
+   * material and colour in `Metadata/slice_info.config`.
    */
   filamentColors?: readonly string[];
 }>;
@@ -147,18 +165,26 @@ const model = (name: string): string =>
   ' <build/>\n' +
   '</model>\n';
 
-const sliceInfo = (name: string, colors: readonly string[]): string =>
+type Filament = Readonly<{ type?: string; color?: string }>;
+
+const sliceInfo = (name: string, nozzleDiameter: number | undefined, filaments: readonly Filament[]): string =>
   `${xmlHeader}<config>\n` +
   ' <plate>\n' +
   '  <metadata key="index" value="1"/>\n' +
+  (nozzleDiameter === undefined ? '' : `  <metadata key="nozzle_diameters" value="${String(nozzleDiameter)}"/>\n`) +
   `  <object identify_id="1" name="${name}" skipped="false"/>\n` +
-  colors.map((color, index) => `  <filament id="${index + 1}" color="${color}"/>\n`).join('') +
+  filaments
+    .map(
+      ({ type, color }, index) =>
+        `  <filament id="${index + 1}"${type === undefined ? '' : ` type="${type}"`}${color === undefined ? '' : ` color="${color}"`}/>\n`,
+    )
+    .join('') +
   ' </plate>\n' +
   '</config>\n';
 
-// A `; key = value` block like the one Bambu Studio writes, which previews and Bambu tools read.
-const configBlock = (colors: readonly string[]): string =>
-  `; CONFIG_BLOCK_START\n; filament_colour = ${colors.join(';')}\n; CONFIG_BLOCK_END\n`;
+// A `; key = value` block like the one Bambu Studio writes (keys in its order), which previews and Bambu tools read.
+const configBlock = (settings: ReadonlyArray<readonly [string, string]>): string =>
+  `; CONFIG_BLOCK_START\n${settings.map(([key, value]) => `; ${key} = ${value}\n`).join('')}; CONFIG_BLOCK_END\n`;
 
 const modelSettings = (name: string): string =>
   `${xmlHeader}<config>\n` +
@@ -208,16 +234,36 @@ const readFilamentColors = (gcode: Uint8Array<ArrayBuffer>): readonly string[] =
   return colors;
 };
 
+const assertSliceFacts = ({
+  filamentTypes: types = [],
+  filamentDiameters: diameters = [],
+  printerModel,
+  nozzleDiameter,
+}: WriteBambuContainerInput): void => {
+  if (
+    types.length > maximumFilamentColors ||
+    diameters.length > maximumFilamentColors ||
+    !types.every((type) => settingText.test(type)) ||
+    !diameters.every((diameter) => isMillimetres(diameter)) ||
+    (printerModel !== undefined && !settingText.test(printerModel)) ||
+    (nozzleDiameter !== undefined && !isMillimetres(nozzleDiameter))
+  ) {
+    throw new TypeError('SLICER_CONTAINER_SETTING_INVALID');
+  }
+};
+
 /**
  * Write one print-ready Bambu container around plate G-code.
  *
- * With `filamentColors`, the plate starts with a config block recording them; the rest of the plate is
- * the given G-code unchanged.
+ * With any slice fact (filament colours, materials or diameters, nozzle, printer, a Bambu plate), the plate starts
+ * with a config block recording them; the rest of the plate is the given G-code unchanged.
  *
- * @param input - Plate G-code, part name, plate identifier, filament colours and optional thumbnail.
+ * @param input - Plate G-code, part name, plate identifier, slice facts and optional thumbnail.
  * @returns Deterministic container bytes.
  * @throws TypeError - `SLICER_CONTAINER_PLATE_EMPTY` for empty G-code, `SLICER_CONTAINER_COLOR_INVALID` for a
- * filament colour that is not `#RRGGBB` or more than 64 colours.
+ * filament colour that is not `#RRGGBB` or more than 64 colours, `SLICER_CONTAINER_SETTING_INVALID` for a printer
+ * model or material that is not 1–64 letters, digits, spaces, `.`, `+` or `-`, a diameter that is not over 0 and at
+ * most 10 mm, or more than 64 filaments.
  * @public
  * @example <caption>Wrap reference G-code for a Bambu upload</caption>
  * ```typescript
@@ -242,9 +288,25 @@ export const writeBambuContainer = (input: WriteBambuContainerInput): Uint8Array
     throw new TypeError('SLICER_CONTAINER_COLOR_INVALID');
   }
   const recorded = colors.map((color) => color.toUpperCase());
+  const types = input.filamentTypes ?? [];
+  const diameters = input.filamentDiameters ?? [];
+  const { printerModel, nozzleDiameter } = input;
+  assertSliceFacts(input);
+  const bedType = bambuPlates.find(({ id }) => id === input.plate)?.bambuName;
+  const stated: ReadonlyArray<readonly [string, string | undefined]> = [
+    ['curr_bed_type', bedType],
+    ['filament_colour', recorded.join(';')],
+    ['filament_diameter', diameters.map(String).join(',')],
+    ['filament_type', types.join(';')],
+    ['nozzle_diameter', nozzleDiameter === undefined ? undefined : String(nozzleDiameter)],
+    ['printer_model', printerModel],
+  ];
+  const settings = stated.flatMap(
+    ([key, value]): Array<readonly [string, string]> => (value === undefined || value === '' ? [] : [[key, value]]),
+  );
   let gcode = body;
-  if (recorded.length > 0) {
-    const block = strToU8(configBlock(recorded));
+  if (settings.length > 0) {
+    const block = strToU8(configBlock(settings));
     gcode = new Uint8Array(block.byteLength + body.byteLength);
     gcode.set(block);
     gcode.set(body, block.byteLength);
@@ -260,7 +322,16 @@ export const writeBambuContainer = (input: WriteBambuContainerInput): Uint8Array
     [bambuPlateMember]: gcode,
     'Metadata/plate_1.gcode.md5': strToU8(md5Hex(gcode)),
     [plateMetadataMember]: strToU8(plate),
-    'Metadata/slice_info.config': strToU8(sliceInfo(name, recorded)),
+    'Metadata/slice_info.config': strToU8(
+      sliceInfo(
+        name,
+        nozzleDiameter,
+        Array.from({ length: Math.max(recorded.length, types.length) }, (_, index) => ({
+          ...(types[index] === undefined ? {} : { type: types[index] }),
+          ...(recorded[index] === undefined ? {} : { color: recorded[index] }),
+        })),
+      ),
+    ),
     'Metadata/model_settings.config': strToU8(modelSettings(name)),
     ...(input.thumbnail === undefined ? {} : { [thumbnailMember]: [input.thumbnail, { level: 0 }] as const }),
   };

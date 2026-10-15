@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
+import type * as RuntimePreparation from '@taucad/runtime/preparation/node';
 import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
@@ -14,6 +15,11 @@ vi.mock('@taucad/runtime/node', async (importOriginal) => ({
 }));
 vi.mock('#cli-runtime.js', () => ({
   createCliRuntime: vi.fn(async () => ({ plugins: [] })),
+}));
+const preparation = vi.hoisted(() => ({ inspect: vi.fn() }));
+vi.mock('@taucad/runtime/preparation/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimePreparation>()),
+  createPreparationHost: vi.fn(() => ({ inspect: preparation.inspect })),
 }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
@@ -67,7 +73,6 @@ describe('exportCommand', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '');
     workspace = await mkdtemp(join(tmpdir(), 'tau-cli-export-'));
     inputPath = join(workspace, 'model.ts');
     await writeFile(inputPath, '/* fixture */', 'utf8');
@@ -209,51 +214,94 @@ describe('exportCommand', () => {
     expect(exportFunction).toHaveBeenCalledWith('glb', {});
   });
 
-  it('loads PicoGK resources for an explicit CLI export', async () => {
-    const target = `${process.platform}-${process.arch}`;
-    const targetRoot = join(workspace, target);
-    const digest = 'a'.repeat(64);
-    const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
-    await mkdir(targetRoot);
-    await writeFile(
-      join(targetRoot, 'tau-runtime-manifest.json'),
-      JSON.stringify({
-        schemaVersion: 2,
-        target,
-        rid: 'test-rid',
-        dotnetSdkVersion: '10.0.400',
-        dotnetRuntimeVersion: '10.0.11',
-        roslynVersion: '5.9.0',
-        picoGkCommit: 'commit',
-        picoGkArchiveSha256: digest,
-        picoGkHostedPatchSha256: digest,
-        hostApiVersion: picogkRuntimeManifestSchema.shape.hostApiVersion.value,
-        protocolVersion: picogkRuntimeManifestSchema.shape.protocolVersion.value,
-        sceneArtifactVersion: picogkRuntimeManifestSchema.shape.sceneArtifactVersion.value,
-        topologySchemaVersion: 1,
-        sourceFilesSha256: digest,
-        workerPath: 'Tau.PicoGK.Worker',
-        workerSha256: digest,
-        resourceFiles: [{ path: 'PicoGK.dll', sha256: digest, label: 'PicoGK' }],
-      }),
-    );
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', workspace);
-    let workerExecutable: string | undefined;
-    exportFunction.mockImplementationOnce(async () => {
+  describe('PicoGK', () => {
+    const closureRoot = '/store/closures/sha256/0123';
+    const file = (path: string) => ({ path, byteLength: 1, sha256: 'a'.repeat(64), mode: 0o644 });
+    const receipt = {
+      root: closureRoot,
+      files: [
+        'dotnet/dotnet',
+        'dotnet/host/fxr/10.0.11/libhostfxr.dylib',
+        'dotnet/shared/Microsoft.NETCore.App/10.0.11/libhostpolicy.dylib',
+        'dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.dylib',
+        'dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Private.CoreLib.dll',
+        'tau-worker/Tau.PicoGK.Worker.dll',
+        'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
+        'tau-worker/PicoGK.dll',
+      ].map((path) => file(path)),
+    };
+    const csharpInput = async (): Promise<string> => {
+      const path = join(workspace, 'main.cs');
+      await writeFile(path, '// fixture', 'utf8');
+      return path;
+    };
+    const inspected = (state: unknown): void => {
+      preparation.inspect.mockResolvedValueOnce({ selection: { package: '@taucad/picogk' }, revision: 1, state });
+    };
+
+    it('composes the kernel from the prepared closure, launched through the dotnet muxer', async () => {
+      inspected({ status: 'ready', attemptId: 'a', receipts: { runtime: receipt } });
+      exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+      const command = await importExportCommand();
+
+      await runCommand(command, { rawArgs: [await csharpInput(), '--ext=glb'] });
+
+      expect(preparation.inspect).toHaveBeenCalledWith({ package: '@taucad/picogk', dependencies: ['runtime'] });
       const { createCliRuntime } = await importedCliRuntime();
-      const options = createCliRuntime.mock.calls.at(-1)?.[0] as {
-        picogk: { workerExecutable: string };
-      };
-      workerExecutable = options.picogk.workerExecutable;
-      return buildSuccessResult(new Uint8Array([1]));
-    });
-    const command = await importExportCommand();
-
-    await runCommand(command, {
-      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'picogk.glb')}`],
+      expect(createCliRuntime.mock.calls.at(-1)?.[0]).toMatchObject({
+        picogk: {
+          workerExecutable: `${closureRoot}/dotnet/dotnet`,
+          workerArguments: [`${closureRoot}/tau-worker/Tau.PicoGK.Worker.dll`],
+          runtimePath: closureRoot,
+        },
+      });
     });
 
-    expect(workerExecutable?.endsWith(`${target}/Tau.PicoGK.Worker`)).toBe(true);
+    it('refuses an unprepared kernel with the command that prepares it', async () => {
+      inspected({ status: 'idle' });
+      exportFunction.mockResolvedValueOnce({
+        success: false,
+        issues: [{ message: 'No kernel handles main.cs', code: 'KERNEL_CAPABILITY_MISSING', severity: 'error' }],
+      });
+      const command = await importExportCommand();
+
+      await expect(runCommand(command, { rawArgs: [await csharpInput(), '--ext=glb'] })).rejects.toMatchObject({
+        code: 'KERNEL_NOT_PREPARED',
+        exit: exitCodes.refused,
+        message: expect.stringContaining('tau prepare picogk') as unknown,
+      });
+      const { createCliRuntime } = await importedCliRuntime();
+      expect(createCliRuntime.mock.calls.at(-1)?.[0]).not.toHaveProperty('picogk');
+    });
+
+    it('reports a host no PicoGK closure supports', async () => {
+      inspected({
+        status: 'blocked',
+        attemptId: 'a',
+        reason: 'unsupported-target',
+        message: 'No runtime variant of @taucad/picogk supports linux-x64.',
+      });
+      exportFunction.mockResolvedValueOnce({
+        success: false,
+        issues: [{ message: 'No kernel handles main.cs', code: 'KERNEL_CAPABILITY_MISSING', severity: 'error' }],
+      });
+      const command = await importExportCommand();
+
+      await expect(runCommand(command, { rawArgs: [await csharpInput(), '--ext=glb'] })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_TARGET',
+        exit: exitCodes.refused,
+        message: 'No runtime variant of @taucad/picogk supports linux-x64.',
+      });
+    });
+
+    it('leaves the payload store alone for inputs PicoGK does not handle', async () => {
+      exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+      const command = await importExportCommand();
+
+      await runCommand(command, { rawArgs: [inputPath, '--ext=glb'] });
+
+      expect(preparation.inspect).not.toHaveBeenCalled();
+    });
   });
 
   it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {

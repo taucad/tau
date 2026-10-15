@@ -1,13 +1,91 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Circle, CircleAlert, Hand, LoaderCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { PrintRequester } from '@taucad/runtime/machine';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import type { JSONSchema7 } from '@taucad/json-schema';
+import type { ParameterManifest } from '@taucad/parameters';
 import { cn } from '@taucad/ui/utils/cn';
 import { disclosureMotion } from '@taucad/ui/components/actions';
+import { formatFieldLabel } from '@taucad/ui/utils/label';
+import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
+import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
 
-/** Who the pane acts as when it creates or resolves a request. @public */
-export const operator: PrintRequester = { kind: 'user', id: 'operator', label: 'You' };
+/** A draft-7 schema and the defaults its owner declares. @public */
+export type ResolvedSchema = Readonly<{ schema: JSONSchema7; defaults: Record<string, unknown> }>;
+
+/**
+ * What a form still needs before its values may be sent: the top-level fields its schema finds wanting.
+ *
+ * @param schema - The form's draft-7 schema.
+ * @param values - The values as they would be sent.
+ * @returns A sentence naming those fields, or nothing when the values are complete.
+ * @public
+ */
+export const formIncomplete = (schema: JSONSchema7, values: Record<string, unknown>): string | undefined => {
+  const { errors } = rjsfValidator.validateFormData(values, schema);
+  if (errors.length === 0) {
+    return undefined;
+  }
+  /* Each field an error lies in; an error on the whole form only summarises those. */
+  const labels = new Set(
+    errors.flatMap(({ property }) => {
+      const segment = /^\[("(?:[^"\\]|\\.)*")\]/u.exec(property ?? '')?.[1];
+      if (segment === undefined) {
+        return [];
+      }
+      const key = JSON.parse(segment) as string;
+      const field = schema.properties?.[key];
+      const title = typeof field === 'object' ? field.title : undefined;
+      return [formatFieldLabel(title ?? key, title)];
+    }),
+  );
+  return `Complete ${labels.size === 0 ? 'the form' : [...labels].join(', ')} first.`;
+};
+
+/**
+ * Compile a provider configuration schema into the parameter manifest the
+ * shared Parameters renderer needs (blueprint R4). The declared defaults keep
+ * the manifest stable across telemetry; observed defaults go to the form.
+ *
+ * @param provider - The provider or route the schema belongs to.
+ * @param configuration - The configuration name inside that provider.
+ * @param resolved - The draft-7 schema and its declared defaults.
+ * @returns The manifest once compiled for the current schema.
+ * @public
+ */
+export const useCompiledConfigurationManifest = (
+  provider: string | undefined,
+  configuration: string,
+  resolved: ResolvedSchema | undefined,
+): ParameterManifest | undefined => {
+  const [compiled, setCompiled] = useState<{
+    readonly resolved: ResolvedSchema;
+    readonly manifest: ParameterManifest;
+  }>();
+  useEffect(() => {
+    if (!provider || !resolved) {
+      return;
+    }
+    let cancelled = false;
+    const compile = async (): Promise<void> => {
+      try {
+        const { manifest } = await compileExportConfigurationManifest(provider, configuration, resolved);
+        if (!cancelled) {
+          setCompiled({ resolved, manifest });
+        }
+      } catch (error) {
+        /* The form stays in its preparing state; what depends on it uses the values entered so far. */
+        console.error(`[print] Could not compile the ${configuration} form for ${provider}.`, error);
+      }
+    };
+    // async-iife: bootstrap -- the manifest is derived from the schema; a newer schema simply supersedes this compile.
+    void compile();
+    return () => {
+      cancelled = true;
+    };
+  }, [configuration, provider, resolved]);
+  return compiled !== undefined && compiled.resolved === resolved ? compiled.manifest : undefined;
+};
 
 /**
  * A clock that ticks once a second while mounted, for ages and staleness.
@@ -47,7 +125,7 @@ export function PrintStages({ children }: { readonly children: React.ReactNode }
   return (
     <div
       data-slot='print-stages'
-      className='flex min-w-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
+      className='flex min-w-0 shrink-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
       onKeyDown={(event) => {
         const move = stageKeys[event.key];
         if (move === undefined || !(event.target instanceof HTMLElement) || !event.target.dataset['printStage']) {
@@ -250,12 +328,12 @@ export function StaleBadge(): React.JSX.Element {
 /** One step of a send or a filament change, as `PrintSteps` lists it. @public */
 export type PrintStep = Readonly<{
   label: string;
-  state: 'done' | 'active' | 'todo';
+  state: 'done' | 'active' | 'todo' | 'skipped';
   /** Who takes the step: while it is active, a step for the person shows a hand instead of a spinner. */
   actor?: 'machine' | 'person';
 }>;
 
-const stepStateWords = { done: 'done', active: 'in progress', todo: 'to do' } as const;
+const stepStateWords = { done: 'done', active: 'in progress', todo: 'to do', skipped: 'skipped' } as const;
 
 /**
  * Something in progress as its steps, in order: what is done, the step in progress and what follows. Sends and
@@ -288,7 +366,8 @@ export function PrintSteps({
             aria-current={step.state === 'active' ? 'step' : undefined}
             className={cn(
               'flex min-w-0 items-center gap-1',
-              step.state !== 'todo' && 'text-foreground',
+              step.state !== 'todo' && step.state !== 'skipped' && 'text-foreground',
+              step.state === 'skipped' && 'line-through',
               needsPerson && 'font-medium',
             )}
           >

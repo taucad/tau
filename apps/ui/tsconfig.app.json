@@ -19,6 +19,7 @@
     "package.json"
   ],
   "compilerOptions": {
+    "rewriteRelativeImportExtensions": true,
     "outDir": "./out-tsc/lib",
     "rootDirs": [".", "./.react-router/types"],
     "lib": ["DOM", "DOM.Iterable", "ES2024"],

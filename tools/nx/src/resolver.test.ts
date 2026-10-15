@@ -91,15 +91,15 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-two today', () => {
+  it('is every non-private type:package project, sorted — fifty-five today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(52);
+    expect(names).toHaveLength(55);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
-    for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {
+    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'geospec-engine']) {
       expect(names).toContain(name);
     }
 
@@ -312,6 +312,7 @@ describe('publishableClosure()', () => {
   it('closes the runtime quick start over its publishable dependencies, in wave order', () => {
     const closure = publishableClosure(live, ['esbuild', 'replicad']);
     expect(closure).toEqual([
+      'archive-core',
       'cache-core',
       'project-core',
       'rpc',

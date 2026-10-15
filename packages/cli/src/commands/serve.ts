@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, defaultMachineProviders, startHostDaemon } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
@@ -14,7 +14,6 @@ import { consola } from 'consola';
 
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
-import { machineProviders } from '#machine-providers.js';
 import { cliError, exitCodes } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 
@@ -352,7 +351,7 @@ export const serveCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+        'Serve the machines route beside the agent channel with the Bambu Lab, Grbl and Carvera providers and their simulators (TAU_HOST_MACHINES=true)',
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
   },
@@ -374,7 +373,7 @@ export const serveCommand = defineCommand({
     if (args.machines && !agent) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
-    const machines = args.machines ? await machineProviders() : undefined;
+    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;

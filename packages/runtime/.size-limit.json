@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 206.76 kB brotli on 2026-10-15; the Node preparation host (./preparation/node) adds 17.27 kB",
+    "name": "total (ESM JS) — measured 226.4 kB brotli on 2026-10-15 (machines contract revision 3 and the Node preparation host, which adds 17.27 kB)",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "208 kB"
+    "limit": "230 kB"
   },
   {
     "name": "@taucad/runtime",

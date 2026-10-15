@@ -32,7 +32,6 @@ import { z } from 'zod';
 
 import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
 import type {
-  TauMcpConfirm,
   TauMcpDispatch,
   TauMcpHostCall,
   TauMcpHostTool,
@@ -83,13 +82,11 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the print
- * tools (blueprint D5, Bambu Studio D13): an
- * external agent may read the slicing profiles a machine offers, and open,
- * read, list and stop a print request through the same ledger a Tau turn
- * uses. A print starts only on the person's answer: in the client's own approval form when it declares form
- * elicitation (`tau mcp`), otherwise in Tau, while the agent is told to wait. Every name is dispatched into the
- * daemon's own registry by tool name.
+ * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the
+ * machine tools: an external agent may read machines and their slicing profiles, apply the host's unattended
+ * actions, stop a machine, and request or check a job. A job, or an action needing a person's approval, goes ahead
+ * only on the person's answer in Tau's Print pane, while the agent is told so: nothing here starts a program. Every
+ * name is dispatched into the daemon's own registry by tool name.
  *
  * @public
  */
@@ -101,11 +98,13 @@ export const hostMcpAllowedTools = [
   toolName.arrangeWorkbench,
   toolName.getParameters,
   toolName.applyParameterOperation,
+  toolName.listMachines,
+  toolName.getMachine,
+  toolName.machineAction,
+  toolName.stopMachine,
   toolName.getPrintProfiles,
-  toolName.requestPrint,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
-  toolName.cancelPrint,
+  toolName.requestJob,
+  toolName.checkJob,
   toolName.askQuestions,
 ] as const;
 
@@ -123,20 +122,26 @@ const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAll
   toolName.getParameters,
   toolName.applyParameterOperation,
   toolName.askQuestions,
+  toolName.listMachines,
+  toolName.getMachine,
+  toolName.machineAction,
+  toolName.stopMachine,
   toolName.getPrintProfiles,
-  toolName.requestPrint,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
-  toolName.cancelPrint,
+  toolName.requestJob,
+  toolName.checkJob,
 ]);
 
 /** The registry tools that change nothing, here or on a machine. */
 const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
   toolName.getParameters,
+  toolName.listMachines,
+  toolName.getMachine,
   toolName.getPrintProfiles,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
+  toolName.checkJob,
 ]);
+
+/** The registry tools that can end a run or halt a machine. */
+const destructiveRegistryTools: ReadonlySet<string> = new Set<string>([toolName.machineAction, toolName.stopMachine]);
 
 /** Tool-specific hints where the derived registry defaults do not describe the effect. */
 const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
@@ -215,9 +220,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
       : definition.inputSchema,
     annotations: hostMcpAnnotationOverrides[definition.name] ?? {
       readOnlyHint: reads,
-      destructiveHint: definition.name === toolName.cancelPrint,
-      idempotentHint: definition.name !== toolName.cancelPrint,
-      /* A print request reaches a machine outside this process once accepted. */
+      destructiveHint: destructiveRegistryTools.has(definition.name),
+      /* Stopping twice stops once; every other effect is a new operation per call. */
+      idempotentHint: reads || definition.name === toolName.stopMachine,
+      /* A machine is outside this process. */
       openWorldHint: !reads,
     },
   };
@@ -588,7 +594,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     /**
      * One allowed tool, by name, into the daemon's registry.
      *
-     * Keyed by tool name rather than RPC name because the print request tools
+     * Keyed by tool name rather than RPC name because the machine tools
      * have no chat RPC — they are registry tools — and this is the one call
      * the MCP adapter makes for either kind.
      *
@@ -858,12 +864,10 @@ export const serveLocalHostMcp = async (
     readonly call: {
       readonly toolCallId: string;
       readonly signal?: AbortSignal | undefined;
-      readonly confirm?: TauMcpConfirm | undefined;
     };
   }): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
     const runId = `mcp:${workspaceRoot}`;
     options.checkouts.set(runId, { cwd: workspaceRoot });
-    const { confirm } = call;
     return options.registry.invoke({
       toolCallId: call.toolCallId,
       toolName: tool,
@@ -871,25 +875,8 @@ export const serveLocalHostMcp = async (
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the args were validated against the tool's own schema.
       input: args as unknown as JsonValue,
       signal: call.signal ?? new AbortController().signal,
-      /* A client that draws forms asks the person inside this call, so a print starts only on their answer (E9,
-       * W11). Without one the tool leaves its request awaiting approval in Tau. Nothing pauses here, so there is
-       * no later attempt to recall an answer. */
-      ...(confirm === undefined
-        ? {}
-        : {
-            approve: async ({ prompt }: { readonly prompt: string }) => {
-              const outcome = await confirm({ message: prompt, label: 'Approve' }).catch((error: unknown) => {
-                /* Not the person's answer: the tool leaves its request for them in Tau, and the operator learns why. */
-                process.stderr.write(
-                  `tau mcp: the agent app could not ask the person to approve ${tool}, so it waits for them in Tau: ${String(error)}\n`,
-                );
-                throw Object.assign(new Error('The agent app could not ask the person.', { cause: error }), {
-                  code: 'APPROVAL_UNAVAILABLE',
-                });
-              });
-              return { interruptId: call.toolCallId, outcome };
-            },
-          }),
+      /* No approve here: a job or an action needing a person waits for them in Tau's Print pane, where their own
+       * session records the approval with its attestations (machines contract R15). */
     });
   };
   const viewer =

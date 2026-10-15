@@ -69,10 +69,14 @@ describe('compact permission requests', () => {
       expect(screen.queryByRole('button')).toBeNull();
     },
   );
-  it('preserves print consequences, unknown requests and old payload-free summaries', () => {
+  it('preserves machine consequences, unknown requests and old payload-free summaries', () => {
     expect(
-      permissionContent({ ...approval, context: { machineId: 'printer', fileName: 'bracket.3mf' } }).consequence,
-    ).toBe('This starts a physical print.');
+      permissionContent({ ...approval, context: { machineId: 'printer', jobId: 'job-1', fileName: 'bracket.3mf' } })
+        .consequence,
+    ).toBe('This starts a job on a physical machine.');
+    expect(permissionContent({ ...approval, context: { machineId: 'printer' } }).consequence).toBe(
+      'This acts on a physical machine.',
+    );
     expect(permissionContent({ ...approval, request: undefined }).title).toBe('Allow shell');
     expect(permissionContent({ ...approval, request: undefined, prompt: 'Allow call_unknown?' }).consequence).toContain(
       'describe this action',

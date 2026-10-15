@@ -4,14 +4,19 @@ import { resolve as resolvePath } from 'node:path';
 import { Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { keyedResource, openLocalMachines, openLocalParameterActors, serveLocalHostMcp } from '@taucad/host';
+import {
+  defaultMachineProviders,
+  keyedResource,
+  openLocalMachines,
+  openLocalParameterActors,
+  serveLocalHostMcp,
+} from '@taucad/host';
 import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
-import { machineProviders } from '#machine-providers.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /**
@@ -133,7 +138,7 @@ export const mcpCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        "Offer the print tools over this computer's Tau printers; a print starts only after the person approves it in the agent app (TAU_HOST_MACHINES=true)",
+        "Offer the machine tools over this computer's Tau machines; a job starts only after the person approves it in Tau's Print pane (TAU_HOST_MACHINES=true)",
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
     'viewer-page': {
@@ -273,7 +278,7 @@ export const mcpCommand = defineCommand({
       ? await openLocalMachines({
           workspaceRoot,
           requireProject: args.project !== undefined || process.env['CLAUDE_PROJECT_DIR'] !== undefined,
-          ...(await machineProviders()),
+          providers: await defaultMachineProviders(),
           actorId: 'tau-mcp',
           onWarning: ({ message }) => {
             process.stderr.write(`tau mcp: ${message}\n`);

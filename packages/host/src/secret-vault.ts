@@ -213,7 +213,7 @@ type FileEntry = z.infer<typeof fileEntrySchema>;
  * import { createFileSecretVault } from '@taucad/host';
  *
  * const vault = createFileSecretVault('/var/lib/tau/machines');
- * await vault.write('machine/bambu/00M00A391800004', '12345678', { label: 'Tau: Workshop X1C access code' });
+ * await vault.write('machine/acme/SN-0001', '12345678', { label: 'Tau: Workshop printer access code' });
  * ```
  */
 export const createFileSecretVault = (directory: string): SecretVault => {
@@ -431,8 +431,8 @@ export const createKeychainSecretVaultWith = (
  * import { createKeychainSecretVault } from '@taucad/host';
  *
  * const vault = createKeychainSecretVault();
- * await vault.write('machine/bambu/00M00A391800004', '12345678', {
- *   label: 'Tau: Workshop X1C access code',
+ * await vault.write('machine/acme/SN-0001', '12345678', {
+ *   label: 'Tau: Workshop printer access code',
  *   facts: { mqtt: 'sha256:7742e457' },
  * });
  * ```

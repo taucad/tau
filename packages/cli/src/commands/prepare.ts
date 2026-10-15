@@ -4,7 +4,6 @@ import {
   describeEffectiveProfile,
   detectHostIndicators,
   PreparationError,
-  readManagedPreparation,
 } from '@taucad/runtime/preparation/node';
 import type {
   ClosureVerification,
@@ -18,7 +17,7 @@ import { defineCommand } from 'citty';
 import type { ArgsDef, CommandDef, ParsedArgs } from 'citty';
 import type { ConsolaInstance } from 'consola';
 
-import { nativePreparationPlugins } from '#native-kernels.js';
+import { nativePreparationPlugins, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
 /** Progress lines on stderr are written at most this often. Milliseconds. */
@@ -45,14 +44,6 @@ const findKernel = (
     `No native kernel is called '${sanitize(kernel)}'. Kernels that can be prepared: ${known.length === 0 ? 'none are installed' : known.join(', ')}.`,
     exitCodes.usage,
   );
-};
-
-const readManaged = (): ManagedPreparation => {
-  try {
-    return readManagedPreparation(process.env);
-  } catch (error) {
-    throw cliError('MANAGED_PROFILE_INVALID', error instanceof Error ? error.message : String(error), exitCodes.usage);
-  }
 };
 
 const preparationFailure = (error: unknown): unknown =>

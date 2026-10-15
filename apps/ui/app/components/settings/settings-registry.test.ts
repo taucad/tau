@@ -89,6 +89,11 @@ describe('searchSettings', () => {
       'bed leveling',
       'flow calibration',
       'timelapse',
+      'router',
+      'cnc mill',
+      'grbl',
+      'carvera',
+      'spindle',
     ]) {
       expect(desktop.searchSettings(query).flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('machines');
     }

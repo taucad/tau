@@ -1,3 +1,5 @@
+import { isStreamingMachines } from '#shared/machine-shutdown.js';
+import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /**
  * The singleton services-utility broker (work item E2, second half).
  *
@@ -67,7 +69,7 @@ export type ServicesQuiesceOutcome =
   | Readonly<{ status: 'host-exited' }>
   | Readonly<{ status: 'failed'; message: string }>
   /* Refused before anything closed (Q-streamed-host); the broker serves again and a later quit asks again. */
-  | Readonly<{ status: 'streaming'; machines: readonly string[] }>
+  | Readonly<{ status: 'streaming'; machines: readonly StreamingMachine[] }>
   | Readonly<{ status: 'streaming-unknown'; message: string }>;
 
 /** Options for {@link createServicesBroker}. */
@@ -138,9 +140,11 @@ export type ServicesBroker = {
    * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
    * @returns The machines' names.
    */
-  streamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
+  streamingMachines(boundMilliseconds: number, attemptId: string): Promise<readonly StreamingMachine[]>;
   /** Quit was called off after {@link ServicesBroker.streamingMachines}: the utility starts machine jobs again. */
-  resumeMachineStarts(): void;
+  resumeMachineStarts(attemptId: string): void;
+  /** Recover only after utility teardown has actually settled; never kill a pending save. */
+  recover(attemptId: string, boundMilliseconds: number): Promise<void>;
   /**
    * The same answer as {@link ServicesBroker.streamingMachines}, holding nothing: what keeps the computer awake
    * while a program streams. No utility, no stream; it never forks one.
@@ -167,10 +171,7 @@ export type ServicesBroker = {
    *   is streaming to a machine.
    * @returns What ended the wait.
    */
-  quiesce(
-    boundMilliseconds: number,
-    options?: Readonly<{ quitIfStreamingUnknown?: boolean }>,
-  ): Promise<ServicesQuiesceOutcome>;
+  quiesce(boundMilliseconds: number, options?: MachineQuitDecision): Promise<ServicesQuiesceOutcome>;
   /** Terminate the utility. */
   dispose(): Promise<void>;
 };
@@ -211,7 +212,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   const bindingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<MachineBindingOutcome>>>();
   let bindingRequest = 0;
-  const streamingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<readonly string[]>>>();
+  const streamingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<readonly StreamingMachine[]>>>();
   let streamingRequest = 0;
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
    * utility, and a window that remounts inside that wait re-adopts the project
@@ -221,6 +222,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   let utility: UtilityProcess | undefined;
   let acceptingConnections = true;
   let quiescence: Promise<ServicesQuiesceOutcome> | undefined;
+  let utilityTeardown = false;
+  let utilityInFlight = false;
+  let utilitySettled: ReturnType<typeof Promise.withResolvers<void>> | undefined;
+  let quitOwner: { attemptId: string; utility: UtilityProcess | undefined } | undefined;
   let settleQuiescence: ((outcome: ServicesQuiesceOutcome) => void) | undefined;
   let disposal: Promise<void> | undefined;
 
@@ -231,14 +236,18 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const askStreaming = async (
     type: 'machines-streaming' | 'machines-streaming-peek',
     boundMilliseconds: number,
-  ): Promise<readonly string[]> => {
+    attemptId?: string,
+  ): Promise<readonly StreamingMachine[]> => {
     const spawned = utility;
+    if (type === 'machines-streaming' && attemptId !== undefined) {
+      quitOwner = { attemptId, utility: spawned };
+    }
     if (spawned === undefined) {
       return [];
     }
     streamingRequest += 1;
-    const requestId = `machines-streaming-${String(streamingRequest)}`;
-    const pending = Promise.withResolvers<readonly string[]>();
+    const requestId = attemptId ?? `machines-streaming-${String(streamingRequest)}`;
+    const pending = Promise.withResolvers<readonly StreamingMachine[]>();
     streamingWaiters.set(requestId, pending);
     const bound = setTimeout(() => {
       pending.reject(new Error('The desktop machine host did not say whether a program is streaming.'));
@@ -378,10 +387,16 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     if (type === 'machines-streaming-answered' && typeof requestId === 'string') {
+      if (utility !== spawned) {
+        return;
+      }
       const { machines } = frame as Record<string, unknown>;
-      streamingWaiters
-        .get(requestId)
-        ?.resolve(Array.isArray(machines) ? machines.filter((name): name is string => typeof name === 'string') : []);
+      const waiter = streamingWaiters.get(requestId);
+      if (isStreamingMachines(machines)) {
+        waiter?.resolve(machines);
+      } else {
+        waiter?.reject(new Error('The machine host returned an invalid streaming assessment.'));
+      }
       return;
     }
     if (type === 'quiesce-refused') {
@@ -390,12 +405,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       const record = frame as Record<string, unknown>;
       const { machines, message } = record;
+      utilityTeardown = false;
+      utilityInFlight = false;
+      utilitySettled?.resolve();
       /* Nothing closed in the utility: serve again, and let the next quit ask again. */
       quiescence = undefined;
       acceptingConnections = true;
       settleQuiescence?.(
-        record['reason'] === 'streaming' && Array.isArray(machines)
-          ? { status: 'streaming', machines: machines.filter((name): name is string => typeof name === 'string') }
+        record['reason'] === 'streaming' && isStreamingMachines(machines)
+          ? { status: 'streaming', machines }
           : {
               status: 'streaming-unknown',
               message: typeof message === 'string' ? message : 'Tau could not tell whether a program is streaming.',
@@ -407,6 +425,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       if (utility !== spawned) {
         return;
       }
+      utilityInFlight = false;
+      utilitySettled?.resolve();
       settleQuiescence?.(
         type === 'quiesced'
           ? { status: 'quiesced' }
@@ -525,6 +545,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   };
 
   const ensure = (): UtilityProcess => {
+    if (utility === undefined && quitOwner !== undefined) {
+      throw new ServicesQuiescingError();
+    }
     if (utility) {
       return utility;
     }
@@ -744,14 +767,57 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         bindingWaiters.delete(requestId);
       }
     },
-    async streamingMachines(boundMilliseconds) {
-      return askStreaming('machines-streaming', boundMilliseconds);
+    async streamingMachines(boundMilliseconds, attemptId) {
+      return askStreaming('machines-streaming', boundMilliseconds, attemptId);
     },
     async peekStreamingMachines(boundMilliseconds) {
-      return askStreaming('machines-streaming-peek', boundMilliseconds);
+      const machines = await askStreaming('machines-streaming-peek', boundMilliseconds);
+      return machines.map(({ name }) => name);
     },
-    resumeMachineStarts() {
-      utility?.postMessage({ type: 'machines-resume' });
+    resumeMachineStarts(attemptId) {
+      if (quitOwner?.attemptId !== attemptId) {
+        return;
+      }
+      utility?.postMessage({ type: 'machines-resume', attemptId });
+      quitOwner = undefined;
+    },
+    async recover(attemptId, boundMilliseconds) {
+      if (quitOwner?.attemptId !== attemptId) {
+        throw new Error('The quit attempt changed.');
+      }
+      if (utilitySettled === undefined) {
+        utility?.postMessage({ type: 'machines-resume', attemptId });
+      } else {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            utilitySettled.promise,
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => {
+                reject(new Error('Projects are still settling. Retry recovery when saving finishes.'));
+              }, boundMilliseconds);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+        if (utilityTeardown) {
+          utility?.kill();
+          utility = undefined;
+          releaseRuntimeLeases();
+          forgetCheckoutContexts();
+          projectAttachments.clear();
+          attachmentGenerations.clear();
+        } else {
+          utility?.postMessage({ type: 'machines-resume', attemptId });
+        }
+      }
+      quitOwner = undefined;
+      quiescence = undefined;
+      utilitySettled = undefined;
+      utilityInFlight = false;
+      utilityTeardown = false;
+      acceptingConnections = true;
     },
     post(message) {
       const { type } = message as { type?: unknown };
@@ -764,8 +830,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     computeProjectRoot(executionRoot) {
       return runtimeContexts.get(canonicalRoot(executionRoot))?.['computeProjectRoot'];
     },
+
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
     quiesce(boundMilliseconds, quit) {
+      if (quit !== undefined && (quitOwner?.attemptId !== quit.attemptId || quitOwner.utility !== utility)) {
+        return Promise.resolve({
+          status: 'streaming-unknown',
+          message: 'The machine host changed. Review quitting again.',
+        });
+      }
       acceptingConnections = false;
       options.revokeGeometry?.();
       if (quiescence !== undefined) {
@@ -777,6 +850,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         return quiescence;
       }
       const settled = Promise.withResolvers<ServicesQuiesceOutcome>();
+      if (!utilityInFlight) {
+        utilitySettled = Promise.withResolvers<void>();
+      }
+      const settlement = utilitySettled;
+      utilityInFlight = true;
+      utilityTeardown = true;
       let finished = false;
       settleQuiescence = (outcome): void => {
         if (finished) {
@@ -787,20 +866,29 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         settleQuiescence = undefined;
         settled.resolve(outcome);
       };
-      const bound = setTimeout(() => settleQuiescence?.({ status: 'timeout' }), boundMilliseconds);
+      const bound = setTimeout(() => {
+        settleQuiescence?.({ status: 'timeout' });
+        quiescence = undefined;
+      }, boundMilliseconds);
       bound.unref();
       /* A dead utility cannot prove that its projects settled. */
       spawned.on('exit', () => {
+        if (utilitySettled !== settlement) {
+          return;
+        }
+        utilityInFlight = false;
+        utilitySettled?.resolve();
         settleQuiescence?.({ status: 'host-exited' });
       });
       try {
-        spawned.postMessage({ type: 'quiesce', quitIfStreamingUnknown: quit?.quitIfStreamingUnknown === true });
+        spawned.postMessage({ type: 'quiesce', ...quit });
       } catch {
         settleQuiescence({ status: 'host-exited' });
       }
       quiescence = settled.promise;
       return quiescence;
     },
+
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
     dispose() {
       acceptingConnections = false;

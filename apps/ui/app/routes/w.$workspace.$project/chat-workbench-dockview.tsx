@@ -1,3 +1,4 @@
+import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { BrowserPane } from '#components/browser/browser-pane.js';
@@ -507,7 +508,7 @@ const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
 ]);
 
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
-  profile === 'editor' || sharedWorkbenchSurfaceIds.has(id);
+  (id !== 'print' || isFeatureEnabled('machines')) && (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
 
 const visibleWorkbenchSurfaceGroups = (
   isTauDebugEnabled: boolean,
@@ -547,6 +548,9 @@ export function replaceWorkbenchPlaceholderWithUtility({
   readonly placeholder: IDockviewPanel;
   readonly panelId: WorkbenchUtilityPanelId;
 }): void {
+  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+    return;
+  }
   const definition = workbenchPanels[panelId];
   const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {
@@ -882,6 +886,9 @@ export function openWorkbenchUtility(
   panelId: WorkbenchUtilityPanelId,
   group?: DockviewGroupPanel,
 ): void {
+  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+    return;
+  }
   const definition = workbenchPanels[panelId];
   const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {

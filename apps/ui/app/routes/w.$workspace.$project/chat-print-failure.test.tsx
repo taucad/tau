@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
-import { FailureEvidence } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import { FailureEvidence } from '#components/machines/machine-controls.js';
 import { entry as createEntry, printingRun } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
 const entry = createEntry();

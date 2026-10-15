@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // Keep concurrent WASM instances bounded on shared runners.
+    maxWorkers: 1,
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

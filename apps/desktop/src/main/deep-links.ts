@@ -48,6 +48,7 @@ const oneTimeTokenPattern = /^[\w-]{1,256}$/u;
 
 /** One admitted `tau://` link. */
 export type DeepLink =
+  | { readonly kind: 'machine'; readonly route: string }
   /** `tau://invitations/<token>`. */
   | { readonly kind: 'invitation'; readonly route: string }
   /** `tau://s/<slug>` with the share payload's optional fragment. */
@@ -56,6 +57,37 @@ export type DeepLink =
   | { readonly kind: 'import'; readonly route: string }
   /** `tau://auth/callback` — redeemed in main; it never reaches the renderer. */
   | { readonly kind: 'auth-callback'; readonly oneTimeToken: string; readonly state: string };
+
+const machineRoute = (segments: readonly string[]): DeepLink | undefined => {
+  if (segments.length === 0 || (segments.length === 1 && segments[0] === '')) {
+    return { kind: 'machine', route: '/machines' };
+  }
+  if (segments.length !== 2) {
+    return undefined;
+  }
+  try {
+    const identities = segments.map((segment) => decodeURIComponent(segment));
+    if (
+      !identities.every(
+        (value) =>
+          value.length > 0 &&
+          value.length <= 256 &&
+          value.isWellFormed() &&
+          value !== '.' &&
+          value !== '..' &&
+          !/[/\\]/u.test(value) &&
+          [...value].every(
+            (character) => (character.codePointAt(0) ?? 0) >= 32 && (character.codePointAt(0) ?? 0) !== 127,
+          ),
+      )
+    ) {
+      return undefined;
+    }
+    return { kind: 'machine', route: `/machines/${identities.map((value) => encodeURIComponent(value)).join('/')}` };
+  } catch {
+    return undefined;
+  }
+};
 
 const isIdentifier = (value: string): boolean =>
   value.length <= identifierMaxCharacters && identifierPattern.test(value) && value !== '.' && value !== '..';
@@ -135,6 +167,13 @@ export const parseDeepLink = (value: string): DeepLink | undefined => {
   const segments = path.slice(1);
   const hasFragmentOrQuery = url.search !== '' || url.hash !== '';
   switch (url.hostname) {
+    case 'machines': {
+      // Reject normalized dot paths and even empty query/fragment delimiters.
+      if (/[?#]/u.test(value) || /(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/iu.test(value)) {
+        return undefined;
+      }
+      return machineRoute(segments);
+    }
     case 'invitations': {
       return segments.length === 1 && isIdentifier(segments[0]!) && !hasFragmentOrQuery
         ? { kind: 'invitation', route: `/invitations/${segments[0]!}` }

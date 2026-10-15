@@ -236,26 +236,20 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   }
 
   const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
-  const openPrintPane = (): void => {
-    workspace?.openPanel('print');
-  };
-  const onRespond = async (approved: boolean, optionId?: string): Promise<void> => {
-    const answer = async (approvalId: string, isApproved: boolean): Promise<void> => {
-      await respondToToolApproval(approvalId, isApproved, { optionId });
-    };
-    if ((await answerInterrupt({ approval, approved, machines, answer })) === 'print-pane') {
-      openPrintPane();
-    }
-  };
-  /* Every job asks for attestations the banner cannot take, so a job is approved only in the Print pane. */
-  const isPrintPaneOnly = approval.context?.jobId !== undefined;
   return (
     <ChatPermissionRequest
       key={approval.approvalId}
       approval={approval}
       name={name}
-      onRespond={onRespond}
-      {...(isPrintPaneOnly ? { review: { label: 'Review in the Print pane', onClick: openPrintPane } } : {})}
+      onReview={approval.context?.jobId === undefined ? undefined : () => workspace?.openPanel('print')}
+      onRespond={async (approved, optionId) => {
+        await answerInterrupt({
+          approval,
+          approved,
+          machines,
+          answer: async (id, accepted) => respondToToolApproval(id, accepted, { optionId }),
+        });
+      }}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import {
@@ -72,6 +72,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import { cookieName } from '#constants/cookie.constants.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter, stringParameter, enumParameter } from '#utils/search-parameter.codecs.js';
+import type { InlineTextEditorHandle } from '#components/inline-text-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
@@ -984,6 +985,7 @@ export function ProjectLibraryCard({
   isSelected,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
+  const nameEditor = useRef<InlineTextEditorHandle>(null);
   const [showPreview, setShowPreview] = useState(false);
   const thumbnail = useProjectThumbnail(project.id);
   const thumbnailSource = thumbnail.url;
@@ -1046,6 +1048,8 @@ export function ProjectLibraryCard({
       <CardHeader>
         <div className='relative z-20 -mx-2 flex flex-1 flex-col items-start justify-start overflow-hidden py-1'>
           <InlineTextEditor
+            ref={nameEditor}
+            ariaLabel='Project name'
             value={project.name}
             className='h-7 w-full [&_[data-slot=button]]:w-full [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:text-base [&_[data-slot=button]]:font-semibold'
             onSave={async (value) => actions.handleRename(project.id, value)}
@@ -1074,7 +1078,11 @@ export function ProjectLibraryCard({
         </Button>
 
         <div className='relative z-20'>
-          <ProjectActionDropdown project={project} actions={actions} />
+          <ProjectActionDropdown
+            project={project}
+            actions={actions}
+            onRename={() => nameEditor.current?.startEditing()}
+          />
         </div>
       </CardFooter>
     </ProjectCard>

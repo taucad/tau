@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { Eye } from 'lucide-react';
+import { Box, Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
 import type { CadPreviewGraphicsOptions } from '#components/cad-preview.js';
@@ -10,9 +10,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 
 type ProjectCardProps = React.ComponentProps<typeof Card> & {
-  readonly to: To;
   readonly linkLabel: string;
-};
+} & (
+    | { readonly to: To; readonly onOpen?: never; readonly isOpening?: never }
+    | { readonly to?: never; readonly onOpen: () => void; readonly isOpening: boolean }
+  );
 
 type ProjectCardMediaProps = {
   readonly thumbnailSource?: string;
@@ -48,11 +50,13 @@ const CadPreviewViewer = lazy(async () => {
 export function ProjectCard({
   to,
   linkLabel,
+  onOpen,
+  isOpening,
   className,
   children,
   ...properties
 }: ProjectCardProps): React.JSX.Element {
-  const warmWorkspace = (typeof to === 'string' ? to : to.pathname)?.startsWith('/w/')
+  const warmWorkspace = (typeof to === 'string' ? to : to?.pathname)?.startsWith('/w/')
     ? warmProjectWorkspace
     : undefined;
   return (
@@ -60,15 +64,27 @@ export function ProjectCard({
       className={cn('isolate relative h-full overflow-hidden pt-0 hover:border-foreground/30', className)}
       {...properties}
     >
-      <Link
-        to={to}
-        className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'
-        onPointerEnter={warmWorkspace}
-        onPointerDown={warmWorkspace}
-        onFocus={warmWorkspace}
-      >
-        <span className='sr-only'>{linkLabel}</span>
-      </Link>
+      {to === undefined ? (
+        <button
+          type='button'
+          className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'
+          disabled={isOpening}
+          aria-busy={isOpening}
+          onClick={onOpen}
+        >
+          <span className='sr-only'>{linkLabel}</span>
+        </button>
+      ) : (
+        <Link
+          to={to}
+          className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'
+          onPointerEnter={warmWorkspace}
+          onPointerDown={warmWorkspace}
+          onFocus={warmWorkspace}
+        >
+          <span className='sr-only'>{linkLabel}</span>
+        </Link>
+      )}
       {children}
     </Card>
   );
@@ -110,8 +126,12 @@ export function ProjectCardMedia({
           unmounted rather than kept, so its kernel workers and memory are released. */}
       {isPreviewVisible ? (
         <div className='relative z-20 size-full'>{children}</div>
+      ) : thumbnailSource ? (
+        <img src={thumbnailSource} alt='' className='size-full object-cover' loading='lazy' />
       ) : (
-        <img src={thumbnailSource ?? '/placeholder.svg'} alt='' className='size-full object-cover' loading='lazy' />
+        <div className='flex size-full items-center justify-center text-muted-foreground'>
+          <Box aria-label='No saved preview' className='size-8' />
+        </div>
       )}
       <Tooltip>
         <TooltipTrigger asChild>

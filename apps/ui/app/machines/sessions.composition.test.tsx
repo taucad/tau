@@ -435,6 +435,7 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ ProjectPrintRouteIntent: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({ ProjectShareRouteIntent: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -1592,8 +1593,10 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
       quit: {
-        onAsk: (handler: () => void) => {
-          asks.push(handler);
+        onAsk: (handler: (attemptId: string) => void) => {
+          asks.push(() => {
+            handler('quit-test');
+          });
           return () => undefined;
         },
         reportQuiesced: () => answers.push('quiesced'),
@@ -1692,8 +1695,10 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     const order: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
       quit: {
-        onAsk: (handler: () => void) => {
-          asks.push(handler);
+        onAsk: (handler: (attemptId: string) => void) => {
+          asks.push(() => {
+            handler('quit-test');
+          });
           return () => undefined;
         },
         reportQuiesced: () => order.push('quiesced'),
@@ -1746,9 +1751,9 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     (globalThis as { tau?: unknown }).tau = {
       quit: {
         isReady: () => ready,
-        onAsk: (handler: () => void) => {
+        onAsk: (handler: (attemptId: string) => void) => {
           ready = true;
-          handler();
+          handler('buffered-quit');
           return () => {
             ready = false;
           };
@@ -1783,8 +1788,10 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
       quit: {
-        onAsk: (handler: () => void) => {
-          asks.push(handler);
+        onAsk: (handler: (attemptId: string) => void) => {
+          asks.push(() => {
+            handler('quit-test');
+          });
           return () => undefined;
         },
         reportQuiesced: () => answers.push('quiesced'),
@@ -1859,8 +1866,10 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
       quit: {
-        onAsk: (handler: () => void) => {
-          asks.push(handler);
+        onAsk: (handler: (attemptId: string) => void) => {
+          asks.push(() => {
+            handler('quit-test');
+          });
           return () => undefined;
         },
         reportQuiesced: () => answers.push('quiesced'),

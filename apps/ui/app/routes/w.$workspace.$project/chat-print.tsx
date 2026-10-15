@@ -1,45 +1,35 @@
+import { useFeature } from '#flags/use-feature.js';
+import { MachinesDisabled } from '#components/machines/machines-disabled.js';
+import { memo, useCallback, useMemo } from 'react';
+import { Button } from '@taucad/ui/components/button';
+import { Link, useSearchParams } from 'react-router';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
+
 import { useSelector } from '@xstate/react';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { useMemo } from 'react';
-import { CircleAlert, CircleCheck, Drill, LoaderCircle, OctagonX, PauseCircle, Printer, RefreshCw } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import { fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
+import { LoaderCircle, Printer } from 'lucide-react';
+import { fffProcessOf } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry, MachineJob } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
-import { Badge } from '@taucad/ui/components/badge';
-import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
-import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
-import { describeOutcome } from '#components/print/machine-facts.js';
-import { PrintSetupRow } from '#components/print/print-setup-row.js';
-import { ParametersBoolean } from '@taucad/viewer/parameters/parameters-boolean';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { useMachineControl, usePresence } from '#hooks/use-machine-control.js';
-import type { MachineControl, Presence } from '#hooks/use-machine-control.js';
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenJob, useMachinesJobs } from '#hooks/use-machines-jobs.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
-import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { isRunOwned } from '#components/machines/machine-controls.js';
 import {
-  Activities,
-  ControlStage,
-  FailureEvidence,
-  asksPresenceAtPane,
-  isRunOwned,
-  stopControlId,
-} from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PressureAdvanceStage } from '#routes/w.$workspace.$project/chat-print-materials.js';
-import {
-  HistoryStage,
-  InspectStage,
-  MachineAlerts,
-  MonitorStage,
-  RunBlock,
-} from '#routes/w.$workspace.$project/chat-print-monitor.js';
+  MachineWorkbench,
+  MachineWorkbenchContent,
+  ObservedPrintHeader,
+  PrintFooter,
+  NoMachines,
+} from '#components/machines/machine-workbench.js';
+import { PrintNotice } from '#components/machines/machine-section.js';
 import {
   PrepareActions,
   PrepareStages,
@@ -49,90 +39,6 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { PrepareActionFacts } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import { ProgramStage } from '#routes/w.$workspace.$project/chat-print-program.js';
-import { PrintNotice, PrintStages, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
-import { ActionApprovals, JobsSection } from '#routes/w.$workspace.$project/chat-print-send.js';
-import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
-
-/** Plain orientation copy derived solely from the authoritative directory entry. @public */
-export type MachinePresentation = Readonly<{
-  label: string;
-  icon: LucideIcon;
-  /** Color for the glyph only; the text stays neutral (DESIGN, color usage law). */
-  iconClassName: string;
-}>;
-
-const spinning = 'text-information animate-spin motion-reduce:animate-none';
-
-/** How a job in flight reads while the machine's own report still describes the moment before it. */
-const inFlightPresentation: Partial<Record<MachineJob['state'], MachinePresentation>> = {
-  approved: { label: 'Sending', icon: LoaderCircle, iconClassName: spinning },
-  transferring: { label: 'Sending', icon: LoaderCircle, iconClassName: spinning },
-  starting: { label: 'Starting', icon: LoaderCircle, iconClassName: spinning },
-  confirming: { label: 'Starting', icon: LoaderCircle, iconClassName: spinning },
-  'awaiting-start': {
-    label: 'Waiting for the start at the machine',
-    icon: PauseCircle,
-    iconClassName: 'text-information',
-  },
-};
-
-/**
- * Where the machine is and what it needs, from the entry and the job this pane has in flight. A job in flight speaks
- * first: the machine keeps reporting its previous state until it takes the start.
- *
- * @param entry - The machine as observed.
- * @param openJob - This machine's unsettled job, if any.
- * @returns The status label and glyph.
- * @public
- */
-export const presentMachine = (entry: MachineDirectoryEntry, openJob?: MachineJob): MachinePresentation => {
-  const inFlight = openJob === undefined ? undefined : inFlightPresentation[openJob.state];
-  const { connection, run, state, activities } = entry.snapshot;
-  if (inFlight && entry.freshness === 'current' && connection === 'connected') {
-    return inFlight;
-  }
-  if (entry.freshness === 'stale') {
-    return { label: 'Stale observation', icon: CircleAlert, iconClassName: 'text-warning' };
-  }
-  if (connection !== 'connected') {
-    return {
-      label:
-        connection === 'occupied'
-          ? 'In use by another app'
-          : connection === 'unreachable'
-            ? 'Unreachable'
-            : 'Disconnected',
-      icon: CircleAlert,
-      iconClassName: 'text-feature',
-    };
-  }
-  if (state.status === 'alarm') {
-    return { label: 'Alarm', icon: CircleAlert, iconClassName: 'text-feature' };
-  }
-  if (run?.state === 'paused' || state.status === 'held') {
-    return { label: 'Paused', icon: PauseCircle, iconClassName: 'text-warning' };
-  }
-  if (run?.state === 'running' || run?.state === 'starting' || run?.state === 'finishing') {
-    return {
-      label: fffProcessOf(entry.descriptor.capabilities) === undefined ? 'Running' : 'Printing',
-      icon: fffProcessOf(entry.descriptor.capabilities) === undefined ? Drill : Printer,
-      iconClassName: 'text-information',
-    };
-  }
-  const busy = activities.find((activity) => activity.state === 'in-progress' || activity.state === 'needs-person');
-  if (busy !== undefined) {
-    return { label: busy.label, icon: LoaderCircle, iconClassName: spinning };
-  }
-  if (state.status === 'ready') {
-    return { label: 'Ready', icon: CircleCheck, iconClassName: 'text-success' };
-  }
-  return {
-    label: state.status === 'asleep' ? 'Asleep' : state.status === 'active' ? 'Busy' : 'Not ready',
-    icon: CircleAlert,
-    iconClassName: 'text-warning',
-  };
-};
-
 /** The one primary step the pane offers. @public */
 export type NextAction = Readonly<{
   label: string;
@@ -203,240 +109,7 @@ const deferredPrepare = (
   return entry !== undefined && isRunOwned(entry) ? 'For the next print' : undefined;
 };
 
-/**
- * One notice for a machine the pane cannot currently trust, saying what waits and what still works.
- *
- * @param properties - The machine as observed.
- * @returns The notice, or nothing for a current, connected machine.
- */
-function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry }): React.JSX.Element | undefined {
-  const { connection } = entry.snapshot;
-  const resets = entry.descriptor.capabilities.connection.opening === 'resets-controller';
-  if (entry.freshness === 'stale') {
-    return (
-      <PrintNotice tone='warning' role='status'>
-        No current observation from {entry.name}. Controls and jobs wait until it reports again; slicing still works.
-      </PrintNotice>
-    );
-  }
-  if (connection !== 'connected') {
-    return (
-      <PrintNotice tone='error' role='status'>
-        {connection === 'occupied'
-          ? `${entry.name} serves one app at a time and another app holds it. Use its own stop if it is moving.`
-          : `${entry.name} is ${connection === 'unreachable' ? 'unreachable' : 'disconnected'}. Controls and jobs wait until the host reconnects${resets ? '; reconnecting restarts its controller, so it will need homing' : ''}. Use its own stop if it is moving.`}
-      </PrintNotice>
-    );
-  }
-  return undefined;
-}
-
-/**
- * The person's statement that they are at the machine, asked once above everything only where starting a job needs
- * it. Other controls that need it ask beside themselves.
- *
- * @param properties - The control and the presence.
- * @returns The switch, or nothing.
- */
-function PresenceRow({
-  control,
-  presence,
-}: {
-  readonly control: MachineControl;
-  readonly presence: Presence;
-}): React.JSX.Element | undefined {
-  if (!asksPresenceAtPane(control.entry)) {
-    return undefined;
-  }
-  return (
-    <div className='rounded-lg border border-border/70 bg-background px-2.5'>
-      <PrintSetupRow
-        label='I am at the machine'
-        description={
-          presence.attended
-            ? 'Controls that need someone watching are enabled. Tau asks again after 10 minutes without a control being used.'
-            : 'Moving the machine and starting a job need someone who can see it.'
-        }
-      >
-        <ParametersBoolean aria-label='I am at the machine' value={presence.attended} onChange={presence.setAttended} />
-      </PrintSetupRow>
-    </div>
-  );
-}
-
-/** Machines belong to this computer and are set up once in Settings › Machines. */
-function NoMachines(): React.JSX.Element {
-  const { open } = useSettingsDialog();
-  return (
-    <PanelEmptyState
-      icon={Printer}
-      title='No machines yet'
-      description='Find a machine on your network or add a simulated machine in Settings. Machines set up there are available in every project on this computer.'
-    >
-      <Button
-        type='button'
-        size='sm'
-        onClick={() => {
-          open('machines');
-        }}
-      >
-        Set up a machine
-      </Button>
-    </PanelEmptyState>
-  );
-}
-
-/**
- * The observation's age. It ticks every second, so it is no live region: the notice above announces staleness. The
- * controller's own state word is inspection detail: beside the header's state it read as a contradiction.
- */
-function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefined }): React.JSX.Element {
-  const now = useNow();
-  return (
-    <p className='flex min-h-8 shrink-0 items-center gap-1.5 border-t border-border/70 px-3 text-xs text-muted-foreground'>
-      {entry?.freshness === 'stale' ? <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' /> : null}
-      <span className='min-w-0 flex-1 truncate'>
-        {entry ? `Observed ${formatAge(entry.snapshot.observedAt, now)}` : 'No machine selected'}
-      </span>
-    </p>
-  );
-}
-
-/**
- * Whether Stop has anything to stop: the machine working or held, a run or an activity in progress, a jog held, or an
- * operation Tau sent still in flight. An idle machine shows no Stop (operator ruling, 2026-10-05). A stale machine
- * whose last report was not idle keeps it: it may be moving now.
- *
- * @param control - The control.
- * @returns True while something could be stopped.
- * @public
- */
-export const hasSomethingToStop = (control: MachineControl): boolean => {
-  const { state, activities, operations } = control.entry.snapshot;
-  return (
-    (control.entry.freshness === 'stale' && state.status !== 'ready' && state.status !== 'asleep') ||
-    state.status === 'active' ||
-    state.status === 'held' ||
-    isRunOwned(control.entry) ||
-    control.hold !== undefined ||
-    control.isStopping ||
-    activities.some((activity) => activity.state === 'in-progress' || activity.state === 'needs-person') ||
-    operations.some((operation) => operation.state === 'sending' || operation.state === 'confirming')
-  );
-};
-
-/**
- * Stop, one press away whenever something could be stopped and never waiting for approval or for an earlier Stop:
- * each press is its own operation. What it does on this machine is said beside it.
- *
- * @param properties - The control.
- * @returns The button.
- */
-function StopButton({ control }: { readonly control: MachineControl }): React.JSX.Element {
-  const { entry } = control;
-  const canStop = entry.snapshot.connection === 'connected';
-  const outcome = `Stop: ${describeOutcome(entry.descriptor.capabilities.stop)} Not an emergency stop.`;
-  const descriptionId = `stop-outcome-${entry.machineId}`;
-  return (
-    <>
-      <Button
-        id={stopControlId(entry.machineId)}
-        type='button'
-        size='xs'
-        variant='destructive'
-        disabled={!canStop}
-        title={canStop ? outcome : 'Not connected: use the machine’s own stop.'}
-        aria-describedby={descriptionId}
-        onClick={() => {
-          void control.stop();
-        }}
-      >
-        {control.isStopping ? (
-          <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-        ) : (
-          <OctagonX aria-hidden />
-        )}
-        Stop
-      </Button>
-      {/* Neither done nor failed: the machine has not said yet. Stop stays pressable meanwhile. */}
-      {control.isStopping ? (
-        <span role='status' className='shrink-0'>
-          Stopping…
-        </span>
-      ) : null}
-      <span id={descriptionId} className='sr-only'>
-        {outcome}
-      </span>
-    </>
-  );
-}
-
-/** The only place the machine is named and chosen, with its status, the Simulated mark, Stop and a refresh. */
-function PrintHeader({
-  entries,
-  selected,
-  openJob,
-  select,
-  refresh,
-  stop,
-}: {
-  readonly entries: readonly MachineDirectoryEntry[];
-  readonly selected: MachineDirectoryEntry | undefined;
-  readonly openJob: MachineJob | undefined;
-  readonly select: ReturnType<typeof useMachinesSelection>['select'];
-  readonly refresh: () => void;
-  readonly stop: React.ReactNode;
-}): React.JSX.Element {
-  const presentation = selected ? presentMachine(selected, openJob) : undefined;
-  /* Read from the host-stamped qualifications on the entry itself, so no machine reads as real while providers load. */
-  const isSimulated = selected !== undefined && isSimulatedMachine(selected.descriptor.capabilities);
-  const Icon = presentation?.icon ?? Printer;
-  return (
-    <div className='flex min-h-10 shrink-0 items-center gap-2 border-b border-border/70 px-3 text-xs text-muted-foreground'>
-      <Icon aria-hidden className={cn('size-3.5 shrink-0', presentation?.iconClassName)} />
-      {entries.length > 0 ? (
-        <div className='flex min-w-0 flex-1'>
-          <ParameterSelect
-            label='Machine'
-            value={selected?.machineId ?? ''}
-            groups={[
-              {
-                label: 'Machines on this computer',
-                options: entries.map((entry) => ({
-                  value: entry.machineId,
-                  label: entry.name,
-                  secondary: [
-                    presentMachine(entry, entry.machineId === selected?.machineId ? openJob : undefined).label,
-                    ...(isSimulatedMachine(entry.descriptor.capabilities) ? ['Simulated'] : []),
-                  ].join(' · '),
-                })),
-              },
-            ]}
-            onChange={select}
-          />
-        </div>
-      ) : (
-        <span className='min-w-0 flex-1'>No machines</span>
-      )}
-      {isSimulated ? (
-        <Badge variant='outline' className='shrink-0'>
-          Simulated
-        </Badge>
-      ) : null}
-      {stop}
-      <Button
-        type='button'
-        size='icon-xs'
-        variant='ghost'
-        aria-label='Refresh machines'
-        title='Refresh machines'
-        onClick={refresh}
-      >
-        <RefreshCw aria-hidden />
-      </Button>
-    </div>
-  );
-}
+const machineParameter = stringParameter();
 
 function ConnectedPrintPanel({
   client,
@@ -453,20 +126,53 @@ function ConnectedPrintPanel({
     () => directory.snapshot?.entries.toSorted((a, b) => a.name.localeCompare(b.name)) ?? [],
     [directory.snapshot],
   );
-  const { selected, select } = useMachinesSelection(projectId, entries);
-  const { jobs, error: jobsError, isStalled: isJobWatchStalled } = useMachinesJobs(client, selected?.machineId);
-  const openJob = jobs.find((job) => isOpenJob(job));
-  const provider = directory.providers.find(({ id }) => id === selected?.providerId);
-  const header = (stop: React.ReactNode): React.JSX.Element => (
-    <PrintHeader
-      entries={entries}
-      selected={selected}
-      openJob={openJob}
-      select={select}
-      refresh={directory.refresh}
-      stop={stop}
-    />
+  const stored = useMachinesSelection(projectId, entries, directory.snapshot?.cursor.hostId);
+  const [, setSearchParams] = useSearchParams();
+  const [linkedMachine, setLinkedMachine] = useSearchParameter(searchParameterName.machine, machineParameter);
+  const [linkedHost] = useSearchParameter(searchParameterName.machineHost, machineParameter);
+  const [linkedJob] = useSearchParameter(searchParameterName.machineJob, machineParameter);
+  const selected = linkedMachine
+    ? linkedHost === directory.snapshot?.cursor.hostId
+      ? entries.find((candidate) => candidate.machineId === linkedMachine)
+      : undefined
+    : stored.selected;
+  const select = useCallback(
+    (machineId: string): void => {
+      stored.select(machineId);
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          next.delete(searchParameterName.machine);
+          next.delete(searchParameterName.machineHost);
+          next.delete(searchParameterName.machineJob);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [stored.select, setSearchParams],
   );
+  const {
+    jobs,
+    error: jobsError,
+    isStalled: isJobWatchStalled,
+  } = useMachinesJobs(client, selected?.machineId, directory.snapshot?.cursor.hostId);
+  const openJob = jobs.find((job) => job.jobId === linkedJob && isOpenJob(job)) ?? jobs.find((job) => isOpenJob(job));
+  const provider = directory.providers.find(({ id }) => id === selected?.providerId);
+  const header = useCallback(
+    (stop: React.ReactNode): React.JSX.Element => (
+      <ObservedPrintHeader
+        client={client}
+        selected={selected}
+        openJob={openJob}
+        select={select}
+        stop={stop}
+        withMachineLink
+      />
+    ),
+    [client, selected, openJob, select],
+  );
+  const errors = useMemo(() => [directory.error, jobsError], [directory.error, jobsError]);
   return (
     <div
       data-slot='print-panel-body'
@@ -481,8 +187,8 @@ function ConnectedPrintPanel({
       }
     >
       {selected ? (
-        <MachinePanel
-          key={`${projectId}:${selected.machineId}`}
+        <ProjectMachinePanel
+          key={`${projectId}:${directory.snapshot?.cursor.hostId}:${selected.machineId}`}
           client={client}
           bridge={bridge}
           isShown={isShown}
@@ -492,14 +198,31 @@ function ConnectedPrintPanel({
           isJobWatchStalled={isJobWatchStalled}
           openJob={openJob}
           header={header}
-          errors={[directory.error, jobsError]}
+          errors={errors}
+          selectedJobId={linkedJob || undefined}
         />
       ) : (
         <>
           {header(undefined)}
           <div className='relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3'>
             {directory.error ? <PrintNotice tone='error'>{directory.error}</PrintNotice> : null}
-            {directory.snapshot ? (
+            {linkedMachine && directory.snapshot ? (
+              <PrintNotice tone='warning'>
+                This linked machine is unavailable on this host.{' '}
+                <Link to='/machines' className='underline'>
+                  View machines
+                </Link>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => {
+                    setLinkedMachine('');
+                  }}
+                >
+                  Choose another machine
+                </Button>
+              </PrintNotice>
+            ) : directory.snapshot ? (
               <NoMachines />
             ) : (
               <div
@@ -521,121 +244,59 @@ function ConnectedPrintPanel({
   );
 }
 
-function MachinePanel({
-  client,
-  bridge,
-  isShown,
-  entry,
-  provider,
-  jobs,
-  isJobWatchStalled,
-  openJob,
-  header,
-  errors,
-}: {
-  readonly client: MachineClient;
-  readonly bridge: MachineApprovalBridge;
-  readonly isShown: boolean;
-  readonly entry: MachineDirectoryEntry;
-  readonly provider: ReturnType<typeof useMachineDirectory>['providers'][number] | undefined;
-  readonly jobs: readonly MachineJob[];
-  /** The jobs watch keeps ending without news. */
-  readonly isJobWatchStalled: boolean;
-  readonly openJob: MachineJob | undefined;
-  readonly header: (stop: React.ReactNode) => React.JSX.Element;
-  readonly errors: ReadonlyArray<string | undefined>;
-}): React.JSX.Element {
-  /* The person's presence is said for this machine only: the panel is keyed by machine, so it starts unattended. */
-  const presence = usePresence();
-  const control = useMachineControl({
-    client,
-    entry,
-    attended: presence.attended,
-    setAttended: presence.setAttended,
-    onUsed: presence.touch,
-  });
-  const isFff = fffProcessOf(entry.descriptor.capabilities) !== undefined;
-  const prepare = usePrintPrepare({
-    client,
-    entry,
-    provider,
-    manifest: provider?.manifest,
-    isShown: isShown && isFff,
-  });
-  const action = nextAction({ entry, openJob, prepare });
-  const prepareDeferred = deferredPrepare(entry, openJob);
+const ProjectMachinePanel = memo(function ProjectMachinePanel(
+  properties: Omit<React.ComponentProps<typeof MachineWorkbenchContent>, 'control' | 'presence'> & {
+    readonly isShown: boolean;
+  },
+): React.JSX.Element {
   return (
-    <>
-      {header(hasSomethingToStop(control) ? <StopButton control={control} /> : undefined)}
-      <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
-        {errors.map((error, index) =>
-          error === undefined ? null : (
-            // A fixed list: the directory's error, then the jobs'. Two may read the same.
-            // oxlint-disable-next-line react/no-array-index-key -- see above.
-            <PrintNotice key={index} tone='error'>
-              {error}
-            </PrintNotice>
-          ),
-        )}
-        {/* What needs the person stays outside the stages: a decision is never folded away. */}
-        <ObservationNotice entry={entry} />
-        <MachineAlerts control={control} />
-        <FailureEvidence client={client} entry={entry} />
-        {control.error === undefined ? null : (
-          <PrintNotice tone='error' role='alert'>
-            {control.error}
-          </PrintNotice>
-        )}
-        <ActionApprovals client={client} control={control} bridge={bridge} />
-        <PresenceRow control={control} presence={presence} />
-        {isJobWatchStalled ? (
-          <PrintNotice tone='neutral' role='status'>
-            Job updates from {entry.name} stopped. Tau keeps retrying; the jobs shown here may be out of date.
-          </PrintNotice>
-        ) : null}
-        <JobsSection client={client} control={control} jobs={jobs} bridge={bridge} />
-        <Activities control={control} />
-        <RunBlock control={control} jobs={jobs} />
-        <PrintStages>
-          <MonitorStage control={control} />
-          <ControlStage client={client} control={control} />
-          {isFff ? (
-            <PrepareStages
-              entry={entry}
-              provider={provider}
-              manifest={provider?.manifest}
-              prepare={prepare}
-              control={control}
-              deferred={prepareDeferred}
-            />
-          ) : (
-            /* A machine Tau does not slice for runs a program file from the project, through the same job. */
-            <ProgramStage client={client} control={control} isDefaultOpen={prepareDeferred === undefined} />
-          )}
-          <PressureAdvanceStage control={control} />
-          <HistoryStage entry={entry} jobs={jobs} />
-          <InspectStage
-            entry={entry}
-            provider={provider}
-            slicer={isFff ? slicerName(prepare.studio) : undefined}
-            job={openJob}
-          />
-        </PrintStages>
-      </div>
-      {isFff && prepareDeferred === undefined && (action.kind === 'slice' || action.kind === 'send') ? (
-        /* One primary action at a fixed place; the job review opens above when Send is pressed. */
-        <div
-          data-slot='print-action-bar'
-          className='flex max-h-[60%] min-w-0 shrink-0 flex-col gap-2 overflow-y-auto border-t border-border/70 px-3 py-2'
-        >
-          <PrepareActions prepare={prepare} control={control} />
-        </div>
-      ) : null}
-      <PrintFooter entry={entry} />
-    </>
+    <MachineWorkbench {...properties}>
+      {({ control, presence }) => <ProjectPreparation {...properties} control={control} presence={presence} />}
+    </MachineWorkbench>
+  );
+});
+function ProjectPreparation(
+  properties: React.ComponentProps<typeof MachineWorkbenchContent> & { readonly isShown: boolean },
+): React.JSX.Element {
+  const { client, entry, provider, openJob, control, isShown } = properties;
+  const { projectId, editorRef } = useProject();
+  const onPreview = useCallback(
+    (job: MachineJob) => {
+      editorRef.send({ type: 'openFile', path: job.artifact.path, source: 'user' });
+    },
+    [editorRef],
+  );
+  const isFff = fffProcessOf(entry.descriptor.capabilities) !== undefined;
+  const prepare = usePrintPrepare({ client, entry, provider, manifest: provider?.manifest, isShown: isShown && isFff });
+  const action = nextAction({ entry, openJob, prepare });
+  const deferred = deferredPrepare(entry, openJob);
+  const preparation = isFff ? (
+    <PrepareStages
+      entry={entry}
+      provider={provider}
+      manifest={provider?.manifest}
+      prepare={prepare}
+      control={control}
+      deferred={deferred}
+    />
+  ) : (
+    <ProgramStage client={client} control={control} isDefaultOpen={deferred === undefined} />
+  );
+  const actions =
+    isFff && deferred === undefined && (action.kind === 'slice' || action.kind === 'send') ? (
+      <PrepareActions prepare={prepare} control={control} />
+    ) : undefined;
+  return (
+    <MachineWorkbenchContent
+      {...properties}
+      projectId={projectId}
+      onPreview={onPreview}
+      preparation={preparation}
+      actions={actions}
+      slicer={isFff ? slicerName(prepare.studio) : undefined}
+    />
   );
 }
-
 /**
  * The Print pane over an injectable machines facet and chat bridge, for fixture and host parity checks.
  *
@@ -707,6 +368,10 @@ function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.
 
 export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
   const availability = useProjectAvailability();
+  const enabled = useFeature('machines');
+  if (!enabled) {
+    return <MachinesDisabled />;
+  }
   return availability === 'ready' ? (
     <AvailablePrintPanel isShown={isShown} />
   ) : (

@@ -1,5 +1,5 @@
 import type { HostToolResult, JsonObject } from '@taucad/agent-host';
-import { exportModelOutputSchema } from '@taucad/chat';
+import { exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import type { KernelIssue } from '@taucad/runtime';
 import { bambuSlotOf } from '@taucad/bambu/settings';
 import { fffProcessOf } from '@taucad/runtime/machine';

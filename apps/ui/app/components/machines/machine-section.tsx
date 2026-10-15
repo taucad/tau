@@ -6,9 +6,9 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { cn } from '@taucad/ui/utils/cn';
 import { disclosureMotion } from '@taucad/ui/components/actions';
-import { formatFieldLabel } from '@taucad/ui/utils/label';
+import { compileExportConfigurationManifest } from '#components/machines/configuration-manifest.js';
 import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
-import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
+import { formatFieldLabel } from '@taucad/ui/utils/label';
 
 /** A draft-7 schema and the defaults its owner declares. @public */
 export type ResolvedSchema = Readonly<{ schema: JSONSchema7; defaults: Record<string, unknown> }>;
@@ -57,10 +57,19 @@ export const useCompiledConfigurationManifest = (
   provider: string | undefined,
   configuration: string,
   resolved: ResolvedSchema | undefined,
-): ParameterManifest | undefined => {
+): {
+  readonly manifest: ParameterManifest | undefined;
+  readonly error: string | undefined;
+  readonly retry: () => void;
+} => {
+  const [attempt, setAttempt] = useState(0);
   const [compiled, setCompiled] = useState<{
     readonly resolved: ResolvedSchema;
-    readonly manifest: ParameterManifest;
+    readonly provider: string;
+    readonly configuration: string;
+    readonly attempt: number;
+    readonly manifest?: ParameterManifest;
+    readonly error?: string;
   }>();
   useEffect(() => {
     if (!provider || !resolved) {
@@ -71,20 +80,41 @@ export const useCompiledConfigurationManifest = (
       try {
         const { manifest } = await compileExportConfigurationManifest(provider, configuration, resolved);
         if (!cancelled) {
-          setCompiled({ resolved, manifest });
+          setCompiled({ resolved, provider, configuration, attempt, manifest });
         }
       } catch (error) {
-        /* The form stays in its preparing state; what depends on it uses the values entered so far. */
-        console.error(`[print] Could not compile the ${configuration} form for ${provider}.`, error);
+        if (!cancelled) {
+          setCompiled({
+            resolved,
+            provider,
+            configuration,
+            attempt,
+            error: error instanceof Error ? error.message : 'This machine form could not be loaded.',
+          });
+        }
       }
     };
-    // async-iife: bootstrap -- the manifest is derived from the schema; a newer schema simply supersedes this compile.
+    // async-iife: bootstrap -- schema identity fences the derived result.
     void compile();
     return () => {
       cancelled = true;
     };
-  }, [configuration, provider, resolved]);
-  return compiled !== undefined && compiled.resolved === resolved ? compiled.manifest : undefined;
+  }, [configuration, provider, resolved, attempt]);
+  const current =
+    compiled !== undefined &&
+    compiled.resolved === resolved &&
+    compiled.provider === provider &&
+    compiled.configuration === configuration &&
+    compiled.attempt === attempt
+      ? compiled
+      : undefined;
+  return {
+    manifest: current?.manifest,
+    error: current?.error,
+    retry: () => {
+      setAttempt((value) => value + 1);
+    },
+  };
 };
 
 /**
@@ -171,26 +201,28 @@ export function PrintStage({
     <Collapsible asChild open={toggled ?? isDefaultOpen} onOpenChange={setToggled}>
       <section aria-label={title} className='group/stage flex min-w-0 flex-col'>
         <div className='grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
-          <CollapsibleTrigger
-            data-print-stage={title}
-            className='col-span-2 col-start-1 row-start-1 grid min-h-9 min-w-0 cursor-action grid-cols-subgrid items-center gap-x-2 px-2.5 text-left text-xs focus-visible:focus-outline'
-          >
-            <span className='flex items-center gap-2'>
-              <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-              <span className='shrink-0 font-medium'>{title}</span>
-            </span>
-            <span className='flex min-w-0 items-center gap-2'>
-              {/* Reserve space beside the title for the sibling reset button. */}
-              {aside === undefined ? null : <span aria-hidden className='size-4 shrink-0' />}
-              <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
-                {summary}
+          <h2 className='contents'>
+            <CollapsibleTrigger
+              data-print-stage={title}
+              className='col-span-2 col-start-1 row-start-1 grid min-h-9 min-w-0 cursor-action grid-cols-subgrid items-center gap-x-2 px-2.5 text-left text-xs focus-visible:focus-outline'
+            >
+              <span className='flex items-center gap-2'>
+                <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+                <span className='shrink-0 font-medium'>{title}</span>
               </span>
-              <ChevronDown
-                aria-hidden
-                className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
-              />
-            </span>
-          </CollapsibleTrigger>
+              <span className='flex min-w-0 items-center gap-2'>
+                {/* Reserve space beside the title for the sibling reset button. */}
+                {aside === undefined ? null : <span aria-hidden className='size-4 shrink-0' />}
+                <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
+                  {summary}
+                </span>
+                <ChevronDown
+                  aria-hidden
+                  className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
+                />
+              </span>
+            </CollapsibleTrigger>
+          </h2>
           {aside === undefined ? null : (
             <div className='relative col-start-2 row-start-1 flex items-center justify-self-start'>{aside}</div>
           )}

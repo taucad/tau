@@ -379,6 +379,18 @@ const revisionOf = async (client: MachineChannelClient, id = machineId): Promise
   return entry.descriptor.capabilities.revision;
 };
 
+const isSettled = async (promise: Promise<unknown>): Promise<boolean> => {
+  const waited = Promise.withResolvers<boolean>();
+  setTimeout(() => {
+    waited.resolve(false);
+  }, 50);
+  const settled = async (): Promise<boolean> => {
+    await promise;
+    return true;
+  };
+  return Promise.race([settled(), waited.promise]);
+};
+
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('createNodeMachineHost', () => {
   const openHost = async (root: string) => {
     const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
@@ -1069,7 +1081,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await fixture.close();
   });
 
-  it('should still stop, hold and apply actions while the host quiesces', async () => {
+  it('should fence new actions and holds while keeping Stop available during quit review', async () => {
     const stop = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
     const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
     const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
@@ -1081,13 +1093,74 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     const resume = await fixture.host.quiesce();
     await expect(
       fixture.client.applyAction(lightOn(fixture.revision, 'light-1', { requestedBy: operator })),
-    ).resolves.toMatchObject({ status: 'accepted' });
-    await expect(fixture.client.beginHold(jogOf(fixture.revision))).resolves.toMatchObject({ status: 'held' });
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_HOST_CLOSING' });
+    await expect(fixture.client.beginHold(jogOf(fixture.revision))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_HOST_CLOSING',
+    });
     await expect(
       fixture.client.stop({ machineId, operationId: 'stop-1', requestedBy: operator }),
     ).resolves.toMatchObject({ kind: 'stop', status: 'accepted' });
-    expect(apply).toHaveBeenCalledOnce();
+    expect(apply).not.toHaveBeenCalled();
     expect(stop).toHaveBeenCalledOnce();
+    resume();
+    await expect(
+      fixture.client.applyAction(lightOn(fixture.revision, 'light-2', { requestedBy: operator })),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    expect(apply).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should release a hold admitted before quit without sending its first jog after the fence', async () => {
+    const pending = Promise.withResolvers<void>();
+    const began = Promise.withResolvers<void>();
+    const extend = vi.fn(async () => undefined);
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      holds: {
+        type: 'supported',
+        begin: async () => {
+          began.resolve();
+          await pending.promise;
+          return { extend, release };
+        },
+      },
+    });
+    const hold = fixture.client.beginHold(jogOf(fixture.revision));
+    await began.promise;
+    const quiesced = fixture.host.quiesce();
+    pending.resolve();
+    const resume = await quiesced;
+    await expect(hold).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_HOST_CLOSING' });
+    expect(extend).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+    resume();
+    await fixture.close();
+  });
+
+  it('should await an already-sent jog renewal and admit no later renewal during quit', async () => {
+    const pending = Promise.withResolvers<void>();
+    const extending = Promise.withResolvers<void>();
+    const extend = vi
+      .fn(async () => undefined)
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(async () => {
+        extending.resolve();
+        await pending.promise;
+      });
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({ holds: { type: 'supported', begin: async () => ({ extend, release }) } });
+    await fixture.client.beginHold(jogOf(fixture.revision));
+    const renewal = fixture.client.renewHold({ holdId: 'jog-1' });
+    await extending.promise;
+    const quiesced = fixture.host.quiesce();
+    await expect(isSettled(quiesced)).resolves.toBe(false);
+    pending.resolve();
+    await renewal;
+    const resume = await quiesced;
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    expect(extend).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledOnce();
     resume();
     await fixture.close();
   });
@@ -1392,17 +1465,6 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     const jobs = storedJobs();
     const fixture = await boundPrinter(jobs.facet);
     // Whether a promise settles within 50 ms of real time.
-    const isSettled = async (promise: Promise<unknown>): Promise<boolean> => {
-      const waited = Promise.withResolvers<boolean>();
-      setTimeout(() => {
-        waited.resolve(false);
-      }, 50);
-      const settled = async (): Promise<boolean> => {
-        await promise;
-        return true;
-      };
-      return Promise.race([settled(), waited.promise]);
-    };
     // A start suspended in its last check (the provider's prepare) when quiescing begins is refused once it resumes.
     await request(fixture.client, 'job-1');
     const preparing = Promise.withResolvers<void>();

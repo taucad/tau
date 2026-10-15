@@ -148,6 +148,9 @@ export const mcpCommand = defineCommand({
     },
   },
   async run({ args }) {
+    if (args.machines && !/^(1|true)$/iu.test(process.env['TAU_MACHINES_ENABLED'] ?? '')) {
+      throw new Error('Machines are not available in this release.');
+    }
     const operationTimeout = seconds('operation-timeout', args['operation-timeout'], defaultOperationTimeout) * 1000;
     const idleRelease = seconds('idle-release', args['idle-release'], defaultIdleRelease) * 1000;
 

@@ -4,6 +4,7 @@
  * Uses Zod for validation
  */
 import { z } from 'zod';
+import { isMachinesFeatureEnabled } from '@taucad/types/constants';
 import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
 import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -61,6 +62,8 @@ const environmentSchema = z.preprocess(
     ...cloudEnvironmentShape,
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
+    /** Deployment opt-in while machine qualification is incomplete. Never a localStorage override. */
+    TAU_MACHINES_ENABLED: z.string().optional().transform(isMachinesFeatureEnabled),
     /**
      * Toggle in-app debug surfaces (per-route diagnostic panels, e2e
      * inspectors). Surfaced in the React tree via the `tauDebug` feature
@@ -134,6 +137,7 @@ const baseClientEnvironmentKeys = [
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_DEBUG',
+  'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',
   'NODE_ENV',
   'POSTHOG_API_HOST',

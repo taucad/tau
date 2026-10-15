@@ -117,7 +117,6 @@ const renderRegion = (
   cancel: ReturnType<typeof vi.fn>;
   syncNow: ReturnType<typeof vi.fn>;
   setSyncChats: ReturnType<typeof vi.fn>;
-  setSyncLargeExports: ReturnType<typeof vi.fn>;
   upgrade: ReturnType<typeof vi.fn>;
   /** Re-render the same mount with a moved facet, which is where C9 lived. */
   show: (next: RemoteFacet, nextSync?: SyncFacet) => void;
@@ -127,7 +126,6 @@ const renderRegion = (
   const cancel = vi.fn();
   const syncNow = vi.fn();
   const setSyncChats = vi.fn();
-  const setSyncLargeExports = vi.fn();
   const upgrade = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const element = (nextRemote: RemoteFacet, nextSync: SyncFacet): React.JSX.Element => (
@@ -143,8 +141,6 @@ const renderRegion = (
             onSync={syncNow}
             syncChats
             onSyncChatsChange={setSyncChats}
-            syncLargeExports={false}
-            onSyncLargeExportsChange={setSyncLargeExports}
             onUpgrade={upgrade}
             signInHref='/auth/sign-in'
             {...overrides}
@@ -160,7 +156,6 @@ const renderRegion = (
     cancel,
     syncNow,
     setSyncChats,
-    setSyncLargeExports,
     upgrade,
     show: (next, nextSync = sync) => {
       rerender(element(next, nextSync));
@@ -1432,34 +1427,29 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     });
   });
 
-  it('offers Sync exports beside Sync chats on a connected project (C14, EQ7)', async () => {
+  it('should offer only Sync chats in connected backup settings', async () => {
     const user = userEvent.setup();
     const region = renderRegion(connected);
 
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    expect(within(screen.getByRole('menuitem', { name: /^Sync chats/u })).getByRole('switch')).toBeChecked();
-    await user.click(screen.getByRole('menuitem', { name: /^Sync exports/u }));
-    expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
+    const menu = screen.getByRole('menu');
+    const chats = within(menu).getByRole('menuitem', { name: /^Sync chats/u });
+    expect(within(menu).getAllByRole('switch')).toHaveLength(1);
+    expect(within(chats).getByRole('switch')).toBeChecked();
+    expect(menu).not.toHaveTextContent(/Sync exports|GeoSpec/u);
+    await user.click(chats);
+    expect(region.setSyncChats).toHaveBeenCalledWith(false);
   });
 
-  it('keeps candidate consent off until a browser device explicitly opts in', async () => {
+  it('should omit export and candidate sharing options from Git backup settings', async () => {
     const user = userEvent.setup();
-    const change = vi.fn();
-    const label = /Share derived GeoSpec geometry candidates separately from project files \(this device\)/u;
-    renderRegion(connected, undefined, { isSyncGeoSpecCandidates: false, onSyncGeoSpecCandidatesChange: change });
-    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    const item = screen.getByRole('menuitem', { name: label });
-    expect(within(item).getByRole('switch')).not.toBeChecked();
-    await user.click(item);
-    expect(change).toHaveBeenCalledWith(true);
-  });
+    renderRegion(facet({ kind: 'git', phase: 'connected', url: 'https://example.test/model.git' }));
 
-  it('explains desktop candidate sharing is unavailable rather than offering a switch', async () => {
-    const user = userEvent.setup();
-    renderRegion(connected, undefined, { isGeoSpecCandidateSharingUnavailable: true });
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    expect(screen.getByText('GeoSpec candidate sharing is available in the browser only.')).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Share derived GeoSpec/u })).not.toBeInTheDocument();
+    const menu = screen.getByRole('menu');
+    expect(within(menu).queryByRole('switch')).not.toBeInTheDocument();
+    expect(menu).not.toHaveTextContent(/Sync exports|GeoSpec/u);
+    expect(within(menu).getByRole('menuitem', { name: /Change backup/u })).toBeInTheDocument();
   });
 });
 

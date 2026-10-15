@@ -2009,6 +2009,9 @@ importers:
       '@electron/packager':
         specifier: ^20.3.0
         version: 20.3.0
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       electron:
         specifier: ^43.5.1
         version: 43.7.9

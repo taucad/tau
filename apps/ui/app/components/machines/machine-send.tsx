@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Bot,
   Check,
@@ -33,22 +33,20 @@ import { answerDeny, answerMachineAction } from '#components/print/machine-actio
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenJob } from '#hooks/use-machines-jobs.js';
-import { useProject } from '#hooks/use-project.js';
 import {
   QualificationBadge,
   RemedyButton,
   declaredAction,
   formParameter,
   isRunOwned,
-} from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PrintNotice, PrintRow, PrintSteps, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
-import type { PrintStep } from '#routes/w.$workspace.$project/chat-print-section.js';
-import {
-  formatDuration,
-  formatFilament,
-  formatProducer,
-  shortDigest,
-} from '#routes/w.$workspace.$project/chat-print-summary.js';
+} from '#components/machines/machine-controls.js';
+import { PrintNotice, PrintRow, PrintSteps, useNow } from '#components/machines/machine-section.js';
+import type { PrintStep } from '#components/machines/machine-section.js';
+import { formatDuration, formatFilament, formatProducer, shortDigest } from '#components/machines/machine-summary.js';
+
+const focusLinkedJob: React.RefCallback<HTMLElement> = (element): void => {
+  element?.focus();
+};
 
 /**
  * Why the machine cannot take a job right now, or nothing when it can: a current connected observation, no run in
@@ -289,7 +287,7 @@ function JobReview({
           <ShieldCheck aria-hidden className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
         )}
         <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <h4 className='truncate text-sm font-medium'>{job.program.name}</h4>
+          <h3 className='truncate text-sm font-medium'>{job.program.name}</h3>
           <p className='text-xs text-muted-foreground'>
             {[
               describeProgram(job.program),
@@ -631,20 +629,21 @@ export function JobsSection({
   control,
   jobs,
   bridge,
+  projectId,
+  onPreview,
+  sourceLink,
+  selectedJobId,
 }: {
   readonly client: MachineClient;
   readonly control: MachineControl;
   readonly jobs: readonly MachineJob[];
   readonly bridge: MachineApprovalBridge;
+  readonly projectId?: string | undefined;
+  readonly onPreview?: ((job: MachineJob) => void) | undefined;
+  readonly sourceLink?: ((job: MachineJob) => React.ReactNode) | undefined;
+  readonly selectedJobId?: string | undefined;
 }): React.JSX.Element | undefined {
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
-  const { projectId, editorRef } = useProject();
-  const preview = useCallback(
-    (job: MachineJob): void => {
-      editorRef.send({ type: 'openFile', path: job.artifact.path, source: 'user' });
-    },
-    [editorRef],
-  );
   const open = jobs.filter((job) => isOpenJob(job));
   const latest = jobs[0];
   const failure =
@@ -659,28 +658,37 @@ export function JobsSection({
   }
   return (
     <section aria-label='Jobs' className='flex min-w-0 flex-col gap-2'>
-      {open.map((job) =>
-        job.state === 'awaiting-approval' ? (
-          <JobReview
-            key={job.jobId}
-            client={client}
-            control={control}
-            job={job}
-            bridge={bridge}
-            onPreview={
-              job.artifact.projectId === projectId
-                ? () => {
-                    preview(job);
-                  }
-                : undefined
-            }
-          />
-        ) : job.state === 'unknown' ? (
-          <UnknownCard key={job.jobId} client={client} job={job} />
-        ) : (
-          <JobProgress key={job.jobId} client={client} entry={control.entry} job={job} />
-        ),
-      )}
+      {open.map((job) => (
+        <div
+          key={job.jobId}
+          tabIndex={selectedJobId === job.jobId ? -1 : undefined}
+          aria-label={selectedJobId === job.jobId ? 'Linked job' : undefined}
+          ref={selectedJobId === job.jobId ? focusLinkedJob : undefined}
+          className='space-y-2 focus-visible:focus-outline'
+        >
+          {sourceLink?.(job)}
+          {job.state === 'awaiting-approval' ? (
+            <JobReview
+              key={job.jobId}
+              client={client}
+              control={control}
+              job={job}
+              bridge={bridge}
+              onPreview={
+                job.artifact.projectId === projectId && onPreview !== undefined
+                  ? () => {
+                      onPreview(job);
+                    }
+                  : undefined
+              }
+            />
+          ) : job.state === 'unknown' ? (
+            <UnknownCard key={job.jobId} client={client} job={job} />
+          ) : (
+            <JobProgress key={job.jobId} client={client} entry={control.entry} job={job} />
+          )}
+        </div>
+      ))}
       {failure ? (
         <FailureCard
           job={failure}

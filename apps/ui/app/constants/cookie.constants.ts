@@ -11,6 +11,7 @@ import { metaConfig } from '#constants/meta.constants.js';
  * - open cookies use <namespace>-op-<subject> (e.g. chat-op-files)
  */
 export const cookieName = {
+  machinePageSize: 'machine-page-size',
   /* Theme */
   // The color hue.
   colorHue: 'color-hue',

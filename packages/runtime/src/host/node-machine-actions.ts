@@ -279,6 +279,14 @@ export const createNodeMachineOperations = (
         );
       }
       const { record: binding, log } = context.usableMachine(machineId, 'MACHINE_UNAVAILABLE');
+      if ((input.kind === 'action' || input.kind === 'hold') && context.isQuiescing()) {
+        return ofKind(
+          refusedReceipt(input, {
+            code: 'MACHINE_HOST_CLOSING',
+            message: 'Tau is reviewing a quit request. Keep Tau open before starting another action.',
+          }),
+        );
+      }
       const admission = await input.admit();
       if ('refusal' in admission) {
         return ofKind(refusedReceipt(input, admission.refusal));
@@ -324,7 +332,23 @@ export const createNodeMachineOperations = (
       await publish(machineId);
       let receipt: MachineOperationReceipt;
       try {
-        receipt = operationReceipt(operation.planned, await admission.send());
+        if ((input.kind === 'action' || input.kind === 'hold') && context.isQuiescing()) {
+          receipt = refusedReceipt(input, {
+            code: 'MACHINE_HOST_CLOSING',
+            message: 'Tau is reviewing a quit request. Keep Tau open before starting another action.',
+          });
+        } else {
+          const sending = admission.send();
+          // Include action and jog admission already past the fence in the quit assessment's bounded wait.
+          if (input.kind === 'action' || input.kind === 'hold') {
+            context.startsInFlight.add(sending);
+          }
+          try {
+            receipt = operationReceipt(operation.planned, await sending);
+          } finally {
+            context.startsInFlight.delete(sending);
+          }
+        }
       } catch (error) {
         report(error);
         receipt = parseMachineOperationReceipt({
@@ -1073,9 +1097,23 @@ export const createNodeMachineOperations = (
         const hold: ActiveHold = { operation, provider, actor: input.admitted.actor, lease };
         holds.set(input.operationId, hold);
         arm(input.operationId, hold);
+        if (context.isQuiescing()) {
+          await endHold(input.operationId);
+          return {
+            status: 'rejected',
+            code: 'MACHINE_HOST_CLOSING',
+            message: 'Tau is reviewing a quit request. The jog was released.',
+          };
+        }
         // The first segment goes out with the hold, not with the first renewal a lease later.
         try {
-          await provider.extend();
+          const extending = provider.extend();
+          context.startsInFlight.add(extending);
+          try {
+            await extending;
+          } finally {
+            context.startsInFlight.delete(extending);
+          }
         } catch (error) {
           report(error);
           await endHold(input.operationId);
@@ -1095,9 +1133,19 @@ export const createNodeMachineOperations = (
         if (!hold || !sameActor(hold.actor, admitted.actor)) {
           return { status: 'ended' };
         }
+        if (context.isQuiescing()) {
+          await endHold(holdId);
+          return { status: 'ended' };
+        }
         arm(holdId, hold);
         try {
-          await hold.provider.extend();
+          const extending = hold.provider.extend();
+          context.startsInFlight.add(extending);
+          try {
+            await extending;
+          } finally {
+            context.startsInFlight.delete(extending);
+          }
         } catch (error) {
           report(error);
           await endHold(holdId);

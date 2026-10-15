@@ -732,6 +732,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
     const environment: Record<string, string> = {};
     environment['TAU_CONFIG_DIR'] = configDirectory;
     environment['TAU_HOST_MACHINES'] = 'true';
+    environment['TAU_MACHINES_ENABLED'] = 'true';
     /* No test may touch a person's keychain. */
     environment['TAU_SECRET_VAULT'] = 'memory';
     return { configDirectory, environment };
@@ -819,9 +820,9 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
     async () => {
       const { configDirectory, environment } = await isolatedStore('config-codex');
       /* The simulator, bound in the store before the server starts, as the person binds a printer in Tau. */
-      const providers = await defaultMachineProviders();
       const vault = process.env['TAU_SECRET_VAULT'];
       process.env['TAU_SECRET_VAULT'] = 'memory';
+      const providers = await defaultMachineProviders();
       const store = await openSharedMachineHost({
         providers: providers.filter(({ id }) => id === 'bambu-simulator'),
         readArtifact: async () => {

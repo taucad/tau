@@ -241,9 +241,10 @@ describe('useMachineDirectoryEntries', () => {
       .fn<MachineClient['list']>()
       .mockResolvedValueOnce({ cursor: cursor(1), entries: [] })
       .mockResolvedValue({ cursor: cursor(2), entries: [printing()] });
-    // SAFETY: the hook calls only list and watch.
+    // SAFETY: the shared observation owner calls these three directory methods.
     const client = {
       list,
+      listProviders: async () => [],
       // A watch that ends at once, as after a host restart.
       async *watch() {
         yield* [];

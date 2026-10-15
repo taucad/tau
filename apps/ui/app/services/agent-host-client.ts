@@ -1,3 +1,4 @@
+import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { SourceLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
@@ -786,6 +787,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           placementPort,
           projectStorage: options.projectStorage,
           authority: options.authority,
+          machinesEnabled: isFeatureEnabled('machines'),
           gatewayBaseUrl: options.gatewayBaseUrl,
           systemPrompt: options.systemPrompt,
           systemPromptBlocks: options.systemPromptBlocks,

@@ -1,4 +1,5 @@
 import '#styles/global.css';
+import { MemoryRouter } from 'react-router';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,15 +35,9 @@ import {
  * a Grbl router and a Carvera with Control open (presence, jog pad, spindle).
  */
 
-vi.doMock('#hooks/use-project.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...projectMock,
-}));
-vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...fileManagerMock,
-}));
-vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) =>
+vi.doMock('#hooks/use-project.js', () => projectMock);
+vi.doMock('#hooks/use-file-manager.js', () => fileManagerMock);
+vi.doMock('#components/machines/configuration-manifest.js', async (importOriginal) =>
   converterMock(await importOriginal()),
 );
 vi.doMock('@taucad/viewer/parameters/parameters', async (importOriginal) => parametersMock(await importOriginal()));
@@ -109,11 +104,13 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
         });
   const { bridge } = createBridge();
   const { container } = render(
-    <TooltipProvider>
-      <div data-testid='frame' style={{ width: `${String(width)}px`, height: '900px' }}>
-        <PrintPanel machines={{ available: true, ...fixture.client }} bridge={bridge} />
-      </div>
-    </TooltipProvider>,
+    <MemoryRouter>
+      <TooltipProvider>
+        <div data-testid='frame' style={{ width: `${String(width)}px`, height: '900px' }}>
+          <PrintPanel machines={{ available: true, ...fixture.client }} bridge={bridge} />
+        </div>
+      </TooltipProvider>
+    </MemoryRouter>,
   );
   if (scenario === 'studio') {
     // The real printer with Bambu Studio: presets, then Advanced settings with its overrides and one change.
@@ -121,9 +118,9 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await page.getByRole('button', { name: /^Advanced settings/u }).click();
     await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
-    await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
-    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
-    await screen.findByRole('button', { name: 'Reset Layer Height' });
+    await page.getByRole('spinbutton', { name: 'Input for Layer height' }).fill('0.16');
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer height' }));
+    await screen.findByRole('button', { name: 'Reset Layer height' });
     // Headless Chromium draws few frames between actions, so the stages' open animations would still
     // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
     for (const animation of document.getAnimations()) {

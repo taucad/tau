@@ -33,8 +33,8 @@ import {
   Consequences,
   declaredAction,
   isSlotAction,
-} from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PrintRow, PrintStage, StaleBadge } from '#routes/w.$workspace.$project/chat-print-section.js';
+} from '#components/machines/machine-controls.js';
+import { PrintRow, PrintStage, StaleBadge } from '#components/machines/machine-section.js';
 
 /**
  * What a slot holds, in a few words: the material, or why there is none.
@@ -556,7 +556,7 @@ export function MaterialSlots({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>{system.label}</h4>
+        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>{system.label}</h3>
         {isStale ? <StaleBadge /> : null}
       </div>
       {slot ? (

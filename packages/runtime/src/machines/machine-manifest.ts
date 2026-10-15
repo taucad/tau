@@ -509,8 +509,6 @@ export const machineWorkAreaClearAttestation = 'work-area-clear';
 /** Remedy and outcome shapes, for consumers that parse them. @internal */
 export const machineRemedySchema: z.ZodType<MachineRemedy> = remedySchema;
 /** @internal */
-export const machineHaltOutcomeSchema: z.ZodType<MachineHaltOutcome> = haltOutcomeSchema;
-/** @internal */
 export const machineActionSafetySchema: z.ZodType<MachineActionSafety> = safetySchema;
 
 /**

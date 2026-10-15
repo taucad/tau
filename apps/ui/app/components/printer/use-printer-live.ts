@@ -10,24 +10,23 @@
  * @module
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { componentValue, fffProcessOf } from '@taucad/runtime/machine';
 import type {
   ComponentObservation,
   MachineClient,
   MachineComponent,
   MachineDirectoryEntry,
-  MachineDirectorySnapshot,
   MachineJob,
   MachineManifest,
   MachineRun,
 } from '@taucad/runtime/machine';
 import { convert } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
-import { projectMachineDirectoryFrame, useMachinesFacet } from '#hooks/use-machines.js';
+import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
-import { firstResync, longestResync, pause, startedRunIdOf, useMachinesJobs } from '#hooks/use-machines-jobs.js';
+import { startedRunIdOf, useMachinesJobs } from '#hooks/use-machines-jobs.js';
 import { materialSystemValue, toolheadOf } from '#components/print/machine-facts.js';
 import type { LiveRunPosition } from '#components/printer/printer-playback.js';
 
@@ -168,90 +167,21 @@ export const selectPrinterLive = (
   };
 };
 
-/** Follow one machine client's directory. */
+/** Read the shared directory projection used by every machine surface. */
 export const useMachineDirectoryEntries = (
   client: MachineClient | undefined,
-): readonly MachineDirectoryEntry[] | undefined => {
-  // Keyed by client so a replaced client never shows the previous directory while its own loads.
-  const [state, setState] = useState<Readonly<{ client: MachineClient; snapshot: MachineDirectorySnapshot }>>();
-  useEffect(() => {
-    if (!client) {
-      return undefined;
-    }
-    const abort = new AbortController();
-    const { signal } = abort;
-    /* Read through a call: the abort lands while awaiting, which narrowing on the property cannot see. */
-    const isAborted = (): boolean => signal.aborted;
-    /* A watch that ends or fails means resync (R10): list again, then watch again, backing off as the jobs do. */
-    const observe = async (): Promise<void> => {
-      let wait = firstResync;
-      while (!isAborted()) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- each resync lists, then watches, in order; never in parallel.
-          const initial = await client.list({ signal });
-          if (isAborted()) {
-            return;
-          }
-          setState({ client, snapshot: initial });
-          // oxlint-disable-next-line no-await-in-loop -- the watch runs until it ends; the next resync follows it.
-          for await (const frame of client.watch({ cursor: initial.cursor, signal })) {
-            wait = firstResync;
-            setState((current) => ({
-              client,
-              snapshot: projectMachineDirectoryFrame(current?.client === client ? current.snapshot : initial, frame),
-            }));
-          }
-        } catch {
-          // The viewer only decorates the simulation: until the resync lands, it keeps what it last saw or file mode.
-        }
-        // oxlint-disable-next-line no-await-in-loop -- the backoff between resyncs is the point of the loop.
-        await pause(wait, signal);
-        wait = Math.min(wait * 2, longestResync);
-      }
-    };
-    // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the observation loop.
-    void observe();
-    return () => {
-      abort.abort();
-    };
-  }, [client]);
-  return state !== undefined && state.client === client ? state.snapshot.entries : undefined;
-};
+): readonly MachineDirectoryEntry[] | undefined => useMachineDirectory(client).snapshot?.entries;
 
-/**
- * Provider manifests by provider id, listed once per client.
- *
- * @param client - The negotiated machines client, when there is one.
- * @returns The manifests, or `undefined` until they load or without a client.
- */
+/** Provider manifests from the same shared observation owner. */
 export const useProviderManifests = (
   client: MachineClient | undefined,
 ): ReadonlyMap<string, MachineManifest> | undefined => {
-  // Keyed by client for the same reason as the directory: a replaced client never shows stale manifests.
-  const [state, setState] =
-    useState<Readonly<{ client: MachineClient; manifests: ReadonlyMap<string, MachineManifest> }>>();
-  useEffect(() => {
-    if (!client) {
-      return undefined;
-    }
-    const abort = new AbortController();
-    const load = async (): Promise<void> => {
-      try {
-        const providers = await client.listProviders({ signal: abort.signal });
-        if (!abort.signal.aborted) {
-          setState({ client, manifests: new Map(providers.map((provider) => [provider.id, provider.manifest])) });
-        }
-      } catch {
-        // Without manifests the scene keeps drawing the reference printer.
-      }
-    };
-    // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the request.
-    void load();
-    return () => {
-      abort.abort();
-    };
-  }, [client]);
-  return state !== undefined && state.client === client ? state.manifests : undefined;
+  const { snapshot, providers } = useMachineDirectory(client);
+  const isLoaded = snapshot !== undefined;
+  return useMemo(
+    () => (isLoaded ? new Map(providers.map((provider) => [provider.id, provider.manifest])) : undefined),
+    [isLoaded, providers],
+  );
 };
 
 /**
@@ -264,12 +194,17 @@ export const usePrinterLive = (digest: string | undefined): PrinterLiveState | u
   const { projectId } = useProject();
   const machines = useMachinesFacet();
   const client = machines.available ? machines : undefined;
-  const entries = useMachineDirectoryEntries(client);
+  const directory = useMachineDirectory(client);
+  const entries = directory.snapshot?.entries;
   const manifests = useProviderManifests(client);
-  const { selected } = useMachinesSelection(projectId, entries ?? []);
+  const { selected } = useMachinesSelection(projectId, entries ?? [], directory.snapshot?.cursor.hostId);
   const machineId = selected?.machineId;
   const followed = useMemo(() => selectPrinterLive(entries, manifests, { machineId }), [entries, manifests, machineId]);
-  const { jobs } = useMachinesJobs(client, followed?.isActive ? followed.machineId : undefined);
+  const { jobs } = useMachinesJobs(
+    client,
+    followed?.isActive ? followed.machineId : undefined,
+    directory.snapshot?.cursor.hostId,
+  );
   return useMemo(
     () =>
       digest === undefined ? followed : selectPrinterLive(entries, manifests, { machineId, file: { digest, jobs } }),

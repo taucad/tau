@@ -835,6 +835,14 @@
       "token": "void flush();",
       "class": "Debounce",
       "owner": "agent-plugin-ui-blueprint W10"
+    },
+    {
+      "id": "M11",
+      "bound": "Desktop recovery waits for actual utility settlement before replacing its service",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "Projects are still settling. Retry recovery when saving finishes.",
+      "class": "External edge",
+      "owner": "machines"
     }
   ]
 }

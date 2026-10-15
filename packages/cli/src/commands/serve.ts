@@ -356,6 +356,9 @@ export const serveCommand = defineCommand({
     },
   },
   async run({ args }) {
+    if (args.machines && !/^(1|true)$/iu.test(process.env['TAU_MACHINES_ENABLED'] ?? '')) {
+      throw new Error('Machines are not available in this release.');
+    }
     if (!args.trustProjects) {
       throw new Error(
         'tau serve is experimental and requires --trust-projects. Remote project code executes on this machine.',

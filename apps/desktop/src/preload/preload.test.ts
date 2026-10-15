@@ -44,8 +44,9 @@ vi.mock('@taucad/runtime/electron/preload', () => ({
 
 type QuitApi = Readonly<{
   isReady(): boolean;
-  onAsk(handler: () => void): () => void;
-  reportQuiesced(forced: boolean): void;
+  onNavigate(handler: (route: string) => void): () => void;
+  onAsk(handler: (attemptId: string) => void): () => void;
+  reportQuiesced(attemptId: string, forced: boolean): void;
 }>;
 
 const quitApi = (): QuitApi => {
@@ -55,7 +56,7 @@ const quitApi = (): QuitApi => {
 
 const askBeforeRendererMounts = (): void => {
   for (const listener of state.listeners.get(quitChannels.ask) ?? []) {
-    listener();
+    listener({}, 'attempt-1');
   }
 };
 
@@ -83,7 +84,25 @@ describe('desktop preload quit bridge', () => {
     askBeforeRendererMounts();
     quitApi().onAsk(handler);
 
-    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledExactlyOnceWith('attempt-1');
+  });
+});
+
+describe('desktop machine navigation bridge', () => {
+  it('buffers a machine route until the app subscribes and ignores unrelated routes', () => {
+    for (const listener of state.listeners.get(quitChannels.navigate) ?? []) {
+      listener({}, '/machines/host/machine');
+      listener({}, 'https://example.com');
+    }
+    const handler = vi.fn();
+    const unsubscribe = quitApi().onNavigate(handler);
+    expect(handler).toHaveBeenCalledExactlyOnceWith('/machines/host/machine');
+    unsubscribe();
+  });
+  it('returns the exact attempt and forced decision to main', () => {
+    vi.mocked(ipcRenderer.send).mockClear();
+    quitApi().reportQuiesced('attempt-2', true);
+    expect(ipcRenderer.send).toHaveBeenCalledExactlyOnceWith(quitChannels.quiesced, 'attempt-2', true);
   });
 });
 

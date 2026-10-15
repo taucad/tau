@@ -75,6 +75,36 @@
       "types": "./src/schemas/tools/project-path-input-normalizer.ts",
       "import": "./src/schemas/tools/project-path-input-normalizer.ts",
       "default": "./src/schemas/tools/project-path-input-normalizer.ts"
+    },
+    "./schemas/questions": {
+      "types": "./src/schemas/questions.schema.ts",
+      "import": "./src/schemas/questions.schema.ts",
+      "default": "./src/schemas/questions.schema.ts"
+    },
+    "./schemas/provider-tool-schemas": {
+      "types": "./src/schemas/provider-tool-schemas.ts",
+      "import": "./src/schemas/provider-tool-schemas.ts",
+      "default": "./src/schemas/provider-tool-schemas.ts"
+    },
+    "./schemas/tools/machine": {
+      "types": "./src/schemas/tools/machine.tool.schema.ts",
+      "import": "./src/schemas/tools/machine.tool.schema.ts",
+      "default": "./src/schemas/tools/machine.tool.schema.ts"
+    },
+    "./schemas/tools/parameter": {
+      "types": "./src/schemas/tools/parameter.tool.schema.ts",
+      "import": "./src/schemas/tools/parameter.tool.schema.ts",
+      "default": "./src/schemas/tools/parameter.tool.schema.ts"
+    },
+    "./schemas/tools/arrange-workbench": {
+      "types": "./src/schemas/tools/arrange-workbench.tool.schema.ts",
+      "import": "./src/schemas/tools/arrange-workbench.tool.schema.ts",
+      "default": "./src/schemas/tools/arrange-workbench.tool.schema.ts"
+    },
+    "./schemas/tools/ask-questions": {
+      "types": "./src/schemas/tools/ask-questions.tool.schema.ts",
+      "import": "./src/schemas/tools/ask-questions.tool.schema.ts",
+      "default": "./src/schemas/tools/ask-questions.tool.schema.ts"
     }
   },
   "dependencies": {

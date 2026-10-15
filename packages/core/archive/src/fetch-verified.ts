@@ -31,7 +31,7 @@ export type FetchVerifiedInput = {
   readonly signal: AbortSignal;
 };
 
-const attemptTimeoutMilliseconds = 60_000;
+const stallTimeoutMilliseconds = 60_000;
 const attempts = 3;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -51,6 +51,30 @@ const downloadFailure = (
     path: input.url,
     detail,
   });
+
+/**
+ * An abort signal that fires once `milliseconds` pass without a call to `progress`, so a slow body that keeps
+ * arriving is never cut off while a silent one is.
+ * @param milliseconds - Longest silence an attempt tolerates.
+ * @returns The signal, `progress` to restart the silence, and `stop` to clear the timer.
+ */
+const stallWatch = (
+  milliseconds: number,
+): { readonly signal: AbortSignal; readonly progress: () => void; readonly stop: () => void } => {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = (): void => {
+    clearTimeout(timer);
+  };
+  const progress = (): void => {
+    stop();
+    timer = setTimeout(() => {
+      controller.abort(new DOMException(`no bytes received for ${milliseconds} ms`, 'TimeoutError'));
+    }, milliseconds);
+  };
+  progress();
+  return { signal: controller.signal, progress, stop };
+};
 
 // One request, following redirects by hand when a policy is given.
 const request = async (input: FetchVerifiedInput, signal: AbortSignal): Promise<Response> => {
@@ -80,7 +104,8 @@ const request = async (input: FetchVerifiedInput, signal: AbortSignal): Promise<
 
 /**
  * Download bytes and verify them against their SRI pin before returning them. Transport errors, 429 and 5xx are
- * retried (three attempts, 100 ms then 200 ms apart, 60 s each); other statuses are not. No credentials are sent.
+ * retried (three attempts, 100 ms then 200 ms apart); other statuses are not. An attempt fails once 60 s pass with
+ * neither a response nor a body chunk, so a slow body that keeps arriving is never cut off. No credentials are sent.
  * Nothing is returned unless the whole body matched `integrity`.
  * @param input - URL, pin, size policy, redirect policy, transport and signal.
  * @returns The verified bytes.
@@ -99,15 +124,19 @@ export const fetchVerified = async (input: FetchVerifiedInput): Promise<Uint8Arr
       await delay(100 * 2 ** (attempt - 1));
       input.signal.throwIfAborted();
     }
+    const watch = stallWatch(stallTimeoutMilliseconds);
     try {
       // oxlint-disable-next-line no-await-in-loop -- bounded sequential retries
-      const response = await request(
-        input,
-        AbortSignal.any([input.signal, AbortSignal.timeout(attemptTimeoutMilliseconds)]),
-      );
+      const response = await request(input, AbortSignal.any([input.signal, watch.signal]));
       if (response.ok && response.body !== null) {
+        const progressing = new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+          transform(chunk, controller) {
+            watch.progress();
+            controller.enqueue(chunk);
+          },
+        });
         // oxlint-disable-next-line no-await-in-loop -- consume the successful response
-        const body = await readBoundedStream(response.body, maximumBytes);
+        const body = await readBoundedStream(response.body.pipeThrough(progressing), maximumBytes);
         if (input.byteLength !== undefined && body.byteLength !== input.byteLength) {
           throw downloadFailure(input, `${body.byteLength} of ${input.byteLength} bytes`, 'byte-length');
         }
@@ -127,6 +156,8 @@ export const fetchVerified = async (input: FetchVerifiedInput): Promise<Uint8Arr
         error instanceof ArchiveError && error.code === 'DOWNLOAD_FAILED'
           ? error
           : downloadFailure(input, errorMessage(error), 'transport');
+    } finally {
+      watch.stop();
     }
   }
   if (bytes === undefined) {

@@ -1,6 +1,6 @@
 import { createGeoSpecAssertionClient } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
-import { Engine, canonicalize } from '@taucad/geospec-engine-native/node';
+import { Engine, canonicalize } from 'geospec-engine/node';
 import { expect, it } from 'vitest';
 
 /* oxlint-disable no-restricted-imports -- Installed external-consumer acceptance imports its copied sibling harness directly. */

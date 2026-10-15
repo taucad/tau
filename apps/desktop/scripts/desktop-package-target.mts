@@ -93,7 +93,7 @@ export const desktopPackageOmissions = (
   plan: DesktopPackagePlan,
   present: Readonly<{ git: boolean; gitResourceRoot: string }>,
 ): readonly string[] => [
-  'GeoSpec native engine (@taucad/geospec-engine-native): its native assembly and CI delivery are darwin-arm64 only, ' +
+  'GeoSpec native engine (geospec-engine): its npm package ships a native binding for darwin-arm64 only, ' +
     'so the geometry utility (AP242 measurement, native GeoSpec checks) cannot start in this package.',
   'PicoGK C# worker (resources/picogk): the desktop enables the PicoGK kernel on darwin-arm64 only, ' +
     'and its voxel natives are built on Darwin arm64 only (upstream publishes no Linux natives).',

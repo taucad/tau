@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 
 /** Explicit source workspace for staged harnesses; defaults to this source checkout. @internal */
 export const fixtureWorkspaceRoot = process.env.GEOSPEC_WORKSPACE_ROOT
@@ -44,4 +44,18 @@ export function readFixture(originalPath, workspaceRoot = fixtureWorkspaceRoot) 
     `Fixture hash changed: ${originalPath}`,
   );
   return bytes;
+}
+
+/**
+ * Locate a file a frozen authority names by its resolved location: through the retained closure when the closure
+ * registers that original path, otherwise the location itself.
+ * @internal
+ * @type {(location: string, workspaceRoot?: string) => string}
+ * @param location - Absolute path the authority's relative reference resolves to.
+ * @param workspaceRoot - Repository containing the retained fixture closure.
+ * @returns Local path; the caller still verifies the bytes it reads.
+ */
+export function locateFixture(location, workspaceRoot = fixtureWorkspaceRoot) {
+  const originalPath = relative(workspaceRoot, location).split(sep).join('/');
+  return manifest.files[originalPath] ? fixturePath(originalPath, workspaceRoot) : location;
 }

@@ -1,16 +1,21 @@
+@import 'tailwindcss';
+@import '@taucad/ui/styles/tokens.css';
+@import './principle-diagrams.css';
+@source '../../../packages/ui/src/components/button.tsx';
+
 @font-face {
   font-family: 'Geist Sans';
-  src: url('/_www/assets/geist.woff2') format('woff2');
+  src: url('/_www/assets/geist-latin.woff2') format('woff2');
   font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
+  font-weight: 400 600;
+  font-display: optional;
 }
 @font-face {
   font-family: 'Geist Mono';
-  src: url('/_www/assets/geist-mono.woff2') format('woff2');
+  src: url('/_www/assets/geist-mono-latin.woff2') format('woff2');
   font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
+  font-weight: 400 500;
+  font-display: optional;
 }
 
 /* ── Site tokens: composed from the shared token layer above ─────────────────────────── */
@@ -39,18 +44,8 @@
   --slow: 500ms;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --l-base: 0.16;
-    --l-surface: 0.2;
-    --l-subtle: 0.3;
-    --l-emphasized: 0.74;
-    --l-deepest: 0.96;
-    --l-primary: 0.76;
-    --c-primary: 0.13;
-    --line: color-mix(in oklch, var(--foreground) 13%, transparent);
-    color-scheme: dark;
-  }
+.dark {
+  color-scheme: dark;
 }
 
 /* ── Base ─────────────────────────────────────────────────────────────────────────────── */
@@ -73,15 +68,18 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: clip;
 }
-a {
-  color: inherit;
-  text-underline-offset: 0.25em;
-  text-decoration-thickness: 1px;
-}
-button,
-input {
-  font: inherit;
-  color: inherit;
+/* Resets must not override the shared components' utility-layer foregrounds. */
+@layer base {
+  a {
+    color: inherit;
+    text-underline-offset: 0.25em;
+    text-decoration-thickness: 1px;
+  }
+  button,
+  input {
+    font: inherit;
+    color: inherit;
+  }
 }
 button,
 summary,
@@ -89,9 +87,7 @@ summary,
   cursor: var(--cursor-action);
 }
 :where(a, button, summary, input):focus-visible {
-  outline: var(--focus-outline-width) solid var(--ring);
-  outline-offset: 3px;
-  border-radius: var(--radius-xs);
+  @apply focus-outline;
 }
 img,
 svg {
@@ -359,6 +355,21 @@ main > .band:first-child::before {
 .button.small {
   min-height: 2.25rem;
   padding: 0 0.875rem;
+}
+.button svg,
+.text-link svg {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  flex: none;
+}
+.download-options {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+}
+.download-actions .fine,
+.download-options .fine {
+  margin-top: 0;
 }
 .out {
   font-size: 0.85em;
@@ -1073,7 +1084,7 @@ main > .band:first-child::before {
 /* The capture carries its own macOS window frame and shadow; the negative margins align the window, not the
    transparent shadow, with the column (window 3456 × 2160 inside a 3680 × 2384 image, inset 112 / 76 / 148 px).
    Re-measure these if scripts/src/readme-hero-capture.ts re-shoots docs/assets/tau-desktop-*.webp at another size,
-   and keep the 1.065 (3680 / 3456) factor in the figure's sizes attribute in templates.mjs in step. */
+   and keep the 1.065 (3680 / 3456) factor in the figure's sizes attribute in page-components.tsx in step. */
 .workspace img {
   width: calc(100% * 3680 / 3456);
   max-width: none;
@@ -1903,4 +1914,15 @@ main > .band:first-child::before {
   gap: var(--gutter);
   color: var(--foreground);
   background: var(--background);
+}
+
+.primary-nav nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.is-live [data-activate-hero],
+[data-activate-hero]:not([hidden]) + [data-note] {
+  display: none;
 }

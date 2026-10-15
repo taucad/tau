@@ -36,7 +36,7 @@ const native = vi.hoisted(() => {
   };
 });
 
-vi.mock('@taucad/geospec-engine-native/node', () => ({
+vi.mock('geospec-engine/node', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the public module's constructor export.
   Engine: native.engine,
 }));

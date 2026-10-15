@@ -447,7 +447,7 @@ it('accepts the project Runtime mesh', async () => {
     expect(geospecWasm!.sourceByteLength).toBe(geospecWasm!.expectedByteLength);
     const runnerWorkers = await target.workers('geospec-runner');
     const [native, assertionApi, { createGeoSpecNativeModelLoader }] = await Promise.all([
-      import('@taucad/geospec-engine-native'),
+      import('geospec-engine'),
       import('geospec/assertion-client'),
       import('geospec/runner/native'),
     ]);

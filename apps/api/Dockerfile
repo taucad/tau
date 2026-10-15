@@ -60,8 +60,8 @@ ENV pnpm_config_verify_deps_before_run=warn
 # Nx's native PTY runner intermittently segfaults; CI turns it off the same way
 # in .github/actions/setup-nx.
 ENV NX_NATIVE_COMMAND_RUNNER=false
-# The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
-# its header says why the runtime image does not need it.
+# The script builds the API's dependencies, then the API targets, and refuses an API
+# runtime dependency on the GeoSpec engine; its header says why.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \

@@ -105,9 +105,11 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
             if (await scroll.isVisible()) {
               await scroll.click();
             }
-            // Approval records can leave the still-running activity group collapsed.
-            for (const group of await page.locator('button[aria-busy="true"][aria-expanded="false"]').all()) {
-              // oxlint-disable-next-line no-await-in-loop -- Open each active disclosure before inspecting its cards.
+            // Permission pauses can collapse these groups before the tool starts running.
+            const group = page
+              .getByRole('button', { name: /Rendering models|Running tests|Capturing images/u, expanded: false })
+              .first();
+            if (await group.isVisible()) {
               await group.click();
             }
             const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();

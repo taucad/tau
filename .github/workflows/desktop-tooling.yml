@@ -33,7 +33,7 @@ jobs:
         runner: >-
           ${{ github.event_name == 'pull_request'
           && fromJSON('["ubuntu-24.04", "windows-2025"]')
-          || fromJSON('["ubuntu-24.04", "windows-2025", "macos-15", "macos-15-intel"]') }}
+          || fromJSON('["ubuntu-24.04", "windows-2025", "macos-26", "macos-26-intel"]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     env:

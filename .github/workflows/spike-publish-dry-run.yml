@@ -3,7 +3,8 @@
 # Ubuntu. Nothing is published: the job holds no npm token and the publish step is gone. The
 # GeoSpec engine is the published `geospec-engine` catalog pin, installed with the workspace.
 #
-# S20 (gate): a dispatch, or a pull request that changes this file. S21 (gitChecks): a dispatch
+# Dispatch only: a pull-request trigger filled the shared macOS queue. S20 (gate): a dispatch with
+# `gate` on. S21 (gitChecks): a dispatch
 # with `gate` off skips the gate and dry-runs the publish with pnpm's git checks on or off. With
 # `tag-checkout` it first pushes a throwaway `spike-publish-<run id>` tag (never `v*`) at the
 # dispatched commit, dry-runs on that tag's checkout, the way `publish.yml` runs on a release tag,
@@ -13,8 +14,12 @@
 # its publishable closure without the GeoSpec engine (D36), install the tarballs into a clean npm
 # application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
 #
-# Difference from `publish.yml`, a finding for W16: it installs Chromium before the gate
-# (`scripts:check-pack-install` launches it).
+# Differences from `publish.yml`, findings for W16: it installs Chromium before the gate
+# (`scripts:check-pack-install` launches it) and the Linux sandbox prerequisites, which include uv
+# (`desktop:prepare-build123d-python`, in the gate's graph, resolves its wheels with uv; run
+# 38668092247 failed with `spawnSync uv ENOENT`), Bubblewrap and unrestricted user namespaces
+# (`native-process-core:test` and `build123d:test` run workers in the sandbox and fail closed on
+# CI without it; run 38678949557 failed with both).
 name: Spike publish dry run
 
 on:
@@ -34,14 +39,9 @@ on:
         type: boolean
         default: false
       s24:
-        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-15'
+        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-26'
         type: boolean
         default: true
-  pull_request:
-    paths:
-      - '.github/workflows/spike-publish-dry-run.yml'
-      - 'scripts/src/check-pack-install.ts'
-      - 'scripts/src/check-pack-install-cli.ts'
 
 permissions:
   contents: read
@@ -103,6 +103,12 @@ jobs:
       - name: Install Chromium for the pack-install check
         if: env.SPIKE_GATE == 'true'
         run: pnpm exec playwright install --with-deps chromium
+
+      # The gate's native kernel suites run workers under Bubblewrap, and
+      # prepare-build123d-python resolves its wheels with uv; the action provides both, as in ci.yml.
+      - name: Setup Linux sandbox prerequisites
+        if: env.SPIKE_GATE == 'true'
+        uses: ./.github/actions/setup-linux-sandbox
 
       - name: Run the release gate
         if: env.SPIKE_GATE == 'true'
@@ -168,7 +174,7 @@ jobs:
       matrix:
         os: >-
           ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
-          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-26"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:

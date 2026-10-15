@@ -153,11 +153,13 @@ export function EntriesSyncHost(): React.JSX.Element {
       });
     };
   }, [store]);
-  useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
+  const flushAtClose = useCallback(
+    async () => confirmFlush(store.flush, 'Model display settings are not confirmed saved.'),
+    [store],
+  );
+  useEffect(() => registerWorkbenchRecordProducer(flushAtClose), [registerWorkbenchRecordProducer, flushAtClose]);
+  useFlushOnClose(flushAtClose, { stage: 'producer' });
   useEffect(() => registerEntryPathChange(store.changePaths), [registerEntryPathChange, store]);
-  useFlushOnClose(async () => confirmFlush(store.flush, 'Model display settings are not confirmed saved.'), {
-    stage: 'producer',
-  });
   const observed = useObservation(observation);
   const sourceHealth: RecordHealth | undefined = observed.error
     ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }

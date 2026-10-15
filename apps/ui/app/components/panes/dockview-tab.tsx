@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Box, X } from 'lucide-react';
+import { Box } from 'lucide-react';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**
@@ -96,14 +95,6 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
     };
   }, [fullTitle]);
 
-  const handleClose = useCallback(
-    (event: React.MouseEvent) => {
-      event.stopPropagation();
-      api.close();
-    },
-    [api],
-  );
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -115,20 +106,6 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
             <DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />
             <span className='dockview-tab-title fade-label flex-1'>{title}</span>
           </span>
-          <button
-            type='button'
-            aria-label={`Close ${fullTitle}`}
-            className={nestedActionVariants({
-              className:
-                'dv-default-tab-action fade-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 hover:bg-nested-action-hover!',
-            })}
-            onClick={handleClose}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <X aria-hidden className='size-3.5' />
-          </button>
         </div>
       </TooltipTrigger>
       <TooltipContent className='max-w-[min(42rem,calc(100vw-1rem))] text-left break-all'>{fullTitle}</TooltipContent>

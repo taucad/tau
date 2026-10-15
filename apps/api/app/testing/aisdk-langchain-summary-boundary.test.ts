@@ -2,7 +2,7 @@
 /**
  * Guards OpenAI Responses `summary_index` boundaries crossing V1 {@link AIMessageChunk}
  * `contentBlocks`: each new index must prepend `\n\n` to the streamed `reasoning-delta`
- * (see patched `peekReasoningSummaryIndex` in `patches/@ai-sdk__langchain@2.0.147.patch`).
+ * (see patched `peekReasoningSummaryIndex` in `tools/pnpm/patches/@ai-sdk__langchain@2.0.147.patch`).
  *
  * Mirrors the synthetic tuple-stream pattern used in {@link aisdk-langchain-values-reasoning-leak.test.ts}.
  */

@@ -14,8 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 The canonical Apache-2.0 text is the root `license` file. Repository licensing
-is described in `LICENSING.md`; the third-party dependency inventory shipped
-inside the published `@taucad/runtime` artifact is `license-deps`.
+is described in `docs/licensing/overview.md`; the third-party dependency inventory
+is maintained in `docs/licensing/third-party-licenses.md` and ships inside the
+published `@taucad/runtime` artifact as `dist/THIRD_PARTY_LICENSES.md`.
 
 -------------------------------------------------------------------------------
 

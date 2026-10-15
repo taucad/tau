@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { mergeComponentObservations } from '@taucad/runtime/machine';
 import type {
   MachineChannelClient,
   MachineClient,
@@ -7,6 +8,7 @@ import type {
   MachineProvider,
 } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
+import { failureCodeOf } from '#components/print/machine-facts.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /**
@@ -23,6 +25,24 @@ export const projectMachineDirectoryFrame = (
 ): MachineDirectorySnapshot => {
   if (frame.type === 'snapshot' || frame.type === 'resync-required') {
     return frame.snapshot;
+  }
+  if (frame.type === 'observed') {
+    // Latest readings move outside the event tail: the cursor stays where it is.
+    return {
+      ...current,
+      entries: current.entries.map((entry) =>
+        entry.machineId === frame.machineId
+          ? {
+              ...entry,
+              snapshot: {
+                ...entry.snapshot,
+                observedAt: frame.observedAt,
+                components: mergeComponentObservations(entry.snapshot.components, frame.components),
+              },
+            }
+          : entry,
+      ),
+    };
   }
   if (frame.event.type === 'machine-directory-removed') {
     const { machineId } = frame.event;
@@ -112,12 +132,12 @@ export const printersInUseElsewhere =
   'Printers are in use by another Tau app on this computer. Quit it to use them here.';
 
 /* The host's name for a machine store another process holds, and the lock's own code it wraps. */
-const inUseElsewhereCodes = ['MACHINE_STORE_OWNED_ELSEWHERE', 'AUTHORITY_ALREADY_OWNED'];
+const inUseElsewhereCodes: ReadonlySet<string> = new Set(['MACHINE_STORE_OWNED_ELSEWHERE', 'AUTHORITY_ALREADY_OWNED']);
 
-/** The channel carries a refusal's code in its message; this one becomes words, every other failure passes. */
+/** This refusal becomes words, every other failure passes. The machine channel carries `code`, which is read typed. */
 const explain = (error: unknown): unknown => {
-  const message = error instanceof Error ? error.message : String(error);
-  return inUseElsewhereCodes.some((code) => message.includes(code))
+  const code = failureCodeOf(error);
+  return code !== undefined && inUseElsewhereCodes.has(code)
     ? new Error(printersInUseElsewhere, { cause: error })
     : error;
 };
@@ -188,20 +208,24 @@ export const createMachinesFacet = ({ dial, connect }: MachinesConnection): Runt
     discover: (input) => stream((client) => client.discover(input)),
     beginBinding: async (input) => call(async (client) => client.beginBinding(input)),
     removeBinding: async (input) => call(async (client) => client.removeBinding(input)),
-    preparePrint: async (input) => call(async (client) => client.preparePrint(input)),
-    uploadPrint: async (input) => call(async (client) => client.uploadPrint(input)),
-    startPrint: async (input) => call(async (client) => client.startPrint(input)),
-    reconcileOperation: async (input) => call(async (client) => client.reconcileOperation(input)),
-    controlRun: async (input) => call(async (client) => client.controlRun(input)),
-    captureStill: async (input) => call(async (client) => client.captureStill(input)),
     list: async (input) => call(async (client) => client.list(input)),
     get: async (input) => call(async (client) => client.get(input)),
     watch: (input) => stream((client) => client.watch(input)),
-    requestPrint: async (input) => call(async (client) => client.requestPrint(input)),
-    listPrintRequests: async (input) => call(async (client) => client.listPrintRequests(input)),
-    watchPrintRequests: (input) => stream((client) => client.watchPrintRequests(input)),
-    resolvePrintRequest: async (input) => call(async (client) => client.resolvePrintRequest(input)),
-    withdrawPrintRequest: async (input) => call(async (client) => client.withdrawPrintRequest(input)),
+    captureStill: async (input) => call(async (client) => client.captureStill(input)),
+    checkJob: async (input) => call(async (client) => client.checkJob(input)),
+    requestJob: async (input) => call(async (client) => client.requestJob(input)),
+    listJobs: async (input) => call(async (client) => client.listJobs(input)),
+    watchJobs: (input) => stream((client) => client.watchJobs(input)),
+    resolveJob: async (input) => call(async (client) => client.resolveJob(input)),
+    withdrawJob: async (input) => call(async (client) => client.withdrawJob(input)),
+    applyAction: async (input) => call(async (client) => client.applyAction(input)),
+    approveAction: async (input) => call(async (client) => client.approveAction(input)),
+    stop: async (input) => call(async (client) => client.stop(input)),
+    beginHold: async (input) => call(async (client) => client.beginHold(input)),
+    renewHold: async (input) => call(async (client) => client.renewHold(input)),
+    endHold: async (input) => call(async (client) => client.endHold(input)),
+    reconcileOperation: async (input) => call(async (client) => client.reconcileOperation(input)),
+    setTesting: async (input) => call(async (client) => client.setTesting(input)),
   };
 };
 

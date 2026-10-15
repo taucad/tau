@@ -25,7 +25,9 @@ const ProjectPaneAction = ({
   label,
   tooltip,
   panel,
+  ref,
 }: {
+  readonly ref?: React.Ref<HTMLButtonElement>;
   readonly icon: LucideIcon;
   readonly label: string;
   readonly tooltip: string;
@@ -34,6 +36,7 @@ const ProjectPaneAction = ({
   const { openPanel } = useProjectWorkspace();
   return (
     <PaneButton
+      ref={ref}
       size='label'
       aria-label={label}
       tooltip={tooltip}
@@ -65,6 +68,7 @@ const GroupSeparator = (): React.JSX.Element => (
  * @returns The cluster in the top-right group, nothing in every other.
  */
 export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
+  const { registerRecordRecoveryFocus, restoreRecordRecoveryFocus } = useProjectWorkspace();
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
   const { projectRef } = useProject();
   const { workbench: workbenchVisible } = useWorkspaceLanes();
@@ -90,8 +94,14 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
           are (review R10). */}
       <RevisionStatusAction />
       {/* Settings records that need a person; nothing while every record is fine. */}
-      <RecordIssuesAction />
-      <ProjectPaneAction icon={Share2} label='Share' tooltip='Share project' panel='share' />
+      <RecordIssuesAction fallbackFocus={restoreRecordRecoveryFocus} />
+      <ProjectPaneAction
+        ref={registerRecordRecoveryFocus}
+        icon={Share2}
+        label='Share'
+        tooltip='Share project'
+        panel='share'
+      />
       <ProjectPaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' panel='export' />
 
       {!isMobile && !workbenchVisible ? (

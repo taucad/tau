@@ -5,6 +5,10 @@
  * Why: Native kernels must never discover system Python or install packages at runtime.
  * Environment: Node 24+, uv, tar, and network access on the target architecture.
  * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts [--target platform-arch]
+ *   [--seed [dir]]
+ *   `--seed` produces the registry-native payload seed instead (`blobs/sha256/<hex>`, the layout `TAU_PAYLOAD_DIR` and a
+ *   mirror share) by delegating to Build123d's `tau-plugin.json` generator, so the desktop and the CLI prepare the
+ *   same digest-pinned closure; the default directory is `out/cache/build123d-seed`.
  * Exit codes: 0 for an integrity-verified resource; non-zero for unsupported targets or any hash/install failure.
  */
 
@@ -51,17 +55,59 @@ const digest = async (path: string): Promise<string> =>
     .update(await readFile(path))
     .digest('hex');
 
-const parseTargets = (): string[] => {
+const parseArguments = (): { readonly targets: string[]; readonly seed?: string } => {
   const arguments_ = process.argv.slice(2);
   const targets: string[] = [];
+  let seed: string | undefined;
   for (let index = 0; index < arguments_.length; index += 1) {
+    if (arguments_[index] === '--seed') {
+      const next = arguments_[index + 1];
+      seed =
+        next === undefined || next.startsWith('--')
+          ? resolve(workspaceRoot, 'out/cache/build123d-seed')
+          : resolve(next);
+      index += next === undefined || next.startsWith('--') ? 0 : 1;
+      continue;
+    }
     if (arguments_[index] !== '--target' || !arguments_[index + 1]) {
-      throw new TypeError('Usage: prepare-build123d-python.mts [--target platform-arch]');
+      throw new TypeError('Usage: prepare-build123d-python.mts [--target platform-arch] [--seed [dir]]');
     }
     targets.push(arguments_[index + 1]!);
     index += 1;
   }
-  return targets.length > 0 ? targets : [`${process.platform}-${process.arch}`];
+  return {
+    targets: targets.length > 0 ? targets : [`${process.platform}-${process.arch}`],
+    ...(seed === undefined ? {} : { seed }),
+  };
+};
+
+/**
+ * Fill the payload seed for each target through Build123d's generator, which downloads every third-party payload
+ * of the target's `tau-plugin.json` variant and keeps it only when its bytes match the pinned digest.
+ * @param targets - Desktop target names (`linux-x64` is the glibc variant).
+ * @param seed - The seed directory.
+ */
+const produceSeed = (targets: readonly string[], seed: string): void => {
+  for (const target of targets) {
+    if (target.startsWith('win32-')) {
+      throw new Error(`Build123d's tau-plugin.json declares no ${target} variant yet.`);
+    }
+    const key = target.startsWith('linux-') ? `${target}-glibc` : target;
+    execFileSync(
+      process.execPath,
+      [
+        '--import',
+        '@oxc-node/core/register',
+        resolve(workspaceRoot, 'packages/plugins/build123d/scripts/generate-tau-plugin.mts'),
+        'seed',
+        '--target',
+        key,
+        '--seed',
+        seed,
+      ],
+      { cwd: workspaceRoot, stdio: 'inherit' },
+    );
+  }
 };
 
 const downloadArchive = async (target: Target): Promise<string> => {
@@ -292,8 +338,13 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   console.log(`Prepared Build123d Python: ${targetName}`);
 };
 
-await Promise.all(
-  parseTargets().map(async (target) => {
-    await prepareTarget(target);
-  }),
-);
+const options = parseArguments();
+if (options.seed === undefined) {
+  await Promise.all(
+    options.targets.map(async (target) => {
+      await prepareTarget(target);
+    }),
+  );
+} else {
+  produceSeed(options.targets, options.seed);
+}

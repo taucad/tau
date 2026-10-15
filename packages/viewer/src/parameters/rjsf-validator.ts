@@ -2,13 +2,13 @@ import { Validator } from '@cfworker/json-schema';
 import type { OutputUnit, Schema } from '@cfworker/json-schema';
 import {
   createErrorHandler,
+  ErrorSchemaBuilder,
   getDefaultFormState,
-  toErrorList,
-  toErrorSchema,
+  toPath,
   unwrapErrorHandler,
   validationDataMerge,
 } from '@rjsf/utils';
-import type { RJSFSchema, RJSFValidationError, ValidatorType } from '@rjsf/utils';
+import type { ErrorSchema, RJSFSchema, RJSFValidationError, ValidatorType } from '@rjsf/utils';
 import type { RJSFContext } from '#parameters/rjsf-context.js';
 
 type FormData = Record<string, unknown>;
@@ -27,6 +27,34 @@ const pointerToProperty = (pointer: string): string => {
     .map((segment) => decodeURI(segment).replaceAll('~1', '/').replaceAll('~0', '~'))
     .map((segment) => `[${JSON.stringify(segment)}]`)
     .join('');
+};
+
+const quotedProperty = /^(?:\[(?:"(?:[^"\\]|\\.)*")\])+$/u;
+const quotedSegment = /\[("(?:[^"\\]|\\.)*")\]/gu;
+
+/* RJSF 6's `toPath` treats every `.`, `[` and `]` as a separator, so it cannot read back the JSON-quoted segments
+ * `pointerToProperty` writes for keys such as `a.b` or `""`. Parse those here and leave any other property, such as
+ * one a `transformErrors` callback rewrote, to RJSF. */
+const propertyToPath = (property: string | undefined): string[] => {
+  if (property === undefined || property === '.') {
+    return [];
+  }
+
+  if (quotedProperty.test(property)) {
+    return [...property.matchAll(quotedSegment)].map(([, segment]) => JSON.parse(segment ?? '""') as string);
+  }
+
+  return toPath(property);
+};
+
+const toErrorSchema = (errors: readonly RJSFValidationError[]): ErrorSchema<FormData> => {
+  const builder = new ErrorSchemaBuilder<FormData>();
+  for (const { property, message } of errors) {
+    if (message) {
+      builder.addErrors(message, propertyToPath(property));
+    }
+  }
+  return builder.ErrorSchema;
 };
 
 const toRjsfError = ({ error, instanceLocation, keyword, keywordLocation }: OutputUnit): RJSFValidationError => {
@@ -80,7 +108,6 @@ export const isJsonSchemaValid = (schema: RJSFSchema, formData: unknown, rootSch
  */
 export const rjsfValidator: RjsfValidator = {
   rawValidation,
-  toErrorList,
   isValid(schema, formData, rootSchema) {
     return isJsonSchemaValid(schema, formData, rootSchema);
   },
@@ -96,13 +123,14 @@ export const rjsfValidator: RjsfValidator = {
       errors = transformErrors(errors, uiSchema);
     }
 
-    const validationData = { errors, errorSchema: toErrorSchema(errors) };
+    const errorSchema = toErrorSchema(errors);
+    const validationData = { errors, errorSchema };
     if (!customValidate) {
       return validationData;
     }
 
     const dataWithDefaults = (getDefaultFormState(rjsfValidator, schema, formData, schema, true) ?? {}) as FormData;
-    const errorHandler = customValidate(dataWithDefaults, createErrorHandler(dataWithDefaults), uiSchema);
+    const errorHandler = customValidate(dataWithDefaults, createErrorHandler(dataWithDefaults), uiSchema, errorSchema);
     return validationDataMerge(validationData, unwrapErrorHandler(errorHandler));
   },
 };

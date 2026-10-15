@@ -166,16 +166,21 @@ export function createRecordHealth(
  */
 export async function confirmFlush(flush: () => Promise<boolean>, message: string): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const confirmed = await Promise.race([
-    flush(),
-    new Promise<false>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(false);
-      }, slowWriteMilliseconds);
-    }),
-  ]).finally(() => {
+  let confirmed: boolean;
+  try {
+    confirmed = await Promise.race([
+      flush(),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, slowWriteMilliseconds);
+      }),
+    ]);
+  } catch (error) {
+    throw new Error(message, { cause: error });
+  } finally {
     clearTimeout(timer);
-  });
+  }
   if (!confirmed) {
     throw new Error(message);
   }

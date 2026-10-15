@@ -30,7 +30,7 @@ export type {
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
-export { defaultConfigDirectory } from '#credential-store.js';
+export { defaultConfigDirectory, defaultPayloadStore } from '#credential-store.js';
 export { hostDescriptorPath, hostSessionCookieName, startAgentServer } from '#agent-server.js';
 export type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
 export { startRunReporter } from '#run-reporter.js';
@@ -79,14 +79,18 @@ export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
 export {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  defaultMachineProviders,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   probeCertificateTrust,
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
-export { openLocalMachines, openSharedMachineHost } from '#local-machines.js';
+export { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
+export type { KeepAwakeBlocker, KeepAwakeRelease, KeepAwakeWhileStreamingOptions } from '#keep-awake.js';
+export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
 export type {
   LocalMachines,
   LocalMachinesRefusal,

@@ -1174,7 +1174,7 @@ the cancelled tools left the system unchanged.
   });
 
   /*
-   * D5 on the substrate (the fixture's one tool stands in for `request_print`): a tool's approval is the run's native durable interrupt. Asking ends the attempt paused
+   * D5 on the substrate (the fixture's one tool stands in for `request_job`): a tool's approval is the run's native durable interrupt. Asking ends the attempt paused
    * (D10, TS-R10); the answer resolves it, and the run's next attempt asks again and reads the answer. Geospec's
    * version held the attempt's driver open on an interrupt port instead, which M1 admits only for external runs.
    */
@@ -1604,7 +1604,7 @@ the cancelled tools left the system unchanged.
     const pending = await host.pendingInterrupts(runId);
     return pending.map((request) => request.prompt);
   };
-  /** A tool keyed by its target file, as `request_print` keys by machine and file (D5). */
+  /** A tool keyed by its target file, as `request_job` keys by machine and file (D5). */
   const keyedTool = (outcomes: string[]) =>
     tools(async (invocation) => {
       const file = (invocation.input as { targetFile: string }).targetFile;

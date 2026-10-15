@@ -10,7 +10,9 @@ const fixture = vi.hoisted(() => ({
   editorSend: vi.fn(),
   setViewEntryPath: vi.fn(),
   mainEntryPath: 'main.ts',
+  availability: 'ready',
   emptyMain: false,
+  notifyAvailability: () => undefined,
   revealSecondary: () => undefined,
   hideSecondary: () => undefined,
   switchProject: () => undefined,
@@ -21,6 +23,16 @@ const fixture = vi.hoisted(() => ({
       viewSettings: {},
       unitSettings: {},
     },
+  },
+}));
+
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => {
+    const [, refresh] = useState(0);
+    fixture.notifyAvailability = () => {
+      refresh((value) => value + 1);
+    };
+    return fixture.availability;
   },
 }));
 
@@ -170,6 +182,7 @@ describe('restored viewer layout admission', () => {
     fixture.setViewEntryPath.mockClear();
     fixture.mainEntryPath = 'main.ts';
     fixture.emptyMain = false;
+    fixture.availability = 'ready';
   });
 
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {
@@ -180,6 +193,22 @@ describe('restored viewer layout admission', () => {
     fixture.mainEntryPath = 'main.ts';
     view.rerender(<ViewerDockview profile='shared' />);
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'main.ts');
+  });
+
+  it('waits for cloud materialization before binding the manifest entry', () => {
+    fixture.emptyMain = true;
+    fixture.mainEntryPath = 'main.scad';
+    fixture.availability = 'downloading';
+    render(<ViewerDockview profile='editor' />);
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.setViewEntryPath).not.toHaveBeenCalledWith('main-view', 'main.scad');
+    fixture.mainEntryPath = 'models/main.ts';
+    fixture.availability = 'ready';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'models/main.ts');
+    expect(fixture.setViewEntryPath).not.toHaveBeenCalledWith('main-view', 'main.scad');
   });
 
   it('admits hidden editor view settings without geometry or canvas demand', () => {

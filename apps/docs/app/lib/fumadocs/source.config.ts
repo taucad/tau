@@ -8,7 +8,7 @@ import { remarkLlmStringifyMdx } from './llm-stringify-mdx.js';
 import { remarkResolveRelativeLinks } from './remark-resolve-relative-links.js';
 
 const generator = createGenerator({
-  tsconfigPath: '../../tsconfig.docs.json',
+  tsconfigPath: './tsconfig.api-docs.json',
 });
 
 // oxlint-disable-next-line typescript/no-deprecated -- the suggested pageSchema replacement breaks fumadocs-mdx 15.4 collection output (every page 404s at prerender); re-evaluate on the next fumadocs-mdx major.

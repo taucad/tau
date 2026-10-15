@@ -195,7 +195,7 @@ describe('Tau MCP Streamable HTTP transport', () => {
         : { errorCode: 'UNEXPECTED', message: 'not a host tool' };
     };
     const requestPrint: TauMcpHostTool = {
-      name: 'request_print',
+      name: 'request_job',
       description: 'Ask the person to approve one print.',
       inputSchema: {
         type: 'object',
@@ -208,21 +208,21 @@ describe('Tau MCP Streamable HTTP transport', () => {
     const client = await connect(await serve(dispatch, [requestPrint]));
 
     const listed = await client.listTools();
-    expect(listed.tools.map(({ name }) => name)).toEqual([...tauMcpToolNames, 'request_print']);
-    const tool = listed.tools.find(({ name }) => name === 'request_print');
+    expect(listed.tools.map(({ name }) => name)).toEqual([...tauMcpToolNames, 'request_job']);
+    const tool = listed.tools.find(({ name }) => name === 'request_job');
     expect(tool?.inputSchema).toMatchObject({ type: 'object', required: ['machineId', 'file'] });
     expect(tool?.annotations?.openWorldHint).toBe(true);
     await expect(
       client.callTool({
-        name: 'request_print',
+        name: 'request_job',
         arguments: { machineId: 'bambu-simulator', file: 'pyramid.gcode.3mf' },
       }),
     ).resolves.toMatchObject({ structuredContent: { requestId: 'req-1', state: 'awaiting-approval' } });
     expect(calls).toEqual([
-      { toolName: 'request_print', args: { machineId: 'bambu-simulator', file: 'pyramid.gcode.3mf' } },
+      { toolName: 'request_job', args: { machineId: 'bambu-simulator', file: 'pyramid.gcode.3mf' } },
     ]);
     // The SDK refuses arguments the host schema rejects before the host sees them.
-    await expect(client.callTool({ name: 'request_print', arguments: { machineId: 1 } })).resolves.toMatchObject({
+    await expect(client.callTool({ name: 'request_job', arguments: { machineId: 1 } })).resolves.toMatchObject({
       isError: true,
     });
     expect(calls).toHaveLength(1);
@@ -239,7 +239,7 @@ describe('Tau MCP Streamable HTTP transport', () => {
      * `$schema` removed and the value shared under `definitions`. */
     const jsonValue = { $ref: '#/definitions/value' };
     const requestPrint: TauMcpHostTool = {
-      name: 'request_print',
+      name: 'request_job',
       description: 'Ask the person to approve one print.',
       inputSchema: {
         type: 'object',
@@ -263,17 +263,17 @@ describe('Tau MCP Streamable HTTP transport', () => {
     const client = await connect(await serve(dispatch, [requestPrint]));
 
     const listed = await client.listTools();
-    expect(listed.tools.find(({ name }) => name === 'request_print')?.inputSchema).toMatchObject({
+    expect(listed.tools.find(({ name }) => name === 'request_job')?.inputSchema).toMatchObject({
       type: 'object',
       required: ['targetFile'],
     });
     const options = { plate: 1, filament: { slots: [2, 'PLA', null], dry: true } };
     await expect(
-      client.callTool({ name: 'request_print', arguments: { targetFile: 'pyramid.gcode.3mf', options } }),
+      client.callTool({ name: 'request_job', arguments: { targetFile: 'pyramid.gcode.3mf', options } }),
     ).resolves.toMatchObject({ structuredContent: { requestId: 'req-1', state: 'awaiting-approval' } });
-    expect(calls).toEqual([{ toolName: 'request_print', args: { targetFile: 'pyramid.gcode.3mf', options } }]);
+    expect(calls).toEqual([{ toolName: 'request_job', args: { targetFile: 'pyramid.gcode.3mf', options } }]);
     await expect(
-      client.callTool({ name: 'request_print', arguments: { targetFile: 'pyramid.gcode.3mf', options: 'fast' } }),
+      client.callTool({ name: 'request_job', arguments: { targetFile: 'pyramid.gcode.3mf', options: 'fast' } }),
     ).resolves.toMatchObject({ isError: true });
     expect(calls).toHaveLength(1);
     await client.close();

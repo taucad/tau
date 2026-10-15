@@ -14,8 +14,7 @@ import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#component
 import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
-/** The project card grid, shared by the Community, the landing strip and their skeletons. */
-export const projectGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+import { projectGridClassName } from '#components/project-grid-layout.js';
 
 export type CommunityProjectGridProperties = {
   readonly projects: readonly BuiltinProjectCardModel[];

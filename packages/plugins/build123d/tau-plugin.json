@@ -1,0 +1,2883 @@
+{
+  "schemaVersion": 1,
+  "dependencies": {
+    "engine": [
+      {
+        "target": {
+          "runtime": "native",
+          "os": "darwin",
+          "arch": "arm64",
+          "minimumOsVersion": "12.0"
+        },
+        "payloads": [
+          {
+            "name": "python",
+            "integrity": "sha256-05BL1qByJG4Hqgva3umhToBSHkKpQ8CEgFn+sWooFtw=",
+            "byteLength": 25147663,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1,
+            "unpackedByteLength": 64347794
+          },
+          {
+            "name": "anytree",
+            "integrity": "sha256-TLzxDfNrHxy6Ext+SH/z7a/J1ukyo8cAcbW3aLq5Af8=",
+            "byteLength": 45077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 147881
+          },
+          {
+            "name": "asttokens",
+            "integrity": "sha256-naExV/Wyi+zeC9N0/Gd9zTwpBhQmTv8JbxZ8RpzZ+TM=",
+            "byteLength": 28702,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d4/2b/04b8a15f3a1c77bc79ddf5c73875327f34b4fa75982df2b76e45e402d364/asttokens-3.0.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 80904
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
+            "byteLength": 368081,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1444029
+          },
+          {
+            "name": "cadquery-ocp-novtk",
+            "integrity": "sha256-IoeBLyE69wIPi7xpsH1gOeUp9eDhVMAZIiGv8/2sZnY=",
+            "byteLength": 62295929,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f7/80/dc46dac2ebb6ae6bcce27bc7f717438b99897199be25323cda559a76e0a1/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 227882951
+          },
+          {
+            "name": "cadquery-ocp-proxy",
+            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
+            "byteLength": 3322,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 5915
+          },
+          {
+            "name": "certifi",
+            "integrity": "sha256-YvInQrWKGjMBSitrcGWIqNfiqIrnvRpuvoyZKShIN3U=",
+            "byteLength": 136983,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 248921
+          },
+          {
+            "name": "charset-normalizer",
+            "integrity": "sha256-6QJRwMe91UoQCg3OPAe35jcnjJOvKdv3jruJpYxLrH0=",
+            "byteLength": 340473,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a4/a0/562247944386f7d4ef94467e84876600cc1e0f1b93239aaa9213d2bc3cbd/charset_normalizer-3.5.1-cp313-cp313-macosx_10_13_universal2.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1068292
+          },
+          {
+            "name": "cloudpickle",
+            "integrity": "sha256-mstH9q/XP2DcHfk7uAG0cvBf9C+myEFn0lyyBr4fv0o=",
+            "byteLength": 22228,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68989
+          },
+          {
+            "name": "coverage",
+            "integrity": "sha256-c6sWAfhNyAT3gS3Cl+k82ZOBFi2jnEcECoJ9To2v5js=",
+            "byteLength": 218575,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/72/4f/732fff31c119bb73b35236dd333030f32c4bfe909f445b423e6c7594f9a2/coverage-7.10.7-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 749537
+          },
+          {
+            "name": "executing",
+            "integrity": "sha256-dgZD00UrTXd9KVuxZ8zHTGSoHfI/teCO/yUMQlpLIBc=",
+            "byteLength": 28317,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 95449
+          },
+          {
+            "name": "ezdxf",
+            "integrity": "sha256-xFHRwg8IswxzXKTWUP7ltEFHQC9LVmL4VQBT7YowCcI=",
+            "byteLength": 2999048,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8b/aa/1e8d3130eaabb780c5e8adfdc1ead023bb04468779b18169d60f7ce5b291/ezdxf-1.4.4-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 15001902
+          },
+          {
+            "name": "fonttools",
+            "integrity": "sha256-lEPu//WKrVWGCPNSCS4b5tJ4mA6MO06GIfy/2peBhQA=",
+            "byteLength": 3092750,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/44/7b/49b0054a79b9ed918c018e70e09b56eb5678ee8b44e59e126c79de4d8d73/fonttools-4.64.0-cp313-cp313-macosx_10_13_universal2.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 13680162
+          },
+          {
+            "name": "idna",
+            "integrity": "sha256-gV5756eAbVSrtYbclDrdx56LLuFpFQWWWMvv9LG0O/Q=",
+            "byteLength": 68550,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 337228
+          },
+          {
+            "name": "ipython",
+            "integrity": "sha256-bRZFdDz9GgfraV2Fqitfpmch+MuulDHUBJ9whLvwZQk=",
+            "byteLength": 639038,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2d/1e/65b59cf518c106aa755e7f7da3099027738687a862ec785060702a481320/ipython-9.17.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2056941
+          },
+          {
+            "name": "ipython-pygments-lexers",
+            "integrity": "sha256-qUYiJKUFreGaYF9x+PpjwgSIM85Qq8hnaKDYHYdtyBw=",
+            "byteLength": 8074,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d9/33/1f075bf72b0b747cb3288d011319aaf64083cf2efef8354174e3ed4540e2/ipython_pygments_lexers-1.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 23118
+          },
+          {
+            "name": "jedi",
+            "integrity": "sha256-e92cJjT1ZxMpmXb0y9Wcs/qSFlzF4F6oEfslNIByi2c=",
+            "byteLength": 4884812,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9a/93/242e2eab5fe682ffcb8b0084bde703a41d51e17ee0f3a31ff0d9d813620a/jedi-0.20.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14579803
+          },
+          {
+            "name": "joblib",
+            "integrity": "sha256-Pbv59uS1kqI1e4VGCOmA/mOQ0THXqC8BGjd+8uvvero=",
+            "byteLength": 306115,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 921902
+          },
+          {
+            "name": "lib3mf",
+            "integrity": "sha256-99xX6iIhT6ktrHKLpm5YxLJLd11GeIgmKoIDONfYQUU=",
+            "byteLength": 2216305,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/04/87/47504d69f0f36841670d12ce3fe1668025bad74d83ed361ead378f626fed/lib3mf-2.5.0-py3-none-macosx_10_9_universal2.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 8669900
+          },
+          {
+            "name": "matplotlib-inline",
+            "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
+            "byteLength": 9534,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/41/09/5b161152e2d90f7b87f781c2e1267494aef9c32498df793f73ad0a0a494a/matplotlib_inline-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 21367
+          },
+          {
+            "name": "mpmath",
+            "integrity": "sha256-oLK5/oC7zYGmZH/xMQhzjPtILUgdgmzA4C9bNeXIjSw=",
+            "byteLength": 536198,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1950197
+          },
+          {
+            "name": "narwhals",
+            "integrity": "sha256-Hw9APox+RGPN6b/nixL92Anjrj3abZsvgCk0+5x6ao8=",
+            "byteLength": 467373,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/eb/dc/55481808fd70ef1567cf13540ffd4702af3f74b112e35427564b03f79c2d/narwhals-2.25.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2002355
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-UsgI+WSE9VcaXMhjd1zlAkfBffs7A2H47WtLBFb4AIA=",
+            "byteLength": 11896845,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/60/f2d208d366f263f39c6e69ed309290717aab41078b6d04c9be2a84fa2a07/numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 38436332
+          },
+          {
+            "name": "ocp-gordon",
+            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
+            "byteLength": 54077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 205203
+          },
+          {
+            "name": "ocpsvg",
+            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
+            "byteLength": 20847,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 71116
+          },
+          {
+            "name": "parso",
+            "integrity": "sha256-qJJusqG5FUhpQf29MehqS6+I/owhDyXy817OxbV0yhw=",
+            "byteLength": 107025,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 355069
+          },
+          {
+            "name": "pexpect",
+            "integrity": "sha256-cjbR4IDkk2vi3D4ybOwK9yrPkhKn4dBgIQ5wpH4lNSM=",
+            "byteLength": 63772,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 191354
+          },
+          {
+            "name": "prompt-toolkit",
+            "integrity": "sha256-AcCJHX+SN9XjOffT5Cza6At1NKuxx8DjNS77piMUkvI=",
+            "byteLength": 392288,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1397699
+          },
+          {
+            "name": "psutil",
+            "integrity": "sha256-GnsEwQ8yzIirOcv2BuEX/XRyHIMcmKJ9wEV43rDBaXk=",
+            "byteLength": 129859,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 475567
+          },
+          {
+            "name": "ptyprocess",
+            "integrity": "sha256-S0Hzln/OOvV8x+lLiIYmwYvzegg+NlHKj+62bUkv7zU=",
+            "byteLength": 13993,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 39907
+          },
+          {
+            "name": "pure-eval",
+            "integrity": "sha256-HbjjW2ez0hjYGK5lPifwbDqkIJAfp7CBypjL7ch04NA=",
+            "byteLength": 11842,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygments",
+            "integrity": "sha256-I2PGm2HEqXyDjaOxMNzWRo9ISJkrIagvKmPsNDdxN9k=",
+            "byteLength": 1250147,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 4621166
+          },
+          {
+            "name": "pyparsing",
+            "integrity": "sha256-hQuhSL2QjX4kEVh+JHoeTwMng5xA4uXm0FoAfsxpkR0=",
+            "byteLength": 122781,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 464007
+          },
+          {
+            "name": "requests",
+            "integrity": "sha256-Kg1gwXL4OsarMeRVSQbA87NYjTe1y5ObHAYfSQfieOA=",
+            "byteLength": 73075,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 234397
+          },
+          {
+            "name": "scikit-learn",
+            "integrity": "sha256-W5NMRcJShEqR1p/aOjTP9ecwfh2xDXfLEKOYAxLHRxM=",
+            "byteLength": 8228299,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/3e/04/5acd7ae280c5f93b6ac5ef6cdec14eef4c8d1cd91d85b3292989c94d96b1/scikit_learn-1.9.0-cp313-cp313-macosx_12_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 30289986
+          },
+          {
+            "name": "scipy",
+            "integrity": "sha256-5vtqVcwLqXtZofKI+4bcb86L38D//L/QFeOpVL8qLZM=",
+            "byteLength": 28715106,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2a/f5/769f36d14922b8071a43e95d24d18b6bdafad10d7f5cf647867e1ac052bc/scipy-1.18.1-cp313-cp313-macosx_12_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 95908027
+          },
+          {
+            "name": "stack-data",
+            "integrity": "sha256-1VWODCWkywhTzdrT132piRoIy4Xdn5+RufjNZuUR5pU=",
+            "byteLength": 24521,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 75301
+          },
+          {
+            "name": "svgelements",
+            "integrity": "sha256-ilzyzAZtmOcT1bh1sdbl7rm5LoVeg169fKqycTrh3K0=",
+            "byteLength": 137856,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/48/2c/6c9bb53db56c8a12a736d2158a8b842a5993b96daabc29d90a098e840280/svgelements-1.9.6-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 681153
+          },
+          {
+            "name": "svgpathtools",
+            "integrity": "sha256-ZcT8QoIV/iff+Mhms6rQzoeYhX7PXS9OWP5eveZNTdk=",
+            "byteLength": 69135,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0e/47/824c69a16715206a77b4d0fb34f1c0518ab50940abed4368c25013dbfea4/svgpathtools-1.7.4-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 252395
+          },
+          {
+            "name": "svgwrite",
+            "integrity": "sha256-u2srVFDx7b+ll9kk+awt0JnmJVYuSSAh191hT2X4oi0=",
+            "byteLength": 67122,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/84/15/640e399579024a6875918839454025bb1d5f850bb70d96a11eabb644d11c/svgwrite-1.4.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 281972
+          },
+          {
+            "name": "sympy",
+            "integrity": "sha256-4JHMPpnSFBoLooRzKPVHmwXZSmY1y5YUjMs/NGcb2PU=",
+            "byteLength": 6299353,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 26841861
+          },
+          {
+            "name": "threadpoolctl",
+            "integrity": "sha256-Q6C4/VopKFABEAOeQ6Xu2EgLkYlnCD6kjcOrnxPEp/s=",
+            "byteLength": 18638,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 66556
+          },
+          {
+            "name": "traitlets",
+            "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
+            "byteLength": 86211,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ad/66/0d785f0bc5e4315a96c989bb476d0fc07ea4f85132550c7b156ca2035d52/traitlets-5.16.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 319664
+          },
+          {
+            "name": "trianglesolver",
+            "integrity": "sha256-qgkDw3CLTitJbwbUkMrnLG/2J0sA0e3OQg/Po7K3ZoI=",
+            "byteLength": 5377,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ff/8e/43d45cf3e18e3f455e4b5ab333a7c27b8e38c4e535f7346b7148ce08eb65/trianglesolver-1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 12210
+          },
+          {
+            "name": "typing-extensions",
+            "integrity": "sha256-SByqSBN06BPBsXatoU6X8fZ6RTnOnP6z81DXjWNwwug=",
+            "byteLength": 45571,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 182767
+          },
+          {
+            "name": "urllib3",
+            "integrity": "sha256-DPPK5WjTaqlXayjfs18RMo8cuXTKdkfZR167hsdaxuM=",
+            "byteLength": 135717,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 450461
+          },
+          {
+            "name": "wcwidth",
+            "integrity": "sha256-1bc9umFYpZXsk3A1Dn8mN7ysjWxeT9408w/P+2EDpeQ=",
+            "byteLength": 331669,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1841615
+          },
+          {
+            "name": "webcolors",
+            "integrity": "sha256-/Ew7WTWK2hZFUghKjr7mN8Ih5AWSZ9D4Mls7Vg9sfwo=",
+            "byteLength": 15027,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f0/33/12020ba99beaff91682b28dc0bbf0345bbc3244a4afbae7644e4fa348f23/webcolors-24.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 45995
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-ifN6N2RqoTMX6bz6eGCmKFz/hwToXIGi12Sl2eAuzL0=",
+            "byteLength": 47187,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/worker.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
+            "byteLength": 24322,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/analyzer.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
+            "byteLength": 9907,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          }
+        ]
+      },
+      {
+        "target": {
+          "runtime": "native",
+          "os": "darwin",
+          "arch": "x64",
+          "minimumOsVersion": "11.0"
+        },
+        "payloads": [
+          {
+            "name": "python",
+            "integrity": "sha256-9xKpFDyKXSSEOOx5IaC0jVSLyk8TN9M8aQ0owtBQQTc=",
+            "byteLength": 24912286,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-apple-darwin-install_only_stripped.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1,
+            "unpackedByteLength": 64850592
+          },
+          {
+            "name": "anytree",
+            "integrity": "sha256-TLzxDfNrHxy6Ext+SH/z7a/J1ukyo8cAcbW3aLq5Af8=",
+            "byteLength": 45077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 147881
+          },
+          {
+            "name": "asttokens",
+            "integrity": "sha256-naExV/Wyi+zeC9N0/Gd9zTwpBhQmTv8JbxZ8RpzZ+TM=",
+            "byteLength": 28702,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d4/2b/04b8a15f3a1c77bc79ddf5c73875327f34b4fa75982df2b76e45e402d364/asttokens-3.0.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 80904
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
+            "byteLength": 368081,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1444029
+          },
+          {
+            "name": "cadquery-ocp-novtk",
+            "integrity": "sha256-4padISm/IQZ/RJUxF8wY8UJvWqyu2LzAdCKOtQ8xebI=",
+            "byteLength": 67126917,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/97/55/93f76eb2a1874b2d51c98e6cad1b55ae7562fc9b6eb36365e3b0597d25c4/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 225560950
+          },
+          {
+            "name": "cadquery-ocp-proxy",
+            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
+            "byteLength": 3322,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 5915
+          },
+          {
+            "name": "certifi",
+            "integrity": "sha256-YvInQrWKGjMBSitrcGWIqNfiqIrnvRpuvoyZKShIN3U=",
+            "byteLength": 136983,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 248921
+          },
+          {
+            "name": "charset-normalizer",
+            "integrity": "sha256-6QJRwMe91UoQCg3OPAe35jcnjJOvKdv3jruJpYxLrH0=",
+            "byteLength": 340473,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a4/a0/562247944386f7d4ef94467e84876600cc1e0f1b93239aaa9213d2bc3cbd/charset_normalizer-3.5.1-cp313-cp313-macosx_10_13_universal2.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1068292
+          },
+          {
+            "name": "cloudpickle",
+            "integrity": "sha256-mstH9q/XP2DcHfk7uAG0cvBf9C+myEFn0lyyBr4fv0o=",
+            "byteLength": 22228,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68989
+          },
+          {
+            "name": "coverage",
+            "integrity": "sha256-mBplH1Q/KFSr07X8syY6rFgbGCCb5Jhjuldd5u30wU0=",
+            "byteLength": 218320,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9a/94/b765c1abcb613d103b64fcf10395f54d69b0ef8be6a0dd9c524384892cc7/coverage-7.10.7-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 732763
+          },
+          {
+            "name": "executing",
+            "integrity": "sha256-dgZD00UrTXd9KVuxZ8zHTGSoHfI/teCO/yUMQlpLIBc=",
+            "byteLength": 28317,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 95449
+          },
+          {
+            "name": "ezdxf",
+            "integrity": "sha256-sKeH+OvL3Ll5jG/P6Qwjr9GgmTyNQwK2zOXY8ZrgUq4=",
+            "byteLength": 3012646,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/4e/b1/8ca9408a2b382a806837e72d35f10931fdd9f53fe66cf208a6340358fbc5/ezdxf-1.4.4-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14697805
+          },
+          {
+            "name": "fonttools",
+            "integrity": "sha256-CWV4F7dVdYIrzWCY7w6/A4bzRDCDnuUxCecP1Ap/ZTk=",
+            "byteLength": 2583001,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/83/e2/08e73bd2f6e6248f071d3e9debe4c2b4cecda3a7dc057c56b44e255421c3/fonttools-4.64.0-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 12080405
+          },
+          {
+            "name": "idna",
+            "integrity": "sha256-gV5756eAbVSrtYbclDrdx56LLuFpFQWWWMvv9LG0O/Q=",
+            "byteLength": 68550,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 337228
+          },
+          {
+            "name": "ipython",
+            "integrity": "sha256-bRZFdDz9GgfraV2Fqitfpmch+MuulDHUBJ9whLvwZQk=",
+            "byteLength": 639038,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2d/1e/65b59cf518c106aa755e7f7da3099027738687a862ec785060702a481320/ipython-9.17.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2056941
+          },
+          {
+            "name": "ipython-pygments-lexers",
+            "integrity": "sha256-qUYiJKUFreGaYF9x+PpjwgSIM85Qq8hnaKDYHYdtyBw=",
+            "byteLength": 8074,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d9/33/1f075bf72b0b747cb3288d011319aaf64083cf2efef8354174e3ed4540e2/ipython_pygments_lexers-1.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 23118
+          },
+          {
+            "name": "jedi",
+            "integrity": "sha256-e92cJjT1ZxMpmXb0y9Wcs/qSFlzF4F6oEfslNIByi2c=",
+            "byteLength": 4884812,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9a/93/242e2eab5fe682ffcb8b0084bde703a41d51e17ee0f3a31ff0d9d813620a/jedi-0.20.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14579803
+          },
+          {
+            "name": "joblib",
+            "integrity": "sha256-Pbv59uS1kqI1e4VGCOmA/mOQ0THXqC8BGjd+8uvvero=",
+            "byteLength": 306115,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 921902
+          },
+          {
+            "name": "lib3mf",
+            "integrity": "sha256-99xX6iIhT6ktrHKLpm5YxLJLd11GeIgmKoIDONfYQUU=",
+            "byteLength": 2216305,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/04/87/47504d69f0f36841670d12ce3fe1668025bad74d83ed361ead378f626fed/lib3mf-2.5.0-py3-none-macosx_10_9_universal2.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 8669900
+          },
+          {
+            "name": "matplotlib-inline",
+            "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
+            "byteLength": 9534,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/41/09/5b161152e2d90f7b87f781c2e1267494aef9c32498df793f73ad0a0a494a/matplotlib_inline-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 21367
+          },
+          {
+            "name": "mpmath",
+            "integrity": "sha256-oLK5/oC7zYGmZH/xMQhzjPtILUgdgmzA4C9bNeXIjSw=",
+            "byteLength": 536198,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1950197
+          },
+          {
+            "name": "narwhals",
+            "integrity": "sha256-Hw9APox+RGPN6b/nixL92Anjrj3abZsvgCk0+5x6ao8=",
+            "byteLength": 467373,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/eb/dc/55481808fd70ef1567cf13540ffd4702af3f74b112e35427564b03f79c2d/narwhals-2.25.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2002355
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-jky5p1TIoMYuqognOl+6M5H0phDR3uiTwHVdoxwIPxU=",
+            "byteLength": 16886595,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f5/d2/6b24738a0ef4557d189b150046cd07823c50e4273e8aebd651222e24306f/numpy-2.5.2-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 56660545
+          },
+          {
+            "name": "ocp-gordon",
+            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
+            "byteLength": 54077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 205203
+          },
+          {
+            "name": "ocpsvg",
+            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
+            "byteLength": 20847,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 71116
+          },
+          {
+            "name": "parso",
+            "integrity": "sha256-qJJusqG5FUhpQf29MehqS6+I/owhDyXy817OxbV0yhw=",
+            "byteLength": 107025,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 355069
+          },
+          {
+            "name": "pexpect",
+            "integrity": "sha256-cjbR4IDkk2vi3D4ybOwK9yrPkhKn4dBgIQ5wpH4lNSM=",
+            "byteLength": 63772,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 191354
+          },
+          {
+            "name": "prompt-toolkit",
+            "integrity": "sha256-AcCJHX+SN9XjOffT5Cza6At1NKuxx8DjNS77piMUkvI=",
+            "byteLength": 392288,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1397699
+          },
+          {
+            "name": "psutil",
+            "integrity": "sha256-7Qys6TkRT2JzjYCP3OzUyGkiJQfiZuV0eZ6cD6oX1IY=",
+            "byteLength": 129090,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e7/36/5ee6e05c9bd427237b11b3937ad82bb8ad2752d72c6969314590dd0c2f6e/psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 433159
+          },
+          {
+            "name": "ptyprocess",
+            "integrity": "sha256-S0Hzln/OOvV8x+lLiIYmwYvzegg+NlHKj+62bUkv7zU=",
+            "byteLength": 13993,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 39907
+          },
+          {
+            "name": "pure-eval",
+            "integrity": "sha256-HbjjW2ez0hjYGK5lPifwbDqkIJAfp7CBypjL7ch04NA=",
+            "byteLength": 11842,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygments",
+            "integrity": "sha256-I2PGm2HEqXyDjaOxMNzWRo9ISJkrIagvKmPsNDdxN9k=",
+            "byteLength": 1250147,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 4621166
+          },
+          {
+            "name": "pyparsing",
+            "integrity": "sha256-hQuhSL2QjX4kEVh+JHoeTwMng5xA4uXm0FoAfsxpkR0=",
+            "byteLength": 122781,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 464007
+          },
+          {
+            "name": "requests",
+            "integrity": "sha256-Kg1gwXL4OsarMeRVSQbA87NYjTe1y5ObHAYfSQfieOA=",
+            "byteLength": 73075,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 234397
+          },
+          {
+            "name": "scikit-learn",
+            "integrity": "sha256-gHRtY71LbqylTTb+X+r00ouzjcb5Rw+Bx8rXxAFV8Rk=",
+            "byteLength": 8705188,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/3c/01/cf3310626b6d48d3e9be69a1223f9180360b5e6edb045f50fade723ce494/scikit_learn-1.9.0-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 29710475
+          },
+          {
+            "name": "scipy",
+            "integrity": "sha256-OrNSPaRHSRVuH2i0ZNxWrxGuTLxcc5pJ0F8yuYLsqfM=",
+            "byteLength": 31089958,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/b6/55/4540ee0f9c42a9ad7109d0d1a8cc70de54c3572b01c6693a2b1c70e90ceb/scipy-1.18.1-cp313-cp313-macosx_10_15_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 99536970
+          },
+          {
+            "name": "stack-data",
+            "integrity": "sha256-1VWODCWkywhTzdrT132piRoIy4Xdn5+RufjNZuUR5pU=",
+            "byteLength": 24521,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 75301
+          },
+          {
+            "name": "svgelements",
+            "integrity": "sha256-ilzyzAZtmOcT1bh1sdbl7rm5LoVeg169fKqycTrh3K0=",
+            "byteLength": 137856,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/48/2c/6c9bb53db56c8a12a736d2158a8b842a5993b96daabc29d90a098e840280/svgelements-1.9.6-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 681153
+          },
+          {
+            "name": "svgpathtools",
+            "integrity": "sha256-ZcT8QoIV/iff+Mhms6rQzoeYhX7PXS9OWP5eveZNTdk=",
+            "byteLength": 69135,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0e/47/824c69a16715206a77b4d0fb34f1c0518ab50940abed4368c25013dbfea4/svgpathtools-1.7.4-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 252395
+          },
+          {
+            "name": "svgwrite",
+            "integrity": "sha256-u2srVFDx7b+ll9kk+awt0JnmJVYuSSAh191hT2X4oi0=",
+            "byteLength": 67122,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/84/15/640e399579024a6875918839454025bb1d5f850bb70d96a11eabb644d11c/svgwrite-1.4.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 281972
+          },
+          {
+            "name": "sympy",
+            "integrity": "sha256-4JHMPpnSFBoLooRzKPVHmwXZSmY1y5YUjMs/NGcb2PU=",
+            "byteLength": 6299353,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 26841861
+          },
+          {
+            "name": "threadpoolctl",
+            "integrity": "sha256-Q6C4/VopKFABEAOeQ6Xu2EgLkYlnCD6kjcOrnxPEp/s=",
+            "byteLength": 18638,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 66556
+          },
+          {
+            "name": "traitlets",
+            "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
+            "byteLength": 86211,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ad/66/0d785f0bc5e4315a96c989bb476d0fc07ea4f85132550c7b156ca2035d52/traitlets-5.16.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 319664
+          },
+          {
+            "name": "trianglesolver",
+            "integrity": "sha256-qgkDw3CLTitJbwbUkMrnLG/2J0sA0e3OQg/Po7K3ZoI=",
+            "byteLength": 5377,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ff/8e/43d45cf3e18e3f455e4b5ab333a7c27b8e38c4e535f7346b7148ce08eb65/trianglesolver-1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 12210
+          },
+          {
+            "name": "typing-extensions",
+            "integrity": "sha256-SByqSBN06BPBsXatoU6X8fZ6RTnOnP6z81DXjWNwwug=",
+            "byteLength": 45571,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 182767
+          },
+          {
+            "name": "urllib3",
+            "integrity": "sha256-DPPK5WjTaqlXayjfs18RMo8cuXTKdkfZR167hsdaxuM=",
+            "byteLength": 135717,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 450461
+          },
+          {
+            "name": "wcwidth",
+            "integrity": "sha256-1bc9umFYpZXsk3A1Dn8mN7ysjWxeT9408w/P+2EDpeQ=",
+            "byteLength": 331669,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1841615
+          },
+          {
+            "name": "webcolors",
+            "integrity": "sha256-/Ew7WTWK2hZFUghKjr7mN8Ih5AWSZ9D4Mls7Vg9sfwo=",
+            "byteLength": 15027,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f0/33/12020ba99beaff91682b28dc0bbf0345bbc3244a4afbae7644e4fa348f23/webcolors-24.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 45995
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-ifN6N2RqoTMX6bz6eGCmKFz/hwToXIGi12Sl2eAuzL0=",
+            "byteLength": 47187,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/worker.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
+            "byteLength": 24322,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/analyzer.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
+            "byteLength": 9907,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          }
+        ]
+      },
+      {
+        "target": {
+          "runtime": "native",
+          "os": "linux",
+          "arch": "arm64",
+          "libc": "glibc",
+          "minimumLibcVersion": "2.31"
+        },
+        "payloads": [
+          {
+            "name": "python",
+            "integrity": "sha256-Ac4M6Rif6urTKYq/ENTv6ZjFWkibPV04yk+D3afnl34=",
+            "byteLength": 29222533,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1,
+            "unpackedByteLength": 79034817
+          },
+          {
+            "name": "anytree",
+            "integrity": "sha256-TLzxDfNrHxy6Ext+SH/z7a/J1ukyo8cAcbW3aLq5Af8=",
+            "byteLength": 45077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 147881
+          },
+          {
+            "name": "asttokens",
+            "integrity": "sha256-naExV/Wyi+zeC9N0/Gd9zTwpBhQmTv8JbxZ8RpzZ+TM=",
+            "byteLength": 28702,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d4/2b/04b8a15f3a1c77bc79ddf5c73875327f34b4fa75982df2b76e45e402d364/asttokens-3.0.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 80904
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
+            "byteLength": 368081,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1444029
+          },
+          {
+            "name": "cadquery-ocp-novtk",
+            "integrity": "sha256-2PaLBcKRf7D16lae2IxpfUfMV6eyk5KdhjtSyZrOkxI=",
+            "byteLength": 61978120,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/6a/bc/3eb58a3b7513309d665e0a65c00da93fc825dc930744cd8ab23626cd2e1f/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 252641390
+          },
+          {
+            "name": "cadquery-ocp-proxy",
+            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
+            "byteLength": 3322,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 5915
+          },
+          {
+            "name": "certifi",
+            "integrity": "sha256-YvInQrWKGjMBSitrcGWIqNfiqIrnvRpuvoyZKShIN3U=",
+            "byteLength": 136983,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 248921
+          },
+          {
+            "name": "charset-normalizer",
+            "integrity": "sha256-lNeOzsJgWo0DmLDzZdXxKmMkhDhRb12sU2pe/3M330o=",
+            "byteLength": 240156,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/31/e7/1d994be1b93d41e9502b8b0460eaa88a1dd8df335df415db87d6c3e91ab2/charset_normalizer-3.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 914861
+          },
+          {
+            "name": "cloudpickle",
+            "integrity": "sha256-mstH9q/XP2DcHfk7uAG0cvBf9C+myEFn0lyyBr4fv0o=",
+            "byteLength": 22228,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68989
+          },
+          {
+            "name": "coverage",
+            "integrity": "sha256-x5Ek9wRloVDok0DeWWP5Nu6XCX0u92yGlwjEJIxjykk=",
+            "byteLength": 253447,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/b1/20/b6ea4f69bbb52dac0aebd62157ba6a9dddbfe664f5af8122dac296c3ee15/coverage-7.10.7-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1001446
+          },
+          {
+            "name": "executing",
+            "integrity": "sha256-dgZD00UrTXd9KVuxZ8zHTGSoHfI/teCO/yUMQlpLIBc=",
+            "byteLength": 28317,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 95449
+          },
+          {
+            "name": "ezdxf",
+            "integrity": "sha256-PT2aZmOZP8ZEdRZH/XhDBXtRdC/6wnxIzijqn4EjlhM=",
+            "byteLength": 5747890,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/cd/ca/1dd390b79df9c104c2d4b5964e80db25362edf704ac742c9db9b279658a5/ezdxf-1.4.4-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 25435306
+          },
+          {
+            "name": "fonttools",
+            "integrity": "sha256-fXmVuQZmYDfXEUwgpVZqNykCdHRSr31b1M1ryo8aJVA=",
+            "byteLength": 5392765,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2f/58/6dc0ff0963fc1e12f53bac59175617ec5927342ee7a4ffb871b44d56d81b/fonttools-4.64.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 23896300
+          },
+          {
+            "name": "idna",
+            "integrity": "sha256-gV5756eAbVSrtYbclDrdx56LLuFpFQWWWMvv9LG0O/Q=",
+            "byteLength": 68550,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 337228
+          },
+          {
+            "name": "ipython",
+            "integrity": "sha256-bRZFdDz9GgfraV2Fqitfpmch+MuulDHUBJ9whLvwZQk=",
+            "byteLength": 639038,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2d/1e/65b59cf518c106aa755e7f7da3099027738687a862ec785060702a481320/ipython-9.17.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2056941
+          },
+          {
+            "name": "ipython-pygments-lexers",
+            "integrity": "sha256-qUYiJKUFreGaYF9x+PpjwgSIM85Qq8hnaKDYHYdtyBw=",
+            "byteLength": 8074,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d9/33/1f075bf72b0b747cb3288d011319aaf64083cf2efef8354174e3ed4540e2/ipython_pygments_lexers-1.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 23118
+          },
+          {
+            "name": "jedi",
+            "integrity": "sha256-e92cJjT1ZxMpmXb0y9Wcs/qSFlzF4F6oEfslNIByi2c=",
+            "byteLength": 4884812,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9a/93/242e2eab5fe682ffcb8b0084bde703a41d51e17ee0f3a31ff0d9d813620a/jedi-0.20.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14579803
+          },
+          {
+            "name": "joblib",
+            "integrity": "sha256-Pbv59uS1kqI1e4VGCOmA/mOQ0THXqC8BGjd+8uvvero=",
+            "byteLength": 306115,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 921902
+          },
+          {
+            "name": "matplotlib-inline",
+            "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
+            "byteLength": 9534,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/41/09/5b161152e2d90f7b87f781c2e1267494aef9c32498df793f73ad0a0a494a/matplotlib_inline-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 21367
+          },
+          {
+            "name": "mpmath",
+            "integrity": "sha256-oLK5/oC7zYGmZH/xMQhzjPtILUgdgmzA4C9bNeXIjSw=",
+            "byteLength": 536198,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1950197
+          },
+          {
+            "name": "narwhals",
+            "integrity": "sha256-Hw9APox+RGPN6b/nixL92Anjrj3abZsvgCk0+5x6ao8=",
+            "byteLength": 467373,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/eb/dc/55481808fd70ef1567cf13540ffd4702af3f74b112e35427564b03f79c2d/narwhals-2.25.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2002355
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-Cq3xO2AEjVAeBfppnvr3c04klPNJikwqVSHYImQDJPM=",
+            "byteLength": 15609566,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/29/f1/2a64a307d92c5d98f5255a4014eb43bb6103ee477087b61ecae44a3aa9b9/numpy-2.5.2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 54106294
+          },
+          {
+            "name": "ocp-gordon",
+            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
+            "byteLength": 54077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 205203
+          },
+          {
+            "name": "ocpsvg",
+            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
+            "byteLength": 20847,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 71116
+          },
+          {
+            "name": "parso",
+            "integrity": "sha256-qJJusqG5FUhpQf29MehqS6+I/owhDyXy817OxbV0yhw=",
+            "byteLength": 107025,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 355069
+          },
+          {
+            "name": "pexpect",
+            "integrity": "sha256-cjbR4IDkk2vi3D4ybOwK9yrPkhKn4dBgIQ5wpH4lNSM=",
+            "byteLength": 63772,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 191354
+          },
+          {
+            "name": "prompt-toolkit",
+            "integrity": "sha256-AcCJHX+SN9XjOffT5Cza6At1NKuxx8DjNS77piMUkvI=",
+            "byteLength": 392288,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1397699
+          },
+          {
+            "name": "psutil",
+            "integrity": "sha256-sHJs7NhPlHRBnWclKt1KwM2YEbBNYRIwVLn7b1ffbp4=",
+            "byteLength": 156997,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/63/65/37648c0c158dc222aba51c089eb3bdfa238e621674dc42d48706e639204f/psutil-7.2.2-cp36-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 691641
+          },
+          {
+            "name": "ptyprocess",
+            "integrity": "sha256-S0Hzln/OOvV8x+lLiIYmwYvzegg+NlHKj+62bUkv7zU=",
+            "byteLength": 13993,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 39907
+          },
+          {
+            "name": "pure-eval",
+            "integrity": "sha256-HbjjW2ez0hjYGK5lPifwbDqkIJAfp7CBypjL7ch04NA=",
+            "byteLength": 11842,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 32912
+          },
+          {
+            "name": "py-lib3mf",
+            "integrity": "sha256-vNyes2BsZqszb8rbpZaBYCiH0F33h8/XQyYiMH9KQ2I=",
+            "byteLength": 1632922,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/75/1d/6b7db799a635ae283240daaf91d1c9e50af8de66625565f0b3bc9d6f3635/py_lib3mf-2.5.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 6843065
+          },
+          {
+            "name": "pygments",
+            "integrity": "sha256-I2PGm2HEqXyDjaOxMNzWRo9ISJkrIagvKmPsNDdxN9k=",
+            "byteLength": 1250147,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 4621166
+          },
+          {
+            "name": "pyparsing",
+            "integrity": "sha256-hQuhSL2QjX4kEVh+JHoeTwMng5xA4uXm0FoAfsxpkR0=",
+            "byteLength": 122781,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 464007
+          },
+          {
+            "name": "requests",
+            "integrity": "sha256-Kg1gwXL4OsarMeRVSQbA87NYjTe1y5ObHAYfSQfieOA=",
+            "byteLength": 73075,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 234397
+          },
+          {
+            "name": "scikit-learn",
+            "integrity": "sha256-OMPcuaH/uFUF7FPVTHtK6gz/cAUEJad2DCr2YayF3wU=",
+            "byteLength": 8789690,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0c/39/ffe829a5b8ecb40a518724a997794657fdc354ada5e8fe8e64d998c0bac9/scikit_learn-1.9.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 39738232
+          },
+          {
+            "name": "scipy",
+            "integrity": "sha256-1BaxbMz9cPv2JADoTQuy9OavUZpFVX8WksdJs38UsxU=",
+            "byteLength": 33998146,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e6/5f/4634e9d35c68496e4e34cb6946eafab044458e6cedab42b40b6588e475b6/scipy-1.18.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 121476633
+          },
+          {
+            "name": "stack-data",
+            "integrity": "sha256-1VWODCWkywhTzdrT132piRoIy4Xdn5+RufjNZuUR5pU=",
+            "byteLength": 24521,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 75301
+          },
+          {
+            "name": "svgelements",
+            "integrity": "sha256-ilzyzAZtmOcT1bh1sdbl7rm5LoVeg169fKqycTrh3K0=",
+            "byteLength": 137856,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/48/2c/6c9bb53db56c8a12a736d2158a8b842a5993b96daabc29d90a098e840280/svgelements-1.9.6-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 681153
+          },
+          {
+            "name": "svgpathtools",
+            "integrity": "sha256-ZcT8QoIV/iff+Mhms6rQzoeYhX7PXS9OWP5eveZNTdk=",
+            "byteLength": 69135,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0e/47/824c69a16715206a77b4d0fb34f1c0518ab50940abed4368c25013dbfea4/svgpathtools-1.7.4-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 252395
+          },
+          {
+            "name": "svgwrite",
+            "integrity": "sha256-u2srVFDx7b+ll9kk+awt0JnmJVYuSSAh191hT2X4oi0=",
+            "byteLength": 67122,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/84/15/640e399579024a6875918839454025bb1d5f850bb70d96a11eabb644d11c/svgwrite-1.4.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 281972
+          },
+          {
+            "name": "sympy",
+            "integrity": "sha256-4JHMPpnSFBoLooRzKPVHmwXZSmY1y5YUjMs/NGcb2PU=",
+            "byteLength": 6299353,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 26841861
+          },
+          {
+            "name": "threadpoolctl",
+            "integrity": "sha256-Q6C4/VopKFABEAOeQ6Xu2EgLkYlnCD6kjcOrnxPEp/s=",
+            "byteLength": 18638,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 66556
+          },
+          {
+            "name": "traitlets",
+            "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
+            "byteLength": 86211,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ad/66/0d785f0bc5e4315a96c989bb476d0fc07ea4f85132550c7b156ca2035d52/traitlets-5.16.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 319664
+          },
+          {
+            "name": "trianglesolver",
+            "integrity": "sha256-qgkDw3CLTitJbwbUkMrnLG/2J0sA0e3OQg/Po7K3ZoI=",
+            "byteLength": 5377,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ff/8e/43d45cf3e18e3f455e4b5ab333a7c27b8e38c4e535f7346b7148ce08eb65/trianglesolver-1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 12210
+          },
+          {
+            "name": "typing-extensions",
+            "integrity": "sha256-SByqSBN06BPBsXatoU6X8fZ6RTnOnP6z81DXjWNwwug=",
+            "byteLength": 45571,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 182767
+          },
+          {
+            "name": "urllib3",
+            "integrity": "sha256-DPPK5WjTaqlXayjfs18RMo8cuXTKdkfZR167hsdaxuM=",
+            "byteLength": 135717,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 450461
+          },
+          {
+            "name": "wcwidth",
+            "integrity": "sha256-1bc9umFYpZXsk3A1Dn8mN7ysjWxeT9408w/P+2EDpeQ=",
+            "byteLength": 331669,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1841615
+          },
+          {
+            "name": "webcolors",
+            "integrity": "sha256-/Ew7WTWK2hZFUghKjr7mN8Ih5AWSZ9D4Mls7Vg9sfwo=",
+            "byteLength": 15027,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f0/33/12020ba99beaff91682b28dc0bbf0345bbc3244a4afbae7644e4fa348f23/webcolors-24.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 45995
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-ifN6N2RqoTMX6bz6eGCmKFz/hwToXIGi12Sl2eAuzL0=",
+            "byteLength": 47187,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/worker.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
+            "byteLength": 24322,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/analyzer.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
+            "byteLength": 9907,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          }
+        ]
+      },
+      {
+        "target": {
+          "runtime": "native",
+          "os": "linux",
+          "arch": "x64",
+          "libc": "glibc",
+          "minimumLibcVersion": "2.31"
+        },
+        "payloads": [
+          {
+            "name": "python",
+            "integrity": "sha256-imiaB3M3vqbRxLwLffHVL8qij19n5Q34v0F8Hj+diHQ=",
+            "byteLength": 34810677,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1,
+            "unpackedByteLength": 98354555
+          },
+          {
+            "name": "anytree",
+            "integrity": "sha256-TLzxDfNrHxy6Ext+SH/z7a/J1ukyo8cAcbW3aLq5Af8=",
+            "byteLength": 45077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 147881
+          },
+          {
+            "name": "asttokens",
+            "integrity": "sha256-naExV/Wyi+zeC9N0/Gd9zTwpBhQmTv8JbxZ8RpzZ+TM=",
+            "byteLength": 28702,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d4/2b/04b8a15f3a1c77bc79ddf5c73875327f34b4fa75982df2b76e45e402d364/asttokens-3.0.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 80904
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
+            "byteLength": 368081,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1444029
+          },
+          {
+            "name": "cadquery-ocp-novtk",
+            "integrity": "sha256-/80E1O+gh9OqlCNgAgJloawOEkB717z+s35wtNHuct8=",
+            "byteLength": 67466562,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 261332561
+          },
+          {
+            "name": "cadquery-ocp-proxy",
+            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
+            "byteLength": 3322,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 5915
+          },
+          {
+            "name": "certifi",
+            "integrity": "sha256-YvInQrWKGjMBSitrcGWIqNfiqIrnvRpuvoyZKShIN3U=",
+            "byteLength": 136983,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 248921
+          },
+          {
+            "name": "charset-normalizer",
+            "integrity": "sha256-YrVfZyJzWmxHL4g2HN5mQGCHc9lEPOvbtRq/Q2ofzdM=",
+            "byteLength": 250638,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/fb/af/63240b0c0248c075c2535a1f1bd992821d8251b9f173abc13329661d09e4/charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 728088
+          },
+          {
+            "name": "cloudpickle",
+            "integrity": "sha256-mstH9q/XP2DcHfk7uAG0cvBf9C+myEFn0lyyBr4fv0o=",
+            "byteLength": 22228,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68989
+          },
+          {
+            "name": "coverage",
+            "integrity": "sha256-ELa6AKsRMqDORCj/aM9Qol79aECkLN9COcm5mq2Dvos=",
+            "byteLength": 252174,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a2/77/8c6d22bf61921a59bce5471c2f1f7ac30cd4ac50aadde72b8c48d5727902/coverage-7.10.7-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 820798
+          },
+          {
+            "name": "executing",
+            "integrity": "sha256-dgZD00UrTXd9KVuxZ8zHTGSoHfI/teCO/yUMQlpLIBc=",
+            "byteLength": 28317,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 95449
+          },
+          {
+            "name": "ezdxf",
+            "integrity": "sha256-gsAizwlNIa09toVXqoNijkFSNV6Ki+8P/9T3Gp6jJd8=",
+            "byteLength": 5774707,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8f/1e/226a6e636ae533e0bc0afe4435d1058fac173564e4af4102862f055a46d9/ezdxf-1.4.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 24856791
+          },
+          {
+            "name": "fonttools",
+            "integrity": "sha256-LEIje36MaBNkPlfT7+074JTUwGM53CFmtibizFwS7pM=",
+            "byteLength": 5373969,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7a/dd/4d3911049680da7b3aecf97cb5094e3a05554f5d94829358fc7664640456/fonttools-4.64.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 22828772
+          },
+          {
+            "name": "idna",
+            "integrity": "sha256-gV5756eAbVSrtYbclDrdx56LLuFpFQWWWMvv9LG0O/Q=",
+            "byteLength": 68550,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 337228
+          },
+          {
+            "name": "ipython",
+            "integrity": "sha256-bRZFdDz9GgfraV2Fqitfpmch+MuulDHUBJ9whLvwZQk=",
+            "byteLength": 639038,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/2d/1e/65b59cf518c106aa755e7f7da3099027738687a862ec785060702a481320/ipython-9.17.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2056941
+          },
+          {
+            "name": "ipython-pygments-lexers",
+            "integrity": "sha256-qUYiJKUFreGaYF9x+PpjwgSIM85Qq8hnaKDYHYdtyBw=",
+            "byteLength": 8074,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/d9/33/1f075bf72b0b747cb3288d011319aaf64083cf2efef8354174e3ed4540e2/ipython_pygments_lexers-1.1.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 23118
+          },
+          {
+            "name": "jedi",
+            "integrity": "sha256-e92cJjT1ZxMpmXb0y9Wcs/qSFlzF4F6oEfslNIByi2c=",
+            "byteLength": 4884812,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9a/93/242e2eab5fe682ffcb8b0084bde703a41d51e17ee0f3a31ff0d9d813620a/jedi-0.20.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14579803
+          },
+          {
+            "name": "joblib",
+            "integrity": "sha256-Pbv59uS1kqI1e4VGCOmA/mOQ0THXqC8BGjd+8uvvero=",
+            "byteLength": 306115,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 921902
+          },
+          {
+            "name": "lib3mf",
+            "integrity": "sha256-tMAAM8R8/qyTt9qgaftG6N6kOR1VIrec1un2r3XjMBM=",
+            "byteLength": 1575000,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/88/83/8b987ba95ac0ed9cc7e9c407a579bf43eff6349b1792b4a66c992ce4f76b/lib3mf-2.5.0-py3-none-manylinux2014_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 6053441
+          },
+          {
+            "name": "matplotlib-inline",
+            "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
+            "byteLength": 9534,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/41/09/5b161152e2d90f7b87f781c2e1267494aef9c32498df793f73ad0a0a494a/matplotlib_inline-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 21367
+          },
+          {
+            "name": "mpmath",
+            "integrity": "sha256-oLK5/oC7zYGmZH/xMQhzjPtILUgdgmzA4C9bNeXIjSw=",
+            "byteLength": 536198,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1950197
+          },
+          {
+            "name": "narwhals",
+            "integrity": "sha256-Hw9APox+RGPN6b/nixL92Anjrj3abZsvgCk0+5x6ao8=",
+            "byteLength": 467373,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/eb/dc/55481808fd70ef1567cf13540ffd4702af3f74b112e35427564b03f79c2d/narwhals-2.25.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 2002355
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-Kbhv+KbMVWtH7GtksZSBXMgOa/Xu3MbN39ZTGMsLTu4=",
+            "byteLength": 16709995,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/7b/44/59a1eb68e773c4098d107ef34a0dbdeca501d72ffcfbff9a7707343921ce/numpy-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 57129209
+          },
+          {
+            "name": "ocp-gordon",
+            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
+            "byteLength": 54077,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 205203
+          },
+          {
+            "name": "ocpsvg",
+            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
+            "byteLength": 20847,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 71116
+          },
+          {
+            "name": "parso",
+            "integrity": "sha256-qJJusqG5FUhpQf29MehqS6+I/owhDyXy817OxbV0yhw=",
+            "byteLength": 107025,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 355069
+          },
+          {
+            "name": "pexpect",
+            "integrity": "sha256-cjbR4IDkk2vi3D4ybOwK9yrPkhKn4dBgIQ5wpH4lNSM=",
+            "byteLength": 63772,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 191354
+          },
+          {
+            "name": "prompt-toolkit",
+            "integrity": "sha256-AcCJHX+SN9XjOffT5Cza6At1NKuxx8DjNS77piMUkvI=",
+            "byteLength": 392288,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1397699
+          },
+          {
+            "name": "psutil",
+            "integrity": "sha256-B2otL5I/1IIWRPW6ifBZUj2pDckBToX45FpXdMpbxvk=",
+            "byteLength": 155560,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 520630
+          },
+          {
+            "name": "ptyprocess",
+            "integrity": "sha256-S0Hzln/OOvV8x+lLiIYmwYvzegg+NlHKj+62bUkv7zU=",
+            "byteLength": 13993,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 39907
+          },
+          {
+            "name": "pure-eval",
+            "integrity": "sha256-HbjjW2ez0hjYGK5lPifwbDqkIJAfp7CBypjL7ch04NA=",
+            "byteLength": 11842,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygments",
+            "integrity": "sha256-I2PGm2HEqXyDjaOxMNzWRo9ISJkrIagvKmPsNDdxN9k=",
+            "byteLength": 1250147,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 4621166
+          },
+          {
+            "name": "pyparsing",
+            "integrity": "sha256-hQuhSL2QjX4kEVh+JHoeTwMng5xA4uXm0FoAfsxpkR0=",
+            "byteLength": 122781,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 464007
+          },
+          {
+            "name": "requests",
+            "integrity": "sha256-Kg1gwXL4OsarMeRVSQbA87NYjTe1y5ObHAYfSQfieOA=",
+            "byteLength": 73075,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 234397
+          },
+          {
+            "name": "scikit-learn",
+            "integrity": "sha256-2nbQkwSkcG23zB4+uqO2uYpnNlzBHSmWxPHli6R99xQ=",
+            "byteLength": 9087723,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/1f/88/8dab5de10c638c083772a6be83a3d8106ced492f74a928c8693638e5bb50/scikit_learn-1.9.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 30893646
+          },
+          {
+            "name": "scipy",
+            "integrity": "sha256-/a9eqJCmGD0FZfUaYXmdZwgb1bHPA8X0s/03MhCGJck=",
+            "byteLength": 35312578,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/41/48/6450ed9243315322bbc19ac57b9b70d66a20bf1d38d124c96bc4bf6af9ea/scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 111865355
+          },
+          {
+            "name": "stack-data",
+            "integrity": "sha256-1VWODCWkywhTzdrT132piRoIy4Xdn5+RufjNZuUR5pU=",
+            "byteLength": 24521,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 75301
+          },
+          {
+            "name": "svgelements",
+            "integrity": "sha256-ilzyzAZtmOcT1bh1sdbl7rm5LoVeg169fKqycTrh3K0=",
+            "byteLength": 137856,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/48/2c/6c9bb53db56c8a12a736d2158a8b842a5993b96daabc29d90a098e840280/svgelements-1.9.6-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 681153
+          },
+          {
+            "name": "svgpathtools",
+            "integrity": "sha256-ZcT8QoIV/iff+Mhms6rQzoeYhX7PXS9OWP5eveZNTdk=",
+            "byteLength": 69135,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/0e/47/824c69a16715206a77b4d0fb34f1c0518ab50940abed4368c25013dbfea4/svgpathtools-1.7.4-py2.py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 252395
+          },
+          {
+            "name": "svgwrite",
+            "integrity": "sha256-u2srVFDx7b+ll9kk+awt0JnmJVYuSSAh191hT2X4oi0=",
+            "byteLength": 67122,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/84/15/640e399579024a6875918839454025bb1d5f850bb70d96a11eabb644d11c/svgwrite-1.4.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 281972
+          },
+          {
+            "name": "sympy",
+            "integrity": "sha256-4JHMPpnSFBoLooRzKPVHmwXZSmY1y5YUjMs/NGcb2PU=",
+            "byteLength": 6299353,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 26841861
+          },
+          {
+            "name": "threadpoolctl",
+            "integrity": "sha256-Q6C4/VopKFABEAOeQ6Xu2EgLkYlnCD6kjcOrnxPEp/s=",
+            "byteLength": 18638,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 66556
+          },
+          {
+            "name": "traitlets",
+            "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
+            "byteLength": 86211,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ad/66/0d785f0bc5e4315a96c989bb476d0fc07ea4f85132550c7b156ca2035d52/traitlets-5.16.1-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 319664
+          },
+          {
+            "name": "trianglesolver",
+            "integrity": "sha256-qgkDw3CLTitJbwbUkMrnLG/2J0sA0e3OQg/Po7K3ZoI=",
+            "byteLength": 5377,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ff/8e/43d45cf3e18e3f455e4b5ab333a7c27b8e38c4e535f7346b7148ce08eb65/trianglesolver-1.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 12210
+          },
+          {
+            "name": "typing-extensions",
+            "integrity": "sha256-SByqSBN06BPBsXatoU6X8fZ6RTnOnP6z81DXjWNwwug=",
+            "byteLength": 45571,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 182767
+          },
+          {
+            "name": "urllib3",
+            "integrity": "sha256-DPPK5WjTaqlXayjfs18RMo8cuXTKdkfZR167hsdaxuM=",
+            "byteLength": 135717,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 450461
+          },
+          {
+            "name": "wcwidth",
+            "integrity": "sha256-1bc9umFYpZXsk3A1Dn8mN7ysjWxeT9408w/P+2EDpeQ=",
+            "byteLength": 331669,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1841615
+          },
+          {
+            "name": "webcolors",
+            "integrity": "sha256-/Ew7WTWK2hZFUghKjr7mN8Ih5AWSZ9D4Mls7Vg9sfwo=",
+            "byteLength": 15027,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/f0/33/12020ba99beaff91682b28dc0bbf0345bbc3244a4afbae7644e4fa348f23/webcolors-24.8.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 45995
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-ifN6N2RqoTMX6bz6eGCmKFz/hwToXIGi12Sl2eAuzL0=",
+            "byteLength": 47187,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/worker.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
+            "byteLength": 24322,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/analyzer.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
+            "byteLength": 9907,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          }
+        ]
+      }
+    ]
+  },
+  "kernels": {
+    "build123d": {
+      "requires": [
+        "engine"
+      ],
+      "extensions": [
+        "py"
+      ]
+    }
+  }
+}

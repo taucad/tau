@@ -50,6 +50,13 @@ export const slicerOptionsSchema = z
     travelSpeed: millimetresPerSecond().min(1).max(600).default(250).describe('Travel move speed'),
     nozzleDiameter: millimetres().min(0.2).max(1.2).default(0.4).describe('Nozzle diameter'),
     filamentDiameter: millimetres().min(1).max(3).default(1.75).describe('Filament diameter'),
+    filamentType: z
+      .string()
+      .regex(/^[\w .+-]{1,64}$/u)
+      .optional()
+      .describe(
+        'Filament material, such as PLA; the reference engine records it so the printer can check what is loaded',
+      ),
     machineProfile: z.enum(['bambu-x1c']).default('bambu-x1c').describe('Target machine profile'),
     plate: z.string().min(1).max(64).default('textured-pei').describe('Build plate identifier'),
     bedSize: z

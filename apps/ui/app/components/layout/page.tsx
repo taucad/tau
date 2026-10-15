@@ -27,6 +27,7 @@ import { DesktopTitlebarControls, TitlebarNavigation } from '#components/layout/
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
 import { sidebarPreferredWidth } from '#constants/sidebar.constants.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -202,6 +203,13 @@ const ApplicationShell = ({
       }
     >
       {isDesktopTarget ? (
+        <span
+          aria-hidden
+          data-slot='desktop-drag-band'
+          className='pointer-events-none fixed top-0 left-0 z-0 h-9 w-(--titlebar-controls-width) [app-region:drag]'
+        />
+      ) : null}
+      {isDesktopTarget ? (
         <DesktopTitlebarControls isFullscreen={isFullscreen} onSidebarResize={resizeSidebar} />
       ) : (
         <WebTitlebarControls onSidebarResize={resizeSidebar} />
@@ -312,7 +320,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   );
   const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
   const hasPageHeaderChrome = [hasBreadcrumbItems, hasActionItems].includes(true);
-  const headerHeightClass = enablePageHeader
+  const isMobile = useIsMobile();
+  const reserveHeader = enablePageHeader && (hasPageHeaderChrome || isMobile);
+  const headerHeightClass = reserveHeader
     ? cn(
         desktopTarget && '[--header-height:calc(var(--spacing)*9)]',
         !desktopTarget && '[--header-height:calc(var(--spacing)*12)] md:[--header-height:calc(var(--spacing)*9)]',
@@ -323,16 +333,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   // value is `false`, or when its function form returns `false` for the current
   // viewer (see `Handle.enablePageWrapper`). The wrapper stays on unless some
   // match opts out.
-  /*
-   * `titleBarStyle: 'hiddenInset'` gives macOS no implicit drag area, so the
-   * window's grab band has to be declared in CSS. It belongs to the shell, not
-   * to a route: every route renders through `Page`, including the ones that opt
-   * out of the wrapper below (auth, share links), and a per-route handle leaves
-   * each new route to remember one. Chromium unions the `drag` rects and
-   * subtracts the `no-drag` ones, so interactive chrome sitting in the band —
-   * the header children here, the dockview tabs, the titlebar controls — opts
-   * itself back out.
-   */
+  // Wrapperless routes retain native chrome; wrapped pages confine dragging to the controls island.
   const desktopDragBand = desktopTarget ? (
     <span
       aria-hidden
@@ -391,11 +392,10 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
    */
   return (
     <CommandPaletteProvider>
-      {desktopDragBand}
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
           <SidebarInset className={cn('size-full min-w-0', headerHeightClass)}>
-            {enablePageHeader ? (
+            {reserveHeader ? (
               <header
                 className={cn(
                   'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
@@ -461,7 +461,12 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             ) : null}
             <section
               ref={pageScrollRef}
-              className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', enablePageHeader && headerOffsetClasses)}
+              className={cn(
+                'h-dvh',
+                enableOverflowY && 'overflow-y-auto',
+                reserveHeader && headerOffsetClasses,
+                enablePageHeader && !reserveHeader && 'md:group-data-[sidebar-open=false]/app-shell:pt-9',
+              )}
               onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
               <Compose components={Providers}>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
@@ -63,17 +64,25 @@ export function CloudProjectPreview({
       {!isCompact && hasImage ? (
         <span className='absolute right-2 bottom-2 rounded-md bg-background px-2 py-1 text-xs'>Saved preview</span>
       ) : null}
-      {!isCompact && (preview.isFailed || (preview.url && failedUrl === preview.url)) ? (
+      {!isCompact && preview.isFailed && !preview.canRetry ? (
+        <p className='absolute right-2 bottom-2 left-2 text-center text-xs'>
+          Preview unavailable. Open the project to view it.
+        </p>
+      ) : null}
+      {!isCompact && ((preview.isFailed && preview.canRetry) || (preview.url && failedUrl === preview.url)) ? (
         <Button
           size='sm'
           variant='outline'
           className='absolute bottom-2'
+          disabled={preview.isLoading}
+          aria-busy={preview.isLoading}
           onClick={async () => {
             setFailedUrl(undefined);
             await preview.retry();
           }}
         >
-          Retry preview
+          {preview.isLoading ? <Loader className='size-3 motion-reduce:animate-none' /> : null}
+          {preview.isLoading ? 'Loading preview…' : 'Retry preview'}
         </Button>
       ) : null}
     </div>

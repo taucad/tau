@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { fileURLToPath } from "node:url";
 import { execFileSync, execSync } from "node:child_process";
 
-//#region ../node_modules/.pnpm/js-yaml@4.3.0/node_modules/js-yaml/dist/js-yaml.mjs
+//#region ../node_modules/.pnpm/js-yaml@4.3.2/node_modules/js-yaml/dist/js-yaml.mjs
 function getDefaultExportFromCjs(x) {
 	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
 }
@@ -768,7 +768,7 @@ function requireOmap() {
 	const _toString = Object.prototype.toString;
 	function resolveYamlOmap(data) {
 		if (data === null) return true;
-		const objectKeys = [];
+		const objectKeys = {};
 		const object = data;
 		for (let index = 0, length = object.length; index < length; index += 1) {
 			const pair = object[index];
@@ -780,8 +780,8 @@ function requireOmap() {
 				else return false;
 			}
 			if (!pairHasKey) return false;
-			if (objectKeys.indexOf(pairKey) === -1) objectKeys.push(pairKey);
-			else return false;
+			if (_hasOwnProperty.call(objectKeys, pairKey)) return false;
+			Object.defineProperty(objectKeys, pairKey, { value: true });
 		}
 		return true;
 	}
@@ -1106,12 +1106,17 @@ function requireLoader() {
 			state.result += _result;
 		}
 	}
+	function chargeMergeWork(state) {
+		state.totalMergeKeys++;
+		if (state.maxTotalMergeKeys !== -1 && state.totalMergeKeys > state.maxTotalMergeKeys) throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
+	}
 	function mergeMappings(state, destination, source, overridableKeys) {
 		if (!common2.isObject(source)) throwError(state, "cannot merge mappings; the provided source object is unacceptable");
+		chargeMergeWork(state);
 		const sourceKeys = Object.keys(source);
 		for (let index = 0, quantity = sourceKeys.length; index < quantity; index += 1) {
 			const key = sourceKeys[index];
-			if (state.maxTotalMergeKeys !== -1 && ++state.totalMergeKeys > state.maxTotalMergeKeys) throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
+			chargeMergeWork(state);
 			if (!_hasOwnProperty.call(destination, key)) {
 				setProperty(destination, key, source[key]);
 				overridableKeys[key] = true;
@@ -1130,8 +1135,10 @@ function requireLoader() {
 		keyNode = String(keyNode);
 		if (_result === null) _result = {};
 		if (keyTag === "tag:yaml.org,2002:merge") {
-			if (Array.isArray(valueNode)) for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) mergeMappings(state, _result, valueNode[index], overridableKeys);
-			else mergeMappings(state, _result, valueNode, overridableKeys);
+			if (Array.isArray(valueNode)) {
+				if (valueNode.length > 100) throwError(state, "abnormal merge sequence size");
+				for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) mergeMappings(state, _result, valueNode[index], overridableKeys);
+			} else mergeMappings(state, _result, valueNode, overridableKeys);
 		} else {
 			if (!state.json && !_hasOwnProperty.call(overridableKeys, keyNode) && _hasOwnProperty.call(_result, keyNode)) {
 				state.line = startLine || state.line;
@@ -2591,7 +2598,7 @@ const parseCatalog = (content, catalog, filePath) => {
 		repos: shared.repos
 	};
 };
-const publicCatalogPath = (root) => join(root, "repos.yaml");
+const publicCatalogPath = (root) => join(root, "tools", "repositories", "catalog.yaml");
 const privateCatalogPath = (root) => join(root, "repos", "tau-brain", "repos.yaml");
 const readCatalog = (root, catalog) => {
 	const filePath = catalog === "public" ? publicCatalogPath(root) : privateCatalogPath(root);

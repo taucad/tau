@@ -110,54 +110,24 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
-  it("should ask the person through the client's form only when the client can draw one", async () => {
+  it('should leave a job for the person in Tau even when the client can draw a form', async () => {
     const { dispatch, invocations, local } = await serve(ready);
     try {
       const asked: string[] = [];
       await dispatch(
-        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
+        { toolName: toolName.requestJob, args: { targetFile: 'plate.ts' } },
         {
-          toolCallId: 'print-1',
+          toolCallId: 'job-1',
           confirm: async ({ message }) => {
             asked.push(message);
-            return 'denied';
+            return 'approved';
           },
         },
       );
-      await dispatch({ toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } }, { toolCallId: 'print-2' });
 
-      const [withForm, withoutForm] = invocations;
-      expect(await withForm?.approve?.({ prompt: 'Print plate.3mf on X1C?' })).toEqual({
-        interruptId: 'print-1',
-        outcome: 'denied',
-      });
-      expect(asked).toEqual(['Print plate.3mf on X1C?']);
-      expect(withForm?.approve?.recall).toBeUndefined();
-      expect(withoutForm?.approve).toBeUndefined();
+      expect(invocations[0]?.approve).toBeUndefined();
+      expect(asked).toEqual([]);
     } finally {
-      await local.close();
-    }
-  });
-
-  it('should tell the tool, and the operator on stderr, when the client could not ask the person', async () => {
-    const { dispatch, invocations, local } = await serve(ready);
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    try {
-      await dispatch(
-        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
-        {
-          toolCallId: 'print-1',
-          confirm: async () => {
-            throw new Error('Method not found');
-          },
-        },
-      );
-      await expect(invocations[0]?.approve?.({ prompt: 'Print plate.3mf on X1C?' })).rejects.toMatchObject({
-        code: 'APPROVAL_UNAVAILABLE',
-      });
-      expect(String(stderr.mock.calls.at(-1)?.[0])).toContain('Method not found');
-    } finally {
-      stderr.mockRestore();
       await local.close();
     }
   });

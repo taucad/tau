@@ -1,26 +1,10 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { expect, it } from 'vitest';
 
 import { picogk } from '#index.js';
-
-const targetRoot = resolve(
-  import.meta.dirname,
-  '../../../../apps/desktop/resources/picogk',
-  `${process.platform}-${process.arch}`,
-);
-const manifest = JSON.parse(readFileSync(join(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as {
-  workerPath: string;
-  workerSha256: string;
-  resourceFiles: Array<{ path: string; sha256: string; label: string }>;
-};
-// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
-// without it and these suites run only where the native engine is present.
-const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
+import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
 
 it.runIf(nativeEngineAvailable)(
   'should release native listeners on default client shutdown and preserve sibling sessions',
@@ -31,12 +15,7 @@ it.runIf(nativeEngineAvailable)(
         picogk({
           kernels: {
             default: {
-              workerExecutable: join(targetRoot, manifest.workerPath),
-              workerSha256: manifest.workerSha256,
-              resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
-                ...resource,
-                path: join(targetRoot, path),
-              })),
+              ...nativeKernelOptions,
               requestTimeout: 120_000,
             },
           },

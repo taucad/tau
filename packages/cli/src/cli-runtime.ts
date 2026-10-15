@@ -1,6 +1,7 @@
 import type { PluginFactory, PluginInstance } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import type { Build123dClosureOptions } from '@taucad/build123d';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 import { cliZooCloseErrors } from '#zoo-proxy.js';
 
@@ -15,6 +16,8 @@ export type CliRuntimeOptions = {
   readonly explicitFactories?: readonly DefaultInvocablePluginFactory[];
   readonly configuredPlugins?: readonly PluginInstance[];
   readonly picogk?: PicogkKernelOptions;
+  /** Build123d's options from the closure `tau prepare build123d` sealed; absent, no Build123d kernel is composed. */
+  readonly build123d?: Build123dClosureOptions;
   /** The Zoo proxy the KCL kernel connects to; defaults to Tau Cloud's (see `cliZooProxyUrl`). */
   readonly zooProxyUrl?: string;
 };
@@ -44,11 +47,12 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, picogkModule] = await Promise.all([
+  const [{ assimp }, { image }, { zoo }, picogkModule, build123dModule] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
     import('@taucad/zoo'),
     options.picogk ? import('@taucad/picogk') : undefined,
+    options.build123d ? import('@taucad/build123d') : undefined,
   ]);
   const builtIns = [
     ...modules.map(({ plugin }) => plugin()),
@@ -62,6 +66,9 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
       },
     }),
     ...(picogkModule && options.picogk ? [picogkModule.picogk({ kernels: { default: options.picogk } })] : []),
+    ...(build123dModule && options.build123d
+      ? [build123dModule.build123d({ kernels: { default: options.build123d } })]
+      : []),
     assimp({ preset: 'all' }),
     image(),
   ];

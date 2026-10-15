@@ -4,18 +4,29 @@ import { resolve as resolvePath } from 'node:path';
 import { Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { keyedResource, openLocalMachines, openLocalParameterActors, serveLocalHostMcp } from '@taucad/host';
+import {
+  defaultMachineProviders,
+  keyedResource,
+  openLocalMachines,
+  openLocalParameterActors,
+  serveLocalHostMcp,
+} from '@taucad/host';
 import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
-import { machineProviders } from '#machine-providers.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
-/** Milliseconds a stopping server waits for its kernels before it exits anyway. */
-const shutdownGrace = 5000;
+/**
+ * Milliseconds a stopping server waits for its kernels before it exits anyway.
+ *
+ * The server exits within five seconds of its client closing. The grace is shorter than that bound because the bound
+ * also covers delivering the end of stdin and exiting: a grace equal to it overran the bound whenever a kernel thread
+ * was still terminating when the grace ran out.
+ */
+const shutdownGrace = 4000;
 
 /**
  * One project's client. Its thread composes the CLI runtime from `--plugin` and `--config` at run time, so the
@@ -127,7 +138,7 @@ export const mcpCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        "Offer the print tools over this computer's Tau printers; a print starts only after the person approves it in the agent app (TAU_HOST_MACHINES=true)",
+        "Offer the machine tools over this computer's Tau machines; a job starts only after the person approves it in Tau's Print pane (TAU_HOST_MACHINES=true)",
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
     'viewer-page': {
@@ -267,7 +278,7 @@ export const mcpCommand = defineCommand({
       ? await openLocalMachines({
           workspaceRoot,
           requireProject: args.project !== undefined || process.env['CLAUDE_PROJECT_DIR'] !== undefined,
-          ...(await machineProviders()),
+          providers: await defaultMachineProviders(),
           actorId: 'tau-mcp',
           onWarning: ({ message }) => {
             process.stderr.write(`tau mcp: ${message}\n`);

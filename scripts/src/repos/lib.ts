@@ -272,7 +272,7 @@ const parseCatalog = (content: string, catalog: CatalogName, filePath: string): 
   };
 };
 
-const publicCatalogPath = (root: string): string => join(root, 'repos.yaml');
+const publicCatalogPath = (root: string): string => join(root, 'tools', 'repositories', 'catalog.yaml');
 const privateCatalogPath = (root: string): string => join(root, 'repos', 'tau-brain', 'repos.yaml');
 
 const readCatalog = (root: string, catalog: CatalogName): PublicCatalog | PrivateCatalog => {

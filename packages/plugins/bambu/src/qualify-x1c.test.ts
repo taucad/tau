@@ -1,6 +1,8 @@
 import type { MachineNetworkStream } from '@taucad/runtime/machine';
 import { describe, expect, it } from 'vitest';
 
+// oxlint-disable-next-line no-restricted-imports -- The monitor test covers the qualification script's own module.
+import { printCubeOutcome } from '../scripts/print-cube-outcome.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The start-evidence test covers the qualification script's own module.
 import { redactProjectFileReply, tapProjectFileReplies } from '../scripts/project-file-reply.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The reply type belongs to the same module.
@@ -140,5 +142,24 @@ describe('tapProjectFileReplies', () => {
     const expected: unknown = JSON.parse(redacted);
     expect(replies.map(({ reply: captured }) => captured)).toEqual([expected]);
     expect(Date.parse(replies[0]?.receivedAt ?? '')).not.toBeNaN();
+  });
+});
+
+describe('print-cube monitor', () => {
+  it('should finish on its own run reaching FINISH, which a Bambu printer keeps reporting', () => {
+    expect(printCubeOutcome({ runId: 'cube', state: 'completed' }, 'cube')).toBe('completed');
+  });
+
+  it('should end at once on its own run cancelled or failed', () => {
+    expect(printCubeOutcome({ runId: 'cube', state: 'cancelled' }, 'cube')).toBe('cancelled');
+    expect(printCubeOutcome({ runId: 'cube', state: 'failed' }, 'cube')).toBe('failed');
+  });
+
+  it('should keep printing while the run runs, and wait on any other run or none', () => {
+    expect(printCubeOutcome({ runId: 'cube', state: 'paused' }, 'cube')).toBe('printing');
+    // The previous print's FINISH is not this stage's.
+    expect(printCubeOutcome({ runId: 'earlier', state: 'completed' }, 'cube')).toBe('waiting');
+    expect(printCubeOutcome(undefined, 'cube')).toBe('waiting');
+    expect(printCubeOutcome({ runId: 'cube', state: 'running' }, undefined)).toBe('waiting');
   });
 });

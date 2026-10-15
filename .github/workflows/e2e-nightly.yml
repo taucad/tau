@@ -216,7 +216,7 @@ jobs:
   # darwin-arm64 binding installs with the workspace from the catalog pin.
   runtime-e2e-darwin:
     name: Runtime end-to-end on Darwin (quarantined, #342)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 150
     needs: [plan]
     permissions:

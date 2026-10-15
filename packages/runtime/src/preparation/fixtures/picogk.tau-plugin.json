@@ -1,0 +1,41 @@
+{
+  "//": "The API guide's PicoGK design manifest: Microsoft's runtime archive verbatim (its releases.json sha512) plus one Tau-hosted framework-dependent layer, `dotnet/` and `tau-worker/` siblings under the closure root. The Tau layer's integrity is a stand-in until the publishing CI computes it.",
+  "schemaVersion": 1,
+  "kernels": { "picogk": { "requires": ["runtime"], "extensions": ["cs"] } },
+  "dependencies": {
+    "runtime": [
+      {
+        "target": { "runtime": "native", "os": "darwin", "arch": "arm64" },
+        "payloads": [
+          {
+            "name": "dotnet",
+            "integrity": "sha512-6WqKgQjVo7cOgnVnskk+3lQPNwXBIJ5/NHNrpqo5jdTQ0V8x62Z8nMo9vNMK2DsxWobV6aE/0sNw4vwM7OckNg==",
+            "byteLength": 33246120,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
+              ]
+            },
+            "destination": "dotnet"
+          },
+          {
+            "name": "worker",
+            "integrity": "sha256-9HUFaOwEKeIDhRzgwuFb9MHseL8n+hDFO7QaTQmC5AQ=",
+            "byteLength": 15600000,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://cdn.taucad.dev/payloads/sha256/f4750568ec0429e203851ce0c2e15bf4c1ec78bf27fa10c53bb41a4d0982e404/tau-picogk-worker-26.2-darwin-arm64.tar.gz",
+                "https://github.com/taucad/tau/releases/download/picogk-worker-26.2.0/tau-picogk-worker-26.2-darwin-arm64.tar.gz"
+              ]
+            },
+            "destination": "tau-worker"
+          }
+        ]
+      }
+    ]
+  }
+}

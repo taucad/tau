@@ -1,5 +1,6 @@
 /**
- * Run Build123d's Python tests and strict coverage gate with the bundled interpreter.
+ * Run Build123d's Python tests and strict coverage gate with the interpreter of the sealed closure
+ * `tau prepare build123d` installs, prepared offline from the payload seed (`pnpm nx run build123d:seed`).
  *
  * This is the executable Wave 1/2 coverage gate from
  * docs/research/native-language-kernel-process-blueprint.md.
@@ -15,21 +16,24 @@
  *   1  Resource validation, tests, or coverage fail.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 
+import { prepareFromSeed } from '#build123d-closure.fixture.js';
+import { build123dOptionsFromClosure } from '#build123d-closure.js';
+
 const repoRoot = resolve(import.meta.dirname, '../../../..');
 const pythonRoot = resolve(repoRoot, 'packages/plugins/build123d/python');
-const targetRoot = resolve(repoRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
-const pythonExecutable = resolve(targetRoot, process.platform === 'win32' ? 'python.exe' : 'bin/python3');
 const reportRoot = resolve(repoRoot, 'out/reports/coverage/packages/plugins/build123d-python');
 const measuredFiles = ['analyzer.py', 'glb.py', 'worker.py'].map((name) => resolve(pythonRoot, name));
 
-const run = (arguments_: readonly string[]): void => {
+const run = (pythonExecutable: string, arguments_: readonly string[]): void => {
   const environment: NodeJS.ProcessEnv = { ...process.env };
   environment['COVERAGE_FILE'] = resolve(reportRoot, '.coverage');
+  // The sealed closure is verified file by file; nothing may write bytecode into it.
+  environment['PYTHONDONTWRITEBYTECODE'] = '1';
   const result = spawnSync(pythonExecutable, ['-I', '-m', 'coverage', ...arguments_], {
     cwd: repoRoot,
     env: environment,
@@ -43,15 +47,11 @@ const run = (arguments_: readonly string[]): void => {
   }
 };
 
-const main = (): void => {
-  if (!existsSync(pythonExecutable)) {
-    throw new Error(
-      `Bundled Python is missing for ${process.platform}-${process.arch}. Run the desktop preparation target.`,
-    );
-  }
+const main = async (): Promise<void> => {
+  const { pythonExecutable } = build123dOptionsFromClosure(await prepareFromSeed());
   mkdirSync(reportRoot, { recursive: true });
-  run(['erase']);
-  run([
+  run(pythonExecutable, ['erase']);
+  run(pythonExecutable, [
     'run',
     '--branch',
     `--source=${pythonRoot}`,
@@ -64,13 +64,11 @@ const main = (): void => {
     '-p',
     'test_*.py',
   ]);
-  run(['json', '-o', resolve(reportRoot, 'coverage.json'), ...measuredFiles]);
-  run(['report', '--show-missing', '--fail-under=100', ...measuredFiles]);
+  run(pythonExecutable, ['json', '-o', resolve(reportRoot, 'coverage.json'), ...measuredFiles]);
+  run(pythonExecutable, ['report', '--show-missing', '--fail-under=100', ...measuredFiles]);
 };
 
-try {
-  main();
-} catch (error) {
+await main().catch((error: unknown) => {
   console.error('Build123d Python tests failed:', error);
-  process.exit(1);
-}
+  process.exitCode = 1;
+});

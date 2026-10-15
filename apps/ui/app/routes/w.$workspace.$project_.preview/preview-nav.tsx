@@ -35,7 +35,7 @@ export function PreviewNav({ className }: PreviewNavProps): React.JSX.Element {
       enableAnimation={false}
       className={cn(
         'w-full border-t bg-sidebar',
-        'gap-0.25 rounded-t-xl rounded-b-none p-0.5 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
+        'gap-0.25 rounded-t-xl rounded-b-none p-0.5 text-foreground [&_svg]:size-4! [&_svg]:text-foreground',
         className,
       )}
     >

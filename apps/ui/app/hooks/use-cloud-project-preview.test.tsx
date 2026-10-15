@@ -70,6 +70,43 @@ describe('cloud saved previews', () => {
     expect(settled[4]?.status).toBe('rejected');
   });
 
+  it('should expose retry progress and recover from a transient preview failure', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(undefined, { status: 503 }));
+    const view = renderHook(() => useCloudProjectPreview('project', true), { wrapper });
+    await waitFor(() => {
+      expect(view.result.current.isFailed).toBe(true);
+    });
+    expect(view.result.current.canRetry).toBe(true);
+    let finish: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementationOnce(
+      async () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    let retry: Promise<unknown> | undefined;
+    act(() => {
+      retry = view.result.current.retry();
+    });
+    await waitFor(() => {
+      expect(view.result.current.isLoading).toBe(true);
+    });
+    await act(async () => {
+      finish?.(imageResponse());
+      await retry;
+    });
+    await waitFor(() => {
+      expect(view.result.current.url).toBe('blob:saved-preview');
+    });
+    expect(view.result.current.isFailed).toBe(false);
+    view.unmount();
+    client.clear();
+  });
+
   it('should release image URLs and never retain the previous account image on account switch', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -87,6 +124,7 @@ describe('cloud saved previews', () => {
     expect(view.result.current.url).toBeUndefined();
     await waitFor(() => {
       expect(view.result.current.isFailed).toBe(true);
+      expect(view.result.current.canRetry).toBe(false);
     });
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:saved-preview');
     view.unmount();

@@ -9,12 +9,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer as createTlsServer } from 'node:tls';
 
-import type { MachineArtifactReference, MachineTransportTrust } from '@taucad/runtime/machine';
+import { createMachineToolRegistry } from '@taucad/agent-tools/registry';
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import type { MachineArtifactReference, MachineCandidate, MachineTransportTrust } from '@taucad/runtime/machine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
 } from '#machine-host.js';
@@ -33,8 +39,8 @@ afterEach(async () => {
 });
 
 /**
- * An implicit-FTPS printer answering only what basic-ftp sends for one upload. Its data channel drains about
- * 4 MiB/s; `stor` is the reply to the store command.
+ * An implicit-FTPS printer answering only what basic-ftp sends for one upload, recording each command (the password
+ * redacted). Its data channel drains about 4 MiB/s; `stor` is the reply to the store command.
  */
 const fakeFtpsPrinter = async (stor: string) => {
   const directory = await sandbox();
@@ -64,6 +70,7 @@ const fakeFtpsPrinter = async (stor: string) => {
   };
   let received = 0;
   let replyOnControl: ((line: string) => void) | undefined;
+  const commands: string[] = [];
   const data = createTlsServer(credentials, (socket) => {
     socket.on('error', () => undefined);
     socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
@@ -86,6 +93,7 @@ const fakeFtpsPrinter = async (stor: string) => {
     socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       for (const line of Buffer.from(chunk).toString('latin1').split('\r\n').filter(Boolean)) {
         const command = line.split(' ')[0]!.toUpperCase();
+        commands.push(command === 'PASS' ? 'PASS' : line);
         const answers = new Map([
           ['USER', '331 password'],
           ['PASS', '230 logged in'],
@@ -110,6 +118,7 @@ const fakeFtpsPrinter = async (stor: string) => {
       digest: digest as Extract<MachineTransportTrust, { type: 'pinned' }>['digest'],
     } satisfies MachineTransportTrust,
     received: () => received,
+    commands: () => commands,
     close: () => {
       control.close();
       data.close();
@@ -120,6 +129,52 @@ const fakeFtpsPrinter = async (stor: string) => {
 describe('machineRouteGrants', () => {
   it('should grant a served session the removal of a binding', () => {
     expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.removeBinding' });
+  });
+});
+
+describe('localMachineFacet', () => {
+  it('should leave no unhandled rejection when closed before the host answers its handshake', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      /* A serve that never attaches: the host's hello never arrives, as when a caller closes the facet at once. */
+      const facet = localMachineFacet(() => undefined);
+      facet.close();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+});
+
+describe('machineAgentGrants', () => {
+  it("should withhold a person's own acts from an agent and keep what the machine tools call", () => {
+    const operations = machineAgentGrants.map(({ operation }) => operation);
+    for (const personal of [
+      'machines.approveAction',
+      'machines.resolveJob',
+      'machines.discover',
+      'machines.beginBinding',
+      'machines.removeBinding',
+      'machines.setTesting',
+      'machines.beginHold',
+    ]) {
+      expect(operations).not.toContain(personal);
+    }
+    expect(operations).toEqual(
+      expect.arrayContaining([
+        'machines.list',
+        'machines.applyAction',
+        'machines.stop',
+        'machines.requestJob',
+        'machines.withdrawJob',
+      ]),
+    );
+    /* Approving is the person's: their session is granted it. */
+    expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.approveAction' });
   });
 });
 
@@ -373,7 +428,7 @@ describe('createNodeMachineRuntime', () => {
       endpoint: { address: '127.0.0.1', port: printer.port },
       trust: printer.trust,
       secretRef: 'vault:machine/fixture/printer-1',
-      username: 'bblp',
+      username: 'maker',
       remoteName: 'tau-fixture.gcode.3mf',
       bytes: upload,
       connectTimeout: 1000,
@@ -381,6 +436,12 @@ describe('createNodeMachineRuntime', () => {
     });
   };
 
+  /*
+   * The wire an implicit-FTPS upload speaks, pinned: TLS from the first byte, a login with the caller's own account,
+   * binary passive STOR of the caller's name, then SIZE to prove every byte landed. The data channel drains slower than
+   * the 1 s timeout allows for the whole file, so a whole-file write would trip basic-ftp's watchdog (it counts queued
+   * bytes as progress); 64 KiB pieces keep it fed.
+   */
   it('should finish an FTPS upload that outlasts its timeout while the printer keeps reading', async () => {
     /* The 8 MiB upload lasts twice the 1 s timeout. */
     const printer = await fakeFtpsPrinter('150 ready');
@@ -388,6 +449,20 @@ describe('createNodeMachineRuntime', () => {
     try {
       await expect(uploadTo(printer, upload)).resolves.toEqual({ bytesWritten: upload.byteLength });
       expect(printer.received()).toBe(upload.byteLength);
+      expect(printer.commands()).toEqual([
+        'OPTS UTF8 ON',
+        'USER maker',
+        'PASS',
+        'FEAT',
+        'TYPE I',
+        'STRU F',
+        'OPTS UTF8 ON',
+        'PBSZ 0',
+        'PROT P',
+        'EPSV',
+        'STOR tau-fixture.gcode.3mf',
+        'SIZE tau-fixture.gcode.3mf',
+      ]);
     } finally {
       printer.close();
     }
@@ -405,4 +480,136 @@ describe('createNodeMachineRuntime', () => {
       printer.close();
     }
   }, 20_000);
+});
+
+/*
+ * R15 end to end over a real host and the Bambu simulator: the agent's tool asks on the agent's session, a person
+ * approves exactly that request on their own session (what the chat banner does), and only then does the host admit
+ * it, once. A request the person did not approve, or approved with other values, is refused.
+ */
+describe('an agent action a person approved, through a real machine host', () => {
+  it('admits the approved request once and refuses one never approved or approved with other values', async () => {
+    const storeRoot = await sandbox();
+    const identity = await openMachineHostIdentity(storeRoot);
+    const { bambuSimulatorMachine } = await import('@taucad/bambu');
+    const errors: unknown[] = [];
+    const host = await createNodeMachineHost({
+      storeRoot,
+      ...identity,
+      admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
+      providers: [bambuSimulatorMachine()],
+      runtime: createNodeMachineRuntime({
+        secrets: createMachineSecretStore({ vault: createMemorySecretVault(), legacyDirectory: storeRoot }),
+        readArtifact: async () => {
+          throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
+        },
+      }),
+      onError: (error) => {
+        errors.push(error);
+      },
+    });
+    const facetFor = (actor: Readonly<{ kind: 'user' | 'agent'; id: string }>, grants: typeof machineRouteGrants) => {
+      const session = host.issueSession({ actor, grants });
+      return localMachineFacet((port) => host.serve({ port, session }));
+    };
+    const person = facetFor({ kind: 'user', id: 'person' }, machineRouteGrants);
+    const agent = facetFor({ kind: 'agent', id: 'tau' }, machineAgentGrants);
+    if (!person.available || !agent.available) {
+      throw new Error('A local machine facet is always available.');
+    }
+    try {
+      let candidate: MachineCandidate | undefined;
+      for await (const event of person.discover({
+        providerId: 'bambu-simulator',
+        configuration: {},
+      })) {
+        if (event.type === 'found') {
+          candidate = event.candidate;
+          break;
+        }
+      }
+      if (candidate === undefined) {
+        throw new Error('The simulator reported no candidate.');
+      }
+      const begun = await person.beginBinding({ candidate, name: 'Simulated X1C' });
+      const bound =
+        begun.status === 'bound'
+          ? begun
+          : await host.completeBinding({ ceremonyId: begun.ceremonyId, secretRef: 'none', serviceTrust: {} });
+      if (bound.status !== 'bound') {
+        throw new Error(`The simulator did not bind: ${JSON.stringify(bound)}`);
+      }
+      const { machineId } = bound;
+      await vi.waitFor(async () => {
+        await expect(person.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+      });
+
+      const registry = createMachineToolRegistry(agent, {
+        confirmation: { pollInterval: 1, pollTimeout: 5 },
+      });
+      /* The chat banner's half: record the person's decision on their own session, then answer. */
+      const intentSchema = z.object({
+        operationId: z.string(),
+        componentId: z.string(),
+        action: z.string(),
+        version: z.number(),
+        expectedRunId: z.string().nullable(),
+        parameters: z.unknown(),
+      });
+      const answeredBy =
+        (parameters?: unknown) =>
+        async ({
+          payload,
+        }: Readonly<{ payload?: Readonly<Record<string, unknown>> }>): Promise<
+          Readonly<{ interruptId: string; outcome: 'approved' }>
+        > => {
+          const { operationId, ...intent } = intentSchema.parse(payload?.['intent']);
+          await person.approveAction({
+            machineId,
+            operationId,
+            intent: { ...intent, parameters: parameters ?? intent.parameters },
+            decision: 'approve',
+            approvedBy: { kind: 'user', id: 'person', label: 'You' },
+          });
+          return { interruptId: 'interrupt-1', outcome: 'approved' };
+        };
+      const unload = async (toolCallId: string, approve: ReturnType<typeof answeredBy>) =>
+        registry.invoke({
+          toolCallId,
+          toolName: 'machine_action',
+          input: {
+            machineId,
+            componentId: 'filament',
+            action: 'material.unload',
+            parameters: { slot: { unitId: 'ams-a', slotId: 'a1' }, toolheadId: 'tool-0' },
+          },
+          signal: new AbortController().signal,
+          approve: Object.assign(vi.fn(approve), { recall: async () => undefined }),
+        });
+      const refused = { status: 'needs-approval', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' };
+
+      /* Approved for other values: the host holds no approval of this request. */
+      const otherValues = await unload('op-other', answeredBy({ slot: { unitId: 'ams-a', slotId: 'a2' } }));
+      expect(otherValues.content).toMatchObject(refused);
+      /* Answered approved, but nothing recorded on the person's session. */
+      const unrecorded = await unload('op-unrecorded', async () => ({
+        interruptId: 'interrupt-1',
+        outcome: 'approved',
+      }));
+      expect(unrecorded.content).toMatchObject(refused);
+
+      const approved = await unload('op-approved', answeredBy());
+      expect(approved.content).toMatchObject({ operationId: 'op-approved' });
+      expect(approved.content).not.toMatchObject({ status: 'needs-approval' });
+      await expect(person.reconcileOperation({ machineId, operationId: 'op-approved' })).resolves.toMatchObject({
+        requestedBy: { kind: 'agent' },
+        approvedBy: { kind: 'user' },
+      });
+      expect(errors).toEqual([]);
+    } finally {
+      person.close();
+      agent.close();
+      await host.close();
+    }
+  }, 30_000);
 });

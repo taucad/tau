@@ -1,6 +1,6 @@
 {
   "name": "@taucad/runtime",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Multi-kernel CAD runtime framework for browser and Node.js",
   "type": "module",
   "sideEffects": false,
@@ -46,6 +46,7 @@
     "./machine": "./src/machines/index.ts",
     "./host": "./src/host/index.ts",
     "./host/node": "./src/host/node.ts",
+    "./preparation/node": "./src/preparation/node.ts",
     "./worker": "./src/worker/index.ts",
     "./plugin": "./src/plugins/plugin-entry.ts",
     "./kernel": "./src/plugins/kernel-plugin-entry.ts",
@@ -134,6 +135,11 @@
         "types": "./dist/host/node.d.mts",
         "import": "./dist/host/node.mjs",
         "default": "./dist/host/node.mjs"
+      },
+      "./preparation/node": {
+        "types": "./dist/preparation/node.d.mts",
+        "import": "./dist/preparation/node.mjs",
+        "default": "./dist/preparation/node.mjs"
       },
       "./worker": {
         "types": "./dist/worker/index.d.mts",
@@ -288,6 +294,7 @@
     "@json-structure/sdk": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@standard-schema/spec": "catalog:",
+    "@taucad/archive-core": "workspace:*",
     "@taucad/cache-core": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/kinematics": "workspace:*",
@@ -328,6 +335,7 @@
   },
   "devDependencies": {
     "@parcel/watcher": "catalog:",
+    "@taucad/archive-core": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",

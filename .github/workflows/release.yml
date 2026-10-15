@@ -12,10 +12,11 @@
 # its own merge (docs/research/monorepo-app-release-practice.md, R2). On every
 # push to `main`:
 #   - A release commit (subject `chore(release): <project> v<version>`, the
-#     squash merge of one of those pull requests) creates the application's tag
-#     and GitHub Release. Creating the release is what starts
-#     `release-build.yml`, which builds and verifies what the release ships and
-#     then deploys it to production.
+#     squash merge of one of those pull requests) creates the application's
+#     GitHub Release as a draft and then its tag. The tag's push is what starts
+#     `release-build.yml`, which builds and verifies what the release ships,
+#     attaches its assets, publishes the release (immutable from then on) and
+#     deploys it to production.
 #   - Then, for every application, the release commit is regenerated on
 #     `release/<project>` and one pull request titled with its subject is
 #     upserted. An application with nothing to release has its pull request
@@ -31,7 +32,7 @@
 #
 # Modelled on taucad/nanoraster's `release-pr.yml`. Every write uses a minted
 # `tau-release-bot` token: the default GITHUB_TOKEN can neither trigger CI on the
-# pull request nor start `release-build.yml` from the releases it creates.
+# pull request nor start `release-build.yml` from the tags it creates.
 name: Release
 
 on:
@@ -113,17 +114,23 @@ jobs:
           for index in $(seq 0 $((count - 1))); do
             tag=$(jq -r ".[$index].tag" "$RUNNER_TEMP/tags.json")
             jq -r ".[$index].notes" "$RUNNER_TEMP/tags.json" > "$RUNNER_TEMP/notes.md"
+            # Releases are immutable once published (go-live DEL-20), so each is
+            # created as a draft that release-build.yml fills and publishes. A
+            # draft has no tag, so the tag is created next; its push is what
+            # starts release-build.yml. Only a desktop release becomes "latest",
+            # once it is published; installed apps read the channel's R2 feed.
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "$tag already has a GitHub Release"
-              continue
+            else
+              gh release create "$tag" --draft --target "$TARGET" --title "$tag" \
+                --notes-file "$RUNNER_TEMP/notes.md" --latest=false
             fi
-            # Only a desktop release becomes "latest", and only once
-            # release-build.yml has attached its assets, so the repository's
-            # download link always has archives. Installed apps read the fixed
-            # `desktop-feed` prerelease instead.
-            gh release create "$tag" --target "$TARGET" --title "$tag" \
-              --notes-file "$RUNNER_TEMP/notes.md" --latest=false
-            echo "Released $tag"
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2> /dev/null; then
+              echo "$tag already exists"
+            else
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$TARGET" --silent
+              echo "Released $tag as a draft"
+            fi
           done
 
   release-prs:

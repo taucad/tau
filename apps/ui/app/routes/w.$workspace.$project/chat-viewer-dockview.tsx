@@ -24,6 +24,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { createStaticDataSource } from '#components/files/file-selector.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -734,6 +735,7 @@ export const ViewerDockview = memo(function ({
   // entryPath (happens when onReady fires before the project loads and the
   // main file is unknown).
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
+  const availability = useProjectAvailability();
   const admittedGraphics = useRef(new Set<string>());
   const admittedGeometry = useRef(new Map<string, string>());
   const visibleGeometryDemand = useRef(new Map<string, string>());
@@ -751,7 +753,7 @@ export const ViewerDockview = memo(function ({
   }, [projectRef]);
 
   useEffect(() => {
-    if (!api || !projectIsReady) {
+    if (!api || !projectIsReady || availability !== 'ready') {
       return;
     }
 
@@ -846,6 +848,7 @@ export const ViewerDockview = memo(function ({
   }, [
     api,
     projectIsReady,
+    availability,
     projectRef,
     mainEntryPath,
     viewRecords,

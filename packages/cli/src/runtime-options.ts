@@ -1,6 +1,7 @@
 import { createCliRuntime } from '#cli-runtime.js';
 import { loadTauPlugin, loadTauPluginConfig } from '#plugin-loader.js';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import type { Build123dClosureOptions } from '@taucad/build123d';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 
 export const loadCliRuntime = async (options: {
@@ -8,6 +9,7 @@ export const loadCliRuntime = async (options: {
   readonly plugin: unknown;
   readonly config?: string;
   readonly picogk?: PicogkKernelOptions;
+  readonly build123d?: Build123dClosureOptions;
   readonly zooProxyUrl?: string;
 }): Promise<AnyRuntimeDefinition> => {
   const pluginSpecifiers = Array.isArray(options.plugin)
@@ -23,6 +25,7 @@ export const loadCliRuntime = async (options: {
     explicitFactories,
     configuredPlugins,
     ...(options.picogk ? { picogk: options.picogk } : {}),
+    ...(options.build123d ? { build123d: options.build123d } : {}),
     ...(options.zooProxyUrl ? { zooProxyUrl: options.zooProxyUrl } : {}),
   });
 };

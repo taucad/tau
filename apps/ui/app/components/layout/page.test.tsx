@@ -28,6 +28,8 @@ const state = vi.hoisted(() => ({
   navigationType: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
 }));
 
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
+
 vi.mock('react-router', () => ({
   Link: ({ children, to, ...properties }: { readonly children: ReactNode; readonly to: string }) => (
     <a {...properties} href={to} rel='noreferrer'>
@@ -309,15 +311,23 @@ describe('Page application shell', () => {
 });
 
 describe('Page header contract', () => {
-  it('renders responsive browser header height by default', () => {
+  it('should leave an empty wide header out of the scrollport while keeping navigation', () => {
     const { container } = render(<Page />);
+    expect(container.querySelector('header')).not.toBeInTheDocument();
+    expect(container.querySelector('main')).toHaveClass('[--header-height:0px]');
+    expect(container.querySelector('section')).not.toHaveClass('mt-(--header-height)');
+    expect(screen.getByRole('button', { name: 'Toggle Sidebar' })).toBeInTheDocument();
+  });
 
+  it('should keep a useful navigation row on mobile', () => {
+    state.isMobile = true;
+    const { container } = render(<Page />);
     expect(container.querySelector('header')).toBeInTheDocument();
-    expect(container.querySelector('main')).toHaveClass(
-      '[--header-height:calc(var(--spacing)*12)]',
-      'md:[--header-height:calc(var(--spacing)*9)]',
-    );
+    expect(container.querySelector('main')).toHaveClass('[--header-height:calc(var(--spacing)*12)]');
     expect(container.querySelector('section')).toHaveClass('mt-(--header-height)');
+    expect(
+      within(container.querySelector('header')!).getByRole('button', { name: 'Toggle Sidebar' }),
+    ).toBeInTheDocument();
   });
 
   it('removes route header DOM and offset while retaining application controls', () => {
@@ -373,14 +383,14 @@ describe('Page header contract', () => {
 });
 
 describe('Desktop window drag band', () => {
-  it('spans the window on desktop and leaves the header chrome clickable', () => {
+  it('should confine dragging to the occupied titlebar island and leave route chrome clickable', () => {
     state.hasBreadcrumb = true;
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { container } = render(<Page />);
 
     expect(container.querySelector('[data-slot=desktop-drag-band]')).toHaveClass(
       'fixed',
-      'inset-x-0',
+      'w-(--titlebar-controls-width)',
       'top-0',
       'h-9',
       '[app-region:drag]',
@@ -403,7 +413,7 @@ describe('Desktop window drag band', () => {
     const { container } = render(<Page />);
 
     expect(container.querySelector('[data-slot=desktop-drag-band]')).not.toBeInTheDocument();
-    expect(container.querySelector('header > div')).not.toHaveClass('[app-region:no-drag]');
+    expect(container.querySelector('header')).not.toBeInTheDocument();
   });
 });
 

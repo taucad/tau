@@ -60,7 +60,7 @@ describe('Workbench first-checkout readiness', () => {
         <PrintPanelBody />
       </MemoryRouter>,
     );
-    expect(screen.getByText('Printing unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Machines unavailable')).toBeInTheDocument();
     expect(screen.queryByText('Downloading project files')).not.toBeInTheDocument();
     expect(mocks.machines).toHaveBeenCalledOnce();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();

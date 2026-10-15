@@ -1,7 +1,7 @@
 # =============================================================================
-# .dockerignore — used by apps/api/Dockerfile (the only Dockerfile in the repo).
+# Dockerfile-specific production build context rules.
 #
-# Build context is the repo root. The API Docker build uses COPY . . to ingest
+# Patterns are relative to the repo-root context, not this file. Builds use COPY . . to ingest
 # the full Nx monorepo, so only exclude items that the build doesn't need.
 # =============================================================================
 
@@ -24,8 +24,9 @@ apps/api-e2e
 docs
 
 # -- CI / tooling / editor config ---------------------------------------------
+# `scripts` stays in the context: it is an Nx project that `runtime-e2e` lists
+# as an implicit dependency, and the project graph fails without it.
 .github
-scripts
 .claude/worktrees
 .cursor
 .vscode
@@ -35,7 +36,7 @@ scripts
 .oxlintcache
 .prettierrc*
 .lintstagedrc*
-.husky
+tools/git-hooks
 
 # -- Nx caches and workspace data --------------------------------------------
 **/.nx/cache
@@ -80,16 +81,5 @@ CODEOWNERS
 docker-compose.yml
 infra
 
-# =============================================================================
-# packages/host/Dockerfile additions (BuildKit reads <dockerfile>.dockerignore
-# in preference to the root file, so this is a copy of the root rules plus the
-# workspace's local `file:`/`link:` dependencies, which live under `out/` and
-# `repos/` and are therefore excluded above — `pnpm install --frozen-lockfile`
-# cannot resolve the lockfile without them).
-# =============================================================================
-!out/artifacts/nanoraster/candidate-bef3b79-20260905T2252NZ/*.tgz
-!repos/openrscad/packages/npm-native/package.json
-!repos/openrscad/packages/npm-native/dist
-!repos/openrscad/packages/npm-native/dist/**
-!repos/openrscad/packages/npm-native/src
-!repos/openrscad/packages/npm-native/src/**
+# Package builds copy this generated inventory into published distributions.
+!docs/licensing/third-party-licenses.md

@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
-          STAGING_SUPPORT_SHA: cd8f118318e7720aeace25d6871c6b478f352673
+          STAGING_SUPPORT_SHA: ef81d9124c75b29e7115da226b3c616e0df2d43a
         run: |
           set -euo pipefail
           # Run listings come back in an unreliable order (a re-run keeps its
@@ -58,8 +58,8 @@ jobs:
             echo "::error::No ci.yml push run on main has succeeded yet."
             exit 1
           fi
-          # Release build runs from the tag's own commit, so it must already
-          # build staging releases: the first such main commit is #331.
+          # Release build runs from the tag's own commit. Require #697, which
+          # builds draft candidates from tag pushes and supplies release-assets.
           status=$(gh api "repos/${GH_REPO}/compare/${STAGING_SUPPORT_SHA}...${sha}" --jq .status)
           if [ "$status" != ahead ] && [ "$status" != identical ]; then
             echo "::error::The newest main commit with green CI, $sha, predates staging release support ($STAGING_SUPPORT_SHA). Run this again once main CI is green on a newer commit."
@@ -107,7 +107,10 @@ jobs:
               echo "release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            pnpm nx show projects --affected --base="$base" --head="$TARGET" --json > "$RUNNER_TEMP/affected.json"
+            # Nx may log before its final JSON line. Invalid output must fail,
+            # not silently count as an unaffected desktop.
+            pnpm nx show projects --affected --base="$base" --head="$TARGET" --json | tail -1 > "$RUNNER_TEMP/affected.json"
+            jq -e 'type == "array" and all(.[]; type == "string")' "$RUNNER_TEMP/affected.json" > /dev/null
             if ! jq -e 'index("desktop")' "$RUNNER_TEMP/affected.json" > /dev/null; then
               echo "release=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -137,17 +140,20 @@ jobs:
           It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is Developer ID signed without notarization. The channel feed advances only after a native OTA acceptance test.
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
+          # A draft, because a published release is immutable (go-live DEL-20):
+          # release-build.yml attaches the archives and publishes it. The tag's
+          # push, not the draft, starts release-build.yml.
+          gh release create "$tag" --draft --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
             --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$TARGET" --silent
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           {
-            echo "Created the prerelease [$TAG](https://github.com/$REPOSITORY/releases/tag/$(jq -rn --arg t "$TAG" '$t | @uri'))."
-            echo "**Release build** packages it and attaches the archives once main CI is green on this commit."
+            echo "Created the draft prerelease $TAG and its tag."
+            echo "**Release build** packages it, attaches the archives and publishes it once main CI is green on this commit."
           } >> "$GITHUB_STEP_SUMMARY"

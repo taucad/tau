@@ -52,6 +52,7 @@
     "api/machines",
     "api/machine-providers",
     "api/host",
+    "api/preparation",
     "api/compute-store",
     "api/electron",
     "api/protocol",

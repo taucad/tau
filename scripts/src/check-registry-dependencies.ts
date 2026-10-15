@@ -572,7 +572,10 @@ const inspectRegistryPackage: RegistryInspection = async (specifier, requirement
     const subpaths: Record<string, readonly string[]> = {};
     for (const subpath of new Set(requirements.map((requirement) => requirement.subpath))) {
       const target = resolvePackageTarget(packageDirectory, manifest, subpath);
-      if (target) {
+      if (target?.endsWith('.json')) {
+        // A JSON module (`import manifest from 'pkg/package.json' with { type: 'json' }`) has only a default export.
+        subpaths[subpath] = ['default'];
+      } else if (target) {
         const names = collectModuleExportNames(target);
         const commonJs = target.endsWith('.cjs') || (!target.endsWith('.mjs') && manifest.type !== 'module');
         subpaths[subpath] = commonJs ? [...new Set(['default', ...names])].sort() : names;

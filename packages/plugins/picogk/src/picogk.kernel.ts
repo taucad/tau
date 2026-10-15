@@ -16,6 +16,7 @@ import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { libraryVersionMismatches } from '#project-manifest.js';
 
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
 export type PicogkNativeHandle = { readonly glb: Uint8Array<ArrayBuffer> };
@@ -181,7 +182,13 @@ export const picogkKernel = defineKernel({
   },
 
   async evaluate({ entryPath, parameters }, services, context) {
-    await context.mirror.sync(services.filesystem, services.fileContentCache, services.operationId);
+    const paths = await context.mirror.sync(services.filesystem, services.fileContentCache, services.operationId);
+    // D35: the project's own references must name the PicoGK this kernel runs, or it runs differently outside Tau.
+    const manifestIssues: KernelIssue[] = [];
+    for (const manifest of paths.filter((path) => !path.includes('/') && path.endsWith('.csproj'))) {
+      // oxlint-disable-next-line no-await-in-loop -- a project root holds one or two project files.
+      manifestIssues.push(...libraryVersionMismatches(manifest, await services.filesystem.readFile(manifest, 'utf8')));
+    }
     const span = services.tracer.startSpan('picogk.build', { entryPath });
     let computeJob: Awaited<ReturnType<typeof context.computeTransport.open>>;
     try {
@@ -217,18 +224,21 @@ export const picogkKernel = defineKernel({
         }
         const transformSpan = services.tracer.startSpan('picogk.glb-transform');
         let glb;
-        const issues: KernelIssue[] = (result.warnings ?? []).map(
-          ({ code: workerCode, type: workerType, ...warning }) => ({
-            ...warning,
-            code: 'INVALID_ANNOTATION',
-            type: 'kernel',
-            details: {
-              producer: { kernelId: 'picogk' },
-              workerCode,
-              workerType,
-            },
-          }),
-        );
+        const issues: KernelIssue[] = [
+          ...manifestIssues,
+          ...(result.warnings ?? []).map(
+            ({ code: workerCode, type: workerType, ...warning }): KernelIssue => ({
+              ...warning,
+              code: 'INVALID_ANNOTATION',
+              type: 'kernel',
+              details: {
+                producer: { kernelId: 'picogk' },
+                workerCode,
+                workerType,
+              },
+            }),
+          ),
+        ];
         try {
           glb = picogkArtifactToGlb(artifact, result, (mechanismIssues) => issues.push(...mechanismIssues));
         } finally {

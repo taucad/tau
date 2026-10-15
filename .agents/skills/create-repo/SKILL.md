@@ -77,7 +77,7 @@ contains a pnpm `catalog:` specifier; otherwise bind it to an empty string.
 
 ### Template destinations
 
-Copy files without rewriting their bodies except placeholder substitution. The release skill template deliberately uses `SKILL.md__tmpl__` so native recursive discovery cannot advertise its unbound placeholders; copy it to the mapped `SKILL.md` destination only after binding:
+Copy files without rewriting their bodies except placeholder substitution. Remove a trailing `__tmpl__` from each destination filename after binding. Nx-discoverable manifests and configs use this suffix so Tau does not load them as real projects; their rendered filenames remain `package.json`, `project.json`, `tsconfig*.json`, `eslint.config.mjs`, `vitest.config.ts` and `tsdown.config.ts`. The release skill likewise uses `SKILL.md__tmpl__` so native discovery cannot advertise its unbound placeholders. Apply suffix removal to the destinations below, including nested `docs-site` files:
 
 | Template path                                                                                                           | Repository destination                                                     |
 | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |

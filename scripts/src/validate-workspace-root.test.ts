@@ -18,11 +18,9 @@ const approvedPaths = [
   '.claude-plugin/plugin.json',
   '.claude/settings.json',
   '.codex/config.toml',
-  '.dockerignore',
   '.github/workflows/ci.yml',
   '.gitignore',
   '.nx/version-plans/.gitkeep',
-  '.nxignore',
   '.oxfmtrc.json',
   '.oxlintrc.json',
   '.vscode/settings.json',
@@ -50,8 +48,8 @@ const approvedPaths = [
 const approvedEntries = approvedPaths.map((path) => path.split('/')[0] ?? '');
 
 describe('authored workspace-root budget', () => {
-  it('should accept the approved 31 roots and documented local output boundaries', () => {
-    expect(approvedEntries).toHaveLength(31);
+  it('should accept the approved 29 roots and documented local output boundaries', () => {
+    expect(approvedEntries).toHaveLength(29);
     expect(
       workspaceRootInventoryErrors({
         trackedPaths: [...approvedPaths, 'apps/api/package.json'],
@@ -74,14 +72,17 @@ describe('authored workspace-root budget', () => {
     ).toEqual([]);
   });
 
-  it('should reject a newly tracked root file even when Git recognizes it as authored', () => {
-    expect(
-      workspaceRootInventoryErrors({
-        trackedPaths: [...approvedPaths, 'scratch.json'],
-        actualEntries: [...approvedEntries, 'scratch.json'],
-      }),
-    ).toEqual(['Unapproved authored root: scratch.json']);
-  });
+  it.each(['scratch.json', '.dockerignore', '.nxignore'])(
+    'should reject an unapproved root even when Git tracks it: %s',
+    (rootEntry) => {
+      expect(
+        workspaceRootInventoryErrors({
+          trackedPaths: [...approvedPaths, rootEntry],
+          actualEntries: [...approvedEntries, rootEntry],
+        }),
+      ).toEqual([`Unapproved authored root: ${rootEntry}`]);
+    },
+  );
 
   it('should reject a same-count substitution of an approved root', () => {
     expect(

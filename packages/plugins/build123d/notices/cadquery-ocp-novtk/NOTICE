@@ -53,16 +53,16 @@ library's copyright notices and licence text.
   targets: darwin-arm64, darwin-x64
 - OpenJPH (BSD-2-Clause): OpenJPH-BSD-2-Clause.txt
   targets: darwin-arm64, darwin-x64
+- FreeImage (GPL-2.0-only OR GPL-3.0-only OR FIPL-1.0; distributed under FIPL-1.0): FreeImage-FIPL-1.0.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- libgomp (GCC OpenMP runtime) (GPL-3.0-or-later WITH GCC-exception-3.1): libgomp-GPL-3.0-or-later-GCC-exception-3.1.txt
+  targets: linux-x64-glibc, linux-arm64-glibc
 - LLVM libc++ (Apache-2.0 WITH LLVM-exception): libcxx-Apache-2.0-LLVM-exception.txt
   targets: darwin-arm64, darwin-x64
 
 Also bundled, and not covered by a notice in this directory while their licences are reviewed:
 
-- FreeImage (GPL-2.0-only OR GPL-3.0-only OR FIPL-1.0)
-  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
 - JBIG-KIT (GPL-2.0-or-later)
-  targets: linux-x64-glibc, linux-arm64-glibc
-- libgomp (GCC OpenMP runtime) (GPL-3.0-or-later WITH GCC-exception-3.1)
   targets: linux-x64-glibc, linux-arm64-glibc
 
 The Linux wheels list their Ubuntu packages, with versions and package URLs, in

@@ -21,6 +21,7 @@ it('keeps the approved issue registry exact and validates only its members', () 
     'INVALID_REFERENCE',
     'RESOURCE_LIMIT',
     'TESSELLATION_DOWNGRADED',
+    'DISPLAY_SIMPLIFIED',
     'METADATA_CONFLICT',
     'SEMANTICS_UNRESOLVED',
     'REPRESENTATION_UNSUPPORTED',

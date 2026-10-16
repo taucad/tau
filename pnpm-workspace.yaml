@@ -237,6 +237,7 @@ catalog:
   madge: ^8.0.0
   manifold-3d: 3.4.1
   mermaid: ^11.17.2
+  meshoptimizer: ^1.1.1
   # Also an undeclared runtime import of @tscircuit/infgrid-ijump-astar's dist; @taucad/tscircuit owns it so it hoists.
   nanoid: ^5.1.16
   netlify-cli: ^27.12.0

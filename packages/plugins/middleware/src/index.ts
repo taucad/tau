@@ -2,6 +2,7 @@
 
 export { middleware, middleware as plugin } from '#middleware.plugin.js';
 
+export { displaySimplification } from '#display-simplification.middleware.js';
 export { geometryCache } from '#geometry-cache.middleware.js';
 export { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 // oxlint-disable-next-line typescript/no-deprecated -- Public compatibility export; no preset selects it.

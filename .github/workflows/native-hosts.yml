@@ -332,8 +332,9 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The Intel runner needs more than Vitest's default 5 s to import OCP in the sandbox.
       - name: Run the Build123d suites
-        run: pnpm nx run build123d:test --outputStyle=static
+        run: pnpm nx run build123d:test --outputStyle=static --testTimeout=120000
 
       # D13: PicoGK declares darwin-arm64 alone until a Tau engine builder exists for another target,
       # so an Intel Mac refuses on `arch`; forcing `TAU_PAYLOAD_TARGET` to a target PicoGK does not

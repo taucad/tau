@@ -93,6 +93,53 @@ describe('@taucad/mcp', () => {
     }
   });
 
+  it('should pass evaluate_model default view options to the canonical RPC through a connected client', async () => {
+    const dispatchMock = vi.fn<TauMcpDispatch>(async () => ({ success: true, status: 'ready' }));
+    const client = await connect({ dispatch: dispatchMock });
+    try {
+      await client.callTool({
+        name: toolName.evaluateModel,
+        arguments: { targetFile: 'main.ts', options: { tessellation: 'low' } },
+      });
+      await client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } });
+    } finally {
+      await client.close();
+    }
+
+    expect(dispatchMock.mock.calls.map(([call]) => call)).toEqual([
+      { rpcName: rpcName.evaluateModel, args: { targetFile: 'main.ts', options: { tessellation: 'low' } } },
+      { rpcName: rpcName.evaluateModel, args: { targetFile: 'main.ts' } },
+    ]);
+  });
+
+  it('should refuse invalid evaluate_model options as screenshot refuses them', async () => {
+    const dispatchMock = vi.fn<TauMcpDispatch>(async () => ({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'model option tessellation: Invalid input',
+    }));
+    const adapter = createTauMcpAdapter({ dispatch: dispatchMock });
+
+    for (const name of [toolName.evaluateModel, toolName.screenshot]) {
+      // oxlint-disable-next-line no-await-in-loop -- each tool's refusal is asserted in turn.
+      await expect(
+        adapter.call({ name, arguments: { targetFile: 'main.ts', options: 'low' }, toolCallId: 'tool-invalid' }),
+      ).rejects.toThrow();
+    }
+    expect(dispatchMock).not.toHaveBeenCalled();
+
+    await expect(
+      adapter.call({
+        name: toolName.evaluateModel,
+        arguments: { targetFile: 'main.ts', options: { tessellation: 'coarse' } },
+        toolCallId: 'tool-refused',
+      }),
+    ).resolves.toEqual({
+      isError: true,
+      content: [{ type: 'text', text: 'VALIDATION_ERROR: model option tessellation: Invalid input' }],
+    });
+  });
+
   it('should carry failure details as text the SDK client delivers instead of rejecting', async () => {
     const failure = {
       errorCode: 'TOOL_OUTPUT_VALIDATION_FAILED',

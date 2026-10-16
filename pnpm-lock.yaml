@@ -2159,6 +2159,15 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  apps/libs/consent:
+    devDependencies:
+      jsdom:
+        specifier: 'catalog:'
+        version: 26.0.0(canvas@3.2.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
   apps/libs/converter:
     dependencies:
       '@taucad/assimp':
@@ -2586,6 +2595,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/consent':
+        specifier: workspace:*
+        version: link:../libs/consent
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
@@ -2839,6 +2851,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/consent':
+        specifier: workspace:*
+        version: link:../libs/consent
       '@taucad/planetary-gearbox':
         specifier: workspace:*
         version: link:../libs/planetary-gearbox
@@ -2857,9 +2872,24 @@ importers:
       react-router:
         specifier: 'catalog:'
         version: 7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      rehype-stringify:
+        specifier: 'catalog:'
+        version: 10.0.1
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-rehype:
+        specifier: 'catalog:'
+        version: 11.1.2
       three:
         specifier: 'catalog:'
         version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
     devDependencies:
       '@netlify/vite-plugin-react-router':
         specifier: ^3.1.1

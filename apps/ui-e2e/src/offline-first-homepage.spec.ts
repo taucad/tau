@@ -13,9 +13,6 @@ const createHomeProject = async (): Promise<void> => {
 };
 
 test('keeps local projects available when the session API is unreachable', async () => {
-  await target.addInitScript(() => {
-    localStorage.setItem('tau:flags', JSON.stringify({ marketingLanding: true }));
-  });
   await createHomeProject();
 
   await target.addInitScript(() => {

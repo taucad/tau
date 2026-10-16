@@ -2,13 +2,15 @@
 /**
  * Purpose: Prepare immutable desktop feeds, mirror qualified archives to R2, or promote a tested release.
  * Environment: DESKTOP_RELEASE_TAG, TAU_DESKTOP_SOURCE_SHA, DESKTOP_ASSETS_DIR; mirror/promote also
- * DESKTOP_R2_BUCKET, DESKTOP_R2_ENDPOINT and AWS credentials. Promotion requires an OTA receipt for each Mac architecture.
+ * DESKTOP_R2_BUCKET, DESKTOP_R2_ENDPOINT and AWS credentials. Promotion requires an OTA receipt for each Mac architecture
+ * the release packaged. A production release packages every target; a staging candidate may leave out Intel
+ * (release-build.yml packages it nightly), and its promotion then leaves the Intel feed and archive where they were.
  * Usage: pnpm nx run desktop:publish -- prepare|mirror|promote
  * Exit: nonzero on mismatched bytes, stale source, missing acceptance, or failed publication.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -52,16 +54,18 @@ const main = async (): Promise<void> => {
   const sourceCommit = required('TAU_DESKTOP_SOURCE_SHA');
   const root = resolve(required('DESKTOP_ASSETS_DIR'));
   await mkdir(root, { recursive: true });
-  const platforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64'];
-  const archives = platforms.map((target) => {
+  const archiveOf = (target: string): string => {
     const [platform, arch] = target.split('-');
     return desktopArchiveName(platform!, arch!);
-  });
-  const feeds = platforms.map((target) => `desktop-update-${target}.json`);
-  const files = [...archives, ...feeds, 'SHA256SUMS.txt', 'download.json'];
+  };
+  const feedOf = (target: string): string => `desktop-update-${target}.json`;
   const manifestPath = resolve(root, 'download.json');
   /* oxlint-disable no-await-in-loop -- Hash and upload large release archives serially to bound memory and preserve publication order. */
   if (operation === 'prepare') {
+    // Only a staging candidate may leave out Intel; a missing archive otherwise fails its digest below.
+    const platforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64'].filter(
+      (target) => channel !== 'staging' || target !== 'darwin-x64' || existsSync(resolve(root, archiveOf(target))),
+    );
     // The release commit's date, not the clock: a rerun prepares byte-identical
     // feeds, which the immutable draft release accepts instead of refusing.
     const publishedAt = new Date(
@@ -69,15 +73,15 @@ const main = async (): Promise<void> => {
     ).toISOString();
     const assets: z.infer<typeof manifestSchema>['assets'] = {};
     const sums: string[] = [];
-    for (const [index, target] of platforms.entries()) {
-      const archive = archives[index]!;
+    for (const target of platforms) {
+      const archive = archiveOf(target);
       const path = resolve(root, archive);
       const sha256 = await digest(path);
       const metadata = await stat(path);
       assets[target] = { url: `${desktopReleaseBaseUrl(tag)}/${archive}`, sha256, size: metadata.size };
       sums.push(`${sha256}  ${archive}`);
       await writeFile(
-        resolve(root, feeds[index]!),
+        resolve(root, feedOf(target)),
         JSON.stringify(
           {
             channel,
@@ -118,6 +122,11 @@ const main = async (): Promise<void> => {
   ) {
     throw new Error('Release manifest identity disagrees with publication');
   }
+  // The manifest names the targets this release packaged; mirror and promote exactly those.
+  const targets = Object.keys(manifest.assets);
+  const archives = targets.map((target) => archiveOf(target));
+  const feeds = targets.map((target) => feedOf(target));
+  const files = [...archives, ...feeds, 'SHA256SUMS.txt', 'download.json'];
   const bucket = required('DESKTOP_R2_BUCKET');
   const endpoint = required('DESKTOP_R2_ENDPOINT');
   const s3 = (args: string[]): string =>
@@ -194,7 +203,7 @@ const main = async (): Promise<void> => {
     sourceCommit: z.literal(sourceCommit),
     version: z.literal(version),
   });
-  for (const target of ['darwin-arm64', 'darwin-x64']) {
+  for (const target of new Set(['darwin-arm64', ...targets.filter((name) => name.startsWith('darwin-'))])) {
     acceptance
       .extend({ target: z.literal(target) })
       .parse(JSON.parse(await readFile(resolve(root, `ota-receipt-${target}.json`), 'utf8')));

@@ -1,0 +1,1 @@
+ALTER TABLE "github_repository_write" ADD COLUMN "installation_id" bigint NOT NULL;

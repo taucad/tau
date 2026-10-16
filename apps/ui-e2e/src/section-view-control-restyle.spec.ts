@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { page as selectors } from 'vitest/browser';
-import { dismissCookies } from '#support/chat-attachments.js';
 import * as target from '#support/external-target.js';
 
 type Point = readonly [number, number, number];
@@ -37,7 +36,6 @@ async function openSectionControlFixture(backend: 'webgl' | 'webgpu' = 'webgl'):
   await target.navigate(sectionControlFixtureRoute(backend));
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
   // The banner sits over the bar's centre and the view cube's corner.
-  await dismissCookies();
   await target.expectGraphicsBackend(backend);
   await target.expectGeometryFramed();
 }

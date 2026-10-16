@@ -67,10 +67,6 @@ const installInstrumentation = async (): Promise<void> => {
   });
 };
 
-const dismissCookies = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
-};
-
 const clearAttachments = async (): Promise<void> => {
   for (;;) {
     const buttons = await target.read(selectors.getByRole('button', { name: /Remove uploaded image/u }));
@@ -241,7 +237,6 @@ test('records canonical GLB capture wall-time distributions', async () => {
   for (let attempt = 0; firstOverlap.length < 10 && attempt < 12; attempt++) {
     await target.navigate('/__e2e/headless-chat-image-capture');
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-    await dismissCookies();
     await waitForRenderedGeometry('gltf');
     await target.delay(1000);
     await takeLongTasks();

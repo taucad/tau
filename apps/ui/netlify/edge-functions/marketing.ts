@@ -1,7 +1,7 @@
 /**
  * Serves the server-rendered marketing site (`apps/www`) on the app's own hostname.
  *
- * A full page load of `/` without an app preference and of marketing pages is proxied to the
+ * A full page load of `/` without an app preference and of marketing, vision and legal pages is proxied to the
  * marketing deploy named by the `MARKETING_ORIGIN` site variable. Every app
  * route, the app's own `/` with a query (`/?settings=…`, OAuth `/?code=…`) and
  * client-side navigation inside the app are untouched. With the variable
@@ -14,8 +14,19 @@ type NetlifyRuntime = { env: { get: (name: string) => string | undefined } };
 
 type EdgeContext = { next: () => Promise<Response> };
 
-/** Marketing page prefixes owned by apps/www; `/vision` stays with the app. */
-const marketingPrefixes = ['/product', '/use-cases', '/pricing', '/contact', '/download', '/blog', '/privacy', '/_www'];
+/** Page prefixes owned by apps/www, including the legal documents the app links to. */
+const marketingPrefixes = [
+  '/product',
+  '/use-cases',
+  '/pricing',
+  '/contact',
+  '/download',
+  '/blog',
+  '/privacy',
+  '/vision',
+  '/legal',
+  '/_www',
+];
 
 /** Query parameters a shared marketing link may carry without leaving `/`. */
 const campaignParameters = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']);
@@ -36,13 +47,13 @@ export function resolveMarketingUrl(requestUrl: URL, method: string, origin: str
         return undefined;
       }
     }
-  } else if (pathname === '/_root.data' || pathname === '/vision.data') {
+  } else if (pathname === '/_root.data') {
     const routes = searchParams.get('_routes')?.split(',');
-    if (!routes?.length || !routes.every((route) => route === 'www-home' || route === 'www-vision')) {
+    if (!routes?.length || !routes.every((route) => route === 'www-home')) {
       return undefined;
     }
   } else if (
-    !['/vision/', '/sitemap-marketing.xml'].includes(pathname) &&
+    pathname !== '/sitemap-marketing.xml' &&
     !marketingPrefixes.some(
       (prefix) => pathname === prefix || pathname === `${prefix}.data` || pathname.startsWith(`${prefix}/`),
     )
@@ -181,8 +192,6 @@ export const config = {
   path: [
     '/',
     '/_root.data',
-    '/vision/',
-    '/vision.data',
     '/sitemap-marketing.xml',
     '/robots.txt',
     ...marketingPrefixes.flatMap((prefix) => [prefix, `${prefix}.data`, `${prefix}/*`]),

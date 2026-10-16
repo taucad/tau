@@ -177,27 +177,37 @@ function SiteShell() {
           </nav>
           <nav className='cell' aria-label='Legal'>
             <h2>Legal</h2>
-            <Link to='/privacy/'>Site privacy</Link>
-            <a href='https://tau.new/legal/privacy'>App privacy ↗</a>
-            <a href='https://tau.new/legal/terms'>Terms ↗</a>
-            <a href='/_www/assets/THIRD_PARTY_LICENSES.txt'>Licenses</a>
+            <Link to='/legal/terms/' prefetch='intent'>
+              Terms
+            </Link>
+            <Link to='/legal/privacy/' prefetch='intent'>
+              Privacy
+            </Link>
+            <Link to='/legal/cookies/' prefetch='intent'>
+              Cookies
+            </Link>
+            <Link to='/legal/' prefetch='intent'>
+              All legal
+            </Link>
+            <a href='/_www/assets/THIRD_PARTY_LICENSES.txt'>Site licenses</a>
           </nav>
         </div>
         <div className='band footer-bottom'>
           <span className='cell'>© 2026 Tau · Apache-2.0</span>
           <Button variant='ghost' data-consent-open hidden>
-            Analytics preferences
+            Cookie preferences
           </Button>
         </div>
       </footer>
       <aside className='consent' aria-label='Optional analytics' hidden>
         <p>
-          <strong>Help us understand what’s useful?</strong>
+          <strong>Help us improve Tau?</strong>
           <br />
-          Allow basic page and action counts. No session replay. <Link to='/privacy/'>Privacy details</Link>
+          Allow optional PostHog analytics in the Tau app, including session recording, and basic page counts on this
+          site. <Link to='/legal/cookies/'>Cookie policy</Link>
         </p>
         <div className='actions'>
-          <Button variant='outline' data-consent='denied'>
+          <Button variant='outline' data-consent='declined'>
             Continue without
           </Button>
           <Button data-consent='accepted'>Allow analytics</Button>

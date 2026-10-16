@@ -12,7 +12,6 @@ import {
   agentTrigger,
   composerSelector,
   editComposerSelector,
-  dismissCookies,
   dropAttachment,
   dropOverCapPdf,
   expectRail,
@@ -64,7 +63,6 @@ const openSeededChat = async (query = ''): Promise<{ projectId: string; chatIds:
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate(`/__e2e/chat-attachments${query}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await selectModel(pdfModelName);
   return seededChatIds();

@@ -19,7 +19,6 @@ import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
 import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
-import { RouteFooter } from '#components/layout/route-footer.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
@@ -103,34 +102,10 @@ const saveScroll = (locationKey: string, scrollTop: number): void => {
   }
 };
 
-type SectionContentProps = {
-  readonly error: ReactNode | undefined;
-  readonly enablePageFooter: boolean;
-};
-
-/**
- * Renders the main content area of the page.
- * Handles the different rendering paths for:
- * - Normal content (Outlet)
- * - Error content
- * - With or without page footer
- * - With or without sidebar positioning
- */
-function SectionContent({ error, enablePageFooter }: SectionContentProps): React.JSX.Element {
-  const content = error ?? <Outlet />;
-
-  if (enablePageFooter) {
-    return (
-      <div className='flex min-h-full flex-col overflow-clip'>
-        <div className='flex flex-1 flex-col'>{content}</div>
-        <RouteFooter />
-      </div>
-    );
-  }
-
-  // Default: render content directly
+/** Renders the main content area of the page: the route outlet, or the error content. */
+function SectionContent({ error }: { readonly error: ReactNode | undefined }): React.JSX.Element {
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- needed for consistent return type
-  return <>{content}</>;
+  return <>{error ?? <Outlet />}</>;
 }
 
 const WebTitlebarControls = ({
@@ -261,7 +236,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     pageWrapperMatches,
     enableOverflowY,
     providers,
-    enablePageFooter,
     enablePageHeaderMatches,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
@@ -271,7 +245,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     pageWrapperMatches: handles.enablePageWrapper,
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
     providers: handles.providers,
-    enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
   const { key: locationKey, pathname, hash } = useLocation();
@@ -474,7 +447,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 {/* Its compute section reads the active project; the dialog is a
                     portal, so only its place in the React tree matters. */}
                 <SettingsDialog />
-                <SectionContent error={error} enablePageFooter={enablePageFooter} />
+                <SectionContent error={error} />
               </Compose>
             </section>
           </SidebarInset>

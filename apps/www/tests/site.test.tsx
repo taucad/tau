@@ -17,6 +17,7 @@ import { content as contact } from '#app/routes/contact.js';
 import { content as download } from '#app/routes/download.js';
 import { content as blog } from '#app/routes/blog.js';
 import { content as privacy } from '#app/routes/privacy.js';
+import { content as legal } from '#app/routes/legal.js';
 import { content as notFound } from '#app/routes/not-found.js';
 import { validateArticles } from '#www/editorial.js';
 import { siteConfiguration } from '#app/config.server.js';
@@ -35,6 +36,7 @@ const bodies = [
   download,
   blog,
   privacy,
+  legal,
   notFound,
 ];
 
@@ -104,6 +106,7 @@ test('should exclude preview pages from the sitemap and advertise launch sitemap
     vi.stubEnv('WWW_LAUNCH', 'true');
     const xml = await sitemap().text();
     expect(xml).toContain('<loc>https://tau.new/product/</loc>');
+    expect(xml).toContain('<loc>https://tau.new/legal/privacy/</loc>');
     expect(xml).not.toContain('404');
     expect(await robots().text()).toContain('Sitemap: https://tau.new/sitemap.xml');
   } finally {

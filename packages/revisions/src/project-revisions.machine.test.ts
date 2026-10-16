@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import * as machineModule from '#project-revisions.machine.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import type { ProjectRevisionsMachineEvent } from '#project-revisions.machine.js';
-import { releaseUnplacedTurns } from '#revision-effects.js';
+import { releaseUnplacedTurns, pushExplicitly } from '#revision-effects.js';
 import { checkoutIgnoredEvents, checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
@@ -2822,5 +2822,32 @@ describe('root invokes notify the host on every child transition (P45)', () => {
 
   it.each(children)('declares onSnapshot on %s so a child transition is a root snapshot', (id) => {
     expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({});
+  });
+});
+
+describe('explicit push host lifecycle', () => {
+  it('should reject a pending push when the root stops so the host can release its credential', async () => {
+    const harness = start();
+    const repositoryUrl = 'https://github.com/studio/model.git';
+    try {
+      await readyRegistry(harness, [live]);
+      harness.promises.settle('readRemote', {
+        output: { remote: { name: 'origin', kind: 'git', url: repositoryUrl, provider: 'github', repositoryId: '9' } },
+      });
+      await flush();
+      harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+      await flush();
+      harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main', automaticPush: false } });
+      await flush();
+      harness.promises.settle('syncFetch', { output: { integration: 'upToDate', leases: {}, ahead: true } });
+      await flush();
+      expect(harness.actor.getSnapshot().children.sync?.getSnapshot().matches('manual')).toBe(true);
+      const pushed = pushExplicitly({ actor: harness.actor, repositoryUrl });
+      const settled = expect(pushed).rejects.toMatchObject({ code: 'INVALID_TRANSPORT' });
+      harness.actor.stop();
+      await settled;
+    } finally {
+      harness.actor.stop();
+    }
   });
 });

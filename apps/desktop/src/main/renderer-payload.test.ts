@@ -344,7 +344,7 @@ describe('Desktop renderer ownership', () => {
               'apps/ui/app/routes/_index/marketing-landing.tsx',
               'apps/ui/app/routes/legal.cookies/route.tsx',
               'apps/ui/app/offline/offline-shell.tsx',
-              'node_modules/posthog-js/dist/module.js',
+              'node_modules/rrweb/dist/rrweb.js',
             ],
           },
         ],
@@ -373,10 +373,10 @@ describe('Desktop renderer ownership', () => {
         {
           name: 'web-module-fixture',
           resolveId(id) {
-            return id === 'virtual:web' ? '\0apps/ui/app/lib/posthog.lib.ts' : null;
+            return id === 'virtual:web' ? '\0apps/ui/app/lib/web-posthog.lib.ts' : null;
           },
           load(id) {
-            return id === '\0apps/ui/app/lib/posthog.lib.ts'
+            return id === '\0apps/ui/app/lib/web-posthog.lib.ts'
               ? "document.body.dataset.webLoaded = 'true'; export const value = 'web';"
               : null;
           },
@@ -387,7 +387,7 @@ describe('Desktop renderer ownership', () => {
     });
     const report = await inspectDesktopPayload(paths);
     expect(report.violations).toContainEqual(expect.stringContaining('Forbidden web surface'));
-    expect(report.violations.join('\n')).toContain('apps/ui/app/lib/posthog.lib.ts');
+    expect(report.violations.join('\n')).toContain('apps/ui/app/lib/web-posthog.lib.ts');
   });
 
   it('should reject web-only metadata from desktop HTML', async () => {

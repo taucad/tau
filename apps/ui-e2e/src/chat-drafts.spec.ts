@@ -7,7 +7,6 @@ import {
   agentTrigger,
   composerSelector,
   editComposerSelector,
-  dismissCookies,
   imageOnlyModelName,
   pdfModelName,
   prepareComposerPage,
@@ -37,7 +36,6 @@ const openSeededChats = async (
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/chat-attachments?chats=2&seed=drafts');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   return seededChatIds();
 };

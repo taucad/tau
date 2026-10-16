@@ -185,7 +185,7 @@ describe('GeneralSettings', () => {
   });
 
   it.each(['free', 'pro'] as const)(
-    'should link privacy details to the privacy page of the deployment serving the app (%s)',
+    'should link privacy details to the public website from a build that runs none (%s)',
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
 
@@ -194,14 +194,14 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', '/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1-ai-service-improvement');
         expect(link).toHaveAttribute('target', '_blank');
       }
     },
   );
 
   it.each(['free', 'pro'] as const)(
-    'should link privacy details to the bound web deployment on desktop, which ships no legal pages (%s)',
+    'should link privacy details to the website of the deployment the app is bound to (%s)',
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
       vi.stubEnv('TAU_TARGET', 'desktop');
@@ -216,7 +216,7 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement');
       }
     },
   );

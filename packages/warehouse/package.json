@@ -1,6 +1,6 @@
 {
   "name": "@taucad/warehouse",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "Editable parametric mechanical parts with portable geometry specifications",
   "type": "module",
   "sideEffects": false,

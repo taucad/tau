@@ -1,6 +1,6 @@
 {
   "name": "@taucad/archive-core",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "Verified archive acquisition and tar, zip and wheel readers for Tau payloads",
   "type": "module",
   "sideEffects": false,

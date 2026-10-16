@@ -4,7 +4,7 @@
       "slug": "workbench",
       "name": "Workbench",
       "description": "Arranges the Tau workbench for a person — opens viewer views from named viewpoints or any direction, sets a view's camera, section cuts, display, grid unit and measurements, hides components and sets render timeouts per file, opens files and utility panes in workbench tabs, closes tabs — by writing the .tau/workbench records through the arrange_workbench tool. Use when a task ends with something to show, when asked to open, arrange, compare, cut open or review views or panes, or when authoring a report the person should see.",
-      "version": "0.1.0-beta.4",
+      "version": "0.1.0-beta.5",
       "whenToUse": "Use when asked to show, open, arrange, compare, cut open or review views or panes, or when a task ends with something to show.",
       "directory": "workbench",
       "files": [

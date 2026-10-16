@@ -1,6 +1,6 @@
 {
   "name": "@taucad/project-core",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "Tau project manifest schema and parsing",
   "type": "module",
   "sideEffects": false,

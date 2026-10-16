@@ -255,7 +255,18 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output(output) {
       const lines = [`Status: ${output.status}`];
       if (output.tessellation) {
-        const { triangles, vertices, elapsed, voxelSize, activeVoxels, memoryBytes } = output.tessellation;
+        const {
+          triangles,
+          vertices,
+          elapsed,
+          voxelSize,
+          activeVoxels,
+          memoryBytes,
+          requested,
+          linearTolerance,
+          angularTolerance,
+          downgraded,
+        } = output.tessellation;
         const grid = [
           voxelSize === undefined ? undefined : `voxelSize ${voxelSize} mm`,
           activeVoxels === undefined ? undefined : `${activeVoxels} active voxels`,
@@ -264,6 +275,15 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         lines.push(
           `Mesh: ${triangles} triangles, ${vertices} vertices, ${Math.round(elapsed)} ms${grid.length > 0 ? ` (${grid.join(', ')})` : ''}`,
         );
+        const resolution = [
+          requested === undefined ? undefined : `requested ${requested}`,
+          linearTolerance === undefined ? undefined : `linearTolerance ${linearTolerance} mm`,
+          angularTolerance === undefined ? undefined : `angularTolerance ${angularTolerance}°`,
+          downgraded === undefined ? undefined : `downgraded ${downgraded}`,
+        ].filter(Boolean);
+        if (resolution.length > 0) {
+          lines.push(`Resolution: ${resolution.join(', ')}`);
+        }
       }
       if (output.kernelIssues && output.kernelIssues.length > 0) {
         const issues = output.kernelIssues.map((issue) => `  - ${issue.message}`).join('\n');

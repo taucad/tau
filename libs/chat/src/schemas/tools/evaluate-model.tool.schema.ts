@@ -34,9 +34,13 @@ export const tessellationReportSchema = z
     voxelSize: z.number().positive().optional(),
     activeVoxels: count.optional(),
     memoryBytes: count.optional(),
+    requested: z.enum(['low', 'medium', 'high', 'extra-high', 'explicit']).optional(),
+    linearTolerance: z.number().positive().optional(),
+    angularTolerance: z.number().positive().optional(),
+    downgraded: count.optional(),
   })
   .describe(
-    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes.',
+    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes. Tolerance-meshed kernels add the requested preset or explicit, the effective linearTolerance (mm) and angularTolerance (degrees), and downgraded coarser steps taken to fit the triangle budget.',
   );
 
 /** @public */

@@ -14,6 +14,7 @@ import type {
   ViewUpdateOutcome,
   WideViewRequest,
 } from '@taucad/runtime';
+import type { TessellationReport } from '@taucad/runtime/types';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
@@ -191,6 +192,27 @@ describe('createRuntimeAgentClients', () => {
       voxelSize: 0.5,
       activeVoxels: 2846,
       memoryBytes: 1_296_848,
+    };
+    const clients = clientsFor(
+      runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      tessellation,
+    });
+  });
+
+  it('should report the effective tessellation resolution the kernel delivered (I7)', async () => {
+    const tessellation: TessellationReport = {
+      triangles: 1_999_872,
+      vertices: 1_000_014,
+      elapsed: 812,
+      requested: 'extra-high',
+      linearTolerance: 0.02,
+      angularTolerance: 10,
+      downgraded: 1,
     };
     const clients = clientsFor(
       runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),

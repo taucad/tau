@@ -93,6 +93,25 @@ describe('@taucad/mcp', () => {
     }
   });
 
+  it('should return the effective tessellation resolution in the evaluate_model result (I7)', async () => {
+    const tessellation = {
+      triangles: 1_999_872,
+      vertices: 1_000_014,
+      elapsed: 812,
+      requested: 'extra-high',
+      linearTolerance: 0.02,
+      angularTolerance: 10,
+      downgraded: 1,
+    };
+    const client = await connect({ dispatch: async () => ({ success: true, status: 'ready', tessellation }) });
+    try {
+      const result = await client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } });
+      expect(result.structuredContent).toEqual({ status: 'ready', tessellation });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('should pass evaluate_model default view options to the canonical RPC through a connected client', async () => {
     const dispatchMock = vi.fn<TauMcpDispatch>(async () => ({ success: true, status: 'ready' }));
     const client = await connect({ dispatch: dispatchMock });

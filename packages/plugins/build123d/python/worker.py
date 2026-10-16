@@ -751,11 +751,35 @@ def _normal(a: tuple[float, float, float], b: tuple[float, float, float], c: tup
     return (0.0, 1.0, 0.0) if length == 0 else tuple(value / length for value in cross)  # type: ignore[return-value]
 
 
-def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+class _OverBudget(Exception):
+    """A tessellation produced more triangles than the request allowed; no GLB was written."""
+
+    def __init__(self, triangles: int) -> None:
+        super().__init__(f"{triangles} triangles")
+        self.triangles = triangles
+
+
+def _bounding_diagonal(shapes: tuple[Any, ...]) -> float:
+    """The bounding-box diagonal in millimetres of every shape together; zero when there is nothing to bound."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    box = Bnd_Box()
+    for shape in shapes:
+        BRepBndLib.AddOptimal_s(shape.wrapped, box, False, False)
+    if box.IsVoid():
+        return 0.0
+    return math.sqrt(box.SquareExtent())
+
+
+def _triangulate(shape: Any, linear_tolerance: float, angular_tolerance: float) -> tuple[Any, int]:
+    """Mesh a detached, located copy in OCCT's absolute mode and count its triangles.
+
+    `linear_tolerance` is a chordal deviation in millimetres and `angular_tolerance` an angle in radians.
+    """
     from OCP.BRep import BRep_Tool
     from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
-    from OCP.TopAbs import TopAbs_Orientation
     from OCP.TopLoc import TopLoc_Location
 
     # OCCT stores triangulation on BRep faces. `moved` shares those faces, so
@@ -764,7 +788,25 @@ def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -
     copied.Perform(shape.wrapped, True, False)
     detached = _cast_shape(copied.Shape())
     located = detached.moved(shape.location.inverse() * shape.global_location)
-    BRepMesh_IncrementalMesh(located.wrapped, linear_tolerance, True, angular_tolerance, True)
+    # I4: absolute deflection, so the tolerance is a length and density does not depend on each edge's size.
+    BRepMesh_IncrementalMesh(located.wrapped, linear_tolerance, False, angular_tolerance, True)
+    triangles = 0
+    for face in located.faces():
+        triangulation = BRep_Tool.Triangulation_s(face.wrapped, TopLoc_Location())
+        triangles += triangulation.NbTriangles() if triangulation is not None else 0
+    return located, triangles
+
+
+def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+    located, _triangles = _triangulate(shape, linear_tolerance, angular_tolerance)
+    return _mesh_arrays(shape, located, linear_tolerance)
+
+
+def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float) -> dict[str, Any]:
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
+
     positions: list[float] = []
     normals: list[float] = []
     indices: list[int] = []
@@ -814,9 +856,16 @@ def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -
     }
 
 
-def _topology(shapes: tuple[Any, ...], linear_tolerance: float, angular_tolerance: float) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+def _topology(
+    shapes: tuple[Any, ...],
+    linear_tolerance: float,
+    angular_tolerance: float,
+    max_triangles: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Components and their meshes. Raises `_OverBudget` before building any mesh arrays when the
+    triangulated parts together exceed `max_triangles`."""
     components: list[dict[str, Any]] = []
-    meshes: dict[str, dict[str, Any]] = {}
+    leaves: list[tuple[str, Any]] = []
     used_ids: set[str] = set()
     mesh_index = 0
 
@@ -854,12 +903,23 @@ def _topology(shapes: tuple[Any, ...], linear_tolerance: float, angular_toleranc
         if children:
             component["childIds"] = [visit(child, component_id, f"Component {index + 1}") for index, child in enumerate(children)]
         else:
-            meshes[component_id] = _mesh_shape(shape, linear_tolerance, angular_tolerance)
+            leaves.append((component_id, shape))
             mesh_index += 1
         return component_id
 
     for index, shape in enumerate(shapes):
         visit(shape, None, f"Shape {index + 1}")
+    triangulated = [
+        (component_id, shape, *_triangulate(shape, linear_tolerance, angular_tolerance))
+        for component_id, shape in leaves
+    ]
+    triangles = sum(count for _component_id, _shape, _located, count in triangulated)
+    if max_triangles is not None and triangles > max_triangles:
+        raise _OverBudget(triangles)
+    meshes = {
+        component_id: _mesh_arrays(shape, located, linear_tolerance)
+        for component_id, shape, located, _count in triangulated
+    }
     return components, meshes
 
 
@@ -1035,12 +1095,29 @@ class Worker:
             return {"generation": generation}
         if method == "compute.stats":
             return self.compute.stats()
+        if method == "measure":
+            return {"diagonal": _bounding_diagonal(self.handles[params["handleId"]])}
         if method == "mesh":
+            # Millimetres and degrees at the protocol boundary; OCCT takes the angle in radians.
             shapes = self.handles[params["handleId"]]
-            components, meshes = _topology(shapes, params["linearTolerance"], params["angularTolerance"])
+            try:
+                components, meshes = _topology(
+                    shapes,
+                    params["linearTolerance"],
+                    math.radians(params["angularTolerance"]),
+                    params.get("maxTriangles"),
+                )
+            except _OverBudget as exceeded:
+                return {"triangles": exceeded.triangles, "vertices": exceeded.triangles * 3}
+            triangles = sum(len(mesh["indices"]) // 3 for mesh in meshes.values())
             artifact = self._artifact("glb")
             write_glb(artifact, components, meshes)
-            return {"artifactPath": str(artifact), "byteLength": artifact.stat().st_size}
+            return {
+                "artifactPath": str(artifact),
+                "byteLength": artifact.stat().st_size,
+                "triangles": triangles,
+                "vertices": triangles * 3,
+            }
         if method == "export":
             if params["format"] != "step":
                 raise ValueError(f"Unsupported Build123d export format: {params['format']}")

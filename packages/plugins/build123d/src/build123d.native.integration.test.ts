@@ -578,7 +578,7 @@ describe.runIf(seedPresent)('Build123d native kernel', () => {
       const document = client.open({ source: { path: 'main.py' } });
       const outcome = await document
         .view('model', {
-          options: { tessellation: { linearTolerance: 0.25, angularTolerance: 0.2 } },
+          options: { tessellation: { linearTolerance: 0.25, angularTolerance: 20 } },
         })
         .rendering();
       expect(outcome.superseded).toBe(false);

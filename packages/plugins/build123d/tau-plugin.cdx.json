@@ -1029,6 +1029,40 @@
       ]
     },
     {
+      "bom-ref": "5cae10e6b8d2a3f7642afd52bd7cadd281970e969481fd55d07f524d5a43664c",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5cae10e6b8d2a3f7642afd52bd7cadd281970e969481fd55d07f524d5a43664c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "5cfc6deb2f602ded845596409e41fe8f5e1b389e14e8cc727db0955f0e88de7b",
       "type": "library",
       "name": "ocpsvg",
@@ -1593,40 +1627,6 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "89f37a37646aa13317e9bcfa7860a6285cff8704e85c81a2d764a5d9e02eccbd",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "89f37a37646aa13317e9bcfa7860a6285cff8704e85c81a2d764a5d9e02eccbd"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
         }
       ],
       "properties": [

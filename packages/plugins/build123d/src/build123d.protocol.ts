@@ -166,6 +166,21 @@ export const build123dArtifactSchema = z.object({
   byteLength: z.number().int().nonnegative(),
 });
 
+/**
+ * What the worker answers `mesh` with. Over the request's `maxTriangles` it writes no GLB and answers the counts alone.
+ */
+export const build123dMeshSchema = z.object({
+  artifactPath: z.string().min(1).optional(),
+  byteLength: z.number().int().nonnegative().optional(),
+  triangles: z.number().int().nonnegative(),
+  vertices: z.number().int().nonnegative(),
+});
+/** One `mesh` answer: the triangle and vertex counts, and the GLB when it was within the request's budget. */
+export type Build123dMesh = z.infer<typeof build123dMeshSchema>;
+
+/** What the worker answers `measure` with: the shapes' bounding-box diagonal in millimetres. */
+export const build123dMeasureSchema = z.object({ diagonal: z.number().nonnegative() });
+
 export const build123dEmptySchema = z.object({});
 export const build123dShutdownSchema = z.object({ shutdown: z.literal(true) });
 

@@ -12,7 +12,7 @@ import { build123dComputeDescriptorLimit } from '#build123d.protocol.js';
 import { Build123dWorkerError } from '#python-session.js';
 
 const runtime = createMockKernelRuntime();
-const renderOptions = { tessellation: { linearTolerance: 0.05, angularTolerance: 0.1 } } as const;
+const renderOptions = { tessellation: { linearTolerance: 0.05, angularTolerance: 20 } } as const;
 const kernelOptions = {
   pythonExecutable: '/python',
   workerPath: '/worker.py',
@@ -229,7 +229,12 @@ describe('Build123d kernel lifecycle errors', () => {
       definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
     ).rejects.toThrow(/mesh failed/);
 
-    context.session.request.mockResolvedValueOnce({ artifactPath: '/private/model.glb', byteLength: 3 });
+    context.session.request.mockResolvedValueOnce({
+      artifactPath: '/private/model.glb',
+      byteLength: 3,
+      triangles: 12,
+      vertices: 36,
+    });
     const exported = await definition.export!(
       {
         exportId: 'glb',
@@ -243,7 +248,7 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(context.session.request).toHaveBeenLastCalledWith(
       expect.objectContaining({
         method: 'mesh',
-        params: expect.objectContaining({ linearTolerance: 0.05 }),
+        params: { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, maxTriangles: 20_000_000 },
         signal: runtime.signal,
       }),
     );
@@ -252,6 +257,111 @@ describe('Build123d kernel lifecycle errors', () => {
     await expect(definition.export!({ exportId: 'step', handle, options: {} }, runtime, context)).rejects.toThrow(
       /export failed/,
     );
+  });
+
+  it('meshes a preset render from the measured diagonal and reports its cost', async () => {
+    const context = createContext();
+    const handle = { sessionGeneration: 2, handleId: 'shape' };
+    context.session.request
+      .mockResolvedValueOnce({ diagonal: 2000 })
+      .mockResolvedValueOnce({ artifactPath: '/private/model.glb', byteLength: 3, triangles: 8, vertices: 24 });
+
+    const rendered = await definition.render?.(
+      { view: 'model', handle, options: { tessellation: 'medium' } },
+      runtime,
+      context,
+    );
+
+    expect(context.session.request.mock.calls.map(([call]) => call as unknown)).toEqual([
+      expect.objectContaining({ method: 'measure', params: { handleId: 'shape' } }),
+      expect.objectContaining({
+        method: 'mesh',
+        params: { handleId: 'shape', linearTolerance: 1, angularTolerance: 20, maxTriangles: 2_000_000 },
+      }),
+    ]);
+    expect(rendered).toMatchObject({
+      content: new Uint8Array([1, 2, 3]),
+      tessellation: { triangles: 8, vertices: 24, requested: 'medium', linearTolerance: 1, downgraded: 0 },
+      issues: [],
+    });
+  });
+
+  it('coarsens an over-budget render and delivers its last step unbounded', async () => {
+    const context = createContext();
+    const handle = { sessionGeneration: 2, handleId: 'shape' };
+    const overBudget = { triangles: 3_000_000, vertices: 9_000_000 };
+    context.session.request
+      .mockResolvedValueOnce(overBudget)
+      .mockResolvedValueOnce(overBudget)
+      .mockResolvedValueOnce(overBudget)
+      .mockResolvedValueOnce({ ...overBudget, artifactPath: '/private/model.glb', byteLength: 3 });
+
+    const rendered = await definition.render?.(
+      { view: 'model', handle, options: { tessellation: { linearTolerance: 0.5, angularTolerance: 20 } } },
+      runtime,
+      context,
+    );
+
+    expect(context.session.request.mock.calls.map(([call]) => (call as { params: unknown }).params)).toEqual([
+      { handleId: 'shape', linearTolerance: 0.5, angularTolerance: 20, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 1, angularTolerance: 24, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 2, angularTolerance: 28, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 4, angularTolerance: 32 },
+    ]);
+    expect(rendered).toMatchObject({
+      tessellation: { requested: 'explicit', linearTolerance: 4, angularTolerance: 32, downgraded: 3 },
+      issues: [expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' })],
+    });
+  });
+
+  it('exports STEP from the retained shapes', async () => {
+    const context = createContext();
+    context.session.request.mockResolvedValueOnce({ artifactPath: '/private/assembly.step', byteLength: 3 });
+
+    const exported = await definition.export!(
+      { exportId: 'step', handle: { sessionGeneration: 2, handleId: 'shape' }, options: {} },
+      runtime,
+      context,
+    );
+
+    expect(context.session.request).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ method: 'export', params: { handleId: 'shape', format: 'step' } }),
+    );
+    expect(exported).toMatchObject({ files: [{ name: 'assembly.step', bytes: new Uint8Array([1, 2, 3]) }] });
+  });
+
+  it('refuses an over-budget GLB export with RESOURCE_LIMIT', async () => {
+    const context = createContext();
+    const handle = { sessionGeneration: 2, handleId: 'shape' };
+    context.session.request.mockResolvedValueOnce({ triangles: 30_000_000, vertices: 90_000_000 });
+
+    await expect(
+      definition.export!(
+        {
+          exportId: 'glb',
+          handle,
+          options: {
+            tessellation: { linearTolerance: 0.01 },
+            coordinateSystem: 'y-up',
+            unit: { length: 'meter' },
+          },
+        },
+        runtime,
+        context,
+      ),
+    ).rejects.toMatchObject({
+      name: 'Build123dKernelError',
+      issues: [
+        expect.objectContaining({
+          code: 'RESOURCE_LIMIT',
+          details: expect.objectContaining({
+            producer: 'build123d',
+            suggested: { linearTolerance: 0.015, angularTolerance: 20 },
+          }),
+        }),
+      ],
+    });
+    expect(context.session.readArtifact).not.toHaveBeenCalled();
   });
 
   it('announces verified worker admissions, refreshes warm candidates and skips the off arm', async () => {

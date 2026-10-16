@@ -4,14 +4,23 @@ import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
+import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
+import type { OcctTessellationTolerances } from '@taucad/occt-core';
 
 import {
   build123dAnalysisSchema,
   build123dArtifactSchema,
   build123dBuildSchema,
   build123dComputeDescriptorLimit,
+  build123dMeasureSchema,
+  build123dMeshSchema,
 } from '#build123d.protocol.js';
-import type { Build123dAnalysis } from '#build123d.protocol.js';
+import type { Build123dAnalysis, Build123dMesh } from '#build123d.protocol.js';
+import {
+  Build123dTessellationRefusal,
+  meshExportWithinBudget,
+  meshPreviewWithinBudget,
+} from '#build123d-tessellation.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
 import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
@@ -58,6 +67,9 @@ class Build123dKernelError extends Error {
 }
 
 const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
+  if (error instanceof Build123dTessellationRefusal) {
+    return [error.issue];
+  }
   if (error instanceof Build123dWorkerError) {
     return error.issues.map(({ code: pythonCode, type: pythonType, ...issue }) => ({
       ...issue,
@@ -126,12 +138,51 @@ const analyzeEntry = async (
   return result;
 };
 
+/**
+ * The worker's mesh and measure requests for one retained handle, in millimetres and degrees.
+ *
+ * @param handleId - The retained shapes to mesh.
+ * @param runtime - Kernel runtime, for its abort signal.
+ * @param session - The Python session holding the handle.
+ * @returns The mesh request and the diagonal measurement.
+ */
+const meshRequests = (
+  handleId: string,
+  runtime: Pick<KernelServices, 'signal'>,
+  session: PythonSession,
+): {
+  mesh: (tolerances: OcctTessellationTolerances, maxTriangles?: number) => Promise<Build123dMesh>;
+  measureDiagonal: () => Promise<number>;
+} => ({
+  mesh: async (tolerances, maxTriangles) =>
+    session.request({
+      method: 'mesh',
+      params: {
+        handleId,
+        linearTolerance: tolerances.linearTolerance,
+        angularTolerance: tolerances.angularTolerance,
+        ...(maxTriangles === undefined ? {} : { maxTriangles }),
+      },
+      schema: build123dMeshSchema,
+      signal: runtime.signal,
+    }),
+  async measureDiagonal() {
+    const measured = await session.request({
+      method: 'measure',
+      params: { handleId },
+      schema: build123dMeasureSchema,
+      signal: runtime.signal,
+    });
+    return measured.diagonal;
+  },
+});
+
 /** `build123d` kernel capability. @public */
 export const build123dKernel = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
-  version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1',
+  version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1.tessellation1',
   optionsSchema: build123dOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: build123dRenderSchema } },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
@@ -312,17 +363,24 @@ export const build123dKernel = defineKernel({
       throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
     }
     try {
-      const artifact = await context.session.request({
-        method: 'mesh',
-        params: {
-          handleId: handle.handleId,
-          linearTolerance: options.tessellation.linearTolerance,
-          angularTolerance: options.tessellation.angularTolerance,
+      const { mesh, measureDiagonal } = meshRequests(handle.handleId, runtime, context.session);
+      // The render hook cannot tell a viewer preview from a capture, so every render takes the preview budget.
+      const meshed = await meshPreviewWithinBudget(
+        {
+          tessellation: options.tessellation,
+          fallback: 'medium',
+          explicitDefaults: occtExplicitTessellationDefaults.preview,
+          budget: occtTriangleBudgets.preview,
+          staleCode: 'VIEW_OPTIONS_INVALID',
+          measureDiagonal,
         },
-        schema: build123dArtifactSchema,
-        signal: runtime.signal,
-      });
-      return { content: await context.session.readArtifact(artifact) };
+        mesh,
+      );
+      return {
+        content: await context.session.readArtifact(meshed.artifact),
+        tessellation: meshed.tessellation,
+        issues: meshed.issues,
+      };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
     }
@@ -333,25 +391,30 @@ export const build123dKernel = defineKernel({
       throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
     }
     try {
+      if (input.exportId === 'glb') {
+        const { mesh, measureDiagonal } = meshRequests(input.handle.handleId, runtime, context.session);
+        const meshed = await meshExportWithinBudget(
+          {
+            tessellation: input.options.tessellation,
+            fallback: 'high',
+            explicitDefaults: occtExplicitTessellationDefaults.export,
+            budget: occtTriangleBudgets.export,
+            staleCode: 'EXPORT_OPTIONS_INVALID',
+            measureDiagonal,
+          },
+          mesh,
+        );
+        const bytes = await context.session.readArtifact(meshed.artifact);
+        return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))], issues: meshed.issues };
+      }
       const artifact = await context.session.request({
-        method: input.exportId === 'glb' ? 'mesh' : 'export',
-        params:
-          input.exportId === 'glb'
-            ? {
-                handleId: input.handle.handleId,
-                linearTolerance: input.options.tessellation.linearTolerance,
-                angularTolerance: input.options.tessellation.angularTolerance,
-              }
-            : { handleId: input.handle.handleId, format: 'step' },
+        method: 'export',
+        params: { handleId: input.handle.handleId, format: 'step' },
         schema: build123dArtifactSchema,
         signal: runtime.signal,
       });
       const bytes = await context.session.readArtifact(artifact);
-      return {
-        files: [
-          createExportFile(input.exportId, input.exportId === 'glb' ? 'model.glb' : 'assembly.step', asBuffer(bytes)),
-        ],
-      };
+      return { files: [createExportFile('step', 'assembly.step', asBuffer(bytes))] };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
     }

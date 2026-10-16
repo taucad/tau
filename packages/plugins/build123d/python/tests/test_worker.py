@@ -443,7 +443,7 @@ class WorkerTest(unittest.TestCase):
             built = runtime.dispatch("build", {"entryPath": "main.py", "parameters": {"width": 4}})
             handle = built["handleId"]
             mesh_result = runtime.dispatch(
-                "mesh", {"handleId": handle, "linearTolerance": 0.05, "angularTolerance": 0.1}
+                "mesh", {"handleId": handle, "linearTolerance": 0.05, "angularTolerance": 20}
             )
             self.assertTrue(Path(mesh_result["artifactPath"]).is_file())
             export_result = runtime.dispatch("export", {"handleId": handle, "format": "step"})
@@ -470,7 +470,7 @@ class WorkerTest(unittest.TestCase):
             retained = runtime.dispatch(
                 "build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config()}
             )["handleId"]
-            runtime.dispatch("mesh", {"handleId": retained, "linearTolerance": 0.05, "angularTolerance": 0.1})
+            runtime.dispatch("mesh", {"handleId": retained, "linearTolerance": 0.05, "angularTolerance": 20})
             runtime.dispatch("export", {"handleId": retained, "format": "step"})
             self.assertEqual(counter.read_text(encoding="utf-8"), "1")
             with self.assertRaisesRegex(ValueError, "Unsupported"):
@@ -480,7 +480,7 @@ class WorkerTest(unittest.TestCase):
             with patch.object(build123d, "export_step", return_value=False), self.assertRaisesRegex(RuntimeError, "failed"):
                 runtime.dispatch("export", {"handleId": handle, "format": "step"})
             runtime.handles["empty"] = ()
-            empty_mesh = runtime.dispatch("mesh", {"handleId": "empty", "linearTolerance": 0.05, "angularTolerance": 0.1})
+            empty_mesh = runtime.dispatch("mesh", {"handleId": "empty", "linearTolerance": 0.05, "angularTolerance": 20})
             glb.validate_glb(Path(empty_mesh["artifactPath"]).read_bytes())
             with self.assertRaisesRegex(ValueError, "no shapes"):
                 runtime.dispatch("export", {"handleId": "empty", "format": "step"})
@@ -525,6 +525,59 @@ class WorkerTest(unittest.TestCase):
         self.assertTrue(fine_again == fine, "fine A changed after coarse B")
         self.assertTrue(coarse == fresh_coarse, "coarse B differs from a fresh shape")
         self.assertEqual(worker._brep_bytes(retained), exact_before, "render changed the exact BRep")
+
+    def test_mesh_is_absolute_in_millimetres_and_degrees(self) -> None:
+        """I4: OCCT meshes in absolute mode; the protocol's degrees reach OCCT as radians."""
+        import math
+
+        from build123d import Box, Pos, Sphere
+        import OCP.BRepMesh
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            runtime = worker.Worker(root, artifacts)
+            runtime.handles["small"] = (Sphere(5),)
+            runtime.handles["large"] = (Sphere(500),)
+            runtime.handles["empty"] = ()
+            runtime.handles["pair"] = (Box(10, 10, 10), Pos(10, 0, 0) * Box(10, 10, 10))
+
+            self.assertAlmostEqual(runtime.dispatch("measure", {"handleId": "small"})["diagonal"], math.sqrt(300), places=6)
+            self.assertAlmostEqual(runtime.dispatch("measure", {"handleId": "large"})["diagonal"], math.sqrt(3) * 1000, places=3)
+            self.assertEqual(runtime.dispatch("measure", {"handleId": "empty"}), {"diagonal": 0.0})
+            self.assertAlmostEqual(runtime.dispatch("measure", {"handleId": "pair"})["diagonal"], math.sqrt(600), places=6)
+
+            with patch.object(
+                OCP.BRepMesh,
+                "BRepMesh_IncrementalMesh",
+                wraps=OCP.BRepMesh.BRepMesh_IncrementalMesh,
+            ) as mesher:
+                small = runtime.dispatch("mesh", {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20})
+            _shape, linear, relative, angular, parallel = mesher.call_args.args
+            self.assertEqual((linear, relative, parallel), (0.05, False, True))
+            self.assertAlmostEqual(angular, math.radians(20))
+            self.assertGreater(small["triangles"], 0)
+            self.assertEqual(small["vertices"], small["triangles"] * 3)
+            glb.validate_glb(Path(small["artifactPath"]).read_bytes())
+
+            # The same absolute tolerance on a sphere a hundred times larger needs many more triangles.
+            large = runtime.dispatch("mesh", {"handleId": "large", "linearTolerance": 0.05, "angularTolerance": 20})
+            self.assertGreater(large["triangles"], small["triangles"] * 10)
+
+            before = set(artifacts.iterdir())
+            refused = runtime.dispatch(
+                "mesh",
+                {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20, "maxTriangles": small["triangles"] - 1},
+            )
+            self.assertEqual(refused, {"triangles": small["triangles"], "vertices": small["triangles"] * 3})
+            self.assertEqual(set(artifacts.iterdir()), before, "an over-budget mesh writes no GLB")
+            within = runtime.dispatch(
+                "mesh",
+                {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20, "maxTriangles": small["triangles"]},
+            )
+            self.assertEqual(within["triangles"], small["triangles"])
+            self.assertIn("artifactPath", within)
 
     def test_resident_lineage_hits_are_share_mode_clones_without_codec_work(self) -> None:
         """G-F1/I1/U2: a warm hit is a lineage lookup plus a clone; no codec, no mesh, no I/O."""

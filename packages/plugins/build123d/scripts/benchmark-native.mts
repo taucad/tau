@@ -136,7 +136,7 @@ const build = async (width: number) =>
 const mesh = async (handleId: string) =>
   session.request({
     method: 'mesh',
-    params: { handleId, linearTolerance: 0.1, angularTolerance: 0.1 },
+    params: { handleId, linearTolerance: 0.1, angularTolerance: 20 },
     schema: build123dArtifactSchema,
     signal,
   });

@@ -4218,6 +4218,9 @@ importers:
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../core/native-process
+      '@taucad/occt-core':
+        specifier: workspace:*
+        version: link:../../core/occt
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters

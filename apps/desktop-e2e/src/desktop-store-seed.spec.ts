@@ -104,6 +104,16 @@ const launchUntilCollected = async ({
   readonly label: string;
 }): Promise<{ readonly seeding: readonly SeedOutcome[]; readonly lines: readonly string[] }> => {
   const logPath = join(userData, 'logs/desktop.log');
+  const readLog = async (): Promise<Uint8Array<ArrayBuffer>> => {
+    try {
+      return new Uint8Array(await readFile(logPath));
+    } catch {
+      return new Uint8Array();
+    }
+  };
+  /* Every launch of this profile appends to one `desktop.log`: only what this launch wrote is its report. */
+  const earlierLog = await readLog();
+  const logOffset = earlierLog.byteLength;
   const started = performance.now();
   const output: string[] = [];
   let collected = false;
@@ -120,8 +130,8 @@ const launchUntilCollected = async ({
   try {
     const deadline = Date.now() + launchDeadlineMilliseconds;
     for (;;) {
-      const text = await readFile(logPath, 'utf8').catch(() => '');
-      const lines = text.split('\n');
+      const log = await readLog();
+      const lines = new TextDecoder().decode(log.byteLength < logOffset ? log : log.subarray(logOffset)).split('\n');
       const failure = lines.find((line) => / native\.store /u.test(line));
       if (failure !== undefined) {
         throw new Error(`Main could not open the payload store: ${failure}`);

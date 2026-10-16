@@ -1033,6 +1033,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       if (isRenderAbortedError(error)) {
         throw error;
       }
+      // A kernel refusal (an over-budget export's `RESOURCE_LIMIT`) keeps its code and details, as render does.
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        return { success: false, issues: carried };
+      }
       return createKernelError([
         {
           message: error instanceof Error ? error.message : String(error),

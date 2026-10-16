@@ -39,8 +39,25 @@ const lastSegment = (url: string): string => decodeURIComponent(new URL(url).pat
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const contentRangePattern = /^bytes \d+-\d+\/(?<total>\d+)$/u;
+
 /**
- * HEAD one URL and compare its `Content-Length` with the pinned byte length.
+ * Ask for the first byte and read the total length from `Content-Range`. Some CDNs (such as
+ * `builds.dotnet.microsoft.com`) answer HEAD with a short placeholder body length instead of the object's.
+ * @param url - The pinned URL.
+ * @param transport - The `fetch` to use.
+ * @returns The advertised length, or `undefined` when the answer carries none.
+ */
+const rangedLength = async (url: string, transport: typeof fetch): Promise<number | undefined> => {
+  const response = await transport(url, { headers: { range: 'bytes=0-0' }, redirect: 'follow' });
+  await response.body?.cancel();
+  const total = contentRangePattern.exec(response.headers.get('content-range') ?? '')?.groups?.['total'];
+  return response.status === 206 && total !== undefined ? Number(total) : undefined;
+};
+
+/**
+ * HEAD one URL and compare its `Content-Length` with the pinned byte length, confirming a disagreement with
+ * a one-byte ranged GET before calling it drift.
  * @param pin - The URL and its pin.
  * @param transport - The `fetch` to use.
  * @returns One row.
@@ -63,12 +80,22 @@ export const checkContentLength = async (pin: PinnedUrl, transport: typeof fetch
     return row('drift', `HEAD answered HTTP ${String(response.status)}`);
   }
   const length = response.headers.get('content-length');
-  if (length === null) {
-    return row('drift', 'HEAD answered no Content-Length');
+  if (length !== null && Number(length) === pin.byteLength) {
+    return row('fresh', `${length} bytes`);
   }
-  return Number(length) === pin.byteLength
-    ? row('fresh', `${length} bytes`)
-    : row('drift', `Content-Length ${length}, pinned ${String(pin.byteLength)}`);
+  let ranged: number | undefined;
+  try {
+    ranged = await rangedLength(pin.url, transport);
+  } catch (error) {
+    return row('drift', `HEAD Content-Length ${length ?? 'absent'}; ranged GET failed: ${errorText(error)}`);
+  }
+  if (ranged === pin.byteLength) {
+    return row('fresh', `${String(ranged)} bytes (Content-Range)`);
+  }
+  return row(
+    'drift',
+    `Content-Length ${length ?? 'absent'}, Content-Range ${ranged === undefined ? 'absent' : String(ranged)}, pinned ${String(pin.byteLength)}`,
+  );
 };
 
 const wheelPattern = /^(?<name>[^-]+)-(?<version>[^-]+)(?:-\d[^-]*)?-[^-]+-[^-]+-[^-]+\.whl$/u;

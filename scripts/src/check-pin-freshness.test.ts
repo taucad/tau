@@ -145,8 +145,11 @@ describe('check-pin-freshness', () => {
     const drifted: Record<string, Answer> = {
       ...fresh,
       [`HEAD ${layerUrl}`]: { headers: { 'content-length': '9' } },
+      [`GET ${layerUrl}`]: { status: 206, headers: { 'content-range': 'bytes 0-0/9' } },
       [`HEAD ${layerUrl}-mirror`]: { status: 404 },
-      [`HEAD ${dotnetUrl}`]: {},
+      // A CDN that answers HEAD with a placeholder length: the ranged GET settles it.
+      [`HEAD ${dotnetUrl}`]: { headers: { 'content-length': '20' } },
+      [`GET ${dotnetUrl}`]: { status: 206, headers: { 'content-range': 'bytes 0-0/6' } },
       'GET https://pypi.org/pypi/demo-pkg/2.13.0/json': {
         body: JSON.stringify({
           // eslint-disable-next-line @typescript-eslint/naming-convention -- PyPI's own snake_case field
@@ -172,9 +175,8 @@ describe('check-pin-freshness', () => {
 
     expect(drift).toEqual(
       expect.arrayContaining([
-        { payload: 'engine/worker', check: 'content-length', detail: 'Content-Length 9, pinned 5' },
+        { payload: 'engine/worker', check: 'content-length', detail: 'Content-Length 9, Content-Range 9, pinned 5' },
         { payload: 'engine/worker', check: 'content-length', detail: 'HEAD answered HTTP 404' },
-        { payload: 'engine/dotnet', check: 'content-length', detail: 'HEAD answered no Content-Length' },
         { payload: 'engine/demo-pkg', check: 'pypi', detail: 'yanked: broken' },
         {
           payload: 'engine/python',
@@ -188,8 +190,16 @@ describe('check-pin-freshness', () => {
         },
       ]),
     );
-    expect(drift).toHaveLength(6);
-    expect(freshnessReport(rows)).toContain('**6 drifted pin checks.** No pin was changed');
+    expect(drift).toHaveLength(5);
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        payload: 'engine/dotnet',
+        check: 'content-length',
+        status: 'fresh',
+        detail: '6 bytes (Content-Range)',
+      }),
+    );
+    expect(freshnessReport(rows)).toContain('**5 drifted pin checks.** No pin was changed');
   });
 
   it('should report unreachable publishers and transports as drift rather than passing them', async () => {
@@ -199,6 +209,8 @@ describe('check-pin-freshness', () => {
         {
           ...fresh,
           [`HEAD ${pbsUrl}`]: { status: 500 },
+          [`HEAD ${wheelUrl}`]: {},
+          [`GET ${wheelUrl}`]: { status: 200 },
           'GET https://pypi.org/pypi/demo-pkg/2.13.0/json': { status: 404 },
           'GET https://github.com/astral-sh/python-build-standalone/releases/download/20260901/SHA256SUMS': {
             status: 403,
@@ -210,7 +222,12 @@ describe('check-pin-freshness', () => {
     const failing = await checkPinFreshness([path], transportOf({}, []));
 
     expect(rows.filter(({ status }) => status === 'drift').map(({ detail }) => detail)).toEqual(
-      expect.arrayContaining(['HEAD answered HTTP 500', 'PyPI answered HTTP 404', 'SHA256SUMS answered HTTP 403']),
+      expect.arrayContaining([
+        'HEAD answered HTTP 500',
+        'Content-Length absent, Content-Range absent, pinned 5',
+        'PyPI answered HTTP 404',
+        'SHA256SUMS answered HTTP 403',
+      ]),
     );
     expect(failing.every(({ status }) => status === 'drift')).toBe(true);
     expect(failing.map(({ detail }) => detail)).toEqual(

@@ -332,7 +332,7 @@
         "occurrence:path/0/0": {
           "components": ["occurrence:path/0/0"]
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
           "components": []
         },
         "occurrence:path/0/1": {
@@ -342,7 +342,7 @@
       "joints": {
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": {
           "parent": "occurrence:path/0/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "name": "native",
           "type": "prismatic",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.022615020028634282],
@@ -353,7 +353,7 @@
           }
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": {
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "child": "occurrence:path/0/1",
           "name": "native",
           "type": "revolute",
@@ -390,7 +390,7 @@
         "occurrence:path/0/1": {
           "components": ["occurrence:path/0/1"]
         },
-        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
           "components": []
         },
         "occurrence:path/0/0": {
@@ -400,7 +400,7 @@
       "joints": {
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/distance": {
           "parent": "occurrence:path/0/1",
-          "child": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
           "name": "mate",
           "type": "prismatic",
           "origin": [0.038461173326357546, -0.0029997489803376765, -0.022151394461785916],
@@ -411,7 +411,7 @@
           }
         },
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/angle": {
-          "parent": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
           "child": "occurrence:path/0/0",
           "name": "mate",
           "type": "revolute",
@@ -448,10 +448,10 @@
         "occurrence:path/0/0": {
           "components": ["occurrence:path/0/0"]
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
           "components": []
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1": {
           "components": []
         },
         "occurrence:path/0/1": {
@@ -462,7 +462,7 @@
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": {
           "type": "revolute",
           "parent": "occurrence:path/0/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "name": "native / X (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
           "axis": [0.9384472853749152, 0.022590878558260655, -0.34468296270401627],
@@ -473,8 +473,8 @@
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": {
           "type": "revolute",
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
           "name": "native / Y (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
           "axis": [-0.18665298215553594, 0.8727963390714092, -0.4509847167654253],
@@ -485,7 +485,7 @@
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": {
           "type": "revolute",
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
           "child": "occurrence:path/0/1",
           "name": "native / Z (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
@@ -522,10 +522,10 @@
         "occurrence:path/0/1": {
           "components": ["occurrence:path/0/1"]
         },
-        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
           "components": []
         },
-        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1": {
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1": {
           "components": []
         },
         "occurrence:path/0/0": {
@@ -536,7 +536,7 @@
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": {
           "type": "revolute",
           "parent": "occurrence:path/0/1",
-          "child": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
           "name": "native / Z (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
           "axis": [-0.601709849207371, -0.7592344857948956, -0.24800857434089488],
@@ -547,8 +547,8 @@
         },
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": {
           "type": "revolute",
-          "parent": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
-          "child": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
           "name": "native / Y (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
           "axis": [0.1823950971408763, -0.43291976831278356, 0.882786782152393],
@@ -559,7 +559,7 @@
         },
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": {
           "type": "revolute",
-          "parent": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
           "child": "occurrence:path/0/0",
           "name": "native / X (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
@@ -596,10 +596,10 @@
         "occurrence:path/0/0": {
           "components": ["occurrence:path/0/0"]
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
           "components": []
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1": {
           "components": []
         },
         "occurrence:path/0/1": {
@@ -610,7 +610,7 @@
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": {
           "type": "revolute",
           "parent": "occurrence:path/0/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "name": "native / X (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
           "axis": [0.9384472853749152, 0.022590878558260655, -0.34468296270401627],
@@ -621,8 +621,8 @@
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": {
           "type": "revolute",
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
           "name": "native / Y (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
           "axis": [-0.18665298215553594, 0.8727963390714092, -0.4509847167654253],
@@ -633,7 +633,7 @@
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": {
           "type": "revolute",
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
           "child": "occurrence:path/0/1",
           "name": "native / Z (composed)",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
@@ -670,10 +670,10 @@
         "occurrence:path/0/1": {
           "components": ["occurrence:path/0/1"]
         },
-        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
           "components": []
         },
-        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1": {
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1": {
           "components": []
         },
         "occurrence:path/0/0": {
@@ -684,7 +684,7 @@
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": {
           "type": "revolute",
           "parent": "occurrence:path/0/1",
-          "child": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
           "name": "native / Z (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
           "axis": [-0.601709849207371, -0.7592344857948956, -0.24800857434089488],
@@ -695,8 +695,8 @@
         },
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": {
           "type": "revolute",
-          "parent": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/0",
-          "child": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
           "name": "native / Y (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
           "axis": [0.1823950971408763, -0.43291976831278356, 0.882786782152393],
@@ -707,7 +707,7 @@
         },
         "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": {
           "type": "revolute",
-          "parent": "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/virtual/1",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
           "child": "occurrence:path/0/0",
           "name": "native / X (composed)",
           "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
@@ -744,7 +744,7 @@
         "occurrence:path/0/0": {
           "components": ["occurrence:path/0/0"]
         },
-        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0": {
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
           "components": []
         },
         "occurrence:path/0/1": {
@@ -754,7 +754,7 @@
       "joints": {
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": {
           "parent": "occurrence:path/0/0",
-          "child": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "name": "native",
           "type": "prismatic",
           "origin": [0.04207769624319711, -0.0057756836563952465, -0.022615020028634282],
@@ -764,7 +764,7 @@
           }
         },
         "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": {
-          "parent": "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/virtual/0",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
           "child": "occurrence:path/0/1",
           "name": "native",
           "type": "revolute",

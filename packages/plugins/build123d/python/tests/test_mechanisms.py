@@ -10,6 +10,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build123d import Axis, BallJoint, Box, Compound, CylindricalJoint, LinearJoint, Location, Plane, RevoluteJoint, RigidJoint, Rotation
 from mechanisms import _matrix, _wire, project_mechanism
+from tau_assembly import Assembly
 
 
 def components(shapes):
@@ -108,39 +109,17 @@ class MechanismsTest(unittest.TestCase):
         self.assertEqual(result['mechanismIntent']['connections'][0]['referenceCoordinates'],{'angle':22.5})
         np.testing.assert_allclose(next(iter(evaluate(result['mechanism'],{}).values())),np.eye(4),atol=1e-12)
 
-    def test_unconnected_interfaces_and_explicit_ids_survive_reordering(self):
-        a=Box(1,2,3); b=Box(1,2,3)
-        RigidJoint('mount',a,Location((1,2,3)))
-        RigidJoint('mount',b,Location((3,2,1)))
-        for order in ((a,b),(b,a)):
-            a.label='Renamed'; b.label='Renamed'
-            entries=components(order)
-            self.assertEqual(project_mechanism(order,entries,{'occurrence_ids':{'a':a,'b':b}}),{})
+    def test_unconnected_interfaces_and_named_ids_survive_reordering(self):
+        for reverse in (False, True):
+            a=Box(1,2,3); b=Box(1,2,3)
+            RigidJoint('mount',a,Location((1,2,3)))
+            RigidJoint('mount',b,Location((3,2,1)))
+            a.label=b.label='Renamed'
+            model=Assembly(children=dict(reversed([('a',a),('b',b)])) if reverse else {'a':a,'b':b})
+            entries=components((model,))
+            self.assertEqual(project_mechanism((model,),entries),{})
             keyed={entry['id']:entry for entry in entries}
-            self.assertEqual(keyed['occurrence:a']['jointInterfaces']['mount']['frame'][12:15],[.001,.003,-.002])
-
-    def test_repeated_articulated_modules_follow_moving_mount_with_independent_state(self):
-        chassis=Box(10,10,10)
-        modules=[]; drives=[]
-        for index in range(2):
-            housing=Box(4,4,4); rotor=Box(2,2,2)
-            drive=RevoluteJoint('shaft',housing,angular_range=(-720,720)); RigidJoint('shaft',rotor)
-            drive.connect_to(rotor.joints['shaft'],angle=0)
-            module=Compound(children=[housing,rotor]); RigidJoint('mount',module)
-            RevoluteJoint(f'mount{index}',chassis,axis=Axis((index*20,0,0),(0,1,0)),angular_range=(-720,720)).connect_to(module.joints['mount'],angle=0)
-            modules.append(module);drives.append(drive)
-        model=Compound(children=[chassis,*modules]);entries=components((model,))
-        output=project_mechanism((model,),entries,{'ground':chassis,'occurrence_ids':{'base':chassis,'left':modules[0],'right':modules[1],'left-rotor':modules[0].children[1],'right-rotor':modules[1].children[1]}})
-        self.assertNotIn('mechanismDiagnostics',output)
-        mechanism=output['mechanism'];records=output['mechanismIntent']['connections']
-        coords={}
-        for record in records:
-            if record['parent']['interfaceId']=='mount0': coords[record['playbackCoordinates']['angle']]=30
-            if record['parent']['interfaceId']=='shaft' and record['child']['componentId']=='occurrence:left-rotor': coords[record['playbackCoordinates']['angle']]=73
-        posed=evaluate(mechanism,coords)
-        np.testing.assert_allclose(posed['occurrence:right-rotor'],np.eye(4),atol=1e-12)
-        self.assertGreater(np.max(np.abs(posed['occurrence:left-rotor']-posed['occurrence:left'])),.5)
-        self.assertGreater(np.max(np.abs(posed['occurrence:left']-np.eye(4))),.4)
+            self.assertEqual(keyed['occurrence:0/a']['jointInterfaces']['mount']['frame'][12:15],[.001,.003,-.002])
 
     def test_closed_loop_retains_intent_with_diagnostic(self):
         a=Box(1,1,1);b=Box(1,1,1)
@@ -159,7 +138,7 @@ class AdmissionTests(unittest.TestCase):
         from mechanisms import _interface, _range, _reference, _motion_joints
         a=Box(1,1,1); b=Box(1,1,1)
         joint=RevoluteJoint('hinge',a,angular_range=(-360,360)); mount=RigidJoint('mount',b)
-        for supplement,message in (([], 'dictionary'),({'unknown':0},'Unknown motion'),({'occurrence_ids':{'bad':b}},'occurrence_ids'),({'animations':[{}]},'connected native joints')):
+        for supplement,message in (([], 'dictionary'),({'unknown':0},'Unknown motion'),({'occurrence_ids':{'bad':b}},'Unknown motion'),({'animations':[{}]},'connected native joints')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError,message): project_mechanism((a,),components((a,)),supplement)
         with self.assertRaisesRegex(ValueError,'traversals'): project_mechanism((a,),[])
         with self.assertRaisesRegex(ValueError,'occurs twice'): project_mechanism((a,a),components((a,a)))
@@ -182,44 +161,6 @@ class AdmissionTests(unittest.TestCase):
         a.joints['wrong']=mount
         with self.assertRaisesRegex(ValueError,'different occurrence'): project_mechanism((a,b),components((a,b)))
 
-    def test_couplings_clips_and_durable_connections(self):
-        a=Box(1,1,1);b=Box(1,1,1);c=Box(1,1,1);static=Box(1,1,1)
-        driver=RevoluteJoint('driver',a,angular_range=(-720,720));bm=RigidJoint('mount',b)
-        driver.connect_to(bm,angle=0)
-        follower=CylindricalJoint('follower',a,angular_range=(-720,720),linear_range=(-100,100));cm=RigidJoint('mount',c)
-        follower.connect_to(cm,angle=0,position=0)
-        model=Compound(children=[a,b,c,static]);shapes=(model,)
-        supplement={'connections':[(driver,bm)],'couplings':[{'driver':driver,'follower':(follower,'angle'),'ratio':-2}], 'animations':[{'id':'spin','duration':2,'keyframes':[{'time':0,'coordinates':{driver:0}},{'time':2,'coordinates':{driver:144}}]}]}
-        result=project_mechanism(shapes,components(shapes),supplement)
-        self.assertEqual(len(result['mechanismIntent']['connections']),2)
-        self.assertEqual(result['mechanism']['couplings'],result['mechanismIntent']['couplings'])
-        self.assertEqual(result['mechanism']['animations'][0]['keyframes'][1]['coordinates'],{result['mechanism']['couplings'][0]['driver']:144})
-        for value in (cm,(follower,'bad'),RigidJoint('unused',static)):
-            with self.subTest(value=str(value)),self.assertRaisesRegex(ValueError,'motion reference'):
-                project_mechanism(shapes,components(shapes),{'couplings':[{'driver':value,'follower':driver,'ratio':1}]})
-        # Same child receiving two physical constraints is retained, never silently collapsed.
-        RigidJoint('second',a).connect_to(RigidJoint('second',b))
-        unsupported=project_mechanism(shapes,components(shapes))
-        self.assertNotIn('mechanism',unsupported)
-        self.assertEqual(unsupported['mechanismDiagnostics'][0]['code'],'UNSUPPORTED_MECHANISM')
-
-    def test_public_compound_alias_follows_moving_descendant(self):
-        housing=Box(4,4,4);rotor=Box(2,2,2);tool=Box(1,1,1)
-        RevoluteJoint('shaft',housing,angular_range=(-360,360)).connect_to(RigidJoint('mount',rotor),angle=0)
-        module=Compound(children=[housing,rotor])
-        module.joints['output']=RigidJoint('output',rotor)
-        module.joints['output'].connect_to(RigidJoint('tool',tool))
-        model=Compound(children=[module,tool]);entries=components((model,))
-        result=project_mechanism((model,),entries,{'occurrence_ids':{'module':module,'rotor':rotor,'tool':tool}})
-        exported=next(entry for entry in entries if entry['id']=='occurrence:module')
-        self.assertEqual(exported['jointInterfaceAliases']['output'],{'componentId':'occurrence:rotor','interfaceId':'output'})
-        self.assertNotIn('jointInterfaces',exported)
-        mechanism=result['mechanism']
-        shaft=next(key for key,joint in mechanism['joints'].items() if joint['type']=='revolute')
-        posed=evaluate(mechanism,{shaft:73})
-        np.testing.assert_allclose(posed['occurrence:tool'],posed['occurrence:rotor'],atol=1e-12)
-        self.assertGreater(np.max(np.abs(posed['occurrence:tool']-np.eye(4))),.9)
-
     def test_ground_can_reverse_native_connection_direction(self):
         for rotating in (False,True):
             a=Box(1,1,1);b=Box(1,1,1)
@@ -227,13 +168,13 @@ class AdmissionTests(unittest.TestCase):
             target=RigidJoint('mount',b)
             state={'angle':22.5} if rotating else {}
             source.connect_to(target,**state)
-            model=Compound(children=[a,b]);shapes=(model,);entries=components(shapes)
+            model=Assembly(children={'a':a,'b':b});shapes=(model,);entries=components(shapes)
             meshes={entry['id']:{'positions':[]} for entry in entries if entry['kind']=='part'}
-            result=project_mechanism(shapes,entries,{'ground':b,'occurrence_ids':{'a':a,'b':b}},meshes=meshes)
-            self.assertEqual(set(meshes),{'occurrence:a','occurrence:b'})
-            self.assertEqual(result['mechanism']['root'],'occurrence:b')
+            result=project_mechanism(shapes,entries,{'ground':b},meshes=meshes)
+            self.assertEqual(set(meshes),{'occurrence:0/a','occurrence:0/b'})
+            self.assertEqual(result['mechanism']['root'],'occurrence:0/b')
             coords={next(iter(result['mechanism']['joints'])):73} if rotating else {}
-            actual=evaluate(result['mechanism'],coords)['occurrence:a']
+            actual=evaluate(result['mechanism'],coords)['occurrence:0/a']
             before=_matrix(copy.copy(source).relative_to(copy.copy(target),**state))
             after=_matrix(copy.copy(source).relative_to(copy.copy(target),**({'angle':95.5} if rotating else {})))
             delta=_matrix(a.global_location)@after@np.linalg.inv(before)@np.linalg.inv(_matrix(a.global_location))

@@ -6,6 +6,7 @@ See README.md for provenance, verification and transport limitations.
 """
 
 from copy import copy
+from tau_assembly import Assembly
 from dataclasses import dataclass
 from math import acos, atan, atan2, cos, hypot, inf, pi, sin, sqrt, tan
 
@@ -187,7 +188,8 @@ def planet_unit(p, gear_blank):
     screw = head.fuse(chamfer(cylinder(2.48, 12, -12), 0.25, -12))
     socket = Face(Wire.make_polygon([polar(4 / sqrt(3), (30 + i * 60) * RAD) for i in range(6)], close=True))
     screw = screw.cut(extrude(socket, 3, 2.5))
-    unit = Compound(label="Planet Unit", children=[
+    unit = Assembly(label="Planet Unit", children=dict(zip(("gear", "pin", "bushing", "thrust-washer", "front-spacer", "rear-spacer",
+        "front-screw-washer", "rear-screw-washer", "front-screw", "rear-screw"), [
         part("Planet Gear", gear, "#B7C1CA"),
         part("Planet Pin", pin, "#8C9AA7"),
         part("Flanged Bushing", bushing, "#BE974E"),
@@ -198,8 +200,11 @@ def planet_unit(p, gear_blank):
         part("Rear Screw Washer", screw_washer.translate((0, 0, -9)), "#8C9AA7"),
         part("Front Socket Screw", screw.translate((0, 0, f + 9)), "#313B46"),
         part("Rear Socket Screw", screw.rotate(Axis.X, 180).translate((0, 0, -9)), "#313B46"),
-    ])
+    ], strict=True)))
     RigidJoint("mount", unit, Location())
+    RevoluteJoint("spin", unit, Axis.Z, angular_range=(-inf, inf))
+    unit.connect("spin", unit.joints["spin"], unit.parts["gear"].joints["axis"],
+                 angle=180 / PLANET_TEETH + PLANET_RELATIVE_RATIO * p.input_angle)
     return unit
 
 
@@ -228,73 +233,50 @@ def main(p: Params = Params()):
     prototype = planet_unit(p, gear_blank)
     units = []
     for i in range(3):
-        # Keep fresh assembly containers and shared leaf geometry. The original
-        # 0.11.1 spike exposed shared Compound root duplication in STEP export.
-        unit = Compound(label=f"Planet Unit {i + 1}", children=[copy(child) for child in prototype.children])
-        RigidJoint("mount", unit, prototype.joints["mount"].relative_location)
-        # Connect in module-local coordinates before the parent places the unit.
-        RevoluteJoint("spin", unit, Axis.Z, angular_range=(-inf, inf)).connect_to(
-            unit.children[0].joints["axis"], angle=180 / PLANET_TEETH + PLANET_RELATIVE_RATIO * p.input_angle
-        )
-        # Native child placement does not rebuild its containing Compound BRep.
-        # Reattach the children before sharing that assembled geometry upstream.
-        unit.children = unit.children
+        # Assembly copies rebind joints, handles and public endpoints independently.
+        unit = copy(prototype)
+        unit.label = f"Planet Unit {i + 1}"
         unit.move(Location(polar(a, i * 120 * RAD)))
         units.append(unit)
-    carrier = Compound(label="Carrier", children=[
-        part("Carrier Rear", rear, "#285E88"),
-        part("Carrier Front And Output Hub", front, "#285E88"),
-        *units,
-    ])
+    carrier = Assembly(label="Carrier", children={
+        "rear": part("Carrier Rear", rear, "#285E88"),
+        "front": part("Carrier Front And Output Hub", front, "#285E88"),
+        **{f"planet-{i + 1}": unit for i, unit in enumerate(units)},
+    })
     RigidJoint("mount", carrier, Location())
     RigidJoint("output", carrier, Location((0, 0, f + 26)))
     for i, unit in enumerate(units):
-        RigidJoint(f"planet-{i + 1}", carrier, Location(polar(a, i * 120 * RAD))).connect_to(unit.joints["mount"])
+        RigidJoint(f"planet-{i + 1}", carrier, Location(polar(a, i * 120 * RAD)))
+        carrier.connect(f"planet-{i + 1}", carrier.joints[f"planet-{i + 1}"], unit.joints["mount"])
     ring_part = part("Internal Ring Gear", ring, "#718293")
     sun_part = part("Sun Gear And Input Shaft", sun, "#D0D6DD")
-    RevoluteJoint("sun", ring_part, Axis.Z, angular_range=(-inf, inf)).connect_to(
-        sun_part.joints["axis"], angle=p.input_angle
-    )
-    RevoluteJoint("carrier", ring_part, Axis.Z, angular_range=(-inf, inf)).connect_to(
-        carrier.joints["mount"], angle=CARRIER_RATIO * p.input_angle
-    )
-    result = Compound(label="Planetary Gear System", children=[ring_part, sun_part, carrier])
+    RevoluteJoint("sun", ring_part, Axis.Z, angular_range=(-inf, inf))
+    RevoluteJoint("carrier", ring_part, Axis.Z, angular_range=(-inf, inf))
+    result = Assembly(label="Planetary Gear System", children={"ring": ring_part, "sun": sun_part, "carrier": carrier})
+    drive = result.connect("sun", ring_part.joints["sun"], sun_part.joints["axis"], angle=p.input_angle)
+    carrier_drive = result.connect("carrier", ring_part.joints["carrier"], carrier.joints["mount"], angle=CARRIER_RATIO * p.input_angle)
+    result.couple(driver=(drive, "angle"), follower=(carrier_drive, "angle"), ratio=CARRIER_RATIO)
+    for unit in units:
+        result.couple(driver=(drive, "angle"), follower=(unit.connections["spin"], "angle"),
+                      ratio=PLANET_RELATIVE_RATIO, offset=180 / PLANET_TEETH)
     RigidJoint("mount", result, Location())
-    # Public native aliases expose moving descendants without private child paths.
-    result.joints["input"] = ring_part.joints["sun"]
-    result.joints["carrier"] = ring_part.joints["carrier"]
-    result.joints["output"] = carrier.joints["output"]
-    for i, unit in enumerate(units):
-        result.joints[f"planet-{i + 1}"] = unit.joints["spin"]
+    result.expose_joint("input", ring_part.joints["sun"])
+    result.expose_joint("output", carrier.joints["output"])
     return result
 
 
 def motion(model):
-    """Tau transport supplement; native joints own attachment and initial placement.
+    """Root grounding and presentation; Assembly owns reusable motion relations.
 
-    All coordinates below are deltas from the authored input_angle pose. The
-    24/24/72 stage has a fixed ring: carrier = sun/4 and relative planet = -3*sun/4.
-    Combining carrier orbit with relative spin gives world planet angle = -sun/2.
+    The fixed-ring 24/24/72 stage has carrier=sun/4 and relative planet=-3*sun/4
+    plus its authored tooth phase. Clip values are absolute native degrees;
+    projection converts them to deltas from the parameter-authored input angle.
     """
-    drive = model.joints["input"]
-    carrier_joint = model.joints["carrier"]
-    ring = drive.parent
-    sun = drive.connected_to.parent
-    carrier = carrier_joint.connected_to.parent
-    occurrence_ids = {"stage": model, "ring": ring, "sun": sun, "carrier": carrier,
-                      "carrier-rear": carrier.children[0], "carrier-front": carrier.children[1]}
-    couplings = [{"driver": drive, "follower": carrier_joint, "ratio": CARRIER_RATIO}]
-    roles = ("gear", "pin", "bushing", "thrust-washer", "front-spacer", "rear-spacer",
-             "front-screw-washer", "rear-screw-washer", "front-screw", "rear-screw")
-    for i in range(1, 4):
-        planet_joint = model.joints[f"planet-{i}"]
-        unit = planet_joint.parent
-        occurrence_ids[f"planet-{i}"] = unit
-        occurrence_ids.update({f"planet-{i}-{role}": child for role, child in zip(roles, unit.children, strict=True)})
-        couplings.append({"driver": drive, "follower": planet_joint, "ratio": PLANET_RELATIVE_RATIO})
-    return {"ground": ring, "occurrence_ids": occurrence_ids, "couplings": couplings,
+    drive = model.connections["sun"]
+    angle = drive.coordinates["angle"]
+    return {"ground": model.parts["ring"],
             "animations": [{"id": "sun-four-turns", "name": "Sun input · four turns", "duration": 8,
                             "loop": "repeat", "keyframes": [
-                                {"time": 0, "coordinates": {drive: 0}},
-                                {"time": 8, "coordinates": {drive: 1440}},
+                                {"time": 0, "coordinates": {(drive, "angle"): angle}},
+                                {"time": 8, "coordinates": {(drive, "angle"): angle + 1440}},
                             ]}]}

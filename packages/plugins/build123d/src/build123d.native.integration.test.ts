@@ -289,7 +289,7 @@ def main(params):
             const orbit = (((planet - 1) * 120 + (inputAngle + angle) / 4) * Math.PI) / 180;
             const expected = [0.048 * Math.cos(orbit), 0.007, -0.048 * Math.sin(orbit)];
             const centers = ['gear', 'pin'].map((role) => {
-              const id = `occurrence:planet-${planet}-${role}`;
+              const id = `occurrence:0/carrier/planet-${planet}/${role}`;
               const component = payload.components.find((candidate) => candidate.id === id);
               assert.ok(component?.primitiveRefs);
               const linkId = Object.entries(mechanism.links).find(([, body]) => body.components.includes(id))?.[0];
@@ -430,6 +430,7 @@ def main(params):
       'main.py': `from dataclasses import dataclass
 from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
 from reusable import textured_part
+from tau_assembly import Assembly
 
 @dataclass(frozen=True)
 class Params:
@@ -440,16 +441,17 @@ def main(params):
     rotor = textured_part(params.size)
     RevoluteJoint("shaft", base, Axis.Z, angle_reference=(1, 1, 0))
     RigidJoint("mount", rotor)
-    base.joints["shaft"].connect_to(rotor.joints["mount"], angle=22.5)
-    return Compound(children=[base, rotor], label="Module")
+    model = Assembly(children={"base": base, "rotor": rotor}, label="Module")
+    model.connect("drive", base.joints["shaft"], rotor.joints["mount"], angle=22.5)
+    return model
 
 def motion(model):
     base, rotor = model.children
-    joint = base.joints["shaft"]
-    return {"ground": base, "occurrence_ids": {"base": base, "rotor": rotor},
+    joint = model.connections["drive"]
+    return {"ground": base,
             "animations": [{"id": "turn", "duration": 1, "keyframes": [
-                {"time": 0, "coordinates": {joint: 0}},
-                {"time": 1, "coordinates": {joint: 90}}]}]}
+                {"time": 0, "coordinates": {(joint, "angle"): 22.5}},
+                {"time": 1, "coordinates": {(joint, "angle"): 112.5}}]}]}
 `,
       'reusable.py': `from pathlib import Path
 from build123d import Box
@@ -478,7 +480,7 @@ def textured_part(size):
         const reopened = await glbToDocument(bytes);
         const payload = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
         expect(payload).toMatchObject({
-          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:base', connections: [expect.any(Object)] },
+          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:0/base', connections: [expect.any(Object)] },
           mechanism: { animations: [{ id: 'turn' }] },
         });
         const textures = reopened.getRoot().listTextures();

@@ -17,11 +17,11 @@ import type { build123dOptionsSchema } from '#build123d.schemas.js';
 
 /** Closure-relative POSIX path of the interpreter python-build-standalone ships. */
 const pythonPath = 'python/bin/python3';
-/** Closure-relative directory the worker and its four support modules unpack into. */
+/** Closure-relative directory the worker and its five support modules unpack into. */
 const workerDirectory = 'tau-worker';
-/** Closure-relative worker entry point and its four support modules. */
+/** Closure-relative worker entry point and its five support modules. */
 const workerPath = `${workerDirectory}/worker.py`;
-const supportPaths = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map(
+const supportPaths = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py', 'tau_assembly.py'].map(
   (name) => `${workerDirectory}/${name}`,
 );
 const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
@@ -47,7 +47,7 @@ const rowOf = (receipt: ClosureLaunch, path: string): ReceiptFile => {
 const absolute = (receipt: ClosureLaunch, path: string): string => join(receipt.root, ...path.split('/'));
 
 /**
- * Build123d's launch set: the interpreter and the five worker scripts, which every launch hashes.
+ * Build123d's launch set: the interpreter and the six worker scripts, which every launch hashes.
  * The preparation host records their rows in the closure's launch index, so a launch never reads the 22,000-row
  * receipt; the rest of the closure is re-verified when the worker exits before its handshake.
  * @returns Closure-relative paths.
@@ -57,7 +57,7 @@ export const build123dLaunchSet = (): readonly string[] => [pythonPath, workerPa
 
 /**
  * Map a sealed `engine` closure to the options `build123dKernel` already takes: the interpreter, the worker and its
- * four support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
+ * five support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
  * sandbox may read. The session hashes exactly these files at launch (D8), so the per-launch check stays O(1).
  *
  * @param receipt - The closure `tau prepare build123d` sealed: its receipt, or the launch view a preparation host's
@@ -197,6 +197,9 @@ export const createBuild123dSeal =
         signal: input.signal,
       });
       if (imported.exitCode === 0) {
+        // Importing native modules takes long enough for an external metadata writer to alter the tree.
+        // Check the final tree too, before the host inventories additions into the sealed receipt.
+        await assertOnlyBytecodeAdded({ ...input, root });
         return undefined;
       }
       const blocked = systemLibraryRefusal({ package: input.package, output: imported.stderr, attemptId: '' });

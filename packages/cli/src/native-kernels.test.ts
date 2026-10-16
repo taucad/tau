@@ -60,6 +60,7 @@ describe('native kernels from the payload store', () => {
       'tau-worker/glb.py',
       'tau-worker/native_materials.py',
       'tau-worker/mechanisms.py',
+      'tau-worker/tau_assembly.py',
     ]);
     expect(picogk?.launchSet).toBeTypeOf('function');
   });

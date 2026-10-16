@@ -45,6 +45,7 @@ describe('Build123d tau-plugin.json', () => {
         { path: '/closure/tau-worker/glb.py', sha256: 'd'.repeat(64) },
         { path: '/closure/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
         { path: '/closure/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
+        { path: '/closure/tau-worker/tau_assembly.py', sha256: 'f'.repeat(64) },
       ],
     });
     expect(deployment.kernels).toEqual({ [kernel.id]: { requires: ['engine'], extensions: [...kernel.extensions] } });
@@ -83,6 +84,7 @@ describe('Build123d tau-plugin.json', () => {
         'glb.py',
         'native_materials.py',
         'mechanisms.py',
+        'tau_assembly.py',
       ]);
       for (const { payload, hex } of workers) {
         const bytes = readFileSync(join(packageRoot, 'python', payload.name));
@@ -206,8 +208,8 @@ describe('Build123d targets (charter D15–D18, W14)', () => {
     readonly expected: string;
   }>([
     {
-      name: 'glibc 2.28 (S17: OCP needs manylinux_2_31)',
-      host: linux('x64', 'glibc', '2.28'),
+      name: 'glibc 2.27 (OCP 8.0.1 needs manylinux_2_28)',
+      host: linux('x64', 'glibc', '2.27'),
       expected: 'unsupported minimumLibcVersion, nearest linux-x64-glibc',
     },
     { name: 'musl (alpine)', host: linux('x64', 'musl'), expected: 'unsupported libc, nearest linux-x64-glibc' },

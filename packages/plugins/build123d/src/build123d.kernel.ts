@@ -186,7 +186,7 @@ export const build123dKernel = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
-  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1',
+  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.assembly1',
   optionsSchema: build123dOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: build123dRenderSchema } },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.

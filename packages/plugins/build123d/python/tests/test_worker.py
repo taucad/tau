@@ -358,15 +358,14 @@ class WorkerTest(unittest.TestCase):
             root = Path(directory)
             entry = root / "main.py"
             entry.write_text(MODEL.replace("return Box(params.width, 3, 4)",
-                "left = Box(1, 1, 1); right = Box(1, 1, 1); left.label = right.label = 'same'; return [left, right]") +
-                "\ndef motion(model): return {'occurrence_ids': {'left': model[0], 'right': model[1]}}\n")
+                "from tau_assembly import Assembly; left = Box(1, 1, 1); right = Box(1, 1, 1); left.label = right.label = 'same'; return Assembly(children={'left': left, 'right': right})"))
             declarations = []
             shapes, _ = worker._load_model(root, "main.py", {}, motion=declarations.append)
             components, meshes = worker._topology(shapes, 0.1, 0.1)
             worker.project_mechanism(shapes, components, declarations[0], meshes=meshes)
-            self.assertEqual([item["name"] for item in components], ["same", "same"])
-            self.assertEqual([item["id"] for item in components], ["occurrence:left", "occurrence:right"])
-            self.assertEqual(set(meshes), {"occurrence:left", "occurrence:right"})
+            self.assertEqual([item["name"] for item in components[1:]], ["same", "same"])
+            self.assertEqual([item["id"] for item in components[1:]], ["occurrence:0/left", "occurrence:0/right"])
+            self.assertEqual(set(meshes), {"occurrence:0/left", "occurrence:0/right"})
 
     def test_motion_hook_is_evaluated_with_the_native_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

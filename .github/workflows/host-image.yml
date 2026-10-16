@@ -57,7 +57,7 @@ jobs:
           TAU_IMAGE: ${{ env.IMAGE }}
           TAU_STORE_DIR: ${{ runner.temp }}/store
           TAU_SANDBOX_DOCKER_OPTS: ${{ env.SANDBOX_OPTS }}
-          TAU_BUILDX_ARGS: --cache-from type=gha,scope=host-image --cache-to type=gha,scope=host-image,mode=max
+          TAU_BUILDX_ARGS: --cache-from type=gha,scope=host-image --cache-to type=gha,scope=host-image,mode=max,ignore-error=true
         run: |
           set -o pipefail
           mkdir -p "$EVIDENCE"

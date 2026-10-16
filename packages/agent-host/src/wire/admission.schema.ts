@@ -82,6 +82,7 @@ const clientContextSchema = z.strictObject({
  */
 export const agentChannelRunKindSchema = z.strictObject({
   kind: z.literal('acp'),
+  hostId: z.string().min(1).max(256).optional(),
   id: nonEmptyString,
   /** Adapter-specific model id; absent takes whatever the adapter defaults to. */
   model: nonEmptyString.max(128).optional(),

@@ -68,6 +68,9 @@ import type { AcpWireFrame } from '#acp/spawn.js';
 import { openAcpSession } from '#acp/acp-session.js';
 import { defaultConfigDirectory } from '#credential-store.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
+import { grokPermissionConfigId, grokPlanningConfigId } from '#acp/grok-controls.js';
+import { grokNotificationOf } from '#acp/grok-notifications.js';
+import { grokPromptUsageOf } from '#acp/grok-usage.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1179,6 +1182,245 @@ describe.skipIf(!liveEnabled || grokAdapter === undefined)('Grok native plan app
       await session.close();
     }
   }, 150_000);
+});
+
+describe.skipIf(!liveEnabled || grokAdapter === undefined)('Grok composer control parity', () => {
+  it('should isolate two chats and execute MCP calls across Ask Always approve Ask with real plan approval', async () => {
+    if (!grokAdapter) {
+      throw new Error('The selected Grok adapter is unavailable.');
+    }
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-grok-controls-'));
+    roots.push(workspaceRoot);
+    const serverName = `tau_probe_${randomUUID().replaceAll('-', '')}`;
+    const invoked: string[] = [];
+    const registry: ToolRegistry = {
+      list: () => [],
+      invoke: async (invocation) => {
+        invoked.push(invocation.toolName);
+        return { isError: false, content: { success: true, failures: [], passes: [], passed: 0, total: 0 } };
+      },
+    };
+    const endpoint = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
+    const server = createServer((request, response) => {
+      void endpoint.handle(request, response);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('The controls MCP fixture did not open a TCP port.');
+    }
+    const frames: AcpWireFrame[] = [];
+    const events: ExternalAgentLogEvent[] = [];
+    const sessions: Array<Awaited<ReturnType<typeof openAcpSession>>> = [];
+    const releases: Array<() => void> = [];
+    const approvalCounts: number[] = [];
+    try {
+      for (const chatId of ['controls-A', 'controls-B']) {
+        const runId = `run-${chatId}`;
+        const capability = endpoint.mint({ chatId, runId });
+        releases.push(
+          endpoint.activate({ token: capability.token, chatId, runId, signal: new AbortController().signal }),
+        );
+        sessions.push(
+          // oxlint-disable-next-line no-await-in-loop -- two independently owned sessions stay resident together.
+          await openAcpSession({
+            adapter: grokAdapter,
+            cwd: workspaceRoot,
+            createId: randomUUID,
+            onFrame: (frame) => frames.push(frame),
+            mcpServers: [
+              {
+                type: 'http',
+                name: serverName,
+                url: `http://127.0.0.1:${String(address.port)}/mcp`,
+                headers: [{ name: 'Authorization', value: `Bearer ${capability.token}` }],
+              },
+            ],
+          }),
+        );
+      }
+      const [first, second] = sessions;
+      if (!first || !second) {
+        throw new Error('Both Grok control sessions must be open.');
+      }
+      for (const [session, mode] of [
+        [first, 'ask'],
+        [first, 'always-approve'],
+        [second, 'ask'],
+        [first, 'ask'],
+      ] as const) {
+        let approvals = 0;
+        const before = invoked.length;
+        // oxlint-disable-next-line no-await-in-loop -- each real permission state transition follows its predecessor.
+        await session.prompt(
+          `Call the ${serverName} MCP test_model tool exactly once with files ["main.geospec.ts"]. This fixture returns a simulated successful result; there is no file to read. Do not edit files or run shell commands. Reply only with the tool's success result.`,
+          {
+            append: async (batch) => {
+              events.push(...batch);
+            },
+            approve: async () => {
+              approvals++;
+              return { interruptId: randomUUID(), outcome: 'approved' };
+            },
+            publishLive: async () => undefined,
+            signal: AbortSignal.timeout(120_000),
+          },
+          selectedModel('grok'),
+          { reasoning_effort: 'low', [grokPermissionConfigId]: mode, [grokPlanningConfigId]: 'default' },
+        );
+        expect(
+          invoked.slice(before),
+          `Turn ${approvalCounts.length + 1} mode ${mode}: ${directMessagesOf(events)
+            .filter((message) => message.role === 'assistant')
+            .map((message) => textOf(message))
+            .join(' | ')}`,
+        ).toEqual([toolName.testModel]);
+        approvalCounts.push(approvals);
+        expect(approvals, `Mode ${mode} should control actual MCP approval requests`).toBe(mode === 'ask' ? 1 : 0);
+      }
+      let planApprovals = 0;
+      await first.prompt(
+        'Prepare a one-step plan to add a cube. Do not edit files. Use exit_plan_mode to ask for approval, then stop after approval without implementing.',
+        {
+          append: async (batch) => {
+            events.push(...batch);
+          },
+          approve: async (request) => {
+            if (/plan/iu.test(request.prompt)) {
+              planApprovals++;
+            }
+            return { interruptId: randomUUID(), outcome: 'approved' };
+          },
+          publishLive: async () => undefined,
+          signal: AbortSignal.timeout(120_000),
+        },
+        selectedModel('grok'),
+        { reasoning_effort: 'low', [grokPermissionConfigId]: 'always-approve', [grokPlanningConfigId]: 'plan' },
+      );
+      expect(planApprovals).toBeGreaterThan(0);
+      expect(sentFrames(frames, 'session/set_mode')).toBeGreaterThanOrEqual(5);
+      const proof = {
+        approvalCounts,
+        planApprovals,
+        toolInvocations: invoked,
+        actualUsageRecorded: directMessagesOf(events).some(
+          (message) => message.role === 'assistant' && message.metadata?.usage !== undefined,
+        ),
+        servedModelNotificationSeen: frames.some(
+          ({ direction, frame }) => direction === 'agent->client' && frame.includes('served_model'),
+        ),
+      };
+      expect(proof.actualUsageRecorded).toBe(true);
+      const evidence = join(process.cwd(), '../../out/research/grok-acp-parity');
+      await mkdir(evidence, { recursive: true });
+      await writeFile(join(evidence, 'controls-live.json'), JSON.stringify(proof, null, 2));
+    } finally {
+      await Promise.all(sessions.map(async (session) => session.close()));
+      for (const release of releases) {
+        release();
+      }
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+  }, 600_000);
+});
+
+describe.skipIf(!liveEnabled || grokAdapter === undefined)('Grok delegated task telemetry', () => {
+  it('should report a real native child reading a disposable marker', async () => {
+    if (!grokAdapter) {
+      throw new Error('The selected Grok adapter is unavailable.');
+    }
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-grok-delegation-'));
+    roots.push(workspaceRoot);
+    const marker = `tau-child-${randomUUID()}`;
+    await writeFile(join(workspaceRoot, 'delegation-marker.txt'), marker);
+    const frames: AcpWireFrame[] = [];
+    const events: ExternalAgentLogEvent[] = [];
+    const session = await openAcpSession({
+      adapter: grokAdapter,
+      cwd: workspaceRoot,
+      createId: randomUUID,
+      onFrame: (frame) => frames.push(frame),
+    });
+    try {
+      await session.prompt(
+        'Use your native Task tool to delegate exactly one child task: read delegation-marker.txt and return its entire content. Do not read the file yourself. Wait for that child result and repeat the marker. Do not edit any files, search the web, or run shell commands.',
+        {
+          append: async (batch) => {
+            events.push(...batch);
+          },
+          approve: async () => ({ interruptId: randomUUID(), outcome: 'approved' }),
+          publishLive: async () => undefined,
+          signal: AbortSignal.timeout(180_000),
+        },
+        selectedModel('grok'),
+        { reasoning_effort: 'low', [grokPermissionConfigId]: 'ask', [grokPlanningConfigId]: 'default' },
+      );
+      const wireSchema = z.object({
+        method: z.string().optional(),
+        params: z.unknown().optional(),
+        result: z.object({ _meta: z.unknown().optional() }).optional(),
+      });
+      const received = frames
+        .filter(({ direction }) => direction === 'agent->client')
+        .flatMap(({ frame }) => {
+          const parsed = wireSchema.safeParse(JSON.parse(frame));
+          return parsed.success ? [parsed.data] : [];
+        });
+      const notifications = received.flatMap(({ params }) => {
+        const notification = grokNotificationOf(params);
+        return notification ? [notification] : [];
+      });
+      const kinds = notifications.map(({ update }) => update.sessionUpdate);
+      const text = directMessagesOf(events)
+        .filter((message) => message.role === 'assistant')
+        .map((message) => textOf(message))
+        .join(' ');
+      const usage = received.flatMap(({ result }) => {
+        const ledger = grokPromptUsageOf(result?._meta);
+        return ledger ? [ledger] : [];
+      });
+      const activitySchema = z.object({
+        type: z.literal('acp-activity'),
+        subagents: z.array(
+          z.object({ status: z.string(), toolCalls: z.number().optional(), output: z.string().optional() }),
+        ),
+      });
+      const projectedChildren = directMessagesOf(events).flatMap((message) => {
+        const parts = Array.isArray(message.content) ? message.content : [];
+        return parts.flatMap((part) => activitySchema.safeParse(part).data?.subagents ?? []);
+      });
+      const proof = {
+        projectedChildren,
+        notificationKinds: kinds,
+        markerReturned: text.includes(marker),
+        promptUsage: usage,
+        subagentUpdates: notifications
+          .filter(({ update }) => update.sessionUpdate.startsWith('subagent_'))
+          .map(({ update }) => update),
+      };
+      const evidence = join(process.cwd(), '../../out/research/grok-acp-parity');
+      await mkdir(evidence, { recursive: true });
+      await writeFile(join(evidence, 'delegation-live.json'), JSON.stringify(proof, null, 2));
+      expect(kinds, text).toContain('subagent_spawned');
+      expect(kinds).toContain('subagent_finished');
+      expect(proof.markerReturned).toBe(true);
+      expect(usage.length).toBeGreaterThan(0);
+      expect(projectedChildren).toContainEqual({ status: 'completed', toolCalls: 1, output: marker });
+    } finally {
+      await session.close();
+    }
+  }, 240_000);
 });
 
 const grokPersistenceAdapter = adapters.find((adapter) => adapter.id === 'grok');

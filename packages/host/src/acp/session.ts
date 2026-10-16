@@ -91,6 +91,11 @@ import type {
   ToolInputProviderMessage,
 } from '@taucad/agent-host';
 
+import type { GrokNotification } from '#acp/grok-notifications.js';
+import { grokPromptUsageOf, grokVendorCostOf } from '#acp/grok-usage.js';
+import type { GrokPromptUsage } from '#acp/grok-usage.js';
+import { initialGrokNotificationState, grokNotificationAfter, finishGrokPresentation } from '#acp/grok-presentation.js';
+import type { GrokPresentation } from '#acp/grok-presentation.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
@@ -1064,6 +1069,7 @@ type TurnProjection = {
   /** The chat title the agent proposed, if any. */
   readonly title: string | undefined;
   update(update: SessionUpdate): void;
+  grokNotification(notification: GrokNotification): void;
   sessionState(state: AcpSessionPresentation): void;
   approve(
     request: Parameters<ExternalAgentTurn['approve']>[0],
@@ -1075,12 +1081,17 @@ type TurnProjection = {
    * `PromptResponse` arrives after every notification, so this is the last
    * thing the turn learns and the first thing its final message must carry.
    */
-  report(input: { readonly usage?: AcpUsage | undefined; readonly model?: string | undefined }): void;
+  report(input: {
+    readonly usage?: AcpUsage | undefined;
+    readonly model?: string | undefined;
+    readonly grokUsage?: GrokPromptUsage | undefined;
+  }): void;
   flush(): Promise<void>;
 };
 
 /** Latest replaceable presentation facts for one ACP session. @internal */
-export type AcpSessionPresentation = {
+export type AcpSessionPresentation = Partial<GrokPresentation> & {
+  readonly hostId?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly title?: string | undefined;
   readonly plan?: JsonValue | undefined;
@@ -1208,15 +1219,6 @@ const vendorUsageOf = (usage: AcpUsage): JsonObject => {
   return totals;
 };
 
-const grokUsageSchema = z.object({
-  inputTokens: z.number().nonnegative(),
-  outputTokens: z.number().nonnegative(),
-  totalTokens: z.number().nonnegative(),
-  cachedReadTokens: z.number().nonnegative().optional(),
-  cacheCreationTokens: z.number().nonnegative().optional(),
-  reasoningTokens: z.number().nonnegative().optional(),
-});
-
 /**
  * Normalize Grok's per-prompt counters to the cumulative ACP usage contract.
  * @internal
@@ -1233,18 +1235,21 @@ export const promptUsageOf = (
   if (isPresent(response.usage) || agentId !== 'grok') {
     return response.usage ?? undefined;
   }
-  const parsed = grokUsageSchema.safeParse(response._meta?.['usage']);
-  if (!parsed.success) {
+  const usage = grokPromptUsageOf(response._meta);
+  if (usage === undefined) {
     return undefined;
   }
-  const usage = parsed.data;
   return {
-    inputTokens: (prior?.inputTokens ?? 0) + usage.inputTokens,
+    inputTokens:
+      (prior?.inputTokens ?? 0) +
+      Math.max(0, usage.inputTokens - (usage.cachedReadTokens ?? 0) - (usage.cacheCreationTokens ?? 0)),
     outputTokens: (prior?.outputTokens ?? 0) + usage.outputTokens,
     totalTokens: (prior?.totalTokens ?? 0) + usage.totalTokens,
     cachedReadTokens: (prior?.cachedReadTokens ?? 0) + (usage.cachedReadTokens ?? 0),
     cachedWriteTokens: (prior?.cachedWriteTokens ?? 0) + (usage.cacheCreationTokens ?? 0),
-    thoughtTokens: (prior?.thoughtTokens ?? 0) + (usage.reasoningTokens ?? 0),
+    ...(usage.reasoningTokens === undefined
+      ? {}
+      : { thoughtTokens: (prior?.thoughtTokens ?? 0) + usage.reasoningTokens }),
   };
 };
 
@@ -1258,6 +1263,7 @@ export const promptUsageOf = (
 // oxlint-disable-next-line eslint/max-lines-per-function -- one turn is one ordered projection; splitting the update switch from the handlers that feed it would hide the ordering this function exists to keep.
 export const createTurnProjection = (options: {
   readonly turn: AcpPromptTurn;
+  readonly requestId?: string | undefined;
   readonly createId: () => string;
   readonly agentId: string;
   /** The pinned connection negotiated settings readback; never inferred from a tool update. */
@@ -1353,6 +1359,7 @@ export const createTurnProjection = (options: {
    */
   const reported: {
     usage?: AcpUsage | undefined;
+    grokUsage?: GrokPromptUsage | undefined;
     model?: string | undefined;
     title?: string | undefined;
     /** The vendor's own money report — its number, its currency, its label. */
@@ -1361,6 +1368,9 @@ export const createTurnProjection = (options: {
     context?: JsonValue | undefined;
   } = {};
   let sessionPresentation = emptySessionPresentation;
+  let grokState = initialGrokNotificationState();
+  let activityMessageId: string | undefined;
+  let activityCommitted = false;
   let sessionMessageId: string | undefined;
   let sessionCommitted = false;
 
@@ -1430,6 +1440,7 @@ export const createTurnProjection = (options: {
         ...(streamState === undefined ? {} : { streamState }),
         ...(!final || usage === undefined ? {} : { vendorUsage: vendorUsageOf(usage) }),
         ...(!final || cost === undefined ? {} : { vendorCost: cost }),
+        ...(!final || reported.grokUsage === undefined ? {} : { vendorPromptUsage: asJson(reported.grokUsage) }),
         ...(!final || context === undefined ? {} : { vendorContext: context }),
       },
     };
@@ -1496,6 +1507,7 @@ export const createTurnProjection = (options: {
     const content = asJson({
       type: 'acp-session',
       agentId: options.agentId,
+      ...(sessionPresentation.hostId === undefined ? {} : { hostId: sessionPresentation.hostId }),
       commands: sessionPresentation.commands,
       configOptions: sessionPresentation.configOptions,
       ...(sessionPresentation.sessionId === undefined ? {} : { sessionId: sessionPresentation.sessionId }),
@@ -1516,6 +1528,24 @@ export const createTurnProjection = (options: {
         : { type: 'message.appended', message },
     ]);
     sessionCommitted = true;
+  };
+
+  /** Keep each turn's observations beside its own transcript, independent of chat configuration. */
+  const publishGrokPresentation = async (): Promise<void> => {
+    await flushBoundary();
+    const state = grokState.presentation;
+    const message: ProviderMessage = {
+      id: (activityMessageId ??= options.createId()),
+      role: 'assistant',
+      content: [asJson({ type: 'acp-activity', agentId: options.agentId, ...state })],
+      metadata: externalMetadata,
+    };
+    await append([
+      activityCommitted
+        ? { type: 'message.envelope-replaced', messageId: message.id, replacement: message }
+        : { type: 'message.appended', message },
+    ]);
+    activityCommitted = true;
   };
 
   /**
@@ -1709,6 +1739,16 @@ export const createTurnProjection = (options: {
 
   // oxlint-disable-next-line eslint/complexity -- one branch per `session/update` variant is the point (V13): every variant carries an explicit ruling here, and a `default` would turn the next protocol addition into a silent drop.
   const project = async (update: SessionUpdate): Promise<void> => {
+    if (
+      sessionPresentation.activity?.status === 'running' &&
+      ['agent_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update'].includes(update.sessionUpdate)
+    ) {
+      const { activity: _activity, ...rest } = sessionPresentation;
+      sessionPresentation = rest;
+      const { activity: _grokActivity, ...grokPresentation } = grokState.presentation;
+      grokState = { ...grokState, presentation: grokPresentation };
+      await publishGrokPresentation();
+    }
     switch (update.sessionUpdate) {
       case 'agent_message_chunk':
       case 'agent_thought_chunk': {
@@ -1928,9 +1968,29 @@ export const createTurnProjection = (options: {
         await project(update);
       });
     },
+    grokNotification: (notification) => {
+      if (options.agentId !== 'grok' || finalized) {
+        return;
+      }
+      enqueue(async () => {
+        const next = grokNotificationAfter(grokState, notification, {
+          sessionId: sessionPresentation.sessionId ?? '',
+          promptId: options.requestId,
+        });
+        if (next === grokState) {
+          return;
+        }
+        grokState = next;
+        sessionPresentation = { ...sessionPresentation, ...next.presentation };
+        if (next.presentation.servedModel !== undefined) {
+          reported.model = next.presentation.servedModel;
+        }
+        await publishGrokPresentation();
+      });
+    },
     sessionState: (state) => {
       enqueue(async () => {
-        sessionPresentation = state;
+        sessionPresentation = { ...sessionPresentation, ...state };
         await publishSessionState();
       });
     },
@@ -2000,7 +2060,11 @@ export const createTurnProjection = (options: {
     },
     report: (input) => {
       reported.usage = input.usage ?? reported.usage;
-      reported.model = input.model ?? reported.model;
+      reported.model = grokState.presentation.servedModel ?? input.model ?? reported.model;
+      reported.grokUsage = input.grokUsage ?? reported.grokUsage;
+      if (input.grokUsage !== undefined) {
+        reported.cost = asJson(grokVendorCostOf(input.grokUsage)) ?? undefined;
+      }
     },
     get title(): string | undefined {
       return reported.title;
@@ -2010,6 +2074,16 @@ export const createTurnProjection = (options: {
         return;
       }
       await settleProjection();
+      if (
+        options.agentId === 'grok' &&
+        (sessionPresentation.activity !== undefined || sessionPresentation.subagents !== undefined)
+      ) {
+        const finished = finishGrokPresentation(grokState.presentation);
+        const { activity: _activity, ...rest } = sessionPresentation;
+        sessionPresentation = { ...rest, ...finished };
+        grokState = { ...grokState, presentation: finished };
+        await publishGrokPresentation();
+      }
       for (const open of openToolCalls.values()) {
         // Preserve undecided media if cancellation or transport loss prevents a terminal result.
         // oxlint-disable-next-line no-await-in-loop -- durable call order is retained.

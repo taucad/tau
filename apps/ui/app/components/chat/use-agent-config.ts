@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AcpSessionData } from '@taucad/chat';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
@@ -7,7 +7,7 @@ export type AgentConfigOption = AcpSessionData['configOptions'][number];
 
 /** The agent's own options, and how to read and change them. */
 export type AgentConfig = {
-  /** Every non-model session option, or discovered reasoning before the first turn. Empty on Tau. */
+  /** Every non-model session option, or discovered controls before the first turn. Empty on Tau. */
   readonly options: readonly AgentConfigOption[];
   /** The value in force: a pending choice first, else what the session confirmed. */
   readonly valueOf: (option: AgentConfigOption) => string | boolean;
@@ -41,23 +41,53 @@ export const configValues = (
  *
  * @param sessionData - The latest session presentation for the chat.
  * @param status - The chat's status; a settled turn confirms what it carried.
- * @param discoveredThoughtLevel - The agent's own reasoning option from discovery, before a session exists.
+ * @param discoveredOptions - Verified agent controls and model reasoning from discovery, before a session exists.
  * @returns The options, their values and the setter.
  */
 export const useAgentConfig = (
   sessionData: AcpSessionData | undefined,
   status: string,
-  discoveredThoughtLevel?: AgentConfigOption,
+  discoveredOptions: readonly AgentConfigOption[] = [],
 ): AgentConfig => {
   const {
     execution: { execution, setActiveExecution },
   } = useChatComposer();
-  const confirmed = JSON.stringify(sessionData?.configOptions.map((option) => [option.id, option.currentValue]) ?? []);
+  const ownerKey = JSON.stringify(
+    execution.kind === 'acp'
+      ? [execution.kind, execution.hostId, execution.agentId, execution.model]
+      : [execution.kind],
+  );
+  const owner = useMemo(() => ({ key: ownerKey }), [ownerKey]);
+  const activeOwner = useRef<typeof owner | undefined>(owner);
+  useLayoutEffect(() => {
+    activeOwner.current = owner;
+    return () => {
+      activeOwner.current = undefined;
+    };
+  }, [owner]);
+  const liveSession =
+    execution.kind === 'acp' && sessionData?.agentId === execution.agentId && sessionData.hostId === execution.hostId;
+  const sessionModel = sessionData?.configOptions.find((option) => option.category === 'model')?.currentValue;
+  const liveModel = liveSession && (execution.model === undefined || execution.model === sessionModel);
+  const confirmedOptions = useMemo(
+    () =>
+      liveSession
+        ? sessionData.configOptions.filter(
+            (option) => option.category !== 'model' && (liveModel || option.category !== 'thought_level'),
+          )
+        : [],
+    [liveModel, liveSession, sessionData],
+  );
+  const confirmed = JSON.stringify(confirmedOptions.map((option) => [option.id, option.currentValue]));
   const [pending, setPending] = useState<{
+    readonly owner: typeof owner;
     readonly confirmed: string;
     readonly values: Readonly<Record<string, string | boolean>>;
     readonly submitted: Readonly<Record<string, string | boolean>>;
-  }>({ confirmed, values: {}, submitted: {} });
+  }>({ owner, confirmed, values: {}, submitted: {} });
+  if (pending.owner !== owner) {
+    setPending({ owner, confirmed, values: {}, submitted: {} });
+  }
   const previousStatus = useRef(status);
   const previousSession = useRef<AcpSessionData | undefined>(undefined);
   useEffect(() => {
@@ -81,43 +111,58 @@ export const useAgentConfig = (
           !sessionReplaced && (!settled || !Object.hasOwn(pending.submitted, id) || pending.submitted[id] !== value),
       ),
     );
-    setPending({ confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
-    if (sessionData?.agentId === execution.agentId) {
-      const actual = Object.fromEntries(
-        sessionData.configOptions.flatMap((option) =>
-          option.category !== 'model' &&
-          (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean')
-            ? [[option.id, option.currentValue]]
-            : [],
-        ),
-      );
+    setPending({ owner, confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
+    if (liveSession) {
+      const actual = Object.fromEntries(confirmedOptions.map((option) => [option.id, option.currentValue]));
       const { config: _config, ...selection } = execution;
-      const config = { ...actual, ...retained };
+      const selectedReasoning = liveModel
+        ? {}
+        : Object.fromEntries(
+            discoveredOptions.flatMap((option): Array<[string, string | boolean]> => {
+              const value = execution.config?.[option.id];
+              return option.category === 'thought_level' && value !== undefined ? [[option.id, value]] : [];
+            }),
+          );
+      const config = { ...selectedReasoning, ...actual, ...retained };
       setActiveExecution({ ...selection, ...(Object.keys(config).length === 0 ? {} : { config }) });
     }
-  }, [confirmed, execution, pending, sessionData, setActiveExecution, status]);
-  const pendingValues = pending.confirmed === confirmed ? pending.values : {};
-  /* A session of another agent (the chat just switched) offers nothing for this one. */
-  const liveSession = execution.kind === 'acp' && sessionData?.agentId === execution.agentId;
+  }, [
+    confirmed,
+    confirmedOptions,
+    discoveredOptions,
+    execution,
+    liveModel,
+    liveSession,
+    owner,
+    pending,
+    sessionData,
+    setActiveExecution,
+    status,
+  ]);
+  const pendingValues = pending.owner === owner && pending.confirmed === confirmed ? pending.values : {};
   const options = liveSession
-    ? sessionData.configOptions.filter((option) => option.category !== 'model')
-    : execution.kind === 'acp' && discoveredThoughtLevel
-      ? [discoveredThoughtLevel]
+    ? [
+        ...confirmedOptions,
+        ...(liveModel ? [] : discoveredOptions.filter((option) => option.category === 'thought_level')),
+      ]
+    : execution.kind === 'acp'
+      ? discoveredOptions.filter((option) => option.category !== 'model')
       : [];
   return {
     options,
     valueOf: (option) =>
-      liveSession
+      liveSession && (liveModel || option.category !== 'thought_level')
         ? (pendingValues[option.id] ?? option.currentValue)
         : ((execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ?? option.currentValue),
     select: (id, value) => {
-      if (execution.kind !== 'acp') {
+      if (execution.kind !== 'acp' || activeOwner.current !== owner) {
         return;
       }
       setPending((current) => ({
         ...current,
+        owner,
         confirmed,
-        values: { ...(current.confirmed === confirmed ? current.values : {}), [id]: value },
+        values: { ...(current.owner === owner && current.confirmed === confirmed ? current.values : {}), [id]: value },
       }));
       setActiveExecution({ ...execution, config: { ...execution.config, [id]: value } });
     },

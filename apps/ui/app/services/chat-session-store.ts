@@ -128,6 +128,7 @@ const nonOutputChunkTypes: ReadonlySet<string> = new Set([
   'abort',
   'message-metadata',
   'data-acp-session',
+  'data-acp-activity',
 ]);
 
 // ---------------------------------------------------------------------------

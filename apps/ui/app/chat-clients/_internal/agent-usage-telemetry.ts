@@ -87,6 +87,7 @@ const structuralChunks = new Set([
   'error',
   'message-metadata',
   'data-acp-session',
+  'data-acp-activity',
 ]);
 const knownKinds: ReadonlySet<string> = new Set(agentToolKinds);
 /**

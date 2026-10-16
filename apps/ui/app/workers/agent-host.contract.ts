@@ -155,6 +155,7 @@ export type AgentHostProjectRebridge = {
  * @public
  */
 export type AgentHostExternalAgent = {
+  readonly hostId?: string | undefined;
   readonly kind: 'acp';
   readonly id: string;
   readonly model?: string;
@@ -326,6 +327,7 @@ export const agentHostAdmissionConfigSchema = z.strictObject({
  */
 export const agentHostExternalAgentSchema = z.strictObject({
   kind: z.literal('acp'),
+  hostId: z.string().min(1).max(256).optional(),
   id: nonEmptyString,
   model: nonEmptyString.optional(),
   config: z.record(nonEmptyString, z.union([z.string(), z.boolean()])).optional(),

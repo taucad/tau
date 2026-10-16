@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 26.53 kB brotli on 2026-10-08",
+    "name": "total (ESM JS) — measured 30.36 kB brotli on 2026-10-16 (adds region-scoped claims, host work maxima, run budgets and capacity guidance)",
     "path": "dist/**/*.mjs",
-    "limit": "30 kB"
+    "limit": "32 kB"
   }
 ]

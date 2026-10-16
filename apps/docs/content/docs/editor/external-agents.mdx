@@ -16,9 +16,9 @@ An external agent is a coding CLI you already have installed. Tau starts it, giv
 | Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | 2.1.232     |
 | Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.41      |
 
-An older CLI is refused before the turn starts, naming the version it found. Codex and Claude Code are qualified with authenticated live turns; Grok Build is offered, but its authenticated live turns are not yet qualified.
+An older CLI is refused before the turn starts, naming the version it found. Codex and Claude Code are qualified with live turns; Grok Build's are not yet.
 
-Tau runs the `codex` or `claude` it found on your `PATH`, never a copy of its own: the adapters ship without the vendor binaries. Install Claude Code with [Anthropic's installer](https://docs.anthropic.com/en/docs/claude-code/setup), then run `claude auth login` on the host machine.
+Tau runs your own `codex` or `claude` from `PATH`; sign Claude Code in with `claude auth login`.
 
 For Grok Build, follow the [official installation instructions](https://docs.x.ai/build/overview), then run `grok login` on the host machine. Tau starts `grok --no-auto-update agent stdio` using that local login. Its native ACP handshake has been verified without credentials.
 

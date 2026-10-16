@@ -19,6 +19,7 @@ const tetrahedronGlb = (apex: number): Uint8Array<ArrayBuffer> => {
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [{ mesh: 0 }],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics are uppercase by specification.
     meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
     buffers: [{ byteLength: binary.byteLength }],
     bufferViews: [

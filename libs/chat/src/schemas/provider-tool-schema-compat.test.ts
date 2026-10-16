@@ -355,6 +355,7 @@ describe('provider-facing tool schema compatibility', () => {
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {
     expect(Object.keys(providerSchemaFor(toolName.screenshot).properties ?? {}).sort()).toEqual([
+      'includeEdges',
       'instance',
       'mode',
       'options',

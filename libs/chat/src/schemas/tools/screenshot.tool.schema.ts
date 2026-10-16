@@ -48,6 +48,10 @@ export const screenshotInputSchema = z
       .pipe(z.record(z.string(), z.json()))
       .optional(),
     section: screenshotSectionSchema.optional().describe('Cut a 3D view open along one axis plane.'),
+    includeEdges: z
+      .boolean()
+      .optional()
+      .describe('true draws edge lines over a 3D view, false leaves them out; a view without edge lines refuses true.'),
     parameters: parameterOverridesSchema.optional(),
   })
   .strict();

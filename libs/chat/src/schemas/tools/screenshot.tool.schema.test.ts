@@ -54,3 +54,25 @@ describe('screenshotInputSchema section and parameters', () => {
     expect(JSON.stringify(wire['properties'])).toContain('this call only');
   });
 });
+
+describe('screenshotInputSchema includeEdges', () => {
+  it('accepts a per-call edge request in either direction and leaves it absent when omitted', () => {
+    expect(screenshotInputSchema.parse({ targetFile: 'main.ts', includeEdges: false })).toMatchObject({
+      includeEdges: false,
+    });
+    expect(screenshotInputSchema.parse({ targetFile: 'main.ts', includeEdges: true })).toMatchObject({
+      includeEdges: true,
+    });
+    expect(screenshotInputSchema.parse({ targetFile: 'main.ts' })).not.toHaveProperty('includeEdges');
+  });
+
+  it('refuses a non-boolean edge request', () => {
+    expect(screenshotInputSchema.safeParse({ targetFile: 'main.ts', includeEdges: 'false' }).success).toBe(false);
+  });
+
+  it('publishes includeEdges as an optional boolean on the wire', () => {
+    const wire = toProviderToolJsonSchema(screenshotInputSchema);
+    expect(wire['required']).toEqual(['targetFile']);
+    expect(wire).toMatchObject({ properties: { includeEdges: { type: 'boolean' } } });
+  });
+});

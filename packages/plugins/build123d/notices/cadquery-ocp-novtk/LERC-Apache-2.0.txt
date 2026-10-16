@@ -1,0 +1,38 @@
+LERC (Limited Error Raster Compression): bundled in cadquery-ocp-novtk 7.9.3.1.1
+
+Licence: Apache-2.0
+Bundled as:
+  darwin-arm64: OCP/.dylibs/libLerc.4.dylib
+  darwin-x64: OCP/.dylibs/libLerc.4.dylib
+
+The macOS builds are conda-forge builds of the upstream release; the upstream licence below applies.
+
+==============================================================================
+https://raw.githubusercontent.com/Esri/lerc/master/NOTICE
+==============================================================================
+
+
+LERC
+Copyright 2015-2026 Esri
+
+This software embodiment is an implementation of
+
+United States Patent 9,002,126, Limited Error Raster Compression (LERC).
+Assignee: Esri.
+Assignors/Inventors: Maurer, Thomas (Redlands, CA); Gao, Peng (Redlands, CA); Becker, Peter (Redlands, CA).
+
+The right to practice this patent is hereby granted under the Apache V2.0 License Agreement,
+Clause 3 - Grant of Patent License.
+
+The license is available at
+http://github.com/Esri/lerc/
+
+For additional information, contact:
+
+Environmental Systems Research Institute, Inc.
+Attn: Contracts and Legal Department
+380 New York Street
+Redlands, CA 92373
+E-mail: contracts@esri.com
+
+The Apache License 2.0 text is LICENSE in this directory.

@@ -10,9 +10,60 @@ declares Apache-2.0, and they are built from the CadQuery/OCP sources:
   Lesser General Public License 2.1 with the Open CASCADE exception 1.0
   (https://dev.opencascade.org/resources/licensing).
 
-The Linux wheels also bundle system libraries (libpng, libjpeg-turbo, libtiff,
-libwebp, freetype, fontconfig, FreeImage, LibRaw, OpenJPEG, OpenEXR, jxrlib,
-JBIG-KIT, Little CMS, liblzma, libzstd, libgomp and libuuid). Each wheel lists
-them, with their versions and package URLs, in
-cadquery_ocp_novtk-7.9.3.1.1.dist-info/sboms/auditwheel.cdx.json inside the
-closure.
+Libraries bundled with OCP
+--------------------------
+
+Besides OCCT, each wheel bundles the shared libraries below, enumerated from the wheel listing
+(cadquery_ocp_novtk.libs/ on Linux, OCP/.dylibs/ on macOS). Each file named here carries that
+library's copyright notices and licence text.
+
+- Little CMS (MIT): lcms2-MIT.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- Fontconfig (HPND-sell-variant): fontconfig-HPND-sell-variant.txt
+  targets: linux-x64-glibc, linux-arm64-glibc
+- FreeType (FTL OR GPL-2.0-or-later; distributed under FTL): FreeType-FTL.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- libpng (libpng-2.0): libpng-libpng-2.0.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- libjpeg-turbo (IJG AND BSD-3-Clause AND Zlib): libjpeg-turbo-IJG-BSD-3-Clause-Zlib.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- LibTIFF (libtiff): LibTIFF-libtiff.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- libwebp (libwebp, libwebpmux, libsharpyuv) (BSD-3-Clause): libwebp-BSD-3-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- OpenJPEG (BSD-2-Clause): OpenJPEG-BSD-2-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- OpenEXR and Imath (IlmBase) (BSD-3-Clause): OpenEXR-BSD-3-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- jxrlib (JPEG XR) (BSD-2-Clause): jxrlib-BSD-2-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- LibRaw (LGPL-2.1-only OR CDDL-1.0; distributed under LGPL-2.1): LibRaw-LGPL-2.1.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- XZ Utils (liblzma) (0BSD): xz-0BSD.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- Zstandard (BSD-3-Clause OR GPL-2.0-only; distributed under BSD-3-Clause): zstd-BSD-3-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- libuuid (util-linux) (BSD-3-Clause): libuuid-BSD-3-Clause.txt
+  targets: linux-x64-glibc, linux-arm64-glibc
+- zlib (Zlib): zlib-Zlib.txt
+  targets: darwin-arm64, darwin-x64
+- libdeflate (MIT): libdeflate-MIT.txt
+  targets: darwin-arm64, darwin-x64
+- LERC (Limited Error Raster Compression) (Apache-2.0): LERC-Apache-2.0.txt
+  targets: darwin-arm64, darwin-x64
+- OpenJPH (BSD-2-Clause): OpenJPH-BSD-2-Clause.txt
+  targets: darwin-arm64, darwin-x64
+- LLVM libc++ (Apache-2.0 WITH LLVM-exception): libcxx-Apache-2.0-LLVM-exception.txt
+  targets: darwin-arm64, darwin-x64
+
+Also bundled, and not covered by a notice in this directory while their licences are reviewed:
+
+- FreeImage (GPL-2.0-only OR GPL-3.0-only OR FIPL-1.0)
+  targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
+- JBIG-KIT (GPL-2.0-or-later)
+  targets: linux-x64-glibc, linux-arm64-glibc
+- libgomp (GCC OpenMP runtime) (GPL-3.0-or-later WITH GCC-exception-3.1)
+  targets: linux-x64-glibc, linux-arm64-glibc
+
+The Linux wheels list their Ubuntu packages, with versions and package URLs, in
+cadquery_ocp_novtk-7.9.3.1.1.dist-info/sboms/auditwheel.cdx.json inside the closure.

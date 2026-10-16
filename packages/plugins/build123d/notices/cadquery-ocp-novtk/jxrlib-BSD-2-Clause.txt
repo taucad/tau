@@ -1,0 +1,81 @@
+jxrlib (JPEG XR): bundled in cadquery-ocp-novtk 7.9.3.1.1
+
+Licence: BSD-2-Clause
+Bundled as:
+  linux-x64-glibc: cadquery_ocp_novtk.libs/libjpegxr-2d5c0d18.so.1.1, cadquery_ocp_novtk.libs/libjxrglue-4a31577b.so.1.1
+  linux-arm64-glibc: cadquery_ocp_novtk.libs/libjpegxr-a1be58b4.so.1.1, cadquery_ocp_novtk.libs/libjxrglue-d1b67592.so.1.1
+  darwin-arm64: OCP/.dylibs/libjpegxr.1.1.dylib, OCP/.dylibs/libjxrglue.1.1.dylib
+  darwin-x64: OCP/.dylibs/libjpegxr.1.1.dylib, OCP/.dylibs/libjxrglue.1.1.dylib
+
+The Linux builds are Ubuntu 20.04 packages (libjxr0 1.1-6build1), as the
+wheel's dist-info/sboms/auditwheel.cdx.json records. Their licence is Ubuntu's debian/copyright
+for that source version, reproduced below.
+
+The macOS builds are conda-forge builds of the upstream release; the upstream licence below applies.
+
+==============================================================================
+debian/copyright, https://changelogs.ubuntu.com/changelogs/pool/universe/j/jxrlib/jxrlib_1.1-6build1/copyright
+==============================================================================
+
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Source: https://jxrlib.codeplex.com/
+Upstream-Name: jxrlib
+
+Files: *
+Copyright: © Microsoft Corp.
+License:
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ .
+  Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+  Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+
+Files: debian/*
+Copyright: 2013, Mathieu Malaterre <malat@debian.org>
+License:
+ Same as above
+
+==============================================================================
+https://raw.githubusercontent.com/4creators/jxrlib/master/LICENSE
+==============================================================================
+
+BSD 2-Clause License
+
+Copyright © Microsoft Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

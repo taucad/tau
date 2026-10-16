@@ -57,13 +57,14 @@ library's copyright notices and licence text.
   targets: linux-x64-glibc, linux-arm64-glibc, darwin-arm64, darwin-x64
 - libgomp (GCC OpenMP runtime) (GPL-3.0-or-later WITH GCC-exception-3.1): libgomp-GPL-3.0-or-later-GCC-exception-3.1.txt
   targets: linux-x64-glibc, linux-arm64-glibc
+- JBIG-KIT (GPL-2.0-or-later): JBIG-KIT-GPL-2.0-or-later.txt
+  targets: linux-x64-glibc, linux-arm64-glibc
 - LLVM libc++ (Apache-2.0 WITH LLVM-exception): libcxx-Apache-2.0-LLVM-exception.txt
   targets: darwin-arm64, darwin-x64
 
-Also bundled, and not covered by a notice in this directory while their licences are reviewed:
-
-- JBIG-KIT (GPL-2.0-or-later)
-  targets: linux-x64-glibc, linux-arm64-glibc
+JBIG-KIT is GPL-2.0-or-later. JBIG-KIT-GPL-2.0-or-later.txt gives its corresponding source, the
+Ubuntu source package jbigkit 2.1-3.1ubuntu0.20.04.1 with SHA-256 hashes, and a written offer of
+that source valid for three years.
 
 The Linux wheels list their Ubuntu packages, with versions and package URLs, in
 cadquery_ocp_novtk-7.9.3.1.1.dist-info/sboms/auditwheel.cdx.json inside the closure.

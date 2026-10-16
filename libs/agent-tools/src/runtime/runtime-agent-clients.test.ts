@@ -392,6 +392,85 @@ describe('createRuntimeAgentClients', () => {
   });
 });
 
+describe('createRuntimeAgentClients per-call parameters and sections', () => {
+  it('passes per-call parameters to every geometry document as caller overrides', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+    const parameters = { voxelSize: 0.5, part: 'Shade Print' };
+
+    await clients.kernelClient.evaluateModel({ targetFile: 'main.ts', parameters });
+    await clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl', parameters });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', parameters });
+    await clients.kernelClient.evaluateModel({ targetFile: 'main.ts', parameters: {} });
+
+    const inputs = fixture.open.mock.calls.map(([input]) => input);
+    expect(inputs.slice(0, 3).map((input) => input.parameters)).toEqual([parameters, parameters, parameters]);
+    // An empty object is the stored group alone, exactly like omitting it.
+    expect(inputs[3]).not.toHaveProperty('parameters');
+  });
+
+  it('cuts a 3D capture with the requested plane, keys its identity and reports what was kept', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    const plain = await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+    const cut = await clients.images.captureImages({
+      targetFile: 'main.ts',
+      mode: 'single',
+      section: { plane: 'xy', offsetMm: 6 },
+    });
+
+    expect(plain).not.toHaveProperty('message');
+    expect(cut).toMatchObject({ success: true, message: 'Section xy: kept z ≤ 6 mm; the cut face is capped.' });
+    const [plainJob, cutJob] = clients.exporter.mock.calls.map(([job]) => job);
+    expect(plainJob?.exportOptions).not.toHaveProperty('sections');
+    expect(cutJob?.exportOptions).toMatchObject({
+      sections: { planes: [{ point: [0, 0, 0.006], normal: [0, 0, -1] }] },
+    });
+    expect(cutJob?.identity).not.toBe(plainJob?.identity);
+  });
+
+  it('names what a cut needs when the renderer refuses a section', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture, async () => {
+      throw new Error('parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle');
+    });
+
+    const result = await clients.images.captureImages({
+      targetFile: 'main.ts',
+      mode: 'single',
+      section: { plane: 'xy', offsetMm: 6 },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? undefined : result.message).toContain(
+      'The xy section at 6 mm could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
+    );
+  });
+
+  it('refuses a section on a 2D view before rendering an image', async () => {
+    const fixture = runtimeFixture({
+      evaluate: () => evaluation([{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }]),
+      render: (_path, view) =>
+        rendering({ mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' }, view),
+    });
+    const clients = clientsFor(fixture);
+
+    await expect(
+      clients.images.captureImages({
+        targetFile: 'drawing.ts',
+        mode: 'single',
+        section: { plane: 'xz', offsetMm: 0 },
+      }),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'section applies to 3D views only; view drawing is a 2D drawing. Omit section for this view.',
+    });
+    expect(clients.exporter).not.toHaveBeenCalled();
+  });
+});
+
 describe('createRuntimeParameterAgentClient', () => {
   const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean; unbound?: boolean }> = {}) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
@@ -567,7 +646,7 @@ describe('createRuntimeParameterAgentClient', () => {
 
   const proposeSourceUnit = async (adapter: Awaited<ReturnType<typeof fixture>>['adapter']) => {
     // The request is built only from what `get_parameters` returned.
-    const read = await adapter.getParameters({ targetFile: 'main.py' });
+    const read = await adapter.getParameters({ targetFile: 'main.py', detail: 'full' });
     if (!read.success || read.manifest === undefined || read.current === undefined) {
       throw new Error('Expected resolved parameters');
     }
@@ -687,6 +766,42 @@ describe('createRuntimeParameterAgentClient', () => {
       status: 'unresolved',
       diagnostics: [{ code: 'INVALID_RECORD', severity: 'error', resource: 'main.py' }],
     });
+    actor.stop();
+  });
+
+  it('reads the values projection by default and the manifest only under detail full', async () => {
+    const { actor, adapter, current } = await fixture(undefined, { sourceUnit: true, unbound: true });
+
+    const values = await adapter.getParameters({ targetFile: 'main.py' });
+    expect(values).toMatchObject({
+      success: true,
+      status: 'resolved',
+      detail: 'values',
+      parameters: {
+        '/label': { value: 'plate', default: 'plate' },
+        '/width': { value: 1, default: 1, unit: 'mm' },
+      },
+      current: { identity: current.identity },
+    });
+    expect(values).not.toHaveProperty('manifest');
+    if (values.success && values.status === 'resolved') {
+      expect(values.parameters?.['/width']).not.toHaveProperty('unitInferred');
+    }
+
+    const full = await adapter.getParameters({ targetFile: 'main.py', detail: 'full' });
+    expect(full).toMatchObject({
+      success: true,
+      status: 'resolved',
+      detail: 'full',
+      manifest: { revision: current.manifest.revision },
+    });
+    expect(full).not.toHaveProperty('parameters');
+    if (!full.success || full.status !== 'resolved') {
+      throw new Error('Expected a resolved full read');
+    }
+    // The full read is the exact admitted manifest, so it can be admitted again unchanged.
+    await expect(admitParameterManifest(full.manifest)).resolves.toMatchObject({ revision: current.manifest.revision });
+    expect(JSON.stringify(values).length).toBeLessThan(JSON.stringify(full).length);
     actor.stop();
   });
 

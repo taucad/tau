@@ -1045,7 +1045,7 @@ export default function ImportRoute(): React.JSX.Element {
                 </h2>
                 <p className='text-sm break-all text-muted-foreground'>
                   {linkedSelection.repository.fullName} at {linkedSelection.branch.name} ·{' '}
-                  {linkedSelection.repository.access === 'write' ? 'future revisions can push' : 'read-only'}
+                  {linkedSelection.repository.access === 'write' ? 'GitHub permits read and write access' : 'read-only'}
                 </p>
               </div>
               {linkedError === undefined ? undefined : (
@@ -1130,7 +1130,7 @@ export default function ImportRoute(): React.JSX.Element {
                   <p className='text-xs text-muted-foreground'>
                     Tau preserves the selected branch’s commits, tracked files, executable modes and Git remote.
                     {linkedSelection.repository.access === 'write'
-                      ? ' Future revisions sync automatically.'
+                      ? ' Importing does not push to GitHub. Enable writes for this repository in Settings, then choose Push to upload revisions.'
                       : ' This repository is linked read-only; local revisions remain available.'}
                   </p>
                 </div>

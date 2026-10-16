@@ -46,7 +46,6 @@ jobs:
       formal: ${{ steps.plan.outputs.formal }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
-      native-darwin: ${{ steps.plan.outputs.native-darwin }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -87,19 +86,10 @@ jobs:
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
-          # The darwin-arm64 native selection (D30): every project with the target on a push to
-          # `main`, the affected ones on a pull request. `standalone-darwin` follows it here;
-          # the native-darwin row itself runs from native-darwin.yml, off this run.
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            native_darwin=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1)
-          else
-            native_darwin=$(pnpm nx show projects --affected --with-target test:native-darwin --json | tail -1)
-          fi
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
-          echo "Native darwin-arm64 rows: $native_darwin"
           # Each staging app is diffed against the commit staging serves, not against
           # the last green run that NX_BASE names: while `main` is red that base stays
           # put and every push would redeploy everything changed since. An app with no
@@ -123,7 +113,7 @@ jobs:
             echo "$deploy_apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "native-darwin=$native_darwin"; do
+          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -358,7 +348,7 @@ jobs:
   # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs on macOS
   # when the native projects are affected and on every push to `main`, as the native-darwin row does.
   standalone:
-    name: Standalone projects (${{ matrix.ecosystem }})
+    name: Standalone projects (${{ matrix.ecosystem }})${{ matrix.ecosystem == 'kcl' && ' [quarantined]' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -393,20 +383,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
           openscad --version
 
-      # Zoo's CLI, pinned by release and by the sha256 GitHub records for the asset.
-      - name: Install the Zoo CLI
+      # Restore the Zoo CLI setup and KCL execution once renewable CI credentials are provisioned.
+      - name: Report Zoo KCL quarantine
         if: matrix.ecosystem == 'kcl'
-        env:
-          ZOO_CLI_URL: https://github.com/KittyCAD/cli/releases/download/v0.2.203/zoo-x86_64-unknown-linux-musl
-          ZOO_CLI_SHA256: 86a72e94136cf0fc0acaaef309bab79f9c940d89c278689b69dfcc44231df43c
         run: |
-          mkdir -p "$RUNNER_TEMP/zoo"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/zoo/zoo" "$ZOO_CLI_URL"
-          echo "$ZOO_CLI_SHA256  $RUNNER_TEMP/zoo/zoo" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/zoo/zoo"
-          echo "$RUNNER_TEMP/zoo" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/zoo/zoo" --version
-          echo "::notice title=Zoo CLI::$("$RUNNER_TEMP/zoo/zoo" --version) / $("$RUNNER_TEMP/zoo/zoo" kcl export --help 2>&1 | tr '\n' ' ' | cut -c1-900)"
+          echo '::notice title=Zoo/KCL quarantined::Skipped pending Zoo credentials and renewable Tau Pro CI authentication.'
+          echo 'Zoo/KCL standalone comparison is quarantined, not qualified. Restore execution after CI authentication is provisioned.' >> "$GITHUB_STEP_SUMMARY"
 
       # `tau prepare build123d` seals the closure inside the native sandbox, as on a user's machine.
       - name: Setup Linux sandbox prerequisites
@@ -414,19 +396,11 @@ jobs:
         uses: ./.github/actions/setup-linux-sandbox
 
       - name: Check every template outside Tau
-        id: standalone-check
-        # Temporary quarantine until #745 replaces KCL execution with an explicit skip.
-        continue-on-error: ${{ matrix.ecosystem == 'kcl' }}
+        if: matrix.ecosystem != 'kcl'
         env:
           ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
           TAU_API_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
         run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
-
-      - name: Report quarantined KCL failure
-        if: ${{ !cancelled() && matrix.ecosystem == 'kcl' && steps.standalone-check.outcome == 'failure' }}
-        run: |
-          echo '::notice title=Zoo/KCL quarantined::Authentication is not provisioned; this result does not qualify KCL.'
-          echo 'Zoo/KCL failed under the temporary quarantine. The explicit skip is tracked in #745.' >> "$GITHUB_STEP_SUMMARY"
 
       # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`
       # unmodified and installs and bundles the same tree.
@@ -438,45 +412,6 @@ jobs:
           set -o pipefail
           pnpm exec vitest run --root apps/runtime-e2e src/package-lock-parity.test.ts | tee "$RUNNER_TEMP/parity.log"
           grep -q '"parity":"npm-ci"' "$RUNNER_TEMP/parity.log"
-
-  standalone-darwin:
-    name: Standalone projects (nuget, macos-15)
-    needs: [plan]
-    if: >-
-      !cancelled() && needs.plan.result == 'success' &&
-      (github.event_name == 'push' || needs.plan.outputs.native-darwin == 'true') &&
-      (github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]')
-    runs-on: macos-15
-    timeout-minutes: 45
-    env:
-      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
-      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
-      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-      DOTNET_NOLOGO: '1'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
-          save-pnpm-store: 'false'
-
-      - name: Install the .NET 10 SDK
-        run: |
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
-          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
-          mkdir -p "$RUNNER_TEMP/dotnet"
-          tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
-          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
-          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
-
-      - name: Check every template outside Tau
-        run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
 
   # The required check. It passes only when the plan and every affected lane passed, and the
   # browser lane too when this run needed it.

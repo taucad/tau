@@ -2500,6 +2500,94 @@ it('should keep the latest structured summary through live, checkpoint, duplicat
   );
 });
 
+it('should keep Grok activity beside its turn and preserve vendor accounting without a Tau charge', () => {
+  const chunks = projectAgentHostEvent({
+    ...base,
+    type: 'message.appended',
+    message: {
+      id: 'grok-turn-activity',
+      role: 'assistant',
+      content: [
+        {
+          type: 'acp-activity',
+          agentId: 'grok',
+          servedModel: 'Actual Grok',
+          subagents: [{ id: 'child', status: 'completed', toolCalls: 1, output: 'Fixture inspected' }],
+        },
+      ],
+      metadata: {
+        responseModel: 'Actual Grok',
+        usage: {
+          input: 50,
+          output: 20,
+          cacheRead: 40,
+          cacheWrite: 10,
+          totalTokens: 120,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        tauInternal: {
+          origin: 'external',
+          agentId: 'grok',
+          vendorPromptUsage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            totalTokens: 120,
+            costUsdTicks: 1,
+            costIsPartial: false,
+            usageIsIncomplete: false,
+            modelCalls: 2,
+          },
+        },
+      },
+    },
+  });
+  expect(chunks).toMatchObject([
+    {
+      type: 'data-acp-activity',
+      id: 'grok-turn-activity:acp-activity:0',
+      data: {
+        agentId: 'grok',
+        servedModel: 'Actual Grok',
+        subagents: [{ id: 'child', status: 'completed' }],
+      },
+    },
+    {
+      type: 'data-usage',
+      data: {
+        agent: 'grok',
+        model: 'Actual Grok',
+        inputTokens: 50,
+        cacheReadTokens: 40,
+        vendorReport: { costUsdTicks: 1, costIsPartial: false, usageIsIncomplete: false, modelCalls: 2 },
+      },
+    },
+  ]);
+  expect(chunks.some((chunk) => chunk.type === 'finish-step' || chunk.type === 'data-acp-session')).toBe(false);
+});
+
+it('should use only the selected host session controls for the same agent', () => {
+  const messages: MyUIMessage[] = ['A', 'B'].map((hostId) => ({
+    id: `session-${hostId}`,
+    role: 'assistant',
+    parts: [
+      {
+        type: 'data-acp-session',
+        data: {
+          type: 'acp-session',
+          id: hostId,
+          agentId: 'grok',
+          hostId,
+          commands: [],
+          configOptions: [],
+        },
+      },
+    ],
+  }));
+  expect(latestAcpSessionData(messages, 'grok', 'A')?.hostId).toBe('A');
+  expect(latestAcpSessionData(messages, 'grok', 'B')?.hostId).toBe('B');
+  expect(latestAcpSessionData(messages, 'grok', 'C')).toBeUndefined();
+});
+
 it('should preserve the selected provider option when replaying a resolved permission', () => {
   expect(
     projectAgentHostEvent({

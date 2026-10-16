@@ -65,8 +65,8 @@ const fixture = () => {
     expires_at: new Date(Date.now() + 3_600_000).toISOString(),
     app: { client_id: 'app-id' },
     user: { id: 42 },
+    // GitHub's scoped authorization response is not an installation resource: it omits id.
     installation: {
-      id: 12,
       account: { id: 7 },
       repository_selection: 'selected',
       permissions: { contents: 'read', metadata: 'read' },
@@ -128,6 +128,20 @@ describe('GitHub repository capabilities', () => {
         permissions: { contents: 'read', metadata: 'read' },
       },
     ]);
+  });
+  it('should accept a matching installation ID when the provider includes it', async () => {
+    const { service, provider } = fixture();
+    Object.assign(provider.scoped.installation, { id: 12 });
+    await expect(
+      service.repositoryToken('user', 'connection', { repositoryId: 9, operation: 'read' }),
+    ).resolves.toMatchObject({ accessToken: 'read-token' });
+  });
+  it('should reject a different installation ID when the provider includes it', async () => {
+    const { service, provider } = fixture();
+    Object.assign(provider.scoped.installation, { id: 99 });
+    await expect(
+      service.repositoryToken('user', 'connection', { repositoryId: 9, operation: 'read' }),
+    ).rejects.toMatchObject({ response: { code: 'GITHUB_SCOPED_TOKEN_INVALID' } });
   });
   it('should refuse write credential requests before calling the scope endpoint', async () => {
     const { service, scopedRequests } = fixture();

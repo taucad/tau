@@ -726,7 +726,10 @@ export const ChatTextareaBar = memo(function ({
     selectedModel === undefined
       ? discoveredAgent?.thoughtLevel
       : discoveredAgent?.models.find((model) => model.id === selectedModel)?.thoughtLevel;
-  const agentConfig = useAgentConfig(acpSessionData, status, discoveredThoughtLevel);
+  const agentConfig = useAgentConfig(acpSessionData, status, [
+    ...(discoveredAgent?.configOptions ?? []),
+    ...(discoveredThoughtLevel ? [discoveredThoughtLevel] : []),
+  ]);
   /* F6: only the composer being typed in owns ⌘/ and ⌘. — the edit box while
    * focus is inside it, the main composer otherwise. */
   const ownsShortcuts = useCallback(

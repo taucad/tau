@@ -23,6 +23,9 @@ import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema } from '#picogk.protocol.js';
 import { PicogkSession } from '#picogk-session.js';
 
+// oxlint-disable-next-line no-restricted-imports -- The gate's own sibling module; scripts have no `#` alias.
+import { resourceConvergence, soakResolutions } from './soak-convergence.mjs';
+
 type ResourceManifest = {
   readonly target: string;
   readonly workerPath: string;
@@ -64,34 +67,6 @@ const logger: RuntimeLogger = {
 const percentile = (values: readonly number[], fraction: number): number => {
   const ordered = [...values].sort((left, right) => left - right);
   return ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))]!;
-};
-
-const median = (values: readonly number[]): number => {
-  const ordered = [...values].sort((left, right) => left - right);
-  const middle = (ordered.length - 1) / 2;
-  return (ordered[Math.floor(middle)]! + ordered[Math.ceil(middle)]!) / 2;
-};
-
-const resourceConvergence = (values: readonly number[], resolution = 0) => {
-  // A warm-up step is not a leak; one downward sample does not disprove a leak.
-  // Examine the final 100 runs at the declared detection resolution. A failure
-  // means nonconvergence in this observation window, not proof of a memory leak.
-  const tail = values.slice(-100);
-  const blockMedians = Array.from({ length: 5 }, (_, index) => median(tail.slice(index * 20, (index + 1) * 20)));
-  const slopes = blockMedians.flatMap((value, index) =>
-    blockMedians.slice(index + 1).map((next, offset) => (next - value) / ((offset + 1) * 20)),
-  );
-  const growthPerEdit = median(slopes);
-  const lastBlockGrowth = blockMedians[4]! - median(tail.slice(40, 80));
-  const spread = Math.max(...blockMedians) - Math.min(...blockMedians);
-  return {
-    blockMedians,
-    growthPerEdit,
-    lastBlockGrowth,
-    spread,
-    resolution,
-    converged: !((growthPerEdit > 0 && spread > resolution) || lastBlockGrowth > resolution),
-  };
 };
 
 const validateGlb = (bytes: Uint8Array<ArrayBuffer>): void => {
@@ -317,12 +292,14 @@ const main = async (): Promise<void> => {
     if (nativeMemory.some((bytes) => !Number.isFinite(bytes) || bytes < 0)) {
       throw new Error('PicoGK reported invalid native-allocation telemetry.');
     }
+    // Memory is judged at its measured steady-state noise (see soak-convergence.mts); descriptors and temporary
+    // files stay exact. The floors are pinned against oscillation and retained growth by soak-convergence.test.mts.
+    const resolution = soakResolutions(pageSizeBytes / 1024);
     const convergence = {
-      // A one-page detection limit, not an allowance for measurement error or a claim of zero growth.
-      residentKilobytes: resourceConvergence(resident, pageSizeBytes / 1024),
-      managedHeapBytes: resourceConvergence(managedHeap),
-      descriptors: resourceConvergence(descriptors),
-      temporaryFiles: resourceConvergence(temporaryFiles),
+      residentKilobytes: resourceConvergence(resident, resolution.residentKilobytes),
+      managedHeapBytes: resourceConvergence(managedHeap, resolution.managedHeapBytes),
+      descriptors: resourceConvergence(descriptors, resolution.descriptors),
+      temporaryFiles: resourceConvergence(temporaryFiles, resolution.temporaryFiles),
     };
 
     const sourceSaveToSettled = {

@@ -12,7 +12,8 @@
  *    The X31 line is at most 200 ms added per module.
  * Chromium, Firefox and WebKit run when installed (`pnpm exec playwright install --with-deps chromium firefox webkit`).
  *
- * Environment: TAU_INTEGRITY_ENGINES, a comma-separated subset of chromium,firefox,webkit (default: all three).
+ * Environment: TAU_INTEGRITY_ENGINES, a comma-separated subset of chromium,firefox,webkit (default: all three);
+ * TAU_INTEGRITY_TIMED_ENGINES, the engines held to the overhead line (default: every engine run).
  * Usage: node apps/ui/scripts/check-asset-integrity.mts <client-dir> <evidence-dir> [iterations]
  * Exit codes: 0 pass, 1 an oracle line failed, 2 usage.
  */
@@ -257,7 +258,11 @@ await new Promise<void>((resolve) => {
 });
 const origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
 
+// X44: the overhead line gates each engine only on the platform it ships on; tamper refusal gates every engine.
+const timedEngines = process.env['TAU_INTEGRITY_TIMED_ENGINES']?.split(',').filter(Boolean);
+
 const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
+  const timed = timedEngines === undefined || timedEngines.includes(label);
   let worst = { path: '', added: Number.NEGATIVE_INFINITY };
   for (const row of rows) {
     const added = row.checked - row.plain;
@@ -271,12 +276,12 @@ const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
       );
     }
     record(
-      row.untampered.ok && !row.tamperedWithIntegrity.ok && added <= overheadLimit,
+      row.untampered.ok && !row.tamperedWithIntegrity.ok && (!timed || added <= overheadLimit),
       `${label} ${row.path} ${(row.bytes / 1e6).toFixed(1)} MB: untampered ${row.untampered.ok ? 'compiles' : `fails ${row.untampered.error ?? ''}`}; tampered+integrity ${row.tamperedWithIntegrity.ok ? 'COMPILED' : 'refused'}; tampered without integrity ${row.tamperedWithoutIntegrity.ok ? 'compiles' : 'fails'}; loader ${row.plain.toFixed(1)} ms plain, ${row.checked.toFixed(1)} ms with integrity, added ${added.toFixed(1)} ms`,
     );
   }
   lines.push(
-    `  ${label} worst added: ${worst.added.toFixed(1)} ms (${worst.path}); line ≤ ${String(overheadLimit)} ms`,
+    `  ${label} worst added: ${worst.added.toFixed(1)} ms (${worst.path}); ${timed ? `line ≤ ${String(overheadLimit)} ms` : 'information only (X44)'}`,
   );
 };
 

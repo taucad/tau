@@ -1,6 +1,7 @@
 # The UI's WASM integrity in browsers (charter D26, W19; ruling X31): build the web client, re-hash its asset receipt,
 # then load every WASM module the build ships through the runtime's loader in a module worker under COOP/COEP, in
-# Chromium, Firefox and WebKit. A tampered byte must be refused, and integrity may add at most 200 ms per module.
+# Chromium, Firefox and WebKit. A tampered byte must be refused, and integrity may add at most 200 ms per module on
+# the platform each engine ships on (X44): Chromium and Firefox on Linux, WebKit on macOS.
 name: UI asset integrity
 
 on:
@@ -32,10 +33,13 @@ jobs:
           - label: three browsers
             runner: ubuntu-latest
             engines: chromium,firefox,webkit
+            # X44: Linux WebKit must refuse every tamper; its overhead is recorded as information only.
+            timed: chromium,firefox
           # WebKit on macOS, the engine Safari ships, measured beside Linux WebKit for the X31 line.
           - label: WebKit on macos-26
             runner: macos-26
             engines: webkit
+            timed: webkit
     timeout-minutes: 60
     env:
       NX_DAEMON: 'false'
@@ -62,6 +66,7 @@ jobs:
         timeout-minutes: 40
         env:
           TAU_INTEGRITY_ENGINES: ${{ matrix.engines }}
+          TAU_INTEGRITY_TIMED_ENGINES: ${{ matrix.timed }}
         run: node apps/ui/scripts/check-asset-integrity.mts apps/ui/build/client "$RUNNER_TEMP/evidence" 5
       - name: Summarize
         if: always()

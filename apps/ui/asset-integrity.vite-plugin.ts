@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { BinaryLike } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Plugin } from 'vite';
@@ -27,9 +28,7 @@ type AssetIntegrityOptions = {
   readonly receipt: boolean;
 };
 
-type HashInput = Parameters<ReturnType<typeof createHash>['update']>[0];
-
-const integrityOf = (source: HashInput): string => `sha384-${createHash('sha384').update(source).digest('base64')}`;
+const integrityOf = (source: BinaryLike): string => `sha384-${createHash('sha384').update(source).digest('base64')}`;
 
 /**
  * The statement a chunk runs first: record each WASM file it references in the realm's asset integrity registry,

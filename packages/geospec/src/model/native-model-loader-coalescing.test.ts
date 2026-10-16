@@ -428,7 +428,7 @@ describe('native model loader work-unit budget', () => {
             diagnostics: [{ code: 'GEOSPEC_MODEL_OPTION_INVALID', details: { option: 'workUnitLimit' } }],
           });
           await expect(refusal).rejects.toThrow(
-            'loadModel workUnitLimit must be a positive integer no greater than 512000000',
+            "loadModel workUnitLimit must be a positive integer no greater than this host's maximum of 512000000",
           );
         }),
       );
@@ -436,6 +436,24 @@ describe('native model loader work-unit budget', () => {
     } finally {
       await loader.releaseAll();
     }
+  });
+
+  it('should admit a budget above the default maximum when the host raised it', async () => {
+    const { engine } = fixtureEngine();
+    const { runtime } = fixtureRuntime();
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime, maximumWorkUnitLimit: 2_048_000_000 });
+    try {
+      const raised = await loader({ file: 'main.ts', workUnitLimit: 1_024_000_000 });
+      expect(raised.load?.workUnitLimit).toBe(1_024_000_000);
+      await expect(loader({ file: 'main.ts', workUnitLimit: 2_048_000_001 })).rejects.toThrow(
+        "no greater than this host's maximum of 2048000000",
+      );
+    } finally {
+      await loader.releaseAll();
+    }
+    expect(() => createGeoSpecNativeModelLoader({ engine, maximumWorkUnitLimit: 0 })).toThrow(
+      'GeoSpec maximumWorkUnitLimit must be a positive safe integer',
+    );
   });
 });
 
@@ -645,6 +663,98 @@ describe('native model loader region crop', () => {
   });
 });
 
+type Description = Awaited<ReturnType<NonNullable<GeoSpecRuntimeClient['describe']>>>;
+const description = (kernelId: string | undefined): Description => ({ success: false, kernelId, issues: [] });
+
+describe('native model loader kernel description', () => {
+  const brepStep: GeoSpecExportRoute = {
+    kernelId: 'replicad',
+    targetFormat: 'step',
+    fidelity: 'brep',
+    exportOptions: { schema: { properties: { coordinateSystem: {} } }, defaults: {} },
+  };
+  const voxelStep: GeoSpecExportRoute = {
+    kernelId: 'picovoxel',
+    targetFormat: 'step',
+    transcoderId: 'mesh-to-step',
+    fidelity: 'mesh',
+  };
+  const routedRuntime = (describe: NonNullable<GeoSpecRuntimeClient['describe']> | undefined) => {
+    const fixture = fixtureRuntime();
+    const bestRouteFor = vi.fn((_format: string, options?: { kernelId?: string }) =>
+      options?.kernelId === 'picovoxel' ? voxelStep : brepStep,
+    );
+    const runtime = Object.assign(fixture.runtime, {
+      bestRouteFor,
+      routesFor: () => [brepStep, voxelStep],
+      ...(describe === undefined ? {} : { describe }),
+    });
+    return { ...fixture, runtime, bestRouteFor };
+  };
+
+  it('should pick STEP routes among the described kernel and refuse a mesh-only kernel before export', async () => {
+    const { engine, ingestSubject } = fixtureEngine();
+    const describe = vi.fn(async () => description('picovoxel'));
+    const { runtime, document, bestRouteFor } = routedRuntime(describe);
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    await expect(loader({ file: 'main.ts', format: 'step' })).rejects.toMatchObject({
+      diagnostics: [{ code: 'GEOSPEC_KERNEL_BREP_UNSUPPORTED', details: { kernelId: 'picovoxel' } }],
+    });
+    expect(describe).toHaveBeenCalledWith({ source: { path: 'main.ts' } });
+    expect(bestRouteFor).toHaveBeenCalledWith('step', { kernelId: 'picovoxel' });
+    expect(document.export).not.toHaveBeenCalled();
+    expect(ingestSubject).not.toHaveBeenCalled();
+    await loader.releaseAll();
+  });
+
+  it('should keep the runtime-wide route when the Runtime cannot describe the source', async () => {
+    for (const describe of [
+      undefined,
+      vi.fn(async () => {
+        throw new Error('describe failed');
+      }),
+      vi.fn(async () => description(undefined)),
+    ]) {
+      const { engine } = fixtureEngine();
+      const { runtime, document, bestRouteFor } = routedRuntime(describe);
+      const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+      // oxlint-disable-next-line no-await-in-loop -- Each Runtime shape loads on its own engine.
+      const subject = await loader({ file: 'main.ts', format: 'step' });
+      expect(subject.load).toMatchObject({ format: 'step' });
+      expect(bestRouteFor).toHaveBeenCalledWith('step');
+      expect(document.export).toHaveBeenCalledOnce();
+      // oxlint-disable-next-line no-await-in-loop -- Release before the next Runtime shape.
+      await loader.releaseAll();
+    }
+  });
+
+  it('should admit a region only when the described kernel itself declares the crop', async () => {
+    const { engine } = fixtureEngine();
+    const cropRoute: GeoSpecExportRoute = {
+      kernelId: 'picovoxel',
+      targetFormat: 'glb',
+      exportOptions: { schema: { properties: { coordinateSystem: {}, unit: {}, region: {} } }, defaults: {} },
+    };
+    const plainRoute: GeoSpecExportRoute = {
+      kernelId: 'replicad',
+      targetFormat: 'glb',
+      exportOptions: { schema: { properties: { coordinateSystem: {}, unit: {} } }, defaults: {} },
+    };
+    const fixture = fixtureRuntime();
+    const runtime = Object.assign(fixture.runtime, {
+      routesFor: () => [plainRoute, cropRoute],
+      bestRouteFor: () => plainRoute,
+      describe: async () => description('replicad'),
+    });
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    await expect(loader({ file: 'main.ts', region: { min: [0, 0, 0], max: [1, 1, 1] } })).rejects.toMatchObject({
+      diagnostics: [{ code: 'GEOSPEC_MODEL_REGION_UNSUPPORTED', details: { kernelIds: ['replicad'] } }],
+    });
+    expect(fixture.document.export).not.toHaveBeenCalled();
+    await loader.releaseAll();
+  });
+});
+
 class MemoryFileSystem implements VmFileSystem {
   private readonly files = new Map<string, string>();
 
@@ -719,5 +829,92 @@ describe('run-level load coalescing', () => {
     } finally {
       await nativeModelLoader.releaseAll();
     }
+  });
+});
+
+describe('region-scoped subjects', () => {
+  const regionRoute: GeoSpecExportRoute = {
+    kernelId: 'picovoxel',
+    targetFormat: 'glb',
+    exportOptions: { schema: { properties: { coordinateSystem: {}, unit: {}, region: {} } }, defaults: {} },
+  };
+  const confirm = (exportOptions: unknown): KernelIssue[] =>
+    exportOptions !== null && typeof exportOptions === 'object' && 'region' in exportOptions
+      ? [
+          {
+            code: 'RESOURCE_LIMIT',
+            severity: 'info',
+            message: 'Cropped.',
+            type: 'runtime',
+            details: { region: exportOptions.region },
+          },
+        ]
+      : [];
+  const run = async (claims: string) => {
+    const { engine } = fixtureEngine();
+    const fixture = fixtureRuntime({ issues: confirm });
+    const runtime = Object.assign(fixture.runtime, { bestRouteFor: () => regionRoute });
+    const nativeModelLoader = createGeoSpecNativeModelLoader({ engine, runtime });
+    try {
+      const result = await runGeoSpecModule({
+        filesystem: new MemoryFileSystem({
+          'spec.geospec.ts': `
+            import { expectGeo, it } from 'geospec';
+            import { loadModel } from 'geospec/model';
+            const region = { min: [0, 0, 0], max: [10, 10, 10] };
+            ${claims}
+          `,
+        }),
+        entryPath: 'spec.geospec.ts',
+        nativeAssertions: { engine },
+        nativeModelLoader,
+      });
+      return result;
+    } finally {
+      await nativeModelLoader.releaseAll();
+    }
+  };
+
+  it('should refuse whole-model claims on a crop with a typed scope diagnostic, under either polarity', async () => {
+    const result = await run(`
+      it('components', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).toHaveConnectedComponents(1); });
+      it('no components', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).not.toHaveConnectedComponents(2); });
+      it('interference', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).toHaveNoComponentInterference(); });
+      it('watertight', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).toBeWatertight(); });
+      it('occurrences', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).toHaveAssemblyOccurrences({ total: 3 }); });
+    `);
+    expect(result.success).toBe(true);
+    const tests = result.success ? result.tests : [];
+    expect(tests).toHaveLength(5);
+    for (const test of tests) {
+      expect(test.status).toBe('failed');
+      expect(test.assertions).toHaveLength(1);
+      expect(test.assertions[0]).toMatchObject({
+        passed: false,
+        region: { min: [0, 0, 0], max: [10, 10, 10] },
+        diagnostics: [
+          { code: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM', details: { region: { min: [0, 0, 0], max: [10, 10, 10] } } },
+        ],
+      });
+      expect(test.assertions[0]?.report).toBeUndefined();
+    }
+  });
+
+  it('should evaluate region measurements with the region recorded, and whole-model claims on a whole load', async () => {
+    const result = await run(`
+      it('volume', async () => { expectGeo(await loadModel({ file: 'main.ts', region })).toHaveVolume({ min: 1, max: 2 }); });
+      it('components', async () => { expectGeo(await loadModel({ file: 'main.ts' })).toHaveConnectedComponents(1); });
+    `);
+    // The fixture engine cannot answer either claim; what matters is that neither is refused for scope.
+    const [volume, components] = result.success ? result.tests : [];
+    expect(volume?.assertions[0]).toMatchObject({ kind: 'volume', region: { min: [0, 0, 0], max: [10, 10, 10] } });
+    expect(
+      volume?.assertions[0]?.diagnostics?.some(({ code }) => code === 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM'),
+    ).not.toBe(true);
+    expect(components?.assertions[0]?.kind).toBe('connectedComponents');
+    expect(components?.assertions[0]).not.toHaveProperty('region');
+    expect(
+      components?.assertions[0]?.diagnostics?.some(({ code }) => code === 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM'),
+    ).not.toBe(true);
   });
 });

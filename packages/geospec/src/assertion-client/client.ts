@@ -3,6 +3,7 @@
 import type { JSONValue } from '@taucad/runtime/types';
 import {
   assertGeoSpecAuthoredWorkUnitLimit,
+  resolveGeoSpecMaximumWorkUnitLimit,
   evaluateGeoSpecNativeClaim,
   evaluateGeoSpecNativeQuery,
   resolveGeoSpecNativeWorkUnitLimit,
@@ -116,6 +117,12 @@ export type GeoSpecAssertionClientOptions = {
   readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
   readonly subjectSlot?: string;
   readonly workUnitLimit?: number;
+  /**
+   * The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options. Host
+   * policy: omitted uses `geoSpecMaximumWorkUnitLimit`, and a host provisioned for larger claims
+   * raises it. Must be a positive safe integer.
+   */
+  readonly maximumWorkUnitLimit?: number;
 };
 
 const minimumDistanceFact = (
@@ -321,6 +328,12 @@ export const createGeoSpecMatcherMethods = <Result>(options: {
 export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOptions): GeoSpecAssertionClient => {
   let sequence = 0;
   const subjectSlot = options.subjectSlot ?? 'subject';
+  let maximumWorkUnitLimit: number | undefined;
+  // Resolved on first use, like the default budget, so a client never constructed for claims never validates.
+  const resolveMaximumWorkUnitLimit = (): number => {
+    maximumWorkUnitLimit ??= resolveGeoSpecMaximumWorkUnitLimit(options.maximumWorkUnitLimit);
+    return maximumWorkUnitLimit;
+  };
   let workUnitLimit: number | undefined;
   const resolveWorkUnitLimit = (): number => {
     workUnitLimit ??= resolveGeoSpecNativeWorkUnitLimit(options.engine, options.workUnitLimit);
@@ -346,6 +359,7 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
           subject,
           subjectSlot,
           workUnitLimit: chain.workUnitLimit ?? resolveWorkUnitLimit(),
+          maximumWorkUnitLimit: resolveMaximumWorkUnitLimit(),
         };
         const report = evaluateGeoSpecNativeClaim({
           ...context,
@@ -433,7 +447,11 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
   return {
     query,
     expectGeo(subject, expectOptions) {
-      assertGeoSpecAuthoredWorkUnitLimit(expectOptions?.workUnitLimit, 'expectGeo workUnitLimit');
+      assertGeoSpecAuthoredWorkUnitLimit(
+        expectOptions?.workUnitLimit,
+        'expectGeo workUnitLimit',
+        resolveMaximumWorkUnitLimit(),
+      );
       const raw = 'subjectHash' in subject || 'contentHash' in subject;
       const admission = raw ? undefined : resolveGeoSpecSubject(subject, options.engine);
       const identity = raw ? subject : admission!.identity;

@@ -8,6 +8,7 @@ export { GeoSpecModelLoadError } from '#model/errors.js';
 export { createModelLoader, loadModel } from '#model/load-model.js';
 export type { GeoSpecSubject } from '#model/subject.js';
 export { geoSpecMeshEvidenceMatchers, resolveRuntimeExportIntent } from '#model/export-intent.js';
+export { geoSpecRegionScopedKinds, geoSpecRegionWholeModelClaimCode } from '#model/region-scope.js';
 export type {
   GeoSpecExportRoute,
   RuntimeBackedModelFormat,

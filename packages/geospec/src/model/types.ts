@@ -46,7 +46,7 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  * @public
  */
 export type GeoSpecRuntimeClient = Pick<RuntimeClient, 'connect' | 'terminate'> &
-  Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>> & {
+  Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
     open: (
       input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
     ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
@@ -122,7 +122,7 @@ export type LoadModelSourceOptions = {
   meshAngularToleranceDegrees?: number;
   /**
    * Default work-unit budget for every claim on this subject: a positive integer no greater than
-   * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
    * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
    */
   workUnitLimit?: number;
@@ -158,7 +158,7 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   meshAngularToleranceDegrees?: number;
   /**
    * Default work-unit budget for every claim on this subject: a positive integer no greater than
-   * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
    * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
    */
   workUnitLimit?: number;
@@ -201,7 +201,7 @@ export type LoadModelFileOptions = {
   meshAngularToleranceDegrees?: number;
   /**
    * Default work-unit budget for every claim on this subject: a positive integer no greater than
-   * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
    * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
    */
   workUnitLimit?: number;

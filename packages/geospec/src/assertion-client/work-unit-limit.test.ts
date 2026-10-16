@@ -85,13 +85,28 @@ describe('authored work-unit budgets', () => {
     const client = createGeoSpecAssertionClient({ engine });
     for (const workUnitLimit of [0, -1, 2.5, geoSpecMaximumWorkUnitLimit + 1]) {
       expect(() => client.expectGeo({ subjectHash: hash }, { workUnitLimit })).toThrow(
-        `GeoSpec expectGeo workUnitLimit must be a positive integer no greater than 512000000; received ${workUnitLimit}.`,
+        `GeoSpec expectGeo workUnitLimit must be a positive integer no greater than this host's maximum of 512000000 (the host can raise it with maximumWorkUnitLimit); received ${workUnitLimit}.`,
       );
     }
     expect(() => client.expectGeo({ subjectHash: hash }, { workUnitLimit: '10' as unknown as number })).toThrow(
-      'GeoSpec expectGeo workUnitLimit must be a positive integer no greater than 512000000; received string.',
+      "GeoSpec expectGeo workUnitLimit must be a positive integer no greater than this host's maximum of 512000000 (the host can raise it with maximumWorkUnitLimit); received string.",
     );
     expect(engine.budgets).toEqual([]);
+  });
+
+  it('should let the host raise the authored maximum and refuse a malformed host maximum', () => {
+    const engine = new BudgetEngine();
+    const client = createGeoSpecAssertionClient({ engine, maximumWorkUnitLimit: 4_000_000_000 });
+    client.expectGeo({ subjectHash: hash }, { workUnitLimit: 3_000_000_000 }).toBeWatertight();
+    expect(engine.budgets).toEqual([3_000_000_000]);
+    expect(() => client.expectGeo({ subjectHash: hash }, { workUnitLimit: 4_000_000_001 })).toThrow(
+      "no greater than this host's maximum of 4000000000",
+    );
+    for (const maximumWorkUnitLimit of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        createGeoSpecAssertionClient({ engine, maximumWorkUnitLimit }).expectGeo({ subjectHash: hash }),
+      ).toThrow('GeoSpec maximumWorkUnitLimit must be a positive safe integer');
+    }
   });
 
   it('should apply the same precedence to standalone subject assertions', () => {
@@ -163,6 +178,22 @@ describe('authored work-unit budgets', () => {
     // The engine's exact result row keeps its own bytes and values.
     expect(report?.result['diagnostics']).toStrictEqual(engine.row['diagnostics']);
     expect(new TextDecoder().decode(report?.canonicalResult)).not.toContain('maximumLimit');
+  });
+
+  it("should report the host's raised maximum on a MATCHER_TIMEOUT", () => {
+    const engine = new BudgetEngine();
+    engine.row = {
+      status: 'refused',
+      diagnostics: [{ code: 'MATCHER_TIMEOUT', severity: 'error', message: 'Budget exhausted.' }],
+    };
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 300, maximumWorkUnitLimit: 1_024_000_000 });
+    let report: GeoSpecAssertionError['report'] | undefined;
+    try {
+      client.expectGeo({ subjectHash: hash }).toBeWatertight();
+    } catch (error) {
+      report = error instanceof GeoSpecAssertionError ? error.report : undefined;
+    }
+    expect(report?.diagnostics[0]).toMatchObject({ details: { limit: 300, maximumLimit: 1_024_000_000 } });
   });
 
   it('should carry the loadModel budget and an expectGeo override through the runner collector', async () => {

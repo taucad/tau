@@ -33,6 +33,7 @@ import type {
   GeoSpecTestCase,
   GeoSpecTestEvent,
 } from '#runner/types.js';
+import { regionScopeRefusal } from '#model/region-scope.js';
 import { resolveGeoSpecSubject } from '#model/subject.js';
 
 type GeoSpecTestFunction = () => unknown | PromiseLike<unknown>;
@@ -112,7 +113,7 @@ const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
         severity: 'error',
         message: `${error.message} The test still ran to completion before the run moved on; this is a wall-clock timeout, not a geometry verdict.`,
         suggestion:
-          'Keep the assertion. Raise testTimeout (CLI --test-timeout) if the requirement is legitimately slow, or make the load it waits on cheaper (a coarser mesh export or a smaller subject).',
+          'Keep the assertion and the model as designed. Raise testTimeout (CLI --test-timeout) so the requirement can finish; if this host cannot give it the time, report it as not decided at this capacity.',
         details: { testTimeout: error.testTimeout },
       },
     ];
@@ -310,6 +311,14 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
       if (admission.load !== undefined) {
         assertion.loadId = admission.load.loadId;
       }
+      const region = admission.load?.region;
+      if (region !== undefined) {
+        assertion.region = { min: [...region.min], max: [...region.max] };
+      }
+      const regionRefusal = regionScopeRefusal(region, invocation.kind);
+      if (regionRefusal !== undefined) {
+        return recordAssertion(assertion, [regionRefusal]);
+      }
       const workUnitLimit = expectOptions?.workUnitLimit ?? admission.load?.workUnitLimit;
       const methods = nativeClient.expectGeo(
         admission.identity,
@@ -418,7 +427,11 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
 
     expectGeo(subject, expectOptions) {
       // Validate once at the chain, before any claim, so a bad budget names expectGeo.
-      assertGeoSpecAuthoredWorkUnitLimit(expectOptions?.workUnitLimit, 'expectGeo workUnitLimit');
+      assertGeoSpecAuthoredWorkUnitLimit(
+        expectOptions?.workUnitLimit,
+        'expectGeo workUnitLimit',
+        options.nativeAssertions.maximumWorkUnitLimit,
+      );
       const invoke = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion =>
         recordInvocation(invocation, expectOptions);
       return Object.assign(createGeoSpecMatcherMethods({ invoke, polarity: 'positive', subject }), {

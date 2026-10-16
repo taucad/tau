@@ -2,7 +2,9 @@
 
 import { createGeoSpecMatcherMethods } from '#assertion-client/client.js';
 import { diagnosticForTransport, geometryDiagnosticSchema } from '#model/errors.js';
+import { regionScopeRefusal } from '#model/region-scope.js';
 import { resolveGeoSpecSubject } from '#model/subject.js';
+import type { GeoSpecLoadRegion } from '#model/types.js';
 import type { GeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecAssertion, GeoSpecExpectOptions, GeoSpecMatcher } from '#runner/types.js';
 
@@ -26,6 +28,23 @@ export const expectGeoSubject = (subject: GeoSpecSubject, options?: GeoSpecExpec
       polarity: negative ? 'negative' : 'positive',
       invoke: (invocation): GeoSpecAssertion => {
         resolveGeoSpecSubject(subject);
+        const region = admission.load?.region;
+        const scoped: GeoSpecLoadRegion | undefined =
+          region === undefined ? undefined : { min: [...region.min], max: [...region.max] };
+        const scope = scoped === undefined ? {} : { region: scoped };
+        const regionRefusal = regionScopeRefusal(region, invocation.kind);
+        if (regionRefusal !== undefined) {
+          // A whole-model claim on a crop is refused before the engine: no verdict either way.
+          return {
+            kind: invocation.kind,
+            subject: admission.identity,
+            ...(admission.load === undefined ? {} : { loadId: admission.load.loadId }),
+            ...scope,
+            expected: invocation.expected,
+            passed: false,
+            diagnostics: [regionRefusal],
+          };
+        }
         const methods = negative ? chain.not : chain;
         const report = Reflect.apply(methods[invocation.matcher], methods, invocation.arguments) as ReturnType<
           typeof chain.toBeWatertight
@@ -37,6 +56,7 @@ export const expectGeoSubject = (subject: GeoSpecSubject, options?: GeoSpecExpec
           kind: invocation.kind,
           subject: admission.identity,
           ...(admission.load === undefined ? {} : { loadId: admission.load.loadId }),
+          ...scope,
           expected: invocation.expected,
           passed: report.status === 'passed',
           diagnostics,

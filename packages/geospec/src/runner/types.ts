@@ -3,6 +3,7 @@ import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecNativeModelLoader, GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
+import type { GeoSpecLoadRegion } from '#model/types.js';
 import type { GeoSpecNativeSubject } from '#engine/client.js';
 
 /**
@@ -153,7 +154,7 @@ export type GeoSpecMassExpectation = {
 export type GeoSpecExpectOptions = {
   /**
    * Deterministic work-unit budget for every claim in this chain: a positive integer no
-   * greater than `geoSpecMaximumWorkUnitLimit` (512 000 000). Omitted uses the subject's
+   * greater than the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). Omitted uses the subject's
    * `loadModel` budget, then the host's, then the engine default. Raise it to retry a
    * `MATCHER_TIMEOUT` refusal whose `details.used` exceeded `details.limit`.
    */
@@ -655,6 +656,11 @@ export type GeoSpecAssertion = {
   report?: GeoSpecCanonicalClaimReport;
   /** The host load which admitted this assertion's subject; independent of equal geometry hashes. */
   loadId?: string;
+  /**
+   * The crop this assertion's subject was loaded with. Present only for a region load: the verdict
+   * holds for this millimetre box, never for the whole model.
+   */
+  region?: GeoSpecLoadRegion;
   /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
   durationMs?: number;
 };

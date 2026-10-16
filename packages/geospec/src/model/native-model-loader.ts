@@ -1,7 +1,7 @@
 /** Native protocol-3 model admission over direct bytes and Tau Runtime exports. @module */
 
 import type { GeoSpecNativeEngine, GeoSpecNativeSubject } from '#assertion-client/index.js';
-import { geoSpecAuthoredWorkUnitLimitProblem } from '#engine/client.js';
+import { geoSpecAuthoredWorkUnitLimitProblem, resolveGeoSpecMaximumWorkUnitLimit } from '#engine/client.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import { bindRawSubjectResidency } from '#model/subject.js';
@@ -49,6 +49,9 @@ const engineResidency = new WeakMap<GeoSpecNativeModelEngine, Residency>();
 // The existing native JSON codec profile limits each request to 16 MiB. Retained descriptors
 // use that same byte ceiling in aggregate, separately from retained binary input bytes.
 const descriptorLimit = 16 * 1024 * 1024;
+// The engine's retained-subject refusal carries only the protocol code and this message, no
+// structured detail, so both are matched. retained-subject-eviction.test.ts drives the real engine
+// past its retained count, so a reworded message fails that test rather than a run.
 const countRefusal = (error: unknown): boolean =>
   error instanceof Error &&
   'code' in error &&
@@ -186,6 +189,11 @@ export type CreateGeoSpecNativeModelLoaderOptions = {
    * scopes one at a time: a scope's release touches only subjects whose scope has settled.
    */
   readonly carried?: Map<string, unknown>;
+  /**
+   * The largest `loadModel` `workUnitLimit` a spec may author. Host policy: omitted uses
+   * `geoSpecMaximumWorkUnitLimit`, and a host provisioned for larger claims raises it.
+   */
+  readonly maximumWorkUnitLimit?: number;
 };
 
 /**
@@ -343,6 +351,26 @@ const runtimeRoutesFor = (runtime: GeoSpecRuntimeClient, format: string): readon
 };
 
 /**
+ * The kernel that evaluates a Runtime source, so export routes are chosen among its own.
+ * @param runtime - The connected Runtime.
+ * @param options - The load naming the source.
+ * @returns The kernel id, or `undefined` when the Runtime cannot describe the source; route
+ *   selection then spans every kernel, as it did before description existed.
+ */
+const describedKernel = async (runtime: GeoSpecRuntimeClient, options: RuntimeOptions): Promise<string | undefined> => {
+  if (typeof runtime.describe !== 'function') {
+    return undefined;
+  }
+  try {
+    const { kernelId } = await runtime.describe({ source: runtimeSource(options) });
+    return typeof kernelId === 'string' && kernelId.length > 0 ? kernelId : undefined;
+  } catch {
+    // A source the Runtime cannot describe still fails or succeeds at export, with its own issues.
+    return undefined;
+  }
+};
+
+/**
  * Stable JSON for a coalescing key, or `undefined` for a value whose identity JSON cannot carry.
  * @param value - Plain load input.
  * @returns Key text with sorted object keys.
@@ -448,6 +476,7 @@ export const createGeoSpecNativeModelLoader = (
   defaults: CreateGeoSpecNativeModelLoaderOptions,
 ): ManagedGeoSpecNativeModelLoader => {
   let requestSequence = 0;
+  const maximumWorkUnitLimit = resolveGeoSpecMaximumWorkUnitLimit(defaults.maximumWorkUnitLimit);
   const admissions = new Map<string, ResidentInput>();
   const admissionOwners = new Map<ResidencyOwner, string>();
   let generation = 0;
@@ -870,9 +899,11 @@ export const createGeoSpecNativeModelLoader = (
       requestedFormat === 'stp' ? 'step' : requestedFormat;
     const runtime = await runtimeFor(options);
     await runtime.connect();
+    const kernelId = await describedKernel(runtime, options);
     const intentOptions = {
       runtime,
       format,
+      ...(kernelId === undefined ? {} : { kernelId }),
       ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
       ...(options.meshAngularToleranceDegrees === undefined
         ? {}
@@ -885,10 +916,13 @@ export const createGeoSpecNativeModelLoader = (
     // Validated by the loader before any Runtime work.
     const region = options.region === undefined ? undefined : copyRegion(options.region);
     if (region !== undefined) {
-      // The kernel that renders the file is chosen when it opens, so admit the crop when any direct
-      // route declares it; an option no route declares would be dropped by option parsing and export
-      // the whole model. The kernel's crop notice below stays the authority for the chosen route.
-      const routes = runtimeRoutesFor(runtime, format);
+      // A described kernel's own direct routes decide. Without one, the kernel that renders the file
+      // is chosen when it opens, so admit the crop when any direct route declares it; an option no
+      // route declares would be dropped by option parsing and export the whole model. The kernel's
+      // crop notice below stays the authority for the chosen route.
+      const routes = runtimeRoutesFor(runtime, format).filter(
+        (route) => kernelId === undefined || route.kernelId === kernelId,
+      );
       const cropping = routes.some(
         (route) => route.transcoderId === undefined && 'region' in (route.exportOptions?.schema.properties ?? {}),
       );
@@ -901,7 +935,7 @@ export const createGeoSpecNativeModelLoader = (
             code: 'GEOSPEC_MODEL_REGION_UNSUPPORTED',
             message: `No direct ${format.toUpperCase()} export of this Runtime${kernelIds.length === 0 ? '' : ` (${kernelIds.join(', ')})`} declares a region option, so GeoSpec cannot crop '${options.file}' before admission.`,
             suggestion:
-              'Load the whole model, or coarsen it with the kernel’s own parameters; a region load needs a kernel whose GLB export crops, such as PicoVoxel.',
+              'Load the whole model; if it exceeds a host limit, provision more resources and report the claim as not decided at this capacity. A region load needs a kernel whose GLB export crops, such as PicoVoxel, and only scopes a separate claim to that region.',
             details: { file: options.file, format, region, kernelIds },
           }),
         ]);
@@ -1161,7 +1195,11 @@ export const createGeoSpecNativeModelLoader = (
         ]),
       );
     }
-    const workUnitLimitProblem = geoSpecAuthoredWorkUnitLimitProblem(options.workUnitLimit, 'loadModel workUnitLimit');
+    const workUnitLimitProblem = geoSpecAuthoredWorkUnitLimitProblem(
+      options.workUnitLimit,
+      'loadModel workUnitLimit',
+      maximumWorkUnitLimit,
+    );
     if (workUnitLimitProblem !== undefined) {
       return Promise.reject(
         failure([

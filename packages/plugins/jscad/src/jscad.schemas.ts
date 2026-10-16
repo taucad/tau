@@ -6,13 +6,24 @@
  * @public
  */
 
-import type { z } from 'zod';
+import { z } from 'zod';
 import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
+import { jscadTessellationSchema } from '#jscad-tessellation.js';
 
 /**
- * JSCAD per-format export schemas.
+ * JSCAD render options: a tessellation preset or an explicit default segment count; previews default to `medium`.
+ * @public
+ */
+export const jscadRenderSchema = z.object({
+  tessellation: jscadTessellationSchema.default('medium').describe('Tessellation quality for preview rendering'),
+});
+
+/**
+ * JSCAD per-format export schemas; mesh exports default to the `high` preset.
  * @public
  */
 export const jscadExportSchemas = {
-  glb: gltfExportConventionSchema,
+  glb: gltfExportConventionSchema.extend({
+    tessellation: jscadTessellationSchema.default('high').describe('Tessellation quality for mesh-based exports'),
+  }),
 } as const satisfies Record<string, z.ZodType>;

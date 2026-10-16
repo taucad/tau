@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 6874 B on 2026-08-23",
+    "name": "total (ESM JS) — measured 8.86 kB brotlied on 2026-10-16 (tessellation presets and budgets)",
     "path": "dist/**/*.mjs",
-    "limit": "8 kB"
+    "limit": "9.75 kB"
   }
 ]

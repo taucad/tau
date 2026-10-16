@@ -391,7 +391,7 @@ function buildNodeFromJscadPart(
  *               - Shapes created with colorize() will preserve their colors
  * @param transformOptions - coordinate-system and unit conversion options
  * @param modeling - resolved `@jscad/modeling` API from the kernel context
- * @returns the GLB binary and the topology warnings derived from the same normalization
+ * @returns the GLB binary, the topology warnings derived from the same normalization, and the triangles and vertices it draws
  *
  * @throws {Error} If any shape cannot be converted to GLTF polygon
  *
@@ -409,7 +409,7 @@ export function jscadToGltf(
   shape: unknown,
   transformOptions: GeometryOutputTransformOptions & { includeEdges?: boolean },
   modeling: JscadModeling,
-): { content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] } {
+): { content: Uint8Array<ArrayBuffer>; issues: KernelIssue[]; triangles: number; vertices: number } {
   const parts = getRenderableJscadParts(shape, modeling);
 
   const nodes: GlbNode[] = [];
@@ -431,5 +431,14 @@ export function jscadToGltf(
     nodes,
     ...(hasLinePrimitives ? { extensionsUsed: [KHRMaterialsUnlit.EXTENSION_NAME] } : {}),
   };
-  return { content: writeGlb(input), issues };
+  let triangles = 0;
+  let vertices = 0;
+  for (const primitive of nodes.flatMap((node) => node.primitives)) {
+    if (primitive.mode === Primitive.Mode['TRIANGLES']) {
+      const count = primitive.positions.length / 3;
+      triangles += (primitive.indices?.length ?? count) / 3;
+      vertices += count;
+    }
+  }
+  return { content: writeGlb(input), issues, triangles, vertices };
 }

@@ -35,10 +35,14 @@ describe('mesh phase conversion failure', () => {
     expect(render).toBeDefined();
 
     await expect(
-      render!({ view: 'model', handle: nativeHandle, options: {}, content: {} }, createMockKernelRuntime(), {
-        modulesRegistered: true,
-        modeling: testModeling,
-      }),
+      render!(
+        { view: 'model', handle: nativeHandle, options: { tessellation: 'medium' }, content: {} },
+        createMockKernelRuntime(),
+        {
+          modulesRegistered: true,
+          modeling: testModeling,
+        },
+      ),
     ).rejects.toThrow('unsupported polygon');
   });
 });

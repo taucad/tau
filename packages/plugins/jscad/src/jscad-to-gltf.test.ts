@@ -344,12 +344,13 @@ function createPlanetGearWithSplitCapChains(): JscadGeom3 {
 }
 
 describe('jscadToGltf', () => {
-  it('should expose coordinate and unit export schema for GLB', () => {
+  it('should expose coordinate, unit and tessellation export schema for GLB', () => {
     const parsed = jscadExportSchemas.glb.parse({});
 
     expect(parsed).toEqual({
       coordinateSystem: 'y-up',
       unit: { length: 'meter' },
+      tessellation: 'high',
     });
   });
 

@@ -176,6 +176,7 @@ const jscadCubeCutoutSource = `
 const jscadGlbExportOptions = {
   coordinateSystem: 'z-up',
   unit: { length: 'millimeter' },
+  tessellation: 'high',
 } as const;
 
 const testModeling = resolveJscadModeling(jscadModelingImport);
@@ -216,7 +217,7 @@ describe('JscadWorker', () => {
     const fresh = jscadDefinition.deserializeHandle!({ serialized }, runtime, context);
     const render = async (shape: typeof handle, includeEdges: boolean) => {
       const projected = await jscadDefinition.render!(
-        { handle: shape, view: 'model', options: {}, content: { includeEdges } },
+        { handle: shape, view: 'model', options: { tessellation: 'medium' }, content: { includeEdges } },
         runtime,
         context,
       );
@@ -927,7 +928,7 @@ module.exports = { main, getParameterDefinitions }
         }
 
         const meshed = await render(
-          { view: 'model', handle: nativeHandle, options: {}, content: { includeEdges: true } },
+          { view: 'model', handle: nativeHandle, options: { tessellation: 'medium' }, content: { includeEdges: true } },
           createMockKernelRuntime(),
           { modulesRegistered: true, modeling: testModeling },
         );

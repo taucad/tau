@@ -60,16 +60,25 @@ jobs:
           TAU_BUILDX_ARGS: --cache-from type=gha,scope=host-image --cache-to type=gha,scope=host-image,mode=max
         run: |
           set -o pipefail
+          mkdir -p "$EVIDENCE"
           packages/host/scripts/build-native-image.sh 2>&1 | tee "$EVIDENCE/build.log" | tail -40
 
       - name: Prove the image offline
         run: packages/host/scripts/check-native-image.sh "$IMAGE" "$EVIDENCE"
 
+      # Job logs and artifacts are not readable everywhere the result is reviewed, so the probe, the build's tail and
+      # the oracle summary are also published as notice annotations.
       - name: Summarize
         if: always()
         run: |
-          { echo '```'; cat "$EVIDENCE/summary.txt" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          while IFS= read -r line; do echo "::notice title=Host image::$line"; done < <(head -n 40 "$EVIDENCE/summary.txt" 2>/dev/null)
+          report="$EVIDENCE/report.txt"
+          {
+            echo "== probe"; cat "$EVIDENCE/probe.txt" 2>/dev/null || echo "(no probe output)"
+            echo "== oracle"; cat "$EVIDENCE/summary.txt" 2>/dev/null || echo "(no oracle summary)"
+            echo "== build (tail)"; tail -n 40 "$EVIDENCE/build.log" 2>/dev/null | cut -c1-240 || true
+          } > "$report"
+          { echo '```'; cat "$report"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh 'Host image' "$report"
 
       - name: Upload evidence
         if: always()

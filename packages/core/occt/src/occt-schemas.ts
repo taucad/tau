@@ -73,8 +73,14 @@ const tessellationFormsMessage =
 export const occtExplicitTessellationSchema = z
   .strictObject(
     {
-      linearTolerance: linearTolerance().optional().describe('Linear tolerance (distance) for tessellation'),
-      angularTolerance: angularTolerance().optional().describe('Angular tolerance (degrees) for tessellation'),
+      linearTolerance: linearTolerance()
+        .optional()
+        .meta({ examples: [0.02] })
+        .describe('Linear tolerance (distance) for tessellation'),
+      angularTolerance: angularTolerance()
+        .optional()
+        .meta({ examples: [20] })
+        .describe('Angular tolerance (degrees) for tessellation'),
     },
     {
       error: (issue) =>
@@ -86,7 +92,7 @@ export const occtExplicitTessellationSchema = z
   .refine((value) => value.linearTolerance !== undefined || value.angularTolerance !== undefined, {
     message: `explicit tolerances need linearTolerance or angularTolerance; ${tessellationFormsMessage}`,
   })
-  .meta({ minProperties: 1 })
+  .meta({ title: 'Explicit', minProperties: 1 })
   .describe('Explicit tolerances in millimetres and degrees');
 
 /** Explicit OCCT tolerances as parsed. @public */
@@ -102,6 +108,7 @@ export const occtTessellationSchema = z.xor(
       .enum(occtTessellationQualities, {
         error: () => `expected a preset 'low' | 'medium' | 'high' | 'extra-high'; ${tessellationFormsMessage}`,
       })
+      .meta({ title: 'Preset' })
       .describe('Quality preset derived from the shape bounding-box diagonal'),
     occtExplicitTessellationSchema,
   ],

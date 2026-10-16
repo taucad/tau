@@ -15,11 +15,15 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { mock } from 'vitest-mock-extended';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { createMockKernelRuntime, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
-import { describe, expect, it, vi } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { picogkKernel } from '#index.js';
 import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
 import { PicogkSession } from '#picogk-session.js';
 import { picogkBuildSchema, picogkProtocolVersion } from '#picogk.protocol.js';
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const options = nativeKernelOptions;

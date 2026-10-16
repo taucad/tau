@@ -7,72 +7,43 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { gzipSync } from 'node:zlib';
 
 import { createPreparationHost, parsePluginDeployment } from '@taucad/runtime/preparation/node';
 import type { HostIndicators } from '@taucad/runtime/preparation/node';
+import { tarGz, writeSeedDirectory } from '@taucad/runtime-testing/preparation';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { picogkOptionsFromClosure } from '#picogk-closure.js';
 import { composeManifest } from '#picogk-layer.js';
 import type { PicogkLayerRecord } from '#picogk-layer.js';
 
-type Member = { readonly name: string; readonly text: string; readonly executable?: boolean };
-
-/** A gzipped ustar archive of regular files, the shape both payloads have. */
-const tarGz = (members: readonly Member[]): Uint8Array<ArrayBuffer> => {
-  const blocks: Array<Uint8Array<ArrayBuffer>> = [];
-  for (const { name, text, executable } of members) {
-    const data = new TextEncoder().encode(text);
-    const header = Buffer.alloc(512);
-    header.write(name, 0);
-    header.write(`${(executable === true ? 0o755 : 0o644).toString(8).padStart(7, '0')}\0`, 100);
-    header.write('0000000\0', 108);
-    header.write('0000000\0', 116);
-    header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124);
-    header.write('00000000000\0', 136);
-    header.write('0', 156);
-    header.write('ustar\u000000', 257);
-    header.fill(0x20, 148, 156);
-    header.write(
-      `${header
-        .reduce((sum, byte) => sum + byte, 0)
-        .toString(8)
-        .padStart(6, '0')}\0 `,
-      148,
-    );
-    blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
-  }
-  return new Uint8Array(gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)])));
-};
-
 const runtimeVersion = '10.0.11';
-const runtimeArchive = tarGz([
-  { name: 'dotnet', text: 'muxer', executable: true },
-  { name: 'LICENSE.txt', text: 'MIT' },
-  { name: `host/fxr/${runtimeVersion}/libhostfxr.dylib`, text: 'hostfxr' },
-  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libhostpolicy.dylib`, text: 'hostpolicy' },
-  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libcoreclr.dylib`, text: 'coreclr' },
-  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libclrjit.dylib`, text: 'clrjit' },
-  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/System.Private.CoreLib.dll`, text: 'corelib' },
-  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/System.Linq.dll`, text: 'linq' },
-]);
-const layerArchive = tarGz([
-  { name: 'Tau.PicoGK.Worker.dll', text: 'worker' },
-  { name: 'Tau.PicoGK.Worker.runtimeconfig.json', text: '{}' },
-  { name: 'Tau.PicoGK.Worker.deps.json', text: '{}' },
-  { name: 'PicoGK.dll', text: 'picogk' },
-  { name: 'picogk.26.2.dylib', text: 'engine' },
-  { name: 'libSkiaSharp.dylib', text: 'skia' },
-  { name: 'Microsoft.CodeAnalysis.dll', text: 'roslyn' },
-]);
+const runtimeArchive = tarGz(
+  { name: 'dotnet', data: 'muxer', mode: 0o755 },
+  { name: 'LICENSE.txt', data: 'MIT' },
+  { name: `host/fxr/${runtimeVersion}/libhostfxr.dylib`, data: 'hostfxr' },
+  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libhostpolicy.dylib`, data: 'hostpolicy' },
+  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libcoreclr.dylib`, data: 'coreclr' },
+  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/libclrjit.dylib`, data: 'clrjit' },
+  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/System.Private.CoreLib.dll`, data: 'corelib' },
+  { name: `shared/Microsoft.NETCore.App/${runtimeVersion}/System.Linq.dll`, data: 'linq' },
+);
+const layerArchive = tarGz(
+  { name: 'Tau.PicoGK.Worker.dll', data: 'worker' },
+  { name: 'Tau.PicoGK.Worker.runtimeconfig.json', data: '{}' },
+  { name: 'Tau.PicoGK.Worker.deps.json', data: '{}' },
+  { name: 'PicoGK.dll', data: 'picogk' },
+  { name: 'picogk.26.2.dylib', data: 'engine' },
+  { name: 'libSkiaSharp.dylib', data: 'skia' },
+  { name: 'Microsoft.CodeAnalysis.dll', data: 'roslyn' },
+);
 
 const hex = (algorithm: 'sha256' | 'sha512', bytes: Uint8Array<ArrayBuffer>): string =>
   createHash(algorithm).update(bytes).digest('hex');
-const sha512Integrity = `sha512-${createHash('sha512').update(runtimeArchive).digest('base64')}`;
+const sha512Integrity: `sha512-${string}` = `sha512-${createHash('sha512').update(runtimeArchive).digest('base64')}`;
 const layerRecord: PicogkLayerRecord = {
   schemaVersion: 2,
   target: 'darwin-arm64',
@@ -117,17 +88,10 @@ describe('PicoGK closure preparation', () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-picogk-closure-'));
     roots.push(root);
     const seed = join(root, 'seed');
-    await mkdir(join(seed, 'blobs/sha256'), { recursive: true });
-    await writeFile(join(seed, 'blobs/sha256', hex('sha256', runtimeArchive)), runtimeArchive);
-    await writeFile(join(seed, 'blobs/sha256', layerRecord.sha256), layerArchive);
-    await writeFile(
-      join(seed, 'tau-seed.json'),
-      JSON.stringify({
-        closures: [
-          { payloads: [{ integrity: sha512Integrity, blob: `blobs/sha256/${hex('sha256', runtimeArchive)}` }] },
-        ],
-      }),
-    );
+    await writeSeedDirectory(seed, [
+      { integrity: sha512Integrity, bytes: runtimeArchive },
+      { integrity: `sha256-${createHash('sha256').update(layerArchive).digest('base64')}`, bytes: layerArchive },
+    ]);
     const host = createPreparationHost({
       plugins: [{ package: '@taucad/picogk', deployment: parsePluginDeployment(testManifest(), 'test manifest') }],
       store: join(root, 'store'),

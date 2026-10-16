@@ -1,0 +1,45 @@
+# Pin freshness (charter W15, D27, R1): once a week, read-only, ask every origin and publisher
+# whether the payloads the native plugins' `tau-plugin.json` manifests pin are still served as
+# pinned. A HEAD per URL compares `Content-Length` with the pinned byte length; PyPI's JSON API
+# reports a wheel's `yanked` flag and sha256, python-build-standalone's release `SHA256SUMS` and
+# Microsoft's `releases.json` the published digests. Drift is a job summary and a red run, never
+# an edit: a pin changes only through its generator and a reviewed pull request (I1). It
+# downloads no payload. A pull request that changes this job or its script runs it once.
+name: Pin freshness
+
+on:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/pin-freshness.yml
+      - scripts/src/check-pin-freshness.ts
+      - scripts/src/check-payload-urls.ts
+
+permissions:
+  contents: read
+  actions: read # nrwl/nx-set-shas inside setup-nx
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    name: Check pinned payloads against their publishers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Report pin drift
+        run: node scripts/src/check-pin-freshness.ts --summary "$GITHUB_STEP_SUMMARY" packages/plugins/*/tau-plugin.json

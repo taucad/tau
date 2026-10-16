@@ -15,10 +15,14 @@ import { join } from 'node:path';
 
 import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { describe, expect, it } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { picogk } from '#index.js';
 import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 const runtime = defineRuntime({
   plugins: [

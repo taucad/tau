@@ -14,6 +14,20 @@
         "prepare-layer"
       ]
     },
+    "test:native-darwin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Tier 3b of PicoGK on darwin-arm64 (charter D27, D30; the native-darwin CI job): with TAU_PICOGK_CLOSURE=pinned the native fixture prepares the checked-in manifest's closure from its pinned origins (Microsoft's runtime and the published Tau layer, about 58 MB) instead of building the layer, the closure must equal the golden receipt, and every native suite runs on it behind the global-fetch tripwire."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/plugins/picogk",
+        "command": "../../../node_modules/.bin/vitest run src/picogk-closure.native.integration.test.ts src/picogk.native.integration.test.ts src/picogk.native-sandbox.integration.test.ts src/picogk.native-lifecycle.integration.test.ts src/picogk-materials.native.integration.test.ts",
+        "env": {
+          "TAU_PICOGK_CLOSURE": "pinned"
+        }
+      }
+    },
     "prepare-layer": {
       "executor": "nx:run-commands",
       "dependsOn": [

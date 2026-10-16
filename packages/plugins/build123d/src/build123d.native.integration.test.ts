@@ -23,11 +23,15 @@ import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { asKnownArtifact } from '@taucad/runtime';
-import { describe, expect, it } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prepareFromSeed, seedPresent } from '#build123d-closure.fixture.js';
 import { build123d, build123dOptionsFromClosure } from '#index.js';
 import type { ParameterSetActors } from '@taucad/parameters/set-machine';
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const encoder = new TextEncoder();

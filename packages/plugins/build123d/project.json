@@ -59,6 +59,18 @@
     "test": {
       "dependsOn": ["seed"]
     },
+    "test:native-darwin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["seed"],
+      "metadata": {
+        "description": "Tier 3b of Build123d on darwin-arm64 (charter D27, D30; the native-darwin CI job): the closure sealed from the digest-keyed seed must equal the golden receipt, re-verify intact and import OCP inside the sandbox, then the kernel and sandbox suites run on it. Each file installs the global-fetch tripwire, and the golden comparison is appended to TAU_GOLDEN_SUMMARY_FILE when set."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/plugins/build123d",
+        "command": "../../../node_modules/.bin/vitest run src/build123d-closure.native.integration.test.ts src/build123d.native.integration.test.ts src/build123d.native-sandbox.integration.test.ts"
+      }
+    },
     "test-python": {
       "executor": "nx:run-commands",
       "dependsOn": ["seed"],

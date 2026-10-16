@@ -1,6 +1,12 @@
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import { rpcClientErrorCode } from '@taucad/chat';
-import { geoSpecDefaultRunBudget, geoSpecMaxRunBudget, resolveGeoSpecRunBudget } from '@taucad/chat/constants';
+import {
+  geoSpecDefaultMaxRunBudget,
+  geoSpecDefaultRunBudget,
+  geoSpecHostLimitProblem,
+  resolveGeoSpecHostLimits,
+  resolveGeoSpecRunBudget,
+} from '@taucad/chat/constants';
 import { createGeoSpecRunProgress, markGeoSpecRunTimeout } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRunProgress } from '@taucad/agent-tools/geospec';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
@@ -23,10 +29,22 @@ export type GeoSpecWorkerRpcClientOptions = {
   createWorker?: CreateGeoSpecWorker;
   /**
    * The host's run budget in milliseconds, raised per call to cover its
-   * `testTimeout` and capped at {@link geoSpecMaxRunBudget}. A run that
-   * outlives it answers `OPERATION_TIMEOUT` with the requirements it completed.
+   * `testTimeout` and capped at `maxRunBudget`. A run that outlives it answers
+   * `OPERATION_TIMEOUT` with the requirements it completed.
    */
   runnerTimeout?: number;
+  /**
+   * Host policy: the longest run budget and largest `testTimeout`, in
+   * milliseconds. Defaults to {@link geoSpecDefaultMaxRunBudget}; a host
+   * provisioned for longer verification raises it. A call above it is refused.
+   */
+  maxRunBudget?: number;
+  /**
+   * Host policy: the largest `workUnitLimit` a call, `loadModel` or `expectGeo`
+   * may request. Defaults to GeoSpec's default authored maximum; a host
+   * provisioned for larger claims raises it. A call above it is refused.
+   */
+  maxWorkUnitLimit?: number;
   /** Milliseconds to wait for worker initialization before failing in-flight runs. */
   initTimeout?: number;
   /** Milliseconds to wait after cooperative abort before hard-resetting the worker. */
@@ -62,12 +80,15 @@ const defaultAbortGrace = 5000;
 const defaultInitTimeout = 10_000;
 /**
  * The longest a started `runTests` call can take before resolving: a full
- * startup timeout, then the longest run budget, then the abort grace. No
- * outer RPC budget bounds a browser-placed tool call, so this is the bound.
+ * startup timeout, then the host's longest run budget, then the abort grace.
+ * No outer RPC budget bounds a browser-placed tool call, so this is the bound.
  *
+ * @param maxRunBudget - The host's longest run budget. Milliseconds.
+ * @returns The bound. Milliseconds.
  * @public
  */
-export const geoSpecClientWorstCaseTimeout = defaultInitTimeout + geoSpecMaxRunBudget + defaultAbortGrace;
+export const geoSpecClientWorstCaseTimeout = (maxRunBudget: number = geoSpecDefaultMaxRunBudget): number =>
+  defaultInitTimeout + maxRunBudget + defaultAbortGrace;
 
 const createRequestId = (): string => randomUuid();
 
@@ -96,7 +117,11 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   let availableCandidates: ReadonlyArray<Uint8Array<ArrayBuffer>> = [];
   const pendingRuns = new Map<string, PendingRun>();
 
-  const hostRunBudget = Math.min(options.runnerTimeout ?? geoSpecDefaultRunBudget, geoSpecMaxRunBudget);
+  const hostLimits = resolveGeoSpecHostLimits({
+    ...(options.maxRunBudget === undefined ? {} : { maxRunBudget: options.maxRunBudget }),
+    ...(options.maxWorkUnitLimit === undefined ? {} : { maxWorkUnitLimit: options.maxWorkUnitLimit }),
+  });
+  const hostRunBudget = Math.min(options.runnerTimeout ?? geoSpecDefaultRunBudget, hostLimits.maxRunBudget);
   const initTimeout = options.initTimeout ?? defaultInitTimeout;
   const abortGrace = options.abortGrace ?? defaultAbortGrace;
 
@@ -333,6 +358,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         sessionId: nextSessionId,
         runtimeConfig: options.runtimeConfig,
         fileSystemPort: fileSystemBridge.port,
+        maxWorkUnitLimit: hostLimits.maxWorkUnitLimit,
       };
       worker.postMessage(request, [fileSystemBridge.port]);
     } catch (error) {
@@ -412,6 +438,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     if (context?.signal?.aborted) {
       return errorResult('GeoSpec request cancelled.');
     }
+    const overLimit = geoSpecHostLimitProblem(args, hostLimits);
+    if (overLimit !== undefined) {
+      return { success: false, errorCode: rpcClientErrorCode.validationError, message: overLimit };
+    }
     let candidateSharingEnabled = false;
     if (
       !closed &&
@@ -457,7 +487,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       const pending: PendingRun = {
         resolve,
         abortListener,
-        runBudget: resolveGeoSpecRunBudget(hostRunBudget, args.testTimeout),
+        runBudget: resolveGeoSpecRunBudget(hostRunBudget, args.testTimeout, hostLimits.maxRunBudget),
         budgetStartedAt: performance.now(),
         progress: createGeoSpecRunProgress(),
         ...(context?.signal ? { signal: context.signal } : {}),

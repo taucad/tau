@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { geoSpecMaxRunBudget } from '@taucad/chat/constants';
+import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '@taucad/chat/constants';
 import { projectGeoSpecTest } from '@taucad/agent-tools/geospec';
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import { mock } from 'vitest-mock-extended';
@@ -215,9 +215,60 @@ describe('createGeoSpecWorkerRpcClient', () => {
     await client.close();
   });
 
-  it('should bound a started call by startup, the longest run budget and the abort grace', () => {
+  it("should bound a started call by startup, the host's longest run budget and the abort grace", () => {
     // No outer RPC budget bounds a browser-placed test_model call, so the client's own bound is the only one.
-    expect(geoSpecClientWorstCaseTimeout).toBe(10_000 + geoSpecMaxRunBudget + 5000);
+    expect(geoSpecClientWorstCaseTimeout()).toBe(10_000 + geoSpecDefaultMaxRunBudget + 5000);
+    expect(geoSpecClientWorstCaseTimeout(3_600_000)).toBe(10_000 + 3_600_000 + 5000);
+  });
+
+  it('should refuse a call above the host maxima before starting a worker, and accept a host that raised them', async () => {
+    const createWorker = vi.fn(() => new FakeGeoSpecWorker() as unknown as Worker);
+    const client = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(new FakeFileManagerWorker()),
+      runtimeConfig,
+      createWorker,
+    });
+    const overBudget = await client.runTests({
+      files: ['main.geospec.ts'],
+      testTimeout: geoSpecDefaultMaxRunBudget + 1,
+    });
+    expect(overBudget).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' });
+    expect(overBudget.success ? '' : overBudget.message).toContain('maxRunBudget');
+    const overWork = await client.runTests({
+      files: ['main.geospec.ts'],
+      workUnitLimit: geoSpecDefaultMaxWorkUnitLimit + 1,
+    });
+    expect(overWork).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' });
+    expect(overWork.success ? '' : overWork.message).toContain('maxWorkUnitLimit');
+    expect(createWorker).not.toHaveBeenCalled();
+    await client.close();
+
+    const geoSpecWorker = new FakeGeoSpecWorker();
+    const raised = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(new FakeFileManagerWorker()),
+      runtimeConfig,
+      createWorker: () => geoSpecWorker as unknown as Worker,
+      maxRunBudget: 3_600_000,
+      maxWorkUnitLimit: 4_000_000_000,
+    });
+    await expect(
+      raised.runTests({ files: ['main.geospec.ts'], testTimeout: 1_800_000, workUnitLimit: 2_000_000_000 }),
+    ).resolves.toMatchObject({ success: true });
+    const messages = geoSpecWorker.postMessage.mock.calls.map(([message]) => message);
+    expect(messages.find((message) => message.type === 'initialize')).toMatchObject({
+      maxWorkUnitLimit: 4_000_000_000,
+    });
+    expect(messages.find((message) => message.type === 'run')).toMatchObject({
+      args: { workUnitLimit: 2_000_000_000 },
+    });
+    await raised.close();
+    expect(() =>
+      createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: createOpenFileSystemBridge(new FakeFileManagerWorker()),
+        runtimeConfig,
+        maxRunBudget: 0,
+      }),
+    ).toThrow('maxRunBudget must be a positive safe integer');
   });
 
   it('should reuse one default compiled worker across repeated successful test runs', async () => {
@@ -538,7 +589,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
     }
   });
 
-  it('should raise the run budget to cover the requested testTimeout, up to the longest budget', async () => {
+  it("should raise the run budget to cover the requested testTimeout, up to the host's longest budget", async () => {
     vi.useFakeTimers();
     try {
       const fileManagerWorker = new FakeFileManagerWorker();
@@ -551,11 +602,11 @@ describe('createGeoSpecWorkerRpcClient', () => {
         runnerTimeout: 1000,
         abortGrace: 10,
       });
-      const resultPromise = client.runTests({ files: ['main.geospec.ts'], testTimeout: geoSpecMaxRunBudget });
-      await vi.advanceTimersByTimeAsync(geoSpecMaxRunBudget - 1);
+      const resultPromise = client.runTests({ files: ['main.geospec.ts'], testTimeout: geoSpecDefaultMaxRunBudget });
+      await vi.advanceTimersByTimeAsync(geoSpecDefaultMaxRunBudget - 1);
       expect(geoSpecWorker.postMessage.mock.calls.some(([message]) => message.type === 'abort')).toBe(false);
       await vi.advanceTimersByTimeAsync(20);
-      await expect(resultPromise).resolves.toMatchObject({ timeout: { budget: geoSpecMaxRunBudget } });
+      await expect(resultPromise).resolves.toMatchObject({ timeout: { budget: geoSpecDefaultMaxRunBudget } });
     } finally {
       vi.useRealTimers();
     }

@@ -85,6 +85,7 @@ vi.mock('geospec/model', () => {
     loadModel: workerMocks.loadModel,
     // Result projection names the mesh-supported matchers in evidence suggestions.
     geoSpecMeshEvidenceMatchers: ['toHaveBoundingBox', 'toHaveVolume'],
+    geoSpecRegionWholeModelClaimCode: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM',
   };
 });
 
@@ -1210,6 +1211,7 @@ describe('geospec-runner.worker', () => {
         sessionId: 'native-session',
         runtimeConfig: defaultRuntimeConfig,
         fileSystemPort: new MessageChannel().port1,
+        maxWorkUnitLimit: 4_000_000_000,
       },
     } as MessageEvent<GeoSpecRunnerWorkerRequest>);
 
@@ -1228,9 +1230,12 @@ describe('geospec-runner.worker', () => {
       readonly nativeAssertions: {
         readonly engine: Readonly<Record<string, unknown>>;
         readonly evidenceProfile: string;
+        readonly maximumWorkUnitLimit?: number;
       };
     };
     expect(runnerOptions.nativeAssertions.evidenceProfile).toBe('bounded');
+    // The host's work-unit maximum is policy the runner enforces on authored budgets.
+    expect(runnerOptions.nativeAssertions.maximumWorkUnitLimit).toBe(4_000_000_000);
     for (const method of ['ingestSubject', 'subjectHandle', 'releaseSubject', 'processRequest', 'evaluateClaim']) {
       expect(typeof runnerOptions.nativeAssertions.engine[method]).toBe('function');
     }

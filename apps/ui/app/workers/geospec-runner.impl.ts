@@ -423,7 +423,11 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
-        nativeAssertions: { engine: candidateEngine, evidenceProfile: 'bounded' },
+        nativeAssertions: {
+          engine: candidateEngine,
+          evidenceProfile: 'bounded',
+          ...(request.maxWorkUnitLimit === undefined ? {} : { maximumWorkUnitLimit: request.maxWorkUnitLimit }),
+        },
         model: {
           runtime: runtimeClient,
           readSource: async (source) => {

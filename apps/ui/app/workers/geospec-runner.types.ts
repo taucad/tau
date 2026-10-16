@@ -8,6 +8,8 @@ export type GeoSpecRunnerWorkerInitializeRequest = {
   sessionId: string;
   runtimeConfig: UiRuntimeConfigInput;
   fileSystemPort: MessagePort;
+  /** Host policy: the largest work-unit budget a spec may author. */
+  maxWorkUnitLimit?: number;
 };
 
 export type GeoSpecRunnerWorkerRunRequest = {

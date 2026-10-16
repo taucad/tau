@@ -3,9 +3,9 @@
 # no closure serves refuse with a typed reason before any download.
 #
 # - Linux x64 and arm64 (glibc): prepare, read `selection.host` from the receipt, run the Build123d
-#   suites; on x64 also the refusals S17 measured, each in a container: glibc 2.28 (`blocked`, axis
-#   `minimumLibcVersion`), Alpine (`blocked`, axis `libc`) and an image without libGL (`blocked`,
-#   `missing-system-library`, ruling X6). These run on every pull request that affects Build123d,
+#   suites; on x64 also the refusals: glibc 2.28 (`blocked`, axis `minimumLibcVersion`, S17) and
+#   Alpine (`blocked`, axis `libc`), each in a container, and the runner with libGL moved aside
+#   (`blocked`, `missing-system-library`, ruling X6). These run on every pull request that affects Build123d,
 #   PicoGK or the CLI (Nx affected), and on every push to `main`.
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
 #   and a refused `TAU_PAYLOAD_TARGET`. Only on push to `main`, nightly and on dispatch, so a pull
@@ -173,16 +173,13 @@ jobs:
         run: pnpm nx run build123d:test --outputStyle=static
 
       # Each refusal runs `tau prepare build123d --json` from the runner's checkout, mounted read-only,
-      # and requires exit 3 with the typed outcome; an `unsupported-target` refusal must also leave the
-      # store without a single blob, so it was decided before any download.
+      # and requires exit 3, the typed outcome and a store without a single blob, so it was decided
+      # before any download.
       #
       # - S17: glibc 2.28 refuses on the floor (`minimumLibcVersion`, 2.31 > 2.28), with no network.
       #   Node 24 runs on glibc 2.28, so the runner's own Node is mounted.
       # - D18: Alpine (musl) has no closure and refuses on `libc`, with Alpine's own Node.
-      # - X6: on a glibc host without libGL the closure refuses to seal with `missing-system-library`
-      #   naming `libGL.so.1`, never a crash at the first model. Offline from the seed; the sandbox
-      #   tools come from the image's packages, none of which pulls libGL.
-      - name: Refuse glibc 2.28, musl and a host without libGL
+      - name: Refuse glibc 2.28 and musl
         if: matrix.arch == 'x64'
         run: |
           node_root=$(dirname "$(dirname "$(command -v node)")")
@@ -228,8 +225,36 @@ jobs:
             "--network=none -v $musl/node_modules:/node_modules:ro" node:24-alpine \
             node packages/cli/dist/bin/tau.mjs prepare build123d --json
           test -z "$(ls -A "$RUNNER_TEMP/tau-alpine/payloads/blobs" 2>/dev/null)"
-          refuse nogl '.code == "MISSING_SYSTEM_LIBRARY" and .details.detail.library == "libGL.so.1"' \
-            "--privileged -e TAU_PAYLOAD_DIR=$GITHUB_WORKSPACE/out/cache/build123d-seed" ubuntu:24.04 sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends bubblewrap socat ripgrep >/dev/null && ! ldconfig -p | grep -q libGL.so.1 && /opt/node/bin/node packages/cli/dist/bin/tau.mjs prepare build123d --offline --json'
+
+      # X6: on a glibc host without libGL, the closure refuses to seal with `missing-system-library`
+      # naming `libGL.so.1`, never a crash at the first model. The kernel sandbox does not nest inside
+      # a container, so the runner itself loses libGL for this step, offline from the seed into an
+      # empty store, and gets it back afterwards.
+      - name: Refuse a host without libGL
+        if: matrix.arch == 'x64'
+        env:
+          TAU_CONFIG_DIR: ${{ runner.temp }}/tau-nogl
+          TAU_PAYLOAD_DIR: ${{ github.workspace }}/out/cache/build123d-seed
+        run: |
+          aside="$RUNNER_TEMP/libgl-aside"
+          mkdir -p "$aside"
+          restore() { sudo mv "$aside"/* /usr/lib/x86_64-linux-gnu/ && sudo ldconfig; }
+          trap restore EXIT
+          sudo mv /usr/lib/x86_64-linux-gnu/libGL.so.1* "$aside"/
+          sudo ldconfig
+          if ldconfig -p | grep -q 'libGL\.so\.1 '; then echo "::error::libGL.so.1 is still resolvable"; exit 1; fi
+          code=0
+          node packages/cli/dist/bin/tau.mjs prepare build123d --offline --json > "$RUNNER_TEMP/nogl.json" || code=$?
+          cat "$RUNNER_TEMP/nogl.json"
+          test "$code" = 3
+          jq -e '.code == "MISSING_SYSTEM_LIBRARY" and .details.reason == "missing-system-library"
+            and .details.detail.library == "libGL.so.1"' "$RUNNER_TEMP/nogl.json"
+          {
+            echo "### tau prepare build123d without libGL: refused"
+            echo '```json'
+            jq '{ code, detail: .details.detail, message: .details.message }' "$RUNNER_TEMP/nogl.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   intel:
     name: Native kernels on darwin-x64

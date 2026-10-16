@@ -91,7 +91,7 @@ if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]] &&
   listed="$(grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]+"' "$work/receipt" | sed -E 's/.*"([^"]+)"$/\1/' || true)"
   [[ -n "$chunk_path" ]] || chunk_path="$(first '\.m?js$' 'worker' <<<"$listed")"
   [[ -n "$wasm_path" ]] || wasm_path="$(first '\.wasm$' '^$' <<<"$listed")"
-  [[ -n "$worker_path" ]] || worker_path="$(first 'worker[^/]*\.m?js$' '^$' <<<"$listed")"
+  [[ -n "$worker_path" ]] || worker_path="$(first '\.worker(-[A-Za-z0-9_-]+)?\.m?js$' '^$' <<<"$listed")"
 fi
 
 # Discovery 2: the document's script references, then the chunks they reference.
@@ -117,7 +117,7 @@ if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]]; then
     references "$work/scan" >>"$work/queue"
     sort -u -o "$work/queue" "$work/queue"
     [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' "$work/queue" | sed -n 1p || true)"
-    [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' "$work/queue" | sed -n 1p || true)"
+    [[ -n "$worker_path" ]] || worker_path="$(grep -E '\.worker(-[A-Za-z0-9_-]+)?\.m?js$' "$work/queue" | sed -n 1p || true)"
   done
 fi
 

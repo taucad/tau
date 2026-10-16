@@ -38,9 +38,17 @@ type ModuleRow = {
   readonly tamperedWithoutIntegrity: Outcome;
   readonly checked: number;
   readonly plain: number;
+  /** Diagnostics for large modules: median load with other digests, and buffered (non-streaming) loads. */
+  readonly variants?: Readonly<Record<string, number>>;
+};
+type WorkerModule = {
+  readonly path: string;
+  readonly bytes: number;
+  readonly integrity: string;
+  readonly variants?: Readonly<Record<string, string>>;
 };
 type WorkerInput = {
-  readonly modules: ReadonlyArray<{ readonly path: string; readonly bytes: number; readonly integrity: string }>;
+  readonly modules: readonly WorkerModule[];
   readonly iterations: number;
 };
 type WorkerOutput = { readonly crossOriginIsolated: boolean; readonly row: ModuleRow };
@@ -96,6 +104,16 @@ record(
   }`,
 );
 
+/* Diagnostics: for modules of 10 MB or more, also time other digests and buffered loads. */
+const workerModules: WorkerModule[] = modules.map((module) => {
+  if (module.bytes < 10_000_000) {
+    return module;
+  }
+  const bytes = read(module.path);
+  const digest = (algorithm: string): string => `${algorithm}-${createHash(algorithm).update(bytes).digest('base64')}`;
+  return { ...module, variants: { sha256: digest('sha256'), sha512: digest('sha512') } };
+});
+
 /* 2. The browsers. The registration lines run as the app runs them, resolved against each chunk's own URL. */
 const registrationModule = registrations
   .map(({ chunk, line }) =>
@@ -135,7 +153,17 @@ self.onmessage = async ({ data }) => {
         (kind === 'checked' ? checked : plain).push(performance.now() - start);
       }
     }
-    rows.push({ path: module.path, bytes: module.bytes, registered: integrity !== undefined, untampered, tamperedWithIntegrity, tamperedWithoutIntegrity, checked: median(checked), plain: median(plain) });
+    let variants;
+    if (module.variants) {
+      variants = {};
+      const time = async (name, run) => { const times = []; for (let index = 0; index < data.iterations; index += 1) { const start = performance.now(); await run(name + '=' + index); times.push(performance.now() - start); } variants[name] = median(times); };
+      for (const [name, value] of Object.entries(module.variants)) {
+        await time(name, (query) => { const href = url + '?' + query; registry.set(href, value); return compileWasmStreaming(href); });
+      }
+      await time('buffered', async (query) => WebAssembly.compile(await (await fetch(url + '?' + query)).arrayBuffer()));
+      await time('buffered-sha384', async (query) => WebAssembly.compile(await (await fetch(url + '?' + query, { integrity })).arrayBuffer()));
+    }
+    rows.push({ path: module.path, bytes: module.bytes, registered: integrity !== undefined, untampered, tamperedWithIntegrity, tamperedWithoutIntegrity, checked: median(checked), plain: median(plain), variants });
   }
   self.postMessage({ crossOriginIsolated: self.crossOriginIsolated, row: rows[0] });
 };
@@ -225,6 +253,12 @@ const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
     if (added > worst.added) {
       worst = { path: row.path, added };
     }
+    if (row.variants !== undefined) {
+      const timings = Object.entries(row.variants).map(([name, value]) => `${name} ${value.toFixed(1)} ms`);
+      lines.push(
+        `INFO ${label} ${row.path} streaming plain ${row.plain.toFixed(1)} ms, sha384 ${row.checked.toFixed(1)} ms, ${timings.join(', ')}`,
+      );
+    }
     record(
       row.untampered.ok && !row.tamperedWithIntegrity.ok && added <= overheadLimit,
       `${label} ${row.path} ${(row.bytes / 1e6).toFixed(1)} MB: untampered ${row.untampered.ok ? 'compiles' : `fails ${row.untampered.error ?? ''}`}; tampered+integrity ${row.tamperedWithIntegrity.ok ? 'COMPILED' : 'refused'}; tampered without integrity ${row.tamperedWithoutIntegrity.ok ? 'compiles' : 'fails'}; loader ${row.plain.toFixed(1)} ms plain, ${row.checked.toFixed(1)} ms with integrity, added ${added.toFixed(1)} ms`,
@@ -248,7 +282,7 @@ for (const [label, type] of engines) {
     try {
       const page = await browser.newPage();
       await page.goto(`${origin}${harness}/`);
-      const input: WorkerInput = { modules, iterations };
+      const input: WorkerInput = { modules: workerModules, iterations };
       // One fresh worker per module, as a kernel worker would have, so compiled modules never accumulate.
       const measured = await page.evaluate(
         async ({ script, data }) => {

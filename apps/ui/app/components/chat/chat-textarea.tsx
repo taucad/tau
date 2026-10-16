@@ -23,7 +23,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
-import { findEntryGraphics, listGeometryEntryPaths } from '@taucad/workbench-panes/units/geometry-units';
+import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the

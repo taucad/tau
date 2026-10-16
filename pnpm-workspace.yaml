@@ -436,7 +436,6 @@ patchedDependencies:
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
   '@react-three/fiber@9.6.1': tools/pnpm/patches/@react-three__fiber@9.6.1.patch
   monaco-editor@0.55.1: tools/pnpm/patches/monaco-editor@0.55.1.patch
-  allotment@1.20.6: tools/pnpm/patches/allotment@1.20.6.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

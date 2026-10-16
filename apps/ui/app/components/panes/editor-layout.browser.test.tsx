@@ -154,50 +154,94 @@ describe('Dockview tab close action in Chromium', () => {
 });
 
 describe('editor chrome layout stability in Chromium', () => {
-  it.each([{ defaultSizes: undefined }, { defaultSizes: [200, 600] }])(
-    'should restore panes after Suspense with defaultSizes=$defaultSizes',
-    async ({ defaultSizes }) => {
-      const fixture = (pending?: Promise<void>, visible = true): React.JSX.Element => (
-        <Suspense fallback={<p>Loading pane</p>}>
-          <div style={{ width: 800, height: 400 }}>
-            <Allotment paneLabels={['Chat', 'Viewer']} defaultSizes={defaultSizes}>
-              <Allotment.Pane visible={visible} preferredSize={200} minSize={100}>
+  it.each([
+    { defaultSizes: undefined, nested: false },
+    { defaultSizes: [200, 600], nested: false },
+    { defaultSizes: undefined, nested: true },
+  ])(
+    'should keep panes mounted during Suspense with defaultSizes=$defaultSizes, nested=$nested',
+    async ({ defaultSizes, nested }) => {
+      await page.viewport(1300, 650);
+      const fixture = (pending?: Promise<void>, visible = true): React.JSX.Element => {
+        const workspace = (
+          <Allotment paneLabels={['Chat', 'Viewer']} defaultSizes={defaultSizes}>
+            <Allotment.Pane visible={visible} preferredSize={200} minSize={100}>
+              <div className='size-full'>
                 Chat history
-              </Allotment.Pane>
-              <Allotment.Pane minSize={100}>
-                <SuspendedContent pending={pending} />
-              </Allotment.Pane>
-            </Allotment>
-          </div>
-        </Suspense>
-      );
+                <input aria-label='Chat draft' />
+              </div>
+            </Allotment.Pane>
+            <Allotment.Pane minSize={100}>
+              <SuspendedContent pending={pending} />
+            </Allotment.Pane>
+          </Allotment>
+        );
+        return (
+          <Suspense fallback={<p>Loading workspace</p>}>
+            <div style={{ width: nested ? 1000 : 800, height: 400 }}>
+              {nested ? (
+                <Allotment paneLabels={['Sidebar', 'Content']}>
+                  <Allotment.Pane preferredSize={200} minSize={100}>
+                    Sidebar
+                  </Allotment.Pane>
+                  <Allotment.Pane>{workspace}</Allotment.Pane>
+                </Allotment>
+              ) : (
+                workspace
+              )}
+            </div>
+          </Suspense>
+        );
+      };
       const view = render(fixture());
       const editor = view.container.querySelector('textarea')!;
       await vi.waitFor(() => {
-        expect(view.container.querySelectorAll('.sash')).toHaveLength(1);
+        expect(view.container.querySelectorAll('.sash')).toHaveLength(nested ? 2 : 1);
         expect(editor.getBoundingClientRect().width).toBeGreaterThan(0);
       });
       await userEvent.fill(editor, 'Unsaved work');
+      const draft = view.container.querySelector('input')!;
+      await userEvent.fill(draft, 'Unsent message');
+      const sashes = [...view.container.querySelectorAll('.sash')];
       /* oxlint-disable eslint/no-await-in-loop -- Each reveal must finish before suspending the same mounted panes again. */
       for (let cycle = 0; cycle < 2; cycle += 1) {
+        draft.focus();
         const { promise, resolve } = Promise.withResolvers<void>();
         await act(async () => {
           view.rerender(fixture(promise));
         });
         await vi.waitFor(() => {
-          expect(view.getByText('Loading pane').getBoundingClientRect().height).toBeGreaterThan(0);
+          expect(view.getByRole('status', { name: 'Loading' }).getBoundingClientRect().height).toBeGreaterThan(0);
+          expect(view.queryByText('Loading workspace')).toBeNull();
+          expect(document.activeElement).toBe(draft);
+          expect(draft.value).toBe('Unsent message');
+          expect([...view.container.querySelectorAll('.sash')]).toEqual(sashes);
+          expect(view.getByText('Chat history').getBoundingClientRect().width).toBe(200);
         });
+        const sash = await view.findByRole('separator', { name: 'Resize Chat and Viewer panes' });
+        sash.focus();
+        await userEvent.keyboard('{ArrowRight}');
+        await vi.waitFor(() => {
+          expect(view.getByText('Chat history').getBoundingClientRect().width).toBe(208);
+        });
+        await userEvent.keyboard('{ArrowLeft}');
+        if (nested && cycle === 0) {
+          await page.screenshot({ path: '../../../../../out/test-results/editor-layout/suspense-pending.png' });
+        }
         await act(async () => {
           resolve();
           await promise;
         });
         await vi.waitFor(() => {
-          expect(view.queryByText('Loading pane')).toBeNull();
+          expect(view.queryByRole('status', { name: 'Loading' })).toBeNull();
           expect(view.getByRole('textbox', { name: 'Persistent editor' })).toBe(editor);
           expect(editor.value).toBe('Unsaved work');
-          expect(view.container.querySelectorAll('.sash')).toHaveLength(1);
+          expect(view.container.querySelectorAll('.sash')).toHaveLength(nested ? 2 : 1);
           expect(view.getByText('Chat history').getBoundingClientRect().width).toBe(200);
         });
+        if (nested && cycle === 0) {
+          await page.screenshot({ path: '../../../../../out/test-results/editor-layout/suspense-resolved.png' });
+        }
         view.rerender(fixture(undefined, false));
         await vi.waitFor(() => {
           expect(view.getByText('Chat history').getBoundingClientRect().width).toBe(0);

@@ -42,10 +42,63 @@ const topologySchema = JSON.parse(
   ),
 ) as Record<string, unknown>;
 const isTopologyPayload = new Ajv2020({ strict: true, allErrors: true }).compile<TauCadTopologyPayload>(topologySchema);
-const prompt = `Use the cad-build123d and geospec-authoring skills to create a small reusable two-rotor assembly in main.py.
-Make a 100 by 40 by 6 mm chassis, and define one reusable Python factory that returns a native Compound module with a housing and an asymmetric rotor. Instantiate it twice, 50 mm apart. Each rotor must connect to its housing using native RevoluteJoint and RigidJoint objects; each complete module connects to the chassis with native RigidJoint attachment points. Keep the resulting assembly hierarchy and give parts meaningful labels.
-Use a native bd_materials wood.oak() textured material on one housing and a plain green color on the other. Use native materials on the rotors too. Do not invent a material library, tessellator or GLB writer.
-Using the skill's supported motion(model) supplement, ground the chassis, give the chassis, rotors and housings the occurrence_ids chassis, left-rotor, right-rotor, left-housing and right-housing, and add one named animation that turns the two rotors independently in opposite directions. The left housing is oak and the right housing is green. Keep geometry and joint authoring in Build123D.
+const assemblyComponents = {
+  chassis: 'occurrence:0/chassis',
+  carrier: 'occurrence:0/movingAssembly/carrier',
+  leftHousing: 'occurrence:0/movingAssembly/left/housing',
+  rightHousing: 'occurrence:0/movingAssembly/right/housing',
+  leftRotor: 'occurrence:0/movingAssembly/left/rotor',
+  rightRotor: 'occurrence:0/movingAssembly/right/rotor',
+  leftFollower: 'occurrence:0/movingAssembly/left/follower',
+  rightFollower: 'occurrence:0/movingAssembly/right/follower',
+};
+const assemblyDrivers = {
+  carrier: 'occurrence:0/connection/carrier',
+  left: 'occurrence:0/movingAssembly/left/connection/drive',
+  right: 'occurrence:0/movingAssembly/right/connection/drive',
+};
+const assertAssemblyIntent = (topology: TauCadTopologyPayload): void => {
+  const intent = topology.mechanismIntent;
+  if (intent === undefined) {
+    throw new Error('Exported assembly has no mechanism intent');
+  }
+  const couplings = intent.couplings ?? [];
+  expect(intent.schemaVersion).toBe(1);
+  expect(intent.ground).toBe(assemblyComponents.chassis);
+  expect(intent.connections).toHaveLength(7);
+  expect(couplings).toHaveLength(2);
+  for (const side of ['left', 'right']) {
+    const moduleId = `occurrence:0/movingAssembly/${side}`;
+    const driveId = `${moduleId}/connection/drive`;
+    const drive = intent.connections.find((connection) => connection.id === driveId);
+    expect(drive?.parent.componentId).toBe(`${moduleId}/housing`);
+    expect(drive?.child.componentId).toBe(`${moduleId}/rotor`);
+    expect(drive?.playbackCoordinates).toEqual({ angle: driveId });
+    const mount = intent.connections.find(
+      (connection) => connection.id === `occurrence:0/movingAssembly/connection/${side}-mount`,
+    );
+    expect(mount?.parent.componentId).toBe(assemblyComponents.carrier);
+    // Exposed mount resolves to its housing owner, never a synthetic assembly joint.
+    expect(mount?.child).toEqual({ componentId: `${moduleId}/housing`, interfaceId: 'mount' });
+    const coupling = couplings.find((entry) => entry.driver === driveId);
+    expect(coupling).toMatchObject({
+      driver: driveId,
+      follower: `${moduleId}/connection/follower`,
+      ratio: -2,
+    });
+    expect(coupling && 'offset' in coupling ? (coupling.offset ?? 0) : 0).toBe(0);
+  }
+  const carrier = intent.connections.find((connection) => connection.id === assemblyDrivers.carrier);
+  expect(carrier?.parent.componentId).toBe(assemblyComponents.chassis);
+  expect(carrier?.child).toEqual({ componentId: assemblyComponents.carrier, interfaceId: 'mount' });
+};
+
+const prompt = `Use the cad-build123d and geospec-authoring skills to create a reusable assembly in main.py using Assembly from tau_assembly.
+Make a grounded 100 by 40 by 6 mm chassis and a moving carrier above it. The root Assembly has exactly the named children chassis and movingAssembly. movingAssembly is an Assembly with named children carrier, left and right. Keep these keys exactly, because we independently inspect their stable occurrence identities.
+Define one reusable factory returning an Assembly with named children housing, rotor and follower. The rotor and follower are asymmetric visible parts with native +Z RevoluteJoint/RigidJoint attachment points. Inside that factory, persist both connections using module.connect with names drive and follower and zero authored angles, then persist a coupling using module.couple with driver=(drive, "angle"), follower=(follower, "angle"), ratio=-2 and offset=0. Expose a housing-owned native mount joint as module.expose_joint("mount", housing.joints["mount"]). Keep the alias in module.interfaces; never reparent a joint or alias it into module.joints.
+Make one module and use copy.copy or copy.deepcopy to obtain the second complete independent module, retaining its internal connections, coupling and mount alias. Mount these left and right instances 50 mm apart on the moving carrier using movingAssembly.connect with names left-mount and right-mount and the exposed interfaces. Do not recreate the internal module connections at the root. Expose a carrier-owned mount as movingAssembly.interfaces["mount"] and use root.connect("carrier", ...) to attach the whole movingAssembly to a +Z chassis revolute joint at zero authored angle. Both modules must travel with the carrier and rotate their own rotors independently.
+Use native bd_materials wood.oak() on the left housing and plain green on the right housing, preserving their geometry, connections and mount ownership. Use native materials on the rotors too. Give parts readable labels. Do not invent a material library, tessellator or GLB writer.
+The motion(model) supplement must contain only root grounding and named animation clips. Ground model.parts["chassis"]. Use actual connection handles and authored angle coordinates for one clip: at time0 all three independent drivers are0; at time4 carrier=30 degrees, left drive=90 degrees, right drive=-60 degrees. Let each module's own -2 coupling drive its follower. Do not provide flat occurrence_ids, root coupling records or string joint guesses.
 Write deterministic GeoSpec tests only for the requested chassis dimensions and 50 mm assembly separation, using supported STEP occurrence bounds. Run them and fix errors until test_model returns runStatus "passed". This bounded acceptance does not request additional interference or other assertions that need unavailable evidence. An inconclusive or unsupported result does not satisfy the task; preserve both requested dimension and separation proofs. Evaluate main.py, export a canonical GLB with export_model, inspect the model with a screenshot and leave the final assembly visible. Report the result. Work only inside this project; if the desktop runtime itself is unavailable, report the blocker without modifying app installations or other worktrees.`;
 
 let session: DesktopSession | undefined;
@@ -134,21 +187,22 @@ test.skipIf(!enabled)(
           content: readFileSync(join(entry.parentPath, entry.name), 'utf8'),
         }));
       const sources = authoredFiles.map((entry) => entry.content).join('\n');
-      expect(sources).toMatch(/\bCompound\b/u);
+      expect(sources).toMatch(/from tau_assembly import[^\n]*\bAssembly\b/u);
+      expect(sources).toMatch(/\b(?:copy|deepcopy)\(/u);
       expect(sources).toMatch(/\bRevoluteJoint\b/u);
       expect(sources).toMatch(/\bRigidJoint\b/u);
-      expect(sources).toContain('connect_to');
+      expect(sources).toContain('.connect(');
+      expect(sources).toContain('.couple(');
+      expect(sources).toContain('.expose_joint(');
       expect(sources).toContain('bd_materials');
       expect(sources).toMatch(/\boak\(/u);
       expect(sources).toMatch(/def motion\(/u);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
       await page.keyboard.press('Control+m');
       await expectVisible(page.getByTestId('kinematics-pane'), 60_000);
-      await expect
-        .poll(async () => page.locator('[data-testid^="kinematics-dof-"]').count(), { timeout: 60_000 })
-        .toBe(2);
+      await expect.poll(async () => page.locator('[data-driver-control]').count(), { timeout: 60_000 }).toBe(3);
       const matrices = async () =>
-        page.evaluate(() => {
+        page.evaluate((componentIds) => {
           const bridge = (
             globalThis as typeof globalThis & {
               __TAU_KINEMATICS_TEST__?: {
@@ -156,10 +210,8 @@ test.skipIf(!enabled)(
               };
             }
           ).__TAU_KINEMATICS_TEST__;
-          return ['chassis', 'left-rotor', 'right-rotor'].map((id) =>
-            bridge?.getComponentWorldMatrix('file:main.py', `occurrence:${id}`),
-          );
-        });
+          return componentIds.map((id) => bridge?.getComponentWorldMatrix('file:main.py', id));
+        }, Object.values(assemblyComponents));
       await expect
         .poll(async () => {
           const current = await matrices();
@@ -172,15 +224,72 @@ test.skipIf(!enabled)(
       await expect
         .poll(async () => {
           const after = await matrices();
-          return [1, 2].every((index) => JSON.stringify(after[index]) !== JSON.stringify(before[index]));
+          return [1, 4, 5, 6, 7].every((index) => JSON.stringify(after[index]) !== JSON.stringify(before[index]));
         })
         .toBe(true);
       await page.getByTestId('kinematics-pause').click();
       const after = await matrices();
       expect(after[0]).toEqual(before[0]);
+      const assertAssemblyPose = async (coordinates: { carrier: number; left: number; right: number }) => {
+        for (const key of ['carrier', 'left', 'right'] as const) {
+          const control = page
+            .locator('[data-driver-control]')
+            .filter({ has: page.getByTestId(`kinematics-dof-${assemblyDrivers[key]}`) })
+            .getByRole('spinbutton');
+          // oxlint-disable-next-line no-await-in-loop -- Each user control commits a distinct independent coordinate.
+          await control.fill(String(coordinates[key]));
+          // oxlint-disable-next-line no-await-in-loop -- Commit before proceeding to the next independent control.
+          await control.press('Enter');
+        }
+        const { carrier, left, right } = coordinates;
+        const expectedDegrees = [
+          0,
+          carrier,
+          carrier,
+          carrier,
+          carrier + left,
+          carrier + right,
+          carrier - 2 * left,
+          carrier - 2 * right,
+        ];
+        await expect
+          .poll(async () => {
+            const observed = await matrices();
+            return observed.every((matrix, index) => {
+              if (matrix === undefined) {
+                return false;
+              }
+              // Native +Z becomes GLB +Y; measure each actual scene placement independently of the coupling solver.
+              const actual = Math.atan2(matrix[8]!, matrix[0]!);
+              const expected = (expectedDegrees[index]! * Math.PI) / 180;
+              return Math.abs(Math.atan2(Math.sin(actual - expected), Math.cos(actual - expected))) < 1e-6;
+            });
+          })
+          .toBe(true);
+        const observed = await matrices();
+        expect(observed[0]).toEqual(before[0]);
+        return { coordinates, expectedDegrees, matrices: observed };
+      };
+      const assemblyReference = await assertAssemblyPose({ carrier: 0, left: 0, right: 0 });
+      const assemblyMoved = await assertAssemblyPose({ carrier: 30, left: 0, right: 0 });
+      const assemblyLeft = await assertAssemblyPose({ carrier: 30, left: 40, right: 0 });
+      const assemblyBoth = await assertAssemblyPose({ carrier: 30, left: 40, right: -25 });
+      // Driving one copied module cannot move the other's internals or the common moving parent.
+      for (const index of [1, 2, 3, 5, 7]) {
+        expect(assemblyLeft.matrices[index]).toEqual(assemblyMoved.matrices[index]);
+      }
+      for (const index of [1, 2, 3, 4, 6]) {
+        expect(assemblyBoth.matrices[index]).toEqual(assemblyLeft.matrices[index]);
+      }
+      const assemblyPoses = [assemblyReference, assemblyMoved, assemblyLeft, assemblyBoth];
       await page.keyboard.press('Control+a');
-      const row = page.locator('[data-model-component-row][data-model-component-id="occurrence:left-housing"]');
-      const otherRow = page.locator('[data-model-component-row][data-model-component-id="occurrence:right-housing"]');
+      await page.getByRole('textbox', { name: 'Filter parts', exact: true }).fill('housing');
+      const row = page.locator(
+        `[data-model-component-row][data-model-component-id="${assemblyComponents.leftHousing}"]`,
+      );
+      const otherRow = page.locator(
+        `[data-model-component-row][data-model-component-id="${assemblyComponents.rightHousing}"]`,
+      );
       await expectVisible(row, 60_000);
       await expectVisible(otherRow, 60_000);
       await expect
@@ -216,7 +325,7 @@ test.skipIf(!enabled)(
       await row.locator('[data-model-part-button]').click();
       expect(await row.locator('[data-model-part-button]').getAttribute('aria-pressed')).toBe('true');
       const visibility = async () =>
-        page.evaluate(() => {
+        page.evaluate((components) => {
           const bridges =
             (
               globalThis as typeof globalThis & {
@@ -226,10 +335,10 @@ test.skipIf(!enabled)(
               }
             ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.map((bridge) => ({
-            left: bridge.getRenderedModelComponentState('occurrence:left-housing').visibleMeshCount,
-            right: bridge.getRenderedModelComponentState('occurrence:right-housing').visibleMeshCount,
+            left: bridge.getRenderedModelComponentState(components.leftHousing).visibleMeshCount,
+            right: bridge.getRenderedModelComponentState(components.rightHousing).visibleMeshCount,
           }));
-        });
+        }, assemblyComponents);
       await row.getByRole('button', { name: /^Hide /u }).click();
       await expect
         .poll(async () => {
@@ -247,6 +356,7 @@ test.skipIf(!enabled)(
         .toBe(true);
       await session.capture(`build123d-adoption-isolated-${runId}`);
       await row.getByRole('button', { name: /^Remove isolation for /u }).click();
+      await page.getByRole('textbox', { name: 'Filter parts', exact: true }).fill('');
       await page.getByRole('button', { name: 'Fit view', exact: true }).first().click();
       await expectGeometryFramed(page);
       const directory = await session.capture(`build123d-adoption-${runId}`);
@@ -277,9 +387,7 @@ test.skipIf(!enabled)(
           ),
         }),
       ).toEqual([]);
-      expect(reopenedTopology.mechanismIntent?.schemaVersion).toBe(1);
-      expect(reopenedTopology.mechanismIntent?.ground).toBe('occurrence:chassis');
-      expect(reopenedTopology.mechanismIntent?.connections.length).toBeGreaterThan(0);
+      assertAssemblyIntent(reopenedTopology);
       expect(reopenedTopology.mechanism?.animations?.length).toBeGreaterThan(0);
       expect(reopened.getRoot().listTextures().length).toBeGreaterThan(0);
       expect(
@@ -298,7 +406,19 @@ test.skipIf(!enabled)(
       writeFileSync(
         join(directory, 'build123d-adoption.json'),
         JSON.stringify(
-          { advertised, runId, projectRoot, skills, evaluation, tests, screenshot, exported, before, after },
+          {
+            advertised,
+            runId,
+            projectRoot,
+            skills,
+            evaluation,
+            tests,
+            screenshot,
+            exported,
+            before,
+            after,
+            assemblyPoses,
+          },
           null,
           2,
         ),
@@ -327,19 +447,24 @@ test.skipIf(!enabled)(
             }
           ).__TAU_SECTION_VIEW_TEST__;
           const surfaceCenter = (id: string) => {
-            const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(`occurrence:${id}`);
+            const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(`occurrence:0/${id}`);
             return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
           };
           return {
             ringCenter: surfaceCenter('ring'),
             coordinates: bridge?.getState('file:main.py')?.coordinates,
-            matrices: ['ring', 'sun', 'carrier-front', 'planet-1-gear', 'planet-2-gear', 'planet-3-gear'].map((id) =>
-              bridge?.getComponentWorldMatrix('file:main.py', `occurrence:${id}`),
-            ),
+            matrices: [
+              'ring',
+              'sun',
+              'carrier/front',
+              'carrier/planet-1/gear',
+              'carrier/planet-2/gear',
+              'carrier/planet-3/gear',
+            ].map((id) => bridge?.getComponentWorldMatrix('file:main.py', `occurrence:0/${id}`)),
             // These centrally symmetric gears and pins have their bore-axis midpoint at the surface bounds center.
             // Read rendered vertices, not joint metadata: a correct pivot can still carry incorrectly baked geometry.
             boreCenters: [1, 2, 3].map((planet) =>
-              ['gear', 'pin'].map((role) => surfaceCenter(`planet-${planet}-${role}`)),
+              ['gear', 'pin'].map((role) => surfaceCenter(`carrier/planet-${planet}/${role}`)),
             ),
           };
         });
@@ -458,7 +583,7 @@ test.skipIf(!enabled)(
       if (planetaryParts === undefined) {
         throw new Error('The planetary renderer did not expose its 34 leaf components');
       }
-      const ringRow = page.locator('[data-model-component-row][data-model-component-id="occurrence:ring"]');
+      const ringRow = page.locator('[data-model-component-row][data-model-component-id="occurrence:0/ring"]');
       await expectVisible(ringRow);
       await expect
         .poll(

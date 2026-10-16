@@ -17,6 +17,8 @@ import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias,
 import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load integrity plugin.
+import { createAssetIntegrity } from '../asset-integrity.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
@@ -57,6 +59,7 @@ export default defineConfig({
   plugins: [
     mtAssets.plugin,
     createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+    createAssetIntegrity({ receipt: true }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
@@ -65,7 +68,10 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
+    plugins: () => [
+      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      createAssetIntegrity({ receipt: false }),
+    ],
   },
   // The same browser stubs as the web and desktop builds (`@resvg/resvg-js`).
   resolve: { alias: [...uiResolveAlias] },

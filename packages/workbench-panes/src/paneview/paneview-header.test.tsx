@@ -12,7 +12,7 @@ import {
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
   paneviewStyleOverrides,
-} from '#components/panes/paneview-header.js';
+} from '#paneview/paneview-header.jsx';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 type ExpansionHandler = (event: { isExpanded: boolean }) => void;

@@ -17,7 +17,7 @@ import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { toast } from '#components/ui/sonner.js';
@@ -66,7 +66,7 @@ import {
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 import { cn } from '@taucad/ui/utils/cn';
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
@@ -81,7 +81,7 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterDraft } from '@taucad/viewer/parameters/parameter-edit';
 import { withPointerValue } from '#services/parameter-set-service.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
 import {
   usePaneviewPersistence,
   getInitialPanelOptions,

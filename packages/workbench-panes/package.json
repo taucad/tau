@@ -1,0 +1,166 @@
+{
+  "name": "@taucad/workbench-panes",
+  "version": "0.1.0-beta.2",
+  "description": "Tau workbench panes (parameters, model, kinematics, export, share) shared by the Tau app and the agent plugin viewer",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/workbench-panes"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/workbench-panes#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "workbench",
+    "react",
+    "viewer"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./paneview/paneview": "./src/paneview/paneview.tsx",
+    "./paneview/paneview-header": "./src/paneview/paneview-header.tsx",
+    "./paneview/resize-handle": "./src/paneview/resize-handle.ts",
+    "./paneview/use-resize-handles": "./src/paneview/use-resize-handles.ts",
+    "./components/pane-button": "./src/components/pane-button.tsx",
+    "./units/geometry-units": "./src/units/geometry-units.ts",
+    "./host/workbench-host": "./src/host/workbench-host.tsx",
+    "./registry/pane-registry": "./src/registry/pane-registry.ts",
+    "./kinematics/kinematics-source": "./src/kinematics/kinematics-source.ts",
+    "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
+    "./model/model-source": "./src/model/model-source.ts",
+    "./export/export-source": "./src/export/export-source.ts",
+    "./share/share-source": "./src/share/share-source.ts",
+    "./styles/panes.css": "./src/styles/panes.css",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./paneview/paneview": {
+        "types": "./dist/paneview/paneview.d.mts",
+        "import": "./dist/paneview/paneview.mjs",
+        "default": "./dist/paneview/paneview.mjs"
+      },
+      "./paneview/paneview-header": {
+        "types": "./dist/paneview/paneview-header.d.mts",
+        "import": "./dist/paneview/paneview-header.mjs",
+        "default": "./dist/paneview/paneview-header.mjs"
+      },
+      "./paneview/resize-handle": {
+        "types": "./dist/paneview/resize-handle.d.mts",
+        "import": "./dist/paneview/resize-handle.mjs",
+        "default": "./dist/paneview/resize-handle.mjs"
+      },
+      "./paneview/use-resize-handles": {
+        "types": "./dist/paneview/use-resize-handles.d.mts",
+        "import": "./dist/paneview/use-resize-handles.mjs",
+        "default": "./dist/paneview/use-resize-handles.mjs"
+      },
+      "./components/pane-button": {
+        "types": "./dist/components/pane-button.d.mts",
+        "import": "./dist/components/pane-button.mjs",
+        "default": "./dist/components/pane-button.mjs"
+      },
+      "./units/geometry-units": {
+        "types": "./dist/units/geometry-units.d.mts",
+        "import": "./dist/units/geometry-units.mjs",
+        "default": "./dist/units/geometry-units.mjs"
+      },
+      "./host/workbench-host": {
+        "types": "./dist/host/workbench-host.d.mts",
+        "import": "./dist/host/workbench-host.mjs",
+        "default": "./dist/host/workbench-host.mjs"
+      },
+      "./registry/pane-registry": {
+        "types": "./dist/registry/pane-registry.d.mts",
+        "import": "./dist/registry/pane-registry.mjs",
+        "default": "./dist/registry/pane-registry.mjs"
+      },
+      "./kinematics/kinematics-source": {
+        "types": "./dist/kinematics/kinematics-source.d.mts",
+        "import": "./dist/kinematics/kinematics-source.mjs",
+        "default": "./dist/kinematics/kinematics-source.mjs"
+      },
+      "./parameters/parameters-source": {
+        "types": "./dist/parameters/parameters-source.d.mts",
+        "import": "./dist/parameters/parameters-source.mjs",
+        "default": "./dist/parameters/parameters-source.mjs"
+      },
+      "./model/model-source": {
+        "types": "./dist/model/model-source.d.mts",
+        "import": "./dist/model/model-source.mjs",
+        "default": "./dist/model/model-source.mjs"
+      },
+      "./export/export-source": {
+        "types": "./dist/export/export-source.d.mts",
+        "import": "./dist/export/export-source.mjs",
+        "default": "./dist/export/export-source.mjs"
+      },
+      "./share/share-source": {
+        "types": "./dist/share/share-source.d.mts",
+        "import": "./dist/share/share-source.mjs",
+        "default": "./dist/share/share-source.mjs"
+      },
+      "./styles/panes.css": "./dist/styles/panes.css",
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.jsx": "./src/*.tsx",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "class-variance-authority": "catalog:",
+    "lucide-react": "catalog:",
+    "radix-ui": "catalog:",
+    "dockview-react": "^8.2.0"
+  },
+  "peerDependencies": {
+    "@taucad/ui": "^0.1.0-beta.0",
+    "@taucad/viewer": "^0.1.0-beta.0",
+    "@xstate/react": "^7.0.0-alpha.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "xstate": "^6.0.0-alpha.59"
+  },
+  "devDependencies": {
+    "@taucad/nx": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/viewer": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@xstate/react": "7.0.0-alpha.3",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "xstate": "catalog:"
+  }
+}

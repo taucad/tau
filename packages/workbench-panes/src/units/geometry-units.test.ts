@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listGeometryEntryPaths, sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths, sortGeometryUnitEntries } from '#units/geometry-units.js';
 
 describe('sortGeometryUnitEntries', () => {
   it('should place mainEntryPath first', () => {

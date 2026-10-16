@@ -5,7 +5,7 @@ import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifeti
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
-import { findEntryGraphics } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { ReactNode } from 'react';
 import {
   createContext,

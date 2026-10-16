@@ -1,8 +1,8 @@
 import { useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useResizeHandles } from '#components/panes/use-resize-handles.js';
-import type { ResizeHandle } from '#components/panes/use-resize-handles.js';
+import { useResizeHandles } from '#paneview/use-resize-handles.js';
+import type { ResizeHandle } from '#paneview/use-resize-handles.js';
 
 function Harness({
   describeHandle,

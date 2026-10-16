@@ -43,7 +43,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '@taucad/workbench-panes/units/geometry-units';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { FormatEntry } from '#utils/export-formats.utils.js';

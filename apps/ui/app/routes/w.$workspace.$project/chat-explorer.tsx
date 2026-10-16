@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExterna
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
@@ -47,7 +47,7 @@ import {
 import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '@taucad/workbench-panes/units/geometry-units';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -55,7 +55,7 @@ import {
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 import {
   getInitialPanelOptions,
   usePaneviewPersistence,

@@ -8,8 +8,8 @@ import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/pane
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { useResizeHandles } from '#components/panes/use-resize-handles.js';
-import { dockviewResizeHandle } from '#components/panes/resize-handle.js';
+import { useResizeHandles } from '@taucad/workbench-panes/paneview/use-resize-handles';
+import { dockviewResizeHandle } from '@taucad/workbench-panes/paneview/resize-handle';
 
 /**
  * Custom Dockview theme. The `dockview-theme-tau` class is applied to the root

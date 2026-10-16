@@ -82,6 +82,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/viewer": "workspace:*",
+    "@taucad/workbench-panes": "workspace:*",
     "@vitejs/plugin-react": "catalog:",
     "@xstate/react": "7.0.0-alpha.3",
     "immer": "^10.2.0",

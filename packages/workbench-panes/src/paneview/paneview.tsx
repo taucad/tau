@@ -3,11 +3,15 @@ import { useCallback, useImperativeHandle, useRef } from 'react';
 import { PaneviewReact } from 'dockview-react';
 import type { PaneviewApi, PaneviewReadyEvent } from 'dockview-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { DockviewStyles } from '#components/panes/dockview-styles.js';
-import { paneviewResizeHandle } from '#components/panes/resize-handle.js';
-import { useResizeHandles } from '#components/panes/use-resize-handles.js';
+import { paneviewResizeHandle } from '#paneview/resize-handle.js';
+import { useResizeHandles } from '#paneview/use-resize-handles.js';
 
-/** Shared native workbench section layout with keyboard sizing and drag feedback. */
+/**
+ * Shared native workbench section layout with keyboard sizing and drag feedback. Dockview's own stylesheet
+ * (`dockview-react/dist/styles/dockview.css`) is the consumer's to load.
+ *
+ * @public
+ */
 export function Paneview({
   ref,
   className,
@@ -27,7 +31,6 @@ export function Paneview({
   );
   return (
     <div className='size-full' data-resize-owner ref={rootRef}>
-      <DockviewStyles />
       <PaneviewReact {...properties} className={cn('section-resize', className)} onReady={ready} />
     </div>
   );

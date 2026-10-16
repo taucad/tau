@@ -6,7 +6,7 @@
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
 @import 'streamdown/styles.css';
-@import '../components/panes/pane-resize.css';
+@import '@taucad/workbench-panes/styles/panes.css';
 @import '../components/layout/application-shell.css';
 @import './scroll-shadows.css';
 @import './shiny-text.css';

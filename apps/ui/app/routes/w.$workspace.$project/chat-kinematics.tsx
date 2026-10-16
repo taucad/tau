@@ -26,7 +26,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi, PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import type { DegreeOfFreedom, JointLimits, Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
 import { randomUuid } from '@taucad/utils/id';
@@ -52,7 +52,7 @@ import {
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import {
@@ -67,7 +67,7 @@ import {
   getKinematicsStructure,
 } from '#utils/kinematics-structure.utils.js';
 import type { KinematicsStructure } from '#utils/kinematics-structure.utils.js';
-import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { findEntryGraphics, listGeometryEntryPaths } from '@taucad/workbench-panes/units/geometry-units';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { AngleDial, TravelTrack, curveRange } from '#routes/w.$workspace.$project/kinematics-instruments.js';
 import { KinematicsPlayer, unitSelector } from '#routes/w.$workspace.$project/kinematics-player.js';

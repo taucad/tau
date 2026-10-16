@@ -5,7 +5,7 @@ import { AlertCircle, RefreshCcw, RotateCcw } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { DrawerClose, DrawerHandle, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';

@@ -120,7 +120,7 @@ import type {
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { OpenFile } from '#types/editor.types.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   DropdownMenu,

@@ -1,5 +1,5 @@
 import type { DockviewApi, PaneviewApi } from 'dockview-react';
-import type { ResizeHandle } from '#components/panes/use-resize-handles.js';
+import type { ResizeHandle } from '#paneview/use-resize-handles.js';
 
 /** Locate the two views adjacent to a native sash, including nested split branches. */
 export function adjacentResizeViews(

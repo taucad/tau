@@ -10,7 +10,7 @@ import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 

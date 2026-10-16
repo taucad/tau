@@ -18,7 +18,7 @@ import {
   sweepAnimationId,
 } from '@taucad/viewer/machines/kinematics.machine';
 import type { KinematicsUnitState, kinematicsMachine } from '@taucad/viewer/machines/kinematics.machine';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useReducedMotion } from '#components/geometry/loader/metal-morph-playback-gates.js';
 import { LoopGlyph, ProgressRing } from '#routes/w.$workspace.$project/kinematics-instruments.js';
 

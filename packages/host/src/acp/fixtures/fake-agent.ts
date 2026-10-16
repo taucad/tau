@@ -49,6 +49,7 @@
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
  * | `auth-required` | `initialize` advertises a `terminal-auth` method and `session/new` errors `-32000` |
  * | `restore-auth` | restoring an existing session errors `-32000` instead of silently starting fresh |
+ * | `prompt-auth` | no auth method is advertised and `session/prompt` errors `-32000`, as claude-agent-acp does for a logged-out `claude` |
  * | `images` | `promptCapabilities.image` is advertised; withheld otherwise |
  * | `protocol-2` | `initialize` answers a protocol version this client does not speak |
  * | `silent` | `initialize` is never answered at all |
@@ -1132,6 +1133,10 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
        * gone" indistinguishable from "the model refused" (review 1-review S5). */
       if (!promptSession || promptSession.closed) {
         fail(-32_602, 'Unknown session');
+        return;
+      }
+      if (inMode('prompt-auth')) {
+        fail(-32_000, 'Authentication required');
         return;
       }
       const promptSessionId = asString(params['sessionId']);

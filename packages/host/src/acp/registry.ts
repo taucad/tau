@@ -19,10 +19,11 @@
  */
 
 import { execFile } from 'node:child_process';
+import { accessSync, constants, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 
@@ -82,6 +83,16 @@ export type AcpAgentProfile = {
    */
   readonly spawnEnv?: Readonly<Record<string, string>> | undefined;
   /**
+   * Variable through which the adapter is told which `cli` to run.
+   *
+   * Both module adapters bundle a vendor copy of their CLI and run it unless
+   * told otherwise, so the CLI the version probe checked would not be the one
+   * that runs. Resolution sets this variable to the absolute path it found
+   * (`executablePath`), which keeps the probed executable and the executed one
+   * the same file and lets staging omit the bundled copies.
+   */
+  readonly executableEnv?: string | undefined;
+  /**
    * Where this agent puts a tool call's *programmatic* name, as dotted paths
    * into the notification, tried in order.
    *
@@ -129,6 +140,14 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
     version: '0.70.0',
     cli: 'claude',
     configEnv: ['CLAUDE_CONFIG_DIR'],
+    /* Without it the adapter's Agent SDK looks for its own platform package,
+     * which staging omits, and every `session/new` fails "native binary not
+     * found". The user's `claude` is the login X6 inherits anyway. */
+    executableEnv: 'CLAUDE_CODE_EXECUTABLE',
+    /* The `claudeCodeVersion` the adapter's Agent SDK 0.3.232 was built against;
+     * an older CLI is refused rather than fed flags it does not know. */
+    minimumCliVersion: '2.1.232',
+    loginCommand: 'claude auth login',
   },
   {
     id: 'codex',
@@ -142,10 +161,10 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
      * the probe already refuses the adapter when that CLI is absent — so the
      * bundled copy is a second Codex nobody checked, and its platform payload is
      * 258 MB that the packaged app would otherwise have to carry. */
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable name is the vendor's, not ours.
-    spawnEnv: { CODEX_PATH: 'codex' },
+    executableEnv: 'CODEX_PATH',
     /* The copy codex-acp 1.7.0 bundles; an older PATH binary is refused. */
     minimumCliVersion: '0.148.0',
+    loginCommand: 'codex login',
   },
   {
     id: 'grok',
@@ -162,6 +181,13 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
 
 /** A resolved adapter, ready to spawn. @public */
 export type AcpAdapter = AcpAgentProfile & {
+  /**
+   * Absolute path of `cli` on the adapter's PATH, found at resolution.
+   *
+   * The version probe, a native spawn and `executableEnv` all use this one
+   * file. `undefined` when no such file exists, which the probe then refuses.
+   */
+  readonly executablePath?: string | undefined;
   /** Models the discovery probe read; empty when it failed (V5). */
   readonly models?: ExternalAgentDescriptor['models'] | undefined;
   /** The model select's `currentValue`: what a turn naming no model runs. */
@@ -238,6 +264,55 @@ const adapterOverrides = (environment: NodeJS.ProcessEnv): ReadonlyMap<string, s
 };
 
 /**
+ * The value of one environment variable, by Windows' case-insensitive rule there.
+ *
+ * @param environment - Environment to read.
+ * @param name - Variable name as POSIX spells it.
+ * @returns The value, if set.
+ */
+const environmentValue = (environment: NodeJS.ProcessEnv, name: string): string | undefined =>
+  process.platform === 'win32'
+    ? Object.entries(environment).find(([key]) => key.toUpperCase() === name)?.[1]
+    : environment[name];
+
+/**
+ * Find one command on an environment's PATH, as a shell would.
+ *
+ * Windows tries each `PATHEXT` suffix and never the bare name, which there
+ * names the extensionless shell script npm writes beside its `.cmd` shim.
+ *
+ * @param command - Bare command name, or an absolute path returned as is.
+ * @param environment - Environment whose `PATH` (and `PATHEXT`) to search.
+ * @returns The absolute path of the first executable file, if any.
+ */
+const locateExecutable = (command: string, environment: NodeJS.ProcessEnv): string | undefined => {
+  if (isAbsolute(command)) {
+    return command;
+  }
+  const suffixes =
+    process.platform === 'win32'
+      ? (environmentValue(environment, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((suffix) => suffix !== '')
+      : [''];
+  for (const directory of (environmentValue(environment, 'PATH') ?? '').split(delimiter)) {
+    if (directory === '') {
+      continue;
+    }
+    for (const suffix of suffixes) {
+      const candidate = resolvePath(directory, `${command}${suffix}`);
+      try {
+        if (statSync(candidate).isFile()) {
+          accessSync(candidate, constants.X_OK);
+          return candidate;
+        }
+      } catch {
+        /* Absent or not executable: keep searching, as a shell does. */
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * Resolve every pinned adapter that is actually installed.
  *
  * @param options - Module URL to resolve from, plus pin/environment overrides.
@@ -261,13 +336,13 @@ export const resolveAcpAdapters = (options: {
   const require = createRequire(options.resolveFrom);
   const agents: AcpAdapter[] = [];
   const refused: AcpAdapterRefusal[] = [];
-  for (const pin of options.pins ?? acpAgentProfiles) {
-    const override = overrides.get(pin.id);
+  for (const profile of options.pins ?? acpAgentProfiles) {
+    const override = overrides.get(profile.id);
     if (override) {
       /* An override replaces the adapter *and* its CLI probe: the fixture speaks
        * ACP on its own and has no vendor CLI to interrogate. */
       agents.push({
-        ...pin,
+        ...profile,
         args: undefined,
         cli: undefined,
         package: 'test-override',
@@ -276,6 +351,10 @@ export const resolveAcpAdapters = (options: {
       });
       continue;
     }
+    /* Found once here, not per probe: discovery probes versions and models in
+     * parallel, and both must start the same executable. */
+    const executablePath = profile.cli === undefined ? undefined : locateExecutable(profile.cli, environment);
+    const pin = executablePath === undefined ? profile : { ...profile, executablePath };
     if (pin.args !== undefined) {
       agents.push(pin);
       continue;
@@ -346,7 +425,7 @@ export const probeAcpAgents = async (
         return adapter;
       }
       try {
-        const { stdout } = await execFileAsync(adapter.cli, ['--version'], {
+        const { stdout } = await execFileAsync(adapter.executablePath ?? adapter.cli, ['--version'], {
           timeout: options.probeTimeout ?? acpCliProbeTimeout,
           env: environment,
         });

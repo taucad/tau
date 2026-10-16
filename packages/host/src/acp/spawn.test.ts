@@ -8,14 +8,15 @@
  * is the fix, and this is the test that keeps it honest.
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Client } from '@agentclientprotocol/sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { acpAgentProfiles, resolveAcpAdapters } from '#acp/registry.js';
 import { acpAdapterEnvironment, spawnAcpAdapter } from '#acp/spawn.js';
 import type { AcpAdapter, AcpWireFrame } from '#acp/index.js';
 
@@ -186,4 +187,48 @@ describe('spawnAcpAdapter', () => {
     },
     30_000,
   );
+});
+
+describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () => {
+  it('starts the user’s own claude for a session, not the Agent SDK’s platform copy', async () => {
+    /* C2/P1: staged without its optional platform package, the adapter's SDK
+     * fails every `session/new` with "native binary not found" unless it is
+     * told which CLI to run. The stub records how it was started. */
+    const root = await branch();
+    const bin = join(root, 'bin');
+    const calls = join(root, 'calls.log');
+    await mkdir(bin);
+    await writeFile(join(bin, 'claude'), `#!/bin/sh\necho "$@" >> '${calls}'\necho '2.1.301 (stub)'\n`);
+    await chmod(join(bin, 'claude'), 0o755);
+    const environment = {
+      PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+      HOME: root,
+      CLAUDE_CONFIG_DIR: root,
+    };
+    const { agents } = resolveAcpAdapters({
+      resolveFrom: new URL('../../../cli/src/commands/serve.ts', import.meta.url).href,
+      pins: acpAgentProfiles.filter((profile) => profile.id === 'claude'),
+      environment,
+    });
+    const [claude] = agents;
+    expect(claude?.executablePath).toBe(join(bin, 'claude'));
+    const adapter = spawnAcpAdapter({ adapter: claude ?? fakeAgent, cwd: root, environment });
+    spawned.push(adapter);
+    /* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived connection the run uses. */
+    const connection = new ClientSideConnection(
+      () => ({ sessionUpdate: () => undefined, requestPermission: () => ({ outcome: { outcome: 'cancelled' } }) }),
+      adapter.stream,
+    );
+
+    await connection.initialize({
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    });
+    /* The stub exits at once, so the session may fail; what matters is who ran. */
+    await connection.newSession({ cwd: root, mcpServers: [] }).catch(() => undefined);
+    await expect
+      .poll(async () => readFile(calls, 'utf8').catch(() => ''), { timeout: 20_000, interval: 100 })
+      .toContain('--output-format stream-json');
+    expect(adapter.stderr()).not.toContain('native binary not found');
+  }, 30_000);
 });

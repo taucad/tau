@@ -65,6 +65,8 @@ describe('AuthDesktopRoute', () => {
   const assign = vi.fn();
 
   beforeEach(() => {
+    /* A non-prerelease desktop release exists, so the download is offered (Q56); the hidden case is its own test. */
+    vi.stubEnv('TAU_DESKTOP_RELEASED', 'true');
     mocks.search = '?state=abcd1234efgh';
     mocks.session = { user: { id: 'usr_1' } };
     mocks.authFetch.mockResolvedValue({ data: { token: 'ott-value' }, error: null });
@@ -73,7 +75,18 @@ describe('AuthDesktopRoute', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
+  });
+
+  it('hides the download while no non-prerelease desktop release exists (DSK-7)', async () => {
+    vi.stubEnv('TAU_DESKTOP_RELEASED', 'false');
+    render(<AuthDesktopRoute />);
+
+    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Tau Desktop didn’t open' }));
+
+    expect(screen.queryByRole('link', { name: 'Get Tau Desktop' })).not.toBeInTheDocument();
   });
 
   // MAJOR 2: any site can navigate a signed-in browser here. Minting on mount

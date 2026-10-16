@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectManifestSchemaUrl } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -133,9 +133,15 @@ const recoveryFailures: ReadonlyArray<readonly [PendingProjectRecoveryReason, st
 ];
 
 beforeEach(() => {
+  /* A non-prerelease desktop release exists, so the native-kernel notice offers it (Q56); the hidden case is its own test. */
+  vi.stubEnv('TAU_DESKTOP_RELEASED', 'true');
   navigate.mockClear();
   send.mockClear();
   restoreProject.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('ProjectRouteNotice', () => {
@@ -266,6 +272,14 @@ describe('ProjectRouteNotice', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Go back' }));
     expect(navigate).toHaveBeenCalledWith(-1);
+  });
+
+  it('should offer only the projects for a native kernel while no non-prerelease desktop exists (DSK-7)', () => {
+    vi.stubEnv('TAU_DESKTOP_RELEASED', 'false');
+    render(<ProjectRouteNotice state={{ kind: 'native-kernel', projectId, project, kernelName: 'PicoGK' }} />);
+
+    expect(screen.queryByRole('button', { name: 'Get Tau Desktop' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Go to projects' })).toBeInTheDocument();
   });
 
   it('should open Tau Desktop in a new tab for a native kernel', async () => {

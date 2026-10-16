@@ -6,7 +6,7 @@ import { useLocation } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Spinner } from '#components/ui/spinner.js';
-import { tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
 import { authClient } from '#lib/auth-client.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -229,12 +229,14 @@ export default function AuthDesktopRoute(): React.JSX.Element {
               <ExternalLink aria-hidden='true' />
               Try again
             </Button>
-            <Button asChild variant='outline' className='w-full'>
-              <a href={tauDesktopDownloadUrl} target='_blank' rel='noreferrer'>
-                <Download aria-hidden='true' />
-                Get Tau Desktop
-              </a>
-            </Button>
+            {isTauDesktopReleased() && (
+              <Button asChild variant='outline' className='w-full'>
+                <a href={tauDesktopDownloadUrl} target='_blank' rel='noreferrer'>
+                  <Download aria-hidden='true' />
+                  Get Tau Desktop
+                </a>
+              </Button>
+            )}
             {/* Sign-in is the one flow with no browser continuation: the
                 session being handed over is the desktop app's, not this tab's. */}
             <p className='text-sm text-muted-foreground'>

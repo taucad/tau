@@ -28,7 +28,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
@@ -209,7 +209,10 @@ export const describeProjectRouteNotice = (
         title: `${state.kernelName} needs Tau Desktop`,
         description:
           'This project runs native code that the web runtime does not include. Open it in Tau Desktop to continue.',
-        actions: [{ label: 'Get Tau Desktop', run: 'desktop', icon: MonitorDown, isPrimary: true }, projectsAction],
+        /* The download is offered only once a non-prerelease exists (Q56, DSK-7). */
+        actions: isTauDesktopReleased()
+          ? [{ label: 'Get Tau Desktop', run: 'desktop', icon: MonitorDown, isPrimary: true }, projectsAction]
+          : [{ ...projectsAction, isPrimary: true }],
       };
     }
     case 'access-error': {

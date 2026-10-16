@@ -24,6 +24,12 @@ interface ImportMetaEnv {
    * `mode === 'test'`.
    */
   readonly TAU_ORIGIN_AGENT_HOST?: 'absent';
+  /**
+   * `'true'` once a non-prerelease Tau Desktop release exists to download (charter Q56, go-live DSK-7); `'false'`
+   * otherwise. Substituted by `define` in `vite.config.ts` from `TAU_DESKTOP_RELEASED` at build time; undefined
+   * under `mode === 'test'` so tests can stub both branches.
+   */
+  readonly TAU_DESKTOP_RELEASED?: 'true' | 'false';
 }
 
 declare module '*?base64' {

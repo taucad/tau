@@ -86,6 +86,7 @@
     "minimatch": "^10.2.5",
     "nanoid": "catalog:",
     "safe-regex": "^2.1.1",
+    "smol-toml": "catalog:",
     "ws": "catalog:"
   },
   "peerDependencies": {

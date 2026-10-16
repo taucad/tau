@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 746 packages, with the license each declares.
+The web and desktop apps include the following 747 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -687,6 +687,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [simple-concat](https://github.com/feross/simple-concat) | 1.0.1 | MIT |
 | [simple-get](https://github.com/feross/simple-get) | 4.0.1 | MIT |
 | [smart-buffer](https://github.com/JoshGlazebrook/smart-buffer) | 4.2.0 | MIT |
+| [smol-toml](https://github.com/squirrelchat/smol-toml) | 1.9.1 | BSD-3-Clause |
 | [socks](https://github.com/JoshGlazebrook/socks) | 2.8.10 | MIT |
 | [sonic-boom](https://github.com/pinojs/sonic-boom) | 5.0.2 | MIT |
 | [sonner](https://github.com/emilkowalski/sonner) | 2.0.8 | MIT |

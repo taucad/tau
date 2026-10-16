@@ -702,6 +702,23 @@ const askForm = async (sessionId: string): Promise<void> => {
   await textChunk(sessionId, `ask-form: ${result?.action ?? 'none'} ${JSON.stringify(result?.content ?? null)}`);
 };
 
+/** Request a secret-marked form across the actual wire; it must never become a project record. */
+const askSecretForm = async (sessionId: string): Promise<void> => {
+  const answer = await request('elicitation/create', {
+    sessionId,
+    mode: 'form',
+    message: 'PRIVATE_FIELD_CANARY',
+    requestedSchema: {
+      type: 'object',
+      required: ['secret'],
+      properties: { secret: { type: 'string', writeOnly: true } },
+    },
+    // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- codex-acp wire spelling; prevents the pre-fix fixture from hanging.
+    _meta: { codex: { autoResolutionMs: 0 } },
+  });
+  await textChunk(sessionId, `ask-secret-form: ${JSON.stringify(answer.result)}`);
+};
+
 /**
  * The permission-gated write every turn ends with.
  *
@@ -718,11 +735,16 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
     ? { result: { outcome: { outcome: 'selected', optionId: 'allow' } } }
     : await request('session/request_permission', {
         sessionId,
-        toolCall: { toolCallId: 'write-1', title: 'write hello.txt' },
+        toolCall: { toolCallId: 'write-1', title: 'write hello.txt', _meta: { token: 'permission-metadata-canary' } },
         options: [
           { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
           { optionId: 'allow-session', name: 'Allow for this session', kind: 'allow_always' },
-          { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
+          {
+            optionId: 'allow-always',
+            name: 'Always allow',
+            kind: 'allow_always',
+            _meta: { token: 'permission-metadata-canary' },
+          },
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
       });
@@ -805,6 +827,9 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     void request('fs/write_text_file', { sessionId, path: 'admitted.txt', content: 'admitted write' });
     await pause(250);
     return 'end_turn';
+  }
+  if (text.includes('ask-secret-form')) {
+    await askSecretForm(sessionId);
   }
   if (text.includes('ask-form')) {
     await askForm(sessionId);

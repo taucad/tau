@@ -29,10 +29,10 @@ export type GrokQuestionResponse =
 
 /**
  * Preserve native questions without adopting answers on the person's behalf.
+ * @internal
  * @param request - Validated native request.
  * @param context - Record identity and clock.
  * @returns The shared question record.
- * @internal
  */
 export const askOfGrok = (request: GrokQuestionRequest, context: { askId: string; now: number }): Ask => ({
   id: context.askId,
@@ -44,18 +44,23 @@ export const askOfGrok = (request: GrokQuestionRequest, context: { askId: string
   questions: request.questions.map((question, index) => ({
     id: `question_${String(index)}`,
     question: question.question,
-    options: question.options,
+    options: question.options.map((option) => ({ ...option, value: option.label })),
     allowsText: true,
+    field: {
+      type: question.multiSelect === true ? 'array' : 'string',
+      required: true,
+      ...(question.multiSelect === true ? { minItems: 1, maxItems: 12 } : {}),
+    },
     ...(question.multiSelect === true ? { isList: true } : {}),
   })),
 });
 
 /**
  * Return choices or own words using Grok's native response envelope.
+ * @internal
  * @param ask - The recorded questions.
  * @param answers - The person's answer, or cancellation.
  * @returns The native reply.
- * @internal
  */
 export const grokQuestionResponseOf = (ask: Ask, answers: AskAnswers | undefined): GrokQuestionResponse => {
   if (answers?.declined) {
@@ -70,7 +75,9 @@ export const grokQuestionResponseOf = (ask: Ask, answers: AskAnswers | undefined
     answers: Object.fromEntries(
       resolved.flatMap((answer) => {
         const question = ask.questions.find((candidate) => candidate.id === answer.id);
-        return question === undefined ? [] : [[question.question, [answer.answer]]];
+        return question === undefined
+          ? []
+          : [[question.question, Array.isArray(answer.value) ? answer.value : [answer.answer]]];
       }),
     ),
   };

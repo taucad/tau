@@ -44,6 +44,10 @@ export function ChatQuestionCard({
   if (questions === undefined) {
     return undefined;
   }
+  const unavailableReason =
+    ask.answerVersion !== 2 && ask.resolution === undefined
+      ? 'This question needs an updated host. Resume the chat to request it again.'
+      : undefined;
   const record = async (label: string, write: () => Promise<void>): Promise<void> => {
     const isDecision = label !== 'hold';
     if (isDecision && writing.current) {
@@ -78,7 +82,7 @@ export function ChatQuestionCard({
         answers={questions.answers[ask.id]}
         now={questions.now}
         isFlat={isFlat}
-        isPending={isPending}
+        isPending={isPending || unavailableReason !== undefined}
         {...(ask.agentId === undefined ? {} : { agentName: externalAgentDisplayName(ask.agentId) })}
         onAnswer={(questionId, reply) => {
           void record('answer', async () => questions.answer(ask.id, questionId, reply));
@@ -90,6 +94,11 @@ export function ChatQuestionCard({
           void record('decline', async () => questions.decline(ask.id));
         }}
       />
+      {unavailableReason === undefined ? null : (
+        <p role='status' className='px-2 text-xs/5'>
+          {unavailableReason}
+        </p>
+      )}
       {isPending ? (
         <p role='status' className='px-2 text-xs/5 text-muted-foreground'>
           Saving response…
@@ -235,6 +244,13 @@ export function ChatQuestionQueue({
     }
   }, [isSettled, offScreenWaiting, waiting]);
 
+  if (questions?.recordFailure !== undefined) {
+    return (
+      <p role='alert' className='px-2 text-xs/5'>
+        {questions.recordFailure}
+      </p>
+    );
+  }
   if (!isSettled || questions === undefined || offScreenWaiting.length === 0) {
     return undefined;
   }

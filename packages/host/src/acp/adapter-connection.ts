@@ -13,6 +13,7 @@ import { grokPlanSchema, permissionOfGrokPlan, grokPlanResponseOf } from '#acp/g
 import { z } from 'zod';
 import { grokNotificationOf } from '#acp/grok-notifications.js';
 import { grokQuestionSchema } from '#acp/grok-questions.js';
+import { elicitationRequestSchema } from '#acp/elicitation-request.js';
 
 import { client } from '@agentclientprotocol/sdk';
 import { createCallbackLogic } from 'xstate';
@@ -111,7 +112,9 @@ export const createAdapterConnection = (
         }
         return ask('_x.ai/ask_user_question', params);
       })
-      .onRequest('elicitation/create', async ({ params }) => ask('elicitation/create', params))
+      .onRequest('elicitation/create', elicitationRequestSchema, async ({ params }) =>
+        ask('elicitation/create', params),
+      )
       .onNotification('elicitation/complete', ({ params }) => {
         send({ type: 'elicitationComplete', elicitationId: params.elicitationId });
       })

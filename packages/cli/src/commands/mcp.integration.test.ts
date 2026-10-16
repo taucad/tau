@@ -64,6 +64,25 @@ export const resolve = async (specifier, context, next) => {
 };
 `;
 
+/** Failure-only lifecycle evidence from the child, without changing its shutdown deadline or production code. */
+const shutdownLogHook = `import { Worker, isMainThread } from 'node:worker_threads';
+if (isMainThread) {
+const started = performance.now();
+const trace = (event, threadId) => process.stderr.write('[mcp-shutdown] ' + JSON.stringify({ event, threadId, ms: Math.round(performance.now() - started) }) + '\\n');
+process.stdin.once('end', () => trace('stdin-end'));
+process.once('exit', () => trace('process-exit'));
+const terminate = Worker.prototype.terminate;
+Worker.prototype.terminate = function () {
+  const id = this.threadId;
+  trace('worker-terminate-start', id);
+  return terminate.call(this).then(code => {
+    trace('worker-terminate-end', id);
+    return code;
+  });
+};
+}
+`;
+
 /** What the noisy model prints from its kernel's thread; never JSON-RPC. */
 const noiseMarker = 'tau-mcp-model-console-noise';
 
@@ -188,6 +207,7 @@ beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'mcp-integration-'));
   disposers.push(async () => rm(scratch, { recursive: true, force: true }));
   await writeFile(join(scratch, 'resolve-log.mjs'), resolveLogHook);
+  await writeFile(join(scratch, 'shutdown-log.mjs'), shutdownLogHook);
 });
 
 /** One JSON-RPC frame on a server's stdio. */
@@ -398,7 +418,9 @@ describe('tau mcp over stdio', () => {
         await writeFile(join(scratch, project, name), text);
       }
     }
-    served = launch(join(scratch, 'block'));
+    served = launch(join(scratch, 'block'), undefined, {
+      imports: [pathToFileURL(join(scratch, 'shutdown-log.mjs')).href],
+    });
     disposers.push(stopIfRunning(served));
     client = new Client({ name: 'tau-mcp-integration', version: '1' });
     initializeTime = await connect(client, served);
@@ -590,6 +612,28 @@ describe('tau mcp over stdio', () => {
     const { code, elapsed } = await exitWithin(served, 5000);
     await annotate(`exited ${String(Math.round(elapsed))} ms after the client closed`);
 
+    // An exited child can still have buffered diagnostics; never extend the running-process deadline.
+    if (typeof code === 'number' && code !== 0 && !served.child.stderr.closed) {
+      const drained = Promise.withResolvers<void>();
+      const onClose = (): void => {
+        drained.resolve();
+      };
+      served.child.stderr.once('close', onClose);
+      try {
+        await Promise.race([drained.promise, sleep(1000, undefined, { ref: false })]);
+      } finally {
+        served.child.stderr.off('close', onClose);
+      }
+    }
+    if (code !== 0) {
+      await annotate(
+        served
+          .stderr()
+          .split('\n')
+          .filter((line) => line.startsWith('[mcp-shutdown] '))
+          .join('\n') || 'No shutdown lifecycle event received before the deadline.',
+      );
+    }
     expect(code).toBe(0);
     if (rendererUnavailable === undefined) {
       expect(screenshotPath).not.toBe('');

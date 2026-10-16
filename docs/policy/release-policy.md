@@ -205,7 +205,7 @@ For alpha, beta, and release candidate versions:
 - Prerelease versions follow the format `X.Y.Z-alpha.N`
 - Prereleases do not generate changelog entries in the stable changelog
 - A beta train of the whole fixed group runs `nx release version prerelease --preid beta --first-release` with git and staging disabled, which keeps the version plans for the next stable release; the `package-release` skill owns the exact command
-- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` before Trusted Publishing can publish it, and the first trusted publish must follow within two days of the binding. Every name of the group had been published this way by 2026-10-16
+- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` and environment `npm-publish` before Trusted Publishing can publish it, and the first trusted publish must follow within two days of the binding. Every name of the group had been published this way by 2026-10-16
 - The train publishes under `beta` only and never moves `latest`; promotion is a separate operator step (below)
 
 ## Operator Publish Handoff
@@ -291,7 +291,7 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 1. **No npm tokens in CI**: Trusted Publishing eliminates stored credentials
 2. **Provenance attestation**: Every package is cryptographically signed
 3. **Version plan review**: Version bumps are reviewed as part of the PR process
-4. **CI-only publishing**: Each name's trusted publisher is `taucad/tau` and `publish.yml`, so a token-free publish comes only from that workflow. The binding names no GitHub environment, so a dispatch of `publish.yml` on any ref of the repository can publish; pinning it to an environment needs the workflow's `environment` and every name's binding to change together
+4. **CI-only publishing**: Each name's trusted publisher is `taucad/tau`, `publish.yml` and the GitHub environment `npm-publish`, so a token-free publish comes only from that workflow's publish job on a ref the environment admits (`main` and the `v*` tags). A binding without the environment would admit a dispatch on any ref, including a branch that edited its own copy of the workflow; the workflow's `environment` and every name's binding change together
 5. **Lockfile integrity**: `pnpm install --frozen-lockfile` in CI prevents dependency tampering
 
 ## Decision Log

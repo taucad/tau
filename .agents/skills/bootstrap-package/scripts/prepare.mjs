@@ -8,7 +8,10 @@
  * nothing else (docs/policy/napi-architecture-policy.md §8).
  *
  * Usage: node prepare.mjs --spec <spec.json> --out <directory>
- * Spec:  [{ name, repository: "owner/repo", workflow: "ci.yml", license, author, description }]
+ * Spec:  [{ name, repository: "owner/repo", workflow: "ci.yml", environment?: "npm-publish",
+ *          license, author, description }]
+ * `environment` is the GitHub environment the publish job declares; omit it only
+ * when that workflow's publish job names none.
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -57,7 +60,8 @@ rmSync(staging, { recursive: true, force: true });
 
 const shellArray = (values) => values.map((value) => `  "${value}"`).join('\n');
 const tarballFor = (name) => `${name.replace('@', '').replaceAll('/', '-')}-0.0.0.tgz`;
-const groups = [...new Set(packages.map(({ repository, workflow }) => `${repository} ${workflow}`))];
+const groupKey = ({ repository, workflow, environment = '' }) => `${repository} ${workflow} ${environment}`;
+const groups = [...new Set(packages.map(groupKey))];
 
 writeFileSync(
   join(out, 'bootstrap.sh'),
@@ -103,10 +107,11 @@ done
 echo "== trust"
 ${groups
   .map((group) => {
-    const [repository, workflow] = group.split(' ');
-    const names = packages.filter((entry) => `${entry.repository} ${entry.workflow}` === group).map(({ name }) => name);
+    const [repository, workflow, environment] = group.split(' ');
+    const names = packages.filter((entry) => groupKey(entry) === group).map(({ name }) => name);
+    const environmentFlag = environment ? ` --environment ${environment}` : '';
     return `for n in ${names.map((name) => `"${name}"`).join(' ')}; do
-  npm trust github "$n" --repository ${repository} --file ${workflow} --allow-publish --yes || { echo "STOPPED at $n" >&2; exit 1; }
+  npm trust github "$n" --repository ${repository} --file ${workflow}${environmentFlag} --allow-publish --yes || { echo "STOPPED at $n" >&2; exit 1; }
   sleep 2
 done`;
   })

@@ -36,6 +36,7 @@ const fixture = () => {
     scopes: 'read:user, user:email, gist',
     identity: 42,
     status: 200,
+    commits: [{ version: revision }],
     creation: {
       id: 'abc123',
       owner: { id: 42 },
@@ -44,13 +45,15 @@ const fixture = () => {
     gist: {
       id: 'abc123',
       owner: { id: 42 },
-      history: [{ version: revision }],
       files: { 'tau-project.zip.base64url': { content: 'YXJjaGl2ZQ' } },
     },
   };
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/user')) {
       return Response.json({ id: state.identity, login: 'person' }, { headers: { 'x-oauth-scopes': state.scopes } });
+    }
+    if (url.endsWith('/commits?per_page=1')) {
+      return Response.json(state.commits);
     }
     if (init?.method === 'DELETE') {
       return new Response(null, { status: 204 });
@@ -114,6 +117,9 @@ describe('server-side Gist authority', () => {
       history: [{ version: revision }],
       html_url: 'https://gist.github.com/abc123',
     });
+    expect(
+      fetch.mock.calls.every(([, init]) => new Headers(init?.headers).get('x-github-api-version') === '2026-03-10'),
+    ).toBe(true);
     expect(fetch.mock.calls[1]?.[0]).toBe('https://api.github.com/gists');
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({
       method: 'POST',
@@ -124,8 +130,61 @@ describe('server-side Gist authority', () => {
       ['https://api.github.com/user', 'GET'],
       ['https://api.github.com/gists', 'POST'],
       ['https://api.github.com/gists/abc123', 'GET'],
+      ['https://api.github.com/gists/abc123/commits?per_page=1', 'GET'],
+      [`https://api.github.com/gists/abc123/${revision}`, 'GET'],
     ]);
   });
+  it.each(['update', 'delete'] as const)(
+    'should verify the current commit before %s without embedded history',
+    async (action) => {
+      const { service, fetch } = fixture();
+      await service.mutate('user', headers, { action, id: 'abc123', revision, payload: { files: payload.files } });
+      expect(fetch.mock.calls.some(([url]) => url.endsWith(`/${revision}`))).toBe(true);
+      expect(
+        fetch.mock.calls.filter(([, init]) => init?.method === (action === 'update' ? 'PATCH' : 'DELETE')),
+      ).toHaveLength(1);
+    },
+  );
+  it.each([[], [{ version: 'invalid' }], {}])(
+    'should reject invalid commit-list responses without repeating upload: %j',
+    async (commits) => {
+      const { service, state, fetch } = fixture();
+      Object.assign(state, { commits });
+      await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+        response: { code: 'GITHUB_GIST_RESPONSE_INVALID' },
+      });
+      expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    },
+  );
+  it('should compare the uploaded bytes with the pinned revision rather than the earlier unversioned read', async () => {
+    const { service, state, fetch } = fixture();
+    const defaultFetch = fetch.getMockImplementation();
+    fetch.mockImplementation(async (url, init) =>
+      url.endsWith(`/${revision}`)
+        ? Response.json({ ...state.gist, files: { 'tau-project.zip.base64url': { content: 'concurrent-change' } } })
+        : (defaultFetch?.(url, init) ?? Response.error()),
+    );
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      response: { code: 'GITHUB_GIST_CHANGED' },
+    });
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+  it.each([{ id: 'def456' }, { owner: { id: 99 } }, { files: { 'unrelated.txt': { content: 'private' } } }])(
+    'should validate ownership and canonical files again at the pinned revision: %j',
+    async (invalid) => {
+      const { service, state, fetch } = fixture();
+      const defaultFetch = fetch.getMockImplementation();
+      fetch.mockImplementation(async (url, init) =>
+        url.endsWith(`/${revision}`)
+          ? Response.json({ ...state.gist, ...invalid })
+          : (defaultFetch?.(url, init) ?? Response.error()),
+      );
+      await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+        response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
+      });
+      expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    },
+  );
   it('should reject a foreign create acknowledgement before reading it back', async () => {
     const { service, state, fetch } = fixture();
     state.creation.owner.id = 99;
@@ -148,22 +207,18 @@ describe('server-side Gist authority', () => {
     });
     expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
-  it.each([
-    { id: 'def456' },
-    { owner: { id: 99 } },
-    { files: { 'unrelated.txt': { content: 'private' } } },
-    { history: [] },
-    { history: [{ version: 'invalid' }] },
-    { history: undefined },
-  ])('should reject an invalid created Gist read-back without repeating the upload: %j', async (invalid) => {
-    const { service, state, fetch } = fixture();
-    Object.assign(state.gist, invalid);
-    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
-      name: 'ForbiddenException',
-      response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
-    });
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-  });
+  it.each([{ id: 'def456' }, { owner: { id: 99 } }, { files: { 'unrelated.txt': { content: 'private' } } }])(
+    'should reject an invalid created Gist read-back without repeating the upload: %j',
+    async (invalid) => {
+      const { service, state, fetch } = fixture();
+      Object.assign(state.gist, invalid);
+      await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+        name: 'ForbiddenException',
+        response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
+      });
+      expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    },
+  );
   it.each([
     { public: false, files: { 'other.txt': { content: 'data' } } },
     { public: false, files: { 'tau-project.zip.base64url': { content: 'x'.repeat(921_601) } } },
@@ -197,14 +252,21 @@ describe('server-side Gist authority', () => {
     });
   });
   it('should remove the previous canonical filename when encryption changes', async () => {
-    const { service, fetch } = fixture();
+    const { service, state, fetch } = fixture();
+    const defaultFetch = fetch.getMockImplementation();
+    fetch.mockImplementation(async (url, init) => {
+      if (init?.method === 'PATCH') {
+        Object.assign(state.gist, { files: { 'tau-project.jwe': { content: 'encrypted' } } });
+      }
+      return defaultFetch?.(url, init) ?? Response.error();
+    });
     await service.mutate('user', headers, {
       action: 'update',
       id: 'abc123',
       revision,
       payload: { files: { 'tau-project.jwe': { content: 'encrypted' } } },
     });
-    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]).toMatchObject({
       method: 'PATCH',
       body: JSON.stringify({
         files: { 'tau-project.jwe': { content: 'encrypted' }, 'tau-project.zip.base64url': null },

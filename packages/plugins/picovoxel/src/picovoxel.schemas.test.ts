@@ -6,6 +6,7 @@ import {
   multiUnavailableReason,
   picovoxelExportSchemas,
   picovoxelOptionsSchema,
+  picovoxelRegionSchema,
   picovoxelRenderSchema,
 } from '#picovoxel.schemas.js';
 
@@ -113,5 +114,31 @@ describe('lane schemas', () => {
     ];
 
     expect(keys.filter((key) => ['fastRenorm', 'serialLattice', 'acceptLane'].includes(key))).toEqual([]);
+  });
+});
+
+describe('region schema', () => {
+  const region = { min: [-1, -2, -3], max: [1, 2, 3] };
+
+  it('should accept an optional crop box on renders and every native export', () => {
+    expect(picovoxelRenderSchema.parse({ region })).toEqual({ lane: 'fast', region });
+    for (const schema of Object.values(picovoxelExportSchemas)) {
+      expect(schema.parse({ region })).toMatchObject({ lane: 'exact', region });
+      expect(schema.parse({})).not.toHaveProperty('region');
+    }
+  });
+
+  it.each([
+    [{ min: [0, 0, 0], max: [1, 0, 1] }, 'region.min must be below region.max on every axis.'],
+    [{ min: [0, 0], max: [1, 1, 1] }, undefined],
+    [{ min: [0, 0, 0], max: [1, 1, Number.POSITIVE_INFINITY] }, undefined],
+    [{ min: [0, 0, 0], max: [1, 1, 1], extra: true }, undefined],
+  ])('should refuse a malformed crop box %#', (candidate, message) => {
+    const parsed = picovoxelRegionSchema.safeParse(candidate);
+
+    expect(parsed.success).toBe(false);
+    if (message !== undefined) {
+      expect(parsed.error?.issues[0]?.message).toBe(message);
+    }
   });
 });

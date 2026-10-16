@@ -12,9 +12,10 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import { layerUrls } from '#picogk-layer.js';
+import { composeSbom, layerUrls } from '#picogk-layer.js';
 
 const text = readFileSync(resolve(import.meta.dirname, '../tau-plugin.json'), 'utf8');
+const sbomText = readFileSync(resolve(import.meta.dirname, '../tau-plugin.cdx.json'), 'utf8');
 const deployment = parsePluginDeployment(JSON.parse(text), '@taucad/picogk tau-plugin.json');
 const variants = deployment.dependencies['runtime'] ?? [];
 const payload = (name: string, key: string): DependencyPayload => {
@@ -141,5 +142,40 @@ describe('tau-plugin.json targets', () => {
     },
   ])('should answer $name as declared', ({ host, options, expected }) => {
     expect(answer(host, options)).toBe(expected);
+  });
+});
+
+describe('tau-plugin.cdx.json', () => {
+  it('ships the SBOM the manifest derives: a purl, the pinned hash and every URL per payload (D26)', () => {
+    const sbom = JSON.parse(sbomText) as {
+      readonly specVersion: string;
+      readonly components: ReadonlyArray<{
+        readonly name: string;
+        readonly purl: string;
+        readonly hashes: ReadonlyArray<{ readonly alg: string; readonly content: string }>;
+        readonly externalReferences: ReadonlyArray<{ readonly type: string; readonly url: string }>;
+      }>;
+    };
+    const pinned = variants.flatMap((variant) => variant.payloads);
+
+    expect(sbom).toEqual(composeSbom(JSON.parse(text) as Record<string, unknown>));
+    expect(sbom.specVersion).toBe('1.6');
+    expect(
+      sbom.components.map(({ name, purl, hashes, externalReferences }) => ({
+        name,
+        purl: purl.split('@')[0],
+        hash: hashes[0]?.content,
+        urls: externalReferences.map(({ url }) => url),
+      })),
+    ).toEqual(
+      expect.arrayContaining(
+        pinned.map((payload) => ({
+          name: payload.name === 'dotnet' ? 'dotnet-runtime' : 'tau-picogk-layer',
+          purl: payload.name === 'dotnet' ? 'pkg:generic/microsoft/dotnet-runtime' : 'pkg:github/taucad/tau',
+          hash: hex(payload.integrity),
+          urls: payload.origin.kind === 'url' ? payload.origin.urls : [],
+        })),
+      ),
+    );
   });
 });

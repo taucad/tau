@@ -293,8 +293,9 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
           expect(refused.issues).toEqual(
             expect.arrayContaining([
               expect.objectContaining({
-                code: 'KERNEL_BINDING_FAILED',
+                code: 'REPRESENTATION_UNSUPPORTED',
                 message: expect.stringContaining('refuses a fast-lane GLB or glTF export'),
+                details: expect.objectContaining({ refusal: 'PICOVOXEL_LANE_EXPORT', lane: 'fast' }),
               }),
             ]),
           );

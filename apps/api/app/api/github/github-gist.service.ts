@@ -29,8 +29,8 @@ const gistSchema = z.object({
   id: z.string().regex(/^[0-9a-f]+$/u),
   owner: z.object({ id: z.number().int().positive() }),
   files: z.record(z.string(), z.object({ content: z.string().optional(), truncated: z.boolean().optional() })),
-  history: z.array(z.object({ version: z.string().regex(/^[0-9a-f]{40}$/u) })),
 });
+const commitsSchema = z.array(z.object({ version: z.string().regex(/^[0-9a-f]{40}$/u) })).nonempty();
 type GistCredential = { accessToken: string; accountId: number; login: string; scopes: string[] };
 
 type GistCapability = Readonly<{
@@ -145,8 +145,16 @@ export class GithubGistService {
     if (!body.success || body.data.owner.id !== credential.accountId) {
       throw new BadGatewayException({ code: 'GITHUB_GIST_RESPONSE_INVALID' });
     }
-    return { id: body.data.id, history: body.data.history, html_url: `https://gist.github.com/${body.data.id}` };
+    // API 2026-03-10 omits history from Gist objects. Verify the uploaded bytes at an explicit commit.
+    const current = await this.ownedGist(credential, body.data.id);
+    const uploaded = Object.entries(payload?.data.files ?? {}).find(([, file]) => file !== null);
+    const readBack = current.files[uploaded?.[0] ?? ''];
+    if (uploaded === undefined || readBack?.truncated === true || readBack?.content !== uploaded[1]?.content) {
+      throw new ConflictException({ code: 'GITHUB_GIST_CHANGED' });
+    }
+    return { id: body.data.id, history: current.history, html_url: `https://gist.github.com/${body.data.id}` };
   }
+
   private authorizationUrl(): string {
     return `https://github.com/settings/connections/applications/${encodeURIComponent(this.config.get('GITHUB_CLIENT_ID', { infer: true }))}`;
   }
@@ -268,7 +276,23 @@ export class GithubGistService {
     if (!/^[0-9a-f]{1,64}$/u.test(id)) {
       throw new BadRequestException({ code: 'GITHUB_GIST_ID_INVALID' });
     }
-    const response = await this.request(`/gists/${id}`, credential.accessToken, { method: 'GET' });
+    await this.readOwnedGist(credential, id);
+    const response = await this.request(`/gists/${id}/commits?per_page=1`, credential.accessToken, { method: 'GET' });
+    const commits = commitsSchema.safeParse(await this.json(response));
+    const latest = commits.success ? commits.data[0] : undefined;
+    if (latest === undefined) {
+      throw new BadGatewayException({ code: 'GITHUB_GIST_RESPONSE_INVALID' });
+    }
+    const pinned = await this.readOwnedGist(credential, id, latest.version);
+    return { ...pinned, history: [latest] };
+  }
+
+  private async readOwnedGist(credential: GistCredential, id: string, revision?: string) {
+    const response = await this.request(
+      `/gists/${id}${revision === undefined ? '' : `/${revision}`}`,
+      credential.accessToken,
+      { method: 'GET' },
+    );
     const gist = gistSchema.safeParse(await this.json(response));
     if (
       !gist.success ||

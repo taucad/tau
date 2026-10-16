@@ -80,6 +80,7 @@ const build = {
     unload: 0,
   },
   metrics: { managedHeapBytes: 0, picoGkNativeBytes: 0, processWorkingSetBytes: 0 },
+  voxelSize: 0.5,
 };
 
 /* The native worker, its workspace mirror and the compute cache are process boundaries; the
@@ -173,11 +174,13 @@ describe('PicoGK native edge claim', () => {
         throw new Error('Unexpected superseded PicoGK render');
       }
       expect(outcome.rendering.success ? [] : outcome.rendering.issues).toEqual([]);
-      // The mesh cost reaches the client with the artifact: one tetrahedron, its worker meshing time.
+      // The mesh cost reaches the client with the artifact: one tetrahedron, its worker meshing time
+      // and the voxel size the model ran at.
       expect(outcome.rendering.success ? outcome.rendering.artifact.tessellation : undefined).toEqual({
         triangles: 4,
         vertices: 4,
         elapsed: 6,
+        voxelSize: 0.5,
       });
       const bytes = extractGltfFromResult(outcome.rendering);
       if (!bytes) {

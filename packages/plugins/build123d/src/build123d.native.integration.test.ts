@@ -25,11 +25,15 @@ import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { asKnownArtifact } from '@taucad/runtime';
-import { describe, expect, it } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prepareFromSeed, seedPresent } from '#build123d-closure.fixture.js';
 import { build123d, build123dOptionsFromClosure } from '#index.js';
 import type { ParameterSetActors } from '@taucad/parameters/set-machine';
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const encoder = new TextEncoder();
@@ -289,7 +293,7 @@ def main(params):
             const orbit = (((planet - 1) * 120 + (inputAngle + angle) / 4) * Math.PI) / 180;
             const expected = [0.048 * Math.cos(orbit), 0.007, -0.048 * Math.sin(orbit)];
             const centers = ['gear', 'pin'].map((role) => {
-              const id = `occurrence:0/carrier/planet-${planet}/${role}`;
+              const id = `occurrence:path/0/2/${planet + 1}/${role === 'gear' ? 0 : 1}`;
               const component = payload.components.find((candidate) => candidate.id === id);
               assert.ok(component?.primitiveRefs);
               const linkId = Object.entries(mechanism.links).find(([, body]) => body.components.includes(id))?.[0];
@@ -430,7 +434,6 @@ def main(params):
       'main.py': `from dataclasses import dataclass
 from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
 from reusable import textured_part
-from tau_assembly import Assembly
 
 @dataclass(frozen=True)
 class Params:
@@ -441,13 +444,12 @@ def main(params):
     rotor = textured_part(params.size)
     RevoluteJoint("shaft", base, Axis.Z, angle_reference=(1, 1, 0))
     RigidJoint("mount", rotor)
-    model = Assembly(children={"base": base, "rotor": rotor}, label="Module")
-    model.connect("drive", base.joints["shaft"], rotor.joints["mount"], angle=22.5)
-    return model
+    base.joints["shaft"].connect_to(rotor.joints["mount"], angle=22.5)
+    return Compound(children=[base, rotor], label="Module")
 
 def motion(model):
     base, rotor = model.children
-    joint = model.connections["drive"]
+    joint = base.joints["shaft"]
     return {"ground": base,
             "animations": [{"id": "turn", "duration": 1, "keyframes": [
                 {"time": 0, "coordinates": {(joint, "angle"): 22.5}},
@@ -480,7 +482,7 @@ def textured_part(size):
         const reopened = await glbToDocument(bytes);
         const payload = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
         expect(payload).toMatchObject({
-          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:0/base', connections: [expect.any(Object)] },
+          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:path/0/0', connections: [expect.any(Object)] },
           mechanism: { animations: [{ id: 'turn' }] },
         });
         const textures = reopened.getRoot().listTextures();
@@ -953,7 +955,7 @@ def textured_part(size):
       const document = client.open({ source: { path: 'main.py' } });
       const outcome = await document
         .view('model', {
-          options: { tessellation: { linearTolerance: 0.25, angularTolerance: 0.2 } },
+          options: { tessellation: { linearTolerance: 0.25, angularTolerance: 20 } },
         })
         .rendering();
       expect(outcome.superseded).toBe(false);

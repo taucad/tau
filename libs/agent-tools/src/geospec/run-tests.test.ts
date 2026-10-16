@@ -1,10 +1,18 @@
+import { geoSpecDefaultMaxWorkUnitLimit } from '@taucad/chat/constants';
+import { geoSpecMaximumWorkUnitLimit } from 'geospec/assertion-client';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
-import type { GeoSpecRunnerResult, GeoSpecRunnerRunOptions } from 'geospec/runner/worker';
+import type { GeoSpecDiscoveryFileSystem, GeoSpecTestCase } from 'geospec/runner';
+import type {
+  GeoSpecRunner,
+  GeoSpecRunnerEvent,
+  GeoSpecRunnerResult,
+  GeoSpecRunnerRunOptions,
+} from 'geospec/runner/worker';
 
 import type { SourceRevision } from '@taucad/runtime';
 
+import type { GeoSpecRunProgressEvent } from '#geospec/run-progress.js';
 import { hasGeoSpecSelectionFilters, runGeoSpecTests } from '#geospec/run-tests.js';
 
 const discoveryOver = (tree: Record<string, readonly string[]>): GeoSpecDiscoveryFileSystem => ({
@@ -128,14 +136,163 @@ describe('runGeoSpecTests', () => {
     await runGeoSpecTests({
       discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
       runner,
-      args: { testNamePattern: 'watertight', testTimeout: 5000 },
+      args: { testNamePattern: 'watertight', testTimeout: 5000, workUnitLimit: 64_000_000 },
     });
 
     expect(runner.run).toHaveBeenCalledWith({
       files: ['cube.geospec.ts'],
       testNamePattern: 'watertight',
       testTimeout: 5000,
+      workUnitLimit: 64_000_000,
     });
+  });
+
+  it("defaults the run work-unit maximum to GeoSpec's default authored maximum", () => {
+    expect(geoSpecDefaultMaxWorkUnitLimit).toBe(geoSpecMaximumWorkUnitLimit);
+  });
+});
+
+describe('runGeoSpecTests progress and kernel facts', () => {
+  const refusingRunner = () => {
+    const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
+    const emit = (event: GeoSpecRunnerEvent): void => {
+      for (const listener of listeners) {
+        listener(event);
+      }
+    };
+    const runner: Pick<GeoSpecRunner, 'on' | 'run'> = {
+      on(type, handler) {
+        const matches = (event: GeoSpecRunnerEvent): event is Extract<GeoSpecRunnerEvent, { type: typeof type }> =>
+          event.type === type;
+        const listener = (event: GeoSpecRunnerEvent): void => {
+          if (matches(event)) {
+            handler(event);
+          }
+        };
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      run: vi.fn(async ({ files }: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> => {
+        emit({ type: 'run-start', files });
+        const test: GeoSpecTestCase = {
+          suite: ['lamp'],
+          name: 'occurrences',
+          status: 'inconclusive',
+          assertions: [
+            {
+              kind: 'assemblyOccurrences',
+              subject: {},
+              expected: {},
+              passed: false,
+              loadId: 'load-1',
+              diagnostics: [
+                {
+                  code: 'GEOSPEC_UNSUPPORTED_EVIDENCE',
+                  severity: 'error',
+                  message: 'toHaveAssemblyOccurrences() needs exact BRep evidence.',
+                  suggestion: "loadModel({ file, format: 'step' })",
+                },
+              ],
+            },
+          ],
+          diagnostics: [],
+        };
+        emit({ type: 'test-complete', file: 'lamp.geospec.ts', test });
+        return {
+          success: false,
+          passed: 0,
+          failed: 0,
+          selectedTests: 1,
+          files: [
+            {
+              file: 'lamp.geospec.ts',
+              result: {
+                success: true,
+                passed: false,
+                tests: [test],
+                bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
+                lineage: {
+                  status: 'complete',
+                  modules: [],
+                  loads: [
+                    {
+                      loadId: 'load-1',
+                      status: 'complete',
+                      evidence: {
+                        loadId: 'load-1',
+                        status: 'complete',
+                        format: 'glb',
+                        parameters: {},
+                        ingestOptions: {},
+                        sourcePath: 'main.ts',
+                        artifacts: [{ name: 'main.glb', sha256: 'd'.repeat(64), byteLength: 1 }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        };
+      }),
+    };
+    return { runner, listeners };
+  };
+
+  it('forwards projected progress while the run executes and unsubscribes after it', async () => {
+    const { runner, listeners } = refusingRunner();
+    const events: GeoSpecRunProgressEvent[] = [];
+    await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['lamp.geospec.ts'] }),
+      runner,
+      args: {},
+      onProgress: (event) => events.push(event),
+    });
+
+    expect(events.map((event) => event.type)).toStrictEqual(['run-start', 'test-complete']);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('asks the host for the kernel of a refused load and names its mesh alternative', async () => {
+    const { runner } = refusingRunner();
+    const kernelEvidence = vi.fn(async () => ({ kernelId: 'picovoxel', directBrepStep: false }));
+    const output = await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['lamp.geospec.ts'] }),
+      runner,
+      args: {},
+      kernelEvidence,
+    });
+
+    expect(kernelEvidence).toHaveBeenCalledWith('main.ts');
+    expect(output.failures[0]).toMatchObject({ category: 'unsupported-evidence' });
+    expect(output.failures[0]?.suggestion).toContain("kernel 'picovoxel'");
+    expect(output.failures[0]?.suggestion).not.toContain("format: 'step'");
+  });
+
+  it('keeps the generic evidence guidance when the kernel lookup fails', async () => {
+    const { runner } = refusingRunner();
+    const output = await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['lamp.geospec.ts'] }),
+      runner,
+      args: {},
+      kernelEvidence: async () => {
+        throw new Error('describe failed');
+      },
+    });
+
+    expect(output.failures[0]?.suggestion).toContain('mesh-only kernel this matcher is unsupported');
+  });
+
+  it('never asks for kernel facts when no failure is an evidence refusal', async () => {
+    const kernelEvidence = vi.fn(async () => undefined);
+    await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
+      runner: passingRunner(),
+      args: {},
+      kernelEvidence,
+    });
+
+    expect(kernelEvidence).not.toHaveBeenCalled();
   });
 });
 

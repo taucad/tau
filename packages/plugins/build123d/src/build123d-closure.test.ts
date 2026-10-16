@@ -45,7 +45,6 @@ const closureFiles = [
   row('tau-worker/worker.py', 'd'),
   row('tau-worker/native_materials.py', 'e'),
   row('tau-worker/mechanisms.py', 'f'),
-  row('tau-worker/tau_assembly.py', 'f'),
 ];
 
 describe('build123dOptionsFromClosure', () => {
@@ -62,7 +61,6 @@ describe('build123dOptionsFromClosure', () => {
         { path: '/store/closures/sha256/abc/tau-worker/glb.py', sha256: hex('c') },
         { path: '/store/closures/sha256/abc/tau-worker/native_materials.py', sha256: hex('e') },
         { path: '/store/closures/sha256/abc/tau-worker/mechanisms.py', sha256: hex('f') },
-        { path: '/store/closures/sha256/abc/tau-worker/tau_assembly.py', sha256: hex('f') },
       ],
       runtimePath: '/store/closures/sha256/abc',
     });

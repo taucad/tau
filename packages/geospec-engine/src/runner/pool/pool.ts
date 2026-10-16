@@ -33,6 +33,7 @@ import type {
   GeoSpecRunnerResult,
   GeoSpecRunnerRunOptions,
 } from 'geospec/runner/worker';
+import { geoSpecTimeoutCode } from 'geospec/runner';
 import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { ShardTimings } from '#runner/pool/timings.js';
@@ -66,17 +67,17 @@ export type GeoSpecPoolOptions = {
 };
 
 const shardTimeoutIssue = (file: string, shardWatchdog: number): RunnerIssue => ({
-  code: 'GEOSPEC_SHARD_TIMEOUT',
+  code: geoSpecTimeoutCode.shard,
   message: `GeoSpec shard '${file}' exceeded the ${shardWatchdog} ms non-verdict watchdog and its worker was terminated: infrastructure failure, not a geometry verdict.`,
   severity: 'error',
   type: 'runtime',
 });
 
-const shardErrorResult = (message: string): GeoSpecRunResult => ({
+const shardErrorResult = (message: string, code = 'GEOSPEC_SHARD_FAILED'): GeoSpecRunResult => ({
   success: false,
   issues: [
     {
-      code: 'GEOSPEC_SHARD_FAILED',
+      code,
       message,
       severity: 'error',
       type: 'runtime',
@@ -646,9 +647,11 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             const result =
               settled.type === 'complete'
                 ? settled.message.result
-                : shardErrorResult(
-                    settled.type === 'listed' ? 'the pool worker answered a shard with a test list' : settled.message,
-                  );
+                : settled.type === 'timeout'
+                  ? shardErrorResult(settled.message, geoSpecTimeoutCode.shard)
+                  : shardErrorResult(
+                      settled.type === 'listed' ? 'the pool worker answered a shard with a test list' : settled.message,
+                    );
             if (settled.type === 'complete') {
               worker.loadKey = settled.message.primaryLoadKey ?? worker.loadKey;
               options.timings?.record(shard.timingKey, {
@@ -658,7 +661,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             }
             if (settled.type === 'timeout') {
               issues.push({
-                code: 'GEOSPEC_SHARD_TIMEOUT',
+                code: geoSpecTimeoutCode.shard,
                 message: settled.message,
                 severity: 'error',
                 type: 'runtime',

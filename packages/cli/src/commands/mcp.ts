@@ -20,6 +20,7 @@ import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
 import { childEnvironment } from '#child-environment.js';
+import { exitNow } from '#exit-now.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
@@ -508,7 +509,9 @@ export const mcpCommand = defineCommand({
       }
     };
     await Promise.race([close().catch(() => undefined), sleep(shutdownGrace)]);
-    // oxlint-disable-next-line unicorn/no-process-exit -- a kernel thread that ignores termination would keep the event loop alive; the protocol is already closed, so no reader is truncated.
-    process.exit(0);
+    /* Not `process.exit`: a kernel's WebAssembly tier-up still compiling on V8's threads would hold it for seconds,
+     * and a kernel thread that ignores termination would keep the event loop alive. The protocol is already closed,
+     * so no reader is truncated. */
+    await exitNow(0);
   },
 });

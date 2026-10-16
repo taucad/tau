@@ -29,7 +29,17 @@ import type { KernelServices } from '@taucad/runtime/kernel';
 
 import modelingPackage from '@jscad/modeling/package.json' with { type: 'json' };
 
-import { jscadExportSchemas } from '#jscad.schemas.js';
+import { jscadExportSchemas, jscadRenderSchema } from '#jscad.schemas.js';
+import {
+  createJscadTessellationBudgetExceededIssue,
+  createJscadTessellationDowngradedIssue,
+  createJscadTessellationReport,
+  jscadDefaultSegments,
+  jscadTriangleBudgets,
+  meshWithinJscadBudget,
+  resolveJscadTessellation,
+  withDefaultSegments,
+} from '#jscad-tessellation.js';
 
 import { jscadToGltf } from '#jscad-to-gltf.js';
 import { resolveJscadModeling } from '#jscad-modeling.js';
@@ -261,6 +271,85 @@ function resolveModule(module: unknown): Record<string, unknown> {
 }
 
 // =============================================================================
+// Tessellation re-runs
+// =============================================================================
+
+/** What re-running a model at another default segment count needs: its bundle and its parameters. */
+type JscadProgram = { code: string; parameters: Record<string, unknown> };
+
+/** Evaluated parts at JSCAD's own default segment count, and the program that rebuilds them at another. */
+type JscadHandle = JscadPartDescriptor[] & { program?: JscadProgram };
+
+/** The default segment count circular primitives read during the current run; `undefined` is JSCAD's own. */
+let activeSegments: number | undefined;
+let segmentsTail: Promise<void> = Promise.resolve();
+
+/**
+ * Run `operation` with `segments` active, after every earlier run in this realm has settled.
+ *
+ * @param segments - The default segment count to activate, or `undefined` for JSCAD's own.
+ * @param operation - The model run.
+ * @returns What the run returns.
+ */
+async function withSegments<Value>(segments: number | undefined, operation: () => Promise<Value>): Promise<Value> {
+  const previous = segmentsTail;
+  const done = Promise.withResolvers<void>();
+  segmentsTail = done.promise;
+  try {
+    await previous;
+    activeSegments = segments;
+    return await operation();
+  } finally {
+    activeSegments = undefined;
+    done.resolve();
+  }
+}
+
+const parseSerializedProgram = (value: unknown): JscadProgram | undefined =>
+  isRecordObject(value) && typeof value['code'] === 'string' && isRecordObject(value['parameters'])
+    ? { code: value['code'], parameters: value['parameters'] }
+    : undefined;
+
+/**
+ * The model's parts at a default segment count. JSCAD's own count is the evaluated handle; any other count runs the
+ * bundle again, because a primitive's segments are fixed when it is built.
+ *
+ * @param input - The evaluated handle, its program, the segment count, the kernel services and the modeling API.
+ * @returns The named parts at that count.
+ */
+async function partsAt(input: {
+  handle: JscadHandle;
+  program: JscadProgram;
+  segments: number;
+  runtime: KernelServices;
+  modeling: JscadModeling;
+}): Promise<JscadPartDescriptor[]> {
+  const { handle, program, segments, runtime, modeling } = input;
+  if (segments === jscadDefaultSegments) {
+    return handle;
+  }
+  const executeResult = await runtime.execute(program.code);
+  if (!executeResult.success) {
+    throw new JscadBuildError(executeResult.issues);
+  }
+  const module = resolveModule(executeResult.value);
+  let shapes: unknown;
+  try {
+    shapes = await withSegments(segments, async () => runMain(module, program.parameters, modeling));
+  } catch (error) {
+    throw new JscadBuildError([
+      {
+        message: error instanceof Error ? error.message : String(error),
+        code: 'RUNTIME',
+        type: 'runtime',
+        severity: 'error',
+      },
+    ]);
+  }
+  return shapes === undefined ? [] : normalizeJscadParts(shapes, modeling);
+}
+
+// =============================================================================
 // Kernel module definition
 // =============================================================================
 
@@ -272,8 +361,15 @@ export const jscadKernel = defineKernel({
   builtinModuleNames: ['@jscad/modeling'],
   builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
-  version: '1.0.0',
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
+  version: '1.1.0',
+  views: {
+    model: {
+      title: 'Model',
+      mimeType: 'model/gltf-binary',
+      optionsSchema: jscadRenderSchema,
+      content: ['includeEdges'],
+    },
+  },
   // D2: in-worker CSG yields cooperatively, so a superseded drag render is abandoned, not killed.
   cancellation: 'cooperative',
   exports: {
@@ -287,7 +383,13 @@ export const jscadKernel = defineKernel({
   },
 
   async initialize(_options, runtime) {
-    const modeling = resolveJscadModeling(await import('@jscad/modeling'));
+    const resolved = resolveJscadModeling(await import('@jscad/modeling'));
+    const primitives: unknown = Reflect.get(resolved, 'primitives');
+    // Circular primitives without their own `segments` take the active default count of the current run.
+    const authoring = isRecordObject(primitives)
+      ? { ...resolved, primitives: withDefaultSegments(primitives, () => activeSegments) }
+      : resolved;
+    const modeling: JscadModeling = authoring;
     registerJscadModules(runtime, modeling);
     runtime.logger.debug('Initialized JSCAD kernel with @jscad/modeling');
     return { modulesRegistered: true, modeling };
@@ -370,7 +472,7 @@ export const jscadKernel = defineKernel({
 
     let shapes: unknown;
     try {
-      shapes = await runMain(module, parameters, context.modeling);
+      shapes = await withSegments(undefined, async () => runMain(module, parameters, context.modeling));
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),
@@ -395,21 +497,63 @@ export const jscadKernel = defineKernel({
       return { handle: [] };
     }
 
-    return { handle: normalizeJscadParts(shapes, context.modeling) };
+    const handle: JscadHandle = Object.assign(normalizeJscadParts(shapes, context.modeling), {
+      program: { code: bundleResult.code, parameters },
+    });
+    return { handle };
   },
 
-  async render({ handle, content }, _services, context) {
-    if (!handle.some((part) => isRenderableJscadPart(part, context.modeling))) {
-      return { content: asBuffer(createEmptyGlb()) };
+  async render({ handle, options, content }, runtime, context) {
+    const includeEdges = content?.includeEdges === true;
+    const started = performance.now();
+    if (handle.program === undefined) {
+      if (!handle.some((part) => isRenderableJscadPart(part, context.modeling))) {
+        return { content: asBuffer(createEmptyGlb()) };
+      }
+      const gltf = jscadToGltf(handle, { includeEdges }, context.modeling);
+      return { content: gltf.content, issues: gltf.issues };
     }
-    const gltf = jscadToGltf(handle, { includeEdges: content?.includeEdges === true }, context.modeling);
-    return { content: gltf.content, issues: gltf.issues };
+    const { program } = handle;
+    const requested = resolveJscadTessellation(options.tessellation);
+    const budget = jscadTriangleBudgets.preview;
+    const { result, segments, downgraded } = await meshWithinJscadBudget({
+      segments: requested.segments,
+      budget,
+      async mesh(count) {
+        const parts = await partsAt({ handle, program, segments: count, runtime, modeling: context.modeling });
+        if (!parts.some((part) => isRenderableJscadPart(part, context.modeling))) {
+          return { content: asBuffer(createEmptyGlb()), issues: [], triangles: 0, vertices: 0 };
+        }
+        return jscadToGltf(parts, { includeEdges }, context.modeling);
+      },
+    });
+    const tessellation = createJscadTessellationReport({
+      requested,
+      downgraded,
+      triangles: result.triangles,
+      vertices: result.vertices,
+      elapsed: performance.now() - started,
+    });
+    const issues =
+      downgraded === 0
+        ? result.issues
+        : [
+            ...result.issues,
+            createJscadTessellationDowngradedIssue({
+              requested,
+              segments,
+              downgraded,
+              triangles: result.triangles,
+              budget,
+            }),
+          ];
+    return { content: result.content, tessellation, issues };
   },
 
   serializeHandle({ handle }, _runtime, context) {
     const { geom2, geom3, path2 } = context.modeling.geometries;
     const parts = normalizeJscadParts(handle, context.modeling);
-    return parts.map((part): JscadSerializedNativeHandleEntry => {
+    const entries = parts.map((part): JscadSerializedNativeHandleEntry => {
       const { shape } = part;
       if (geom3.isA(shape)) {
         return {
@@ -434,16 +578,19 @@ export const jscadKernel = defineKernel({
       }
       throw new Error(`Unsupported JSCAD geometry type for serialized handle at index ${part.index}.`);
     });
+    return handle.program === undefined ? entries : { parts: entries, program: { ...handle.program } };
   },
 
-  deserializeHandle({ serialized }, _runtime, context) {
+  deserializeHandle({ serialized }, _runtime, context): JscadHandle {
     const { geom2, geom3, path2 } = context.modeling.geometries;
-    if (!Array.isArray(serialized)) {
+    const withProgram = isRecordObject(serialized) && !Array.isArray(serialized) ? serialized : undefined;
+    const rawEntries: unknown = withProgram ? withProgram.parts : serialized;
+    if (!Array.isArray(rawEntries)) {
       throw new TypeError('Invalid JSCAD serialized handle: expected an array of compact-binary entries.');
     }
 
-    const serializedEntries: unknown[] = serialized;
-    return serializedEntries.map((rawEntry, index): JscadPartDescriptor => {
+    const serializedEntries: unknown[] = rawEntries;
+    const parts = serializedEntries.map((rawEntry, index): JscadPartDescriptor => {
       const entry = parseSerializedNativeHandleEntry(rawEntry, index);
       const compactBinary = normalizeCompactBinaryData({
         data: entry.data,
@@ -479,9 +626,11 @@ export const jscadKernel = defineKernel({
         sourceName: name,
       };
     });
+    const program = parseSerializedProgram(withProgram?.program);
+    return program === undefined ? parts : Object.assign(parts, { program });
   },
 
-  async export(input, _runtime, context) {
+  async export(input, runtime, context) {
     const { exportId, handle, options, content } = input;
 
     switch (exportId) {
@@ -492,12 +641,23 @@ export const jscadKernel = defineKernel({
         }
 
         const { coordinateSystem, unit } = options;
-        if (!handle.some((part) => isRenderableJscadPart(part, context.modeling))) {
+        const requested = resolveJscadTessellation(options.tessellation);
+        const parts =
+          handle.program === undefined
+            ? handle
+            : await partsAt({
+                handle,
+                program: handle.program,
+                segments: requested.segments,
+                runtime,
+                modeling: context.modeling,
+              });
+        if (!parts.some((part) => isRenderableJscadPart(part, context.modeling))) {
           return { files: [createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))] };
         }
 
         const gltf = jscadToGltf(
-          handle,
+          parts,
           {
             coordinateSystem,
             unit,
@@ -505,6 +665,12 @@ export const jscadKernel = defineKernel({
           },
           context.modeling,
         );
+        const budget = jscadTriangleBudgets.export;
+        if (handle.program !== undefined && gltf.triangles > budget) {
+          throw new JscadBuildError([
+            createJscadTessellationBudgetExceededIssue({ requested, triangles: gltf.triangles, budget }),
+          ]);
+        }
         return { files: [createExportFile('glb', 'model.glb', asBuffer(gltf.content))], issues: gltf.issues };
       }
 

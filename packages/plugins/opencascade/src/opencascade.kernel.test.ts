@@ -727,7 +727,7 @@ export default function main() {
       const exportResult = await exportLastRender('stl');
       assertDocumentSuccess(exportResult, 'STL export');
       expect(exportResult.files.length).toBeGreaterThan(0);
-      expect(exportResult.files[0].name).toBe('Shape 1');
+      expect(exportResult.files[0].name).toBe('Shape 1.stl');
       expect(exportResult.files[0].bytes).toBeInstanceOf(Uint8Array);
     });
 
@@ -773,7 +773,7 @@ export default function main() {
       const exportResult = await exportLastRender('step');
       assertDocumentSuccess(exportResult, 'STEP export');
       expect(exportResult.files.length).toBe(1);
-      expect(exportResult.files[0].name).toBe('assembly');
+      expect(exportResult.files[0].name).toBe('assembly.step');
 
       const stepContent = new TextDecoder().decode(exportResult.files[0].bytes);
       expect(stepContent).toContain('CLOSED_SHELL');

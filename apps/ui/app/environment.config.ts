@@ -97,6 +97,19 @@ const environmentSchema = z.preprocess(
       .optional()
       .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)))
       .describe('Accept private/loopback http git remotes in Connect. Default false.'),
+    /**
+     * The managed acquisition profile (`TAU_ACQUISITION`). `locked` keeps the editor's type acquisition to the static
+     * types, with no request. Only unset, empty or `open` is `open`; any other value is `locked`, so a typo never
+     * opens the network.
+     */
+    TAU_ACQUISITION: z
+      .string()
+      .optional()
+      .transform((value): 'open' | 'locked' => {
+        const trimmed = value?.trim() ?? '';
+        return trimmed === '' || trimmed === 'open' ? 'open' : 'locked';
+      })
+      .describe('Managed acquisition profile: open (default) or locked (no CDN type acquisition).'),
     NODE_ENV: z.enum(['development', 'production', 'test']),
 
     // PostHog Analytics
@@ -146,6 +159,7 @@ const baseClientEnvironmentKeys = [
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',
+  'TAU_ACQUISITION',
   'NODE_ENV',
   'POSTHOG_API_HOST',
   'POSTHOG_UI_HOST',

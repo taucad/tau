@@ -1,6 +1,6 @@
 /**
- * Pack every package of the release train (every publishable package except the GeoSpec engine,
- * charter D36), install the TGZs with npm outside Tau, and exercise the
+ * Pack every package of the release train (every publishable package), install the TGZs with npm
+ * outside Tau, and exercise the
  * published surface: every export subpath, every `files` entry, the native payloads that only
  * fail once instantiated, and the runtime's shipped README quick start.
  *
@@ -14,10 +14,11 @@
  * A subset only works when it is closed under workspace dependencies; omitting a sibling makes npm
  * fall back to the registry and 404. Requesting `packages/runtime` also packs the packages its
  * README quick start imports and their publishable closure, computed from the graph. Requesting
- * `packages/cli` packs the CLI's publishable closure except the GeoSpec engine packages, which Tau's
- * train does not publish (charter D36; `@taucad/host` peers them optionally), and then runs the
+ * `packages/cli` packs the CLI's publishable closure, which includes `@taucad/geospec-engine` and
+ * `geospec` so that `@taucad/host`'s optional GeoSpec peers resolve (audit H-01), and then runs the
  * installed `tau` from a project folder outside the app with an empty config directory: `export` to
- * a GLB, `check`, `mcp` answering `initialize`, and the typed not-prepared refusal for a `.py` model.
+ * a GLB, `check`, `mcp` listing and passing `test_model`, and the typed not-prepared refusal for a
+ * `.py` model.
  *
  * `--from-urls` is the consumer leg of the pkg.pr.new full run (`preview-packages.yml`): it packs
  * nothing and installs every package the run published, by the URLs in the `--json` file that
@@ -1177,22 +1178,16 @@ type InstallPlan = {
   readonly previewNames?: ReadonlySet<string>;
 };
 
-/**
- * The GeoSpec engine project: outside Tau's train (charter D36), so a consumer of the CLI closure
- * installs without it. `@taucad/host` declares it, and the published `geospec-engine`, as optional peers.
- */
-const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine']);
-
 /** Pack the requested (or every) publishable directory into TGZs. */
 const planFromTarballs = async (requested: readonly string[], artifactRoot: string): Promise<InstallPlan> => {
   const resolved = await workspace({ fresh: true });
   const projectByName = new Map(publishable(resolved).map((project) => [project.name, project]));
-  // The release train, in dependency order, derived from the graph; the GeoSpec engine is not in it (D36).
+  // The release train, in dependency order, derived from the graph.
   const releaseTrainDirectories = publishWaves(resolved)
     .flat()
     .flatMap((name) => {
       const project = projectByName.get(name);
-      return project && !geospecEngineProjects.has(name) ? [project.root] : [];
+      return project ? [project.root] : [];
     });
   /** Private workspace libraries bundled into some artifact; none may ever be declared. */
   const bundledLibraryNames = new Set(
@@ -1217,7 +1212,7 @@ const planFromTarballs = async (requested: readonly string[], artifactRoot: stri
   const cliDirectories = requested.includes('packages/cli')
     ? publishableClosure(resolved, ['cli']).flatMap((name) => {
         const root = projectByName.get(name)?.root;
-        return root === undefined || geospecEngineProjects.has(name) ? [] : [root];
+        return root === undefined ? [] : [root];
       })
     : [];
   const packageDirectories =

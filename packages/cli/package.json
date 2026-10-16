@@ -1,6 +1,6 @@
 {
   "name": "@taucad/cli",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.5",
   "description": "CLI for @taucad/runtime",
   "type": "module",
   "sideEffects": [
@@ -72,9 +72,11 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
+    "@taucad/camera": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
@@ -96,6 +98,8 @@
     "@taucad/zoo": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
+    "geospec": "workspace:*",
+    "geospec-engine": "catalog:",
     "ink": "catalog:",
     "react": "catalog:",
     "semver": "catalog:",

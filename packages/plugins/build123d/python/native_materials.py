@@ -47,7 +47,7 @@ def material_dependencies(shapes: tuple[Any, ...], workspace: Path, declared_pat
     return sorted(dependencies)
 
 
-def tessellate_surface(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+def tessellate_surface(shape: Any, linear_tolerance: float, angular_tolerance: float, *, pretriangulated: bool = False) -> dict[str, Any]:
     """Use native normals and face-local UVs while retaining exact face ranges.
 
     The caller supplies detached geometry so meshing cannot mutate a retained BRep.
@@ -60,8 +60,18 @@ def tessellate_surface(shape: Any, linear_tolerance: float, angular_tolerance: f
     indices: list[int] = []
     face_groups: list[dict[str, int]] = []
     for face_id, face in enumerate(shape.faces(), 1):
+        tolerance = linear_tolerance
+        if pretriangulated:
+            # Native mesh() checks the stored achieved deflection, which can be
+            # slightly above its requested value. Admit that existing absolute
+            # triangulation for extraction; never let UV extraction remesh in
+            # Build123D's relative mode after the triangle budget was checked.
+            from OCP.BRep import BRep_Tool
+            from OCP.TopLoc import TopLoc_Location
+            mesh = BRep_Tool.Triangulation_s(face.wrapped, TopLoc_Location())
+            tolerance = max(tolerance, mesh.Deflection()) * (1 + 1e-12)
         vertices, triangles, native_normals, native_uvs = face.tessellate_with_uvs(
-            linear_tolerance, angular_tolerance, atlas_packing=False
+            tolerance, angular_tolerance, atlas_packing=False
         )
         offset = len(positions) // 3
         start = len(indices)

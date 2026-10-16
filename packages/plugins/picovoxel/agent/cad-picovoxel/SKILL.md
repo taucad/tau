@@ -18,6 +18,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 
 - `voxelSize` is the voxel edge h in millimetres. Choose about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds.
 - Iterate with per-call `parameters`, e.g. `{ "voxelSize": 1.5 }` on `evaluate_model`, `screenshot` or `export_model`; they are never saved. Stay coarse while iterating and export at the author's value. Tau never changes `voxelSize` itself; edit the source value only when the author asks.
+- `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A view or capture over 2 M triangles shows a mesh simplified within half a voxel and warns `DISPLAY_SIMPLIFIED`; only the picture changes. The grid, exports and GeoSpec subjects stay exact.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Dispose large intermediates after their last use.
@@ -431,29 +432,13 @@ declare class Frames implements Spline
 
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
 
-// Lens/washer
-declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
-  radialSteps: number
-  polarSteps: number
-  heightSteps: number
-  readonly innerRadius: number
-  readonly outerRadius: number
-  upperModulation: SurfaceModulation
-  lowerModulation: SurfaceModulation
-  readonly frame: Frame
-  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
-  // C# `SetHeight` — modulated faces bump radial sampling to 500
-  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
-  setRadialSteps(steps: number): void;
-  setPolarSteps(steps: number): void;
-  setHeightSteps(steps: number): void;
-  voxConstruct(pk: Pico): Voxels;
-  mshConstruct(pk: Pico): Mesh;
-  protected radiusRatioFromStep(step: number): number;
-  protected phiRatioFromStep(step: number): number;
-  protected heightRatioFromStep(step: number): number;
-  // Surface point (C# `vecGetSurfacePoint`
-  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
+// BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`)
+declare class ControlPointSpline implements Spline
+  constructor(controlPoints: readonly Vec3[], degree?: number, ends?: SplineEnds);
+  // Render with the given sample count (C# `aGetPoints`)
+  points(samples?: number): Vec3[];
+  // Sample dynamically at a length ratio (C# `vecGetPointAt`)
+  pointAt(lengthRatio: number): Vec3;
 ```
 
 ### `picovoxel/numerics`
@@ -479,6 +464,20 @@ vec3: {
   readonly isFinite: (v: Vec3) => boolean
   // … 11 more members in the API reference
 }
+
+// `Frame` factories and operations (C# `Frame3d` surface
+frame: {
+  // The world coordinate system (C# `frmWorld`)
+  readonly world: Frame
+  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
+  readonly ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
+  // World point → local coordinates (C# `vecPtFromWorld`)
+  readonly ptFromWorld: (f: Frame, world: Vec3) => Vec3
+  // … 22 more members in the API reference
+}
+
+// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
+Vec2: readonly [number, number]
 ```
 
 ## API reference

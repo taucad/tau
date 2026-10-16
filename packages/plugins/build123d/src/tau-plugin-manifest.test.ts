@@ -45,7 +45,6 @@ describe('Build123d tau-plugin.json', () => {
         { path: '/closure/tau-worker/glb.py', sha256: 'd'.repeat(64) },
         { path: '/closure/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
         { path: '/closure/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
-        { path: '/closure/tau-worker/tau_assembly.py', sha256: 'f'.repeat(64) },
       ],
     });
     expect(deployment.kernels).toEqual({ [kernel.id]: { requires: ['engine'], extensions: [...kernel.extensions] } });
@@ -84,7 +83,6 @@ describe('Build123d tau-plugin.json', () => {
         'glb.py',
         'native_materials.py',
         'mechanisms.py',
-        'tau_assembly.py',
       ]);
       for (const { payload, hex } of workers) {
         const bytes = readFileSync(join(packageRoot, 'python', payload.name));

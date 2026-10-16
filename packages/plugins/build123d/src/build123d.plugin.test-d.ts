@@ -16,7 +16,6 @@ const selected = plugin({
         { path: '/glb.py', sha256: 'd'.repeat(64) },
         { path: '/native_materials.py', sha256: 'd'.repeat(64) },
         { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
-        { path: '/tau_assembly.py', sha256: 'd'.repeat(64) },
       ],
     },
   },

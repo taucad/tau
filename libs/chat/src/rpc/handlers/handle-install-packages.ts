@@ -97,15 +97,36 @@ const nonNpmManifest = async (
  *
  * @param input - Dependency edits; `upgrade` present selects upgrade mode with exactly those names.
  * @param fileSystem - The project's record filesystem, rooted at the project.
- * @param signal - Cancels resolution and downloads.
+ * @param options - The invocation's cancellation and the host's acquisition profile.
+ * @param options.signal - Cancels resolution and downloads.
+ * @param options.acquisition - The host's managed acquisition profile; `locked` refuses before any read or request.
  * @returns What changed, the direct dependencies as locked, and issues, or a typed failure.
  * @public
  */
 export async function handleInstallPackages(
   input: InstallPackagesRpcInput,
   fileSystem: RpcFileSystem,
-  signal: AbortSignal = new AbortController().signal,
+  {
+    signal = new AbortController().signal,
+    acquisition = 'open',
+  }: { readonly signal?: AbortSignal | undefined; readonly acquisition?: 'open' | 'locked' | undefined } = {},
 ): Promise<InstallPackagesRpcResult> {
+  if (acquisition === 'locked') {
+    // The locked profile makes no request, and resolving or installing a package needs the npm registry (X43).
+    return {
+      success: true,
+      manifestChanged: false,
+      lockChanged: false,
+      packages: [],
+      issues: [
+        {
+          code: 'registry-unavailable',
+          message:
+            'The acquisition profile is locked (TAU_ACQUISITION=locked), so install_packages contacts no registry and wrote nothing. Install where the registry is reachable and bring package.json, package-lock.json and node_modules into the project; its imports then load from node_modules.',
+        },
+      ],
+    };
+  }
   try {
     const native = await nonNpmManifest(fileSystem);
     if (native !== undefined) {

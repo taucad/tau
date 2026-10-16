@@ -6,6 +6,7 @@ import type {
   GeoSpecRuntimeSourceAdapter,
   LoadModelCodeOptions,
   LoadModelFileOptions,
+  LoadModelSourceOptions,
   ManagedGeoSpecModelLoader,
 } from '#model/types.js';
 import { createModelLoader, loadModel } from '#model/index.js';
@@ -113,5 +114,29 @@ describe('geospec/model public types', () => {
     expectTypeOf(createModelLoader({ engine })).toEqualTypeOf<ManagedGeoSpecModelLoader>();
     // @ts-expect-error -- a host loader always needs the compiled engine that admits its subjects.
     createModelLoader({ sourceAdapters: [adapter] });
+  });
+
+  it('should accept a bounded work-unit budget everywhere and a crop only on Runtime-backed loads', () => {
+    expectTypeOf(loadModel({ file: 'main.ts', workUnitLimit: 16_000_000 })).toEqualTypeOf<Promise<GeoSpecSubject>>();
+    expectTypeOf(loadModel({ source: new Uint8Array(), workUnitLimit: 16_000_000 })).toEqualTypeOf<
+      Promise<GeoSpecSubject>
+    >();
+    expectTypeOf(
+      loadModel({
+        file: 'main.ts',
+        region: { min: [0, 0, 0], max: [40, 40, 60] },
+      }),
+    ).toEqualTypeOf<Promise<GeoSpecSubject>>();
+    const invalidSourceCrop: LoadModelSourceOptions = {
+      source: new Uint8Array(),
+      // @ts-expect-error -- direct bytes are admitted as they are; only a kernel export can crop.
+      region: { min: [0, 0, 0], max: [1, 1, 1] },
+    };
+    void invalidSourceCrop;
+    void loadModel({
+      file: 'main.ts',
+      // @ts-expect-error -- a crop corner has exactly three millimetre coordinates.
+      region: { min: [0, 0], max: [1, 1, 1] },
+    });
   });
 });

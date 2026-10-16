@@ -5,10 +5,14 @@ import { userEvent } from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
-const mocks = vi.hoisted(() => ({
-  files: new Map<string, string>(),
-  executeRpcCall: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const executeRpcCall = vi.fn();
+  return {
+    files: new Map<string, string>(),
+    executeRpcCall,
+    createRpcHandlers: vi.fn((_deps: unknown) => ({ executeRpcCall })),
+  };
+});
 
 vi.mock('#hooks/use-file-content.js', () => ({
   useFileContent: (path: string | undefined): FileContentResult => {
@@ -21,8 +25,10 @@ vi.mock('#hooks/use-file-content.js', () => ({
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
 vi.mock('#hooks/rpc-handlers.js', () => ({
-  createRpcHandlers: () => ({ executeRpcCall: mocks.executeRpcCall }),
+  createRpcHandlers: mocks.createRpcHandlers,
 }));
+/* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
+vi.mock('#environment.config.js', () => ({ ENV: { TAU_ACQUISITION: 'locked' } }));
 
 const { PackagesPanel } = await import('#routes/w.$workspace.$project/packages-panel.js');
 
@@ -112,6 +118,8 @@ describe('PackagesPanel', () => {
     expect(mocks.executeRpcCall).toHaveBeenCalledWith(
       expect.objectContaining({ rpcName: 'install_packages', args: {} }),
     );
+    // The page's acquisition profile reaches the handler, which refuses under locked with no request.
+    expect(mocks.createRpcHandlers).toHaveBeenCalledWith(expect.objectContaining({ acquisition: 'locked' }));
 
     settle({
       success: true,

@@ -10,7 +10,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build123d import Axis, BallJoint, Box, Compound, CylindricalJoint, LinearJoint, Location, Plane, RevoluteJoint, RigidJoint, Rotation
 from mechanisms import _matrix, _wire, project_mechanism
-from tau_assembly import Assembly
 
 
 def components(shapes):
@@ -115,11 +114,11 @@ class MechanismsTest(unittest.TestCase):
             RigidJoint('mount',a,Location((1,2,3)))
             RigidJoint('mount',b,Location((3,2,1)))
             a.label=b.label='Renamed'
-            model=Assembly(children=dict(reversed([('a',a),('b',b)])) if reverse else {'a':a,'b':b})
+            model=Compound(children=[b,a] if reverse else [a,b])
             entries=components((model,))
-            self.assertEqual(project_mechanism((model,),entries),{})
+            self.assertEqual(project_mechanism((model,),entries,{'occurrence_ids':{'a':a,'b':b}}),{})
             keyed={entry['id']:entry for entry in entries}
-            self.assertEqual(keyed['occurrence:0/a']['jointInterfaces']['mount']['frame'][12:15],[.001,.003,-.002])
+            self.assertEqual(keyed['occurrence:a']['jointInterfaces']['mount']['frame'][12:15],[.001,.003,-.002])
 
     def test_closed_loop_retains_intent_with_diagnostic(self):
         a=Box(1,1,1);b=Box(1,1,1)
@@ -138,7 +137,7 @@ class AdmissionTests(unittest.TestCase):
         from mechanisms import _interface, _range, _reference, _motion_joints
         a=Box(1,1,1); b=Box(1,1,1)
         joint=RevoluteJoint('hinge',a,angular_range=(-360,360)); mount=RigidJoint('mount',b)
-        for supplement,message in (([], 'dictionary'),({'unknown':0},'Unknown motion'),({'occurrence_ids':{'bad':b}},'Unknown motion'),({'animations':[{}]},'connected native joints')):
+        for supplement,message in (([], 'dictionary'),({'unknown':0},'Unknown motion'),({'occurrence_ids':{'bad':b}},'occurrence_ids'),({'animations':[{}]},'connected native joints')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError,message): project_mechanism((a,),components((a,)),supplement)
         with self.assertRaisesRegex(ValueError,'traversals'): project_mechanism((a,),[])
         with self.assertRaisesRegex(ValueError,'occurs twice'): project_mechanism((a,a),components((a,a)))
@@ -168,13 +167,13 @@ class AdmissionTests(unittest.TestCase):
             target=RigidJoint('mount',b)
             state={'angle':22.5} if rotating else {}
             source.connect_to(target,**state)
-            model=Assembly(children={'a':a,'b':b});shapes=(model,);entries=components(shapes)
+            model=Compound(children=[a,b]);shapes=(model,);entries=components(shapes)
             meshes={entry['id']:{'positions':[]} for entry in entries if entry['kind']=='part'}
-            result=project_mechanism(shapes,entries,{'ground':b},meshes=meshes)
-            self.assertEqual(set(meshes),{'occurrence:0/a','occurrence:0/b'})
-            self.assertEqual(result['mechanism']['root'],'occurrence:0/b')
+            result=project_mechanism(shapes,entries,{'ground':b,'occurrence_ids':{'a':a,'b':b}},meshes=meshes)
+            self.assertEqual(set(meshes),{'occurrence:a','occurrence:b'})
+            self.assertEqual(result['mechanism']['root'],'occurrence:b')
             coords={next(iter(result['mechanism']['joints'])):73} if rotating else {}
-            actual=evaluate(result['mechanism'],coords)['occurrence:0/a']
+            actual=evaluate(result['mechanism'],coords)['occurrence:a']
             before=_matrix(copy.copy(source).relative_to(copy.copy(target),**state))
             after=_matrix(copy.copy(source).relative_to(copy.copy(target),**({'angle':95.5} if rotating else {})))
             delta=_matrix(a.global_location)@after@np.linalg.inv(before)@np.linalg.inv(_matrix(a.global_location))

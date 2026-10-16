@@ -14,6 +14,7 @@ import type {
   ViewUpdateOutcome,
   WideViewRequest,
 } from '@taucad/runtime';
+import type { TessellationReport } from '@taucad/runtime/types';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
@@ -191,6 +192,27 @@ describe('createRuntimeAgentClients', () => {
       voxelSize: 0.5,
       activeVoxels: 2846,
       memoryBytes: 1_296_848,
+    };
+    const clients = clientsFor(
+      runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      tessellation,
+    });
+  });
+
+  it('should report the effective tessellation resolution the kernel delivered (I7)', async () => {
+    const tessellation: TessellationReport = {
+      triangles: 1_999_872,
+      vertices: 1_000_014,
+      elapsed: 812,
+      requested: 'extra-high',
+      linearTolerance: 0.02,
+      angularTolerance: 10,
+      downgraded: 1,
     };
     const clients = clientsFor(
       runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),
@@ -583,6 +605,39 @@ describe('createRuntimeAgentClients default view options', () => {
       views: [],
     });
     expect(fixture.viewRequests).toEqual([]);
+  });
+
+  it('asks the runtime for edge lines only when the screenshot asks for them', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', includeEdges: true });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', includeEdges: false });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+
+    expect(fixture.viewRequests.map(({ request }) => request)).toEqual([{ content: { includeEdges: true } }, {}, {}]);
+    // A false request also tells the image renderer to leave lines out; omission keeps its default.
+    expect(clients.exporter.mock.calls.map(([job]) => 'lines' in job.exportOptions)).toEqual([false, true, false]);
+  });
+
+  it('refuses edge lines a view cannot carry with VALIDATION_ERROR', async () => {
+    const message = 'Content property "includeEdges" is not supported by this route.';
+    const clients = clientsFor(
+      runtimeFixture({
+        render: () => ({
+          success: false,
+          requestId: 'render-1',
+          evaluationId: 'evaluation-1',
+          transient: false,
+          issues: [{ code: 'RUNTIME_CONTENT_UNSUPPORTED', message, type: 'runtime', severity: 'error' }],
+        }),
+      }),
+    );
+
+    await expect(
+      clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', view: 'drawing', includeEdges: true }),
+    ).resolves.toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message });
+    expect(clients.exporter).not.toHaveBeenCalled();
   });
 
   it('refuses export options the kernel rejects with VALIDATION_ERROR', async () => {

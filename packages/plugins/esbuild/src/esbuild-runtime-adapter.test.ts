@@ -51,6 +51,15 @@ describe('Esbuild runtime adapter', () => {
     });
   });
 
+  it('should pass the locked acquisition profile to the VM', async () => {
+    const filesystem = createMockFileSystem();
+    vi.mocked(createEsbuildModuleVm).mockResolvedValue(createMockVm());
+
+    await esbuildDefinition.initialize({ acquisition: 'locked' }, { filesystem });
+
+    expect(createEsbuildModuleVm).toHaveBeenCalledWith(expect.objectContaining({ acquisition: 'locked' }));
+  });
+
   it('should delegate import detection to the VM', async () => {
     const vm = createMockVm();
     vi.mocked(vm.detectImports).mockResolvedValue({

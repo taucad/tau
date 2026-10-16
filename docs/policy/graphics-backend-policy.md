@@ -1,9 +1,9 @@
 ---
 title: 'Graphics Backend Policy'
-description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, and backend evidence'
+description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-01'
+updated: '2026-10-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -13,11 +13,14 @@ related:
   - docs/policy/webgpu-rendering-pipeline.md
   - docs/research/threejs-shader-foundation-and-testing-blueprint.md
   - docs/research/viewer-section-view-performance.md
+  - docs/research/kernel-tessellation-policy-blueprint.md
 ---
 
 # Graphics Backend Policy
 
 Tau maintains WebGL and WebGPU Three.js paths in `apps/ui`. WebGL is the default interactive baseline. The default-off `webGpu` feature flag enables experimental WebGPU viewers when an adapter is available; this opt-in does not establish default-backend readiness.
+
+Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: how their resolution is named, bounded and reported. The [kernel tessellation blueprint](../research/kernel-tessellation-policy-blueprint.md) holds the rulings (R1, R2) and the measurements behind them.
 
 ## Rules
 
@@ -111,6 +114,57 @@ The one exception is a reused fat line that must grow. WebGL caps an instanced g
 
 Per-frame work returns early when its inputs are unchanged. A `useFrame` callback or render-loop task derives a key from everything that changes its output, including a result that lands later such as a worker response, and does nothing while the key matches the last one it applied. Key a plane, matrix or other object that changes in place by its values, not its identity. A demand frame loop still renders for orbit, damping and every other `invalidate()`, so per-frame work without a key repeats on each of those frames.
 
+### 15. Name mesh resolution with one tessellation vocabulary
+
+A kernel view or export option `tessellation` is a quality preset or the kernel's explicit object, never both (ruling R1). The TypeScript type is the union, the Zod schema is a union of the preset enum and a strict object, and the JSON Schema is a `oneOf`; a value carrying a preset and a tolerance together is a type error and a `VALIDATION_ERROR` naming both forms. The OCCT kernels (replicad, opencascade, build123d) share `occtTessellationSchema` in `@taucad/occt-core`.
+
+| Preset       | Linear tolerance (D = bounding-box diagonal) | Angular tolerance | Use                                                       |
+| ------------ | -------------------------------------------- | ----------------- | --------------------------------------------------------- |
+| `low`        | D / 500                                      | 30°               | First look, thumbnails, large assemblies                  |
+| `medium`     | D / 2000                                     | 20°               | Viewer preview, `evaluate_model` and `screenshot` default |
+| `high`       | D / 8000                                     | 12°               | `export_model` default, GeoSpec evidence                  |
+| `extra-high` | D / 32000                                    | 6°                | Explicit request only                                     |
+
+Preset linear tolerances are clamped to 0.001–50 mm. The explicit object is absolute: `linearTolerance` is millimetres and `angularTolerance` degrees in every kernel, and OCCT always meshes in absolute mode, so a plugin that needs another representation converts inside itself. An explicit object that omits a field takes the kernel's absolute default for it (0.02 mm and 20° to view, 0.01 mm and 20° to export).
+
+Precedence replaces and never merges: a per-call option wins whole over the stored viewer record, which wins whole over the kernel default. No level combines its fields with another level's, and an explicit object never rides beside a preset. Model-declared hints are not implemented; until they are, models keep tessellation out of their parameters.
+
+The kernel-settings pane renders such a union as two modes, Preset (one segmented control of the presets) and Custom (the explicit fields in their `x-tau-unit` units). Switching modes replaces the stored value; it carries nothing across.
+
+**Why**: agents and people need a one-word choice that means the same in every kernel, manufacturing exports need exact values, and a merged form would have two sources of truth.
+
+CORRECT (`options` on `evaluate_model`, `screenshot` or `export_model`):
+
+```text
+{ "tessellation": "low" }
+{ "tessellation": { "linearTolerance": 0.01, "angularTolerance": 12 } }
+```
+
+INCORRECT (a `VALIDATION_ERROR`):
+
+```json
+{ "tessellation": { "quality": "high", "linearTolerance": 0.01 } }
+```
+
+### 16. Bound mesh cost by lane and report what was delivered
+
+| Lane                          | Triangle budget | Over budget                                                                                                                                                   |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preview and capture (renders) | 2,000,000       | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
+| Export                        | 20,000,000      | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
+
+Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time; tolerance-meshed kernels add the requested form, the effective `linearTolerance` and `angularTolerance` and the downgrade steps; voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes mesh output reports it here.
+
+**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect.
+
+### 17. Keep a voxel model's grid; simplify only its picture
+
+In voxel kernels (PicoVoxel, PicoGK) the voxel size is the model (ruling R2). No lane of the harness changes `voxelSize`; it is a model parameter, never a tessellation option, and iteration goes through per-call `parameters`. Choose it from the thinnest feature, about one third of the thinnest wall or strut: field evaluation time scales with 1/h³, and memory and triangles with 1/h².
+
+A voxel render over the 2,000,000-triangle preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
+
+**Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while a simplified display mesh changes only the picture, within half a voxel.
+
 ## Ownership
 
 - Backend resolution: `packages/viewer/src/graphics/graphics-backend.ts`
@@ -120,3 +174,7 @@ Per-frame work returns early when its inputs are unchanged. A `useFrame` callbac
 - Materials: `packages/viewer/src/graphics/three/materials`
 - Picking and scheduling: `packages/viewer/src/graphics/three/utils`
 - Graphics state: `packages/viewer/src/machines/graphics.machine.ts`
+- Tessellation vocabulary, presets and budgets: `packages/core/occt/src/occt-schemas.ts`, `packages/core/occt/src/occt-tessellation.ts`
+- Kernel-settings pane: `packages/viewer/src/cad/kernel-settings.tsx`
+- Voxel display simplification: `packages/plugins/middleware/src/display-simplification.middleware.ts`
+- Tessellation report on `evaluate_model`: `libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts`

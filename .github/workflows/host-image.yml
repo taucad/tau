@@ -1,0 +1,93 @@
+# The Tau host image with a baked payload store (charter D37, W19, W22's Docker row): build it with
+# packages/host/scripts/build-native-image.sh, then prove under `docker run --network none` that the image runs as a
+# non-root user, reports build123d `ready`, evaluates a build123d model to a GLB inside the native sandbox and verifies
+# its store offline. The probe step records which Docker security options the native sandbox needs.
+name: Host image
+
+on:
+  pull_request:
+    paths:
+      - packages/host/Dockerfile
+      - packages/host/Dockerfile.dockerignore
+      - packages/host/docker-entrypoint.sh
+      - packages/host/scripts/**
+      - .github/workflows/host-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Host image with a baked store under --network none
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE: tau-host:native
+      SANDBOX_OPTS: --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Before Buildx: the probe builds and runs a local image through the default docker driver.
+      - name: Probe the Docker options the native sandbox needs
+        run: |
+          echo "EVIDENCE=$RUNNER_TEMP/evidence" >> "$GITHUB_ENV"
+          packages/host/scripts/probe-docker-sandbox.sh "$RUNNER_TEMP/evidence"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Expose the GitHub Actions cache to Buildx
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+
+      - name: Build the native image
+        env:
+          TAU_IMAGE: ${{ env.IMAGE }}
+          TAU_STORE_DIR: ${{ runner.temp }}/store
+          TAU_SANDBOX_DOCKER_OPTS: ${{ env.SANDBOX_OPTS }}
+          TAU_BUILDX_ARGS: --cache-from type=gha,scope=host-image --cache-to type=gha,scope=host-image,mode=max,ignore-error=true
+        run: |
+          set -o pipefail
+          mkdir -p "$EVIDENCE"
+          packages/host/scripts/build-native-image.sh 2>&1 | tee "$EVIDENCE/build.log" | tail -40
+
+      - name: Prove the image offline
+        run: packages/host/scripts/check-native-image.sh "$IMAGE" "$EVIDENCE"
+
+      # Job logs and artifacts are not readable everywhere the result is reviewed, so the probe, the build's tail and
+      # the oracle summary are also published as notice annotations.
+      - name: Summarize
+        if: always()
+        run: |
+          report="$EVIDENCE/report.txt"
+          {
+            echo "== probe"; cat "$EVIDENCE/probe.txt" 2>/dev/null || echo "(no probe output)"
+            echo "== oracle"; cat "$EVIDENCE/summary.txt" 2>/dev/null || echo "(no oracle summary)"
+            echo "== build (failed Nx tasks)"
+            for task in $(grep -oE -- '- [a-z0-9@/_-]+:[a-z0-9:_-]+$' "$EVIDENCE/build.log" 2>/dev/null | cut -c3- | sort -u); do
+              grep -m1 -A40 -F -- "> nx run $task" "$EVIDENCE/build.log" | cut -c1-240
+            done || true
+            echo "== build (tail)"; tail -n 40 "$EVIDENCE/build.log" 2>/dev/null | cut -c1-240 || true
+          } > "$report"
+          { echo '```'; cat "$report"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh 'Host image' "$report"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: host-image-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

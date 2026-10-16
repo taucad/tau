@@ -165,6 +165,8 @@ export const picogkBuildSchema = z
     recycleAfterResponse: z.boolean(),
     timings: picogkWorkerTimingsSchema,
     metrics: picogkWorkerMetricsSchema,
+    /** Voxel edge length in millimetres the model's `Library.Go` ran with; absent without a voxel library. */
+    voxelSize: z.number().positive().optional(),
   })
   .strict()
   .superRefine((scene, context) => {

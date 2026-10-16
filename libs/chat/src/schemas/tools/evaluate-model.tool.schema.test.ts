@@ -36,6 +36,37 @@ describe('evaluateModelOutputSchema', () => {
     expect(evaluateModelOutputSchema.safeParse({ status: 'pending' }).success).toBe(false);
   });
 
+  it('should keep the effective tessellation resolution the kernel reported (I7)', () => {
+    const tessellation = {
+      triangles: 1308,
+      vertices: 656,
+      elapsed: 42,
+      requested: 'high',
+      linearTolerance: 0.05,
+      angularTolerance: 16,
+      downgraded: 1,
+    };
+
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', tessellation })).toEqual({
+      status: 'ready',
+      tessellation,
+    });
+  });
+
+  it('should reject a tessellation resolution the runtime cannot report', () => {
+    const counts = { triangles: 12, vertices: 8, elapsed: 3 };
+    for (const resolution of [
+      { requested: 'coarse' },
+      { linearTolerance: 0 },
+      { angularTolerance: -1 },
+      { downgraded: 0.5 },
+    ]) {
+      expect(
+        evaluateModelOutputSchema.safeParse({ status: 'ready', tessellation: { ...counts, ...resolution } }).success,
+      ).toBe(false);
+    }
+  });
+
   it('should not advertise a status the schema rejects (I9)', () => {
     const description = toolDescriptions[toolName.evaluateModel];
     expect(description).not.toContain('pending');

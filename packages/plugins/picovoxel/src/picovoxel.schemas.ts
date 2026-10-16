@@ -110,6 +110,29 @@ export type PicovoxelOptions = z.output<typeof picovoxelOptionsSchema>;
 /** Host-facing PicoVoxel kernel options, as passed to `picovoxel({ kernels: { default } })`. @public */
 export type PicovoxelOptionsInput = z.input<typeof picovoxelOptionsSchema>;
 
+const regionVectorSchema = z.tuple([z.number(), z.number(), z.number()]);
+
+/**
+ * Axis-aligned crop box in millimetres (Z-up), used to check a large voxel model region by region.
+ *
+ * The model is trimmed in the voxel domain before meshing, so every cropped part is still a closed
+ * shell. A Mesh output cannot be cropped that way and is refused, a part wholly outside the box is
+ * dropped, and every export of a cropped handle reports the box it was cut to.
+ *
+ * @public
+ */
+export const picovoxelRegionSchema = z
+  .strictObject({ min: regionVectorSchema, max: regionVectorSchema })
+  .refine(({ min, max }) => min.every((value, axis) => value < max[axis]!), {
+    message: 'region.min must be below region.max on every axis.',
+  })
+  .describe(
+    'Optional axis-aligned crop box { min: [x, y, z], max: [x, y, z] } in millimetres. Voxel parts are trimmed to it before meshing, parts outside it are dropped, Mesh parts are refused, and every export reports the box. Omit it for the whole model.',
+  );
+
+/** A PicoVoxel crop box. @public */
+export type PicovoxelRegion = z.output<typeof picovoxelRegionSchema>;
+
 /**
  * Construction options for renders. The viewer never sends render options, so this default decides
  * its lane: `'fast'`.
@@ -122,6 +145,7 @@ export const picovoxelRenderSchema = z.object({
     .describe(
       "'fast' (default) builds with the lane's Class-2 accelerations for the viewer. 'exact' builds the byte-reproducible model; exports replay it automatically.",
     ),
+  region: picovoxelRegionSchema.optional(),
 });
 
 const exportLaneSchema = z.object({
@@ -130,12 +154,14 @@ const exportLaneSchema = z.object({
     .describe(
       "'exact' (default) replays the model in a deterministic session. 'fast' exports fast-lane geometry: STL is stamped LANE=fast, GLB and glTF are refused.",
     ),
+  region: picovoxelRegionSchema.optional(),
 });
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
- * Per-format PicoVoxel export schemas. Each carries `lane`, defaulting to `'exact'`.
+ * Per-format PicoVoxel export schemas. Each carries `lane`, defaulting to `'exact'`, and an optional
+ * `region` the runtime replays into the native build.
  * @public
  */
 export const picovoxelExportSchemas = {

@@ -236,10 +236,13 @@ describe('ExportSchemaForm', async () => {
     expect(fieldUnit('Width')).toBe('px');
 
     cleanup();
-    await renderPngForm({}, published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({})));
-    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
-    expect(fieldUnit('Minimum Size')).toBe('mm');
-    expect(fieldUnit('Minimum Angle')).toBe('°');
+    await renderPngForm(
+      {},
+      published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { linearTolerance: 2 } })),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Group: Explicit' }));
+    expect(fieldUnit('Linear Tolerance')).toBe('mm');
+    expect(fieldUnit('Angular Tolerance')).toBe('°');
     expect(fieldUnit('Segments')).toBeFalsy();
   });
 
@@ -255,29 +258,36 @@ describe('ExportSchemaForm', async () => {
   it('should present model lengths in the project display unit', async () => {
     await renderPngForm(
       {},
-      published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { minimumSize: 2 } })),
+      published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { linearTolerance: 2 } })),
       'cm',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Group: Explicit' }));
 
-    expect(fieldUnit('Minimum Size')).toBe('cm');
-    expect(screen.getByRole('spinbutton', { name: 'Input for Minimum Size' })).toHaveValue('0.2');
+    expect(fieldUnit('Linear Tolerance')).toBe('cm');
+    expect(screen.getByRole('spinbutton', { name: 'Input for Linear Tolerance' })).toHaveValue('0.2');
   });
 
   it('should take an unset model length in the project display unit', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+    const user = userEvent.setup();
     const onChange = await renderPngForm(
       {},
       published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({})),
       'cm',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
-    const input = screen.getByRole('spinbutton', { name: 'Input for Minimum Size' });
+    await user.click(screen.getByRole('combobox', { name: 'Select for Tessellation' }));
+    await user.click(screen.getByRole('option', { name: 'Explicit' }));
+    await user.click(screen.getByRole('button', { name: 'Group: Explicit' }));
+    const input = screen.getByRole('spinbutton', { name: 'Input for Linear Tolerance' });
 
     expect(input).toHaveValue(null);
-    expect(fieldUnit('Minimum Size')).toBe('cm');
+    expect(fieldUnit('Linear Tolerance')).toBe('cm');
     fireEvent.change(input, { target: { value: '0.2' } });
     await waitFor(() => {
-      expect(onChange.mock.lastCall?.[0]).toEqual({ tessellation: { minimumSize: 2 } });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ tessellation: { linearTolerance: 2 } });
     });
   });
 

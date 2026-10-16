@@ -650,6 +650,8 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
         Assert.Single(result.Components);
         Assert.NotEmpty(result.Components[0].Positions);
         Assert.True(result.Timings.MeshConstruction >= 0);
+        // The voxel size the model passed to Library.Go is the one the tessellation report carries.
+        Assert.Equal<float?>(2f, result.VoxelSize);
 
         Write("main.cs", "throw new InvalidOperationException(\"model exploded\");");
         Assert.Contains("model exploded", Assert.Throws<InvalidOperationException>(() =>
@@ -1420,6 +1422,20 @@ Library.Go(1f, () =>
         Assert.Equal(2, result.Metrics.PicoGkNativeBytes);
         Assert.Equal(3, result.Metrics.ProcessWorkingSetBytes);
         Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(result.ArtifactPath))).ToLowerInvariant(), result.Sha256);
+        // Without a voxel library there is no voxel size, and the descriptor omits the field.
+        Assert.Null(result.VoxelSize);
+        var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Assert.DoesNotContain("voxelSize", JsonSerializer.Serialize(result, web));
+        var voxel = MeshArtifactWriter.Write(
+            root,
+            execution with { VoxelSize = 0.5f },
+            new WorkerDiagnostics(
+                new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                new WorkerMetrics(1, 2, 3)));
+        Assert.Equal<float?>(0.5f, voxel.VoxelSize);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(voxel, web))!.AsObject();
+        Assert.Equal(0.5, json["voxelSize"]!.GetValue<double>());
+        Assert.All(json["prototypes"]!.AsArray(), prototype => Assert.Null(prototype!["voxelSize"]));
     }
 
     [Fact]
@@ -1455,6 +1471,7 @@ Library.Go(2f, () =>
         Assert.Contains("\"defaultParameters\":{}", output);
         Assert.Contains("\"artifactPath\"", output);
         Assert.Contains("\"entryPointInvoke\"", output);
+        Assert.Contains("\"voxelSize\":2", output);
         Assert.Contains("\"shutdown\":true", output);
         Assert.Single(Directory.GetFiles(artifacts, "*.tau-mesh"));
         Assert.DoesNotContain("\"type\":\"event\"", output);

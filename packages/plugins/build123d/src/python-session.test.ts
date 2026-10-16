@@ -88,7 +88,6 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   const glbPath = join(runtimePath, 'glb.py');
   const materialPath = join(runtimePath, 'native_materials.py');
   const mechanismPath = join(runtimePath, 'mechanisms.py');
-  const assemblyPath = join(runtimePath, 'tau_assembly.py');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$4" "$5" "$6" "$7" "$8" "$9" "$10"\n`;
   writeFileSync(executable, executableBody);
   chmodSync(executable, 0o700);
@@ -97,7 +96,6 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   writeFileSync(glbPath, 'glb');
   writeFileSync(materialPath, 'materials');
   writeFileSync(mechanismPath, 'mechanisms');
-  writeFileSync(assemblyPath, 'assembly');
   const logger = createMockLogger();
   const options = {
     pythonExecutable: executable,
@@ -111,7 +109,6 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
       { path: glbPath, sha256: sha256('glb') },
       { path: materialPath, sha256: sha256('materials') },
       { path: mechanismPath, sha256: sha256('mechanisms') },
-      { path: assemblyPath, sha256: sha256('assembly') },
     ],
     requestTimeout,
     maxArtifactBytes: 32,

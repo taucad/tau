@@ -6,7 +6,13 @@ import { join } from 'node:path';
 import { integrityToHex } from '@taucad/archive-core';
 import { runInNativeSandbox } from '@taucad/native-process-core';
 import { createPreparationHost, targetKey } from '@taucad/runtime/preparation/node';
-import { describe, expect, it } from 'vitest';
+import {
+  appendGoldenSummary,
+  compareWithGolden,
+  installFetchTripwire,
+  readGoldenReceipts,
+} from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   deployment,
@@ -20,32 +26,25 @@ import {
 import { build123dLaunchSet, build123dOptionsFromClosure } from '#index.js';
 import { build123dOptionsSchema } from '#build123d.schemas.js';
 
-type GoldenEntry = { readonly closureIntegrity: string; readonly treeIntegrity: string; readonly fileCount: number };
-
-const golden = JSON.parse(readFileSync(join(packageRoot, 'tau-plugin.golden.json'), 'utf8')) as Readonly<
-  Record<string, GoldenEntry>
->;
+const golden = await readGoldenReceipts(join(packageRoot, 'tau-plugin.golden.json'));
 const hostKey = hostVariant === undefined ? undefined : targetKey(hostVariant.target);
 const receipt = seedPresent ? await prepareFromSeed() : undefined;
 
 describe.runIf(seedPresent)('Build123d sealed closure', () => {
   const sealed = receipt!;
 
-  it.runIf(hostKey !== undefined && golden[hostKey] !== undefined)(
-    'should seal the tree the golden receipt records for this target',
-    () => {
-      const entry = golden[hostKey!]!;
-      expect({
-        closureIntegrity: sealed.closureIntegrity,
-        treeIntegrity: sealed.treeIntegrity,
-        fileCount: sealed.files.length,
-      }).toEqual({
-        closureIntegrity: entry.closureIntegrity,
-        treeIntegrity: entry.treeIntegrity,
-        fileCount: entry.fileCount,
-      });
-    },
-  );
+  // The closure is prepared from the seed, offline: nothing in this file may reach for the network.
+  beforeAll(() => installFetchTripwire());
+
+  // Every host that prepares a declared target compares with the producer's golden entry (charter R3, D27); the
+  // comparison also lands in the CI job summary when `TAU_GOLDEN_SUMMARY_FILE` names one.
+  it('should seal the tree the golden receipt records for this target', async () => {
+    const comparison = compareWithGolden(sealed, golden, hostKey!);
+    await appendGoldenSummary('@taucad/build123d engine', comparison);
+
+    // The message carries the observed entry, which is what a producer records when a pin moves.
+    expect(comparison, JSON.stringify(comparison.observed)).toMatchObject({ status: 'match' });
+  });
 
   // Re-hashing every file of a ~900 MB closure takes seconds; the per-launch check never does this.
   it('should verify the sealed closure intact, file by file', async () => {
@@ -62,6 +61,8 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     }
   }, 300_000);
 
+  // A cold first import of OCP loads hundreds of MB of native libraries; with the PicoGK row alongside it, this
+  // overruns vitest's 5 s default on macos-26 runners.
   it('should import OCP and build123d inside the sandbox', async () => {
     const options = build123dOptionsSchema.parse(build123dOptionsFromClosure(sealed));
     const scratch = mkdtempSync(join(realpathSync(tmpdir()), 'tau-build123d-self-test-'));
@@ -79,7 +80,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
-  }, 90_000);
+  }, 120_000);
 
   it('should install only wheels the host target lock pins', () => {
     const lock = readFileSync(join(packageRoot, 'python', `pylock.${hostKey!}.toml`), 'utf8');

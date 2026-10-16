@@ -477,28 +477,18 @@
       ]
     },
     {
-      "bom-ref": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0",
-      "type": "library",
-      "name": "pure-eval",
-      "version": "0.2.3",
-      "purl": "pkg:pypi/pure-eval@0.2.3?file_name=pure_eval-0.2.3-py3-none-any.whl",
+      "bom-ref": "1cd591fe4aa79f3c4804887799a652fe7fde12973bc1a3ff71e55300159c0793",
+      "type": "file",
+      "name": "tau-worker/mechanisms.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0"
+          "content": "1cd591fe4aa79f3c4804887799a652fe7fde12973bc1a3ff71e55300159c0793"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "MIT"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -521,18 +511,28 @@
       ]
     },
     {
-      "bom-ref": "1df2e26330e4073f75f7c4cb89dae4d35e60d2fcb40a37a7bd7cc9d8e5f6112d",
-      "type": "file",
-      "name": "tau-worker/native_materials.py",
+      "bom-ref": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0",
+      "type": "library",
+      "name": "pure-eval",
+      "version": "0.2.3",
+      "purl": "pkg:pypi/pure-eval@0.2.3?file_name=pure_eval-0.2.3-py3-none-any.whl",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1df2e26330e4073f75f7c4cb89dae4d35e60d2fcb40a37a7bd7cc9d8e5f6112d"
+          "content": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0"
         }
       ],
       "licenses": [
         {
-          "expression": "Apache-2.0"
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -2816,6 +2816,40 @@
       ]
     },
     {
+      "bom-ref": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6",
+      "type": "file",
+      "name": "tau-worker/native_materials.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "bb6b2b5450f1edbfa597d924f9ac2dd099e625562e492021d7dd614f65f8a22d",
       "type": "library",
       "name": "svgwrite",
@@ -2917,40 +2951,6 @@
       ]
     },
     {
-      "bom-ref": "c71ffb9201319733f59ec7aba89344f0c5fe88bb3dc675b7bc4430f9a8ac5dd6",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "c71ffb9201319733f59ec7aba89344f0c5fe88bb3dc675b7bc4430f9a8ac5dd6"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "c79124f70465a150e89340de5963f936ee97097d2ef76c869708c4248c63ca49",
       "type": "library",
       "name": "coverage",
@@ -2979,40 +2979,6 @@
         {
           "name": "taucad:target",
           "value": "linux-arm64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "c8d6fcdc7a20dfcf05deb1468ed23bb051cbb6227aff937b9c9df6133684f80e",
-      "type": "file",
-      "name": "tau-worker/tau_assembly.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "c8d6fcdc7a20dfcf05deb1468ed23bb051cbb6227aff937b9c9df6133684f80e"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -3280,6 +3246,40 @@
       ]
     },
     {
+      "bom-ref": "d95828e79910b6f1528f0ca5bf5ef23f6d56b97dd0150107035074ce9730a6a6",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d95828e79910b6f1528f0ca5bf5ef23f6d56b97dd0150107035074ce9730a6a6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "da76d09304a4706db7cc1e3ebaa3b6b98a67365cc11d2996c4f1e58ba47df714",
       "type": "library",
       "name": "scikit-learn",
@@ -3413,40 +3413,6 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
-        }
-      ]
-    },
-    {
-      "bom-ref": "ec44d122c4c8e452ac382c28f98036e24b4792df4ec1f91c1828bc1f683fa7f7",
-      "type": "file",
-      "name": "tau-worker/mechanisms.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "ec44d122c4c8e452ac382c28f98036e24b4792df4ec1f91c1828bc1f683fa7f7"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
         }
       ]
     },

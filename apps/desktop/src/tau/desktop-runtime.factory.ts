@@ -9,7 +9,13 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
+import {
+  displaySimplification,
+  geometryCache,
+  gltfEdgeDetection,
+  parameterFileResolver,
+  parameterUnits,
+} from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { createOpenrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
@@ -69,6 +75,15 @@ export const desktopOpenrscadKernel = createOpenrscadKernel({
     return backend;
   },
 })();
+/**
+ * The bundler's acquisition profile from `TAU_ACQUISITION`: `locked` refuses every import it would download. Only
+ * unset, empty or `open` is `open`, so a value the strict reader refuses never opens the network.
+ */
+const desktopBundlerAcquisition = (): 'open' | 'locked' => {
+  const value = process.env['TAU_ACQUISITION']?.trim() ?? '';
+  return value === '' || value === 'open' ? 'open' : 'locked';
+};
+
 export const desktopAssimpBackend = process.arch === 'arm64' ? 'native' : 'wasm';
 
 /** Construct the complete desktop recipe; native kernels run inside the shared sandbox. */
@@ -79,7 +94,9 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
       const native = desktopNativeKernels(await (options.nativeKernels ?? awaitNativeKernels)());
       return {
         plugins: [
-          esbuild(),
+          esbuild(
+            desktopBundlerAcquisition() === 'locked' ? { bundlers: { default: { acquisition: 'locked' } } } : undefined,
+          ),
           opencascade(),
           jscad(),
           manifold(),
@@ -120,7 +137,13 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
           tscircuit(),
         ],
         kernels: [desktopOpenrscadKernel],
-        middleware: [parameterFileResolver(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
+        middleware: [
+          parameterFileResolver(),
+          parameterUnits(),
+          geometryCache(),
+          gltfEdgeDetection(),
+          displaySimplification(),
+        ],
       };
     },
   });

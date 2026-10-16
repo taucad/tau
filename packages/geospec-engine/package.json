@@ -1,6 +1,6 @@
 {
   "name": "@taucad/geospec-engine",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.5",
   "description": "GeoSpec CLI and Node worker-pool host for the compiled GeoSpec engine",
   "type": "module",
   "sideEffects": [

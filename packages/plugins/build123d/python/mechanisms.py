@@ -1,7 +1,7 @@
 """Project native Build123D joints into portable intent and Tau's playback profile.
 
-Native shapes and joints remain primary. Tau Assembly retains named occurrences,
-connections and authored couplings. motion(model) supplies root ground and clips. Playback values
+Native shapes and joints remain primary. motion(model) supplies only metadata
+that native Build123D does not retain: coupling, grounding and clips. Playback values
 are deltas from the exported pose. Ball values are the final composed intrinsic XYZ
 chart that native Build123D range-checks, not the pre-reference input angles.
 """
@@ -13,8 +13,7 @@ from typing import Any
 from urllib.parse import quote
 
 import numpy as np
-from build123d import BallJoint, CylindricalJoint, LinearJoint, Location, RevoluteJoint, RigidJoint, Rotation
-from tau_assembly import Assembly, Connection, _coordinate
+from build123d import BallJoint, CylindricalJoint, Joint, LinearJoint, Location, RevoluteJoint, RigidJoint, Rotation
 
 _KINDS = {RigidJoint: "fixed", RevoluteJoint: "revolute", LinearJoint: "prismatic", CylindricalJoint: "cylindrical", BallJoint: "spherical"}
 _C = np.array([[1., 0., 0., 0.], [0., 0., 1., 0.], [0., -1., 0., 0.], [0., 0., 0., 1.]])
@@ -96,11 +95,8 @@ def _walk(shapes: tuple[Any, ...]) -> list[tuple[Any, str]]:
             raise ValueError("The same native shape occurs twice; copy it before placing another occurrence")
         seen.add(id(shape))
         result.append((shape, path))
-        names = {id(child): quote(name, safe="") for name, child in shape.parts.items()} if isinstance(shape, Assembly) else {}
-        if isinstance(shape, Assembly) and {id(child) for child in shape.children} != set(names):
-            raise ValueError("Assembly children changed outside its named occurrence mapping")
         for index, child in enumerate(shape.children):
-            visit(child, f"{path}/{names.get(id(child), str(index))}")
+            visit(child, f"{path}/{index}")
     for index, shape in enumerate(shapes):
         visit(shape, str(index))
     return result
@@ -143,7 +139,7 @@ def _relative(source: Any, target: Any, state: dict[str, Any]) -> np.ndarray:
     return _matrix(copy.copy(source).relative_to(copy.copy(target), **state))
 
 
-def _motion_joints(source: Any, target: Any, parent: str, child: str, key: str, reference_coordinates: dict[str, float] | None = None) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, float], dict[str, str]]:
+def _motion_joints(source: Any, target: Any, parent: str, child: str, key: str) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, float], dict[str, str]]:
     """Lower one physical pair to exact baked-frame delta joints."""
     moving, state = _reference(source, target)
     owner = _matrix(source.parent.global_location)
@@ -156,11 +152,6 @@ def _motion_joints(source: Any, target: Any, parent: str, child: str, key: str, 
         return [(key, {**common, "type": "fixed", "origin": _point((owner @ _local(source))[:3, 3])})], reference, coordinate_ids
     if isinstance(moving, BallJoint):
         angles = state["angles"]
-        if reference_coordinates is not None:
-            authored = tuple(reference_coordinates[axis] for axis in "xyz")
-            if not np.allclose(_matrix(Rotation(*angles)), _matrix(Rotation(*authored)), atol=1e-7):
-                raise ValueError("Native ball connection no longer matches its authored reference pose")
-            angles = authored
         reference = dict(zip("xyz", angles, strict=True))
         frame = _matrix(moving.parent.global_location) @ _local(moving)
         basis = frame[:3, :3]
@@ -185,7 +176,7 @@ def _motion_joints(source: Any, target: Any, parent: str, child: str, key: str, 
             previous = next_link
         return result, reference, coordinate_ids
     for coordinate, value in state.items():
-        if not isinstance(value, (int, float)) or not math.isfinite(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Native {coordinate} must be finite")
     base = _relative(source, target, state)
     actual = np.linalg.inv(owner) @ _matrix(target.parent.global_location)
@@ -235,22 +226,26 @@ def _motion_joints(source: Any, target: Any, parent: str, child: str, key: str, 
 def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]], supplement: dict[str, Any] | None = None, *, meshes: dict[str, Any] | None = None) -> dict[str, Any]:
     """Project final occurrences and native connections without mutating native shapes.
 
-    Assembly owns named occurrences, durable connections and authored couplings.
-    Plain native shapes retain structural path identity and connected_to capture.
+    Native connected_to is discovered automatically. Explicit endpoint pairs can
+    replace that list when its single-last-edge state cannot describe a model.
     Unsupported mechanical graphs keep their intent with explicit diagnostics.
     """
     supplement = {} if supplement is None else supplement
     if not isinstance(supplement, dict):
         raise ValueError("motion(model) must return a dictionary")
-    allowed = {"ground", "animations"}
+    allowed = {"ground", "occurrence_ids", "connections", "couplings", "animations"}
     if set(supplement) - allowed:
         raise ValueError(f"Unknown motion fields: {sorted(set(supplement) - allowed)}")
     occurrences = _walk(shapes)
     if len(occurrences) != len(components):
         raise ValueError("Topology and mechanism occurrence traversals disagree")
     by_object = {id(shape): component for (shape, _), component in zip(occurrences, components, strict=True)}
-    prefix = "occurrence:" if any(isinstance(shape, Assembly) for shape, _ in occurrences) else "occurrence:path/"
-    rename = {component["id"]: f"{prefix}{path}" for (_, path), component in zip(occurrences, components, strict=True)}
+    explicit: dict[int, str] = {}
+    for key, shape in supplement.get("occurrence_ids", {}).items():
+        if not isinstance(key, str) or not key or key == "__proto__" or id(shape) not in by_object or id(shape) in explicit:
+            raise ValueError("occurrence_ids requires unique nonempty strings mapped to distinct returned occurrences")
+        explicit[id(shape)] = f"occurrence:{quote(key, safe='')}"
+    rename = {component["id"]: explicit.get(id(shape), f"occurrence:path/{path}") for (shape, path), component in zip(occurrences, components, strict=True)}
     for (shape, _), component in zip(occurrences, components, strict=True):
         component["id"] = rename[component["id"]]
         if "parentId" in component:
@@ -261,111 +256,104 @@ def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]],
         interfaces = {}
         for name, joint in shape.joints.items():
             if joint.parent is not shape:
-                raise ValueError(f"Joint {name!r} belongs to a different occurrence; use Assembly.expose_joint")
+                raise ValueError(f"Joint {name!r} belongs to a different occurrence; expose descendants through ordinary Python properties")
             interfaces[name] = _interface(joint)
-        if isinstance(shape, Assembly):
-            for name, endpoint in shape.interfaces.items():
-                joint = endpoint.joint
-                if joint.parent.joints.get(joint.label) is not joint:
-                    raise ValueError("An exposed native joint was replaced or removed")
-                if id(joint.parent) not in by_object or not any(ancestor is shape for ancestor in joint.parent.ancestors):
-                    raise ValueError("Exposed joint must still belong to a descendant occurrence")
-                component.setdefault("jointInterfaceAliases", {})[name] = {"componentId": rename.get(by_object[id(joint.parent)]["id"], by_object[id(joint.parent)]["id"]), "interfaceId": joint.label}
         if interfaces:
             component["jointInterfaces"] = interfaces
     if meshes is not None:
         remapped = {rename[key]: value for key, value in meshes.items()}
         meshes.clear()
         meshes.update(remapped)
+    def endpoint(joint: Any) -> None:
+        if not isinstance(joint, Joint):
+            raise ValueError("A connection endpoint must be a native Build123D joint")
+        if id(joint.parent) not in by_object:
+            raise ValueError("A connection endpoint is outside the returned occurrences; connect the final instances")
+        if joint.parent.joints.get(joint.label) is not joint:
+            raise ValueError("A connection endpoint was replaced or removed from its native owner")
+
+    def pair_key(value: Any) -> tuple[int, int]:
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            raise ValueError("A connection must be a pair of native joints")
+        source, target = value
+        endpoint(source)
+        endpoint(target)
+        if source.parent is target.parent:
+            raise ValueError("A connection must join distinct native occurrences")
+        return tuple(sorted((id(source), id(target))))
+
     pairs = []
-    handles = [connection for shape, _ in occurrences if isinstance(shape, Assembly) for connection in shape.connections.values()]
     seen_pairs: set[tuple[int, int]] = set()
-    for handle in handles:
-        source, target = handle.source, handle.target
-        for joint, saved in ((source, handle._source_state), (target, handle._target_state)):
-            if joint.parent.joints.get(joint.label) is not joint or _interface(joint) != _interface(saved):
-                raise ValueError("A connected native joint was replaced, removed or changed after connect")
-        if id(source.parent) not in by_object or id(target.parent) not in by_object:
-            raise ValueError("A connection endpoint is outside the returned occurrences; connect the final copies")
-        pairs.append((*handle._pair(), handle))
-        seen_pairs.add(tuple(sorted((id(source), id(target)))))
-    for source, target in ((joint, joint.connected_to) for shape, _ in occurrences for joint in shape.joints.values() if joint.connected_to is not None):
-        if id(source.parent) not in by_object or id(target.parent) not in by_object:
-            raise ValueError("A connection endpoint is outside the returned occurrences; connect the final copies")
-        pair = tuple(sorted((id(source), id(target))))
-        if pair not in seen_pairs:
-            pairs.append((source, target, None))
-            seen_pairs.add(pair)
+    # Explicit metadata is authoritative, never silently unioned with stale native
+    # last-edge pointers. Otherwise recover the exact native retained pairs.
+    declared = supplement.get("connections")
+    if declared is not None and not isinstance(declared, (tuple, list)):
+        raise ValueError("connections must be a sequence of native joint pairs")
+    candidates = declared if declared is not None else [(joint, joint.connected_to) for shape, _ in occurrences for joint in shape.joints.values() if joint.connected_to is not None]
+    for value in candidates:
+        state = None
+        if isinstance(value, dict):
+            if not {"source", "target"} <= set(value) or set(value) - {"source", "target", "angle", "position", "angles"}:
+                raise ValueError("An explicit connection record requires source, target and native angle, position or angles")
+            source, target = value["source"], value["target"]
+            state = {key: item for key, item in value.items() if key not in ("source", "target")}
+        else:
+            pair_key(value)
+            source, target = value
+        key = pair_key((source, target))
+        if key in seen_pairs and declared is not None:
+            raise ValueError("Explicit connections cannot repeat a native endpoint pair")
+        if key not in seen_pairs:
+            pairs.append((source, target, state))
+            seen_pairs.add(key)
     if not pairs:
-        if supplement.get("animations"):
+        if any(supplement.get(field) for field in ("couplings", "animations")):
             raise ValueError("Motion declarations require connected native joints")
         return {}
     diagnostics = []
     intent: dict[str, Any] = {"schemaVersion": 1, "units": {"length": "m", "angle": "deg"}, "connections": []}
     links: dict[str, Any] = {}
     joints: dict[str, Any] = {}
-    handle_ids: dict[Connection, dict[str, str]] = {}
-    references: dict[Connection, dict[str, float]] = {}
+    pair_coordinates: dict[tuple[int, int], tuple[dict[str, str], dict[str, float]]] = {}
+    joint_pairs: dict[int, list[tuple[int, int]]] = {}
     parents: dict[str, str] = {}
     owner_ids = {id(joint.parent) for source, target, _ in pairs for joint in (source, target)}
-    for source, target, handle in pairs:
+    for source, target, state in pairs:
         parent = by_object[id(source.parent)]["id"]
         child = by_object[id(target.parent)]["id"]
         key = f"{parent}/joint/{quote(source.label, safe='')}/{child}/{quote(target.label, safe='')}"
-        if handle is not None:
-            key = f"{by_object[id(handle.assembly)]['id']}/connection/{quote(handle.name, safe='')}"
         connection: dict[str, Any] = {"id": key, "parent": {"componentId": parent, "interfaceId": source.label}, "child": {"componentId": child, "interfaceId": target.label}}
         intent["connections"].append(connection)
+        projected_source, projected_target = source, target
+        if state is not None:
+            projected_source, projected_target = copy.copy(source), copy.copy(target)
+            for field, value in state.items():
+                values = tuple(value.orientation) if isinstance(value, Rotation) else value if field == "angles" and isinstance(value, tuple) else (value,)
+                if any(isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) for number in values):
+                    raise ValueError("Explicit native coordinates must be finite numbers")
+            try:
+                declared_relative = _matrix(projected_source.relative_to(projected_target, **state))
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"Invalid explicit native connection coordinates: {error}") from error
+            actual_relative = np.linalg.inv(_matrix(source.parent.global_location)) @ _matrix(target.parent.global_location)
+            if not np.allclose(declared_relative, actual_relative, atol=1e-7):
+                raise ValueError("Explicit native connection coordinates do not match final occurrence placement")
         try:
-            lowered, reference, ids = _motion_joints(source, target, parent, child, key, dict(handle.coordinates) if handle is not None else None)
+            lowered, reference, ids = _motion_joints(projected_source, projected_target, parent, child, key)
             connection["referenceCoordinates"] = reference
             connection["coordinateChart"] = "intrinsic-xyz" if any(isinstance(j, BallJoint) for j in (source, target)) else "axis"
             connection["playbackCoordinates"] = ids
             joints.update(lowered)
-            if handle is not None:
-                handle_ids[handle] = ids
-                references[handle] = reference
+            identity = pair_key((source, target))
+            pair_coordinates[identity] = ids, reference
+            for endpoint_joint in (source, target):
+                joint_pairs.setdefault(id(endpoint_joint), []).append(identity)
             parents[child] = parent
             for _, joint in lowered:
                 links.setdefault(joint["parent"], {"components": []})
                 links.setdefault(joint["child"], {"components": []})
         except (ValueError, TypeError, AttributeError) as error:
-            if handle is not None:
-                reference = {name: value * (.001 if name == "distance" else 1.) for name, value in handle.coordinates.items()}
-                ids = {name: key if len(reference) == 1 else f"{key}/{name}" for name in reference}
-                connection.update(referenceCoordinates=reference, playbackCoordinates=ids, coordinateChart="intrinsic-xyz" if any(isinstance(j, BallJoint) for j in (source, target)) else "axis")
-                handle_ids[handle], references[handle] = ids, reference
             diagnostics.append({"code": "UNSUPPORTED_MECHANISM", "path": f"/mechanismIntent/connections/{len(intent['connections']) - 1}", "message": str(error), "recovery": "Inspect the retained connection intent and author a supported native joint tree for playback."})
-    # Product containment cannot choose a rigid body in an articulated module.
-    # Explicit local base ownership is independent of native call direction and
-    # of whichever public port an enclosing assembly connects. Fixed-only groups
-    # are unambiguous because all their bodies have identical playback transforms.
-    assembly_bases: dict[int, Any] = {}
-    ambiguous_bases: set[int] = set()
-    fixed_parents = {key: key for key in links}
-    def fixed_root(key: str) -> str:
-        while fixed_parents[key] != key:
-            key = fixed_parents[key]
-        return key
-    for joint in joints.values():
-        if joint["type"] == "fixed":
-            fixed_parents[fixed_root(joint["child"])] = fixed_root(joint["parent"])
-    for shape, _ in occurrences:
-        if not isinstance(shape, Assembly):
-            continue
-        if shape.base is not None:
-            if id(shape.base) not in by_object or not any(parent is shape for parent in shape.base.ancestors):
-                raise ValueError("Assembly base must remain an owned descendant occurrence")
-            if id(shape.base) not in owner_ids:
-                raise ValueError("Assembly base must participate in its mechanism graph")
-            assembly_bases[id(shape)] = shape.base
-        else:
-            candidates = [body for body, _ in occurrences if id(body) in owner_ids and any(parent is shape for parent in body.ancestors)]
-            groups = {fixed_root(by_object[id(body)]["id"]) for body in candidates if by_object[id(body)]["id"] in fixed_parents}
-            if len(groups) == 1:
-                assembly_bases[id(shape)] = candidates[0]
-            elif candidates:
-                ambiguous_bases.add(id(shape))
     # Containment supplies rigid placement for a body mounted on a native assembly;
     # it never joins sibling bodies or guesses a connection from coincident frames.
     for shape, _ in occurrences:
@@ -373,25 +361,9 @@ def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]],
         owner = shape
         while id(owner) not in owner_ids and owner.parent is not None and id(owner.parent) in by_object:
             owner = owner.parent
-            if id(owner) in owner_ids:
-                break
-            if id(owner) in assembly_bases:
-                owner = assembly_bases[id(owner)]
-                break
-            if id(owner) in ambiguous_bases and not shape.children:
-                diagnostics.append({"code": "UNSUPPORTED_MECHANISM", "path": "/mechanismIntent/connections", "message": "An unjointed assembly part has no unambiguous local base body.", "recovery": "Set Assembly(base=...) or group static geometry beneath a connected native Compound; containment does not choose a body."})
-                break
         body_id = by_object[id(owner)]["id"]
         if id(owner) in owner_ids and not shape.children:
             links.setdefault(body_id, {"components": []})["components"].append(component["id"])
-        if id(shape) in owner_ids and component["id"] not in parents:
-            ancestor = shape.parent
-            while ancestor is not None and id(ancestor) not in owner_ids:
-                ancestor = ancestor.parent
-            if ancestor is not None and id(ancestor) in by_object:
-                parent_id = by_object[id(ancestor)]["id"]
-                joints[f"{component['id']}/mount"] = {"type": "fixed", "parent": parent_id, "child": component["id"], "origin": [0., 0., 0.]}
-                parents[component["id"]] = parent_id
     physical_ids = {component["id"] for component in components}
     roots = [key for key in links if key not in parents and key in physical_ids]
     ground = supplement.get("ground")
@@ -424,24 +396,36 @@ def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]],
     if root is None or root not in links:
         diagnostics.append({"code": "UNSUPPORTED_MECHANISM", "path": "/mechanismIntent/ground", "message": "The retained graph needs one unambiguous root; ground must name that native occurrence.", "recovery": "Connect all moving bodies to a single ground, preserving assembly mounts."})
     def dof(value: Any) -> tuple[str, float, float]:
-        handle, coordinate = _coordinate(value)
-        ids = handle_ids.get(handle)
-        if ids is None or coordinate not in ids:
-            raise ValueError("A motion reference must name an exported assembly connection coordinate")
+        if not isinstance(value, tuple) or len(value) != 2 or value[1] not in ("angle", "distance", "x", "y", "z"):
+            raise ValueError("A coordinate reference must be (native_joint, coordinate_name) or ((source, target), coordinate_name)")
+        reference, coordinate = value
+        if isinstance(reference, Joint):
+            endpoint(reference)
+            candidates = joint_pairs.get(id(reference), [])
+            if len(candidates) != 1:
+                raise ValueError("A motion joint reference must name exactly one exported connection; use an explicit endpoint pair for ambiguity")
+            identity = candidates[0]
+        else:
+            identity = pair_key(reference)
+        resolved = pair_coordinates.get(identity)
+        if resolved is None or coordinate not in resolved[0]:
+            raise ValueError("A motion reference must name an exported native connection coordinate")
+        ids, references = resolved
         scale = .001 if coordinate == "distance" else 1.
-        return ids[coordinate], references[handle][coordinate], scale
+        return ids[coordinate], references[coordinate], scale
     couplings = []
-    for shape, _ in occurrences:
-        if isinstance(shape, Assembly):
-            for entry in shape._couplings:
-                driver, qd, sd = dof(entry.driver)
-                follower, qf, sf = dof(entry.follower)
-                # Native authored f = ratio*d + offset becomes delta coordinates.
-                # Validate again so mutated native poses cannot quietly change phase.
-                offset = entry.ratio * qd * sf / sd + entry.offset * sf - qf
-                if not math.isclose(offset, 0., abs_tol=1e-8 * sf):
-                    raise ValueError("Coupling phase does not match the authored reference pose")
-                couplings.append({"driver": driver, "follower": follower, "ratio": entry.ratio * sf / sd})
+    for entry in supplement.get("couplings", []):
+        if not isinstance(entry, dict) or set(entry) - {"driver", "follower", "ratio", "offset"} or not {"driver", "follower", "ratio"} <= set(entry):
+            raise ValueError("A coupling requires driver, follower, ratio and optional offset")
+        ratio, phase = entry["ratio"], entry.get("offset", 0.)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (ratio, phase)):
+            raise ValueError("Coupling ratio and offset must be finite numbers")
+        driver, qd, sd = dof(entry["driver"])
+        follower, qf, sf = dof(entry["follower"])
+        offset = ratio * qd * sf / sd + phase * sf - qf
+        if not math.isclose(offset, 0., abs_tol=1e-8 * sf):
+            raise ValueError("Coupling phase does not match the authored reference pose")
+        couplings.append({"driver": driver, "follower": follower, "ratio": ratio * sf / sd})
     animations = []
     for entry in supplement.get("animations", []):
         frames = []
@@ -449,7 +433,7 @@ def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]],
             coordinates = {}
             for key, value in frame["coordinates"].items():
                 coordinate, reference, scale = dof(key)
-                if not isinstance(value, (int, float)) or not math.isfinite(value):
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                     raise ValueError("Animation coordinates must be finite native values")
                 coordinates[coordinate] = value * scale - reference
             frames.append({**frame, "coordinates": coordinates})
@@ -458,13 +442,14 @@ def project_mechanism(shapes: tuple[Any, ...], components: list[dict[str, Any]],
         intent["couplings"] = couplings
     if animations:
         intent["animations"] = animations
+    assigned = {key for link in links.values() for key in link["components"]}
+    unassigned = [component["id"] for component in components if not component.get("childIds") and component["id"] not in assigned]
+    if unassigned:
+        diagnostics.append({"code": "UNSUPPORTED_MECHANISM", "path": "/mechanismIntent/rigidBodies", "message": "Some geometry has no connected native rigid body.", "recovery": "Group passive geometry under its connected native rigid Compound; product containment cannot choose an articulated base."})
     result: dict[str, Any] = {"mechanismIntent": intent}
     if diagnostics:
         result["mechanismDiagnostics"] = diagnostics
     else:
-        # Static leaves remain on the ground and do not create hidden grounds.
-        assigned = {key for link in links.values() for key in link["components"]}
-        links[root]["components"].extend(component["id"] for component in components if not component.get("childIds") and component["id"] not in assigned)
         result["mechanism"] = {"schemaVersion": 1, "units": intent["units"], "root": root, "links": links, "joints": joints, **({"couplings": couplings} if couplings else {}), **({"animations": animations} if animations else {})}
     component_ids = {component["id"] for component in components}
     intent["rigidBodies"] = {key: list(body["components"]) for key, body in links.items() if key in component_ids}

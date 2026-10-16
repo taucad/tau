@@ -260,4 +260,38 @@ describe('document protocol payload-shape coverage (C18)', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('preserves the requested form, effective tolerances and downgrade count of an OCCT mesh', () => {
+    const tessellation = {
+      triangles: 5006,
+      vertices: 2505,
+      elapsed: 12,
+      requested: 'medium',
+      linearTolerance: 0.0087,
+      angularTolerance: 20,
+      downgraded: 0,
+    } as const;
+    const rendered = {
+      subscriptionId: 'view',
+      requestId: 'request',
+      evaluationId: 'evaluation-1',
+      intent: 0,
+      success: true,
+      view: 'model',
+      artifact: { mimeType: 'model/gltf-binary', content: 'glb', tessellation },
+      hash: 'model-hash',
+      transient: false,
+      issues: [],
+    } as const;
+    const parsed = wire.notifies.rendered.safeParse(rendered);
+    expect(parsed.success && parsed.data.success ? parsed.data.artifact.tessellation : undefined).toEqual(tessellation);
+    for (const invalid of [{ requested: 'ultra' }, { linearTolerance: 0 }, { downgraded: -1 }, { downgraded: 0.5 }]) {
+      expect(
+        wire.notifies.rendered.safeParse({
+          ...rendered,
+          artifact: { ...rendered.artifact, tessellation: { ...tessellation, ...invalid } },
+        }).success,
+      ).toBe(false);
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '#constants/rpc.constants.js';
 import { jsonValueSchema } from '#schemas/message-provider.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
@@ -62,6 +63,16 @@ export const geoSpecRunLineageSchema = z
               ingestOptions: z.record(z.string(), jsonValueSchema),
               sourceRevision: sourceRevisionSchema.optional(),
               sourcePath: z.string().optional(),
+              workUnitLimit: z.number().int().positive().optional(),
+              reused: z.literal(true).optional(),
+              region: z
+                .object({
+                  min: z.tuple([z.number(), z.number(), z.number()]),
+                  max: z.tuple([z.number(), z.number(), z.number()]),
+                })
+                .strict()
+                .optional()
+                .describe('The crop this load applied: claims on it hold for this millimetre box only.'),
               artifacts: z.array(
                 z
                   .object({
@@ -150,9 +161,20 @@ export const geoSpecRunFilterInputSchema = z
       .number()
       .int()
       .min(1)
-      .max(300_000)
+      .max(Number.MAX_SAFE_INTEGER)
       .optional()
-      .describe('Async test timeout in milliseconds. Equivalent to CLI --test-timeout.'),
+      .describe(
+        `Per-test async timeout in milliseconds on every host (CLI --test-timeout). A test still running then fails with GEOSPEC_TEST_TIMEOUT; the run still waits for it to settle, so this does not shorten the run. Omit for none. The browser run budget is raised to cover it, up to the host's maximum (${geoSpecDefaultMaxRunBudget} ms unless the host raised it); a larger value is refused, and a run that outlives its budget returns \`timeout\` plus the requirements completed so far.`,
+      ),
+    workUnitLimit: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional()
+      .describe(
+        `Engine work-unit budget for each claim in this run, replacing the host default. A budget in loadModel or expectGeo still wins for its own claims. Raise it when a row has category work-budget, up to the host's maximum (${geoSpecDefaultMaxWorkUnitLimit} unless the host raised it); a larger value is refused. Omit for the host default.`,
+      ),
   })
   .strict();
 
@@ -213,6 +235,52 @@ export const nativeGeoSpecReportSchema = z.object({
 export type NativeGeoSpecReport = z.infer<typeof nativeGeoSpecReportSchema>;
 
 /**
+ * Why a requirement did not pass, one category per refusal cause. Only
+ * `geometry` is a decided claim; every other category keeps the assertion and
+ * changes how the evidence is obtained.
+ *
+ * @public
+ */
+export const geoSpecFailureCategorySchema = z
+  .enum([
+    'geometry',
+    'unsupported-evidence',
+    'analysis-limit',
+    'resource-limit',
+    'work-budget',
+    'timeout',
+    'model-load',
+    'infrastructure',
+  ])
+  .describe(
+    'geometry: the claim was decided false. unsupported-evidence: the loaded evidence cannot answer the matcher. analysis-limit / resource-limit: the subject exceeds an engine analysis or admission limit. work-budget: the claim exhausted its work-unit budget. timeout: a wall-clock bound expired. model-load: the model did not load. infrastructure: bundling, engine or host failure.',
+  );
+/** @public */
+export type GeoSpecFailureCategory = z.infer<typeof geoSpecFailureCategorySchema>;
+
+/**
+ * A browser run that outlived its run budget. The run is reported with the
+ * requirements it completed; the rest are not run, never passed.
+ *
+ * @public
+ */
+export const geoSpecRunTimeoutSchema = z
+  .object({
+    errorCode: z.literal('OPERATION_TIMEOUT'),
+    code: z.literal('GEOSPEC_RUN_TIMEOUT'),
+    budget: z.number().int().positive().describe('Run budget in milliseconds.'),
+    elapsed: z.number().int().nonnegative().describe('Milliseconds the run had taken when the budget expired.'),
+    phase: z
+      .enum(['queued', 'running'])
+      .describe('queued: the run waited behind an earlier run in this session and never started.'),
+    file: z.string().optional().describe('GeoSpec file in flight when the budget expired'),
+    requirement: z.string().optional().describe('Requirement in flight when the budget expired'),
+  })
+  .strict();
+/** @public */
+export type GeoSpecRunTimeout = z.infer<typeof geoSpecRunTimeoutSchema>;
+
+/**
  * Test failure result -- failures include detailed feedback for the LLM and
  * are tagged with the source file whose geometry failed the requirement.
  */
@@ -221,6 +289,7 @@ const testFailureSchema = z.object({
   requirement: z.string().describe('Description of the requirement that failed'),
   reason: z.string().describe('Why the test failed'),
   suggestion: z.string().describe('Actionable suggestion to fix the issue'),
+  category: geoSpecFailureCategorySchema.optional(),
   targetFile: rootedFilePathSchema.describe('Source file whose geometry produced this failure'),
   diagnostics: z
     .array(geometryDiagnosticSchema)
@@ -285,6 +354,7 @@ export const testModelOutputSchema = z.object({
     .optional()
     .describe('Run qualification, distinct from individual passed claims; absence is unqualified.'),
   accounting: geoSpecRunAccountingSchema.optional(),
+  timeout: geoSpecRunTimeoutSchema.optional(),
   lineageStatus: geoSpecLineageStatusSchema.optional(),
   lineage: z.array(z.object({ file: z.string(), lineage: geoSpecRunLineageSchema }).strict()).optional(),
   tests: z

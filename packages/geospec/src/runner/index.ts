@@ -19,6 +19,7 @@ export {
   isGeoSpecTestFile,
 } from '#runner/discovery.js';
 export { runGeoSpecModule } from '#runner/run-geospec-module.js';
+export { geoSpecTimeoutCode, isGeoSpecTimeoutCode, type GeoSpecTimeoutCode } from '#runner/timeout-codes.js';
 export type {
   DiscoverGeoSpecFilesOptions,
   GeoSpecDiscoveryFileKind,
@@ -60,6 +61,7 @@ export type {
   GeoSpecStepUnitsExpectation,
   GeoSpecSurfaceAreaExpectation,
   GeoSpecTestCase,
+  GeoSpecTestEvent,
   GeoSpecTestStatus,
   GeoSpecTopologyCountsExpectation,
   GeoSpecValidBrepExpectation,

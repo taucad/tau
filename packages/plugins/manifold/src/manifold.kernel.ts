@@ -6,13 +6,12 @@
  * Registers manifold-3d modules as built-ins for user code imports.
  */
 
-import { Primitive, WebIO } from '@gltf-transform/core';
-import type { Document } from '@gltf-transform/core';
+import { Document, Primitive, WebIO, getBounds } from '@gltf-transform/core';
 import type { Manifold } from 'manifold-3d';
 import type { BaseGLTFNode, GLTFAttribute, GLTFMaterial } from 'manifold-3d/lib/gltf-node.js';
 
 import { createExportFile } from '@taucad/runtime/types';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 import {
   asBuffer,
   jsonSchemaFromJson,
@@ -32,7 +31,16 @@ import {
 } from '@taucad/runtime/kernel';
 import type { KernelServices } from '@taucad/runtime/kernel';
 
-import { manifoldOptionsSchema, manifoldExportSchemas } from '#manifold.schemas.js';
+import { manifoldOptionsSchema, manifoldExportSchemas, manifoldRenderSchema } from '#manifold.schemas.js';
+import {
+  createManifoldTessellationBudgetExceededIssue,
+  createManifoldTessellationDowngradedIssue,
+  createManifoldTessellationReport,
+  manifoldTriangleBudgets,
+  meshWithinManifoldBudget,
+  resolveManifoldTessellation,
+} from '#manifold-tessellation.js';
+import type { ManifoldCircularDetail } from '#manifold-tessellation.js';
 
 import { initManifoldWasm } from '#init-manifold.js';
 
@@ -354,7 +362,46 @@ function addPlanarNormals(document: Document): void {
   }
 }
 
-async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<ArrayBuffer>> {
+/** A model's GLB with the triangles and vertices it draws and its bounding-box diagonal in millimetres. */
+type ManifoldMesh = {
+  glb: Uint8Array<ArrayBuffer>;
+  triangles: number;
+  vertices: number;
+  diagonal: number;
+};
+
+/**
+ * Count the triangles and vertices every scene node draws, and measure the scene's bounding-box diagonal.
+ *
+ * @param document - A written and re-read manifold-3d glTF document.
+ * @returns Triangles, vertices and the diagonal in millimetres (`NaN` when the scene has no extent).
+ */
+function measureDocument(document: Document): Omit<ManifoldMesh, 'glb'> {
+  const root = document.getRoot();
+  const scene = root.getDefaultScene() ?? root.listScenes()[0];
+  let triangles = 0;
+  let vertices = 0;
+  if (!scene) {
+    return { triangles, vertices, diagonal: Number.NaN };
+  }
+  scene.traverse((node) => {
+    for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
+      if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
+        continue;
+      }
+      const positions = primitive.getAttribute('POSITION')?.getCount() ?? 0;
+      triangles += (primitive.getIndices()?.getCount() ?? positions) / 3;
+      vertices += positions;
+    }
+  });
+  // The manifold-3d scene models millimetres under a root `wrapper` node scaled to glTF metres; undo that scale.
+  const [rootScale = 1] = scene.listChildren()[0]?.getScale() ?? [];
+  const { min, max } = getBounds(scene);
+  const diagonal = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / Math.abs(rootScale || 1);
+  return { triangles, vertices, diagonal: Number.isFinite(diagonal) ? diagonal : Number.NaN };
+}
+
+async function createGlbFromManifoldOutput(output: unknown): Promise<ManifoldMesh> {
   const [gltfNodeImport, sceneBuilderImport, gltfIoImport] = await Promise.all([
     import('manifold-3d/lib/gltf-node.js'),
     import('manifold-3d/lib/scene-builder.js'),
@@ -388,14 +435,31 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<
     throw new TypeError('Manifold setupIO export must be callable.');
   }
   const configuredIo: unknown = setupIo(new WebIO());
-  if (!isRecordObject(configuredIo) || !isCallable(configuredIo['writeBinary'])) {
+  if (
+    !isRecordObject(configuredIo) ||
+    !isCallable(configuredIo['writeBinary']) ||
+    !isCallable(configuredIo['readBinary'])
+  ) {
     throw new TypeError('Manifold setupIO() must return a glTF IO instance.');
   }
   const bytes: unknown = await configuredIo['writeBinary'](document);
   if (!(bytes instanceof Uint8Array)) {
     throw new TypeError('Manifold glTF writer must return Uint8Array bytes.');
   }
-  return new Uint8Array(bytes);
+  const glb = await normalizeGltfGeometryNames(new Uint8Array(bytes), {
+    format: 'glb',
+    rewriteLegacyGeneratedShapeNames: true,
+    materialNamePolicy: 'clear-generated',
+    materialNameSource: 'external-generated',
+    sceneNamePolicy: 'clear-generated',
+    sceneNameSource: 'external-generated',
+  });
+  // The manifold-3d writer fills mesh data while writing, so the counts and bounds come from the written GLB.
+  const written: unknown = await configuredIo['readBinary'](glb);
+  if (!(written instanceof Document)) {
+    throw new TypeError('Manifold glTF reader must return a glTF document.');
+  }
+  return { glb, ...measureDocument(written) };
 }
 
 /**
@@ -406,6 +470,70 @@ export type ManifoldOptions = {
   /** Override the default Manifold WASM URL for custom builds or benchmarking. */
   wasmUrl?: string;
 };
+
+/** What re-running a model at another circular detail needs: its bundle, its parameters and its size. */
+type ManifoldProgram = {
+  code: string;
+  parameters: Record<string, unknown>;
+  /** Bounding-box diagonal in millimetres at Manifold's default detail; presets scale with it. */
+  diagonal: number;
+};
+
+/** The evaluated model at Manifold's default detail, and the program that re-meshes it at another one. */
+type ManifoldHandle = {
+  glb: Uint8Array<ArrayBuffer>;
+  program?: ManifoldProgram;
+};
+
+/**
+ * Run the model's bundle again with Manifold's circular detail set before `main`, and restore the defaults after.
+ * Circular detail is read when a circle, cylinder, sphere or revolve is built, so a different detail needs a new run.
+ *
+ * @param input - The program, the detail to set, the kernel services and the kernel context.
+ * @returns The model's GLB with its counts and diagonal.
+ */
+async function meshProgram(input: {
+  program: ManifoldProgram;
+  detail: ManifoldCircularDetail;
+  services: KernelServices;
+  context: Readonly<{ manifoldCadModule: Record<string, unknown> }>;
+}): Promise<ManifoldMesh> {
+  const { program, detail, services, context } = input;
+  return exclusive(async () => {
+    const levelOfDetail = await import('manifold-3d/lib/level-of-detail.js');
+    await cleanupManifoldRuntime();
+    try {
+      levelOfDetail.setMinCircularEdgeLength(detail.linearTolerance);
+      levelOfDetail.setMinCircularAngle(detail.angularTolerance);
+      if (detail.segments !== undefined) {
+        levelOfDetail.setCircularSegments(detail.segments);
+      }
+      const executeResult = await services.execute(program.code);
+      if (!executeResult.success) {
+        throw new ManifoldBuildError(executeResult.issues);
+      }
+      const model = await runMain(resolveModule(executeResult.value), program.parameters, context.manifoldCadModule);
+      if (model === undefined || (Array.isArray(model) && model.length === 0)) {
+        return { glb: asBuffer(createEmptyGlb()), triangles: 0, vertices: 0, diagonal: Number.NaN };
+      }
+      return await createGlbFromManifoldOutput(model);
+    } catch (error) {
+      if (error instanceof ManifoldBuildError) {
+        throw error;
+      }
+      throw new ManifoldBuildError([
+        {
+          message: error instanceof Error ? error.message : String(error),
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+    } finally {
+      await cleanupManifoldRuntime();
+    }
+  });
+}
 
 // =============================================================================
 // Kernel module definition
@@ -419,9 +547,9 @@ export const manifoldKernel = defineKernel({
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   builtinPackages: { 'manifold-3d': manifoldPackage },
   name: 'ManifoldKernel',
-  version: '1.1.0',
+  version: '1.2.0',
   optionsSchema: manifoldOptionsSchema,
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: manifoldRenderSchema } },
   exports: {
     glb: {
       title: 'glTF binary',
@@ -535,15 +663,9 @@ export const manifoldKernel = defineKernel({
       }
 
       try {
-        const glb = await normalizeGltfGeometryNames(await createGlbFromManifoldOutput(model), {
-          format: 'glb',
-          rewriteLegacyGeneratedShapeNames: true,
-          materialNamePolicy: 'clear-generated',
-          materialNameSource: 'external-generated',
-          sceneNamePolicy: 'clear-generated',
-          sceneNameSource: 'external-generated',
-        });
-        return { handle: { glb } };
+        const { glb, diagonal } = await createGlbFromManifoldOutput(model);
+        const handle: ManifoldHandle = { glb, program: { code: bundleResult.code, parameters, diagonal } };
+        return { handle };
       } catch (error) {
         const stackFrames = parseStackTrace(error, {
           classifyFrame: createFrameClassifier(),
@@ -568,11 +690,44 @@ export const manifoldKernel = defineKernel({
     });
   },
 
-  async render({ handle }) {
-    return { content: handle.glb };
+  async render({ handle, options }, services, context) {
+    const { tessellation } = options;
+    const { program } = handle;
+    if (program === undefined) {
+      return { content: handle.glb };
+    }
+    const started = performance.now();
+    const requested = resolveManifoldTessellation(tessellation, program.diagonal);
+    const budget = manifoldTriangleBudgets.preview;
+    const { result, effective, downgraded } = await meshWithinManifoldBudget({
+      detail: requested,
+      budget,
+      mesh: async (detail) => meshProgram({ program, detail, services, context }),
+    });
+    const report: TessellationReport = createManifoldTessellationReport({
+      requested,
+      effective,
+      downgraded,
+      triangles: result.triangles,
+      vertices: result.vertices,
+      elapsed: performance.now() - started,
+    });
+    const issues =
+      downgraded === 0
+        ? []
+        : [
+            createManifoldTessellationDowngradedIssue({
+              requested,
+              effective,
+              downgraded,
+              triangles: result.triangles,
+              budget,
+            }),
+          ];
+    return { content: result.glb, tessellation: report, issues };
   },
 
-  async export(input) {
+  async export(input, services, context) {
     const { exportId, handle, options } = input;
 
     if (handle.glb.length === 0) {
@@ -582,7 +737,19 @@ export const manifoldKernel = defineKernel({
     switch (exportId) {
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- exhaustive switch
       case 'glb': {
-        const transformedGlb = await transformGltfExportBytes(handle.glb, {
+        let source = handle.glb;
+        if (handle.program) {
+          const requested = resolveManifoldTessellation(options.tessellation, handle.program.diagonal);
+          const mesh = await meshProgram({ program: handle.program, detail: requested, services, context });
+          const budget = manifoldTriangleBudgets.export;
+          if (mesh.triangles > budget) {
+            throw new ManifoldBuildError([
+              createManifoldTessellationBudgetExceededIssue({ requested, triangles: mesh.triangles, budget }),
+            ]);
+          }
+          source = mesh.glb;
+        }
+        const transformedGlb = await transformGltfExportBytes(source, {
           format: 'glb',
           coordinateSystem: options.coordinateSystem,
           unit: options.unit,
@@ -610,11 +777,14 @@ export const manifoldKernel = defineKernel({
   },
 
   serializeHandle({ handle }) {
-    return { glb: new Uint8Array(handle.glb) };
+    return { glb: new Uint8Array(handle.glb), ...(handle.program ? { program: { ...handle.program } } : {}) };
   },
 
-  deserializeHandle({ serialized }) {
-    return { glb: new Uint8Array(serialized.glb) };
+  deserializeHandle({ serialized }): ManifoldHandle {
+    return {
+      glb: new Uint8Array(serialized.glb),
+      ...(serialized.program ? { program: { ...serialized.program } } : {}),
+    };
   },
 });
 

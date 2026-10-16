@@ -198,6 +198,8 @@ describe('exportTauProjectArtifact', () => {
     expect(fixture.sourceRuntime.snapshotSource.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.sourceRuntime.bestRouteFor.mock.invocationCallOrder[0]!,
     );
+    // Routes are chosen among the snapshotted kernel's own, never another kernel's.
+    expect(fixture.sourceRuntime.bestRouteFor).toHaveBeenCalledWith('step', { kernelId: 'replicad' });
     expect(fixture.exportDocument.export.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.exportRuntime.bestRouteFor.mock.invocationCallOrder[0]!,
     );

@@ -39,6 +39,12 @@ The kernel adds normals, creased at 30°, unless a material already names `NORMA
 
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
 
+## Tessellation
+
+Views and exports take `options.tessellation` as a quality preset or an explicit object, never both. Pick `low` for a first look, thumbnails or large assemblies, `medium` (the default for `evaluate_model`, `screenshot` and the viewer) for ordinary review, `high` (the export default) for printing and GeoSpec evidence, and `extra-high` only when asked. Presets scale with the model's size, so a 5 mm pin and a 5 m frame cost about the same. The explicit object uses segments, millimetres and degrees and does not scale. Both forms together, such as `{ quality: 'high', linearTolerance: 0.01 }`, fail with `VALIDATION_ERROR`. A model cannot declare a tessellation hint yet, so keep it out of model parameters; resolution written into the geometry itself is covered below. Results report the effective `tessellation` (requested form, resolution, triangles, vertices, elapsed); a view over 2 M triangles is re-meshed up to three steps coarser with a `TESSELLATION_DOWNGRADED` warning, and an export over 20 M is refused rather than coarsened.
+
+In Manifold the explicit object is `{ segments?, linearTolerance?, angularTolerance? }`: a fixed circle segment count, the minimum circular edge length and the minimum circular angle. A segment count passed to a primitive is the model's own and stays.
+
 ## Wrong / Correct
 
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.

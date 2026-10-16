@@ -7,7 +7,7 @@ import { defaultPayloadStore } from '@taucad/host';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { acpAdapterResolveFrom, agentWorkspaceRoot, serveNativeKernels } from '#commands/serve.js';
+import { acpAdapterResolveFrom, agentWorkspaceRoot, childArguments, serveNativeKernels } from '#commands/serve.js';
 
 const nativeKernels = vi.hoisted(() => ({
   composeNativeKernels: vi.fn<() => Promise<unknown>>(),
@@ -149,5 +149,18 @@ describe('serveNativeKernels', () => {
 
     await expect(kernels.native.compose()).resolves.toEqual({ unavailable: [] });
     await expect(kernels.native.closureRoots()).resolves.toEqual([]);
+  });
+});
+
+describe('childArguments', () => {
+  it('should hand a runtime child the locked profile as an argument, since its environment is minimal', () => {
+    const base = { plugin: ['./p.mjs'], config: 'tau.config.mjs', zooProxyUrl: 'wss://api.example/v1/kernels/zoo' };
+
+    expect(childArguments({ ...base, acquisition: 'open' })).toEqual([
+      '--plugin=./p.mjs',
+      '--config=tau.config.mjs',
+      '--zoo-proxy-url=wss://api.example/v1/kernels/zoo',
+    ]);
+    expect(childArguments({ ...base, acquisition: 'locked' })).toContain('--acquisition=locked');
   });
 });

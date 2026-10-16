@@ -1,10 +1,14 @@
 // @vitest-environment node
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { expect, it } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, expect, it } from 'vitest';
 
 import { picogk } from '#index.js';
 import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 it.runIf(nativeEngineAvailable)(
   'should release native listeners on default client shutdown and preserve sibling sessions',

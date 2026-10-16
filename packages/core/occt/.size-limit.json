@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 4492 bytes on 2026-08-23",
+    "name": "total (ESM JS) with tessellation presets and budgets — measured 6.73 kB brotlied on 2026-10-16",
     "path": "dist/**/*.mjs",
-    "limit": "6 kB"
+    "limit": "7 kB"
   }
 ]

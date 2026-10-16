@@ -63,14 +63,25 @@ Options:
   --include <glob>           Include glob (repeatable, default **/*.geospec.{ts,js})
   --exclude <glob>           Exclude glob (repeatable)
   -t, --test-name-pattern <re>  JavaScript regex matched against 'suite > test'
-  --test-timeout <ms>        Async test-callback timeout
+  --test-timeout <ms>        Per-test async timeout (GEOSPEC_TEST_TIMEOUT)
   --workers [n]              Run in a worker pool; omit n to auto-size
-  --shard-timeout <ms>       Non-verdict per-shard watchdog
+  --shard-timeout <ms>       Non-verdict per-shard watchdog (GEOSPEC_SHARD_TIMEOUT)
   --matcher-wall-backstop <ms>  Non-verdict matcher watchdog
   --forensic                 Include structured timing measurements
   --bail                     Stop after the first failing file
   --json                     Print one JSON result document and nothing else
   -h, --help                 Show this help
+
+Timeouts:
+  Every host reports wall-clock timeouts with one code family. None of them is
+  a geometry verdict, and nothing is timed out unless asked.
+  GEOSPEC_TEST_TIMEOUT   a test outlived --test-timeout (test_model testTimeout);
+                         the test still settles before the run moves on
+  GEOSPEC_SHARD_TIMEOUT  a pool shard outlived --shard-timeout; its worker is
+                         terminated
+  GEOSPEC_RUN_TIMEOUT    a browser run outlived its host run budget; completed
+                         requirements are still reported
+  The engine's work-unit budget (MATCHER_TIMEOUT) is deterministic, not a clock.
 `;
 
 const numericFlag = (raw: string | undefined, flag: string): number | { error: string } => {

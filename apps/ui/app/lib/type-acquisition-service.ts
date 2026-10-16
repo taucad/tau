@@ -24,6 +24,7 @@
  * - Fetches type declarations from esm.sh via X-TypeScript-Types header
  * - Guards all async operations with session epoch + AbortController
  * - Degrades gracefully offline (static types always available, dynamic types silently skipped)
+ * - Under the locked acquisition profile (`dynamicTypes: false`) acquires nothing: static types only, no request
  */
 
 import type * as Monaco from 'monaco-editor';
@@ -54,6 +55,11 @@ export type TypeAcquisitionConfig = {
    * types always come from esm.sh's latest.
    */
   readProjectFile?: ProjectFileReader;
+  /**
+   * `false` under the locked acquisition profile (`TAU_ACQUISITION=locked`): only the static types are registered and
+   * no import is acquired, so the service makes no request. Default `true`.
+   */
+  dynamicTypes?: boolean;
 };
 
 type ProjectFileReader = (path: string) => Promise<string | undefined>;
@@ -92,6 +98,7 @@ function ataLog(...args: unknown[]): void {
 export class TypeAcquisitionService {
   private monaco: typeof Monaco | undefined;
   private readProjectFile: TypeAcquisitionConfig['readProjectFile'];
+  private dynamicTypes = true;
 
   // --- Session safety ---
   private sessionEpoch = 0;
@@ -126,6 +133,7 @@ export class TypeAcquisitionService {
   public initialize(monaco: typeof Monaco, config: TypeAcquisitionConfig): void {
     this.monaco = monaco;
     this.readProjectFile = config.readProjectFile;
+    this.dynamicTypes = config.dynamicTypes !== false;
     this.abortController = new AbortController();
 
     // Register static types via addExtraLib on both defaults
@@ -162,7 +170,7 @@ export class TypeAcquisitionService {
    * Attaches listeners to existing and newly-created JS/TS models.
    */
   public startWatching(): void {
-    if (!this.monaco) {
+    if (!this.monaco || !this.dynamicTypes) {
       return;
     }
 

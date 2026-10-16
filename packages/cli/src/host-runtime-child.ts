@@ -6,6 +6,7 @@ import { installNativeWorkerLauncher } from '@taucad/native-process-core';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
 import type { NativeComposition } from '#native-kernels.js';
+import { acquisitionOf } from '#acquisition.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { installSandboxModuleHooks } from '#sandbox-modules.js';
 
@@ -18,6 +19,8 @@ const { values } = parseArgs({
     plugin: { type: 'string', multiple: true },
     config: { type: 'string' },
     'zoo-proxy-url': { type: 'string' },
+    /* The daemon starts this child with a minimal environment, so `tau serve` passes the profile as an argument. */
+    acquisition: { type: 'string' },
   },
   strict: true,
 });
@@ -74,6 +77,7 @@ const handleMessage = async (message: unknown): Promise<void> => {
     plugin: values.plugin,
     config: values.config,
     ...(values['zoo-proxy-url'] ? { zooProxyUrl: values['zoo-proxy-url'] } : {}),
+    acquisition: acquisitionOf(values.acquisition),
     ...(native?.build123d === undefined ? {} : { build123d: native.build123d }),
     ...(native?.picogk === undefined ? {} : { picogk: native.picogk }),
     ...(native === undefined ? {} : { unavailableKernels: native.unavailable }),

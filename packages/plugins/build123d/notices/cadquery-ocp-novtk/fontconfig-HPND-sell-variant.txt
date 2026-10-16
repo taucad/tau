@@ -1,0 +1,43 @@
+Fontconfig: bundled in cadquery-ocp-novtk 7.9.3.1.1
+
+Licence: HPND-sell-variant
+Bundled as:
+  linux-x64-glibc: cadquery_ocp_novtk.libs/libfontconfig-ebabad56.so.1.12.0
+  linux-arm64-glibc: cadquery_ocp_novtk.libs/libfontconfig-8ee924d8.so.1.12.0
+
+The Linux builds are Ubuntu 20.04 packages (libfontconfig1 2.13.1-2ubuntu3), as the
+wheel's dist-info/sboms/auditwheel.cdx.json records. Their licence is Ubuntu's debian/copyright
+for that source version, reproduced below.
+
+==============================================================================
+debian/copyright, https://changelogs.ubuntu.com/changelogs/pool/main/f/fontconfig/fontconfig_2.13.1-2ubuntu3/copyright
+==============================================================================
+
+This package was debianized by Colin Walters <walters@debian.org> on
+Sun, 13 Oct 2002 15:01:50 -0400
+
+It was downloaded from http://www.fontconfig.org/
+
+Upstream Author: Keith Packard
+
+Copyright:
+
+Copyright © 2001,2003 Keith Packard
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation, and that the name of Keith Packard not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.  Keith Packard makes no
+representations about the suitability of this software for any purpose.  It
+is provided "as is" without express or implied warranty.
+
+KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.

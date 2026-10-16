@@ -388,7 +388,11 @@ const provideSchema = z.strictObject({
     ]),
   ]),
   model: agentChannelModelSchema.optional(),
-  runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
+  runtimeConfig: z.strictObject({
+    tauApiUrl: z.url(),
+    tauWebSocketUrl: z.url(),
+    acquisition: z.enum(['open', 'locked']).optional(),
+  }),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),
 });

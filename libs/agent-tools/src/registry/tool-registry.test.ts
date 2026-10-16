@@ -1415,6 +1415,59 @@ describe('createChatToolRegistry GeoSpec evidence normalization', () => {
     expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(original);
   });
 
+  it('should retain an indented result.json so line-oriented reads return one field per line', async () => {
+    const original = verdict(1);
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>();
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({
+          ...emptyFileSystem(),
+          writeBinaryFile: async (path, bytes) => {
+            stored.set(path, Uint8Array.from(bytes));
+          },
+        }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    const text = new TextDecoder().decode(stored.get(compact.fullResult!.path));
+    expect(text).toBe(JSON.stringify(original, undefined, 2));
+    expect(text.split('\n').filter((line) => line.includes('"requirement"'))).toStrictEqual([
+      expect.stringMatching(/^ {6}"requirement": /u),
+    ]);
+    expect(compact.fullResult?.byteLength).toBe(new TextEncoder().encode(text).byteLength);
+  });
+
+  it('should keep the inline budget on compact JSON when indentation alone crosses it', async () => {
+    const encodedBytes = (text: string): number => new TextEncoder().encode(text).byteLength;
+    const original = {
+      ...verdict(9),
+      total: 301,
+      failures: Array.from({ length: 300 }, (_, index) => ({
+        id: `f-${index}`,
+        requirement: `r-${index}`,
+        reason: 'x'.repeat(300),
+        suggestion: 's',
+        targetFile: 'main.geospec.ts',
+      })),
+    };
+    expect(encodedBytes(JSON.stringify(original))).toBeLessThan(128 * 1024);
+    expect(encodedBytes(JSON.stringify(original, undefined, 2))).toBeGreaterThan(128 * 1024);
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: async () => undefined }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(compact.failures).toHaveLength(300);
+    expect(compact).not.toHaveProperty('omittedFailures');
+  });
+
   it('should refuse when complete evidence cannot be persisted', async () => {
     const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
       throw new Error('record authority unavailable');

@@ -10,6 +10,7 @@
     "server.ts",
     "netlify/edge-functions/*.ts",
     "geospec-mt-assets.vite-plugin.ts",
+    "asset-integrity.vite-plugin.ts",
     "geospec-mt-assets-cache-key.ts",
     "vite.calibration.config.ts",
     "react-router.config.ts",

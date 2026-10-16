@@ -13,8 +13,10 @@ import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import { geoSpecRunAccountingSchema, geoSpecRunLineageSchema } from '@taucad/chat/schemas/tools/test-model';
 import { isRecord } from '@taucad/utils/schema';
 import type { GeometryDiagnostic } from 'geospec/mesh';
+import { geoSpecMeshEvidenceMatchers, geoSpecRegionWholeModelClaimCode } from 'geospec/model';
+import { isGeoSpecTimeoutCode } from 'geospec/runner';
 import type { GeoSpecTestCase } from 'geospec/runner';
-import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { GeoSpecRunnerFileResult, GeoSpecRunnerResult } from 'geospec/runner/worker';
 
 type RunGeoSpecTestsSuccess = Extract<RunGeoSpecTestsRpcResult, { success: true }>;
 type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
@@ -111,46 +113,467 @@ const transportReports = (test: GeoSpecTestCase): RunGeoSpecReport[] | undefined
 /** The `test_model` payload minus its success discriminant. @public */
 export type TestModelOutput = Omit<RunGeoSpecTestsSuccess, 'success'>;
 
+type TestRow = NonNullable<TestModelOutput['tests']>[number];
+type PassRow = RunGeoSpecTestsSuccess['passes'][number];
+type LineageRow = NonNullable<TestModelOutput['lineage']>[number];
+type SourceRevisionRow = NonNullable<TestModelOutput['sourceRevisions']>[number];
+
+/**
+ * What the host knows about the kernel that evaluated one model source, so an
+ * evidence refusal names a next step that kernel can take.
+ *
+ * @public
+ */
+export type GeoSpecKernelEvidence = {
+  /** The kernel that evaluates the source. */
+  readonly kernelId: string;
+  /** True when that kernel offers a direct BRep STEP export route. */
+  readonly directBrepStep: boolean;
+};
+
+/** Options for projecting runner results. @public */
+export type GeoSpecProjectionOptions = {
+  /** Whether the caller applied selection filters. */
+  readonly filtersApplied?: boolean;
+  /** Kernel facts by model source path, from the host's runtime routes. */
+  readonly kernels?: ReadonlyMap<string, GeoSpecKernelEvidence>;
+};
+
+/** One test's projected rows. Skipped tests have only their test row. @public */
+export type GeoSpecProjectedTest = {
+  readonly test: TestRow;
+  readonly failure?: RunGeoSpecTestFailure;
+  readonly pass?: PassRow;
+};
+
+/** One settled file's projected rows and observed accounting. @public */
+export type GeoSpecFileProjection = {
+  readonly failures: RunGeoSpecTestFailure[];
+  readonly passes: PassRow[];
+  readonly tests: TestRow[];
+  readonly lineage?: LineageRow;
+  readonly sourceRevisions: SourceRevisionRow[];
+  /** Observed test counts for this file, when the module reported them. */
+  readonly counts?: GeoSpecTestCounts;
+};
+
+/** Observed per-file test counts, summed into run accounting. @public */
+export type GeoSpecTestCounts = Pick<
+  NonNullable<TestModelOutput['accounting']>,
+  'discovered' | 'selected' | 'completed' | 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'skipped' | 'notRun'
+>;
+
+type FailureCategory = NonNullable<RunGeoSpecTestFailure['category']>;
+type RunnerIssue = NonNullable<GeoSpecRunnerResult['issues']>[number];
+
+const analysisLimitCodes = new Set(['GEOSPEC_ANALYSIS_LIMIT']);
+const resourceLimitCodes = new Set(['GEOSPEC_RESOURCE_LIMIT', 'LIMIT_EXCEEDED', 'limit-exceeded']);
+const workBudgetCodes = new Set(['MATCHER_TIMEOUT', 'GEOSPEC_WORK_BUDGET_EXHAUSTED']);
+const evidenceCodes = new Set([
+  'GEOSPEC_UNSUPPORTED_EVIDENCE',
+  'GEOSPEC_EVIDENCE_UNSUPPORTED',
+  'GEOSPEC_KERNEL_BREP_UNSUPPORTED',
+  'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
+  geoSpecRegionWholeModelClaimCode,
+]);
+/*
+ * Engine pins before the distinct limit codes (geospec-engine 0.1.0-next.51)
+ * fold byte-limit refusals into GEOSPEC_UNSUPPORTED_EVIDENCE and report
+ * admission limits as an untyped load error. Their messages name the limit;
+ * this bridge retires with the pin that carries the typed codes.
+ */
+const limitMessage = /\bexceeds?\b[^.]*\blimit\b/iu;
+const admissionLimitMessage = /\b(?:subject|admission|retained|binary)\b[^.]*\blimit\b/iu;
+const weakeningSuggestion =
+  /\b(?:update|weaken|relax|loosen|remove|delete|drop|change)\b[^.]{0,60}\b(?:assertion|expectation|expected|tolerance|test)\b/iu;
+/** Advice to reduce the design to fit a limit; a limit is met with resources, never less geometry. */
+const reducingSuggestion =
+  /\b(?:coarsen|coarser|shrink|crop|simplify|decimate)\b|\bsmaller (?:part|model|subject|export)\b|\blower (?:the )?resolution\b/iu;
+const capacityAdvice =
+  'Provision more resources (raise the host limit or the work budget the diagnostic names, for example test_model workUnitLimit) and re-run; if this host cannot provide them, report the claim as not decided at this capacity. Keep the model as designed, at its full geometry and resolution, and never let a region load stand in for a whole-model claim.';
+
+const meshMatchers = geoSpecMeshEvidenceMatchers.join(', ');
+
+const diagnosticCodes = (diagnostic: GeometryDiagnostic): readonly string[] => {
+  const nested = isRecord(diagnostic.details) ? diagnostic.details['code'] : undefined;
+  return typeof nested === 'string' ? [diagnostic.code, nested] : [diagnostic.code];
+};
+
+const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | undefined => {
+  const codes = diagnosticCodes(diagnostic);
+  if (codes.some((code) => isGeoSpecTimeoutCode(code))) {
+    return 'timeout';
+  }
+  if (codes.some((code) => analysisLimitCodes.has(code))) {
+    return 'analysis-limit';
+  }
+  if (codes.some((code) => resourceLimitCodes.has(code))) {
+    return 'resource-limit';
+  }
+  if (codes.some((code) => workBudgetCodes.has(code))) {
+    return 'work-budget';
+  }
+  if (codes.some((code) => evidenceCodes.has(code))) {
+    return limitMessage.test(diagnostic.message) ? 'analysis-limit' : 'unsupported-evidence';
+  }
+  if (codes.some((code) => code.startsWith('GEOSPEC_NATIVE_') || code.startsWith('GEOSPEC_MODEL_'))) {
+    return 'model-load';
+  }
+  if (codes.includes('GEOSPEC_CANONICAL_EXPORT_UNSUPPORTED')) {
+    return 'model-load';
+  }
+  if (limitMessage.test(diagnostic.message) && admissionLimitMessage.test(diagnostic.message)) {
+    return 'resource-limit';
+  }
+  return undefined;
+};
+
+/** Most specific first: a decided claim stands; then what keeps the claim undecided. */
+const categoryPriority: readonly FailureCategory[] = [
+  'geometry',
+  'timeout',
+  'resource-limit',
+  'analysis-limit',
+  'work-budget',
+  'unsupported-evidence',
+  'model-load',
+  'infrastructure',
+];
+
+const failureCategory = (test: GeoSpecTestCase, diagnostics: readonly GeometryDiagnostic[]): FailureCategory => {
+  const found = new Set<FailureCategory>();
+  for (const diagnostic of diagnostics) {
+    const category = diagnosticCategory(diagnostic);
+    if (category !== undefined) {
+      found.add(category);
+    }
+  }
+  const decided = test.assertions.some(
+    (assertion) =>
+      assertion.report?.status === 'failed' ||
+      (assertion.report === undefined &&
+        assertion.passed === false &&
+        !(assertion.diagnostics ?? []).some((diagnostic) => diagnosticCategory(diagnostic) !== undefined)),
+  );
+  if (decided && !diagnostics.some((diagnostic) => diagnostic.code === 'TEST_FAILED')) {
+    found.add('geometry');
+  }
+  return categoryPriority.find((category) => found.has(category)) ?? 'infrastructure';
+};
+
+const keepsAssertion = (suggestion: string | undefined): suggestion is string =>
+  suggestion !== undefined &&
+  suggestion.trim() !== '' &&
+  !weakeningSuggestion.test(suggestion) &&
+  !reducingSuggestion.test(suggestion);
+
+const evidenceSuggestion = (
+  kernels: readonly GeoSpecKernelEvidence[],
+  engineSuggestion: string | undefined,
+): string => {
+  const meshOnly = kernels.filter((kernel) => !kernel.directBrepStep);
+  if (meshOnly.length > 0) {
+    const names = meshOnly.map((kernel) => `'${kernel.kernelId}'`).join(', ');
+    return `This matcher needs exact BRep evidence, and kernel ${names} has no direct STEP/BRep export route, so the matcher is unsupported on this kernel. Keep the requirement and report it as unsupported. Assert what a mesh can answer with the mesh-supported matchers: ${meshMatchers}.`;
+  }
+  if (kernels.length > 0) {
+    return keepsAssertion(engineSuggestion)
+      ? engineSuggestion
+      : "Load the model with loadModel({ file, format: 'step' }) for exact BRep evidence and keep the assertion.";
+  }
+  const meshNote = `On a mesh-only kernel this matcher is unsupported; mesh-supported matchers are ${meshMatchers}.`;
+  return keepsAssertion(engineSuggestion)
+    ? `${engineSuggestion} ${meshNote}`
+    : `Keep the assertion and load evidence that can answer it. ${meshNote}`;
+};
+
+const categorySuggestion = (options: {
+  readonly category: FailureCategory;
+  readonly diagnostics: readonly GeometryDiagnostic[];
+  readonly kernels: readonly GeoSpecKernelEvidence[];
+}): string => {
+  const { category, diagnostics, kernels } = options;
+  const own = diagnostics.find(
+    (diagnostic) => diagnosticCategory(diagnostic) === category && keepsAssertion(diagnostic.suggestion),
+  )?.suggestion;
+  const any = diagnostics.find((diagnostic) => keepsAssertion(diagnostic.suggestion))?.suggestion;
+  const regionScope = diagnostics.find((diagnostic) => diagnostic.code === geoSpecRegionWholeModelClaimCode);
+  if (regionScope?.suggestion !== undefined) {
+    return regionScope.suggestion;
+  }
+  switch (category) {
+    case 'geometry': {
+      return (
+        any ??
+        'Change the model so it meets this requirement, using the expected and actual values in the diagnostics. Keep the assertion and its tolerance.'
+      );
+    }
+    case 'timeout': {
+      return (
+        own ??
+        `Keep the assertion. Raise testTimeout so the requirement can finish, or re-run only it with testNamePattern. ${capacityAdvice}`
+      );
+    }
+    case 'analysis-limit': {
+      return `Keep the assertion: the analysis needs more than the engine limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
+    }
+    case 'resource-limit': {
+      return `Keep the assertion: the model exceeds the host admission limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
+    }
+    case 'work-budget': {
+      return 'Keep the assertion: the claim exhausted its deterministic work-unit budget (the diagnostic details give limit and used). Raise workUnitLimit for this claim (expectGeo or loadModel option, or test_model workUnitLimit for the whole run) or narrow its selection, then re-run.';
+    }
+    case 'unsupported-evidence': {
+      return evidenceSuggestion(kernels, own ?? any);
+    }
+    case 'model-load': {
+      return (
+        own ??
+        any ??
+        'Fix the model so it evaluates and exports in the requested format (see the runtime issues), then re-run. Keep the assertion.'
+      );
+    }
+    case 'infrastructure': {
+      return (
+        any ??
+        'This is not a geometry verdict. Fix the spec or host problem the diagnostics name and re-run; keep the assertion.'
+      );
+    }
+  }
+};
+
+const loadKernels = (
+  test: GeoSpecTestCase,
+  lineage: LineageRow | undefined,
+  kernels: ReadonlyMap<string, GeoSpecKernelEvidence> | undefined,
+): GeoSpecKernelEvidence[] => {
+  if (kernels === undefined || lineage === undefined) {
+    return [];
+  }
+  const loadIds = new Set(
+    test.assertions.flatMap((assertion) => (assertion.loadId === undefined ? [] : [assertion.loadId])),
+  );
+  const sources = lineage.lineage.loads.flatMap((load) =>
+    (loadIds.size === 0 || loadIds.has(load.loadId)) && load.evidence?.sourcePath !== undefined
+      ? [load.evidence.sourcePath]
+      : [],
+  );
+  return [...new Set(sources)].flatMap((source) => {
+    const kernel = kernels.get(source);
+    return kernel === undefined ? [] : [kernel];
+  });
+};
+
+/**
+ * Project one settled test onto its `test_model` rows.
+ *
+ * @param file - The GeoSpec file the test belongs to.
+ * @param test - The settled test.
+ * @param options - Whether to carry claim reports, the file's lineage and kernel facts.
+ * @returns The test row and its pass or failure row.
+ * @public
+ */
+export const projectGeoSpecTest = (
+  file: string,
+  test: GeoSpecTestCase,
+  options: {
+    readonly reports?: boolean;
+    readonly lineage?: LineageRow;
+    readonly kernels?: ReadonlyMap<string, GeoSpecKernelEvidence>;
+  } = {},
+): GeoSpecProjectedTest => {
+  const requirement = fullGeoSpecTestName(test);
+  const testRow: TestRow = {
+    id: `${file}:${test.ordinal ?? requirement}`,
+    requirement,
+    targetFile: file,
+    status: test.status,
+    ...(test.ordinal === undefined ? {} : { ordinal: test.ordinal }),
+  };
+  if (test.status === 'skipped') {
+    return { test: testRow };
+  }
+  const allReports = transportReports(test);
+  const reports = options.reports === false ? undefined : allReports;
+  const nonPassingReport = allReports?.find((report) => report.status !== 'passed');
+  if (
+    test.status !== 'passed' ||
+    test.assertions.some(
+      (assertion) =>
+        assertion.passed === false || (assertion.report !== undefined && assertion.report.status !== 'passed'),
+    )
+  ) {
+    const assertionDiagnostics = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []);
+    // The collector mirrors its thrown assertion's exact diagnostic objects.
+    // Worker structured-clone preserves these aliases. Never deduplicate by
+    // code/message: separate failures can have identical text and locations.
+    const mirrored = new Set(assertionDiagnostics);
+    const diagnostics = [
+      ...assertionDiagnostics,
+      ...test.diagnostics.filter((diagnostic) => !mirrored.has(diagnostic)),
+    ];
+    const category = failureCategory(test, diagnostics);
+    return {
+      test: testRow,
+      failure: {
+        id: `${file}:${requirement}`,
+        requirement,
+        reason:
+          diagnosticText(diagnostics) ??
+          (nonPassingReport ? `GeoSpec evidence status: ${nonPassingReport.status}.` : 'GeoSpec test failed.'),
+        suggestion: categorySuggestion({
+          category,
+          diagnostics,
+          kernels: loadKernels(test, options.lineage, options.kernels),
+        }),
+        category,
+        targetFile: file,
+        diagnostics: transportDiagnostics(diagnostics),
+        ...(reports === undefined ? {} : { reports }),
+      },
+    };
+  }
+  return {
+    test: testRow,
+    pass: {
+      id: `${file}:${requirement}`,
+      requirement,
+      targetFile: file,
+      ...(reports === undefined ? {} : { reports }),
+    },
+  };
+};
+
+const issueRow = (issue: RunnerIssue, targetFile: string): RunGeoSpecTestFailure => {
+  if (isGeoSpecTimeoutCode(issue.code)) {
+    return {
+      id: issue.code,
+      requirement: 'Every selected GeoSpec file must finish within its wall-clock bound',
+      reason: issue.message,
+      suggestion: `Keep the assertions. Re-run the timed-out file on its own or raise its timeout. ${capacityAdvice}`,
+      category: 'timeout',
+      targetFile,
+    };
+  }
+  if (issue.code === 'GEOSPEC_RUNNER_ABORTED' || issue.code === 'GEOSPEC_RUNNER_BAILED') {
+    return {
+      id: issue.code,
+      requirement: 'Every selected GeoSpec file must run',
+      reason: issue.message,
+      suggestion:
+        'The files in accounting.notRunFiles never started. Re-run them with files: [...]; nothing was asserted for them.',
+      category: 'infrastructure',
+      targetFile,
+    };
+  }
+  return {
+    id: issue.code,
+    requirement: 'At least one selected GeoSpec test must run',
+    reason: issue.message,
+    suggestion:
+      'Run without filters, or use files/include/exclude/testNamePattern values that select at least one GeoSpec test.',
+    targetFile,
+  };
+};
+
+/**
+ * Project one settled file onto its `test_model` rows, lineage and counts.
+ *
+ * @param fileResult - The runner's result for one file.
+ * @param options - Kernel facts by model source path.
+ * @returns The file's rows in test order, after its bundle failure.
+ * @public
+ */
+export const projectGeoSpecFile = (
+  fileResult: GeoSpecRunnerFileResult,
+  options: Pick<GeoSpecProjectionOptions, 'kernels'> = {},
+): GeoSpecFileProjection => {
+  const { file, result: moduleResult } = fileResult;
+  const lineage: LineageRow | undefined =
+    moduleResult.lineage === undefined
+      ? undefined
+      : { file, lineage: geoSpecRunLineageSchema.parse(moduleResult.lineage) };
+  const failures: RunGeoSpecTestFailure[] = [];
+  const passes: PassRow[] = [];
+  const tests: TestRow[] = [];
+  if (!moduleResult.success) {
+    const timeoutIssue = moduleResult.issues.find((issue) => isGeoSpecTimeoutCode(issue.code));
+    failures.push({
+      id: `${file}:bundle`,
+      requirement: `GeoSpec module ${file} must bundle and execute`,
+      reason: moduleResult.issues.map((issue) => issue.message).join('\n'),
+      suggestion:
+        timeoutIssue === undefined
+          ? 'Fix the GeoSpec syntax, imports, or referenced project files.'
+          : issueRow(timeoutIssue, file).suggestion,
+      ...(timeoutIssue === undefined ? {} : { category: 'timeout' }),
+      targetFile: file,
+    });
+  }
+  for (const test of moduleResult.tests ?? []) {
+    const projected = projectGeoSpecTest(file, test, {
+      ...(lineage === undefined ? {} : { lineage }),
+      ...(options.kernels === undefined ? {} : { kernels: options.kernels }),
+    });
+    tests.push(projected.test);
+    if (projected.failure !== undefined) {
+      failures.push(projected.failure);
+    }
+    if (projected.pass !== undefined) {
+      passes.push(projected.pass);
+    }
+  }
+  const sourceRevisions =
+    lineage?.lineage.loads.flatMap(({ evidence }) =>
+      evidence?.sourceRevision === undefined ? [] : [evidence.sourceRevision],
+    ) ?? [];
+  const counts = moduleResult.accounting;
+  return {
+    failures,
+    passes,
+    tests,
+    ...(lineage === undefined ? {} : { lineage }),
+    sourceRevisions,
+    ...(counts === undefined
+      ? {}
+      : {
+          counts: {
+            discovered: counts.discovered,
+            selected: counts.selected,
+            completed: counts.completed,
+            passed: counts.passed,
+            failed: counts.failed,
+            unsupported: counts.unsupported,
+            inconclusive: counts.inconclusive,
+            skipped: counts.skipped,
+            notRun: counts.notRun,
+          },
+        }),
+  };
+};
+
 /**
  * Convert a GeoSpec runner result into the compact `test_model` RPC shape.
  *
  * @param result - The runner's aggregate result.
  * @param entryPaths - Discovered GeoSpec files the run selected.
- * @param options - Whether the caller applied selection filters.
+ * @param options - Whether the caller applied selection filters, and kernel facts.
  * @returns The compact model-facing verdict.
  * @public
  */
 export const runnerResultToTestModelOutput = (
   result: GeoSpecRunnerResult,
   entryPaths: readonly string[],
-  options: { filtersApplied?: boolean } = {},
+  options: GeoSpecProjectionOptions = {},
 ): TestModelOutput => {
   const failures: RunGeoSpecTestsSuccess['failures'] = [];
   const passes: RunGeoSpecTestsSuccess['passes'] = [];
-  const tests: NonNullable<TestModelOutput['tests']> = result.files.flatMap(({ file, result: moduleResult }) =>
-    (moduleResult.tests ?? []).map((test) => ({
-      id: `${file}:${test.ordinal ?? fullGeoSpecTestName(test)}`,
-      requirement: fullGeoSpecTestName(test),
-      targetFile: file,
-      status: test.status,
-      ...(test.ordinal === undefined ? {} : { ordinal: test.ordinal }),
-    })),
+  const files = result.files.map((fileResult) =>
+    projectGeoSpecFile(fileResult, options.kernels === undefined ? {} : { kernels: options.kernels }),
   );
-  const lineage = result.files.flatMap(({ file, result: moduleResult }) =>
-    moduleResult.lineage === undefined
-      ? []
-      : [
-          {
-            file,
-            lineage: geoSpecRunLineageSchema.parse(moduleResult.lineage),
-          },
-        ],
-  );
-  const sourceRevisions = lineage.flatMap(({ lineage: fileLineage }) =>
-    fileLineage.loads.flatMap(({ evidence }) =>
-      evidence?.sourceRevision === undefined ? [] : [evidence.sourceRevision],
-    ),
-  );
+  const tests: NonNullable<TestModelOutput['tests']> = files.flatMap((file) => file.tests);
+  const lineage = files.flatMap((file) => (file.lineage === undefined ? [] : [file.lineage]));
+  const sourceRevisions = files.flatMap((file) => file.sourceRevisions);
 
   if (entryPaths.length === 0) {
     if (options.filtersApplied) {
@@ -175,74 +598,12 @@ export const runnerResultToTestModelOutput = (
   }
 
   for (const issue of result.issues ?? []) {
-    failures.push({
-      id: issue.code,
-      requirement: 'At least one selected GeoSpec test must run',
-      reason: issue.message,
-      suggestion:
-        'Run without filters, or use files/include/exclude/testNamePattern values that select at least one GeoSpec test.',
-      targetFile: entryPaths.join(', ') || '*.geospec.ts',
-    });
+    failures.push(issueRow(issue, entryPaths.join(', ') || '*.geospec.ts'));
   }
 
-  for (const fileResult of result.files) {
-    if (!fileResult.result.success) {
-      failures.push({
-        id: `${fileResult.file}:bundle`,
-        requirement: `GeoSpec module ${fileResult.file} must bundle and execute`,
-        reason: fileResult.result.issues.map((issue) => issue.message).join('\n'),
-        suggestion: 'Fix the GeoSpec syntax, imports, or referenced project files.',
-        targetFile: fileResult.file,
-      });
-    }
-
-    for (const test of fileResult.result.tests ?? []) {
-      if (test.status === 'skipped') {
-        continue;
-      }
-
-      const requirement = fullGeoSpecTestName(test);
-      const reports = transportReports(test);
-      const nonPassingReport = reports?.find((report) => report.status !== 'passed');
-      if (
-        test.status !== 'passed' ||
-        test.assertions.some(
-          (assertion) =>
-            assertion.passed === false || (assertion.report !== undefined && assertion.report.status !== 'passed'),
-        )
-      ) {
-        const assertionDiagnostics = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []);
-        // The collector mirrors its thrown assertion's exact diagnostic objects.
-        // Worker structured-clone preserves these aliases. Never deduplicate by
-        // code/message: separate failures can have identical text and locations.
-        const mirrored = new Set(assertionDiagnostics);
-        const diagnostics = [
-          ...assertionDiagnostics,
-          ...test.diagnostics.filter((diagnostic) => !mirrored.has(diagnostic)),
-        ];
-        failures.push({
-          id: `${fileResult.file}:${requirement}`,
-          requirement,
-          reason:
-            diagnosticText(diagnostics) ??
-            (nonPassingReport ? `GeoSpec evidence status: ${nonPassingReport.status}.` : 'GeoSpec test failed.'),
-          suggestion:
-            diagnostics.find((diagnostic) => diagnostic.suggestion)?.suggestion ??
-            'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
-          targetFile: fileResult.file,
-          diagnostics: transportDiagnostics(diagnostics),
-          ...(reports === undefined ? {} : { reports }),
-        });
-        continue;
-      }
-
-      passes.push({
-        id: `${fileResult.file}:${requirement}`,
-        requirement,
-        targetFile: fileResult.file,
-        ...(reports === undefined ? {} : { reports }),
-      });
-    }
+  for (const file of files) {
+    failures.push(...file.failures);
+    passes.push(...file.passes);
   }
 
   if (entryPaths.length > 0 && failures.length === 0 && passes.length === 0) {

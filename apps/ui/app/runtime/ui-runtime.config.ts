@@ -5,10 +5,11 @@ import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 
 export type UiRuntimeConfigInput = RuntimeConfigInput<typeof runtime>;
 
-type UiRuntimeEnvironment = Pick<Environment, 'TAU_API_URL' | 'TAU_WEBSOCKET_URL'>;
+type UiRuntimeEnvironment = Pick<Environment, 'TAU_ACQUISITION' | 'TAU_API_URL' | 'TAU_WEBSOCKET_URL'>;
 
 export const createUiRuntimeConfig = (environment: UiRuntimeEnvironment): UiRuntimeConfigInput =>
   uiRuntimeConfigSchema.parse({
     tauApiUrl: environment.TAU_API_URL,
     tauWebSocketUrl: environment.TAU_WEBSOCKET_URL,
+    acquisition: environment.TAU_ACQUISITION,
   });

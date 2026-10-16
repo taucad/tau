@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
+import type { EvaluateModelOutput } from '@taucad/chat/schemas/tools/evaluate-model';
 import {
   buildEditedUserMessage,
   buildUserMessage,
@@ -767,13 +768,38 @@ describe('serializeMessage', () => {
       );
     });
 
-    it.each([
+    it.each<[string, NonNullable<EvaluateModelOutput['tessellation']>, string]>([
       [
         'a voxel kernel',
         { triangles: 1308, vertices: 656, elapsed: 41.6, voxelSize: 0.5, activeVoxels: 2846, memoryBytes: 1_296_848 },
         'Mesh: 1308 triangles, 656 vertices, 42 ms (voxelSize 0.5 mm, 2846 active voxels, 1296848 bytes)',
       ],
       ['a mesh kernel', { triangles: 12, vertices: 8, elapsed: 3 }, 'Mesh: 12 triangles, 8 vertices, 3 ms'],
+      [
+        'a preset render',
+        {
+          triangles: 4096,
+          vertices: 2050,
+          elapsed: 18,
+          requested: 'high',
+          linearTolerance: 0.06,
+          angularTolerance: 12,
+        },
+        'Mesh: 4096 triangles, 2050 vertices, 18 ms\nResolution: requested high, linearTolerance 0.06 mm, angularTolerance 12°',
+      ],
+      [
+        'a downgraded render',
+        {
+          triangles: 1_999_872,
+          vertices: 1_000_014,
+          elapsed: 812,
+          requested: 'extra-high',
+          linearTolerance: 0.02,
+          angularTolerance: 10,
+          downgraded: 1,
+        },
+        'Mesh: 1999872 triangles, 1000014 vertices, 812 ms\nResolution: requested extra-high, linearTolerance 0.02 mm, angularTolerance 10°, downgraded 1',
+      ],
     ])('serializes the evaluate_model mesh cost of %s', (_kernel, tessellation, line) => {
       const message = baseMessage([
         {

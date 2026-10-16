@@ -15,7 +15,8 @@ import { join } from 'node:path';
 
 import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { describe, expect, it } from 'vitest';
+import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prepareFromSeed, seedPresent } from '#build123d-closure.fixture.js';
 import { build123d, build123dOptionsFromClosure } from '#index.js';
@@ -101,6 +102,9 @@ class Params:
 def main(params: Params):
     raise RuntimeError("TAU_SANDBOX_PROBE " + json.dumps({"import": IMPORT_OUTCOMES, "main": _outcomes()}))
 `;
+
+// The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
+beforeAll(() => installFetchTripwire());
 
 describe.runIf(seedPresent)('Build123d native sandbox', () => {
   it('should deny host reads, writes, network, and subprocess escapes from module import and main', async () => {

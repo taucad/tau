@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 6.45 kB brotlied on 2026-08-23",
+    "name": "total (ESM JS) with tessellation presets and budgets — measured 7.42 kB brotlied on 2026-10-16",
     "path": ["dist/**/*.mjs"],
     "limit": "8 kB"
   }

@@ -10,6 +10,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { defaultConfigDirectory } from '@taucad/host';
 import { defineCommand } from 'citty';
 
+import { acquisitionOf } from '#acquisition.js';
 import { cliError, createOutput, exitCodes, sanitize, writeStdout } from '#output.js';
 
 // Issues that leave a usable tree: Tau never runs scripts and never materialises native builds.
@@ -86,6 +87,18 @@ export const installCommand = defineCommand({
     },
   },
   async run({ args, rawArgs }) {
+    const profile = process.env['TAU_ACQUISITION'];
+    if (acquisitionOf(profile) === 'locked') {
+      // The locked profile makes no request, and resolving or installing a package needs the npm registry.
+      const issue: PackageIssue = {
+        code: 'registry-unavailable',
+        message: `The acquisition profile is locked (TAU_ACQUISITION=${sanitize(profile?.trim() ?? '')}), so tau install contacts no registry and changed nothing. Install where the registry is reachable and bring package.json, package-lock.json and node_modules here; the locked project's imports then load from node_modules.`,
+      };
+      throw cliError(issue.code, `Install refused:\n  ${issue.code}: ${issue.message}`, {
+        exit: exitCodes.refused,
+        details: [issue],
+      });
+    }
     const output = await createOutput();
     const add = Object.fromEntries(repeated(rawArgs, 'add').map((spec) => parseAdd(spec)));
     const remove = repeated(rawArgs, 'remove');

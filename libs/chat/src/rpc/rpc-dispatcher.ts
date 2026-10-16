@@ -65,7 +65,8 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.writeTodos]: async (args) => handleWriteTodos(args, deps.fileSystem),
     [rpcName.askQuestions]: async (args, context) => handleAskQuestions(args, deps.fileSystem, context?.signal),
     [rpcName.arrangeWorkbench]: async (args) => handleArrangeWorkbench(args, deps.fileSystem, deps.workbench),
-    [rpcName.installPackages]: async (args, context) => handleInstallPackages(args, deps.fileSystem, context?.signal),
+    [rpcName.installPackages]: async (args, context) =>
+      handleInstallPackages(args, deps.fileSystem, { signal: context?.signal, acquisition: deps.acquisition }),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(

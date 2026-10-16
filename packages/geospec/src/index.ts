@@ -18,6 +18,7 @@ export type {
   GeoSpecChamferFeatureExpectation,
   GeoSpecCircularHoleExpectation,
   GeoSpecCylindricalFaceExpectation,
+  GeoSpecExpectOptions,
   GeoSpecComponentInterferenceAllowance,
   GeoSpecComponentInterferenceExpectation,
   GeoSpecComponentInterferencePairExpectation,

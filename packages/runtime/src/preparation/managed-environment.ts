@@ -11,6 +11,28 @@ type Environment = Readonly<Record<string, string | undefined>>;
 const mirrorProtocols = new Set(['https:', 'http:', 'file:']);
 const proxyVariables = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'] as const;
 
+// The managed family (D25) and the proxy and CA names Node reads at start-up, which the plugin manifests forward.
+const profileVariables = [
+  'TAU_ACQUISITION',
+  'TAU_PAYLOAD_MIRROR',
+  'TAU_PAYLOAD_MIRROR_NO_FALLBACK',
+  'TAU_PAYLOAD_DIR',
+  'TAU_CONFIG_DIR',
+  'TAU_PAYLOAD_TARGET',
+  'TAU_PAYLOAD_EMULATION',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_USE_SYSTEM_CA',
+  'NODE_USE_ENV_PROXY',
+] as const;
+
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === '' ? undefined : value.trim();
 
@@ -58,8 +80,8 @@ const nodeFlag = (environment: Environment, execArgv: readonly string[], flag: s
 
 /**
  * Assemble `tau prepare --inspect --json`: the managed profile, the store, the host indicators, how Node reaches the
- * network (proxy and certificate authorities are Node start-up facts) and what the store holds for every declared
- * dependency.
+ * network (proxy and certificate authorities are Node start-up facts), which managed, proxy and CA variables are set
+ * (by name: a proxy URL can carry a credential) and what the store holds for every declared dependency.
  * @param input - The host, its store and indicators, the interpreted profile, the environment and Node's flags.
  * @returns The effective profile.
  * @public
@@ -89,6 +111,7 @@ export const describeEffectiveProfile = async (input: {
     emulation: managed.selection.emulation !== false,
     proxy: envProxy ? 'env-proxy' : 'none',
     ca: systemCa ? 'system' : nonEmpty(environment['NODE_EXTRA_CA_CERTS']) === undefined ? 'bundled' : 'extra',
+    variables: profileVariables.filter((name) => nonEmpty(environment[name]) !== undefined),
     closures,
   };
 };

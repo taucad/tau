@@ -57,25 +57,21 @@ export type RuntimeExportIntentFailure = {
 
 const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
 
-const hasRuntimeRoutes = (runtime: GeoSpecRuntimeClient): runtime is RuntimeClientWithRoutes =>
-  typeof (runtime as { bestRouteFor?: unknown }).bestRouteFor === 'function';
-
-const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: RuntimeBackedModelFormat): boolean => {
-  const { capabilities } = runtime as { capabilities?: { routes?: readonly unknown[] } };
-  if ((capabilities?.routes?.length ?? 0) > 0) {
-    return true;
-  }
-
-  const { routesFor } = runtime as { routesFor?: unknown };
-  return typeof routesFor === 'function' && (routesFor as (format: string) => readonly unknown[])(format).length > 0;
-};
-
-const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: string): boolean => {
-  const properties = route?.exportOptions?.schema.properties;
-  return property in (properties ?? {});
-};
-
-const isDirectRoute = (route: GeoSpecExportRoute): boolean => route.transcoderId === undefined;
+/**
+ * The matchers mesh evidence answers, as the GeoSpec authoring skill lists
+ * them (`packages/geospec/agent/geospec-authoring/SKILL.md`): bounds, volume,
+ * surface area, connected components and watertightness. Every other
+ * exact-feature matcher needs STEP BRep evidence.
+ *
+ * @public
+ */
+export const geoSpecMeshEvidenceMatchers = [
+  'toHaveBoundingBox',
+  'toHaveVolume',
+  'toHaveSurfaceArea',
+  'toHaveConnectedComponents',
+  'toBeWatertight',
+] as const;
 
 type TessellationIntent = {
   linearTolerance?: number;
@@ -138,6 +134,59 @@ const routeToProvenance = (route: GeoSpecExportRoute | undefined): GeometryExpor
       }
     : undefined;
 
+const meshAlternative = `loadModel({ file, format: 'glb' }) with mesh-supported matchers (${geoSpecMeshEvidenceMatchers.join(', ')})`;
+
+/**
+ * The kernel cannot produce exact BRep evidence: no direct BRep STEP route.
+ * Names the mesh alternative and never asks for STEP the kernel cannot give.
+ *
+ * @param options - The evaluating kernel, when known, and its best STEP route.
+ * @returns The refusal with its mesh alternative.
+ */
+const kernelBrepUnsupported = (options: {
+  kernelId: string | undefined;
+  route: GeoSpecExportRoute | undefined;
+}): RuntimeExportIntentFailure => {
+  const subject = options.kernelId === undefined ? 'No kernel in this runtime' : `Kernel '${options.kernelId}'`;
+  return {
+    success: false,
+    diagnostics: [
+      {
+        code: 'GEOSPEC_KERNEL_BREP_UNSUPPORTED',
+        severity: 'error',
+        message: `${subject} has no direct STEP/BRep export route, so exact BRep evidence is unavailable and BRep matchers are unsupported on ${options.kernelId === undefined ? 'it' : 'this kernel'}.`,
+        suggestion: `Keep the requirement and report it as unsupported on this kernel. Load mesh evidence with ${meshAlternative} for the requirements a mesh can answer.`,
+        details: {
+          format: 'step',
+          ...(options.kernelId === undefined ? {} : { kernelId: options.kernelId }),
+          ...(options.route === undefined ? {} : { route: routeToProvenance(options.route) }),
+          meshAlternative: { format: 'glb', matchers: [...geoSpecMeshEvidenceMatchers] },
+        },
+      },
+    ],
+  };
+};
+
+const hasRuntimeRoutes = (runtime: GeoSpecRuntimeClient): runtime is RuntimeClientWithRoutes =>
+  typeof (runtime as { bestRouteFor?: unknown }).bestRouteFor === 'function';
+
+const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: RuntimeBackedModelFormat): boolean => {
+  const { capabilities } = runtime as { capabilities?: { routes?: readonly unknown[] } };
+  if ((capabilities?.routes?.length ?? 0) > 0) {
+    return true;
+  }
+
+  const { routesFor } = runtime as { routesFor?: unknown };
+  return typeof routesFor === 'function' && (routesFor as (format: string) => readonly unknown[])(format).length > 0;
+};
+
+const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: string): boolean => {
+  const properties = route?.exportOptions?.schema.properties;
+  return property in (properties ?? {});
+};
+
+const isDirectRoute = (route: GeoSpecExportRoute): boolean => route.transcoderId === undefined;
+
 const canonicalUnsupported = (options: {
   format: RuntimeBackedModelFormat;
   route?: GeoSpecExportRoute;
@@ -166,6 +215,13 @@ export const resolveRuntimeExportIntent = (options: {
   format: RuntimeBackedModelFormat;
   meshLinearTolerance?: number;
   meshAngularToleranceDegrees?: number;
+  /**
+   * The kernel that evaluates this source, when the host knows it. Routes are
+   * then chosen among that kernel's own, so a mesh-only kernel is told its
+   * BRep matchers are unsupported instead of being sent to another kernel's
+   * STEP route.
+   */
+  kernelId?: string;
 }): RuntimeExportIntent | RuntimeExportIntentFailure => {
   const { runtime, format } = options;
   const tessellation: TessellationIntent | undefined =
@@ -178,10 +234,19 @@ export const resolveRuntimeExportIntent = (options: {
             : { angularToleranceDegrees: options.meshAngularToleranceDegrees }),
         };
   const routeAware = hasRuntimeRoutes(runtime);
-  const route = routeAware ? runtime.bestRouteFor(format) : undefined;
+  const { kernelId } = options;
+  const route = routeAware
+    ? kernelId === undefined
+      ? runtime.bestRouteFor(format)
+      : runtime.bestRouteFor(format, { kernelId })
+    : undefined;
 
   if (stepFormats.has(format)) {
-    if (route && (!isDirectRoute(route) || route.fidelity !== 'brep')) {
+    const exact = route !== undefined && isDirectRoute(route) && route.fidelity === 'brep';
+    if (routeAware && !exact && kernelId !== undefined && hasAnyRouteMetadata(runtime, format)) {
+      return kernelBrepUnsupported({ kernelId, route });
+    }
+    if (route && !exact) {
       return {
         success: false,
         diagnostics: [
@@ -189,10 +254,10 @@ export const resolveRuntimeExportIntent = (options: {
             code: 'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
             severity: 'error',
             message: 'GeoSpec exact BRep evidence requires a direct STEP/BRep runtime export route.',
-            suggestion:
-              'Request a runtime export route that preserves exact STEP/BRep evidence, or load mesh evidence with GLB/glTF when exact BRep assertions are not required.',
+            suggestion: `No kernel in this runtime offers a direct STEP/BRep route, so keep the requirement and report it as unsupported here. Load mesh evidence with ${meshAlternative} for the requirements a mesh can answer.`,
             details: {
               route: routeToProvenance(route),
+              meshAlternative: { format: 'glb', matchers: [...geoSpecMeshEvidenceMatchers] },
             },
           },
         ],

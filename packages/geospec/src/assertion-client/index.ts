@@ -15,7 +15,11 @@ export {
   type MinimumDistanceQuery,
   type MinimumDistanceResult,
 } from '#assertion-client/client.js';
-export { evaluateGeoSpecNativeQuery } from '#engine/client.js';
+export {
+  evaluateGeoSpecNativeQuery,
+  geoSpecMaximumWorkUnitLimit,
+  resolveGeoSpecMaximumWorkUnitLimit,
+} from '#engine/client.js';
 export type { GeoSpecNativeQueryOptions, GeoSpecQueryCapability } from '#engine/client.js';
 export type {
   GeoSpecPmiField,

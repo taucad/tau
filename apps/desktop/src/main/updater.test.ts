@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DesktopUpdaterOptions, SquirrelUpdater } from '#main/updater.js';
-import { availableUpdate, isNewerVersion, startDesktopUpdater, updateFeedUrl } from '#main/updater.js';
+import { availableUpdate, isNewerVersion, startDesktopUpdater, updateFeedUrl, updateSource } from '#main/updater.js';
 
 const feed = (version: string, tag = `desktop@${version}`, platform = 'darwin'): unknown => ({
   currentRelease: version,
@@ -82,11 +82,98 @@ describe('updateFeedUrl', () => {
   });
 });
 
+describe('managed update source', () => {
+  const mirror = 'https://mirror.example/tau';
+  const mirrored = (version: string): unknown => ({
+    currentRelease: version,
+    releases: [
+      {
+        version,
+        updateTo: {
+          version,
+          name: `desktop@${version}`,
+          url: `${mirror}/releases/${encodeURIComponent(`desktop@${version}`)}/Tau-macos-arm64.zip`,
+        },
+      },
+    ],
+  });
+
+  it('should read the public origin unless managed, and never fall back from a managed setting', () => {
+    expect(updateSource({}, 'production')).toEqual({ kind: 'origin', origin: 'https://downloads.tau.new' });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    expect(updateSource({ TAU_DESKTOP_UPDATE_FEED: `${mirror}/` }, 'production')).toEqual({
+      kind: 'origin',
+      origin: mirror,
+    });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    expect(updateSource({ TAU_ACQUISITION: 'locked', TAU_DESKTOP_UPDATE_FEED: mirror }, 'staging')).toEqual({
+      kind: 'origin',
+      origin: mirror,
+    });
+    for (const value of [
+      'not a url',
+      'http://mirror.example',
+      'https://user:pw@mirror.example',
+      'https://mirror.example/?x=1',
+    ]) {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+      expect(updateSource({ TAU_DESKTOP_UPDATE_FEED: value }, 'production').kind).toBe('disabled');
+    }
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    expect(updateSource({ TAU_DESKTOP_UPDATES: 'off', TAU_DESKTOP_UPDATE_FEED: mirror }, 'production').kind).toBe(
+      'disabled',
+    );
+  });
+
+  it('should explain why a managed desktop does not update', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    const updater = startDesktopUpdater(options({ environment: { TAU_ACQUISITION: 'locked' } }));
+    expect(updater.snapshot().phase).toBe('disabled');
+    expect(updater.status()).toContain('TAU_DESKTOP_UPDATE_FEED');
+  });
+
+  it('should check, validate and download only from the mirror', async () => {
+    const autoUpdater = squirrel();
+    const fetchJson = vi.fn(async () => mirrored('0.3.0'));
+    const updater = startDesktopUpdater(
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+      options({ autoUpdater, fetchJson, environment: { TAU_DESKTOP_UPDATE_FEED: mirror } }),
+    );
+
+    await expect(updater.check()).resolves.toMatchObject({ version: '0.3.0', tag: 'desktop@0.3.0' });
+    expect(fetchJson).toHaveBeenCalledWith(`${mirror}/latest/desktop-update-darwin-arm64.json`);
+    expect(autoUpdater.setFeedURL).toHaveBeenCalledWith({
+      url: `${mirror}/releases/desktop%400.3.0/desktop-update-darwin-arm64.json`,
+      serverType: 'json',
+    });
+  });
+
+  it('should refuse a mirrored feed that still names the public archive', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(
+      options({
+        autoUpdater,
+        fetchJson: vi.fn(async () => feed('0.3.0')),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+        environment: { TAU_DESKTOP_UPDATE_FEED: mirror },
+      }),
+    );
+
+    await expect(updater.check()).resolves.toBeUndefined();
+    expect(updater.snapshot().phase).toBe('error');
+    expect(autoUpdater.setFeedURL).not.toHaveBeenCalled();
+  });
+});
+
 describe('startDesktopUpdater', () => {
   it.each([
     ['unpackaged', { packaged: false }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     ['switched off', { environment: { TAU_DESKTOP_UPDATES: 'off' } }],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    ['locked without a mirror', { environment: { TAU_ACQUISITION: 'locked' } }],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+    ['given a plain-HTTP mirror', { environment: { TAU_DESKTOP_UPDATE_FEED: 'http://mirror.example/tau' } }],
   ] as const)('does nothing when %s', async (_case, overrides) => {
     const disabled = options(overrides);
     const updater = startDesktopUpdater(disabled);

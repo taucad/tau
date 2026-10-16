@@ -10,7 +10,7 @@ First-party runtime middleware toolkit for Tau
 
 ## Why @taucad/middleware?
 
-- **The five stages every host wants** — parameter file resolution, two caches, coordinate transform, edge detection.
+- **The six stages every host wants** — parameter file resolution, two caches, coordinate transform, edge detection, voxel display simplification.
 - **Kernel-agnostic** — each stage works on the runtime's own parameter and glTF shapes, never on a kernel's internals.
 - **Ordered by you** — the preset gives the canonical order; the role factories let you interleave your own stages.
 - **Onion-model hooks** — caches short-circuit on a hit and write on the way back up.
@@ -47,9 +47,16 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | `parameterCache`        | middleware factory | deprecated: a hit saves nothing, so no preset selects it; remove it from your list |
 | `geometryCache`         | middleware factory | content-addressable cache over `createGeometry` results                            |
 | `gltfEdgeDetection`     | middleware factory | adds CAD edge overlay primitives to triangle meshes                                |
+| `displaySimplification` | middleware factory | simplifies over-budget voxel preview meshes within half a voxel; exports untouched |
 
-Three presets: `default` selects `parameterFileResolver`, `parameterUnits`, `geometryCache` and
-`gltfEdgeDetection` in that order; `cache` selects `geometryCache`; `units` selects `parameterUnits`.
+Three presets: `default` selects `parameterFileResolver`, `parameterUnits`, `geometryCache`,
+`gltfEdgeDetection` and `displaySimplification` in that order; `cache` selects `geometryCache`; `units`
+selects `parameterUnits`.
+
+`displaySimplification({ maxTriangles })` acts only on a render whose tessellation report describes a
+voxel mesh over `maxTriangles` (default 2,000,000). It keeps the kernel's voxel size, simplifies the
+display mesh within half a voxel until it fits `maxTriangles`, updates the report's counts and adds a
+`DISPLAY_SIMPLIFIED` warning with `{ from, to, maxErrorMm }`. Exports pass through untouched.
 
 Ordering is the point: to interleave your own stages, compose the role factories in `defineRuntime`'s
 `middleware` bucket instead of calling `middleware()`.

@@ -21,7 +21,9 @@
 # Required env vars:
 #   None
 # Optional env vars:
-#   None
+#   TAU_E2E_SERVICES  `host` when PostgreSQL, Redis and MinIO already run as host processes
+#                     (a macOS runner has no Docker; see start-macos-services.sh), so only the
+#                     migration runs (default: start them with Docker Compose)
 #
 # Usage:
 #   apps/desktop-e2e/scripts/ensure-services.sh
@@ -37,10 +39,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # Compose v2 is a docker plugin (GitHub's Ubuntu runners ship only that); v1 is a
 # standalone binary some local installs still use.
-if docker compose version >/dev/null 2>&1; then
-  compose=(docker compose)
-else
-  compose=(docker-compose)
+if [ "${TAU_E2E_SERVICES:-}" != host ]; then
+  if docker compose version >/dev/null 2>&1; then
+    compose=(docker compose)
+  else
+    compose=(docker-compose)
+  fi
+  "${compose[@]}" -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
 fi
-"${compose[@]}" -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
 TAU_CLOUD_ENABLED=true pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate

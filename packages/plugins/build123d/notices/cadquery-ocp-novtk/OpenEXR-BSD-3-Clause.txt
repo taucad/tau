@@ -1,0 +1,487 @@
+OpenEXR and Imath (IlmBase): bundled in cadquery-ocp-novtk 7.9.3.1.1
+
+Licence: BSD-3-Clause
+Bundled as:
+  linux-x64-glibc: cadquery_ocp_novtk.libs/libHalf-614356b1.so.24.0.0, cadquery_ocp_novtk.libs/libIex-2_3-f9b27411.so.24.0.0, cadquery_ocp_novtk.libs/libIlmImf-2_3-72bfabbd.so.24.0.0, cadquery_ocp_novtk.libs/libIlmThread-2_3-b765c51d.so.24.0.0
+  linux-arm64-glibc: cadquery_ocp_novtk.libs/libHalf-caf2cfbb.so.24.0.0, cadquery_ocp_novtk.libs/libIex-2_3-012d99d6.so.24.0.0, cadquery_ocp_novtk.libs/libIlmImf-2_3-e84d6b4b.so.24.0.0, cadquery_ocp_novtk.libs/libIlmThread-2_3-42f3b71e.so.24.0.0
+  darwin-arm64: OCP/.dylibs/libImath.30.3.2.2.dylib, OCP/.dylibs/libIlmThread.33.3.4.12.dylib, OCP/.dylibs/libOpenEXR.33.3.4.12.dylib, OCP/.dylibs/libOpenEXRCore.33.3.4.12.dylib, OCP/.dylibs/libIex.33.3.4.12.dylib
+  darwin-x64: OCP/.dylibs/libImath.30.3.2.2.dylib, OCP/.dylibs/libIlmThread.33.3.4.12.dylib, OCP/.dylibs/libOpenEXR.33.3.4.12.dylib, OCP/.dylibs/libOpenEXRCore.33.3.4.12.dylib, OCP/.dylibs/libIex.33.3.4.12.dylib
+
+The Linux builds are Ubuntu 20.04 packages (libopenexr24 2.3.0-6ubuntu0.5; libilmbase24 2.3.0-6build1), as the
+wheel's dist-info/sboms/auditwheel.cdx.json records. Their licence is Ubuntu's debian/copyright
+for that source version, reproduced below.
+
+The macOS builds are conda-forge builds of the upstream release; the upstream licence below applies.
+
+==============================================================================
+debian/copyright, https://changelogs.ubuntu.com/changelogs/pool/universe/o/openexr/openexr_2.3.0-6ubuntu0.5/copyright
+==============================================================================
+
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: openexr
+Upstream-Contact: openexr-devel@nongnu.org
+Source: http://www.openexr.com/
+
+Files: *
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImf/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImf/ImfCompositeDeepScanLine.cpp
+  IlmImf/ImfCompositeDeepScanLine.h
+  IlmImf/ImfDeepCompositing.cpp
+  IlmImf/ImfDeepCompositing.h
+  IlmImf/ImfFloatVectorAttribute.h
+  IlmImf/ImfMultiView.cpp
+  IlmImf/ImfMultiView.h
+  IlmImf/ImfPartHelper.h
+  IlmImf/ImfStringVectorAttribute.cpp
+  IlmImf/ImfStringVectorAttribute.h
+Copyright: 2007, 2012, 2013, Weta Digital Ltd
+License: BSD-3-clause
+
+Files: IlmImf/ImfDwaCompressor.cpp
+  IlmImf/ImfDwaCompressor.h
+  IlmImf/ImfDwaCompressorSimd.h
+  IlmImf/ImfFastHuf.cpp
+  IlmImf/ImfFastHuf.h
+  IlmImf/ImfSystemSpecific.cpp
+  IlmImf/dwaLookups.cpp
+Copyright: 2009-2014, DreamWorks Animation LLC.
+License: BSD-3-clause
+
+Files: IlmImf/ImfForward.h
+  IlmImf/ImfMultiPartOutputFile.h
+Copyright: 2012, Weta Digital Ltd
+  2011, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImf/ImfOptimizedPixelReading.h
+  IlmImf/ImfSimd.h
+Copyright: 2012, Autodesk, Inc.
+License: BSD-3-clause
+
+Files: IlmImf/ImfPxr24Compressor.cpp
+  IlmImf/ImfPxr24Compressor.h
+Copyright: 2004, Pixar Animation Studios
+License: BSD-3-clause
+
+Files: IlmImf/ImfRgbaYca.cpp
+  IlmImf/ImfRgbaYca.h
+Copyright: held/ 2004, Industrial Light & Magic, a division of Lucasfilm
+License: BSD-3-clause
+
+Files: IlmImf/Makefile.am
+  IlmImf/b44ExpLogTable.h
+  IlmImf/dwaLookups.h
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImf/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: IlmImfExamples/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfExamples/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImfExamples/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: IlmImfFuzzTest/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfFuzzTest/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImfFuzzTest/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: IlmImfTest/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfTest/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImfTest/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: IlmImfTest/compareB44.cpp
+  IlmImfTest/compareB44.h
+Copyright: held/ 2006, Industrial Light & Magic, a division of Lucasfilm
+License: BSD-3-clause
+
+Files: IlmImfTest/compareDwa.cpp
+  IlmImfTest/compareDwa.h
+  IlmImfTest/testDwaCompressorSimd.cpp
+  IlmImfTest/testDwaCompressorSimd.h
+  IlmImfTest/testRle.cpp
+  IlmImfTest/testRle.h
+Copyright: 2009-2014, DreamWorks Animation LLC.
+License: BSD-3-clause
+
+Files: IlmImfTest/compareFloat.cpp
+  IlmImfTest/compareFloat.h
+Copyright: held/ 2004, Industrial Light & Magic, a division of Lucasfilm
+License: BSD-3-clause
+
+Files: IlmImfTest/testBadTypeAttributes.cpp
+  IlmImfTest/testBadTypeAttributes.h
+  IlmImfTest/testCompositeDeepScanLine.cpp
+  IlmImfTest/testCompositeDeepScanLine.h
+  IlmImfTest/testDeepScanLineMultipleRead.cpp
+  IlmImfTest/testDeepScanLineMultipleRead.h
+  IlmImfTest/testFutureProofing.h
+  IlmImfTest/testOptimizedInterleavePatterns.cpp
+  IlmImfTest/testOptimizedInterleavePatterns.h
+  IlmImfTest/testPartHelper.cpp
+  IlmImfTest/testPartHelper.h
+Copyright: 2007, 2012, 2013, Weta Digital Ltd
+License: BSD-3-clause
+
+Files: IlmImfTest/testConversion.cpp
+Copyright: held/ 2003-2012, Industrial Light & Magic, a division of Lucasfilm
+License: BSD-3-clause
+
+Files: IlmImfTest/testCopyDeepScanLine.cpp
+  IlmImfTest/testCopyDeepScanLine.h
+  IlmImfTest/testCopyMultiPartFile.h
+Copyright: 2012, Weta Digital Ltd
+  2011, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfTest/testCopyMultiPartFile.cpp
+  IlmImfTest/testFutureProofing.cpp
+  IlmImfTest/testInputPart.cpp
+  IlmImfTest/testMultiPartFileMixingBasic.cpp
+Copyright: 2012, 2013, Weta Digital Ltd
+  2011, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfTest/testMultiView.cpp
+  IlmImfTest/testMultiView.h
+Copyright: 2012, Industrial Light & Magic, a division of Lucasfilm
+  2007, Weta Digital Ltd
+License: BSD-3-clause
+
+Files: IlmImfTest/testTiledYa.cpp
+  IlmImfTest/testTiledYa.h
+  IlmImfTest/testYca.cpp
+  IlmImfTest/testYca.h
+Copyright: held/ 2004-2012, Industrial Light & Magic, a division of Lucasfilm
+License: BSD-3-clause
+
+Files: IlmImfUtil/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfUtil/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImfUtil/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: IlmImfUtilTest/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: IlmImfUtilTest/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: IlmImfUtilTest/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: Makefile.in
+  openexr.m4
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: PATENTS
+Copyright: able works distributedDreamWorks Animation as part of the OpenEXR
+License: openexr
+
+Files: aclocal.m4
+  depcomp
+  ltmain.sh
+  missing
+Copyright: 1996-2013, Free Software Foundation, Inc.
+License: GPL-2+
+
+Files: config/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: debian/*
+Copyright: 2014, Matteo F. Vescovi <mfv@debian.org>
+  2014, Mathieu Malaterre <malat@debian.org>
+  2009, Cyril Brulebois <kibi@debian.org>
+  2007, 2008, Adeodato Simó <dato@debian.org>
+License: openexr
+
+Files: debian/rules
+Copyright: 2009, Cyril Brulebois <kibi@debian.org>
+License: openexr
+
+Files: doc/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrenvmap/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrenvmap/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: exrenvmap/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrheader/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrheader/main.cpp
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrmakepreview/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrmakepreview/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: exrmakepreview/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrmaketiled/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrmaketiled/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: exrmaketiled/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrmultipart/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrmultipart/exrmultipart.cpp
+Copyright: heldothers as indicated. / 2012, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrmultiview/*
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+Files: exrmultiview/Makefile.am
+Copyright: 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: openexr
+
+Files: exrmultiview/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrstdattr/Makefile.in
+Copyright: 1994-2013, Free Software Foundation, Inc.
+License: openexr
+
+Files: exrstdattr/main.cpp
+Copyright: 2002-2014, Industrial Light & Magic, a division of Lucas
+License: BSD-3-clause
+
+License: BSD-3-clause
+ This software is Copyright (c) 2019 by foo.
+ .
+ This is free software, licensed under:
+ .
+   The (three-clause) BSD License
+ .
+ The BSD License
+ .
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are
+ met:
+ .
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+ .
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution. 
+ .
+   * Neither the name of foo nor the names of its
+     contributors may be used to endorse or promote products derived from
+     this software without specific prior written permission. 
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+License: GPL-2+
+ This software is Copyright (c) 2019 by foo.
+ .
+ This is free software, licensed under:
+ .
+   The GNU General Public License, Version 2, June 1991
+ .
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; version 2 dated June, 1991, or (at
+ your option) any later version.
+ On Debian systems, the complete text of version 2 of the GNU General
+ Public License can be found in '/usr/share/common-licenses/GPL-2'.
+
+License: openexr
+ All rights reserved.
+ .
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are
+ met:
+ *       Redistributions of source code must retain the above copyright
+ notice, this list of conditions and the following disclaimer.
+ *       Redistributions in binary form must reproduce the above
+ copyright notice, this list of conditions and the following disclaimer
+ in the documentation and/or other materials provided with the
+ distribution.
+ *       Neither the name of Industrial Light & Magic nor the names of
+ its contributors may be used to endorse or promote products derived
+ from this software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+==============================================================================
+debian/copyright, https://changelogs.ubuntu.com/changelogs/pool/universe/i/ilmbase/ilmbase_2.3.0-6build1/copyright
+==============================================================================
+
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ilmbase
+Upstream-Author: Florian Kainz <kainz@ilm.com>
+                 Rod Bogart <rgb@ilm.com>
+                 Drew Hess <dhess@ilm.com>
+                 Bill Anderson <wja@ilm.com>
+                 Wojciech Jarosz <wjarosz@ucsd.edu>
+Source: http://www.openexr.com/
+
+Files: *
+Copyright: 2005, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC
+License: ilmbase
+
+Files: debian/*
+Copyright: 2007-2008 Adeodato Simó <dato@debian.org>
+           2009 Cyril Brulebois <kibi@debian.org>
+           2014 Mathieu Malaterre <malat@debian.org>
+           2014 Matteo F. Vescovi <mfv@debian.org>
+License: ilmbase
+
+Files: Imath/ImathPlatform.h
+Copyright: 2001 Boost.org
+License: boost
+ Permission to copy, use, modify, sell and and distribute this
+ software is granted provided this copyright notice appears in all
+ copies. This software is provided "as is" without express or implied
+ warranty, and with no claim as to its suitability for any purpose.
+
+License: ilmbase
+ All rights reserved.
+ .
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are
+ met:
+ *       Redistributions of source code must retain the above copyright
+ notice, this list of conditions and the following disclaimer.
+ *       Redistributions in binary form must reproduce the above
+ copyright notice, this list of conditions and the following disclaimer
+ in the documentation and/or other materials provided with the
+ distribution.
+ *       Neither the name of Industrial Light & Magic nor the names of
+ its contributors may be used to endorse or promote products derived
+ from this software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+==============================================================================
+https://raw.githubusercontent.com/AcademySoftwareFoundation/openexr/v3.4.12/LICENSE.md
+==============================================================================
+
+Copyright (c) Contributors to the OpenEXR Project. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+==============================================================================
+https://raw.githubusercontent.com/AcademySoftwareFoundation/Imath/v3.2.2/LICENSE.md
+==============================================================================
+
+Copyright Contributors to the OpenEXR Project. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

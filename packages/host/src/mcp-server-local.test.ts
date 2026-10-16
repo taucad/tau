@@ -20,10 +20,11 @@ import { z } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import type * as TauMcp from '@taucad/mcp';
 import type { TauMcpServerOptions } from '@taucad/mcp';
-import type { HostToolInvocation, HostToolResult, ToolRegistry } from '@taucad/agent-host';
+import type { HostToolDefinition, HostToolInvocation, HostToolResult, ToolRegistry } from '@taucad/agent-host';
 
 import { serveLocalHostMcp } from '#mcp-server.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
+import { testModelTool } from '#test-model-tool.fixture.js';
 
 const served = vi.hoisted(() => ({ options: undefined as TauMcpServerOptions | undefined, closed: 0 }));
 
@@ -43,16 +44,20 @@ vi.mock('@taucad/mcp', async (importOriginal) => ({
  * Serve over a registry that answers every call with `answer`.
  *
  * @param answer - The registry's result for any invocation.
- * @param options - Default folder and whether the launcher pinned it.
+ * @param options - Default folder, whether the launcher pinned it, and what the registry lists.
  * @returns The served dispatch, the recorded invocations, the run → root map and the local server.
  */
 const serve = async (
   answer: HostToolResult,
-  options?: { readonly workspaceRoot: string; readonly pinned?: boolean },
+  options?: {
+    readonly workspaceRoot?: string;
+    readonly pinned?: boolean;
+    readonly listed?: readonly HostToolDefinition[];
+  },
 ) => {
   const invocations: HostToolInvocation[] = [];
   const registry: ToolRegistry = {
-    list: () => [],
+    list: () => [...(options?.listed ?? [testModelTool])],
     invoke: async (invocation) => {
       invocations.push(invocation);
       return answer;
@@ -93,6 +98,27 @@ const exists = async (path: string): Promise<boolean> => {
 };
 
 describe('serveLocalHostMcp', () => {
+  it('should list test_model only over a registry that offers it', async () => {
+    const withEngine = await serve(ready);
+    try {
+      expect(served.options?.cadTools).toEqual([
+        toolName.evaluateModel,
+        toolName.testModel,
+        toolName.screenshot,
+        toolName.exportModel,
+      ]);
+    } finally {
+      await withEngine.local.close();
+    }
+
+    const { local } = await serve(ready, { listed: [] });
+    try {
+      expect(served.options?.cadTools).toEqual([toolName.evaluateModel, toolName.screenshot, toolName.exportModel]);
+    } finally {
+      await local.close();
+    }
+  });
+
   it('should work in the folder a call names, else the default folder', async () => {
     const { dispatch, invocations, checkouts, local } = await serve(ready);
     try {
@@ -223,7 +249,7 @@ describe('serveLocalHostMcp', () => {
     await writeFile(join(root, 'main.ts'), '');
     const invocations: HostToolInvocation[] = [];
     const registry: ToolRegistry = {
-      list: () => [],
+      list: () => [testModelTool],
       invoke: async (invocation) => {
         invocations.push(invocation);
         await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });

@@ -86,6 +86,7 @@ const buildResult = (id = 'component:picogk-1') => ({
     picoGkNativeBytes: 0,
     processWorkingSetBytes: 20,
   },
+  voxelSize: 0.25,
 });
 
 const contextData = () => ({
@@ -312,6 +313,23 @@ describe('PicoGK kernel', () => {
     );
   });
 
+  it('renders a protocol-8 worker build without a voxel size, and raises no issue for it', async () => {
+    const value = context();
+    const { voxelSize: _voxelSize, ...withoutVoxelSize } = buildResult();
+    value.session.request.mockResolvedValueOnce(withoutVoxelSize);
+
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    const artifact = await definition.render!({ view: 'model', handle: built.handle, options: {} }, runtime, value);
+
+    expect(built.issues).toEqual([]);
+    expect(artifact.tessellation).toEqual({
+      triangles: 1,
+      vertices: 3,
+      elapsed: workerTimings.meshConstruction + workerTimings.meshExtraction + workerTimings.normalGeneration,
+    });
+    expect(artifact.tessellation).not.toHaveProperty('voxelSize');
+  });
+
   it('warns when a root .csproj references PicoGK at a version the kernel does not run', async () => {
     const value = context();
     value.mirror.sync.mockResolvedValueOnce(['Plate.csproj', 'main.cs', 'tools/Other.csproj']);
@@ -372,6 +390,7 @@ describe('PicoGK kernel', () => {
       triangles: 1,
       vertices: 3,
       elapsed: workerTimings.meshConstruction + workerTimings.meshExtraction + workerTimings.normalGeneration,
+      voxelSize: 0.25,
     });
     const serialized = definition.serializeHandle!({ handle }, runtime, value);
     const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtime, value);
@@ -381,6 +400,24 @@ describe('PicoGK kernel', () => {
     expect(definition.deserializeHandle!({ serialized: new Uint8Array(handle.glb) }, runtime, value)).toEqual({
       glb: handle.glb,
     });
+    // A snapshot written before the report carried the voxel size still restores, without one.
+    const { voxelSize: _voxelSize, ...withoutVoxelSize } = handle.tessellation!;
+    expect(
+      definition.deserializeHandle!(
+        { serialized: { glb: handle.glb, tessellation: withoutVoxelSize } },
+        runtime,
+        value,
+      ),
+    ).toEqual({ glb: handle.glb, tessellation: withoutVoxelSize });
+    const restoreWithVoxelSize = (voxelSize: number) => () =>
+      definition.deserializeHandle!(
+        { serialized: { glb: handle.glb, tessellation: { ...handle.tessellation!, voxelSize } } },
+        runtime,
+        value,
+      );
+    for (const voxelSize of [0, -1, Number.POSITIVE_INFINITY]) {
+      expect(restoreWithVoxelSize(voxelSize)).toThrow();
+    }
     expect(() =>
       definition.deserializeHandle!(
         { serialized: { glb: handle.glb, tessellation: { ...handle.tessellation!, triangles: -1 } } },

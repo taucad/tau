@@ -5,7 +5,7 @@
  */
 
 import { getCollector } from '#runner/collector.js';
-import type { GeoSpecMatcher } from '#runner/types.js';
+import type { GeoSpecExpectOptions, GeoSpecMatcher } from '#runner/types.js';
 import { expectGeoSubject } from '#model/subject-assertions.js';
 import type { GeoSpecSubject } from '#model/subject.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
@@ -65,11 +65,12 @@ export const test = it;
  * Start a geometry assertion chain.
  *
  * @param subject - geometry subject under test.
+ * @param options - Optional chain options, such as a larger `workUnitLimit` for a claim that refused with `MATCHER_TIMEOUT`.
  * @returns GeoSpec geometry matchers.
  * @public
  */
-export function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher {
-  return expectGeoSubject(subject);
+export function expectGeo(subject: GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecMatcher {
+  return expectGeoSubject(subject, options);
 }
 
 /**

@@ -63,7 +63,7 @@ Options:
 
 const args = parseArgs(process.argv.slice(2));
 const { samples } = args;
-const options = { tessellation: { segments: 0, minimumAngle: 12, minimumSize: 2 } } as const;
+const options = { tessellation: { segments: 0, angularTolerance: 12, linearTolerance: 2 } } as const;
 const fixtureEntries = [
   resolve('packages/plugins/openrscad/src/fixtures/planetary-gearbox/main.scad'),
   resolve('libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad'),

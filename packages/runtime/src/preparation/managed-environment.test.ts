@@ -101,7 +101,14 @@ describe('describeEffectiveProfile', () => {
         TAU_ACQUISITION: 'locked',
         TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/',
       }),
-      environment: { NODE_EXTRA_CA_CERTS: '/etc/corp-ca.pem' },
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/etc/corp-ca.pem',
+        HTTPS_PROXY: 'http://user:secret@proxy.corp.example:3128',
+        TAU_ACQUISITION: 'locked',
+        TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/',
+        TAU_PAYLOAD_DIR: ' ',
+        UNRELATED: 'value',
+      },
       execArgv: ['--use-system-ca'],
     });
 
@@ -114,7 +121,9 @@ describe('describeEffectiveProfile', () => {
       emulation: true,
       proxy: 'none',
       ca: 'system',
+      variables: ['TAU_ACQUISITION', 'TAU_PAYLOAD_MIRROR', 'HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS'],
       closures,
     });
+    expect(JSON.stringify(profile)).not.toContain('secret');
   });
 });

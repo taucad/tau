@@ -6,6 +6,7 @@ import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { sourceRevisionFileDigest } from '#framework/kernel-worker.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
+import type { TessellationReport } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
@@ -2153,5 +2154,184 @@ describe('issues carried by a throwing evaluate or render', () => {
     } finally {
       await worker.cleanup();
     }
+  });
+});
+
+describe('issues carried by a throwing export', () => {
+  const budgetIssue = {
+    message: 'Export tessellation produced 20000001 triangles, over the 20000000-triangle export budget.',
+    code: 'RESOURCE_LIMIT',
+    type: 'kernel',
+    severity: 'error',
+    details: {
+      producer: 'fixture',
+      requested: { form: 'fine', linearTolerance: 0.01, angularTolerance: 5 },
+      suggested: { linearTolerance: 0.02, angularTolerance: 9 },
+      triangles: 20_000_001,
+      budget: 20_000_000,
+    },
+  } as const;
+
+  class FixtureBuildError extends Error {
+    public readonly issues: unknown[];
+    public constructor(issues: unknown[]) {
+      super('fixture build failed');
+      this.issues = issues;
+    }
+  }
+
+  const exportFailure = async (
+    thrown: unknown,
+  ): Promise<Awaited<ReturnType<KernelRuntimeWorker['exportDocument']>>> => {
+    const kernel = defineKernelV2({
+      id: 'throwing-export',
+      extensions: ['circuit'] as const,
+      name: 'Throwing export kernel',
+      version: '1.0.0',
+      views: {},
+      exports: { mesh: { title: 'Mesh', mimeType: 'model/stl', extension: 'stl' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: [] as const, exports: ['mesh'] as const };
+      },
+      async export() {
+        throw thrown;
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      return await worker.exportDocument({ documentId: 'doc', operationId: 'export', target: 'mesh' });
+    } finally {
+      await worker.cleanup();
+    }
+  };
+
+  it('should surface a RESOURCE_LIMIT issue thrown by export with its details intact', async () => {
+    const result = await exportFailure(new FixtureBuildError([budgetIssue]));
+
+    expect(result.success).toBe(false);
+    expect(result.issues).toEqual([expect.objectContaining(budgetIssue)]);
+    expect(result.issues.some((issue) => issue.code === 'KERNEL_BINDING_FAILED')).toBe(false);
+  });
+
+  it('should keep a ZodError thrown by export as KERNEL_BINDING_FAILED', async () => {
+    const zodFailure = z.object({ wasmUrl: z.string() }).safeParse({}).error ?? new Error('The fixture accepted.');
+    const result = await exportFailure(zodFailure);
+
+    expect(result.success).toBe(false);
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: 'KERNEL_BINDING_FAILED', severity: 'error', message: zodFailure.message }),
+    ]);
+  });
+});
+
+describe('effective tessellation on the render span', () => {
+  const renderMeshSpan = async (
+    tessellation: TessellationReport | undefined,
+  ): Promise<Record<string, unknown> | undefined> => {
+    const kernel = defineKernelV2({
+      id: 'reporting-render',
+      extensions: ['circuit'] as const,
+      name: 'Reporting render kernel',
+      version: '1.0.0',
+      views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['model'] as const, exports: [] as const };
+      },
+      async render() {
+        return { content: '<svg/>', ...(tessellation === undefined ? {} : { tessellation }) };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
+    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'request', view: 'model' });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      expect(rendered[0]?.success, JSON.stringify(rendered[0]?.issues)).toBe(true);
+      worker.flushTelemetry();
+      return telemetry.find(({ name }) => name === 'kernel.mesh')?.detail;
+    } finally {
+      await worker.cleanup();
+    }
+  };
+
+  it('should set tessellation.effective attributes from the render report', async () => {
+    const detail = await renderMeshSpan({
+      triangles: 56_240,
+      vertices: 28_122,
+      elapsed: 4700,
+      requested: 'medium',
+      linearTolerance: 0.1,
+      angularTolerance: 17,
+      downgraded: 0,
+    });
+
+    expect(detail).toMatchObject({
+      'tessellation.effective.form': 'preset',
+      'tessellation.effective.preset': 'medium',
+      'tessellation.effective.linearTolerance': 0.1,
+      'tessellation.effective.angularTolerance': 17,
+      'tessellation.effective.triangles': 56_240,
+      'tessellation.effective.elapsed': 4700,
+      'tessellation.effective.downgraded': false,
+      'tessellation.effective.simplified': false,
+    });
+  });
+
+  it('should leave tessellation.effective attributes off a render without a report', async () => {
+    const detail = await renderMeshSpan(undefined);
+
+    expect(detail).toBeDefined();
+    expect(Object.keys(detail ?? {}).filter((key) => key.startsWith('tessellation.'))).toEqual([]);
   });
 });

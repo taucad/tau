@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — parameter-unit inference and shared content codecs",
+    "name": "total (ESM JS) — parameter-unit inference, shared content codecs and voxel display simplification",
     "path": "dist/**/*.mjs",
-    "limit": "7.5 kB"
+    "limit": "9.5 kB"
   }
 ]

@@ -172,7 +172,9 @@ describe('@taucad/runtime-testing', () => {
       'ws',
     ]);
     const offenders = readdirSync(sourceDirectory, { encoding: 'utf8', recursive: true })
-      .filter((name) => name.endsWith('.ts') && !name.includes('.test'))
+      // `preparation/` is the Node-only `./preparation` subpath (archives, a loopback mirror, the seed layout); the
+      // browser entry must never reach it, which the next test asserts.
+      .filter((name) => name.endsWith('.ts') && !name.includes('.test') && !name.startsWith('preparation/'))
       .flatMap((name) => {
         const source = readFileSync(join(sourceDirectory, name), 'utf8')
           .replaceAll(/\/\*[\S\s]*?\*\//g, '')
@@ -194,5 +196,14 @@ describe('@taucad/runtime-testing', () => {
       });
 
     expect(offenders).toEqual([]);
+  });
+
+  it('keeps the Node-only preparation subpath out of the browser entry', () => {
+    const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+    const entries = ['index.ts', 'browser/three-renderer-output.ts'].map((name) =>
+      readFileSync(join(sourceDirectory, name), 'utf8'),
+    );
+
+    expect(entries.filter((source) => source.includes('preparation'))).toEqual([]);
   });
 });

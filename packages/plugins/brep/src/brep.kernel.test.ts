@@ -1,6 +1,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { getBounds, WebIO } from '@gltf-transform/core';
 import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
@@ -59,5 +60,22 @@ describe('brepKernel', () => {
       },
     });
     expect(ordered.first).toEqual(artifact.content);
+  });
+
+  it.each(['cube.step', 'cube-brep.iges', 'cube.brep'])('renders %s in meters, as glTF requires', async (name) => {
+    const bytes = new Uint8Array(readFileSync(new URL(`fixtures/${name}`, import.meta.url)));
+    runtime.filesystem.mocks.readdir.mockResolvedValueOnce([name]);
+    runtime.filesystem.mocks.stat.mockResolvedValueOnce({ type: 'file', size: bytes.length, mtimeMs: 0 });
+    runtime.filesystem.mocks.readFile.mockResolvedValue(bytes);
+
+    const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
+    const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
+    const document = await new WebIO().readBinary(artifact.content as Uint8Array<ArrayBuffer>);
+    const { min, max } = getBounds(document.getRoot().getDefaultScene() ?? document.getRoot().listScenes()[0]!);
+
+    // Each fixture is a 2 mm cube.
+    for (const axis of [0, 1, 2]) {
+      expect(max[axis]! - min[axis]!).toBeCloseTo(0.002, 6);
+    }
   });
 });

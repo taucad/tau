@@ -246,7 +246,7 @@ const exportModelRpc = defineRpc({
 });
 
 const captureImagesRpc = defineRpc({
-  input: screenshotInputSchema.extend({ includeEdges: zod.boolean().optional() }).strict(),
+  input: screenshotInputSchema,
   success: screenshotOutputSchema,
 });
 

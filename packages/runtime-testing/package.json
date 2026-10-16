@@ -1,6 +1,6 @@
 {
   "name": "@taucad/runtime-testing",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.5",
   "description": "Runtime and geometry test utilities for Tau plugin authors",
   "type": "module",
   "sideEffects": false,
@@ -35,6 +35,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./browser/three-renderer-output": "./src/browser/three-renderer-output.ts",
+    "./preparation": "./src/preparation/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -49,6 +50,11 @@
         "types": "./dist/browser/three-renderer-output.d.mts",
         "import": "./dist/browser/three-renderer-output.mjs",
         "default": "./dist/browser/three-renderer-output.mjs"
+      },
+      "./preparation": {
+        "types": "./dist/preparation/index.d.mts",
+        "import": "./dist/preparation/index.mjs",
+        "default": "./dist/preparation/index.mjs"
       },
       "./package.json": "./package.json"
     },

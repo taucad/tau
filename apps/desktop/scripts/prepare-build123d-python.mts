@@ -190,14 +190,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     throw new Error(`Unsupported Python resource target: ${targetName}`);
   }
   const output = resolve(resourceRoot, targetName);
-  const workerFiles = [
-    'worker.py',
-    'analyzer.py',
-    'glb.py',
-    'native_materials.py',
-    'mechanisms.py',
-    'tau_assembly.py',
-  ] as const;
+  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'] as const;
   const sourceFilesSha256 = createHash('sha256');
   const sourceContents = await Promise.all(
     [

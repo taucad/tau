@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-10-01'
+updated: '2026-10-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -532,7 +532,6 @@ Before merging a PR that touches a publishable package's `package.json` or `tsdo
 
 - **tsdown's `exports: true` auto-generation is experimental** as of v0.21.x and not yet adopted (would collapse the `exports`/`publishConfig.exports` map into a single source-of-truth derived from `entry`). Track and reassess at v0.2 of each package.
 - **`@arethetypeswrong/core` programmatic API is not yet wrapped by `tools/pkgcheck.ts`** — the orchestrator shells out to the workspace-local `attw --pack . --format table` CLI. Output parsing is line-based and brittle. Replace with the programmatic API once `tsdown.dev/options/lint`'s integration covers all current `pkgcheck` checks.
-- **`size-limit` is opt-in via `.size-limit.json`** — not every publishable package declares one. Packages without a `.size-limit.json` skip the size check silently. Add a `.size-limit.json` to every publishable package as the next sweep.
 - **Provenance verification is consumer-side only.** This policy mandates `npm publish --provenance` (per `release-policy.md`), but a malicious release still passes its own signing. Provenance gives auditability, not absence of compromise.
 
 ## References

@@ -124,3 +124,87 @@ export const composeManifest = (manifest: Json, record: PicogkLayerRecord): Json
  * @returns Its file text.
  */
 export const manifestText = (manifest: Json): string => `${JSON.stringify(manifest, undefined, 2)}\n`;
+
+const hexOf = (integrity: string): { readonly algorithm: string; readonly hex: string } => {
+  const dash = integrity.indexOf('-');
+  return {
+    algorithm: integrity.slice(0, dash).replace(/^sha/u, 'SHA-'),
+    hex: Buffer.from(integrity.slice(dash + 1), 'base64').toString('hex'),
+  };
+};
+
+const dotnetVersionPattern = /\/Runtime\/(?<version>[^/]+)\/dotnet-runtime-/u;
+const layerTagPattern = /\/releases\/download\/(?<tag>picogk-layer-[\da-f]{16})\/(?<asset>[^/]+)$/u;
+
+/**
+ * The CycloneDX 1.6 SBOM of the closure a manifest pins (charter D26): one component per payload and target, with its
+ * purl, its pinned hash, its licence where the publisher states one, and a `distribution` reference to each URL. The
+ * layer's own inventory (PicoGK, Roslyn, SkiaSharp and the engine's native sources) is the SBOM inside the layer,
+ * `tau-worker/tau-picogk-sbom.cdx.json`, which the component names.
+ * @param manifest - The parsed `tau-plugin.json`.
+ * @returns The SBOM document.
+ * @throws When a payload is not one this rule knows how to describe.
+ */
+export const composeSbom = (manifest: Json): Json => {
+  const variants = (manifest['dependencies'] as Json | undefined)?.['runtime'];
+  const components: Json[] = [];
+  for (const variant of Array.isArray(variants) ? (variants as Json[]) : []) {
+    const target = variant['target'] as Json;
+    const targetName = `${String(target['os'])}-${String(target['arch'])}`;
+    for (const payload of (variant['payloads'] as Json[] | undefined) ?? []) {
+      const urls = ((payload['origin'] as Json | undefined)?.['urls'] as string[] | undefined) ?? [];
+      const { algorithm, hex } = hexOf(String(payload['integrity']));
+      const shared = {
+        hashes: [{ alg: algorithm, content: hex }],
+        externalReferences: urls.map((url) => ({ type: 'distribution', url })),
+        properties: [{ name: 'taucad:target', value: targetName }],
+      };
+      if (payload['name'] === 'dotnet') {
+        const version = dotnetVersionPattern.exec(urls[0] ?? '')?.groups?.['version'];
+        if (version === undefined) {
+          throw new Error(`The dotnet payload URL ${String(urls[0])} names no runtime version.`);
+        }
+        components.push({
+          'bom-ref': hex,
+          type: 'platform',
+          supplier: { name: 'Microsoft' },
+          name: 'dotnet-runtime',
+          version,
+          purl: `pkg:generic/microsoft/dotnet-runtime@${version}?download_url=${encodeURIComponent(urls[0] ?? '')}`,
+          licenses: [{ expression: 'MIT' }],
+          ...shared,
+        });
+        continue;
+      }
+      const release = urls.map((url) => layerTagPattern.exec(url)?.groups).find((groups) => groups !== undefined);
+      if (payload['name'] !== 'worker' || release === undefined) {
+        throw new Error(`The SBOM rule does not describe the ${String(payload['name'])} payload.`);
+      }
+      components.push({
+        'bom-ref': hex,
+        type: 'library',
+        supplier: { name: 'Tau' },
+        name: 'tau-picogk-layer',
+        version: release['tag'],
+        purl: `pkg:github/taucad/tau@${String(release['tag'])}?file_name=${String(release['asset'])}`,
+        ...shared,
+        properties: [...shared.properties, { name: 'taucad:sbom', value: 'tau-worker/tau-picogk-sbom.cdx.json' }],
+      });
+    }
+  }
+  return {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.6',
+    version: 1,
+    metadata: {
+      component: {
+        type: 'application',
+        'bom-ref': '@taucad/picogk',
+        name: '@taucad/picogk',
+        description:
+          "The native PicoGK runtime closure: Microsoft's .NET runtime archive and the Tau framework-dependent layer.",
+      },
+    },
+    components: components.toSorted((left, right) => String(left['bom-ref']).localeCompare(String(right['bom-ref']))),
+  };
+};

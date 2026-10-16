@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolveRuntimeExportIntent } from '#model/export-intent.js';
+import { geoSpecMeshEvidenceMatchers, resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
 
 function createRuntime(): GeoSpecRuntimeClient;
@@ -228,8 +228,75 @@ describe('resolveRuntimeExportIntent', () => {
     expect(intent.diagnostics[0]).toMatchObject({
       code: 'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
       severity: 'error',
-      suggestion:
-        'Request a runtime export route that preserves exact STEP/BRep evidence, or load mesh evidence with GLB/glTF when exact BRep assertions are not required.',
+      details: { meshAlternative: { format: 'glb', matchers: [...geoSpecMeshEvidenceMatchers] } },
+    });
+    expect(intent.diagnostics[0]?.suggestion).toContain("format: 'glb'");
+    expect(intent.diagnostics[0]?.suggestion).not.toContain("format: 'step'");
+  });
+
+  describe('with the evaluating kernel', () => {
+    const routes = [
+      {
+        kernelId: 'replicad',
+        sourceFormat: 'step',
+        targetFormat: 'step',
+        fidelity: 'brep',
+        exportOptions: { schema: { properties: { coordinateSystem: {} } }, defaults: {} },
+      },
+      {
+        kernelId: 'picovoxel',
+        sourceFormat: 'glb',
+        targetFormat: 'glb',
+        fidelity: 'mesh',
+        exportOptions: { schema: { properties: { coordinateSystem: {}, unit: {} } }, defaults: {} },
+      },
+    ];
+    const routeAwareRuntime = () =>
+      createRuntime({
+        capabilities: { routes },
+        bestRouteFor: vi.fn((format: string, request?: { kernelId?: string }) =>
+          routes.find(
+            (route) =>
+              route.targetFormat === format && (request?.kernelId === undefined || route.kernelId === request.kernelId),
+          ),
+        ),
+      });
+
+    it('should report BRep matchers unsupported on a kernel without a STEP route and name the mesh alternative', () => {
+      const runtime = routeAwareRuntime();
+
+      const intent = resolveRuntimeExportIntent({ runtime, format: 'step', kernelId: 'picovoxel' });
+
+      expect(runtime.bestRouteFor).toHaveBeenCalledWith('step', { kernelId: 'picovoxel' });
+      if (!('success' in intent)) {
+        throw new Error('Expected a kernel-aware refusal.');
+      }
+      expect(intent.diagnostics).toStrictEqual([
+        expect.objectContaining({
+          code: 'GEOSPEC_KERNEL_BREP_UNSUPPORTED',
+          severity: 'error',
+          details: {
+            format: 'step',
+            kernelId: 'picovoxel',
+            meshAlternative: { format: 'glb', matchers: [...geoSpecMeshEvidenceMatchers] },
+          },
+        }),
+      ]);
+      expect(intent.diagnostics[0]?.message).toContain("Kernel 'picovoxel'");
+      expect(intent.diagnostics[0]?.suggestion).not.toMatch(/format: 'step'|load the model as step/iu);
+    });
+
+    it('should keep the direct BRep route of a kernel that has one', () => {
+      const intent = resolveRuntimeExportIntent({
+        runtime: routeAwareRuntime(),
+        format: 'step',
+        kernelId: 'replicad',
+      });
+
+      expect(intent).toMatchObject({
+        options: { coordinateSystem: 'z-up' },
+        provenance: { route: { kernelId: 'replicad', direct: true } },
+      });
     });
   });
 

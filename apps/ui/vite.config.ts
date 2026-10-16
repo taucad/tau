@@ -18,6 +18,8 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 import { resolveTauCloudBuildEnabled } from './build-environment.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -451,6 +453,8 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       mtAssets.plugin,
       createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      // WASM `fetch` integrity and the asset receipt (charter D26): build only.
+      createAssetIntegrity({ receipt: true }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -488,7 +492,10 @@ export default defineConfig(({ command, mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
+      plugins: () => [
+        createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+        createAssetIntegrity({ receipt: false }),
+      ],
     },
     // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
     ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),

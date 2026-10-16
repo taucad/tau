@@ -853,8 +853,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-xx/7kgExlzP1nserqJNE8MX+iLs9xnW3vEQw+aisXdY=",
-            "byteLength": 46268,
+            "integrity": "sha256-2Vgo55kQtvFSjwylv17yP21WuX3QFQEHA1B0zpcwpqY=",
+            "byteLength": 49747,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -886,8 +886,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-HfLiYzDkBz9198TLidrk015g0vy0CjenvXzJ2OX2ES0=",
-            "byteLength": 3519,
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -897,23 +897,12 @@
           },
           {
             "name": "mechanisms.py",
-            "integrity": "sha256-7ETRIsTI5FKsOCwo+YA24ktHkt9OwfkcGCi8H2g/p/c=",
-            "byteLength": 27762,
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/mechanisms.py"
-            },
-            "destination": "tau-worker"
-          },
-          {
-            "name": "tau_assembly.py",
-            "integrity": "sha256-yNb83Hog388F3rFGjtI7sFHLtiJ6/5N7nJ32EzaE+A4=",
-            "byteLength": 13621,
-            "format": "raw",
-            "origin": {
-              "kind": "packagePath",
-              "path": "python/tau_assembly.py"
             },
             "destination": "tau-worker"
           }
@@ -1770,8 +1759,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-xx/7kgExlzP1nserqJNE8MX+iLs9xnW3vEQw+aisXdY=",
-            "byteLength": 46268,
+            "integrity": "sha256-2Vgo55kQtvFSjwylv17yP21WuX3QFQEHA1B0zpcwpqY=",
+            "byteLength": 49747,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1803,8 +1792,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-HfLiYzDkBz9198TLidrk015g0vy0CjenvXzJ2OX2ES0=",
-            "byteLength": 3519,
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1814,23 +1803,12 @@
           },
           {
             "name": "mechanisms.py",
-            "integrity": "sha256-7ETRIsTI5FKsOCwo+YA24ktHkt9OwfkcGCi8H2g/p/c=",
-            "byteLength": 27762,
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/mechanisms.py"
-            },
-            "destination": "tau-worker"
-          },
-          {
-            "name": "tau_assembly.py",
-            "integrity": "sha256-yNb83Hog388F3rFGjtI7sFHLtiJ6/5N7nJ32EzaE+A4=",
-            "byteLength": 13621,
-            "format": "raw",
-            "origin": {
-              "kind": "packagePath",
-              "path": "python/tau_assembly.py"
             },
             "destination": "tau-worker"
           }
@@ -2688,8 +2666,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-xx/7kgExlzP1nserqJNE8MX+iLs9xnW3vEQw+aisXdY=",
-            "byteLength": 46268,
+            "integrity": "sha256-2Vgo55kQtvFSjwylv17yP21WuX3QFQEHA1B0zpcwpqY=",
+            "byteLength": 49747,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2721,8 +2699,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-HfLiYzDkBz9198TLidrk015g0vy0CjenvXzJ2OX2ES0=",
-            "byteLength": 3519,
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2732,23 +2710,12 @@
           },
           {
             "name": "mechanisms.py",
-            "integrity": "sha256-7ETRIsTI5FKsOCwo+YA24ktHkt9OwfkcGCi8H2g/p/c=",
-            "byteLength": 27762,
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/mechanisms.py"
-            },
-            "destination": "tau-worker"
-          },
-          {
-            "name": "tau_assembly.py",
-            "integrity": "sha256-yNb83Hog388F3rFGjtI7sFHLtiJ6/5N7nJ32EzaE+A4=",
-            "byteLength": 13621,
-            "format": "raw",
-            "origin": {
-              "kind": "packagePath",
-              "path": "python/tau_assembly.py"
             },
             "destination": "tau-worker"
           }
@@ -3606,8 +3573,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-xx/7kgExlzP1nserqJNE8MX+iLs9xnW3vEQw+aisXdY=",
-            "byteLength": 46268,
+            "integrity": "sha256-2Vgo55kQtvFSjwylv17yP21WuX3QFQEHA1B0zpcwpqY=",
+            "byteLength": 49747,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -3639,8 +3606,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-HfLiYzDkBz9198TLidrk015g0vy0CjenvXzJ2OX2ES0=",
-            "byteLength": 3519,
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -3650,23 +3617,12 @@
           },
           {
             "name": "mechanisms.py",
-            "integrity": "sha256-7ETRIsTI5FKsOCwo+YA24ktHkt9OwfkcGCi8H2g/p/c=",
-            "byteLength": 27762,
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/mechanisms.py"
-            },
-            "destination": "tau-worker"
-          },
-          {
-            "name": "tau_assembly.py",
-            "integrity": "sha256-yNb83Hog388F3rFGjtI7sFHLtiJ6/5N7nJ32EzaE+A4=",
-            "byteLength": 13621,
-            "format": "raw",
-            "origin": {
-              "kind": "packagePath",
-              "path": "python/tau_assembly.py"
             },
             "destination": "tau-worker"
           }

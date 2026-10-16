@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import type { RpcFileSystem, RpcRuntimeClient } from '#rpc/rpc-dependencies.js';
 import { handleInstallPackages } from '#rpc/handlers/handle-install-packages.js';
+import { createRpcDispatcher } from '#rpc/rpc-dispatcher.js';
 
 const encoder = new TextEncoder();
 
@@ -221,5 +222,26 @@ describe('handleInstallPackages', () => {
     const result = await handleInstallPackages({ add: { alea: '^1.0.1' } }, fileSystem);
 
     expect(result).toMatchObject({ success: true, manifestChanged: true, issues: [] });
+  });
+
+  it('should refuse under the locked acquisition profile with no request and nothing written', async () => {
+    const dispatcher = createRpcDispatcher({
+      fileSystem,
+      kernelClient: mock<RpcRuntimeClient>(),
+      acquisition: 'locked',
+    });
+
+    const result = await dispatcher.dispatch({ rpcName: 'install_packages', args: { add: { alea: '^1.0.1' } } });
+
+    expect(result).toEqual({
+      success: true,
+      manifestChanged: false,
+      lockChanged: false,
+      packages: [],
+      issues: [{ code: 'registry-unavailable', message: expect.stringContaining('TAU_ACQUISITION=locked') as unknown }],
+    });
+    expect(registry).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual(['package.json']);
+    expect(await readFile(join(root, 'package.json'), 'utf8')).toBe(manifest);
   });
 });

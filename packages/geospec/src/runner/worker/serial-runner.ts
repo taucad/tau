@@ -156,8 +156,26 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           testTimeout: runOptions.testTimeout,
           matcherWallBackstop: runOptions.matcherWallBackstop,
           forensic: runOptions.forensic,
+          onTestEvent: (event) => {
+            emit(
+              event.type === 'test-start'
+                ? {
+                    type: 'test-start',
+                    file,
+                    test: {
+                      suite: [...event.test.suite],
+                      name: event.test.name,
+                      ...(event.test.ordinal === undefined ? {} : { ordinal: event.test.ordinal }),
+                    },
+                  }
+                : { type: 'test-complete', file, test: event.test },
+            );
+          },
           bundleCache,
-          nativeAssertions: options.nativeAssertions,
+          nativeAssertions:
+            runOptions.workUnitLimit === undefined
+              ? options.nativeAssertions
+              : { ...options.nativeAssertions, workUnitLimit: runOptions.workUnitLimit },
           ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
           ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
         }).catch(

@@ -9,9 +9,16 @@
 import { Accessor, WebIO, Primitive } from '@gltf-transform/core';
 import { compactTriangleIndices, normalizeGltfGeometryNames, srgbHexToLinearTuple } from '@taucad/geometry-core';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
+import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import type { ShapeEntry } from '#opencascade.types.js';
-import { createOcScope } from '@taucad/occt-core';
+import {
+  createOcScope,
+  createTessellationDowngradedIssue,
+  resolveOcctTessellation,
+  tessellateWithinOcctBudget,
+} from '@taucad/occt-core';
+import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 
 type MeshOptions = {
   linearTolerance: number;
@@ -104,6 +111,12 @@ export function parseHexColor(hex: string): [number, number, number] {
 }
 
 /**
+ * Mesh a shape in OCCT's absolute mode: the linear deflection is millimetres, never a ratio.
+ *
+ * @param oc - OpenCASCADE WASM instance
+ * @param shape - The shape to mesh in place.
+ * @param options - Linear deflection in mm, angular deflection in radians, and parallel meshing.
+ * @returns The mesher, which the caller deletes.
  */
 export function createIncrementalMesh(
   oc: OpenCascadeInstance,
@@ -120,21 +133,22 @@ export function createIncrementalMesh(
 }
 
 /**
- * Mesh OpenCascade shapes and export to GLB using native RWGltf_CafWriter.
+ * Mesh OpenCascade shapes and write them as a raw GLB with native RWGltf_CafWriter.
  *
- * Creates an XCAF document, adds shapes with optional colors, meshes them,
- * then uses OpenCASCADE's native GLTF writer to produce a binary GLB.
+ * Creates an XCAF document, adds shapes with optional colors, meshes them in
+ * absolute mode, then uses OpenCASCADE's native GLTF writer. The bytes still need
+ * {@link finishShapesGlb} before delivery; {@link countGlbMesh} can read them first.
  *
  * @param oc - OpenCASCADE WASM instance
  * @param shapes - Shapes with optional color/opacity metadata
- * @param options - Meshing parameters (linear deflection, angular deflection)
- * @returns GLB binary as a Uint8Array
+ * @param options - Meshing parameters (linear deflection in mm, angular deflection in radians)
+ * @returns Raw GLB bytes as written by OpenCASCADE
  */
-export async function meshShapesToGltf(
+export function writeShapesGlb(
   oc: OpenCascadeInstance,
   shapes: ShapeEntry[],
   options: MeshOptions,
-): Promise<Uint8Array<ArrayBuffer>> {
+): Uint8Array<ArrayBuffer> {
   const scope = createOcScope();
   let result: Uint8Array<ArrayBuffer>;
 
@@ -232,11 +246,216 @@ export async function meshShapesToGltf(
     scope.dispose();
   }
 
-  const tagged = await tagGlbMeshAndNodesFromShapeEntries(result, shapes);
+  return result;
+}
+
+/**
+ * Name meshes and nodes after their shape entries and normalize geometry names, turning
+ * {@link writeShapesGlb} output into the delivered GLB.
+ *
+ * @param glb - Raw GLB bytes from {@link writeShapesGlb}.
+ * @param shapes - The shape entries the GLB was written from.
+ * @returns The delivered GLB.
+ */
+export async function finishShapesGlb(
+  glb: Uint8Array<ArrayBuffer>,
+  shapes: ShapeEntry[],
+): Promise<Uint8Array<ArrayBuffer>> {
+  const tagged = await tagGlbMeshAndNodesFromShapeEntries(glb, shapes);
   return normalizeGltfGeometryNames(tagged, {
     format: 'glb',
     materialNamePolicy: 'clear-all',
     sceneNamePolicy: 'clear-generated',
     sceneNameSource: 'external-generated',
   });
+}
+
+/** Triangles and vertices of a mesh. */
+export type MeshCount = { triangles: number; vertices: number };
+
+type GlbJson = {
+  meshes?: Array<{
+    primitives: Array<{ mode?: number; indices?: number; attributes: Partial<Record<string, number>> }>;
+  }>;
+  accessors?: Array<{ count: number }>;
+};
+
+const glbHeaderBytes = 12;
+const glbChunkHeaderBytes = 8;
+const gltfTrianglesMode = 4;
+
+/**
+ * Triangles and vertices of every triangle primitive in a GLB, read from its JSON chunk
+ * without decoding any buffer.
+ *
+ * @param glb - GLB bytes.
+ * @returns Triangle and vertex counts summed over every triangle primitive.
+ */
+export function countGlbMesh(glb: Uint8Array<ArrayBuffer>): MeshCount {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonStart = glbHeaderBytes + glbChunkHeaderBytes;
+  const jsonLength = view.getUint32(glbHeaderBytes, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(jsonStart, jsonStart + jsonLength))) as GlbJson;
+  const accessorCount = (index: number | undefined): number =>
+    index === undefined ? 0 : (json.accessors?.[index]?.count ?? 0);
+  let triangles = 0;
+  let vertices = 0;
+  for (const mesh of json.meshes ?? []) {
+    for (const primitive of mesh.primitives) {
+      if ((primitive.mode ?? gltfTrianglesMode) !== gltfTrianglesMode) {
+        continue;
+      }
+      const positions = accessorCount(primitive.attributes['POSITION']);
+      triangles += (primitive.indices === undefined ? positions : accessorCount(primitive.indices)) / 3;
+      vertices += positions;
+    }
+  }
+  return { triangles, vertices };
+}
+
+const binaryStlHeaderBytes = 80;
+const binaryStlTriangleBytes = 50;
+
+/**
+ * Triangles in an STL file. A file whose length matches its binary header count is binary;
+ * any other file is ASCII and its facets are counted.
+ *
+ * @param bytes - STL file bytes.
+ * @returns The triangle count.
+ */
+export function countStlTriangles(bytes: Uint8Array<ArrayBuffer>): number {
+  if (bytes.byteLength >= binaryStlHeaderBytes + 4) {
+    const declared = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
+      binaryStlHeaderBytes,
+      true,
+    );
+    if (bytes.byteLength === binaryStlHeaderBytes + 4 + declared * binaryStlTriangleBytes) {
+      return declared;
+    }
+  }
+  return new TextDecoder().decode(bytes).match(/^\s*facet\b/gm)?.length ?? 0;
+}
+
+/**
+ * Bounding-box diagonal of every shape entry together, in model millimetres. Reads the B-rep
+ * geometry rather than any triangulation, so the result does not depend on earlier meshing.
+ *
+ * @param oc - OpenCASCADE WASM instance
+ * @param shapes - Shape entries about to be meshed.
+ * @returns The diagonal, or `NaN` when no shape has extent.
+ */
+export function measureShapesDiagonal(oc: OpenCascadeInstance, shapes: readonly ShapeEntry[]): number {
+  const scope = createOcScope();
+  try {
+    const box = scope.track(new oc.Bnd_Box());
+    for (const entry of shapes) {
+      if (!entry.shape.IsNull()) {
+        oc.BRepBndLib.AddOptimal(entry.shape, box, false, false);
+      }
+    }
+    if (box.IsVoid()) {
+      return Number.NaN;
+    }
+    return Math.hypot(box.GetXMax() - box.GetXMin(), box.GetYMax() - box.GetYMin(), box.GetZMax() - box.GetZMin());
+  } finally {
+    scope.dispose();
+  }
+}
+
+/** A tessellation request: a preset or explicit tolerances, and the field values an explicit request omits. */
+export type OpencascadeTessellationRequest = Readonly<{
+  tessellation: OcctTessellation;
+  explicitDefaults: OcctTessellationTolerances;
+}>;
+
+/**
+ * Resolve a tessellation request into absolute tolerances. Explicit tolerances never measure the shapes.
+ *
+ * @param oc - OpenCASCADE WASM instance
+ * @param shapes - Shape entries about to be meshed.
+ * @param request - The preset or explicit tolerances.
+ * @returns Absolute tolerances in millimetres and degrees, and the requested form.
+ */
+export function resolveOpencascadeTessellation(
+  oc: OpenCascadeInstance,
+  shapes: readonly ShapeEntry[],
+  request: OpencascadeTessellationRequest,
+): OcctResolvedTessellation {
+  return resolveOcctTessellation({ ...request, measureDiagonal: () => measureShapesDiagonal(oc, shapes) });
+}
+
+/**
+ * The mesher's arguments: OCCT takes the angular deflection in radians.
+ *
+ * @param tolerances - Absolute tolerances in millimetres and degrees.
+ * @returns Linear deflection in millimetres and angular deflection in radians.
+ */
+export function toMeshTolerances(
+  tolerances: OcctTessellationTolerances,
+): Pick<MeshOptions, 'linearTolerance' | 'angularTolerance'> {
+  return {
+    linearTolerance: tolerances.linearTolerance,
+    angularTolerance: tolerances.angularTolerance * (Math.PI / 180),
+  };
+}
+
+/** A rendering within a triangle budget, with its cost report and any downgrade warning. */
+export type BudgetedGlb = {
+  content: Uint8Array<ArrayBuffer>;
+  tessellation: TessellationReport;
+  issues: KernelIssue[];
+};
+
+/**
+ * Render a preview GLB within a triangle budget. The request resolves to absolute tolerances;
+ * while the mesh exceeds the budget it is re-meshed one step coarser, at most three times, and
+ * a `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances.
+ *
+ * @param oc - OpenCASCADE WASM instance
+ * @param shapes - The shape entries to render.
+ * @param options - Request, triangle budget and parallel meshing.
+ * @returns The delivered GLB, its tessellation report and the downgrade warning when one was taken.
+ */
+export async function renderShapesWithinBudget(
+  oc: OpenCascadeInstance,
+  shapes: ShapeEntry[],
+  options: { request: OpencascadeTessellationRequest; budget: number; inParallel?: boolean },
+): Promise<BudgetedGlb> {
+  const { request, budget, inParallel } = options;
+  const started = performance.now();
+  const requested = resolveOpencascadeTessellation(oc, shapes, request);
+  const { result, effective, downgraded } = tessellateWithinOcctBudget({
+    tolerances: requested,
+    budget,
+    tessellate(tolerances) {
+      const glb = writeShapesGlb(oc, shapes, { ...toMeshTolerances(tolerances), inParallel });
+      return { glb, ...countGlbMesh(glb) };
+    },
+  });
+  const content = await finishShapesGlb(result.glb, shapes);
+  const delivered = countGlbMesh(content);
+  return {
+    content,
+    tessellation: {
+      ...delivered,
+      elapsed: performance.now() - started,
+      requested: requested.requested,
+      linearTolerance: effective.linearTolerance,
+      angularTolerance: effective.angularTolerance,
+      downgraded,
+    },
+    issues:
+      downgraded === 0
+        ? []
+        : [
+            createTessellationDowngradedIssue({
+              producer: 'opencascade',
+              requested,
+              effective,
+              downgraded,
+              triangles: delivered.triangles,
+              budget,
+            }),
+          ],
+  };
 }

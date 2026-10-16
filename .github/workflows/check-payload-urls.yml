@@ -1,0 +1,42 @@
+# Pinned payload URLs at pull-request time (charter W16, ruling X27; I13, DEL-20): a pull request
+# that changes a native plugin's `tau-plugin.json`, or the script that proves it, downloads every
+# URL each manifest pins and compares the bytes with the pinned integrity and byte length. This is
+# the same check `publish.yml` runs before the npm train, so a pin that does not serve its bytes is
+# refused at review, not on the release run. A fail-closed placeholder pin is skipped with a notice.
+# Read-only: it downloads payloads and writes nothing.
+name: Check payload URLs
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packages/plugins/*/tau-plugin.json
+      - scripts/src/check-payload-urls.ts
+      - .github/workflows/check-payload-urls.yml
+
+permissions:
+  contents: read
+  actions: read # nrwl/nx-set-shas inside setup-nx
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  payload-urls:
+    name: Prove every pinned payload URL serves its bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Prove every pinned payload URL serves its bytes
+        run: node scripts/src/check-payload-urls.ts packages/plugins/*/tau-plugin.json

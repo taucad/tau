@@ -11,7 +11,7 @@ import type { ParameterSnapshot } from '@taucad/parameters';
  * own export routes rather than a second rendering path.
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -945,6 +945,42 @@ describe('createHostToolRegistry', () => {
     const created = await invoke(registry, 'create_file', { targetFile: 'notes.md', content: '# notes\n' });
     expect(created.isError).toBe(false);
     expect(await readFile(join(workspaceRoot, 'notes.md'), 'utf8')).toBe('# notes\n');
+  });
+
+  it('refuses install_packages under TAU_ACQUISITION=locked with no fetch and nothing written (D25, G-locked)', async () => {
+    const fetchSpy = vi.fn<typeof fetch>(async () => {
+      throw new TypeError('network is denied in this test');
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const workspaceRoot = await makeWorkspace();
+      const manifest = '{\n  "name": "demo"\n}\n';
+      await writeFile(join(workspaceRoot, 'package.json'), manifest, 'utf8');
+      const input = { add: { alea: '^1.0.1' } };
+
+      /* Control: an open host reaches the registry through this fetch. */
+      vi.stubEnv('TAU_ACQUISITION', '');
+      await invoke(createHostToolRegistry({ workspaceRoot }), 'install_packages', input);
+      expect(fetchSpy).toHaveBeenCalled();
+      fetchSpy.mockClear();
+
+      /* `locked`, and a value the profile reader refuses, which counts as locked (X43). */
+      vi.stubEnv('TAU_ACQUISITION', 'locked');
+      const locked = await invoke(createHostToolRegistry({ workspaceRoot }), 'install_packages', input);
+      vi.stubEnv('TAU_ACQUISITION', 'lockd');
+      const misspelt = await invoke(createHostToolRegistry({ workspaceRoot }), 'install_packages', input);
+      for (const result of [locked, misspelt]) {
+        expect(JSON.stringify(result.content)).toContain('TAU_ACQUISITION=locked');
+        expect(JSON.stringify(result.content)).toContain('"manifestChanged":false');
+      }
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await readFile(join(workspaceRoot, 'package.json'), 'utf8')).toBe(manifest);
+      expect(await readdir(workspaceRoot)).toEqual(['main.ts', 'package.json']);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('drops a rooted registry once the checkout it served is released', async () => {

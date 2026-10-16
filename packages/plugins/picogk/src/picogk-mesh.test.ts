@@ -763,6 +763,17 @@ describe('PicoGK tessellation report', () => {
     ).toEqual({ triangles: 24, vertices: 16, elapsed: 17 });
   });
 
+  it('carries the voxel size the model ran at, and omits it when the worker reports none', () => {
+    const scene = { prototypes: [], occurrences: [], timings: result.timings };
+    expect(picogkTessellation({ ...scene, voxelSize: 0.4 })).toEqual({
+      triangles: 0,
+      vertices: 0,
+      elapsed: 0,
+      voxelSize: 0.4,
+    });
+    expect(picogkTessellation(scene)).not.toHaveProperty('voxelSize');
+  });
+
   it('reports an empty scene as zero cost', () => {
     expect(picogkTessellation({ prototypes: [], occurrences: [], timings: result.timings })).toEqual({
       triangles: 0,

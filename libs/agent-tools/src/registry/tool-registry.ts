@@ -313,6 +313,8 @@ export type ChatToolRegistryOptions = {
   readonly workbench?: RpcWorkbenchClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
   readonly testingEnabled: boolean;
+  /** The host's managed acquisition profile; `locked` makes `install_packages` refuse with no request. */
+  readonly acquisition?: 'open' | 'locked' | undefined;
 };
 
 /**
@@ -418,6 +420,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
         ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
         ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+        ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
         workbench,
       });
       const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {
@@ -499,9 +502,11 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         }
         if (mapped.rpc === rpcName.runGeoSpecTests && result.success) {
           const verdict = testModelOutputSchema.parse(result);
-          const full = JSON.stringify(result);
+          /* The inline budget is the compact JSON the model would receive; the
+           * retained artifact is indented so grep and paged reads return rows. */
+          const oversized = new TextEncoder().encode(JSON.stringify(result)).byteLength > 128 * 1024;
+          const full = JSON.stringify(result, undefined, 2);
           const bytes = new TextEncoder().encode(full);
-          const oversized = bytes.byteLength > 128 * 1024;
           const hasCanonical = [...verdict.failures, ...verdict.passes].some((row) =>
             row.reports?.some((report) => report.canonical !== undefined),
           );

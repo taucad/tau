@@ -1,0 +1,82 @@
+# The UI's WASM integrity in browsers (charter D26, W19; ruling X31): build the web client, re-hash its asset receipt,
+# then load every WASM module the build ships through the runtime's loader in a module worker under COOP/COEP, in
+# Chromium, Firefox and WebKit. A tampered byte must be refused, and integrity may add at most 200 ms per module on
+# the platform each engine ships on (X44): Chromium and Firefox on Linux, WebKit on macOS.
+name: UI asset integrity
+
+on:
+  pull_request:
+    paths:
+      - apps/ui/asset-integrity.vite-plugin.ts
+      - apps/ui/scripts/check-asset-integrity.mts
+      - apps/ui/vite.config.ts
+      - apps/ui/serve/vite.config.ts
+      - packages/runtime/src/framework/wasm-loader.ts
+      - .github/workflows/ui-asset-integrity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-asset-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    name: WASM integrity (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: three browsers
+            runner: ubuntu-latest
+            engines: chromium,firefox,webkit
+            # X44: Linux WebKit must refuse every tamper; its overhead is recorded as information only.
+            timed: chromium,firefox
+          # WebKit on macOS, the engine Safari ships, measured beside Linux WebKit for the X31 line.
+          - label: WebKit on macos-26
+            runner: macos-26
+            engines: webkit
+            timed: webkit
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Install the three browsers
+        env:
+          ENGINES: ${{ matrix.engines }}
+        run: pnpm exec playwright install --with-deps ${ENGINES//,/ }
+      # Placeholder origins: the server build checks they are set; nothing here contacts them.
+      - name: Build the web client
+        env:
+          TAU_API_URL: http://localhost:4000
+          TAU_WEBSOCKET_URL: ws://localhost:4000
+          TAU_FRONTEND_URL: http://localhost:3000
+        run: pnpm nx build ui --outputStyle=static
+      - name: Re-hash the receipt, tamper and measure
+        timeout-minutes: 40
+        env:
+          TAU_INTEGRITY_ENGINES: ${{ matrix.engines }}
+          TAU_INTEGRITY_TIMED_ENGINES: ${{ matrix.timed }}
+        run: node apps/ui/scripts/check-asset-integrity.mts apps/ui/build/client "$RUNNER_TEMP/evidence" 5
+      - name: Summarize
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/summary.txt" 2>/dev/null || echo '(no summary)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh "UI asset integrity (${{ matrix.label }})" "$RUNNER_TEMP/evidence/summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-asset-integrity-evidence-${{ matrix.runner }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

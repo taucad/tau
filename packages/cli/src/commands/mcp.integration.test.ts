@@ -584,12 +584,11 @@ describe('tau mcp over stdio', () => {
       expect(result.isError ?? false, textOf(result)).toBe(false);
       const artifactPath = (result.structuredContent as { files?: Array<{ artifactPath: string }> } | undefined)
         ?.files?.[0]?.artifactPath;
-      expect(artifactPath).toBeDefined();
+      expect(artifactPath).toMatch(/\.step$/);
       const step = await readFile(join(scratch, 'block', artifactPath ?? ''), 'utf8');
       expect(step.startsWith('ISO-10303-21;')).toBe(true);
-      /* Re-imported: the STEP kernel opens and renders what was exported. */
-      await writeFile(join(scratch, 'block', 'exported.step'), step);
-      const reopened = await call({ name: 'evaluate_model', arguments: { targetFile: 'exported.step' } });
+      /* Re-imported in place: the artifact's extension selects the STEP kernel, which renders what was exported. */
+      const reopened = await call({ name: 'evaluate_model', arguments: { targetFile: artifactPath ?? '' } });
       expect(reopened.structuredContent, textOf(reopened)).toMatchObject({ status: 'ready' });
     },
     kernelCallLimit,

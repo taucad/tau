@@ -124,6 +124,8 @@ export type RpcHandlerDependencies = {
    * cache, but must not be the active preview runtime client.
    */
   createGeoSpecClient?: () => RpcGeoSpecClient;
+  /** The page's managed acquisition profile (`ENV.TAU_ACQUISITION`); `locked` makes `install_packages` refuse. */
+  acquisition?: 'open' | 'locked';
 };
 export type RpcCallInput = RpcCall & {
   toolCallId: string;
@@ -843,6 +845,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
       (projectRef && headlessImageService
         ? createBrowserImageClient(projectRef, headlessImageService, operationTimeoutForFile)
         : undefined),
+    ...(deps.acquisition === undefined ? {} : { acquisition: deps.acquisition }),
   };
 
   const dispatcher = createRpcDispatcher(rpcDeps);

@@ -1,20 +1,8 @@
 {
   "darwin-arm64": {
-    "closureIntegrity": "sha256-ShpT7PrC1Szl9rAtjeIkhp+Zgg73DOCFR5p3dnXV5Vk=",
-    "treeIntegrity": "sha256-KgceBm7W2P6qXqOSSkL9067jLjItsEOdSC/ldRRnju0=",
-    "fileCount": 22930,
-    "byteLength": 857467320
-  },
-  "linux-arm64-glibc": {
-    "closureIntegrity": "sha256-w5KKn4aHVTea/6ypJCm06zjfLruVnTSJZiTAD4t9k2o=",
-    "treeIntegrity": "sha256-y2Puqvzp44ZkgWhx6OxoEnXiu7gHpoorTHZe2Vg73w4=",
-    "fileCount": 25800,
-    "byteLength": 1016678874
-  },
-  "linux-x64-glibc": {
-    "closureIntegrity": "sha256-90ypwtJrxgAVJMZUe4we92N6b9uhfEApk7s1hygTi2w=",
-    "treeIntegrity": "sha256-alW6lWP6VGRi6cHd9IecvNeJYRhSs33VN4OP4Dm+sMg=",
-    "fileCount": 25804,
-    "byteLength": 1172615196
+    "closureIntegrity": "sha256-AB1DOVOm+fGDC5PUptC9XtblM8pc/UUMC5Ro/vawE30=",
+    "treeIntegrity": "sha256-RQNBfR24XQ8qigfxhi5olUUn8QvQBlH1JybVajXKwPA=",
+    "fileCount": 22928,
+    "byteLength": 857438674
   }
 }

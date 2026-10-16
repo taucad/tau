@@ -181,8 +181,10 @@ describe('tau serve --ui (the serve build)', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-serve-ui-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-serve-ui-cfg-'));
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(configDirectory, { recursive: true, force: true });
+      /* A revision store the stopped daemon was still writing can hold `.git`
+         for a moment after the process exits: retry rather than fail on teardown. */
+      await rm(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await rm(configDirectory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     });
     await mkdir(configDirectory, { recursive: true });
     await writeFile(

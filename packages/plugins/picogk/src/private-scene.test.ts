@@ -136,6 +136,21 @@ describe('private scene v8', () => {
     ).toBe(false);
     expect(picogkProtocolVersion).toBe(8);
   });
+  it('accepts the build-level voxel size as an optional positive finite number', () => {
+    const { result } = fixture();
+    expect(picogkBuildSchema.parse(result)).not.toHaveProperty('voxelSize');
+    expect(picogkBuildSchema.parse({ ...result, voxelSize: 0.3 }).voxelSize).toBe(0.3);
+    for (const voxelSize of [0, -0.5, Number.NaN, Number.POSITIVE_INFINITY, '0.3', null]) {
+      expect(picogkBuildSchema.safeParse({ ...result, voxelSize }).success).toBe(false);
+    }
+    // Voxel size belongs to the build, never to a prototype row.
+    expect(
+      picogkBuildSchema.safeParse({
+        ...result,
+        prototypes: result.prototypes.map((prototype) => ({ ...prototype, voxelSize: 0.3 })),
+      }).success,
+    ).toBe(false);
+  });
   it('rejects unused prototypes, legacy descriptors, malformed counters and missing counts', () => {
     const { result } = fixture();
     expect(picogkBuildSchema.safeParse({ ...result, occurrences: [] }).success).toBe(false);

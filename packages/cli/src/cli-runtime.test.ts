@@ -99,7 +99,11 @@ describe('createCliRuntime', () => {
           '@taucad/agent-host',
           // Package install support used by `tau install`, not runtime plugins.
           '@taucad/bundler-core',
+          // A required peer of `@taucad/image` and `@taucad/workbench`, not a runtime plugin.
+          '@taucad/camera',
           '@taucad/filesystem',
+          // The GeoSpec Node host `@taucad/host` peers, installed so `test_model` resolves (audit H-01).
+          '@taucad/geospec-engine',
           '@taucad/host',
           '@taucad/jobs-solvers',
           // The worker launcher `tau serve` brokers native kernels with, not a runtime plugin.
@@ -147,6 +151,14 @@ describe('createCliRuntime', () => {
     expect(runtime.bundlers.map(({ id }) => id)).toEqual(['esbuild']);
     expect(runtime.middleware.length).toBeGreaterThan(0);
     expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'slicer', 'assimp', 'image', 'svg-image']);
+  });
+
+  it('composes the bundler under the locked acquisition profile only when asked', async () => {
+    const open = await composeCli();
+    const locked = await composeCli({ acquisition: 'locked' });
+
+    expect(open.bundlers.find(({ id }) => id === 'esbuild')).not.toHaveProperty('options.acquisition');
+    expect(locked.bundlers.find(({ id }) => id === 'esbuild')?.options).toMatchObject({ acquisition: 'locked' });
   });
 
   it('registers the assimp import kernel through the pinned "all" preset', async () => {

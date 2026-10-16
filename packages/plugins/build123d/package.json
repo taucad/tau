@@ -1,6 +1,6 @@
 {
   "name": "@taucad/build123d",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.5",
   "description": "Native Build123d kernel for Tau",
   "type": "module",
   "sideEffects": false,
@@ -21,6 +21,7 @@
     "python",
     "tau-plugin.json",
     "tau-plugin.cdx.json",
+    "notices",
     "agent",
     "project",
     "LICENSE",
@@ -88,6 +89,7 @@
     "@taucad/cache-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
     "@taucad/parameters": "workspace:*"
   },
   "taucad": {

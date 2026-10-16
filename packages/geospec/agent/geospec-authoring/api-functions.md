@@ -11,8 +11,9 @@ export declare function describe(name: string, function_: GeoSpecTestCallback): 
 
 // Start a geometry assertion chain
 // expectGeo (function)
-export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
+export declare function expectGeo(subject: GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecMatcher;
 //   subject: geometry subject under test
+//   options: Optional chain options, such as a larger `workUnitLimit` for a claim that refused with `MATCHER_TIMEOUT`
 
 // GeoSpec test helper used inside VM-executed test modules
 // it (function)
@@ -46,4 +47,11 @@ export declare function resolveRuntimeExportIntent(options: {
     format: RuntimeBackedModelFormat;
     meshLinearTolerance?: number;
     meshAngularToleranceDegrees?: number;
+    /**
+     * The kernel that evaluates this source, when the host knows it. Routes are
+     * then chosen among that kernel's own, so a mesh-only kernel is told its
+     * BRep matchers are unsupported instead of being sent to another kernel's
+     * STEP route.
+     */
+    kernelId?: string;
 }): RuntimeExportIntent | RuntimeExportIntentFailure;

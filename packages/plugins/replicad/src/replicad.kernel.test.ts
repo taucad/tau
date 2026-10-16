@@ -2174,6 +2174,7 @@ export default function main() {
       expect(exportResult.files.length).toBeGreaterThan(0);
       expect(exportResult.files[0].bytes).toBeInstanceOf(Uint8Array);
       expect(exportResult.files[0].mimeType).toBe('application/step');
+      expect(exportResult.files[0].name).toBe('assembly.step');
 
       const stepContent = new TextDecoder().decode(exportResult.files[0].bytes);
       expect(stepContent).toContain('CLOSED_SHELL');
@@ -2291,7 +2292,7 @@ export default function main() {
       const exportResult = await exportLastRender(client, 'stl');
       assertExportSuccess(exportResult);
       expect(exportResult.files.length).toBeGreaterThan(0);
-      expect(exportResult.files[0].name).toBe('Shape 1');
+      expect(exportResult.files[0].name).toBe('Shape 1.stl');
     });
 
     it('should export to binary STL format', async () => {
@@ -3370,6 +3371,8 @@ describe('OC API Call Tracing', () => {
       file: createGeometryFile('box.ts'),
       parameters: {},
       content: { includeEdges: false, includeTopology: false },
+      // Explicit tolerances, so the span attributes do not depend on the size-derived default preset.
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
     });
     await collectTelemetry();
 
@@ -3420,6 +3423,8 @@ describe('OC API Call Tracing', () => {
       file: createGeometryFile('box.ts'),
       parameters: {},
       content: { includeEdges: true, includeTopology: false },
+      // Explicit tolerances, so the span attributes do not depend on the size-derived default preset.
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
     });
     await collectTelemetry();
 

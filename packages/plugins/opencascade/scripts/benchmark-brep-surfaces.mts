@@ -9,7 +9,7 @@ import { activateOccParallelism } from '@taucad/occt-core';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { opencascadeKernel } from '@taucad/opencascade';
-import { createIncrementalMesh, meshShapesToGltf } from '#opencascade-mesh.js';
+import { createIncrementalMesh, finishShapesGlb, writeShapesGlb } from '#opencascade-mesh.js';
 
 type Oc = any;
 type Owned = { delete(): void };
@@ -825,22 +825,22 @@ const stepExport = (oc: Oc, shape: any): number => {
 };
 
 const glbExportViaOpenCascadeKernel = async (oc: Oc, shape: any): Promise<number> => {
-  const glb = await meshShapesToGltf(
-    oc,
-    [
-      {
-        name: 'V8Block',
-        shape,
-        color: '#cc3333',
-      },
-    ],
+  const entries = [
     {
+      name: 'V8Block',
+      shape,
+      color: '#cc3333',
+    },
+  ];
+  const glb = await finishShapesGlb(
+    writeShapesGlb(oc, entries, {
       linearTolerance: 0.1,
       angularTolerance: (30 * Math.PI) / 180,
       inParallel: true,
       coordinateSystem: 'y-up',
       unit: { length: 'millimeter' },
-    },
+    }),
+    entries,
   );
   return glb.byteLength;
 };
@@ -1460,7 +1460,8 @@ const cases: BenchCase[] = [
   {
     name: 'export-glb-opencascade-kernel-helper-v8',
     category: 'import-export',
-    notes: 'OpenCascade kernel GLB path: meshShapesToGltf, XCAF, RWGltf_CafWriter, glTF post-normalization.',
+    notes:
+      'OpenCascade kernel GLB path: writeShapesGlb, finishShapesGlb, XCAF, RWGltf_CafWriter, glTF post-normalization.',
     setup: (oc) => ({ source: makeV8FixtureWithExternalFeatures(oc) }),
     run: async (oc, context) => {
       if ((await glbExportViaOpenCascadeKernel(oc, context['source'])) < 1) {

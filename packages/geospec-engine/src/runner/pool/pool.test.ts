@@ -889,6 +889,9 @@ describe('createGeoSpecPoolRunner', () => {
 
     expect(worker.terminated()).toBe(true);
     expect(result.issues?.some((issue) => issue.code === 'GEOSPEC_SHARD_TIMEOUT')).toBe(true);
+    // The timed-out file carries the same code, so its row reads as a timeout on every host.
+    const [file] = result.files;
+    expect(file?.result).toMatchObject({ success: false, issues: [{ code: 'GEOSPEC_SHARD_TIMEOUT' }] });
   });
 
   it('should stop dispatching under bail', async () => {

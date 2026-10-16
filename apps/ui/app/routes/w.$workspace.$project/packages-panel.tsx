@@ -13,6 +13,7 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { createRpcHandlers } from '#hooks/rpc-handlers.js';
+import { ENV } from '#environment.config.js';
 import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';
 
 type InstallPackagesInvocation = ToolInvocation<typeof toolName.installPackages>;
@@ -117,7 +118,9 @@ export function PackagesPanel(): React.JSX.Element {
     setIsInstalling(true);
     const toolCallId = randomUuid();
     try {
-      const outcome = await createRpcHandlers({ chatId: 'packages-panel', fileManager }).executeRpcCall({
+      // X43: under the locked profile Install makes no registry request and reports registry-unavailable.
+      const handlers = createRpcHandlers({ chatId: 'packages-panel', fileManager, acquisition: ENV.TAU_ACQUISITION });
+      const outcome = await handlers.executeRpcCall({
         rpcName: rpcName.installPackages,
         args: {},
         toolCallId,

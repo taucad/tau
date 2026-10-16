@@ -8,7 +8,7 @@
  * docs/research/native-language-kernel-process-blueprint.md.
  *
  * Required environment variables: none.
- * Optional environment variables: none.
+ * Optional environment variables: TAU_BUILD123D_TEST_STORE selects an isolated native test store.
  *
  * Usage:
  *   node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts
@@ -32,14 +32,9 @@ import { build123dOptionsFromClosure } from '#build123d-closure.js';
 const repoRoot = resolve(import.meta.dirname, '../../../..');
 const pythonRoot = resolve(repoRoot, 'packages/plugins/build123d/python');
 const reportRoot = resolve(repoRoot, 'out/reports/coverage/packages/plugins/build123d-python');
-const measuredFiles = [
-  'analyzer.py',
-  'glb.py',
-  'worker.py',
-  'native_materials.py',
-  'mechanisms.py',
-  'tau_assembly.py',
-].map((name) => resolve(pythonRoot, name));
+const measuredFiles = ['analyzer.py', 'glb.py', 'worker.py', 'native_materials.py', 'mechanisms.py'].map((name) =>
+  resolve(pythonRoot, name),
+);
 
 const run = (pythonExecutable: string, arguments_: readonly string[]): void => {
   const environment: NodeJS.ProcessEnv = { ...process.env };

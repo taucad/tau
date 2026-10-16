@@ -49,6 +49,7 @@ import { createHostMcpEndpoint, hostMcpCapabilityLifetime } from '#mcp-server.js
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
 import { createNodeLauncher } from '#node-launcher.fixture.js';
+import { testModelTool } from '#test-model-tool.fixture.js';
 
 /* The model is not decoration: the `codex` pin carries one (`registry.ts`), an
  * adapter override spreads the whole pin, and a fixture that offered no
@@ -80,7 +81,7 @@ const geospecEvidence = {
 };
 
 const registry: ToolRegistry = {
-  list: () => [],
+  list: () => [testModelTool],
   invoke: async () => ({ content: geospecEvidence, isError: false }),
 };
 

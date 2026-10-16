@@ -9,6 +9,7 @@ import type {
   GeoSpecRunnerWorkerResponse,
   GeoSpecRunnerWorkerRunRequest,
 } from '#workers/geospec-runner.types.js';
+import type { KernelEvidenceRuntime } from '#workers/geospec-runner.impl.js';
 
 const workerMocks = vi.hoisted(() => {
   const fsProxy = {
@@ -82,6 +83,9 @@ vi.mock('geospec/model', () => {
   return {
     [modelLoadErrorExport]: workerMocks.geoSpecModelLoadErrorClass,
     loadModel: workerMocks.loadModel,
+    // Result projection names the mesh-supported matchers in evidence suggestions.
+    geoSpecMeshEvidenceMatchers: ['toHaveBoundingBox', 'toHaveVolume'],
+    geoSpecRegionWholeModelClaimCode: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM',
   };
 });
 
@@ -282,6 +286,96 @@ describe('geospec-runner.worker', () => {
       },
     });
     vi.unstubAllGlobals();
+  });
+
+  it('should post per-test progress for the run in flight before its single result', async () => {
+    let messageListener: WorkerMessageListener | undefined;
+    vi.stubGlobal(
+      'addEventListener',
+      vi.fn((type: string, listener: WorkerMessageListener) => {
+        if (type === 'message') {
+          messageListener = listener;
+        }
+      }),
+    );
+    const postMessage = vi.fn<(message: GeoSpecRunnerWorkerResponse) => void>();
+    vi.stubGlobal('postMessage', postMessage);
+    vi.stubGlobal('close', vi.fn());
+    workerMocks.createFileSystemBridgeProxy.mockReturnValue(workerMocks.fsProxy);
+    workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
+    workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
+    workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
+    mockProjectTree('', ['main.geospec.ts']);
+    const handlers = new Map<string, (event: unknown) => void>();
+    const eventRunner = {
+      close: vi.fn(async () => undefined),
+      on: vi.fn((type: string, handler: (event: unknown) => void) => {
+        handlers.set(type, handler);
+        return () => handlers.delete(type);
+      }),
+      run: vi.fn(async () => {
+        const [file] = ['main.geospec.ts'];
+        const [settled] = successfulRunnerResult().files[0]?.result.tests ?? [];
+        handlers.get('run-start')?.({ type: 'run-start', files: [file] });
+        handlers.get('test-start')?.({
+          type: 'test-start',
+          file,
+          test: { suite: ['geometry'], name: 'n', ordinal: 0 },
+        });
+        handlers.get('test-complete')?.({ type: 'test-complete', file, test: settled });
+        return successfulRunnerResult();
+      }),
+    };
+    nativeMocks.createNativeGeoSpecRunner.mockReturnValue(eventRunner);
+
+    await import('#workers/geospec-runner.worker.js');
+    const sessionId = await initializeWorkerSession({ messageListener, postMessage });
+    sendRunRequest({ messageListener, requestId: 'progress-1', sessionId, args: {} });
+
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'result', requestId: 'progress-1' }));
+    });
+    const posted = postMessage.mock.calls.map(([message]) => message);
+    expect(posted.map((message) => (message.type === 'progress' ? message.event.type : message.type))).toStrictEqual([
+      'run-start',
+      'test-start',
+      'test-complete',
+      'result',
+    ]);
+    expect(posted.every((message) => !('requestId' in message) || message.requestId === 'progress-1')).toBe(true);
+    expect(handlers.size).toBe(0);
+  });
+
+  it('should read kernel facts from the runtime description and its STEP routes', async () => {
+    const { describeKernelEvidence } = await import('#workers/geospec-runner.impl.js');
+    const asRuntime = (value: Record<string, unknown>): KernelEvidenceRuntime =>
+      value as unknown as KernelEvidenceRuntime;
+    const runtime = (kernelId: string | undefined, route?: { transcoderId?: string; fidelity?: string }) => ({
+      describe: vi.fn(async () => ({ success: true, kernelId, issues: [], parameters: {} })),
+      bestRouteFor: vi.fn(() => route),
+    });
+    const brep = runtime('replicad', { fidelity: 'brep' });
+    await expect(describeKernelEvidence(asRuntime(brep), '/main.ts')).resolves.toStrictEqual({
+      kernelId: 'replicad',
+      directBrepStep: true,
+    });
+    expect(brep.describe).toHaveBeenCalledWith({ source: { path: '/main.ts' } });
+    expect(brep.bestRouteFor).toHaveBeenCalledWith('step', { kernelId: 'replicad' });
+    await expect(describeKernelEvidence(asRuntime(runtime('picovoxel')), '/main.ts')).resolves.toStrictEqual({
+      kernelId: 'picovoxel',
+      directBrepStep: false,
+    });
+    await expect(
+      describeKernelEvidence(asRuntime(runtime('jscad', { fidelity: 'brep', transcoderId: 'mesh-to-step' })), '/m.ts'),
+    ).resolves.toStrictEqual({ kernelId: 'jscad', directBrepStep: false });
+    await expect(describeKernelEvidence(asRuntime(runtime(undefined)), '/main.ts')).resolves.toBeUndefined();
+    const failing = {
+      describe: vi.fn(async () => {
+        throw new Error('gone');
+      }),
+      bestRouteFor: vi.fn(),
+    };
+    await expect(describeKernelEvidence(asRuntime(failing), '/main.ts')).resolves.toBeUndefined();
   });
 
   it('should run tests with a worker-owned runtime client and bridged project filesystem', async () => {
@@ -1117,6 +1211,7 @@ describe('geospec-runner.worker', () => {
         sessionId: 'native-session',
         runtimeConfig: defaultRuntimeConfig,
         fileSystemPort: new MessageChannel().port1,
+        maxWorkUnitLimit: 4_000_000_000,
       },
     } as MessageEvent<GeoSpecRunnerWorkerRequest>);
 
@@ -1135,9 +1230,12 @@ describe('geospec-runner.worker', () => {
       readonly nativeAssertions: {
         readonly engine: Readonly<Record<string, unknown>>;
         readonly evidenceProfile: string;
+        readonly maximumWorkUnitLimit?: number;
       };
     };
     expect(runnerOptions.nativeAssertions.evidenceProfile).toBe('bounded');
+    // The host's work-unit maximum is policy the runner enforces on authored budgets.
+    expect(runnerOptions.nativeAssertions.maximumWorkUnitLimit).toBe(4_000_000_000);
     for (const method of ['ingestSubject', 'subjectHandle', 'releaseSubject', 'processRequest', 'evaluateClaim']) {
       expect(typeof runnerOptions.nativeAssertions.engine[method]).toBe('function');
     }

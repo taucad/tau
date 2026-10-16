@@ -4,12 +4,16 @@
 #
 # Stages mirror apps/api/Dockerfile deliberately — same base, same cache split,
 # same prune — because they solve the same problem in the same workspace:
-#   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
+#   base    : node:26-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps    : workspace skeleton only (lockfile + every workspace package.json
 #             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build cli` (with its workspace deps).
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
-#   runtime : minimal `node:24-slim` running as non-root `tau` (uid 1001).
+#   runtime : minimal `node:26-slim` running as non-root `tau` (uid 1001).
+#   tau-store : empty by default; `scripts/build-native-image.sh` replaces it
+#             with a payload store it prepared using the runtime image itself.
+#   native  : runtime plus that baked store, so build123d is `ready` with no
+#             network (charter D37, W19).
 #
 # Build choices:
 #   - The install is unfiltered for the reason recorded at apps/api/Dockerfile
@@ -19,11 +23,25 @@
 #   - `cli:build-deps` runs first because `pnpm deploy --prod` materialises each
 #     workspace dependency from its `files` field (`dist`), which only exists
 #     once that package has been built.
-#   - The image carries no ACP adapters' CLIs: `claude-agent-acp`/`codex-acp`
-#     resolve as `@taucad/cli` dependencies but the entrypoint starts the daemon
-#     with `--no-external-agents`, so nothing spawns them. Dropping them from the
-#     image means making them optional peers of `@taucad/cli` — a package change,
-#     not a Dockerfile one.
+#   - The deploy injects workspace packages (`inject-workspace-packages`): the
+#     `--legacy` deploy re-resolves `workspace:*` versions against npm under
+#     pnpm 11 and fails on unpublished ones (ruling X33). A deploy copies the
+#     development manifests, whose `exports` point at `./src/*.ts`, so
+#     `scripts/apply-publish-config.mts` applies each `publishConfig` as
+#     `pnpm pack` would; otherwise Node cannot load `@taucad/build123d`.
+#   - Native kernels run inside the bubblewrap sandbox (`bubblewrap`, `socat`,
+#     `ripgrep`), and the build123d OCP extension links `libGL.so.1` and
+#     `libX11.so.6` (`libgl1`, ruling X6). The sandbox needs a non-root user:
+#     its `apply-seccomp` helper maps its own uid into a nested user namespace,
+#     and the kernel refuses to map uid 0 there once bubblewrap has dropped
+#     CAP_SETFCAP ("write /proc/self/uid_map: Operation not permitted"). The
+#     image therefore runs as `tau`; never run it with `--user 0`. The container
+#     must also be allowed to create user namespaces; see
+#     `scripts/build-native-image.sh` for the `docker run` options.
+#   - The image carries no ACP agent CLIs: the build stages the two adapters
+#     into the CLI's `dist-acp` without their vendor binaries, and the
+#     entrypoint starts the daemon with `--no-external-agents`, so nothing
+#     spawns them.
 #   - No pairing happens here. A cloud host is provisioned by the API, which
 #     mints the device credential and passes it in as `TAU_HOST_CREDENTIAL`;
 #     the entrypoint writes it to `$TAU_CONFIG_DIR/host.json`, exactly the file
@@ -42,7 +60,8 @@
 # run under 24.10.0 — and one version across build and runtime keeps a single
 # native ABI in the pruned tree.
 ARG NODE_VERSION=26.7.0
-ARG PNPM_VERSION=10.30.3
+# The workspace's `packageManager` pin: the deploy below needs pnpm 11.
+ARG PNPM_VERSION=11.7.0
 
 # ── Base ──────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS base
@@ -64,6 +83,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── Build ─────────────────────────────────────────────────────────────────
 FROM deps AS build
 COPY . .
+# The root tsconfig references the e2e projects, which the context leaves out.
+# `@oxc-node/core` (it runs `cli:stage-acp`) then falls back to a target without
+# top-level await; point it at the base tsconfig instead.
+ENV OXC_TSCONFIG_PATH=/app/tools/typescript/base.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     pnpm nx run cli:build-deps && pnpm nx build cli
@@ -71,7 +94,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@taucad/cli --prod deploy /pruned --legacy
+    pnpm --filter=@taucad/cli --prod deploy /pruned --config.inject-workspace-packages=true && \
+    node packages/host/scripts/apply-publish-config.mts /pruned && \
+    rm -f /pruned/pnpm-lock.yaml /pruned/pnpm-workspace.yaml
 
 # ── Runtime ───────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS runtime
@@ -80,7 +105,8 @@ LABEL org.opencontainers.image.description="Launcher 3: tau serve as a cloud age
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install --yes --no-install-recommends ca-certificates git git-lfs && \
+    apt-get install --yes --no-install-recommends ca-certificates git git-lfs \
+      bubblewrap socat ripgrep libgl1 && \
     rm -rf /var/lib/apt/lists/* && \
     git lfs install --system --skip-repo
 RUN groupadd --system --gid 1001 tau && \
@@ -99,3 +125,15 @@ ENV NODE_ENV="production" \
 VOLUME ["/workspace"]
 
 ENTRYPOINT ["/usr/local/bin/tau-host-entrypoint"]
+
+# ── Store: replaced at build time by a prepared payload store ─────────────
+# `docker buildx build --build-context tau-store=<dir>` overrides this empty
+# stage. Preparing needs the native sandbox (it compiles the closure's Python
+# bytecode inside it), which a build step cannot create, so the store is
+# prepared by running the `runtime` image and baked here. It must be prepared at
+# /config: a store is used at the path it was sealed at.
+FROM scratch AS tau-store
+
+# ── Native: runtime + baked store ─────────────────────────────────────────
+FROM runtime AS native
+COPY --from=tau-store --chown=tau:tau / /config

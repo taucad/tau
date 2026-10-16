@@ -8,17 +8,19 @@
  * Environment: Node 24+.
  * Usage: node --import @oxc-node/core/register packages/plugins/picogk/scripts/compose-tau-plugin.mts \
  *          --layer <tau-layer.json> [--archive <layer.tar.gz>] [--check | --write <path>] [--outputs]
- *   Without --check or --write the checked-in manifest is rewritten in place. --archive verifies the archive's bytes
+ *   Without --check or --write the checked-in manifest is rewritten in place. The closure's CycloneDX SBOM
+ *   (`tau-plugin.cdx.json`, charter D26) is derived from the manifest and written or checked beside it. --archive verifies the archive's bytes
  *   against the record. --outputs prints `key=value` lines for `$GITHUB_OUTPUT`.
  * Exit codes: 0 success; 1 the record, the archive or the --check comparison failed; 2 usage.
  */
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import {
   composeManifest,
+  composeSbom,
   layerReleaseTag,
   layerUrls,
   manifestText,
@@ -27,6 +29,8 @@ import {
 } from '#picogk-layer.js';
 
 const manifestPath = resolve(import.meta.dirname, '../tau-plugin.json');
+/** The SBOM is derived from the manifest and always written beside it as `tau-plugin.cdx.json`. */
+const sbomPath = (manifest: string): string => resolve(dirname(manifest), 'tau-plugin.cdx.json');
 
 const { values } = parseArgs({
   options: {
@@ -58,14 +62,22 @@ const main = async (): Promise<number> => {
   }
   const current = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
   const composed = composeManifest(current, record);
+  const sbom = composeSbom(composed);
   if (values.check) {
     // Compared as data: the checked-in file is formatted by the repository's formatter, not by this script.
     if (JSON.stringify(composed) !== JSON.stringify(current)) {
       console.error(`${manifestPath} does not pin the layer ${record.sha256}; run this script without --check.`);
       return 1;
     }
+    const currentSbom = JSON.parse(await readFile(sbomPath(manifestPath), 'utf8')) as unknown;
+    if (JSON.stringify(sbom) !== JSON.stringify(currentSbom)) {
+      console.error(`${sbomPath(manifestPath)} does not describe the manifest; run this script without --check.`);
+      return 1;
+    }
   } else {
-    await writeFile(values.write === undefined ? manifestPath : resolve(values.write), manifestText(composed));
+    const target = values.write === undefined ? manifestPath : resolve(values.write);
+    await writeFile(target, manifestText(composed));
+    await writeFile(sbomPath(target), manifestText(sbom));
   }
   if (values.outputs) {
     const [cdnUrl, releaseUrl] = layerUrls(record);

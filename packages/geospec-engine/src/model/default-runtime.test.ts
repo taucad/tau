@@ -25,6 +25,7 @@ describe('default runtime', () => {
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
+      'displaySimplification',
     ]);
     expect(ids(defaultRuntime.bundlers)).toStrictEqual(['esbuild']);
     expect(ids(defaultRuntime.transcoders)).toStrictEqual(['gltf', 'image', 'svg-image', 'assimp']);

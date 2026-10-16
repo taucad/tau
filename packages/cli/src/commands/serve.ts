@@ -18,6 +18,9 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
+import { acquisitionOf } from '#acquisition.js';
+import type { Acquisition } from '#acquisition.js';
+import { stageUiEnvironment } from '#ui-environment.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, exitCodes } from '#output.js';
@@ -49,10 +52,18 @@ const computeStoreWorkerModulePath = (): string =>
     ),
   );
 
-const childArguments = (options: {
+/**
+ * The arguments of one runtime child. The daemon starts it with a minimal environment, so the acquisition profile
+ * travels as `--acquisition=locked`.
+ * @param options - Plugins, config module, Zoo proxy and the acquisition profile.
+ * @returns The child's argv.
+ * @internal
+ */
+export const childArguments = (options: {
   readonly plugin: unknown;
   readonly config?: string;
   readonly zooProxyUrl: string;
+  readonly acquisition: Acquisition;
 }): string[] => {
   const plugins = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
@@ -63,6 +74,7 @@ const childArguments = (options: {
     ...plugins.map((plugin) => `--plugin=${plugin}`),
     ...(options.config ? [`--config=${options.config}`] : []),
     `--zoo-proxy-url=${options.zooProxyUrl}`,
+    ...(options.acquisition === 'locked' ? ['--acquisition=locked'] : []),
   ];
 };
 
@@ -464,11 +476,24 @@ export const serveCommand = defineCommand({
     if (args.computeMode !== 'off' && args.computeMode !== 'memory' && args.computeMode !== 'durable') {
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
-    const agent = agentOptions(args);
-    if (args.machines && !agent) {
+    const configured = agentOptions(args);
+    if (args.machines && !configured) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
     const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
+    /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
+    const acquisitionValue = process.env['TAU_ACQUISITION'];
+    const stagedUi =
+      configured?.uiRoot === undefined
+        ? undefined
+        : await stageUiEnvironment(configured.uiRoot, {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
+            TAU_ACQUISITION:
+              acquisitionValue === undefined || acquisitionValue.trim() === ''
+                ? undefined
+                : acquisitionOf(acquisitionValue),
+          });
+    const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
@@ -542,7 +567,12 @@ export const serveCommand = defineCommand({
       relayUrl: new URL(args.relay),
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
-        args: childArguments({ plugin: args.plugin, config: args.config, zooProxyUrl }),
+        args: childArguments({
+          plugin: args.plugin,
+          config: args.config,
+          zooProxyUrl,
+          acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
+        }),
         native: kernels.native,
       },
       zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },
@@ -602,6 +632,7 @@ export const serveCommand = defineCommand({
         computeConnection?.dispose();
         await computeWorker?.terminate();
         await kernels.dispose().catch(() => undefined);
+        await stagedUi?.dispose();
       }
     }
   },

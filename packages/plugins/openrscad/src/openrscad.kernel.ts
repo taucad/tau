@@ -12,6 +12,21 @@ import { createExportFile } from '@taucad/runtime/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
 import {
+  createOpenrscadTessellationBudgetExceededIssue,
+  createOpenrscadTessellationDowngradedIssue,
+  createOpenrscadTessellationReport,
+  meshWithinOpenrscadBudget,
+  openrscadTessellationSchema,
+  openrscadTriangleBudgets,
+  resolveOpenrscadRequest,
+  scriptOwnedResolution,
+} from '#openrscad-tessellation.js';
+import type {
+  OpenrscadResolution,
+  OpenrscadResolvedTessellation,
+  OpenrscadTessellation,
+} from '#openrscad-tessellation.js';
+import {
   asBuffer,
   assertRootedPath,
   createKernelSuccess,
@@ -19,8 +34,6 @@ import {
   defineKernel,
   gltfExportConventionSchema,
   isRecordObject,
-  quantity,
-  quantityKinds,
   resolveImportPath,
 } from '@taucad/runtime/kernel';
 import type { KernelFileSystem, KernelIssue, RuntimeLogger } from '@taucad/runtime/kernel';
@@ -34,43 +47,90 @@ type OpenRscadContext = {
   entryPath: string | undefined;
 };
 
-// `$fa`: the minimum fragment angle, in degrees.
-const minimumAngle = () =>
-  quantity({ unit: 'deg', quantityKind: quantityKinds.planeAngle, space: 'linear' }).positive();
-// `$fs`: the minimum fragment size, in model millimetres.
-const minimumSize = () => quantity({ unit: 'mm', quantityKind: quantityKinds.length, space: 'linear' }).positive();
-
-const renderTessellationSchema = z.object({
-  tessellation: z
-    .object({
-      segments: z.number().int().min(0).optional(),
-      minimumAngle: minimumAngle().optional(),
-      minimumSize: minimumSize().optional(),
-    })
-    .default({}),
+/**
+ * Render-time OpenSCAD tessellation options. Left out, previews use the `medium` preset for whatever the script does
+ * not set itself: a script's own `$fn`, `$fa` and `$fs` win over the default, never over a requested value.
+ * @public
+ */
+export const openrscadRenderSchema = z.object({
+  tessellation: openrscadTessellationSchema
+    .optional()
+    .meta({ default: 'medium' })
+    .describe("Tessellation quality for preview rendering; left out, the script's own $fn, $fa and $fs are kept"),
 });
-const defaultPreviewTessellation = renderTessellationSchema.parse({}).tessellation;
 
-/** Render-time OpenSCAD tessellation options. @public */
-export const openrscadRenderSchema = renderTessellationSchema;
-
-// Unset fields keep the script's own `$fn`/`$fa`/`$fs`, so exports measure what the preview shows.
 const exportTessellationSchema = z.object({
-  tessellation: z
-    .object({
-      segments: z.number().int().min(3).optional(),
-      minimumAngle: minimumAngle().optional(),
-      minimumSize: minimumSize().optional(),
-    })
-    .describe("Leave a field empty to use the model's own $fn, $fa or $fs.")
-    .default({}),
+  tessellation: openrscadTessellationSchema
+    .optional()
+    .meta({ default: 'high' })
+    .describe("Tessellation quality for mesh-based exports; left out, the script's own $fn, $fa and $fs are kept"),
 });
 
-/** Native OpenRSCAD 3D export options. @public */
+/** Native OpenRSCAD 3D export options; left out, mesh exports use the `high` preset where the script sets nothing. @public */
 export const openrscadExportSchemas = {
   glb: exportTessellationSchema.extend(gltfExportConventionSchema.shape),
   '3mf': exportTessellationSchema,
 } as const satisfies Record<string, z.ZodType>;
+
+/** The script's own `$fn`, `$fa` and `$fs`: what evaluation runs at. */
+const scriptResolution: OpenrscadResolution = {};
+
+/**
+ * A stable key for the special variables a run sets, whatever else the value carries.
+ *
+ * @param resolution - The `$fn`, `$fs` and `$fa` a run sets.
+ * @returns A key that is equal for equal settings.
+ */
+const resolutionKey = ({ segments, linearTolerance, angularTolerance }: OpenrscadResolution): string =>
+  JSON.stringify([segments ?? null, linearTolerance ?? null, angularTolerance ?? null]);
+
+/** The preview GLB holds metres converted from the script's millimetres (the engine's default scale). */
+const previewMetresToMillimetres = 1000;
+
+/**
+ * Bounding-box diagonal of a preview GLB in millimetres, read from the `POSITION` accessors' `min` and `max`.
+ * Node transforms are not applied: OpenSCAD's GLB carries at most an axis swap, which keeps the diagonal.
+ *
+ * @param bytes - The preview GLB.
+ * @returns The diagonal in millimetres, or `NaN` when the GLB has no positions.
+ */
+const glbDiagonal = (bytes: Uint8Array<ArrayBuffer>): number => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.byteLength < 20 || view.getUint32(0, true) !== 0x46_54_6c_67) {
+    return Number.NaN;
+  }
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + view.getUint32(12, true))));
+  const gltf = glbPositionsSchema.safeParse(parsed);
+  if (!gltf.success) {
+    return Number.NaN;
+  }
+  const { accessors = [], meshes = [] } = gltf.data;
+  const bounds = meshes
+    .flatMap((mesh) => mesh.primitives)
+    .flatMap((primitive) => {
+      const accessor = accessors[primitive.attributes.POSITION ?? -1];
+      return accessor?.min && accessor.max ? [{ min: accessor.min, max: accessor.max }] : [];
+    });
+  const extent = [0, 1, 2].map(
+    (axis) =>
+      Math.max(...bounds.map(({ max }) => max[axis] ?? Number.NaN)) -
+      Math.min(...bounds.map(({ min }) => min[axis] ?? Number.NaN)),
+  );
+  const diagonal = Math.hypot(...extent);
+  return Number.isFinite(diagonal) ? diagonal * previewMetresToMillimetres : Number.NaN;
+};
+
+const glbPositionsSchema = z.object({
+  accessors: z.array(z.object({ min: z.array(z.number()).optional(), max: z.array(z.number()).optional() })).optional(),
+  meshes: z
+    .array(
+      z.object({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantic
+        primitives: z.array(z.object({ attributes: z.object({ POSITION: z.number().int().optional() }) })),
+      }),
+    )
+    .optional(),
+});
 
 const customizerParameterSchema = z.object({
   name: z.string(),
@@ -112,6 +172,8 @@ type OpenRscadNativeHandle = {
   /** The plain GLB produced by evaluation; render never mutates this handle. */
   previewGlb?: Uint8Array<ArrayBuffer>;
   previewGlbTessellation?: string;
+  /** Bounding-box diagonal in millimetres at the script's own resolution; presets scale with it. */
+  diagonal?: number;
   source: string;
   files: Record<string, string>;
   binaryFiles: Record<string, Uint8Array<ArrayBuffer>>;
@@ -266,13 +328,13 @@ const toOpenScadLiteral = (value: unknown): string => {
 
 const renderParameters = (
   parameters: Record<string, unknown>,
-  tessellation: z.output<typeof renderTessellationSchema>['tessellation'],
+  tessellation: OpenrscadResolution,
 ): Record<string, string> => {
   const flattened = flattenParameters(parameters);
   const overrides: Record<string, number | undefined> = {
     $fn: tessellation.segments,
-    $fa: tessellation.minimumAngle,
-    $fs: tessellation.minimumSize,
+    $fa: tessellation.angularTolerance,
+    $fs: tessellation.linearTolerance,
   };
   for (const [name, value] of Object.entries(overrides)) {
     if (value !== undefined && !(name in flattened)) {
@@ -440,7 +502,7 @@ const requestOptions = <T extends Record<string, unknown>>(input: {
   files: Record<string, string>;
   binaryFiles: Record<string, Uint8Array<ArrayBuffer>>;
   parameters: Record<string, unknown>;
-  tessellation: z.output<typeof renderTessellationSchema>['tessellation'];
+  tessellation: OpenrscadResolution;
   exportOptions: T;
 }): T & RenderOptions => ({
   files: input.files,
@@ -599,7 +661,7 @@ export const createOpenrscadKernel = ({
               files: bundle.files,
               binaryFiles: bundle.binaryFiles,
               parameters,
-              tessellation: defaultPreviewTessellation,
+              tessellation: scriptResolution,
               exportOptions: {
                 includeEdges,
               },
@@ -616,7 +678,8 @@ export const createOpenrscadKernel = ({
       const preview = asBuffer(result.bytes);
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
-        previewGlbTessellation: JSON.stringify(defaultPreviewTessellation),
+        previewGlbTessellation: resolutionKey(scriptResolution),
+        diagonal: glbDiagonal(preview),
         source: bundle.source,
         files: bundle.files,
         binaryFiles: bundle.binaryFiles,
@@ -639,39 +702,94 @@ export const createOpenrscadKernel = ({
 
     async render({ handle: nativeHandle, options, content }, { tracer }, context) {
       const includeEdges = content?.includeEdges === true;
-      const tessellation = JSON.stringify(options.tessellation);
-      const rendered = !includeEdges && nativeHandle.previewGlbTessellation === tessellation && nativeHandle.previewGlb;
-      if (rendered) {
-        return { content: rendered, issues: nativeHandle.issues };
-      }
-      const span = tracer.startSpan(includeEdges ? 'openrscad.export-3d-edges' : 'openrscad.export-3d-plain', {
-        phase: 'serializingGeometry',
+      const started = performance.now();
+      const requested = resolveOpenrscadRequest({
+        tessellation: options.tessellation,
+        laneDefault: 'medium',
+        diagonal: nativeHandle.diagonal ?? Number.NaN,
+        owned: scriptOwnedResolution([nativeHandle.source, ...Object.values(nativeHandle.files)]),
       });
-      let result: ExportShape3DOutput;
-      try {
-        result = assertExport(
-          await context.backend.renderToGlb(
-            nativeHandle.source,
-            requestOptions({
-              files: nativeHandle.files,
-              binaryFiles: nativeHandle.binaryFiles,
-              parameters: nativeHandle.parameters,
-              tessellation: options.tessellation,
-              exportOptions: {
-                includeEdges,
-              },
-            }),
-          ),
-        );
-      } finally {
-        span.end();
-      }
-      const preview = asBuffer(result.bytes);
-      return { content: preview, issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath) };
+      const budget = openrscadTriangleBudgets.preview;
+      const meshAt = async (
+        resolution: OpenrscadResolution,
+      ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[]; triangles: number; vertices: number }> => {
+        const rendered =
+          !includeEdges && nativeHandle.previewGlbTessellation === resolutionKey(resolution) && nativeHandle.previewGlb;
+        if (rendered) {
+          return {
+            content: rendered,
+            issues: nativeHandle.issues,
+            triangles: nativeHandle.stats.triangleCount,
+            vertices: nativeHandle.stats.vertexCount,
+          };
+        }
+        const span = tracer.startSpan(includeEdges ? 'openrscad.export-3d-edges' : 'openrscad.export-3d-plain', {
+          phase: 'serializingGeometry',
+        });
+        let result: ExportShape3DOutput;
+        try {
+          result = assertExport(
+            await context.backend.renderToGlb(
+              nativeHandle.source,
+              requestOptions({
+                files: nativeHandle.files,
+                binaryFiles: nativeHandle.binaryFiles,
+                parameters: nativeHandle.parameters,
+                tessellation: resolution,
+                exportOptions: {
+                  includeEdges,
+                },
+              }),
+            ),
+          );
+        } finally {
+          span.end();
+        }
+        return {
+          content: asBuffer(result.bytes),
+          issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
+          triangles: result.triangleCount,
+          vertices: result.vertexCount,
+        };
+      };
+      const { result, effective, downgraded } = await meshWithinOpenrscadBudget({
+        resolution: requested,
+        budget,
+        mesh: meshAt,
+      });
+      const tessellation = createOpenrscadTessellationReport({
+        requested,
+        effective,
+        downgraded,
+        triangles: result.triangles,
+        vertices: result.vertices,
+        elapsed: performance.now() - started,
+      });
+      const issues =
+        downgraded === 0
+          ? result.issues
+          : [
+              ...result.issues,
+              createOpenrscadTessellationDowngradedIssue({
+                requested,
+                effective,
+                downgraded,
+                triangles: result.triangles,
+                budget,
+              }),
+            ];
+      return { content: result.content, tessellation, issues };
     },
 
     async export(input, { tracer }, context) {
       const { exportId: format, handle: nativeHandle } = input;
+      const resolve = (tessellation: OpenrscadTessellation | undefined): OpenrscadResolvedTessellation =>
+        resolveOpenrscadRequest({
+          tessellation,
+          laneDefault: 'high',
+          diagonal: nativeHandle.diagonal ?? Number.NaN,
+          owned: scriptOwnedResolution([nativeHandle.source, ...Object.values(nativeHandle.files)]),
+        });
       const exportNative = async (
         format: '3mf' | 'glb',
         exportArtifact: () => Promise<ExportShape3DOutput>,
@@ -685,9 +803,23 @@ export const createOpenrscadKernel = ({
           span.end();
         }
       };
+      const checked = (result: ExportShape3DOutput, requested: OpenrscadResolvedTessellation): KernelIssue[] => {
+        const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
+        if (!result.ok) {
+          throw new OpenRscadExportError(issues);
+        }
+        const budget = openrscadTriangleBudgets.export;
+        if (result.triangleCount > budget) {
+          throw new OpenRscadExportError([
+            createOpenrscadTessellationBudgetExceededIssue({ requested, triangles: result.triangleCount, budget }),
+          ]);
+        }
+        return issues;
+      };
       switch (format) {
         case 'glb': {
           const { content, options } = input;
+          const requested = resolve(options.tessellation);
           const result = await exportNative('glb', async () =>
             context.backend.exportShape3D(
               nativeHandle.source,
@@ -696,7 +828,7 @@ export const createOpenrscadKernel = ({
                 files: nativeHandle.files,
                 binaryFiles: nativeHandle.binaryFiles,
                 parameters: nativeHandle.parameters,
-                tessellation: options.tessellation,
+                tessellation: requested,
                 exportOptions: {
                   includeEdges: content?.includeEdges === true,
                   sourceUnitToMeters: options.unit.length === 'millimeter' ? 1 : 0.001,
@@ -705,14 +837,12 @@ export const createOpenrscadKernel = ({
               }),
             ),
           );
-          const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
-          if (!result.ok) {
-            throw new OpenRscadExportError(issues);
-          }
+          const issues = checked(result, requested);
           return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
         }
         case '3mf': {
           const { options } = input;
+          const requested = resolve(options.tessellation);
           const result = await exportNative('3mf', async () =>
             context.backend.exportShape3D(
               nativeHandle.source,
@@ -721,15 +851,12 @@ export const createOpenrscadKernel = ({
                 files: nativeHandle.files,
                 binaryFiles: nativeHandle.binaryFiles,
                 parameters: nativeHandle.parameters,
-                tessellation: options.tessellation,
+                tessellation: requested,
                 exportOptions: {},
               }),
             ),
           );
-          const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
-          if (!result.ok) {
-            throw new OpenRscadExportError(issues);
-          }
+          const issues = checked(result, requested);
           return { files: [createExportFile('3mf', 'model.3mf', asBuffer(result.bytes))], issues };
         }
         default: {

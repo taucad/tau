@@ -1,0 +1,100 @@
+XZ Utils (liblzma): bundled in cadquery-ocp-novtk 7.9.3.1.1
+
+Licence: 0BSD
+Bundled as:
+  linux-x64-glibc: cadquery_ocp_novtk.libs/liblzma-07dceced.so.5
+  linux-arm64-glibc: cadquery_ocp_novtk.libs/liblzma-66fc3e29.so.5
+  darwin-arm64: OCP/.dylibs/liblzma.5.dylib
+  darwin-x64: OCP/.dylibs/liblzma.5.dylib
+
+The Linux and macOS builds are conda-forge builds of the upstream release; the upstream licence below applies.
+
+==============================================================================
+https://raw.githubusercontent.com/tukaani-project/xz/v5.8.3/COPYING
+==============================================================================
+
+
+XZ Utils Licensing
+==================
+
+    Different licenses apply to different files in this package. Here
+    is a summary of which licenses apply to which parts of this package:
+
+      - liblzma is under the BSD Zero Clause License (0BSD).
+
+      - The command line tools xz, xzdec, lzmadec, and lzmainfo are
+        under 0BSD except that, on systems that don't have a usable
+        getopt_long, GNU getopt_long is compiled and linked in from the
+        'lib' directory. The getopt_long code is under GNU LGPLv2.1+.
+
+      - The scripts to grep, diff, and view compressed files have been
+        adapted from GNU gzip. These scripts (xzgrep, xzdiff, xzless,
+        and xzmore) are under GNU GPLv2+. The man pages of the scripts
+        are under 0BSD; they aren't based on the man pages of GNU gzip.
+
+      - Most of the XZ Utils specific documentation that is in
+        plain text files (like README, INSTALL, PACKAGERS, NEWS,
+        and ChangeLog) are under 0BSD unless stated otherwise in
+        the file itself. The files xz-file-format.txt and
+        lzma-file-format.xt are in the public domain but may
+        be distributed under the terms of 0BSD too.
+
+      - Translated messages and man pages are under 0BSD except that
+        some old translations are in the public domain.
+
+      - Test files and test code in the 'tests' directory, and
+        debugging utilities in the 'debug' directory are under
+        the BSD Zero Clause License (0BSD).
+
+      - The GNU Autotools based build system contains files that are
+        under GNU GPLv2+, GNU GPLv3+, and a few permissive licenses.
+        These files don't affect the licensing of the binaries being
+        built.
+
+      - The 'extra' directory contains files that are under various
+        free software licenses. These aren't built or installed as
+        part of XZ Utils.
+
+    The following command may be helpful in finding per-file license
+    information. It works on xz.git and on a clean file tree extracted
+    from a release tarball.
+
+        sh build-aux/license-check.sh -v
+
+    For the files under the BSD Zero Clause License (0BSD), if
+    a copyright notice is needed, the following is sufficient:
+
+        Copyright (C) The XZ Utils authors and contributors
+
+    If you copy significant amounts of 0BSD-licensed code from XZ Utils
+    into your project, acknowledging this somewhere in your software is
+    polite (especially if it is proprietary, non-free software), but
+    it is not legally required by the license terms. Here is an example
+    of a good notice to put into "about box" or into documentation:
+
+        This software includes code from XZ Utils <https://tukaani.org/xz/>.
+
+    The following license texts are included in the following files:
+      - COPYING.0BSD: BSD Zero Clause License
+      - COPYING.LGPLv2.1: GNU Lesser General Public License version 2.1
+      - COPYING.GPLv2: GNU General Public License version 2
+      - COPYING.GPLv3: GNU General Public License version 3
+
+    If you have questions, don't hesitate to ask for more information.
+    The contact information is in the README file.
+
+==============================================================================
+https://raw.githubusercontent.com/tukaani-project/xz/v5.8.3/COPYING.0BSD
+==============================================================================
+
+Permission to use, copy, modify, and/or distribute this
+software for any purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL
+THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

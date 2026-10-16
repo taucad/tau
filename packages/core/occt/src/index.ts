@@ -7,7 +7,36 @@ export { activateOccParallelism, detectMultiThreadSupport } from '#oc-threading.
 export type { MultiThreadSupport } from '#oc-threading.js';
 
 // Schemas
-export { occtGltfExportSchema, occtRenderOptionSchema, occtStlExportSchema } from '#occt-schemas.js';
+export {
+  occtExplicitTessellationSchema,
+  occtQualityGltfExportSchema,
+  occtQualityRenderOptionSchema,
+  occtQualityStlExportSchema,
+  occtTessellationQualities,
+  occtTessellationSchema,
+} from '#occt-schemas.js';
+export type { OcctExplicitTessellation, OcctTessellation, OcctTessellationQuality } from '#occt-schemas.js';
+
+// Tessellation resolution and budgets
+export {
+  coarsenOcctTessellation,
+  createTessellationBudgetExceededIssue,
+  createTessellationDowngradedIssue,
+  occtExplicitTessellationDefaults,
+  occtMaxTessellationDowngrades,
+  occtPresetLinearToleranceRange,
+  occtTessellationPresets,
+  occtTriangleBudgets,
+  resolveOcctTessellation,
+  suggestOcctTessellation,
+  tessellateWithinOcctBudget,
+} from '#occt-tessellation.js';
+export type {
+  OcctBudgetedTessellation,
+  OcctResolvedTessellation,
+  OcctTessellationLane,
+  OcctTessellationTolerances,
+} from '#occt-tessellation.js';
 
 // Handle scopes
 export { createOcScope } from '#oc-scope.js';

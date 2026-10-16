@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) \u2014 measured 9381 B; native mechanism admission plus project library-version validation",
+    "name": "total (ESM JS) \u2014 measured 10598 B brotli on 2026-10-17; main absolute tessellation plus native mechanism admission and preserved metadata through budget wrappers",
     "path": "dist/**/*.mjs",
-    "limit": "9.5 kB"
+    "limit": "10.75 kB"
   }
 ]

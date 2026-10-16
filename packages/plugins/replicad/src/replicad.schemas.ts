@@ -10,7 +10,11 @@
 
 import { z } from 'zod';
 import { coordinateSystemSchema } from '@taucad/runtime/kernel';
-import { occtGltfExportSchema, occtRenderOptionSchema, occtStlExportSchema } from '@taucad/occt-core';
+import {
+  occtQualityGltfExportSchema,
+  occtQualityRenderOptionSchema,
+  occtQualityStlExportSchema,
+} from '@taucad/occt-core';
 
 /**
  * Custom WASM configuration for injecting non-standard builds at runtime.
@@ -43,21 +47,23 @@ export const replicadOptionsSchema = z.object({
 });
 
 /**
- * Replicad render option schema.
+ * Replicad render option schema: `tessellation` is a quality preset (default `medium`) or explicit
+ * tolerances in millimetres and degrees, never both.
  * @public
  */
 // oxlint-disable-next-line unicorn-js/prefer-export-from -- `no-barrel-files` forbids the re-export form outside index.ts.
-export const replicadRenderSchema = occtRenderOptionSchema;
+export const replicadRenderSchema = occtQualityRenderOptionSchema;
 
 /**
  * Replicad per-format export schemas.
  *
+ * Mesh exports take a quality preset (default `high`) or explicit tolerances, never both.
  * STEP uses `coordinateSystemSchema` because replicad transforms shapes for STEP.
  * @public
  */
 export const replicadExportSchemas = {
-  stl: occtStlExportSchema,
+  stl: occtQualityStlExportSchema,
   step: coordinateSystemSchema,
-  glb: occtGltfExportSchema,
-  gltf: occtGltfExportSchema,
+  glb: occtQualityGltfExportSchema,
+  gltf: occtQualityGltfExportSchema,
 } as const satisfies Record<string, z.ZodType>;

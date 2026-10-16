@@ -70,6 +70,21 @@ tau export model.cs --ext=usdz
 
 An export of a `.cs` file before `tau prepare picogk` exits 3 with `KERNEL_NOT_PREPARED`, and on a host no closure supports (PicoGK runs on macOS 14 or later on Apple silicon) with `UNSUPPORTED_TARGET`.
 
+## Machines without network access
+
+`tau prepare --bundle <dir>` prepares a kernel (every kernel this host runs when none is named) and exports its closure as a seed directory: the payload archives under `blobs/sha256/<hex>`, the plugin's `tau-plugin.json`, an audit unit per closure under `notices/<hex>/` (its receipt, its CycloneDX SBOM and its licence notices) and the `tau-seed.json` index. Copy the directory to a machine with no network, check it, prepare from it and audit the result there:
+
+```bash
+tau prepare build123d --bundle ./tau-seed            # online
+tau prepare --verify-seed ./tau-seed                 # offline: every blob, pin and audit unit
+TAU_ACQUISITION=locked tau prepare --seed ./tau-seed # offline: prepares every kernel the seed indexes
+tau prepare --audit                                  # offline: files, SBOM and notices of every closure
+```
+
+A seed file is used only when it hashes to its name, so a bundle from an untrusted party can at worst be refused. `--verify-seed`, `--seed` and `--audit` exit 3 when anything is missing or differs. The same directory served over HTTP is a `TAU_PAYLOAD_MIRROR`.
+
+`tau ui verify <dir>` re-hashes a deployed copy of the Tau UI build against the `tau-asset-receipt.json` the build writes at its client root, and exits 3 naming every file that is missing or altered. `tau serve --ui` hands the served page the daemon's `TAU_ACQUISITION`, so a locked daemon's UI acquires no types from a CDN.
+
 ## Tau Host
 
 Run the outbound daemon with the same built-in/configured plugin composition used by `export`:

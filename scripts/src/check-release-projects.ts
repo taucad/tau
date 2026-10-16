@@ -32,6 +32,8 @@ export type ReleaseScope = {
   readonly publishable: readonly string[];
   /** The widest set versioning may legitimately touch. */
   readonly releaseTrain: readonly string[];
+  /** Each publishable package's manifest version, by project name. */
+  readonly versions: Readonly<Record<string, string | undefined>>;
   /** How publish.yml publishes: the whole fixed group, or a hand-picked subset. */
   readonly publishesWholeGroup: boolean;
 };
@@ -81,8 +83,62 @@ export const findReleaseScopeMismatches = ({
   return mismatches;
 };
 
+/**
+ * The fixed group ships one version: every publishable manifest must carry the same `version`.
+ * @param versions - Each publishable package's manifest version, by project name.
+ * @returns One mismatch naming every version found and its projects, or none.
+ */
+export const findGroupVersionMismatches = (versions: Readonly<Record<string, string | undefined>>): string[] => {
+  const byVersion = new Map<string, string[]>();
+  for (const [project, version] of Object.entries(versions)) {
+    const key = version ?? '(none)';
+    byVersion.set(key, [...(byVersion.get(key) ?? []), project]);
+  }
+  if (byVersion.size <= 1) {
+    return [];
+  }
+  const found = [...byVersion.entries()]
+    .sort(([, a], [, b]) => b.length - a.length)
+    .map(([version, projects]) => `${version} (${projects.sort().join(', ')})`);
+  return [`the fixed release group carries ${String(byVersion.size)} versions, not one: ${found.join('; ')}`];
+};
+
 /** The release group Nx names when nx.json declares `release.projects` without `release.groups`. */
 export const defaultReleaseGroup = '__default__';
+
+/**
+ * Below 1.0.0 a breaking change is a minor bump (release policy, Pre-1.0 Convention). A `major` or
+ * `premajor` plan applied to the fixed group would release the whole train as 1.0.0, so it is refused
+ * until the group itself has reached 1.0.0.
+ * @param plans - The version-plan files.
+ * @param groupVersion - The fixed group's current version.
+ * @returns One mismatch per plan entry that would take the group to 1.0.0.
+ */
+export const findPreStableBumpMismatches = (plans: readonly VersionPlan[], groupVersion: string): string[] => {
+  if (!groupVersion.startsWith('0.')) {
+    return [];
+  }
+  return plans.flatMap(({ path, text }) => {
+    const frontmatter = /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(text)?.groups?.['body'];
+    let metadata: unknown;
+    try {
+      metadata = frontmatter === undefined ? undefined : loadYaml(frontmatter);
+    } catch {
+      // The scope check reports unreadable frontmatter.
+      return [];
+    }
+    if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
+      return [];
+    }
+    return Object.entries(metadata)
+      .filter(([, bump]) => bump === 'major' || bump === 'premajor')
+      .map(
+        ([project, bump]) =>
+          `${path}: "${project}: ${String(bump)}" would release the fixed group at ${groupVersion} as 1.0.0; ` +
+          'below 1.0.0 a breaking change is a minor bump',
+      );
+  });
+};
 
 /**
  * Version-plan keys must name a project of the train or a release group: a fixed group's plans
@@ -121,6 +177,31 @@ export const findVersionPlanScopeMismatches = (
 const root = resolve(import.meta.dirname, '../..');
 const workflowPath = '.github/workflows/publish.yml';
 
+/**
+ * The project list `nx show projects --json` prints as one line. Plugins may print banners around it
+ * (dotenv's tips can carry `[www…]`), so the list is the last line that parses as a JSON array.
+ * @param stdout - The command's standard output.
+ * @returns The project names.
+ * @throws When no line is a JSON array of strings.
+ */
+export const parseProjectList = (stdout: string): string[] => {
+  for (const line of stdout.split('\n').reverse()) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('[')) {
+      continue;
+    }
+    try {
+      const value: unknown = JSON.parse(trimmed);
+      if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+        return value;
+      }
+    } catch {
+      // A banner line that merely starts with '['.
+    }
+  }
+  throw new Error(`nx show projects printed no project list:\n${stdout}`);
+};
+
 const showProjects = (selector?: string): string[] => {
   const environment = { ...process.env };
   environment['NX_CLOUD'] = 'false';
@@ -134,7 +215,7 @@ const showProjects = (selector?: string): string[] => {
       env: environment,
     },
   );
-  return JSON.parse(stdout.slice(stdout.indexOf('['), stdout.lastIndexOf(']') + 1)) as string[];
+  return parseProjectList(stdout);
 };
 
 /**
@@ -201,6 +282,9 @@ const collectReleaseScope = async (): Promise<ReleaseScope> => {
     // versioning them adds telemetry and chat to the train and changes nothing
     // else, so the upper bound on versioning is the publishable set itself.
     releaseTrain: publishable(resolvedWorkspace).map((project) => project.name),
+    versions: Object.fromEntries(
+      publishable(resolvedWorkspace).map((project) => [project.name, project.manifest?.version]),
+    ),
     // Every publish line, dry-run included: one `-p` anywhere shrinks the train.
     publishesWholeGroup: publishLines.length > 0 && publishLines.every((line) => !/(?:-p |--projects[= ])/u.test(line)),
   };
@@ -221,9 +305,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     path,
     text: readFileSync(join(root, path), 'utf8'),
   }));
+  const groupVersionMismatches = findGroupVersionMismatches(scope.versions);
+  const [groupVersion] = Object.values(scope.versions);
   const mismatches = [
     ...findReleaseScopeMismatches(scope),
+    ...groupVersionMismatches,
     ...findVersionPlanScopeMismatches(plans, scope.releaseTrain, releaseGroups()),
+    ...(groupVersionMismatches.length === 0 && groupVersion !== undefined
+      ? findPreStableBumpMismatches(plans, groupVersion)
+      : []),
   ];
 
   if (mismatches.length > 0) {
@@ -236,6 +326,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   console.log(
     `Release scope verified: ${scope.publishable.length} publishable packages in a ${scope.releaseTrain.length}-project ` +
-      `release train, ${scope.selectors.length} selectors resolved, published as one fixed group.`,
+      `release train at one version (${String(groupVersion)}), ${scope.selectors.length} selectors resolved, ` +
+      'published as one fixed group.',
   );
 }

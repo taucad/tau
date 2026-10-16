@@ -1,0 +1,60 @@
+# Static host conformance (charter D26, W19): request the document, a JS chunk, a WASM module and a worker script from
+# the deployed UI and check the four cross-origin isolation headers and the WASM content type. Run on a change to the
+# script or the UI's Netlify header configuration, and by dispatch against any host that serves a copy of the build.
+name: Static host conformance
+
+on:
+  pull_request:
+    paths:
+      - apps/ui/scripts/static-host-conformance.sh
+      - apps/ui/netlify.toml
+      - .github/workflows/static-host-conformance.yml
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Base URL of the host serving the UI build
+        required: true
+        default: https://taucad-prod-us.netlify.app
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-host-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: Static host conformance (${{ matrix.host }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A pull request is held to the host `main` deploys to (staging). A row with `required: false` is recorded, not
+    # enforced: production serves the last `ui@` release, which this change has not reached, and the apex `tau.new` is
+    # still the legacy Fly app without the isolation headers (go-live X-5).
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('[{{"host":"{0}","required":true}}]', inputs.url)) || fromJSON('[{"host":"https://taucad-prod-us.netlify.app","required":false},{"host":"https://taucad-staging.netlify.app","required":true},{"host":"https://tau.new","required":false},{"host":"https://taucad.dev","required":false}]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check the isolation headers and content types
+        continue-on-error: ${{ !matrix.required }}
+        env:
+          HOST_URL: ${{ matrix.host }}
+          # A bare `/` with no app preference is the marketing site on the Tau hosts
+          # (apps/ui/netlify/edge-functions/marketing.ts); any other query parameter keeps the app's own document.
+          DOCUMENT_PATH: /?conformance=1
+        run: |
+          set -o pipefail
+          apps/ui/scripts/static-host-conformance.sh "$HOST_URL" 2>&1 | tee "$RUNNER_TEMP/conformance.txt"
+      - name: Summarize
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/conformance.txt" 2>/dev/null || echo '(no output)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # One annotation carries the result to the check run, where it reads without the job log.
+          result="$(cat "$RUNNER_TEMP/conformance.txt" 2>/dev/null || echo '(no output)')"
+          result="${result//'%'/'%25'}"
+          echo "::notice title=Static host conformance::${result//$'\n'/'%0A'}"

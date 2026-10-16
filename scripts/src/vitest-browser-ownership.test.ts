@@ -137,6 +137,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
+      // The UI asset-integrity gate (ruling X31) serves the built client, tampers a WASM byte and times the loader in
+      // a module worker in three engines, which Browser Mode cannot host.
+      'apps/ui/scripts/check-asset-integrity.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       // Production SSR audits own isolated no-JavaScript contexts and graphics failure injection.
@@ -173,6 +176,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // The pkg.pr.new consumer leg, the publish workflow's release gate and the publish dry-run spike install Chromium
     // for check-pack-install's browser checks.
     // The S31 and S32 native-dependency spikes install the three engines they measure.
+    // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -184,8 +188,10 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/spike-publish-dry-run.yml',
         '.github/workflows/spike-s31.yml',
         '.github/workflows/spike-s32.yml',
+        '.github/workflows/ui-asset-integrity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
         'apps/docs/project.json',
+        'apps/ui/scripts/check-asset-integrity.mts',
         'apps/www/README.md',
       ].sort(),
     );

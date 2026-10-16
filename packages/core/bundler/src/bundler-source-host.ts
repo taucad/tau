@@ -76,10 +76,20 @@ export type BundlerSourceHost = {
   dispose(): void;
 };
 
+/**
+ * Where a source host may acquire code it does not find in the project (`TAU_ACQUISITION`). `open` loads a bare import
+ * of a project without `package-lock.json` as a CDN bundle and follows URL imports; `locked` never requests anything
+ * and refuses those imports with `package-not-locked`, so only project files, builtins and the installed tree load.
+ * @public
+ */
+export type BundlerAcquisition = 'open' | 'locked';
+
 /** Source-host construction options. @public */
 export type BundlerSourceHostOptions = {
   readonly filesystem: BundlerFileSystem;
   readonly autoExportNames?: readonly string[];
+  /** Default `open`. */
+  readonly acquisition?: BundlerAcquisition;
 };
 
 const sourceExtensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'] as const;
@@ -210,6 +220,7 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
   const builtins = new Map<string, BuiltinModule>();
   const packageArtifacts = new PackageArtifactCache(options.filesystem);
   const autoExportNames = options.autoExportNames ?? ['main', 'defaultParams'];
+  const locked = options.acquisition === 'locked';
 
   return {
     registerBuiltin({ name, module }) {
@@ -238,6 +249,14 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
         message: `${issue.code}: ${issue.message}`,
         issue,
       });
+
+      // The locked profile makes no request: code outside the project, the builtins and the installed tree is refused.
+      const refuseUnlocked = (specifier: string, name: string): BundlerSourceResolution =>
+        refuse(specifier, {
+          code: 'package-not-locked',
+          name,
+          message: `'${name}' is not in the project's package-lock.json and this host's acquisition profile is locked (TAU_ACQUISITION=locked), so it is not downloaded. Lock and install it where the registry is reachable, then open the project here again.`,
+        });
 
       const packageFile = (path: string, owner: { readonly name: string; readonly version: string }) => {
         packageFiles.set(path, owner);
@@ -274,6 +293,9 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
         if (project.lock === undefined && project.issue === undefined) {
           // No package-lock.json: today's CDN bundle (DA4), reported so the author can Install (I8).
           const { name } = parsePackage(specifier);
+          if (locked) {
+            return refuseUnlocked(specifier, name);
+          }
           const identity = await packageArtifacts.ensure(specifier, signal);
           if (!issues.has(name)) {
             issues.set(name, {
@@ -347,12 +369,18 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
           if (mode === 'detect') {
             return { kind: 'external', id: specifier, specifier };
           }
+          if (locked) {
+            return refuseUnlocked(specifier, specifier);
+          }
           const url = isBareSpecifier(specifier) ? `https://esm.sh/${specifier}` : new URL(specifier, importer).href;
           return { kind: 'remote', id: url, url, intent: scriptIntent(new URL(url).pathname) };
         }
         if (isUrl(specifier)) {
           if (mode === 'detect') {
             return { kind: 'external', id: specifier, specifier };
+          }
+          if (locked) {
+            return refuseUnlocked(specifier, specifier);
           }
           return {
             kind: 'remote',
@@ -379,6 +407,9 @@ export const createBundlerSourceHost = (options: BundlerSourceHostOptions): Bund
         }
 
         if (specifier.startsWith('/') && importer?.startsWith(`${artifactRoot}/`)) {
+          if (locked) {
+            return refuseUnlocked(specifier, specifier);
+          }
           const url = `https://esm.sh${specifier}`;
           return { kind: 'remote', id: url, url, intent: scriptIntent(new URL(url).pathname) };
         }

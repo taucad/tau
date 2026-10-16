@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
 
-import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
+import { createTauMcpHttpHandler, serveTauMcpStdio, tauMcpToolNames } from '@taucad/mcp';
 import type {
   TauMcpDispatch,
   TauMcpDispatchOptions,
@@ -40,6 +40,7 @@ import type {
   TauMcpRpcName,
   TauMcpRpcSuccess,
   TauMcpStdioStreams,
+  TauMcpToolName,
 } from '@taucad/mcp';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { screenshotImageSchema, screenshotOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
@@ -381,6 +382,21 @@ const progressUpdates = (
       };
 
 /**
+ * The CAD tools an endpoint lists over one registry.
+ *
+ * `test_model` only when the registry offers it, which it does only when a
+ * GeoSpec runner resolves; the other three always, as the registry's own
+ * failures name what a missing runtime lacks.
+ *
+ * @param registry - The host registry the endpoint dispatches into.
+ * @returns The CAD tools to list.
+ */
+const cadToolsOf = (registry: ToolRegistry): readonly TauMcpToolName[] => {
+  const testsOffered = registry.list().some((definition) => definition.name === toolName.testModel);
+  return tauMcpToolNames.filter((name) => testsOffered || name !== toolName.testModel);
+};
+
+/**
  * Which registry tool one adapter call names, and with what input.
  *
  * @param call - The adapter's validated call.
@@ -537,7 +553,9 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   /* Offered iff the registry offers them: a daemon without a granted machines
    * facet lists none, so an external agent is never told about a tool this
    * host cannot serve. */
+  const cadTools = cadToolsOf(options.registry);
   const handler = createTauMcpHttpHandler({
+    cadTools,
     hostTools: options.registry
       .list()
       .filter((definition) => hostMcpRegistryTools.has(definition.name as HostMcpAllowedTool))
@@ -986,9 +1004,11 @@ export const serveLocalHostMcp = async (
           hostCall: async ({ root, call, signal }) =>
             dispatchIn(root, call, { toolCallId: `loopback:${randomUUID()}`, signal }),
         });
+  const cadTools = cadToolsOf(options.registry);
   const server = await serveTauMcpStdio(
     {
       ...(viewer === undefined ? {} : { viewer }),
+      cadTools,
       hostTools: options.registry
         .list()
         .filter(

@@ -1,4 +1,9 @@
-import type { GeoSpecRunResult, RunGeoSpecModuleOptions, GeoSpecTestAccounting } from '#runner/types.js';
+import type {
+  GeoSpecRunResult,
+  RunGeoSpecModuleOptions,
+  GeoSpecTestAccounting,
+  GeoSpecTestCase,
+} from '#runner/types.js';
 import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
 
@@ -56,14 +61,24 @@ export type GeoSpecRunnerAccounting = GeoSpecTestAccounting & {
   bailed: boolean;
 };
 
+/** Identity of a test that has started but not settled. @public */
+export type GeoSpecRunnerTestRef = {
+  readonly suite: readonly string[];
+  readonly name: string;
+  readonly ordinal?: number;
+};
+
 /**
- * Lifecycle event emitted by GeoSpec worker-style runners.
+ * Lifecycle event emitted by GeoSpec worker-style runners. Test events are
+ * emitted by in-process runners; a pool reports per file.
  *
  * @public
  */
 export type GeoSpecRunnerEvent =
   | { type: 'run-start'; files: readonly string[] }
   | { type: 'file-start'; file: string }
+  | { type: 'test-start'; file: string; test: GeoSpecRunnerTestRef }
+  | { type: 'test-complete'; file: string; test: GeoSpecTestCase }
   | {
       type: 'file-complete';
       file: string;
@@ -100,6 +115,12 @@ export type GeoSpecRunnerRunOptions = {
   testTimeout?: number;
   /** Non-verdict matcher wall backstop. Milliseconds. */
   matcherWallBackstop?: number;
+  /**
+   * Engine work-unit budget for this run's claims, replacing the runner's
+   * `nativeAssertions.workUnitLimit`. A `loadModel` or `expectGeo` budget still
+   * wins for its own claims.
+   */
+  workUnitLimit?: number;
   /** Emit structured forensic measurements for this run. */
   forensic?: boolean;
   /**

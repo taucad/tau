@@ -276,7 +276,49 @@ describe('suite and test tree', () => {
     await collector.waitForCompletion(1);
 
     expect(collector.tests[0]?.status).toBe('failed');
-    expect(collector.tests[0]?.diagnostics[0]?.message).toContain('timed out');
+    expect(collector.tests[0]?.diagnostics).toHaveLength(1);
+    expect(collector.tests[0]?.diagnostics[0]).toMatchObject({
+      code: 'GEOSPEC_TEST_TIMEOUT',
+      severity: 'error',
+      details: { testTimeout: 1 },
+    });
+    expect(collector.tests[0]?.diagnostics[0]?.suggestion).toContain('Keep the assertion');
+  });
+
+  it('should report each selected test to the host as it starts and settles', async () => {
+    const events: Array<{ type: string; name: string; status: string }> = [];
+    const collector = createCollector({
+      nativeAssertions: createNativeFixture().options,
+      onTestEvent: ({ type, test }) => {
+        events.push({ type, name: test.name, status: test.status });
+      },
+    });
+    collector.it('kept', () => undefined);
+    collector.it('failing', () => {
+      throw new Error('boom');
+    });
+    collector.it('dropped', () => undefined);
+    await collector.waitForCompletion(1000, /kept|failing/u);
+
+    expect(events).toStrictEqual([
+      { type: 'test-start', name: 'kept', status: 'passed' },
+      { type: 'test-complete', name: 'kept', status: 'passed' },
+      { type: 'test-start', name: 'failing', status: 'passed' },
+      { type: 'test-complete', name: 'failing', status: 'failed' },
+    ]);
+  });
+
+  it('should keep a test verdict when its progress observer throws', async () => {
+    const collector = createCollector({
+      nativeAssertions: createNativeFixture().options,
+      onTestEvent: () => {
+        throw new Error('observer failed');
+      },
+    });
+    collector.it('kept', () => undefined);
+    await collector.waitForCompletion(1000);
+
+    expect(collector.tests[0]?.status).toBe('passed');
   });
 
   it('should not impose a default timeout on cold model acquisition', async () => {

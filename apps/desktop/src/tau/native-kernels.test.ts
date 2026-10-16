@@ -51,7 +51,6 @@ describe('desktop native kernels', () => {
       { path: `${build123dRoot}/tau-worker/glb.py`, sha256: '3'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/native_materials.py`, sha256: 'b'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/mechanisms.py`, sha256: 'c'.repeat(64) },
-      { path: `${build123dRoot}/tau-worker/tau_assembly.py`, sha256: 'c'.repeat(64) },
     ]);
     expect(native.picogk).toMatchObject({
       workerExecutable: `${picogkRoot}/dotnet/dotnet`,

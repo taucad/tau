@@ -1,0 +1,56 @@
+# The managed seed round trip (charter D25, D26, W19; spike S26): machine A prepares build123d online and exports a
+# seed bundle; machine B, inside a network namespace with no route out, verifies the bundle, prepares from it and audits
+# the closure. B's receipt must equal A's, and a tampered bundle must be refused.
+name: Managed seed round trip
+
+on:
+  pull_request:
+    paths:
+      - packages/cli/src/commands/prepare.ts
+      - packages/cli/src/commands/prepare-seed.ts
+      - packages/cli/scripts/seed-round-trip.sh
+      - packages/plugins/build123d/tau-plugin.json
+      - packages/plugins/build123d/tau-plugin.cdx.json
+      - packages/plugins/build123d/notices/**
+      - packages/runtime/src/preparation/**
+      - .github/workflows/managed-seed.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-seed-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  round-trip:
+    name: Seed round trip and offline audit (build123d, linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Bundle on A, then verify, seed and audit on B with the network denied
+        run: packages/cli/scripts/seed-round-trip.sh build123d "$RUNNER_TEMP/seed" "$RUNNER_TEMP/evidence"
+      - name: Summarize
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/summary.txt" 2>/dev/null || echo '(no summary)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          scripts/spikes/native-deps/linux/annotate.sh 'Managed seed round trip' "$RUNNER_TEMP/evidence/summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: managed-seed-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

@@ -49,15 +49,30 @@ const descriptions = {
   exportModel: `Export one CAD source by offered ID or unambiguous reachable extension to persisted files under .tau/artifacts, echoing exportId and pinned sourceRevision. Pass parameters to export other parameter values for this call only, never saved. For a design question, only a declared text/JSON export whose every output is text/JSON may be used as evidence; read its artifact with your native file reader and compare sourceRevision. Binary or mixed deliverables require the person's export request.`,
 } as const;
 
+/**
+ * Model-facing guidance, with or without the GeoSpec steps a server lists `test_model` for.
+ *
+ * @param tested - Whether the server lists `test_model`.
+ * @returns The instructions MCP initialization returns.
+ */
+const instructionsFor = (tested: boolean): string =>
+  [
+    'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
+    'Use your native skill loader for the Tau skills available in this session.',
+    "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
+    ...(tested
+      ? [
+          'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
+          'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
+        ]
+      : [
+          'After edits, call evaluate_model for build diagnostics and offered views/exports, and screenshot for each needed view.',
+        ]),
+    'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
+  ].join(' ');
+
 /** Model-facing guidance returned by MCP initialization. @public */
-export const tauMcpInstructions = [
-  'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
-  'Use your native skill loader for the Tau skills available in this session.',
-  "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
-  'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
-  'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
-  'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
-].join(' ');
+export const tauMcpInstructions = instructionsFor(true);
 
 /** The sentence a server with the viewer adds to {@link tauMcpInstructions}. */
 const viewerInstruction =
@@ -191,6 +206,12 @@ export type TauMcpServerOptions = Readonly<{
   dispatch: TauMcpDispatch;
   /** Host tools registered beside the CAD four, dispatched by name. */
   hostTools?: readonly TauMcpHostTool[] | undefined;
+  /**
+   * The CAD tools this server lists, from {@link tauMcpToolNames}; all four
+   * when omitted. A host withholds one it cannot run, such as `test_model`
+   * without a GeoSpec engine, so a client is never offered a failing tool.
+   */
+  cadTools?: readonly TauMcpToolName[] | undefined;
   /**
    * How `screenshot` returns its images. `attachments` (the default) returns
    * file paths and links in `structuredContent`. `inline` returns each image as
@@ -593,7 +614,7 @@ const progressFor = (
 
 const registerTools = (
   server: McpServer,
-  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer'>,
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer' | 'cadTools'>,
   hostTools: readonly SdkHostTool[],
 ): void => {
   const { dispatch } = options;
@@ -601,63 +622,28 @@ const registerTools = (
     registerTauMcpViewer(server, options.viewer, alwaysLoad);
   }
   const adapter = createTauMcpAdapter(options);
+  const offered: ReadonlySet<TauMcpToolName> = new Set(options.cadTools ?? tauMcpToolNames);
 
-  server.registerTool(
-    toolName.evaluateModel,
-    { ...canonicalToolDefinitions[toolName.evaluateModel], annotations: readOnlyAnnotations, _meta: alwaysLoad },
-    async (args, extra) =>
-      adapter.call({
-        name: toolName.evaluateModel,
-        arguments: args,
-        toolCallId: randomUUID(),
-        signal: extra.signal,
-        meta: extra._meta,
-      }),
-  );
-  server.registerTool(
-    toolName.testModel,
-    { ...canonicalToolDefinitions[toolName.testModel], annotations: readOnlyAnnotations, _meta: alwaysLoad },
-    async (args, extra) =>
-      adapter.call({
-        name: toolName.testModel,
-        arguments: args,
-        toolCallId: randomUUID(),
-        signal: extra.signal,
-        meta: extra._meta,
-      }),
-  );
-  server.registerTool(
-    toolName.screenshot,
-    {
-      /* An inline result carries image blocks and no structured content, which
-       * a declared output schema would make the client reject. */
-      ...(options.screenshotImages === 'inline'
-        ? { description: descriptions.screenshot, inputSchema: screenshotInputSchema }
-        : canonicalToolDefinitions[toolName.screenshot]),
-      annotations: readOnlyAnnotations,
-      _meta: alwaysLoad,
-    },
-    async (args, extra) =>
-      adapter.call({
-        name: toolName.screenshot,
-        arguments: args,
-        toolCallId: randomUUID(),
-        signal: extra.signal,
-        meta: extra._meta,
-      }),
-  );
-  server.registerTool(
-    toolName.exportModel,
-    { ...canonicalToolDefinitions[toolName.exportModel], annotations: artifactWriteAnnotations, _meta: alwaysLoad },
-    async (args, extra) =>
-      adapter.call({
-        name: toolName.exportModel,
-        arguments: args,
-        toolCallId: randomUUID(),
-        signal: extra.signal,
-        meta: extra._meta,
-      }),
-  );
+  /* An inline screenshot result carries image blocks and no structured content,
+   * which a declared output schema would make the client reject. */
+  const definitionOf = (
+    name: TauMcpToolName,
+  ): Omit<TauMcpToolDefinition, 'outputSchema'> & { outputSchema?: ZodType } =>
+    name === toolName.screenshot && options.screenshotImages === 'inline'
+      ? { description: descriptions.screenshot, inputSchema: screenshotInputSchema }
+      : canonicalToolDefinitions[name];
+  for (const name of tauMcpToolNames.filter((candidate) => offered.has(candidate))) {
+    server.registerTool(
+      name,
+      {
+        ...definitionOf(name),
+        annotations: name === toolName.exportModel ? artifactWriteAnnotations : readOnlyAnnotations,
+        _meta: alwaysLoad,
+      },
+      async (args, extra) =>
+        adapter.call({ name, arguments: args, toolCallId: randomUUID(), signal: extra.signal, meta: extra._meta }),
+    );
+  }
   for (const { tool, inputSchema } of hostTools) {
     server.registerTool(
       tool.name,
@@ -707,12 +693,13 @@ export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOpti
  * @returns A tool-only MCP server that has not yet been connected to a transport.
  */
 const createServer = (
-  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer'>,
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer' | 'cadTools'>,
   hostTools: readonly SdkHostTool[],
 ): McpServer => {
+  const instructions = instructionsFor((options.cadTools ?? tauMcpToolNames).includes(toolName.testModel));
   const server = new McpServer(
     { name: packageJson.name, version: packageJson.version },
-    { instructions: options.viewer === undefined ? tauMcpInstructions : `${tauMcpInstructions} ${viewerInstruction}` },
+    { instructions: options.viewer === undefined ? instructions : `${instructions} ${viewerInstruction}` },
   );
   registerTools(server, options, hostTools);
   return server;
@@ -771,13 +758,13 @@ export const serveTauMcpStdio = async (
  * once, so a schema the SDK cannot use fails the handler's creation rather than
  * every client's `initialize`.
  *
- * @param handlerOptions - Host tools every session of this handler exposes beside the CAD four.
+ * @param handlerOptions - Host tools every session of this handler exposes beside the CAD tools it lists.
  * @returns A stateful HTTP handler and its process-lifetime cleanup function.
  * @throws Error naming a host tool whose input schema cannot convert.
  * @public
  */
 export const createTauMcpHttpHandler = (
-  handlerOptions: Readonly<{ hostTools?: readonly TauMcpHostTool[] | undefined }> = {},
+  handlerOptions: Readonly<Pick<TauMcpServerOptions, 'hostTools' | 'cadTools'>> = {},
 ): TauMcpHttpHandler => {
   const hostTools = toSdkHostTools(handlerOptions.hostTools);
   type Session = {
@@ -836,6 +823,7 @@ export const createTauMcpHttpHandler = (
           }
           return dispatch(call, dispatchOptions);
         },
+        cadTools: handlerOptions.cadTools,
       },
       hostTools,
     );

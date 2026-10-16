@@ -27,9 +27,10 @@ import {
   openrscadKernel,
   openrscadRenderSchema,
 } from '#openrscad.kernel.js';
+import type { OpenrscadTessellation } from '#openrscad-tessellation.js';
 
 const renderOptions = {
-  tessellation: { segments: 0, minimumAngle: 12, minimumSize: 2 },
+  tessellation: { segments: 0, angularTolerance: 12, linearTolerance: 2 },
 } as const;
 
 const createRuntime = (files: Record<string, string | Uint8Array<ArrayBuffer>>) =>
@@ -69,7 +70,7 @@ const renderModel = async (input: {
     {
       handle: created.handle,
       view: 'model',
-      options: input.options ?? { tessellation: {} },
+      options: input.options ?? {},
       content: input.content,
     },
     input.runtime,
@@ -242,9 +243,9 @@ const readSemanticManifest = (json: GlbJson) => {
 
 describe('OpenRSCADKernel', () => {
   it('leaves render and export tessellation to the model unless the caller sets it', () => {
-    expect(openrscadRenderSchema.parse({}).tessellation).toEqual({});
-    expect(openrscadExportSchemas.glb.parse({}).tessellation).toEqual({});
-    expect(openrscadExportSchemas['3mf'].parse({}).tessellation).toEqual({});
+    expect(openrscadRenderSchema.parse({}).tessellation).toBeUndefined();
+    expect(openrscadExportSchemas.glb.parse({}).tessellation).toBeUndefined();
+    expect(openrscadExportSchemas['3mf'].parse({}).tessellation).toBeUndefined();
   });
 
   it('exports with the model $fa/$fs when no tessellation is requested, and honours an explicit one', async () => {
@@ -316,7 +317,7 @@ describe('OpenRSCADKernel', () => {
       throw new Error('Expected OpenRSCAD model render');
     }
     const renderModelAt = definition.render;
-    const render = async (tessellation: Record<string, number>): Promise<number> => {
+    const render = async (tessellation: OpenrscadTessellation | undefined): Promise<number> => {
       const result = await renderModelAt(
         { handle: evaluated.handle, view: 'model', options: { tessellation } },
         runtime,
@@ -846,8 +847,9 @@ color("red") {
     expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
     expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
     expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
-    // Switching back never changes what the next evaluation caches.
-    expect(await render(false)).toEqual({ calls: 1, modes: [4] });
+    // Switching back never changes what the next evaluation caches. The plain view re-renders once because the
+    // default preset sets the $fa and $fs this script leaves to OpenSCAD's own defaults.
+    expect(await render(false)).toEqual({ calls: 2, modes: [4] });
     expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
   });
 

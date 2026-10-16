@@ -33,6 +33,13 @@ export type MechanismIntent = Readonly<{
   schemaVersion: 1;
   units: MechanismUnits;
   ground?: string;
+  /**
+   * Known rigid-body ownership: physical body component IDs map to their geometry component IDs.
+   * Virtual playback factors are excluded. Diagnosed unresolved ownership may leave this map partial;
+   * absence is not a declaration that a component is grounded. Each listed body has complete known membership,
+   * matching its playback link when compiled playback is present, regardless of member order.
+   */
+  rigidBodies?: Readonly<Record<string, readonly string[]>>;
   connections: readonly MechanismConnection[];
   couplings?: readonly Coupling[];
   animations?: readonly Animation[];

@@ -28,6 +28,38 @@ const rigid = (matrix: SpatialMatrix): boolean => {
   );
 };
 
+const rigidBodyIssues = (payload: TauCadTopologyPayload): string[] => {
+  const issues: string[] = [];
+  const byId = new Set(payload.components.map(({ id }) => id));
+  const bodyMembers = new Set<string>();
+  for (const [body, members] of Object.entries(payload.mechanismIntent?.rigidBodies ?? {})) {
+    if (!byId.has(body)) {
+      issues.push(`mechanismIntent rigid body ${body} references missing component`);
+    }
+    for (const member of members) {
+      if (!byId.has(member)) {
+        issues.push(`mechanismIntent rigid body ${body} references missing member ${member}`);
+      }
+      if (bodyMembers.has(member)) {
+        issues.push(`mechanismIntent rigid body member ${member} is assigned more than once`);
+      }
+      bodyMembers.add(member);
+    }
+    if (payload.mechanism !== undefined) {
+      const link = Object.hasOwn(payload.mechanism.links, body) ? payload.mechanism.links[body] : undefined;
+      const compiledMembers = new Set(link?.components);
+      if (
+        link === undefined ||
+        members.length !== compiledMembers.size ||
+        members.some((member) => !compiledMembers.has(member))
+      ) {
+        issues.push(`mechanismIntent rigid body ${body} membership differs from its playback link`);
+      }
+    }
+  }
+  return issues;
+};
+
 /**
  * Validate physical interface frames, endpoint references and occurrence containment.
  * @param payload - Structurally validated topology payload.
@@ -137,6 +169,7 @@ export const mechanismIntentIssues = (payload: TauCadTopologyPayload): string[] 
   if (intent.ground !== undefined && !byId.has(intent.ground)) {
     issues.push(`mechanismIntent ground references missing component ${intent.ground}`);
   }
+  issues.push(...rigidBodyIssues(payload));
   const admitted = payload.mechanism === undefined ? undefined : admitMechanism(payload.mechanism);
   const dofs =
     admitted?.status === 'admitted' ? new Set(listDegreesOfFreedom(admitted.mechanism).map(({ id }) => id)) : undefined;

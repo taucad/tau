@@ -11,6 +11,7 @@ it('should expose portable local interfaces and assembly-owned endpoint referenc
   const intent: MechanismIntent = {
     schemaVersion: 1,
     units: { length: 'm', angle: 'deg' },
+    rigidBodies: { rotor: ['rotor', 'cover'], tool: [] },
     connections: [{ id: 'mount', parent: endpoint, child: { componentId: 'tool', interfaceId: 'mount' } }],
   };
   expectTypeOf(attachment.frame).toEqualTypeOf<
@@ -34,6 +35,10 @@ it('should expose portable local interfaces and assembly-owned endpoint referenc
     ]
   >();
   expectTypeOf(intent.connections[0]!.parent).toEqualTypeOf<JointEndpoint>();
+  expectTypeOf(intent.rigidBodies).toEqualTypeOf<Readonly<Record<string, readonly string[]>> | undefined>();
+  // @ts-expect-error Body membership references topology components, not renderer indices.
+  const invalidBodies: MechanismIntent['rigidBodies'] = { rotor: [0] };
+  expectTypeOf(invalidBodies).toEqualTypeOf<MechanismIntent['rigidBodies']>();
   // @ts-expect-error An endpoint identifies a component occurrence, not a renderer node index.
   const rendererEndpoint: JointEndpoint = { nodeIndex: 2, interfaceId: 'shaft' };
   expectTypeOf(rendererEndpoint).toEqualTypeOf<JointEndpoint>();

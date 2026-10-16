@@ -121,6 +121,15 @@
         "ground": {
           "type": "string"
         },
+        "rigidBodies": {
+          "description": "Known physical rigid-body component IDs mapped to their geometry component IDs; excludes virtual playback factors. May be partial for diagnosed unresolved ownership. Listed membership agrees with the corresponding compiled link when playback is present.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        },
         "connections": {
           "type": "array",
           "items": {

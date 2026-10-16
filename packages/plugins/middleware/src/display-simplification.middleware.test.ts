@@ -93,6 +93,31 @@ const gridCube = (size: number, steps: number) => {
   return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
 };
 
+type MeshGeometry = { readonly positions: Float32Array<ArrayBuffer>; readonly indices: Uint32Array<ArrayBuffer> };
+
+/** A GLB with one mesh per entry, each drawn by `occurrences` unscaled nodes. */
+const createMeshesGlb = async (
+  meshes: ReadonlyArray<{ readonly geometry: MeshGeometry; readonly occurrences: number }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const scene = document.createScene();
+  for (const [index, { geometry, occurrences }] of meshes.entries()) {
+    const primitive = document
+      .createPrimitive()
+      .setAttribute(
+        'POSITION',
+        document.createAccessor().setBuffer(buffer).setType('VEC3').setArray(geometry.positions),
+      )
+      .setIndices(document.createAccessor().setBuffer(buffer).setType('SCALAR').setArray(geometry.indices));
+    const mesh = document.createMesh(`mesh ${String(index)}`).addPrimitive(primitive);
+    for (let occurrence = 0; occurrence < occurrences; occurrence++) {
+      scene.addChild(document.createNode().setMesh(mesh));
+    }
+  }
+  return new NodeIO().writeBinary(document);
+};
+
 type SphereGlbOptions = {
   /** Nodes drawing the sphere mesh, by uniform scale. */
   readonly nodeScales?: readonly number[];
@@ -343,7 +368,7 @@ describe('displaySimplification', () => {
     expect(displaySimplificationMaxTriangles).toBe(2_000_000);
     expect(displaySimplificationVoxelErrorRatio).toBe(0.5);
     expect(definition.optionsSchema!.parse({})).toEqual({ maxTriangles: 2_000_000 });
-    expect(definition.version).toBe('1.0.0');
+    expect(definition.version).toBe('1.1.0');
   });
 
   it('should leave exports to the kernel, so export and GeoSpec bytes never pass through it', () => {
@@ -369,7 +394,9 @@ describe('displaySimplification', () => {
 
     const data = dataOf(output);
     const [simplified] = await readMeshes(data.content as Uint8Array<ArrayBuffer>);
-    expect(simplified!.triangles).toBeLessThan(2000);
+    // The 2,000-triangle budget binds before the error cap, so it stops at the budget.
+    expect(simplified!.triangles).toBeLessThanOrEqual(2000);
+    expect(simplified!.triangles).toBeGreaterThan(1980);
     expect(simplified!.hasNormals).toBe(true);
     expect(maxDeviationMm(sphere.positions, simplified!)).toBeLessThanOrEqual(0.25);
     expect(data.tessellation).toEqual({
@@ -414,14 +441,7 @@ describe('displaySimplification', () => {
 
   it('should keep every crease vertex of a creased mesh exact', async () => {
     const cube = gridCube(0.02, 12);
-    const document = new Document();
-    const buffer = document.createBuffer();
-    const primitive = document
-      .createPrimitive()
-      .setAttribute('POSITION', document.createAccessor().setBuffer(buffer).setType('VEC3').setArray(cube.positions))
-      .setIndices(document.createAccessor().setBuffer(buffer).setType('SCALAR').setArray(cube.indices));
-    document.createScene().addChild(document.createNode().setMesh(document.createMesh().addPrimitive(primitive)));
-    const content = await new NodeIO().writeBinary(document);
+    const content = await createMeshesGlb([{ geometry: cube, occurrences: 1 }]);
     const triangles = cube.indices.length / 3;
 
     const { output } = await run(renderSuccess(content, voxelReport(triangles, cube.positions.length / 3)), 10);
@@ -442,13 +462,84 @@ describe('displaySimplification', () => {
     expect(maxDeviationMm(cube.positions, simplified!)).toBeLessThan(1e-6);
   });
 
-  it('should say when the simplified mesh is still over the budget', async () => {
+  it('should stop at the budget rather than simplifying down to the error cap', async () => {
+    // Flat faces collapse at no error, so only the budget and the locked creases stop the collapse.
+    const cube = gridCube(0.02, 24);
+    const triangles = cube.indices.length / 3;
+    const content = await createMeshesGlb([{ geometry: cube, occurrences: 1 }]);
+    const render = async (budget: number) => {
+      const { output } = await run(renderSuccess(content, voxelReport(triangles, cube.positions.length / 3)), budget);
+      const [mesh] = await readMeshes(dataOf(output).content as Uint8Array<ArrayBuffer>);
+      return { output, mesh: mesh! };
+    };
+
+    const atBudget = await render(1000);
+    const atFloor = await render(4);
+
+    expect(triangles).toBe(6912);
+    expect(atBudget.mesh.triangles).toBeLessThanOrEqual(1000);
+    expect(atBudget.mesh.triangles).toBeGreaterThan(990);
+    expect(atFloor.mesh.triangles).toBeLessThan(700);
+    expect(issueOf(atBudget.output).details).toMatchObject({ from: triangles, to: atBudget.mesh.triangles });
+    expect(issueOf(atBudget.output).message).not.toContain('still over');
+  });
+
+  it('should stop at the error cap when it binds before the budget, and say it is still over', async () => {
     const { output } = await run(
       renderSuccess(await createSphereGlb(), voxelReport(sphereTriangles, sphereVertices)),
-      4,
+      1500,
     );
 
+    const [simplified] = await readMeshes(dataOf(output).content as Uint8Array<ArrayBuffer>);
+    // The budget alone would allow 1,500 triangles; the half-voxel cap stops the sphere above it.
+    expect(simplified!.triangles).toBeGreaterThan(1500);
+    expect(simplified!.triangles).toBeLessThan(sphereTriangles);
+    expect(maxDeviationMm(sphere.positions, simplified!)).toBeLessThanOrEqual(0.25);
+    expect(issueOf(output).details).toMatchObject({ to: simplified!.triangles, maxErrorMm: 0.25, budget: 1500 });
     expect(issueOf(output).message).toContain('It is still over the budget');
+  });
+
+  it('should share the budget among meshes in proportion to the triangles each draws', async () => {
+    const fine = gridCube(0.02, 24);
+    const coarse = gridCube(0.02, 12);
+    const fineTriangles = fine.indices.length / 3;
+    const coarseTriangles = coarse.indices.length / 3;
+    const drawn = fineTriangles + 2 * coarseTriangles;
+    const content = await createMeshesGlb([
+      { geometry: fine, occurrences: 1 },
+      { geometry: coarse, occurrences: 2 },
+    ]);
+    const budget = drawn / 4;
+
+    const { output } = await run(
+      renderSuccess(content, voxelReport(drawn, fine.positions.length / 3 + (2 * coarse.positions.length) / 3)),
+      budget,
+    );
+
+    const [fineMesh, coarseMesh] = await readMeshes(dataOf(output).content as Uint8Array<ArrayBuffer>);
+    expect([fineTriangles, coarseTriangles, budget]).toEqual([6912, 1728, 2592]);
+    // Each mesh keeps a quarter of its triangles, the coarse one per occurrence.
+    expect(fineMesh!.triangles).toBeLessThanOrEqual(1728);
+    expect(fineMesh!.triangles).toBeGreaterThan(1700);
+    expect(coarseMesh!.triangles).toBeLessThanOrEqual(432);
+    expect(coarseMesh!.triangles).toBeGreaterThan(420);
+    const to = fineMesh!.triangles + 2 * coarseMesh!.triangles;
+    expect(dataOf(output).tessellation).toMatchObject({ triangles: to });
+    expect(issueOf(output).details).toMatchObject({ from: drawn, to, budget });
+    expect(issueOf(output).message).not.toContain('still over');
+  });
+
+  it('should leave room in the budget for the triangles it cannot simplify', async () => {
+    const content = await createSphereGlb();
+
+    // The report counts 1,000 triangles beyond the sphere, so the sphere's share is 2,800 less those.
+    const { output } = await run(renderSuccess(content, voxelReport(sphereTriangles + 1000, sphereVertices)), 2800);
+
+    const [simplified] = await readMeshes(dataOf(output).content as Uint8Array<ArrayBuffer>);
+    expect(simplified!.triangles).toBeLessThanOrEqual(1800);
+    expect(simplified!.triangles).toBeGreaterThan(1780);
+    expect(issueOf(output).details).toMatchObject({ from: sphereTriangles + 1000, to: simplified!.triangles + 1000 });
+    expect(issueOf(output).message).not.toContain('still over');
   });
 
   it('should count every occurrence of an instanced mesh and keep the bound in world units', async () => {

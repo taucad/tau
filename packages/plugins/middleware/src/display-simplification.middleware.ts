@@ -1,5 +1,5 @@
 import { Primitive, WebIO } from '@gltf-transform/core';
-import type { Document, Mesh, Node } from '@gltf-transform/core';
+import type { Accessor, Document, Node } from '@gltf-transform/core';
 import { compactPrimitive } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { allExtensions } from '@taucad/geometry-core';
@@ -35,6 +35,11 @@ export const displaySimplificationVoxelErrorRatio = 0.5;
  * 4.5 M-triangle gyroid lamp at 0.5 mm voxels, the measured deviation of every removed vertex from
  * the simplified surface stayed within the bound at a quarter of it (0.247 mm for a 0.25 mm bound)
  * and exceeded it at a third or more, so a quarter is used. The bound is measured, not proven.
+ *
+ * The error is a cap, not a goal: simplification stops as soon as the mesh fits the triangle
+ * budget, or earlier if the next collapse would pass the cap. Driving the lamp all the way to the
+ * cap reached 566 k triangles but took 7.7 s or more, so its first preview came later than the
+ * full mesh would have; stopping at the budget removes only the triangles the budget asks for.
  */
 const simplifierTargetFraction = 0.25;
 
@@ -77,6 +82,17 @@ const worldScale = (node: Node): number => {
 
 /** Triangles and vertices removed from the delivered mesh, counted per drawn occurrence. */
 type Removed = { triangles: number; vertices: number };
+
+/** An indexed triangle primitive that may be simplified, with what bounds it. */
+type Candidate = {
+  readonly primitive: Primitive;
+  readonly indices: Accessor;
+  readonly positions: Float32Array;
+  /** Nodes that draw its mesh; each occurrence counts in the tessellation report. */
+  readonly occurrences: number;
+  /** The largest deviation allowed in the mesh's local units, before the target fraction. */
+  readonly localError: number;
+};
 
 /**
  * Lock the vertices on creases: those where some adjacent face turns more than
@@ -129,82 +145,106 @@ const lockCreaseVertices = (positions: Float32Array, indices: Uint32Array): Uint
 };
 
 /**
- * Simplify one mesh's indexed triangle primitives in place, within an absolute error in metres.
- *
- * Simplification is meshoptimizer's quadric edge collapse, which keeps topology and never moves a
- * vertex: every kept vertex is an original one. Borders and creases are locked, and gltf-transform
- * reads, compacts and rewrites the primitive around it.
- *
- * @param input - The document that owns the mesh, the mesh, the nodes that draw it (each occurrence
- * counts in the tessellation report) and the largest deviation allowed, in world metres.
- * @returns Triangles and vertices removed across every occurrence.
- */
-const simplifyMesh = (
-  input: Readonly<{ document: Document; mesh: Mesh; nodes: readonly Node[]; maxErrorMetres: number }>,
-): Removed => {
-  const { document, mesh, nodes, maxErrorMetres } = input;
-  const removed: Removed = { triangles: 0, vertices: 0 };
-  const localError = (maxErrorMetres * simplifierTargetFraction) / Math.max(...nodes.map((node) => worldScale(node)));
-  for (const primitive of mesh.listPrimitives()) {
-    const indices = primitive.getIndices();
-    const positions = primitive.getAttribute('POSITION')?.getArray();
-    if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !indices || !(positions instanceof Float32Array)) {
-      continue;
-    }
-    const source = Uint32Array.from(indices.getArray()!);
-    const vertices = positions.length / 3;
-    const [simplified] = MeshoptSimplifier.simplifyWithAttributes(
-      source,
-      positions,
-      3,
-      new Float32Array(0),
-      0,
-      [],
-      lockCreaseVertices(positions, source),
-      0,
-      // The target error is relative to the mesh extent, the bounding box's longest side.
-      Math.min(1, localError / MeshoptSimplifier.getScale(positions, 3)),
-      ['LockBorder'],
-    );
-    primitive.setIndices(
-      document.createAccessor().setType('SCALAR').setArray(new Uint32Array(simplified)).setBuffer(indices.getBuffer()),
-    );
-    if (indices.listParents().length === 1) {
-      indices.dispose();
-    }
-    compactPrimitive(primitive);
-    removed.triangles += ((source.length - simplified.length) / 3) * nodes.length;
-    removed.vertices += (vertices - primitive.getAttribute('POSITION')!.getCount()) * nodes.length;
-  }
-  return removed;
-};
-
-/**
- * Simplify every eligible mesh in a GLB.
+ * The indexed triangle primitives of every drawn mesh that may be simplified.
  *
  * A mesh annotated with `EXT_mesh_manifold` keeps its exact triangles, because its topology
  * annotation names them. A mesh no node draws is not shown and is left alone.
  *
- * @param content - GLB bytes.
+ * @param document - The document to search.
  * @param maxErrorMetres - The largest deviation allowed, in world metres.
- * @returns The simplified GLB and what was removed, or the original bytes when nothing was.
+ * @returns One candidate per eligible primitive.
  */
-async function simplifyGlb(
-  content: Uint8Array<ArrayBuffer>,
-  maxErrorMetres: number,
-): Promise<{ content: Uint8Array<ArrayBuffer>; removed: Removed }> {
-  await MeshoptSimplifier.ready;
-  const io = new WebIO().registerExtensions(allExtensions);
-  const document: Document = await io.readBinary(content);
-  const removed: Removed = { triangles: 0, vertices: 0 };
+const listCandidates = (document: Document, maxErrorMetres: number): Candidate[] => {
+  const candidates: Candidate[] = [];
   for (const mesh of document.getRoot().listMeshes()) {
     const nodes = mesh.listParents().filter((parent): parent is Node => parent.propertyType === 'Node');
     if (nodes.length === 0 || mesh.getExtension('EXT_mesh_manifold')) {
       continue;
     }
-    const meshRemoved = simplifyMesh({ document, mesh, nodes, maxErrorMetres });
-    removed.triangles += meshRemoved.triangles;
-    removed.vertices += meshRemoved.vertices;
+    const localError = maxErrorMetres / Math.max(...nodes.map((node) => worldScale(node)));
+    for (const primitive of mesh.listPrimitives()) {
+      const indices = primitive.getIndices();
+      const positions = primitive.getAttribute('POSITION')?.getArray();
+      if (primitive.getMode() === Primitive.Mode['TRIANGLES'] && indices && positions instanceof Float32Array) {
+        candidates.push({ primitive, indices, positions, occurrences: nodes.length, localError });
+      }
+    }
+  }
+  return candidates;
+};
+
+/**
+ * Simplify one primitive in place, down to a triangle count or an error cap, whichever comes first.
+ *
+ * Simplification is meshoptimizer's quadric edge collapse, which keeps topology and never moves a
+ * vertex: every kept vertex is an original one. Borders and creases are locked, and gltf-transform
+ * reads, compacts and rewrites the primitive around it.
+ *
+ * @param document - The document that owns the primitive.
+ * @param candidate - The primitive and its bounds.
+ * @param targetTriangles - Triangles to stop at, counted once rather than per occurrence.
+ * @returns Triangles and vertices removed across every occurrence.
+ */
+const simplifyPrimitive = (document: Document, candidate: Candidate, targetTriangles: number): Removed => {
+  const { primitive, indices, positions, occurrences, localError } = candidate;
+  const source = Uint32Array.from(indices.getArray()!);
+  const vertices = positions.length / 3;
+  const [simplified] = MeshoptSimplifier.simplifyWithAttributes(
+    source,
+    positions,
+    3,
+    new Float32Array(0),
+    0,
+    [],
+    lockCreaseVertices(positions, source),
+    targetTriangles * 3,
+    // The target error is relative to the mesh extent, the bounding box's longest side.
+    Math.min(1, (localError * simplifierTargetFraction) / MeshoptSimplifier.getScale(positions, 3)),
+    ['LockBorder'],
+  );
+  primitive.setIndices(
+    document.createAccessor().setType('SCALAR').setArray(new Uint32Array(simplified)).setBuffer(indices.getBuffer()),
+  );
+  if (indices.listParents().length === 1) {
+    indices.dispose();
+  }
+  compactPrimitive(primitive);
+  return {
+    triangles: ((source.length - simplified.length) / 3) * occurrences,
+    vertices: (vertices - primitive.getAttribute('POSITION')!.getCount()) * occurrences,
+  };
+};
+
+/**
+ * Simplify the eligible primitives of a GLB until the drawn mesh fits the budget.
+ *
+ * The triangles the budget leaves after the ineligible ones are shared among the eligible
+ * primitives in proportion to the triangles each draws (its triangles times its occurrences), so
+ * every primitive gives up the same fraction and the total lands at or just under the budget. The
+ * error cap can stop a primitive above its share; the total is then over the budget and the
+ * warning says so.
+ *
+ * @param content - GLB bytes.
+ * @param bounds - The largest deviation allowed in world metres, the triangle budget and the
+ * triangles the tessellation report counts, every occurrence included.
+ * @returns The simplified GLB and what was removed, or the original bytes when nothing was.
+ */
+async function simplifyGlb(
+  content: Uint8Array<ArrayBuffer>,
+  bounds: Readonly<{ maxErrorMetres: number; budget: number; triangles: number }>,
+): Promise<{ content: Uint8Array<ArrayBuffer>; removed: Removed }> {
+  await MeshoptSimplifier.ready;
+  const io = new WebIO().registerExtensions(allExtensions);
+  const document: Document = await io.readBinary(content);
+  const candidates = listCandidates(document, bounds.maxErrorMetres);
+  const drawn = candidates.reduce((sum, { indices, occurrences }) => sum + (indices.getCount() / 3) * occurrences, 0);
+  const available = Math.max(0, bounds.budget - Math.max(0, bounds.triangles - drawn));
+  const removed: Removed = { triangles: 0, vertices: 0 };
+  for (const candidate of candidates) {
+    const share = Math.floor((candidate.indices.getCount() / 3) * (available / drawn));
+    const primitiveRemoved = simplifyPrimitive(document, candidate, share);
+    removed.triangles += primitiveRemoved.triangles;
+    removed.vertices += primitiveRemoved.vertices;
   }
   if (removed.triangles === 0) {
     return { content, removed };
@@ -298,7 +338,11 @@ async function simplifyDisplayResult(
 
   const maxErrorMm = report.voxelSize * displaySimplificationVoxelErrorRatio;
   const started = performance.now();
-  const simplified = await simplifyGlb(data.content, maxErrorMm / millimetresPerGltfUnit);
+  const simplified = await simplifyGlb(data.content, {
+    maxErrorMetres: maxErrorMm / millimetresPerGltfUnit,
+    budget,
+    triangles: report.triangles,
+  });
   const elapsed = performance.now() - started;
   const to = report.triangles - simplified.removed.triangles;
   logger.debug(`Simplified voxel display mesh from ${String(report.triangles)} to ${String(to)} triangles`);
@@ -334,9 +378,11 @@ async function simplifyDisplayResult(
  * Voxel kernels keep the author's voxel size, so a dense model can render millions of triangles.
  * When a render's tessellation report names a voxel mesh above `maxTriangles`, this middleware
  * collapses edges within half a voxel (meshoptimizer through gltf-transform, topology kept, borders
- * locked), updates the report's counts to the delivered mesh and adds a `DISPLAY_SIMPLIFIED`
- * warning carrying `{ from, to, maxErrorMm }`. It wraps render only: exports, and so GeoSpec
- * subjects, keep the full mesh byte for byte.
+ * and creases locked) until the mesh fits `maxTriangles`. It stops at the budget rather than going
+ * as far as half a voxel allows, because every further collapse delays the first preview. It updates
+ * the report's counts to the delivered mesh and adds a `DISPLAY_SIMPLIFIED` warning carrying
+ * `{ from, to, maxErrorMm }`. It wraps render only: exports, and so GeoSpec subjects, keep the full
+ * mesh byte for byte.
  *
  * Register it after `gltfEdgeDetection` so it sits closer to the kernel and any fallback edge pass
  * runs on the smaller mesh.
@@ -345,7 +391,7 @@ async function simplifyDisplayResult(
 export const displaySimplification = defineMiddleware({
   id: 'displaySimplification',
   name: 'DisplaySimplification',
-  version: '1.0.0',
+  version: '1.1.0',
 
   optionsSchema: z.object({
     maxTriangles: z.number().int().positive().default(displaySimplificationMaxTriangles),

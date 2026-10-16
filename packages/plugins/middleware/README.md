@@ -55,8 +55,8 @@ selects `parameterUnits`.
 
 `displaySimplification({ maxTriangles })` acts only on a render whose tessellation report describes a
 voxel mesh over `maxTriangles` (default 2,000,000). It keeps the kernel's voxel size, simplifies the
-display mesh within half a voxel, updates the report's counts and adds a `DISPLAY_SIMPLIFIED` warning
-with `{ from, to, maxErrorMm }`. Exports pass through untouched.
+display mesh within half a voxel until it fits `maxTriangles`, updates the report's counts and adds a
+`DISPLAY_SIMPLIFIED` warning with `{ from, to, maxErrorMm }`. Exports pass through untouched.
 
 Ordering is the point: to interleave your own stages, compose the role factories in `defineRuntime`'s
 `middleware` bucket instead of calling `middleware()`.

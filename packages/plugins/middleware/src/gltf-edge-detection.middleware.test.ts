@@ -359,11 +359,14 @@ async function createImplicitIndexInputsGltf(): Promise<Uint8Array<ArrayBuffer>>
 }
 
 /**
- * Create a GLB with one cube primitive and one indexed primitive whose index
- * count sits just above the fallback triangle budget. The large primitive
- * references three vertices only, so the fixture stays a few megabytes.
+ * Create a GLB with one 12-triangle cube primitive and one indexed primitive per
+ * entry of `largeTriangles`. By default the single large primitive alone sits
+ * just above the fallback triangle budget. Each large primitive references three
+ * vertices only, so the fixture stays a few megabytes.
  */
-async function createOverBudgetGltf(): Promise<Uint8Array<ArrayBuffer>> {
+async function createOverBudgetGltf(
+  largeTriangles: readonly number[] = [gltfEdgeDetectionMaxTriangles + 1],
+): Promise<Uint8Array<ArrayBuffer>> {
   const io = new NodeIO();
   const document = new Document();
   const buffer = document.createBuffer();
@@ -379,25 +382,29 @@ async function createOverBudgetGltf(): Promise<Uint8Array<ArrayBuffer>> {
       document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(cubePositions),
     )
     .setIndices(document.createAccessor().setBuffer(buffer).setType(Accessor.Type['SCALAR']!).setArray(cubeIndices));
-  const large = document
-    .createPrimitive()
-    .setMode(primitiveModeTriangles)
-    .setAttribute(
-      'POSITION',
+  const mesh = document.createMesh().addPrimitive(cube);
+  for (const triangles of largeTriangles) {
+    mesh.addPrimitive(
       document
-        .createAccessor()
-        .setBuffer(buffer)
-        .setType(Accessor.Type['VEC3']!)
-        .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])),
-    )
-    .setIndices(
-      document
-        .createAccessor()
-        .setBuffer(buffer)
-        .setType(Accessor.Type['SCALAR']!)
-        .setArray(new Uint32Array((gltfEdgeDetectionMaxTriangles + 1) * 3)),
+        .createPrimitive()
+        .setMode(primitiveModeTriangles)
+        .setAttribute(
+          'POSITION',
+          document
+            .createAccessor()
+            .setBuffer(buffer)
+            .setType(Accessor.Type['VEC3']!)
+            .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])),
+        )
+        .setIndices(
+          document
+            .createAccessor()
+            .setBuffer(buffer)
+            .setType(Accessor.Type['SCALAR']!)
+            .setArray(new Uint32Array(triangles * 3)),
+        ),
     );
-  const mesh = document.createMesh().addPrimitive(cube).addPrimitive(large);
+  }
   document.createScene().addChild(document.createNode().setMesh(mesh));
   return io.writeBinary(document);
 }
@@ -977,8 +984,9 @@ describe('gltfEdgeDetection', () => {
       expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
-    it('skips render edges for a primitive above the budget and logs the count once', async () => {
-      const content = await createOverBudgetGltf();
+    it('adds render edges when the render sums to exactly the budget', async () => {
+      const cubeTriangles = 12;
+      const content = await createOverBudgetGltf([gltfEdgeDetectionMaxTriangles - cubeTriangles]);
       const { input, runtime } = createEdgeDetectionContext();
 
       const result = await gltfEdgeDetectionDefinition.wrapRender!(
@@ -990,13 +998,62 @@ describe('gltfEdgeDetection', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
-        // Only the in-budget cube gains a line primitive.
         expect(primitives[0]).toMatchObject({ triangleCount: 2, lineCount: 1, linePrimitiveVertexCounts: [24] });
       }
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('skips render edges for a render above the budget and logs the count once', async () => {
+      const content = await createOverBudgetGltf();
+      const { input, runtime } = createEdgeDetectionContext();
+      const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
+
+      const result = await gltfEdgeDetectionDefinition.wrapRender!(
+        input,
+        createMockRenderHandler(handlerResult),
+        runtime,
+      );
+
+      // The cube is within the budget on its own, but the render as a whole is not.
+      expect(result).toBe(handlerResult);
       expect(runtime.logger.warn).toHaveBeenCalledTimes(1);
       expect(runtime.logger.warn).toHaveBeenCalledWith(
-        `Skipping fallback edge detection for a primitive with ${gltfEdgeDetectionMaxTriangles + 1} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
+        `Skipping fallback edge detection for a render with ${gltfEdgeDetectionMaxTriangles + 13} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
       );
+    });
+
+    it('sums triangles across primitives that are each within the budget', async () => {
+      const half = gltfEdgeDetectionMaxTriangles / 2;
+      const content = await createOverBudgetGltf([half, half]);
+      const { input, runtime } = createEdgeDetectionContext();
+      const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
+
+      const result = await gltfEdgeDetectionDefinition.wrapRender!(
+        input,
+        createMockRenderHandler(handlerResult),
+        runtime,
+      );
+
+      expect(result).toBe(handlerResult);
+      expect(runtime.logger.warn).toHaveBeenCalledWith(
+        `Skipping fallback edge detection for a render with ${gltfEdgeDetectionMaxTriangles + 12} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
+      );
+    });
+
+    it('runs no edge pass and logs no skip when the call turns edges off', async () => {
+      const content = await createOverBudgetGltf();
+      const { runtime } = createEdgeDetectionContext();
+      const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
+
+      const result = await gltfEdgeDetectionDefinition.wrapRender!(
+        renderInput(false),
+        createMockRenderHandler(handlerResult),
+        runtime,
+      );
+
+      expect(result).toBe(handlerResult);
+      expect(runtime.logger.trace).not.toHaveBeenCalled();
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
     it('keeps export edge detection unbudgeted so requested export bytes are unchanged', async () => {

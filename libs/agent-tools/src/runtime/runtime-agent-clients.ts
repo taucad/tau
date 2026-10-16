@@ -72,7 +72,7 @@ export type RuntimeAgentClient = Pick<RuntimeClient, 'describe' | 'capabilities'
   > & {
     view: (
       id?: string,
-      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+      request?: Pick<WideViewRequest, 'instance' | 'options' | 'content'>,
     ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
   };
 };
@@ -304,8 +304,22 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
 
-/** Kernel issue codes for caller-supplied options the kernel's schema refused: the caller's input, not the model, is wrong. */
-const optionIssueCodes: ReadonlySet<KernelIssueCode> = new Set(['VIEW_OPTIONS_INVALID', 'EXPORT_OPTIONS_INVALID']);
+/**
+ * Kernel issue codes for caller-supplied options or content the selected route refused: the caller's input, not
+ * the model, is wrong.
+ */
+const optionIssueCodes: ReadonlySet<KernelIssueCode> = new Set([
+  'VIEW_OPTIONS_INVALID',
+  'EXPORT_OPTIONS_INVALID',
+  'RUNTIME_CONTENT_UNSUPPORTED',
+]);
+
+/**
+ * The runtime content one render asks for. Only `includeEdges: true` is a request: the runtime renders without edges
+ * by default, so `false` and omission both leave the edge pass, native or fallback, off for this call.
+ */
+const edgeContent = (includeEdges: boolean | undefined): Readonly<{ content?: Readonly<{ includeEdges: true }> }> =>
+  includeEdges === true ? { content: { includeEdges: true } } : {};
 
 const isOptionIssue = (issue: KernelIssue): boolean => optionIssueCodes.has(issue.code);
 
@@ -552,6 +566,7 @@ export const createRuntimeAgentClients = (
         const view = document.view(selectedView, {
           ...(captureInput.instance === undefined ? {} : { instance: captureInput.instance }),
           ...(captureInput.options === undefined ? {} : { options: captureInput.options }),
+          ...edgeContent(captureInput.includeEdges),
         });
         try {
           const projected = await view.rendering({ signal: context?.signal });

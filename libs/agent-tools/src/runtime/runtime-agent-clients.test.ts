@@ -607,6 +607,39 @@ describe('createRuntimeAgentClients default view options', () => {
     expect(fixture.viewRequests).toEqual([]);
   });
 
+  it('asks the runtime for edge lines only when the screenshot asks for them', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', includeEdges: true });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', includeEdges: false });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+
+    expect(fixture.viewRequests.map(({ request }) => request)).toEqual([{ content: { includeEdges: true } }, {}, {}]);
+    // A false request also tells the image renderer to leave lines out; omission keeps its default.
+    expect(clients.exporter.mock.calls.map(([job]) => 'lines' in job.exportOptions)).toEqual([false, true, false]);
+  });
+
+  it('refuses edge lines a view cannot carry with VALIDATION_ERROR', async () => {
+    const message = 'Content property "includeEdges" is not supported by this route.';
+    const clients = clientsFor(
+      runtimeFixture({
+        render: () => ({
+          success: false,
+          requestId: 'render-1',
+          evaluationId: 'evaluation-1',
+          transient: false,
+          issues: [{ code: 'RUNTIME_CONTENT_UNSUPPORTED', message, type: 'runtime', severity: 'error' }],
+        }),
+      }),
+    );
+
+    await expect(
+      clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', view: 'drawing', includeEdges: true }),
+    ).resolves.toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message });
+    expect(clients.exporter).not.toHaveBeenCalled();
+  });
+
   it('refuses export options the kernel rejects with VALIDATION_ERROR', async () => {
     const clients = clientsFor(
       runtimeFixture({

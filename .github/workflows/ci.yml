@@ -552,7 +552,6 @@ jobs:
           echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
 
       - name: Check every template outside Tau
-        if: matrix.ecosystem != 'kcl'
         run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
 
   # The required check. It passes only when the plan and every affected lane passed, and the

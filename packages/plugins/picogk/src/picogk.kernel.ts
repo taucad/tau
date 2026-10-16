@@ -268,8 +268,9 @@ export const picogkKernel = defineKernel({
           computeJob = undefined;
         }
         span.end({ ...result.timings, ...result.metrics });
+        const handle: PicogkNativeHandle = { glb, tessellation: picogkTessellation(result) };
         return {
-          handle: { glb, tessellation: picogkTessellation(result) },
+          handle,
           issues,
         };
       } finally {
@@ -311,7 +312,7 @@ export const picogkKernel = defineKernel({
     handle.tessellation === undefined
       ? new Uint8Array(handle.glb)
       : { glb: new Uint8Array(handle.glb), tessellation: handle.tessellation },
-  deserializeHandle: ({ serialized }) => {
+  deserializeHandle: ({ serialized }): PicogkNativeHandle => {
     if (serialized instanceof Uint8Array) {
       return { glb: new Uint8Array(serialized) };
     }

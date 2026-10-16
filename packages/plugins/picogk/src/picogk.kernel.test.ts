@@ -8,7 +8,6 @@ import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOr
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import type { PicogkNativeHandle } from '#picogk.kernel.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkWorkerError } from '#picogk-session.js';
 import type { PicogkSession } from '#picogk-session.js';
@@ -365,7 +364,7 @@ describe('PicoGK kernel', () => {
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
     expect(definition.cancellation).toBe('cooperative');
-    const handle = built.handle as PicogkNativeHandle;
+    const { handle } = built;
     const artifact = await definition.render!({ view: 'model', handle, options: {} }, runtime, value);
     expect(handle.glb).toEqual(artifact.content);
     expect(artifact.tessellation).toEqual(handle.tessellation);

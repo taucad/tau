@@ -67,8 +67,13 @@ type RuntimeFixtureOptions = Readonly<{
 
 const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
   const documents: RuntimeDocument[] = [];
+  const viewRequests: Array<Readonly<{ path: string; id: string | undefined; request: WideViewRequest }>> = [];
   const documentFor = (path: string): RuntimeDocument => {
-    const view = (id?: string, request: WideViewRequest = {}): ViewSubscription => ({
+    const view = (id?: string, request: WideViewRequest = {}): ViewSubscription => {
+      viewRequests.push({ path, id, request });
+      return viewSubscription(id, request);
+    };
+    const viewSubscription = (id: string | undefined, request: WideViewRequest): ViewSubscription => ({
       view: id,
       request,
       on: () => () => undefined,
@@ -126,7 +131,7 @@ const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
     describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
     capabilities: undefined,
   };
-  return { runtime, open, documents };
+  return { runtime, open, documents, viewRequests };
 };
 
 const clientsFor = (
@@ -495,6 +500,104 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
       message: 'section applies to 3D views only; view drawing is a 2D drawing. Omit section for this view.',
     });
     expect(clients.exporter).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRuntimeAgentClients default view options', () => {
+  const optionsRefusal = {
+    code: 'VIEW_OPTIONS_INVALID',
+    message: 'model option tessellation: Invalid input',
+    type: 'kernel',
+    severity: 'error',
+  } as const;
+
+  it('renders the default view with the options evaluate_model was given', async () => {
+    const tessellation = { triangles: 96, vertices: 50, elapsed: 3 };
+    const fixture = runtimeFixture({
+      render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }),
+    });
+    const clients = clientsFor(fixture);
+
+    await expect(
+      clients.kernelClient.evaluateModel({ targetFile: 'main.ts', options: { tessellation: 'low' } }),
+    ).resolves.toMatchObject({ success: true, status: 'ready', views: ['model'], tessellation });
+    expect(fixture.viewRequests).toEqual([
+      { path: 'main.ts', id: 'model', request: { options: { tessellation: 'low' } } },
+    ]);
+  });
+
+  it('renders the default view exactly as before when options are omitted', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toEqual({
+      success: true,
+      status: 'ready',
+      kernelIssues: [],
+      views: ['model'],
+      instances: {},
+      exports: {},
+    });
+    expect(fixture.viewRequests).toEqual([{ path: 'main.ts', id: undefined, request: {} }]);
+  });
+
+  it('refuses options the default view rejects with VALIDATION_ERROR, as screenshot does', async () => {
+    const fixture = runtimeFixture({
+      render: () => ({
+        success: false,
+        requestId: 'render-1',
+        evaluationId: 'evaluation-1',
+        transient: false,
+        issues: [optionsRefusal],
+      }),
+    });
+    const clients = clientsFor(fixture);
+    const refusal = {
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'model option tessellation: Invalid input',
+    };
+
+    await expect(
+      clients.kernelClient.evaluateModel({ targetFile: 'main.ts', options: { tessellation: 'coarse' } }),
+    ).resolves.toEqual(refusal);
+    await expect(
+      clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', options: { tessellation: 'coarse' } }),
+    ).resolves.toEqual(refusal);
+    expect(clients.exporter).not.toHaveBeenCalled();
+    for (const document of fixture.documents) {
+      expect(document.close).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('refuses options for a model that offers no view instead of ignoring them', async () => {
+    const fixture = runtimeFixture({ evaluate: () => evaluation([]) });
+    const clients = clientsFor(fixture);
+
+    await expect(
+      clients.kernelClient.evaluateModel({ targetFile: 'lib.ts', options: { tessellation: 'low' } }),
+    ).resolves.toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' });
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'lib.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      views: [],
+    });
+    expect(fixture.viewRequests).toEqual([]);
+  });
+
+  it('refuses export options the kernel rejects with VALIDATION_ERROR', async () => {
+    const clients = clientsFor(
+      runtimeFixture({
+        export: () => ({
+          success: false,
+          issues: [{ ...optionsRefusal, code: 'EXPORT_OPTIONS_INVALID', message: 'stl option binary: Invalid input' }],
+        }),
+      }),
+    );
+
+    await expect(
+      clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl', options: { binary: 'yes' } }),
+    ).resolves.toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message: 'stl option binary: Invalid input' });
   });
 });
 

@@ -13,7 +13,16 @@ import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.
 import type { CliProfilePhase } from '#commands/export-profile.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
-const parseJsonObject = (flag: string, input: string | undefined): Record<string, unknown> | undefined => {
+/**
+ * Parse a flag's JSON object, refusing anything else as a usage error.
+ *
+ * @internal
+ * @param flag - The flag name, as the error quotes it.
+ * @param input - The flag's raw value, when given.
+ * @returns The object, or `undefined` when the flag was not given.
+ * @throws {CliError} `ARG_JSON_INVALID` (exit 2) for malformed JSON or a non-object.
+ */
+export const parseJsonObject = (flag: string, input: string | undefined): Record<string, unknown> | undefined => {
   if (input === undefined) {
     return undefined;
   }

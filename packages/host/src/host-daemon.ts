@@ -273,6 +273,15 @@ export type HostDaemonOptions = {
    * container that still holds a clone (D21).
    */
   readonly pair?: boolean;
+  /**
+   * Whether this daemon pairs with and connects to the relay at `relayUrl` (default `true`).
+   *
+   * `false` is a local-first daemon (`tau serve` without `--relay`, charter D29): it serves its agent channel and any
+   * UI on loopback, never pairs and never opens the control connection, and is `ready` once the agent channel is.
+   * `relayUrl` stays the Tau API origin its gateway, Zoo proxy and Tau Cloud sync talk to. A credential this
+   * machine already stored still admits Tau runs; without one they are refused `HOST_NOT_PAIRED`.
+   */
+  readonly relay?: boolean;
 };
 
 /** Final daemon closure result. @public */
@@ -1574,11 +1583,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   };
 
   const run = async (): Promise<HostDaemonCloseResult> => {
-    emit({
-      type: 'warning',
-      code: 'TRUSTED_PROJECTS_ONLY',
-      message: 'Remote project code executes on this machine. Connect only projects you trust.',
-    });
+    const relayed = options.relay !== false;
+    if (relayed) {
+      emit({
+        type: 'warning',
+        code: 'TRUSTED_PROJECTS_ONLY',
+        message: 'Remote project code executes on this machine. Connect only projects you trust.',
+      });
+    }
     // async-iife: bootstrap -- a failed mint is a warning and retries on the source's interval.
     void (async (): Promise<void> => {
       try {
@@ -1600,6 +1612,23 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * agents serve and a Tau run is refused `HOST_NOT_PAIRED` (RH-R13). */
     if (options.agent) {
       await startAgent(options.agent);
+    }
+    /* Local-first: nothing to pair with and no control connection to hold, so the daemon is ready once its agent
+     * channel is, and runs until it is closed. */
+    if (!relayed) {
+      resolveReady();
+      if (!shutdown.signal.aborted) {
+        await new Promise<void>((resolve) => {
+          shutdown.signal.addEventListener(
+            'abort',
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      }
+      return { cause: 'requested' };
     }
     const pair = async (): Promise<HostCredential> => {
       if (options.pair === false) {

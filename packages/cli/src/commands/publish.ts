@@ -53,7 +53,7 @@ const readEntryPath = async (workspaceRoot: string): Promise<string> => {
 /**
  * The API this leg reaches, refusing before anything is named.
  *
- * Shared with `tau open` (W18 DEF-2): both verbs need the same two values and
+ * Shared with `tau clone` (W18 DEF-2): both verbs need the same two values and
  * refuse in the same words, and a second copy could drift from this one.
  *
  * @returns The API origin and the session token.

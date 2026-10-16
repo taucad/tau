@@ -1506,6 +1506,51 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 30_000);
 
+  /* Charter D29: `tau serve` without `--relay` is local-first. The daemon serves its agent channel and never pairs or
+   * opens a control connection, so an unreachable relay origin costs nothing and closing it is an ordinary stop. */
+  it('should serve its agent channel without pairing or dialling the relay when the relay is off', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-local-first-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    let relayRequests = 0;
+    const httpServer = createServer((_request, response) => {
+      relayRequests += 1;
+      response.writeHead(404).end();
+    });
+    resources.push(httpServer);
+    await new Promise<void>((resolve) => {
+      httpServer.listen(0, '127.0.0.1', resolve);
+    });
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new TypeError('Expected a TCP relay address.');
+    }
+    const events: HostDaemonEvent[] = [];
+    agentServerSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL(`http://127.0.0.1:${String(address.port)}`),
+      relay: false,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    const served = agentServerSpy.mock.results.at(-1);
+    if (served?.type !== 'return') {
+      throw new TypeError('Expected the daemon to serve its agent channel.');
+    }
+    await expect(fetch(served.value.url())).resolves.toBeInstanceOf(Response);
+    await delay(500);
+
+    expect(relayRequests).toBe(0);
+    expect(events.map((event) => event.type)).not.toContain('pairing');
+    expect(events).not.toContainEqual(expect.objectContaining({ code: 'TRUSTED_PROJECTS_ONLY' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'control' }));
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 30_000);
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
   it('should name the stored account as the principal of its credential and funded transport', async () => {

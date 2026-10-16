@@ -1,179 +1,166 @@
 /**
- * `tau open` — bring a project this machine has never held down from Tau Cloud
- * (W18 DEF-2, architecture `:453`, AC17/AC21).
+ * `tau open` — the launcher (charter D29, C1 R3).
  *
- * The terminal's half of the *From Tau Cloud* section in the project library,
- * and the same two machines behind it: `GET /v1/projects` says which projects
- * this account has, and `openProjectRevisions().openFromRemote()` connects the
- * `tau` remote and waits for W13's open pull to materialize the live checkout.
- * Nothing here checks anything out itself.
+ * One step from a terminal to a place a person can look at a project, as `code .` and `gh browse` do. A folder or
+ * file is served with `tau serve` (local-first, loopback only) and its URL opened in the browser, which is the default
+ * hand-off because the same-origin served page needs no secret in its URL and no Local Network Access prompt (C1 R6).
+ * A URL is opened as it is. `--print` prints the URL instead of opening it.
  *
- * Two things only a terminal has to be told, exactly as `tau publish` is told
- * them: which API (`TAU_API_URL`) and the session token (`TAU_API_TOKEN`). The
- * token authorizes the listing and the fetch; nothing is written under the
- * project — not into `.git/config`, not into a credential helper, not into the
- * remote URL (P40).
+ * `--desktop` is best effort. A `tau://` link the desktop admits (an invitation, a share, an import) goes to the OS
+ * scheme handler. A served folder cannot reach the desktop yet: the daemon-naming `tau://host/<origin>?code=` link
+ * arrives with the serve UI hand-off after spike S32 (W18), so until then the browser opens and the CLI says why.
+ * Cloning a Tau Cloud project is `tau clone`.
+ *
+ * @module
  */
-
-import { existsSync } from 'node:fs';
-import { mkdir, readdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { openProjectRevisions } from '@taucad/host';
-import type { ProjectRevisionVerbs } from '@taucad/host';
-import { defineCommand } from 'citty';
+import { defineCommand, runCommand } from 'citty';
+import type { CommandDef } from 'citty';
+import { createConsola } from 'consola';
 
+import { projectRootOf } from '#commands/check.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-import { requireGitToolchain } from '#commands/revisions.js';
-import { requireApi } from '#commands/publish.js';
 
-/** One project as `GET /v1/projects` answers it, as this command uses it. */
-type CloudProject = Readonly<{ id: string; name: string }>;
+const consola = createConsola({ stdout: process.stderr });
 
-/**
- * Whether one wire row is usable.
- *
- * Its own copy rather than a shared one (review R7): the browser has the same
- * three lines for the same wire, and two small copies are cheaper than a
- * dependency between `packages/cli` and `apps/ui`.
- *
- * @param value - One entry of the route's array.
- * @returns Whether it carries the two fields this command reads.
- */
-const isCloudProject = (value: unknown): value is CloudProject =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as Readonly<{ id?: unknown }>).id === 'string' &&
-  typeof (value as Readonly<{ name?: unknown }>).name === 'string';
+/** What `tau open` was given: a URL to open as it is, or a folder to serve. */
+export type OpenTarget = Readonly<{ kind: 'url'; url: string }> | Readonly<{ kind: 'folder'; folder: string }>;
 
 /**
- * Every project this account has on Tau Cloud.
+ * Classify the launcher's argument.
  *
- * @param api - The API origin and the session token.
- * @returns The caller's projects, most recently changed first.
- * @throws CliError When Tau Cloud refused, in words a person can act on (A18).
+ * @internal
+ * @param target - A path or URL; the current directory when absent.
+ * @param cwd - The directory a relative path resolves from.
+ * @returns The URL, or the project folder a path belongs to (a file's nearest `tau.json` folder).
+ * @throws {CliError} `INPUT_NOT_FOUND` (exit 3) for a path that does not exist.
  */
-const listCloudProjects = async (
-  api: Readonly<{ apiBaseUrl: string; apiToken: string }>,
-): Promise<readonly CloudProject[]> => {
-  const response = await fetch(`${api.apiBaseUrl.replace(/\/$/u, '')}/v1/projects`, {
-    /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire. */
-    headers: { Accept: 'application/json', Authorization: `Bearer ${api.apiToken}` },
-    /* eslint-enable @typescript-eslint/naming-convention -- end wire header names. */
-  });
-  if (!response.ok) {
-    throw cliError(
-      response.status === 401 ? 'NO_API_TOKEN' : 'PROJECTS_UNAVAILABLE',
-      response.status === 401
-        ? 'Tau Cloud did not accept this token. Set TAU_API_TOKEN to a current session token.'
-        : 'Tau Cloud could not list this account’s projects. Try again.',
-      exitCodes.refused,
-    );
+export const openTarget = async (target: string | undefined, cwd: string): Promise<OpenTarget> => {
+  if (target !== undefined && /^(?:https?|tau):\/\//iu.test(target)) {
+    return { kind: 'url', url: new URL(target).href };
   }
-  const body: unknown = await response.json();
-  return Array.isArray(body) ? body.filter((entry) => isCloudProject(entry)) : [];
+  const path = resolve(cwd, target ?? '.');
+  let entry: Awaited<ReturnType<typeof stat>>;
+  try {
+    entry = await stat(path);
+  } catch {
+    throw cliError('INPUT_NOT_FOUND', `Nothing to open at ${path}.`, exitCodes.refused);
+  }
+  if (entry.isDirectory()) {
+    return { kind: 'folder', folder: path };
+  }
+  return { kind: 'folder', folder: projectRootOf(path) };
 };
 
 /**
- * A directory name a person would recognise, from the name the project has.
+ * Hand a URL to the platform's opener: the default browser, or the scheme handler for a `tau://` link.
  *
- * @param project - The project being opened.
- * @returns Its name as a directory, or its id when the name has nothing usable.
+ * @param url - What to open.
+ * @returns Whether the opener started.
  */
-const directoryNameOf = (project: CloudProject): string =>
-  project.name
-    .toLowerCase()
-    .replaceAll(/[^\da-z]+/gu, '-')
-    .replaceAll(/^-|-$/gu, '') || project.id;
+const launch = async (url: string): Promise<boolean> => {
+  const [command, ...prefix] =
+    process.platform === 'darwin'
+      ? ['open']
+      : process.platform === 'win32'
+        ? ['cmd', '/c', 'start', '""']
+        : ['xdg-open'];
+  return new Promise((resolve) => {
+    const child = spawn(command, [...prefix, url], { detached: true, stdio: 'ignore' });
+    child.once('error', () => {
+      resolve(false);
+    });
+    child.once('spawn', () => {
+      child.unref();
+      resolve(true);
+    });
+  });
+};
 
-/** `tau open [project]`. */
+/** `tau open [path|url]`. */
 export const openCommand = defineCommand({
   meta: {
     name: 'open',
-    description: 'Open one of this account’s Tau Cloud projects on this machine',
+    description: 'Open a project folder, file or Tau link in the browser',
   },
   args: {
-    project: {
+    target: {
       type: 'positional',
-      description: 'Project to open (run `tau open` with no project to list them)',
+      description: 'Folder, file or URL to open (defaults to the current directory)',
       required: false,
     },
-    into: {
-      type: 'string',
-      description: 'Directory to open it into (defaults to a new directory named after the project)',
-      required: false,
+    desktop: {
+      type: 'boolean',
+      description: 'Prefer Tau Desktop; best effort, the browser opens when the desktop cannot take this target',
+      default: false,
+    },
+    print: {
+      type: 'boolean',
+      description: 'Print the URL on stdout instead of opening it',
+      default: false,
     },
     json: {
       type: 'boolean',
-      description: 'Write one versioned JSON result record to stdout instead of plain lines',
+      description: 'Print one versioned JSON record with the URL on stdout instead of opening it',
+      default: false,
+    },
+    ui: {
+      type: 'string',
+      description: 'Directory of a prebuilt Tau UI to serve the folder with (TAU_HOST_UI_DIR)',
+      required: false,
+      default: process.env['TAU_HOST_UI_DIR'],
+    },
+    port: {
+      type: 'string',
+      description: 'Loopback port to serve a folder on (see tau serve --port)',
       required: false,
     },
   },
   async run({ args }) {
-    const api = requireApi();
-    const projects = await listCloudProjects(api);
+    const target = await openTarget(typeof args.target === 'string' ? args.target : undefined, process.cwd());
+    const scripted = args.print || args.json;
 
-    if (args.project === undefined || args.project === '') {
+    if (target.kind === 'url') {
       if (args.json) {
-        await emit({ kind: 'projects', ok: true, projects });
+        await emit({ kind: 'open', ok: true, url: target.url, opened: false });
         return;
       }
-      if (projects.length === 0) {
-        await writeStdout('This account has no projects on Tau Cloud yet.\n');
+      if (args.print) {
+        await writeStdout(`${target.url}\n`);
         return;
       }
-      await writeStdout(projects.map((project) => `${project.id}  ${project.name}\n`).join(''));
+      if (args.desktop && !target.url.startsWith('tau://')) {
+        consola.warn('Tau Desktop opens only tau:// links from a terminal; opening the browser.');
+      }
+      if (!(await launch(target.url))) {
+        throw cliError('OPEN_FAILED', `Could not open ${target.url}. Open it yourself.`, exitCodes.refused);
+      }
       return;
     }
 
-    const project = projects.find((candidate) => candidate.id === args.project);
-    if (project === undefined) {
+    if (args.ui === undefined || args.ui === '') {
       throw cliError(
-        'NO_SUCH_PROJECT',
-        `This account has no project ${args.project} on Tau Cloud. Run \`tau open\` to list them.`,
+        'UI_NOT_AVAILABLE',
+        `No Tau UI to open ${target.folder} in. Pass --ui=<directory of a Tau UI build> (or set TAU_HOST_UI_DIR); \`tau serve\` serves the folder to agents without one.`,
         exitCodes.refused,
       );
     }
-
-    /* The binaries first, so "git-lfs is not installed" never reaches a person
-       as "this project could not be opened" (OQ-B8). */
-    await requireGitToolchain();
-    const workspaceRoot = resolve(args.into ?? directoryNameOf(project));
-    /* An existing directory is only safe when it is empty: the open pull writes
-       the remote's tree over this one, and a directory with work in it is not
-       something a `tau open` may quietly overwrite. */
-    const present = existsSync(workspaceRoot) ? await readdir(workspaceRoot) : [];
-    if (present.length > 0) {
-      throw cliError('DIRECTORY_NOT_EMPTY', `${workspaceRoot} is not empty.`, exitCodes.refused);
+    if (args.desktop) {
+      consola.warn('Tau Desktop cannot open a served folder from the terminal yet; opening it in the browser instead.');
     }
-    await mkdir(workspaceRoot, { recursive: true });
-
-    const revisions: ProjectRevisionVerbs = openProjectRevisions({
-      workspaceRoot,
-      projectId: project.id,
-      apiBaseUrl: api.apiBaseUrl,
-      apiToken: api.apiToken,
+    const { serveCommand } = await import('#commands/serve.js');
+    await runCommand(serveCommand as CommandDef, {
+      rawArgs: [
+        target.folder,
+        `--ui=${args.ui}`,
+        ...(args.port === undefined || args.port === '' ? [] : [`--port=${String(args.port)}`]),
+        ...(args.json ? ['--json'] : []),
+        ...(args.print ? ['--print'] : []),
+        scripted ? '--no-open' : '--open',
+      ],
     });
-    try {
-      const outcome = await revisions.openFromRemote();
-      if (args.json) {
-        await emit({
-          kind: 'project',
-          ok: outcome.status === 'opened',
-          id: project.id,
-          path: workspaceRoot,
-          ...outcome,
-        });
-      }
-      if (outcome.status === 'opened') {
-        if (!args.json) {
-          await writeStdout(`${workspaceRoot}\n`);
-        }
-        return;
-      }
-      throw cliError('OPEN_REFUSED', outcome.reason, exitCodes.refused);
-    } finally {
-      await revisions.close();
-    }
   },
 });

@@ -1,6 +1,8 @@
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -16,17 +18,24 @@ import type {
 } from '@taucad/host';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
-import { consola } from 'consola';
+import { createConsola } from 'consola';
 
 import { acquisitionOf } from '#acquisition.js';
 import type { Acquisition } from '#acquisition.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
-import { cliError, exitCodes } from '#output.js';
+import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { NativeComposition, NativePreparation } from '#native-kernels.js';
+
+/* Every report goes to stderr: stdout carries only the served URL or its record (`--print`, `--json`). */
+const consola = createConsola({
+  stdout: process.stderr,
+  // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare -- `isTTY` is `undefined`, not `false`, off a TTY
+  formatOptions: { colors: process.stderr.isTTY === true },
+});
 
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
@@ -55,9 +64,9 @@ const computeStoreWorkerModulePath = (): string =>
 /**
  * The arguments of one runtime child. The daemon starts it with a minimal environment, so the acquisition profile
  * travels as `--acquisition=locked`.
+ * @internal
  * @param options - Plugins, config module, Zoo proxy and the acquisition profile.
  * @returns The child's argv.
- * @internal
  */
 export const childArguments = (options: {
   readonly plugin: unknown;
@@ -195,32 +204,27 @@ export const agentWorkspaceRoot = (workspace: string | undefined, cwd: string): 
  * `TAU_HOST_AGENT_TOKEN` or minted here — because `argv` is world-readable in
  * `ps` on every platform this daemon runs on.
  *
- * @param args - Parsed `tau serve` arguments.
+ * @param args - Parsed `tau serve` arguments, with the Tau API origin.
+ * @param port - The resolved loopback port, or `undefined` to leave the capability off.
  * @returns The agent options, or `undefined` when the capability is off.
  */
-const agentOptions = (args: {
-  /* `citty` hands a numeric-looking value back as a number even for a `string`
-   * argument, and `--agentPort=0` is the ephemeral-port request — so presence
-   * is tested against `undefined`, never for truthiness. */
-  readonly agentPort?: string | number;
-  readonly ui?: string;
-  readonly workspace?: string;
-  readonly gateway?: string;
-  readonly model: string;
-  readonly modelProvider: string;
-  readonly relay: string;
-  readonly externalAgents?: boolean;
-  readonly testModel?: boolean;
-  readonly computeMode: string;
-}): HostDaemonAgentOptions | undefined => {
+const agentOptions = (
+  args: {
+    readonly ui?: string;
+    readonly workspace?: string;
+    readonly gateway?: string;
+    readonly model: string;
+    readonly modelProvider: string;
+    readonly apiUrl: string;
+    readonly externalAgents?: boolean;
+    readonly testModel?: boolean;
+    readonly computeMode: string;
+  },
+  port: number | undefined,
+): HostDaemonAgentOptions | undefined => {
   const uiRoot = args.ui ? resolve(args.ui) : undefined;
-  const requested = args.agentPort === undefined || args.agentPort === '' ? undefined : Number(args.agentPort);
-  if (requested === undefined && !uiRoot) {
+  if (port === undefined) {
     return undefined;
-  }
-  const port = requested ?? 0;
-  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
-    throw new TypeError('--agentPort must be a TCP port, or 0 for an ephemeral one');
   }
   const token = process.env['TAU_HOST_AGENT_TOKEN'] ?? randomBytes(32).toString('base64url');
   if (token.length < 32) {
@@ -230,7 +234,7 @@ const agentOptions = (args: {
   if (!Number.isSafeInteger(contextWindow) || contextWindow < 1) {
     throw new TypeError('TAU_HOST_MODEL_CONTEXT_WINDOW must be a positive integer');
   }
-  /* The same session token `tau publish` and `tau open` take, for the same
+  /* The same session token `tau publish` and `tau clone` take, for the same
    * reason: a terminal has no cookie jar, and the device credential this daemon
    * paired with authenticates the relay only (C67). */
   const tauApiToken = process.env['TAU_API_TOKEN'];
@@ -240,7 +244,7 @@ const agentOptions = (args: {
     ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
-    gatewayBaseUrl: args.gateway ?? args.relay,
+    gatewayBaseUrl: args.gateway ?? args.apiUrl,
     model: {
       id: args.model,
       contextWindow,
@@ -276,9 +280,9 @@ const agentOptions = (args: {
  * resolves them there. A workspace checkout that has not built falls back to
  * this module, where the adapters are devDependencies.
  *
+ * @internal
  * @param from - Module URL to start from; this module's own by default.
  * @returns The URL `resolveAcpAdapters` resolves from.
- * @internal
  */
 export const acpAdapterResolveFrom = (from: string = import.meta.url): string => {
   for (let directory = dirname(fileURLToPath(from)); ; directory = dirname(directory)) {
@@ -353,6 +357,125 @@ export const serveNativeKernels = (): {
   };
 };
 
+/** The port `tau serve` asks for first, so a served project keeps one bookmarkable URL (charter Q53). */
+export const defaultServePort = 7180;
+
+/** How many ports above the requested one `tau serve` tries before giving up. */
+const portSearchSpan = 20;
+
+/**
+ * Whether a TCP port is free on the loopback interface the agent channel binds.
+ *
+ * @internal
+ * @param port - The port to try.
+ * @param host - The interface; `TAU_HOST_AGENT_BIND` or loopback.
+ * @returns `true` when a listener could bind it just now.
+ */
+export const isPortFree = async (
+  port: number,
+  host: string = process.env['TAU_HOST_AGENT_BIND'] ?? '127.0.0.1',
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    const probe = createServer();
+    probe.once('error', () => {
+      resolve(false);
+    });
+    probe.listen({ port, host, exclusive: true }, () => {
+      probe.close(() => {
+        resolve(true);
+      });
+    });
+  });
+
+/**
+ * The port `tau serve` listens on: the one asked for (or the stable default) when it is free, otherwise the next free
+ * one above it, unless `--strict-port` refuses instead (charter Q53, the Vite and Jupyter idiom).
+ *
+ * @internal
+ * @param options - The `--port` value, whether it is strict, and the probe.
+ * @returns The port to bind; `0` asks the OS for an ephemeral one.
+ * @throws {CliError} `PORT_IN_USE` (exit 3) when a strict port, or every port in the search span, is taken.
+ * @throws {CliError} `PORT_INVALID` (exit 2) for a value that is not a TCP port.
+ */
+export const resolveServePort = async (options: {
+  readonly port: string | number | undefined;
+  readonly strict: boolean;
+  readonly free?: (port: number) => Promise<boolean>;
+}): Promise<number> => {
+  const requested =
+    options.port === undefined || options.port === '' ? defaultServePort : Number(String(options.port).trim());
+  if (!Number.isSafeInteger(requested) || requested < 0 || requested > 65_535) {
+    throw cliError('PORT_INVALID', '--port must be a TCP port, or 0 for an ephemeral one', exitCodes.usage);
+  }
+  if (requested === 0) {
+    return 0;
+  }
+  const free = options.free ?? (async (port: number) => isPortFree(port));
+  const last = options.strict ? requested : Math.min(65_535, requested + portSearchSpan);
+  for (let port = requested; port <= last; port += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- ports are tried in order, the first free one wins.
+    if (await free(port)) {
+      return port;
+    }
+  }
+  throw cliError(
+    'PORT_IN_USE',
+    options.strict
+      ? `Port ${String(requested)} is in use and --strict-port is set. Stop what holds it, or pass another --port.`
+      : `Ports ${String(requested)}–${String(last)} are all in use. Pass --port=<port>, or --port=0 for any free port.`,
+    exitCodes.refused,
+  );
+};
+
+/**
+ * Whether `tau serve` opens the browser: as asked, else only for a served UI on an interactive terminal outside CI
+ * whose URL is not being printed for a script.
+ *
+ * @internal
+ * @param options - The `--open` flag, the printing flags, and the environment.
+ * @returns Whether to open the browser.
+ */
+export const shouldOpenBrowser = (options: {
+  readonly open: boolean | undefined;
+  readonly ui: boolean;
+  readonly scripted: boolean;
+  readonly interactive: boolean;
+  readonly ci: boolean;
+}): boolean => {
+  if (!options.ui) {
+    return false;
+  }
+  if (options.open !== undefined) {
+    return options.open;
+  }
+  return options.interactive && !options.ci && !options.scripted;
+};
+
+/**
+ * Ask the platform to open a URL in the default browser; a failure is a warning, never fatal.
+ *
+ * @param url - The URL to open.
+ */
+const openInBrowser = (url: string): void => {
+  const [command, ...prefix] =
+    process.platform === 'darwin'
+      ? ['open']
+      : process.platform === 'win32'
+        ? ['cmd', '/c', 'start', '""']
+        : ['xdg-open'];
+  try {
+    const child = spawn(command, [...prefix, url], { detached: true, stdio: 'ignore' });
+    child.once('error', (error) => {
+      consola.warn(`Could not open a browser (${error.message}). Open ${url} yourself.`);
+    });
+    child.unref();
+  } catch (error) {
+    consola.warn(
+      `Could not open a browser (${error instanceof Error ? error.message : String(error)}). Open ${url} yourself.`,
+    );
+  }
+};
+
 const parsePositiveInteger = (name: string, value: string): number => {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
@@ -361,13 +484,76 @@ const parsePositiveInteger = (name: string, value: string): number => {
   return parsed;
 };
 
+/**
+ * Say where the daemon is serving: the URL once on stdout under `--print` or `--json`, a line on stderr otherwise,
+ * and the browser when asked.
+ *
+ * @param served - The served URL, the workspace, the relay, whether a UI is served, and what to print or open.
+ */
+const announceServed = async (served: {
+  readonly url: string;
+  readonly workspace: string;
+  readonly relay: string | undefined;
+  readonly ui: boolean;
+  readonly print: boolean;
+  readonly json: boolean;
+  readonly open: boolean;
+}): Promise<void> => {
+  if (served.json) {
+    await emit({
+      kind: 'serve',
+      ok: true,
+      url: served.url,
+      workspace: served.workspace,
+      relay: served.relay ?? null,
+      ui: served.ui,
+    });
+  } else if (served.print) {
+    await writeStdout(`${served.url}\n`);
+  }
+  consola.success(`Serving ${served.workspace} at ${served.url}${served.relay === undefined ? ' (local only)' : ''}`);
+  if (served.open) {
+    openInBrowser(served.url);
+  }
+};
+
+/**
+ * `--smoke-test`: the daemon's descriptor must answer, as a page or client would ask it.
+ *
+ * @param url - The served origin.
+ * @throws {CliError} `SMOKE_TEST_FAILED` (exit 1) when it does not answer 200 with a descriptor.
+ */
+const smokeTest = async (url: string): Promise<void> => {
+  const descriptorUrl = new URL('/.well-known/tau-host', url);
+  try {
+    const response = await fetch(descriptorUrl, { signal: AbortSignal.timeout(30_000) });
+    const body: unknown = await response.json();
+    if (!response.ok || typeof body !== 'object' || body === null) {
+      throw new Error(`answered ${String(response.status)}`);
+    }
+  } catch (error) {
+    throw cliError(
+      'SMOKE_TEST_FAILED',
+      `${descriptorUrl.href} did not answer: ${error instanceof Error ? error.message : String(error)}`,
+      exitCodes.error,
+    );
+  }
+  consola.success(`Smoke test passed: ${descriptorUrl.href} answers.`);
+};
+
 /** `tau serve` command. */
 export const serveCommand = defineCommand({
   meta: {
     name: 'serve',
-    description: 'Run the experimental Tau Host remote-compute daemon',
+    description: 'Serve a project folder to the browser on this machine; --relay also offers it to Tau Cloud',
   },
   args: {
+    dir: {
+      type: 'positional',
+      description:
+        'Project folder to serve (defaults to --workspace, or the current directory when it is a Tau project or outside every Git checkout)',
+      required: false,
+    },
     plugin: {
       type: 'string',
       description: 'Default-invoked plugin package or path installed in the invoking project (repeatable)',
@@ -381,8 +567,41 @@ export const serveCommand = defineCommand({
     },
     relay: {
       type: 'string',
-      description: 'Tau Host relay URL',
-      default: process.env['TAU_HOST_RELAY_URL'] ?? 'https://api.tau.new',
+      description:
+        'Pair with and serve through this Tau Host relay (e.g. https://api.tau.new); off by default, so the daemon stays local (TAU_HOST_RELAY_URL)',
+      required: false,
+      default: process.env['TAU_HOST_RELAY_URL'],
+    },
+    port: {
+      type: 'string',
+      description: `Loopback port for the page and agent channel; the next free one is used when it is taken (default ${String(defaultServePort)}; 0 for any free port)`,
+      required: false,
+    },
+    strictPort: {
+      type: 'boolean',
+      description: 'Exit instead of trying the next port when --port is taken',
+      default: false,
+    },
+    open: {
+      type: 'boolean',
+      description:
+        'Open the served UI in the browser; on by default on an interactive terminal outside CI, --no-open never opens',
+      required: false,
+    },
+    print: {
+      type: 'boolean',
+      description: 'Print the served URL once on stdout (and do not open the browser unless --open)',
+      default: false,
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print one versioned JSON record with the served URL on stdout once the daemon is ready',
+      default: false,
+    },
+    smokeTest: {
+      type: 'boolean',
+      description: 'Start, check that /.well-known/tau-host answers, then stop: exit 0 when it does',
+      default: false,
     },
     maxSessions: {
       type: 'string',
@@ -396,7 +615,7 @@ export const serveCommand = defineCommand({
     },
     trustProjects: {
       type: 'boolean',
-      description: 'Acknowledge that remote project code executes on this machine',
+      description: 'With --relay: acknowledge that remote project code executes on this machine',
       default: false,
     },
     pair: {
@@ -407,7 +626,8 @@ export const serveCommand = defineCommand({
     },
     agentPort: {
       type: 'string',
-      description: 'Serve the agent channel on this loopback port (0 for an ephemeral one)',
+      description:
+        'Serve the agent channel on exactly this loopback port (0 for an ephemeral one); with --relay, also turns the channel on',
       required: false,
       default: process.env['TAU_HOST_AGENT_PORT'],
     },
@@ -463,20 +683,53 @@ export const serveCommand = defineCommand({
     if (args.machines && !/^(1|true)$/iu.test(process.env['TAU_MACHINES_ENABLED'] ?? '')) {
       throw new Error('Machines are not available in this release.');
     }
-    if (!args.trustProjects) {
-      throw new Error(
-        'tau serve is experimental and requires --trust-projects. Remote project code executes on this machine.',
+    /* Local-first (charter D29): the relay, pairing and the trust acknowledgement are opt-in together. */
+    const relay = args.relay === undefined || args.relay === '' ? undefined : args.relay;
+    if (relay !== undefined && !args.trustProjects) {
+      throw cliError(
+        'TRUST_REQUIRED',
+        'tau serve --relay requires --trust-projects: projects the relay offers run their code on this machine.',
+        exitCodes.usage,
       );
     }
     /* Before anything is served: this daemon records every turn into a native
      * Git store, so a machine without the binaries is told which one is missing
-     * now rather than at the first turn (OQ-B8, S12). */
-    await requireGitToolchain();
+     * now rather than at the first turn (OQ-B8, S12). Local-first, the daemon
+     * already tolerates a missing revision engine per turn, so it warns. */
+    try {
+      await requireGitToolchain();
+    } catch (error) {
+      if (relay !== undefined) {
+        throw error;
+      }
+      consola.warn(
+        `${error instanceof Error ? error.message : String(error)} Serving without recorded revisions until it is installed.`,
+      );
+    }
     const maxSessions = parsePositiveInteger('--max-sessions', args.maxSessions);
     if (args.computeMode !== 'off' && args.computeMode !== 'memory' && args.computeMode !== 'durable') {
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
-    const configured = agentOptions(args);
+    const workspace = typeof args.dir === 'string' && args.dir !== '' ? args.dir : args.workspace;
+    /* `--agentPort` is exact (its old contract); `--port` and the default search upward unless strict. Relayed, the
+     * channel stays off unless a port or a UI asks for it, as before. */
+    const explicitAgentPort =
+      args.agentPort === undefined || args.agentPort === '' ? undefined : String(args.agentPort);
+    const wantsChannel =
+      relay === undefined ||
+      explicitAgentPort !== undefined ||
+      (args.port !== undefined && args.port !== '') ||
+      Boolean(args.ui) ||
+      args.smokeTest ||
+      args.print ||
+      args.json;
+    const port = wantsChannel
+      ? explicitAgentPort === undefined
+        ? await resolveServePort({ port: args.port, strict: args.strictPort })
+        : await resolveServePort({ port: explicitAgentPort, strict: true })
+      : undefined;
+    const apiUrl = relay ?? process.env['TAU_API_URL'] ?? 'https://api.tau.new';
+    const configured = agentOptions({ ...args, ...(workspace === undefined ? {} : { workspace }), apiUrl }, port);
     if (args.machines && !configured) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
@@ -560,11 +813,20 @@ export const serveCommand = defineCommand({
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     const zooProxyUrl = cliZooProxyUrl({
       TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
-      TAU_API_URL: args.relay,
+      TAU_API_URL: apiUrl,
     });
     /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
+    /* The one served URL, printed once on stdout for a script (Q53, C1 R9) and opened for a person. */
+    const served = Promise.withResolvers<string>();
+    const onEvent = (event: HostDaemonEvent): void => {
+      if (event.type === 'agent' && event.state === 'ready' && event.url !== undefined) {
+        served.resolve(event.url);
+      }
+      reportEvent(event);
+    };
     const daemon = startHostDaemon({
-      relayUrl: new URL(args.relay),
+      relayUrl: new URL(apiUrl),
+      relay: relay !== undefined,
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
         args: childArguments({
@@ -575,12 +837,12 @@ export const serveCommand = defineCommand({
         }),
         native: kernels.native,
       },
-      zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },
+      zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: process.env['TAU_API_TOKEN'] },
       maxSessions,
       systemSkillBundles,
       pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
-      onEvent: reportEvent,
+      onEvent,
     });
     try {
       /* A signal before the daemon is ready stops it too: opening the workspace's
@@ -596,6 +858,28 @@ export const serveCommand = defineCommand({
       ]);
       if (started === 'signal') {
         return;
+      }
+      if (configuredAgent !== undefined) {
+        const url = await served.promise;
+        await announceServed({
+          url,
+          workspace: configuredAgent.workspaceRoot,
+          relay,
+          ui: configuredAgent.uiRoot !== undefined,
+          print: args.print,
+          json: args.json,
+          open: shouldOpenBrowser({
+            open: args.open,
+            ui: configuredAgent.uiRoot !== undefined,
+            scripted: args.print || args.json || args.smokeTest,
+            interactive: process.stdout.isTTY,
+            ci: Boolean(process.env['CI']),
+          }),
+        });
+        if (args.smokeTest) {
+          await smokeTest(url);
+          return;
+        }
       }
       const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
         await stopped.promise;

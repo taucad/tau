@@ -7,7 +7,16 @@ import { defaultPayloadStore } from '@taucad/host';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { acpAdapterResolveFrom, agentWorkspaceRoot, childArguments, serveNativeKernels } from '#commands/serve.js';
+import {
+  acpAdapterResolveFrom,
+  agentWorkspaceRoot,
+  childArguments,
+  defaultServePort,
+  resolveServePort,
+  serveNativeKernels,
+  shouldOpenBrowser,
+} from '#commands/serve.js';
+import { exitCodes } from '#output.js';
 
 const nativeKernels = vi.hoisted(() => ({
   composeNativeKernels: vi.fn<() => Promise<unknown>>(),
@@ -162,5 +171,54 @@ describe('childArguments', () => {
       '--zoo-proxy-url=wss://api.example/v1/kernels/zoo',
     ]);
     expect(childArguments({ ...base, acquisition: 'locked' })).toContain('--acquisition=locked');
+  });
+});
+
+describe('resolveServePort', () => {
+  it('should take the stable default when it is free', async () => {
+    await expect(resolveServePort({ port: undefined, strict: false, free: async () => true })).resolves.toBe(
+      defaultServePort,
+    );
+  });
+
+  it('should move to the next free port, or refuse under --strict-port', async () => {
+    const taken = new Set([4000, 4001]);
+    const free = async (port: number): Promise<boolean> => !taken.has(port);
+
+    await expect(resolveServePort({ port: '4000', strict: false, free })).resolves.toBe(4002);
+    await expect(resolveServePort({ port: '4000', strict: true, free })).rejects.toMatchObject({
+      code: 'PORT_IN_USE',
+      exit: exitCodes.refused,
+    });
+  });
+
+  it('should pass 0 through for an ephemeral port and refuse a value that is not a port', async () => {
+    await expect(resolveServePort({ port: 0, strict: false, free: async () => false })).resolves.toBe(0);
+    await expect(resolveServePort({ port: '70000', strict: false })).rejects.toMatchObject({
+      code: 'PORT_INVALID',
+      exit: exitCodes.usage,
+    });
+  });
+});
+
+describe('shouldOpenBrowser', () => {
+  const base = { open: undefined, ui: true, scripted: false, interactive: true, ci: false } as const;
+
+  it('should open a served UI on an interactive terminal outside CI', () => {
+    expect(shouldOpenBrowser(base)).toBe(true);
+  });
+
+  it.each([
+    ['in CI', { ci: true }],
+    ['off a terminal', { interactive: false }],
+    ['when printing for a script', { scripted: true }],
+    ['with no UI', { ui: false }],
+    ['under --no-open', { open: false }],
+  ])('should not open %s', (_label, change) => {
+    expect(shouldOpenBrowser({ ...base, ...change })).toBe(false);
+  });
+
+  it('should open under --open even when printing', () => {
+    expect(shouldOpenBrowser({ ...base, open: true, scripted: true, ci: true })).toBe(true);
   });
 });

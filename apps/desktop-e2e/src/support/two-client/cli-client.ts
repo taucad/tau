@@ -10,7 +10,7 @@ import { desktopE2EApiUrl } from '#support/config.js';
  *
  * `tau` exactly as a person runs it, signed in with the same account's session
  * as the other two clients: `TAU_API_URL` and `TAU_API_TOKEN`, the pair
- * `tau open`, `tau publish` and `tau revisions save` are told. Spawned from its
+ * `tau clone`, `tau publish` and `tau revisions save` are told. Spawned from its
  * TypeScript source through the workspace's `tsx`, as `packages/cli`'s own
  * integration tests spawn it, so this tier needs no CLI build.
  */

@@ -1,6 +1,15 @@
 # @taucad/cli
 
-CLI for `@taucad/runtime`.
+CLI for Tau: check, test, export and serve CAD projects from the terminal, with the same runtime the Tau UI uses.
+
+```bash
+tau check main.ts                 # does the model evaluate? exit 0 ok, 1 error, 3 refused
+tau test                          # run the project's GeoSpec suites
+tau export main.ts --ext=glb      # write the geometry
+tau open .                        # serve this folder and open it in the browser
+```
+
+Every command writes result data only to stdout and diagnostics to stderr; `--json` prints one versioned `{"v":1,…}` record. Exit codes are `0` ok, `1` failed, `2` usage, `3` refused (the request was well formed but cannot run here: a kernel not prepared, an unsupported host, a missing input), `130`/`143` interrupted.
 
 ## Export
 
@@ -15,6 +24,25 @@ tau export model.ts --ext=glb --content='{"includeEdges":true}'
 ```
 
 WebP export is lossless when `quality` is omitted or set to `1`; values below `1` request lossy output.
+
+## Check and test
+
+`tau check <file>` evaluates a model once and reports its issues and parameters without writing geometry. Exit `0` means it evaluated cleanly, `1` that the model failed (a syntax error, a thrown error, an error diagnostic), `3` that the runtime declined it (`KERNEL_NOT_PREPARED`, `KERNEL_CAPABILITY_MISSING`, no kernel for the file). The project is the nearest folder holding `tau.json`, else the file's own folder.
+
+```bash
+tau check main.ts
+tau check main.py --json          # {"v":1,"kind":"evaluation","status":"refused",…} naming `tau prepare build123d`
+tau check main.ts --params='{"width":20}'
+```
+
+`tau test [project]` runs the project's GeoSpec suites (`*.geospec.ts`) headlessly with the same runner `tau mcp`'s `test_model` uses. Exit `0` means every selected test passed, `1` that a test failed, `3` that nothing could run (no suite, no GeoSpec engine, a kernel not prepared).
+
+```bash
+tau test
+tau test ./bracket --file=bracket.geospec.ts --testNamePattern='holes' --json
+```
+
+Neither command downloads anything: native kernels come from the payload store that `tau prepare` fills.
 
 ## Plugins
 
@@ -85,17 +113,33 @@ A seed file is used only when it hashes to its name, so a bundle from an untrust
 
 `tau ui verify <dir>` re-hashes a deployed copy of the Tau UI build against the `tau-asset-receipt.json` the build writes at its client root, and exits 3 naming every file that is missing or altered. `tau serve --ui` hands the served page the daemon's `TAU_ACQUISITION`, so a locked daemon's UI acquires no types from a CDN.
 
-## Tau Host
+## Serve and open
 
-Run the outbound daemon with the same built-in/configured plugin composition used by `export`:
+`tau serve [dir]` serves a project folder on this machine. Without `--relay` it is local-first: it binds loopback only, pairs with no server and needs no account. With `--ui` it also serves a prebuilt Tau UI build and opens it in the browser.
 
 ```bash
-tau serve --trust-projects
-tau serve --trust-projects --config ./tau.config.mjs
-tau serve --trust-projects --plugin @example/tau-plugin
+tau serve . --ui=./tau-ui                 # http://127.0.0.1:7180, opened in the browser
+tau serve . --ui=./tau-ui --print         # print the URL on stdout, open nothing
+tau serve . --ui=./tau-ui --json          # one {"kind":"serve","url":…} record on stdout
+tau serve . --port=7300 --strict-port     # exit 3 (PORT_IN_USE) instead of trying the next port
+tau serve . --smoke-test --port=0         # start, check /.well-known/tau-host, stop
 ```
 
-The first launch prints a pairing URL and code. The default relay is `https://api.tau.new`; override it with `--relay` or `TAU_HOST_RELAY_URL`. `--max-sessions` defaults to `1`.
+The default port is `7180`; a busy port moves to the next free one unless `--strict-port` is given. The browser opens only on an interactive terminal outside CI, and never with `--print`, `--json` or `--no-open`. Reports go to stderr, so `--print` and `--json` leave exactly the URL or the record on stdout.
+
+`tau open [path|url]` is the one-step launcher: a folder or file is served as above (`--ui` or `TAU_HOST_UI_DIR` names the UI) and opened in the browser, and a URL is opened as it is. `--print` and `--json` print instead of opening. `--desktop` is best effort: a `tau://` link goes to Tau Desktop, and a served folder still opens in the browser until the desktop can take one from the terminal.
+
+### Relay
+
+`--relay <url>` (or `TAU_HOST_RELAY_URL`) instead connects outbound to a Tau server so its browser sessions can run projects on this machine, with the same built-in/configured plugin composition used by `export`:
+
+```bash
+tau serve --relay=https://api.tau.new --trust-projects
+tau serve --relay=https://api.tau.new --trust-projects --config ./tau.config.mjs
+tau serve --relay=https://api.tau.new --trust-projects --plugin @example/tau-plugin
+```
+
+The first launch prints a pairing URL and code. `--max-sessions` defaults to `1`.
 
 With `TAU_API_TOKEN` set, the daemon trades it for a short-lived Zoo-scoped token and sends only that to its runtime child, so project code never sees the session.
 
@@ -107,7 +151,11 @@ pnpm nx dev-host cli
 
 The target connects to the local API at `http://localhost:4000`, stores its development-only credential under the ignored `out/tau-host-dev` directory, and restarts when CLI or Host source changes. Additional `tau serve` options are forwarded, for example `pnpm nx dev-host cli -- --config=./tau.config.mjs`.
 
-Remote project modules execute on this machine. `--trust-projects` is mandatory because the Node permission model is defense in depth, not a malicious-code sandbox. A disconnected browser session is not resumed: the UI creates a fresh session after reconnect.
+Remote project modules execute on this machine. With a relay, `--trust-projects` is mandatory (`TRUST_REQUIRED`, exit 2, without it) because the Node permission model is defense in depth, not a malicious-code sandbox. A disconnected browser session is not resumed: the UI creates a fresh session after reconnect.
+
+### Clone
+
+`tau clone <project>` clones a Tau Cloud project into a local folder (formerly `tau open`); `tau publish` and `tau revisions` work on the clone.
 
 ## Agent commands
 
@@ -138,7 +186,7 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 
 Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one.
 
-Native kernels are composed from the payload store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it in the server's process with progress and cancellation, then replaces each project's thread once its in-flight calls finish. A runtime `tau prepare` sealed meanwhile is picked up on the next call. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
+Native kernels are composed from the payload store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it — a download of about 162 MB for build123d and 49 MB for PicoGK, which an agent host that approves tools without asking starts without a prompt — in the server's process with progress and cancellation, then replaces each project's thread once its in-flight calls finish. A runtime `tau prepare` sealed meanwhile is picked up on the next call. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
 
 ```bash
 tau mcp --project ./bracket

@@ -316,7 +316,7 @@ const discardCommand = defineCommand({
 /**
  * The session a save backs up to Tau Cloud with, when this terminal was given one.
  *
- * The same two values `tau publish` and `tau open` are told (P40), but optional:
+ * The same two values `tau publish` and `tau clone` are told (P40), but optional:
  * a save is recorded either way, and without them only a Git remote, or none,
  * is backed up to.
  *

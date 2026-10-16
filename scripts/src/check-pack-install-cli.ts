@@ -1,15 +1,14 @@
 /**
  * The installed `tau` bin's surface, checked by `check-pack-install.ts` once `@taucad/cli` is in the
- * consumer application: `export` to a GLB, `check`, `mcp` answering `initialize` and listing and passing
- * `test_model` on a GeoSpec suite with the GeoSpec engine the CLI installs (audit H-01), the typed
- * not-prepared refusal for a `.py` model (charter S24), and the ACP adapters it stages in
+ * consumer application (charter W17, the CLI closure in the pack-install oracle): `export` to a GLB, `check`
+ * with one evaluation record, `test` passing a GeoSpec suite and `mcp` answering `initialize` and listing and
+ * passing `test_model` on it with the GeoSpec engine the CLI installs (audit H-01), `serve --smoke-test` serving
+ * locally with no relay, the typed not-prepared refusal for a `.py` model on `export` and `check` (charter
+ * S24), and the ACP adapters it stages in
  * `dist-acp`: present at their pins, without a vendor binary anywhere in the install, and able to
  * answer `initialize` (Claude also `session/new`, against a stub `claude`) through the installed
  * `@taucad/host`. The bin runs from a project folder outside the application with an empty config
  * directory and home, so nothing a developer machine holds is visible to it.
- *
- * A check the charter has not delivered yet is reported as an expected gap only while the bin prints
- * the output recorded for it in {@link expectedCliGaps}; any other failure is red.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -23,39 +22,6 @@ export type CliOutcome = {
   /** Exit status; `undefined` when the process was killed or never started. */
   readonly status: number | undefined;
   readonly output: string;
-};
-
-/**
- * CLI behaviour the charter has not delivered yet, keyed by check, with the substring today's bin
- * prints and the work package that replaces it.
- */
-export const expectedCliGaps: Readonly<Record<string, { readonly owner: string; readonly output: string }>> = {
-  // `tau check` (exit 0 clean, 1 failed assertions, 2 unusable input) arrives with the CLI headless surface.
-  check: { owner: 'W17', output: 'Unknown command check' },
-  // Before preparation a `.py` model must refuse with exit 3 naming `tau prepare build123d`; the CLI does
-  // not register the build123d kernel yet, so the runtime finds no kernel for the extension.
-  'not-prepared': { owner: 'W5', output: 'No kernel handles ".py"' },
-};
-
-type CliVerdict = { readonly verdict: 'pass' | 'gap' } | { readonly verdict: 'fail'; readonly message: string };
-
-/**
- * Classify one CLI check: `pass` when `passed` holds, `gap` when the output carries the check's
- * recorded {@link expectedCliGaps} entry, otherwise a failure message.
- */
-export const classifyCliOutcome = (
-  check: string,
-  outcome: CliOutcome,
-  passed: (outcome: CliOutcome) => boolean,
-): CliVerdict => {
-  if (passed(outcome)) {
-    return { verdict: 'pass' };
-  }
-  const gap = expectedCliGaps[check];
-  if (gap !== undefined && outcome.output.includes(gap.output)) {
-    return { verdict: 'gap' };
-  }
-  return { verdict: 'fail', message: `tau ${check} exited ${String(outcome.status)}:\n${outcome.output.slice(-4000)}` };
 };
 
 /** The refusal a `.py` model gets before its kernel is prepared: exit 3, naming the command that prepares it. */
@@ -448,7 +414,7 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
     XDG_DATA_HOME: join(home, '.local/share'),
     /* eslint-enable @typescript-eslint/naming-convention -- End of the environment names. */
   };
-  const tau = (label: string, arguments_: readonly string[]): CliOutcome => {
+  const tau = (label: string, arguments_: readonly string[]): CliOutcome & { readonly stdout: string } => {
     const started = performance.now();
     const result = spawnSync(bin, arguments_, {
       cwd: project,
@@ -461,20 +427,19 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
     return {
       status: result.status ?? undefined,
       output: `${result.error?.message ?? ''}${result.stdout}${result.stderr}`,
+      stdout: result.stdout,
     };
   };
-  const gaps: string[] = [];
-  const settle = (check: string, outcome: CliOutcome, passed: (outcome: CliOutcome) => boolean): void => {
-    const result = classifyCliOutcome(check, outcome, passed);
-    if (result.verdict === 'fail') {
-      throw new Error(result.message);
+  /** The one JSON record a `--json` run printed, or a failure naming what it printed instead. */
+  const recordOf = (label: string, outcome: CliOutcome, stdout: string): Record<string, unknown> => {
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    if (lines.length !== 1) {
+      throw new Error(
+        `${label} printed ${String(lines.length)} stdout lines, not one record:\n${outcome.output.slice(-4000)}`,
+      );
     }
-    if (result.verdict === 'gap') {
-      gaps.push(`${check} (${expectedCliGaps[check]?.owner ?? 'unowned'})`);
-      console.log(`tau ${check}: expected gap: ${outcome.output.trim().split('\n').slice(-2).join(' | ')}`);
-    }
+    return JSON.parse(lines[0]!) as Record<string, unknown>;
   };
-
   writeFileSync(
     join(project, 'main.ts'),
     "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n",
@@ -490,7 +455,13 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
   }
   console.log(`tau export main.ts --ext=glb: ${String(bytes.byteLength)} bytes of glTF.`);
 
-  settle('check', tau('tau check main.ts', ['check', 'main.ts']), ({ status }) => status === 0);
+  const checked = tau('tau check main.ts --json', ['check', 'main.ts', '--json']);
+  const evaluation = recordOf('tau check main.ts', checked, checked.stdout);
+  if (checked.status !== 0 || evaluation['kind'] !== 'evaluation' || evaluation['status'] !== 'ok') {
+    throw new Error(
+      `tau check main.ts did not evaluate (exit ${String(checked.status)}):\n${checked.output.slice(-4000)}`,
+    );
+  }
 
   for (const [name, text] of Object.entries(geoSpecProjectFiles)) {
     writeFileSync(join(project, name), text);
@@ -506,6 +477,29 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
     throw new Error(geoSpecFailure);
   }
 
+  const tested = tau('tau test --json', ['test', '--json']);
+  const testRecord = recordOf('tau test', tested, tested.stdout);
+  if (tested.status !== 0 || testRecord['status'] !== 'passed' || testRecord['passed'] !== 1) {
+    throw new Error(
+      `tau test did not pass the one-requirement suite (exit ${String(tested.status)}):\n${tested.output.slice(-4000)}`,
+    );
+  }
+  console.log('tau test: the one-requirement GeoSpec suite passed.');
+
+  const served = tau('tau serve --smoke-test --json', [
+    'serve',
+    project,
+    '--smoke-test',
+    '--json',
+    '--port=0',
+    '--no-external-agents',
+  ]);
+  const serveRecord = recordOf('tau serve', served, served.stdout);
+  if (served.status !== 0 || serveRecord['kind'] !== 'serve' || serveRecord['relay'] !== null) {
+    throw new Error(`tau serve did not serve locally (exit ${String(served.status)}):\n${served.output.slice(-4000)}`);
+  }
+  console.log(`tau serve: served ${String(serveRecord['url'])} with no relay; the descriptor answered.`);
+
   checkStagedAcpAdapters(temporaryRoot, appRoot);
 
   writeFileSync(join(project, 'main.py'), 'from build123d import Box\n\nresult = Box(10, 20, 30)\n');
@@ -514,6 +508,17 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
   if (existsSync(pythonOutput)) {
     throw new Error('tau export main.py wrote a GLB with an empty config directory.');
   }
-  settle('not-prepared', python, isNotPreparedRefusal);
-  console.log(`CLI checks passed${gaps.length > 0 ? `; expected gaps: ${gaps.join(', ')}` : ''}.`);
+  if (!isNotPreparedRefusal(python)) {
+    throw new Error(`tau export main.py did not refuse naming tau prepare build123d:\n${python.output.slice(-4000)}`);
+  }
+  const pythonCheck = tau('tau check main.py --json', ['check', 'main.py', '--json']);
+  if (
+    !isNotPreparedRefusal(pythonCheck) ||
+    recordOf('tau check main.py', pythonCheck, pythonCheck.stdout)['status'] !== 'refused'
+  ) {
+    throw new Error(
+      `tau check main.py did not refuse naming tau prepare build123d:\n${pythonCheck.output.slice(-4000)}`,
+    );
+  }
+  console.log('CLI checks passed.');
 };

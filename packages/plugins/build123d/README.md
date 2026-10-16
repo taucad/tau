@@ -41,7 +41,7 @@ Hand the definition to a trusted Node host that supplies the resources described
 
 The package's `tau-plugin.json` declares a digest-pinned native engine closure for macOS arm64/x64 and Linux glibc arm64/x64. Prepare it through the host (`tau prepare build123d --verify` in the CLI), seal it with `sealBuild123dClosure`, and pass `build123dOptionsFromClosure(receipt)` under `kernels.default`. The host owns the separately revocable project trust grant.
 
-Hosts may also supply an equivalent packaged interpreter and wheel tree with a verified resource manifest. The worker ships `analyzer.py`, `glb.py`, `native_materials.py`, `mechanisms.py` and the public authoring module `tau_assembly.py`. Tau Desktop stages and seals bundled closures in `apps/desktop/scripts/runtime-stage.mts`, seeds its payload store and reads launch indexes in `apps/desktop/src/tau/native-store.ts`, and maps those closures to kernel options in `apps/desktop/src/tau/native-kernels.ts`. Windows packages ship no native kernel closure; native Build123D execution is unsupported there.
+Hosts may also supply an equivalent packaged interpreter and wheel tree with a verified resource manifest. The worker ships `analyzer.py`, `glb.py`, `native_materials.py`, `mechanisms.py` and the public authoring module `tau_assembly.py`. Tau Desktop stages and seals bundled closures in `apps/desktop/scripts/runtime-stage.mts`, seeds its payload store and reads launch indexes in `apps/desktop/src/tau/native-store.ts`, and maps those closures to kernel options in `apps/desktop/src/tau/native-kernels.ts`. Windows packages ship no registry-native kernel closure and the native sandbox does not support Windows. The separate Windows desktop Python preparation/test route remains in CI; it does not qualify registry closure or sandbox support.
 
 Do not point production at `python`, a virtual environment, or a user-writable worker. The kernel never searches `PATH`, installs packages, or downloads dependencies.
 
@@ -78,12 +78,17 @@ limits still apply. Workspace mirroring has no fixed byte, file-count or directo
 CPython plus the wheels the target's `pylock.<target>.toml` chose. The generator computes each floor
 as the highest of the interpreter's and the wheels' floors; on Linux that is OCP's `manylinux_2_28`.
 
-| Target              | Floor      | Checked in CI on   |
-| ------------------- | ---------- | ------------------ |
-| `darwin-arm64`      | macOS 12   | `macos-26`         |
-| `darwin-x64`        | macOS 11   | `macos-26-intel`   |
-| `linux-x64-glibc`   | glibc 2.28 | `ubuntu-24.04`     |
-| `linux-arm64-glibc` | glibc 2.28 | `ubuntu-24.04-arm` |
+| Target              | Floor      | Registry host qualification | Build123D qualification |
+| ------------------- | ---------- | --------------------------- | ----------------------- |
+| `darwin-arm64`      | macOS 12   | `macos-26`                  | `macos-15`              |
+| `darwin-x64`        | macOS 11   | `macos-26-intel`            | `macos-15-intel`        |
+| `linux-x64-glibc`   | glibc 2.28 | `ubuntu-24.04`              | `ubuntu-24.04`          |
+| `linux-arm64-glibc` | glibc 2.28 | `ubuntu-24.04-arm`          | `ubuntu-24.04-arm`      |
+
+The registry host column follows `.github/workflows/native-darwin.yml` and
+`native-hosts.yml`; the Build123D column follows `build123d-native.yml`. That separate
+Build123D workflow also runs `test-python-desktop` on `windows-latest`, without sealing
+or testing a registry closure or sandbox on Windows.
 
 `tau prepare build123d` refuses every other host before it downloads anything, with
 `blocked: unsupported-target` and the failing axis: `minimumLibcVersion` below glibc 2.28, `libc` on

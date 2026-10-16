@@ -1,5 +1,5 @@
 ---
-middleware: patch
+middleware: minor
 host: minor
 mcp: minor
 ---

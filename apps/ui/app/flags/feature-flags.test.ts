@@ -247,6 +247,7 @@ describe('zod schema fallback', () => {
     const flags = getAllFlags(storage);
     expect(Object.keys(flags)).toStrictEqual(Object.keys(featureFlagDefaults));
     expect(flags).not.toHaveProperty('marketingLanding');
+    expect(flags).not.toHaveProperty('planMode');
     expect(flags.tauDebug).toBe(true);
   });
 });

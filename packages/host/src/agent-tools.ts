@@ -112,7 +112,7 @@ export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | '
   > & {
     view: (
       id?: string,
-      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+      request?: Pick<WideViewRequest, 'instance' | 'options' | 'content'>,
     ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
   };
 };

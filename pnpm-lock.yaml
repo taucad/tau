@@ -930,6 +930,7 @@ patchedDependencies:
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@react-three/fiber@9.6.1': db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1
+  allotment@1.20.6: 248d4260e625ecc39d5b9bb7b8f5e0ab7c8f6c1f0cc219388323e8af629d2bda
   monaco-editor@0.55.1: ae3f7cdcf75e408318c6920587da738f750140c6f284c62ce7dbf6a1737896db
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   three@0.184.0: 81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993
@@ -1171,7 +1172,7 @@ importers:
         version: 6.0.304(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       allotment:
         specifier: ^1.20.5
-        version: 1.20.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 1.20.6(patch_hash=248d4260e625ecc39d5b9bb7b8f5e0ab7c8f6c1f0cc219388323e8af629d2bda)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       better-auth:
         specifier: 'catalog:'
         version: 1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(pg@8.23.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.11)
@@ -35299,7 +35300,7 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
-  allotment@1.20.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  allotment@1.20.6(patch_hash=248d4260e625ecc39d5b9bb7b8f5e0ab7c8f6c1f0cc219388323e8af629d2bda)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       classnames: 2.5.1
       eventemitter3: 5.0.4

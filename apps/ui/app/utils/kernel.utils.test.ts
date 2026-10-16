@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { opencascadeKernel } from '@taucad/opencascade';
 import { replicadKernel } from '@taucad/replicad';
 import { jscadKernel } from '@taucad/jscad';
 import { manifoldKernel } from '@taucad/manifold';
@@ -11,6 +12,7 @@ describe('getKernelDependencies', () => {
   it('should match every kernel without loading executable plugins into the renderer', () => {
     expect(kernelLibraries).toEqual({
       replicad: replicadKernel().builtinDependencies,
+      opencascadejs: opencascadeKernel().builtinDependencies,
       jscad: jscadKernel().builtinDependencies,
       manifold: manifoldKernel().builtinDependencies,
       picovoxel: picovoxelKernel().builtinDependencies,

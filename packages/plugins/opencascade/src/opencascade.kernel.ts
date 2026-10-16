@@ -585,6 +585,7 @@ export const opencascadeKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: opencascadeDetectPattern,
   builtinModuleNames: ['libcascade'],
+  builtinPackages: { libcascade: { name: 'libcascade', version: '3.1.0' } },
   name: 'OpenCascadeKernel',
   version: '1.1.0',
   optionsSchema: opencascadeOptionsSchema,

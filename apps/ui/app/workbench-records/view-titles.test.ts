@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
-import { viewTabTitle } from '#workbench-records/projection.js';
+import { viewTabTitle } from '#workbench-records/view-titles.js';
 
 describe('workbench view titles', () => {
   it('shows only the file name for views of an entry', () => {

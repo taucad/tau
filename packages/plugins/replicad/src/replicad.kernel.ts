@@ -485,7 +485,10 @@ export const replicadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
-  builtinPackages: { replicad: replicadPackage },
+  builtinPackages: {
+    replicad: replicadPackage,
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.0' },
+  },
   name: 'ReplicadKernel',
   version: '1.4.0',
   optionsSchema: replicadOptionsSchema,

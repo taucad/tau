@@ -199,7 +199,7 @@ export type RpcGraphicsExportModelResult =
  */
 export type RpcGraphicsClient = {
   exportModel(
-    args: Pick<ExportModelRpcInput, 'targetFile' | 'to' | 'options'>,
+    args: Pick<ExportModelRpcInput, 'targetFile' | 'to' | 'options' | 'parameters'>,
     context?: RpcInvocationContext,
   ): Promise<RpcGraphicsExportModelResult>;
 };

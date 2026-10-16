@@ -4,7 +4,12 @@ import { describe, it, expect } from 'vitest';
 import handleRequest from '#entry.server.js';
 import { canonicalProductionUrl } from '#lib/canonical-url.js';
 
-const entryContext = {} as unknown as EntryContext;
+const contextMatching = (...routeIds: string[]): EntryContext =>
+  ({
+    staticHandlerContext: { matches: routeIds.map((id) => ({ route: { id } })) },
+  }) as unknown as EntryContext;
+
+const entryContext = contextMatching('root', 'routes/_index');
 const loadContext = {} as unknown as AppLoadContext;
 
 describe('entry.server handleRequest', () => {
@@ -47,5 +52,27 @@ describe('entry.server handleRequest', () => {
     expect(responseHeaders.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
     expect(responseHeaders.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
     expect(responseHeaders.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+  });
+
+  it('answers an unknown path with 404 (catch-all route)', async () => {
+    const response = await handleRequest(
+      new Request('https://tau.example/no-such-page', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      contextMatching('root', 'routes/$'),
+      loadContext,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('keeps the status of a known path', async () => {
+    const response = await handleRequest(
+      new Request('https://tau.example/', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      entryContext,
+      loadContext,
+    );
+    expect(response.status).toBe(200);
   });
 });

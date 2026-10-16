@@ -20,17 +20,53 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
+import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
 
-import { buildCaptureExportOptions, canonicalCaptureViews } from '#capture/capture-views.js';
+import { projectParameterValues } from '#runtime/parameter-values.js';
+
+import {
+  buildCaptureExportOptions,
+  canonicalCaptureViews,
+  describeCaptureSection,
+  resolveCaptureSectionKeep,
+} from '#capture/capture-views.js';
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
 
 const captureSize = 1600;
+
+/**
+ * Run a capture, and when a section was requested, name what a cut needs in any failure: the
+ * renderer caps the cut, which it refuses on an open or degenerate mesh (some kernels' output).
+ */
+const withSectionGuidance = async <Result>(
+  section: ScreenshotSection | undefined,
+  capture: () => Promise<Result>,
+): Promise<Result> => {
+  if (section === undefined) {
+    return capture();
+  }
+  try {
+    return await capture();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `The ${section.plane} section at ${section.offsetMm} mm could not be rendered: ${reason}. A section caps the cut, which needs a closed mesh without degenerate triangles; capture without section to inspect the outside, or measure the interior with test_model.`,
+      { cause: error },
+    );
+  }
+};
+
+/** Per-call parameter values as the runtime's caller overrides; absent means the stored group alone. */
+const overrides = (
+  parameters: Readonly<Record<string, unknown>> | undefined,
+): Readonly<{ parameters?: Readonly<Record<string, unknown>> }> =>
+  parameters === undefined || Object.keys(parameters).length === 0 ? {} : { parameters };
 const glbMagic = 0x46_54_6c_67;
 const glbVersion = 2;
 
 /** Runtime surface required by request-scoped agent geometry operations. @public */
 export type RuntimeAgentClient = Pick<RuntimeClient, 'describe' | 'capabilities'> & {
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'watch' | 'signal'>) => Pick<
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'watch' | 'signal'>) => Pick<
     ReturnType<RuntimeClient['open']>,
     'evaluation' | 'export' | 'close'
   > & {
@@ -156,11 +192,15 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
         // again carries no new semantic evidence, so it is not re-validated per read.
         const { manifest } = current;
         context?.signal?.throwIfAborted();
+        const detail = request.detail ?? 'values';
         return {
           success: true,
           ...getParametersOutputSchema.parse({
             status: 'resolved',
-            manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
+            detail,
+            ...(detail === 'full'
+              ? { manifest: parameterManifestWireSchema.parse(structuredClone(manifest)) }
+              : { parameters: structuredClone(projectParameterValues(manifest, current.entry)) }),
             current: structuredClone({ entry: current.entry, identity: current.identity }),
             /* R4/I5: the manifest's own identity already names every source file it was compiled
              * from, so provenance is that identity lifted to the top level, not a second digest. */
@@ -322,7 +362,7 @@ export const createRuntimeAgentClients = (
     typeof input.runtime === 'function' ? input.runtime() : input.runtime;
 
   const kernelClient: RpcRuntimeClient = {
-    async evaluateModel({ targetFile, includeCapabilities }, context) {
+    async evaluateModel({ targetFile, includeCapabilities, parameters }, context) {
       const rooted = assertRootedPath(targetFile);
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
@@ -330,7 +370,12 @@ export const createRuntimeAgentClients = (
         context?.signal?.throwIfAborted();
         /* Every agent document is one request's snapshot, opened unwatched: a watched one is
          * superseded when the watch echo of an edit made just before the call lands mid-evaluation. */
-        document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
+        document = runtime.open({
+          source: { path: rooted },
+          ...overrides(parameters),
+          watch: false,
+          signal: context?.signal,
+        });
         const outcome = await document.evaluation({ signal: context?.signal });
         if (outcome.superseded) {
           throw new Error('Model evaluation was superseded');
@@ -404,13 +449,18 @@ export const createRuntimeAgentClients = (
   };
 
   const graphics: RpcGraphicsClient = {
-    async exportModel({ targetFile, to, options }, context): Promise<RpcGraphicsExportModelResult> {
+    async exportModel({ targetFile, to, options, parameters }, context): Promise<RpcGraphicsExportModelResult> {
       const rooted = assertRootedPath(targetFile);
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
+        document = runtime.open({
+          source: { path: rooted },
+          ...overrides(parameters),
+          watch: false,
+          signal: context?.signal,
+        });
         const result = await document.export(to, {
           ...(options === undefined ? {} : { options }),
           signal: context?.signal,
@@ -444,7 +494,12 @@ export const createRuntimeAgentClients = (
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: targetFile }, watch: false, signal: context?.signal });
+        document = runtime.open({
+          source: { path: targetFile },
+          ...overrides(captureInput.parameters),
+          watch: false,
+          signal: context?.signal,
+        });
         const evaluated = await document.evaluation({ signal: context?.signal });
         if (evaluated.superseded) {
           throw new Error('Model evaluation was superseded');
@@ -496,6 +551,13 @@ export const createRuntimeAgentClients = (
             view: rendering.view,
             ...(rendering.instance === undefined ? {} : { instance: rendering.instance }),
           };
+          if (artifact.mimeType === 'image/svg+xml' && captureInput.section !== undefined) {
+            return {
+              success: false,
+              errorCode: rpcClientErrorCode.validationError,
+              message: `section applies to 3D views only; view ${rendering.view} is a 2D drawing. Omit section for this view.`,
+            };
+          }
           if (artifact.mimeType === 'image/svg+xml') {
             const files = requireImageFiles(
               await input.exportImage({
@@ -526,24 +588,32 @@ export const createRuntimeAgentClients = (
             mode: captureInput.mode,
             size: captureSize,
             ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
+            ...(captureInput.section === undefined ? {} : { section: captureInput.section }),
           });
+          // The image service keys captures by identity, so a cut is part of it.
+          const sectionIdentity =
+            captureInput.section === undefined
+              ? ''
+              : `:section:${captureInput.section.plane}:${captureInput.section.offsetMm}:${resolveCaptureSectionKeep(captureInput.section)}`;
           const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
           const names =
             captureInput.mode === 'multi_angle'
               ? canonicalCaptureViews.map(({ id }) => `render-${id}.webp`)
               : ['render.webp'];
           const files = requireImageFiles(
-            await input.exportImage({
-              kind: 'capture',
-              identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}`,
-              sourceFormat: 'glb',
-              sourcePath: targetFile,
-              geometryHash: rendering.hash,
-              content: artifact.content,
-              format: 'webp',
-              signal: context?.signal,
-              exportOptions,
-            }),
+            await withSectionGuidance(captureInput.section, async () =>
+              input.exportImage({
+                kind: 'capture',
+                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}`,
+                sourceFormat: 'glb',
+                sourcePath: targetFile,
+                geometryHash: rendering.hash,
+                content: artifact.content,
+                format: 'webp',
+                signal: context?.signal,
+                exportOptions,
+              }),
+            ),
             { count, mimeType: 'image/webp', names },
           );
           context?.signal?.throwIfAborted();
@@ -555,6 +625,7 @@ export const createRuntimeAgentClients = (
                 ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
                 : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
             ...provenance,
+            ...(captureInput.section === undefined ? {} : { message: describeCaptureSection(captureInput.section) }),
           };
         } finally {
           view.close();

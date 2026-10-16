@@ -223,10 +223,11 @@ em {
     linear-gradient(var(--line-strong), var(--line-strong)) calc(100% - 5px) 0 / 1px 11px no-repeat,
     linear-gradient(var(--line-strong), var(--line-strong)) 100% 5px / 11px 1px no-repeat;
 }
-main > .band:first-child {
+/* The first band meets the header's rule; other children, such as structured data, may precede it. */
+main > .band:not(.band ~ .band) {
   border-top: 0;
 }
-main > .band:first-child::before {
+main > .band:not(.band ~ .band)::before {
   display: none;
 }
 .cell {

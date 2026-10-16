@@ -2,6 +2,7 @@ import type { ComponentProps, FunctionComponent, MouseEvent as ReactMouseEvent }
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { DockviewApi, DockviewReadyEvent, DockviewTheme, IDockviewHeaderActionsProps } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
+import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
@@ -432,6 +433,7 @@ export function Dockview({
       viewportSelector='.dv-tabs-container'
       onClick={handleTabClick}
     >
+      <DockviewStyles />
       <DockviewReact
         {...properties}
         className={className}

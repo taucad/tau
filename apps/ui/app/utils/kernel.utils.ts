@@ -32,6 +32,7 @@ export function getEmptyCode(kernelId: KernelProvider): string {
  */
 export const kernelsWithLibraries: ReadonlySet<KernelProvider> = new Set([
   'replicad',
+  'opencascadejs',
   'jscad',
   'manifold',
   'picovoxel',

@@ -1,6 +1,5 @@
 import type { LinkDescriptor } from 'react-router';
 import allotmentStylesUrl from 'allotment/dist/style.css?url';
-import dockviewStylesUrl from 'dockview-react/dist/styles/dockview.css?url';
 import globalStylesUrl from '#styles/global.css?url';
 
 /**
@@ -9,13 +8,20 @@ import globalStylesUrl from '#styles/global.css?url';
  * React writes `precedence` stylesheets into the head ahead of the module
  * preloads `<Scripts />` hoists for the route graph. A plain stylesheet link is
  * written after them, so on a slow link the render-blocking CSS queued behind
- * hundreds of preloaded chunks and delayed first paint. One shared precedence
- * keeps these sheets in declaration order, which the dockview overrides in
- * `global.css` depend on.
+ * hundreds of preloaded chunks and delayed first paint.
  */
 type StylesheetDescriptor = LinkDescriptor & { readonly precedence: string };
 
-const stylesheetPrecedence = 'default';
+/**
+ * Precedence of third-party sheets. React orders precedence groups by first
+ * appearance, and the root links name this group first, so a vendor sheet a
+ * route adds later (`DockviewStyles`) still lands ahead of `global.css`,
+ * whose overrides depend on that order.
+ */
+export const vendorStylesheetPrecedence = 'vendor';
+
+/** Precedence of the app's own sheet, after every vendor sheet. */
+const appStylesheetPrecedence = 'default';
 
 /*
  * Only the sans face is preloaded: it sets almost every first-paint glyph. The
@@ -36,17 +42,12 @@ const styleSheets: StylesheetDescriptor[] = [
   {
     rel: 'stylesheet',
     href: allotmentStylesUrl,
-    precedence: stylesheetPrecedence,
-  },
-  {
-    rel: 'stylesheet',
-    href: dockviewStylesUrl,
-    precedence: stylesheetPrecedence,
+    precedence: vendorStylesheetPrecedence,
   },
   {
     rel: 'stylesheet',
     href: globalStylesUrl,
-    precedence: stylesheetPrecedence,
+    precedence: appStylesheetPrecedence,
   },
 ];
 

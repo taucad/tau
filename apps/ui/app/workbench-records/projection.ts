@@ -24,16 +24,6 @@ export const graphicsSettingsForView = (record: WorkbenchView): GraphicsViewSett
   pinnedMeasurements: record.measurements.map((measurement) => ({ ...measurement })),
 });
 
-/** Camera name shown when a hand-written view did not supply one. */
-export const viewName = (record: WorkbenchView): string =>
-  record.name ??
-  (record.camera.kind === 'preset'
-    ? `${record.camera.preset[0]?.toUpperCase()}${record.camera.preset.slice(1)}`
-    : 'Look');
-
-export const viewTabTitle = (record: WorkbenchView): string =>
-  record.entryPath === null ? viewName(record) : (record.entryPath.split('/').at(-1) ?? record.entryPath);
-
 /** Preserve the active viewer's display choices when a person opens another view. */
 export const newViewRecord = (entryPath: string | null, settings?: GraphicsViewSettings): WorkbenchView =>
   workbenchRecords.view.schema.parse({

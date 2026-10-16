@@ -44,9 +44,23 @@ describe('TelemetryController', () => {
     controller = new TelemetryController(mockMetrics as unknown as MetricsService);
   });
 
+  const ingestSignedIn = (body: IngestPayloadDto): void => {
+    controller.ingest(body, 'user-1');
+  };
+
+  it('should accept a signed-out batch without recording it', () => {
+    controller.ingest(
+      { entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }] },
+      undefined,
+    );
+
+    expect(mockMetrics.kernelExecutionDuration.record).not.toHaveBeenCalled();
+    expect(mockMetrics.kernelExecutions.add).not.toHaveBeenCalled();
+  });
+
   describe('POST /v1/telemetry/ingest', () => {
     it('should record kernel execution duration and count for createGeometry entries', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }],
       });
 
@@ -57,7 +71,7 @@ describe('TelemetryController', () => {
     });
 
     it('should record export duration for exportGeometry entries', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
@@ -74,7 +88,7 @@ describe('TelemetryController', () => {
     });
 
     it('should default status to "unknown" when detail is missing', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 500 }],
       });
 
@@ -84,7 +98,7 @@ describe('TelemetryController', () => {
     });
 
     it('should default export format to "unknown" when not provided', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [{ name: IngestEntryName.KERNEL_EXPORT_GEOMETRY, duration: 300, detail: { status: 'ok' } }],
       });
 
@@ -95,7 +109,7 @@ describe('TelemetryController', () => {
     });
 
     it('should process multiple entries in a single batch', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1000, detail: { status: 'ok' } },
           {
@@ -113,7 +127,7 @@ describe('TelemetryController', () => {
     });
 
     it('should record a client sync attempt, its lag and its queue depth by placement, clamped', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.SYNC_ATTEMPT,
@@ -153,7 +167,7 @@ describe('TelemetryController', () => {
     const codex = { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_PLACEMENT]: 'daemon' };
 
     it('should record a completed Codex turn with tools and only the token types it reported', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.AGENT_TURN,
@@ -188,7 +202,7 @@ describe('TelemetryController', () => {
     });
 
     it('should count a refused turn as an error once and record no tokens', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.AGENT_TURN,
@@ -222,7 +236,7 @@ describe('TelemetryController', () => {
     });
 
     it('should record an agent outside the known set as other', () => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.AGENT_SESSION,
@@ -270,7 +284,7 @@ describe('TelemetryController', () => {
     const kernel = { ...tau, [AttributeKey.KERNEL_ID]: 'replicad' };
 
     const ingestTurn = (detail: Partial<AgentTurnDetail>): void => {
-      controller.ingest({
+      ingestSignedIn({
         entries: [
           {
             name: IngestEntryName.AGENT_TURN,

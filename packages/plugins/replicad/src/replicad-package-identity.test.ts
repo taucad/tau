@@ -27,7 +27,13 @@ describe('replicad package identity', () => {
     await definition.initialize(replicadOptionsSchema.parse({}), runtime);
 
     expect(installed.name).toBe('@taulabs/replicad');
-    expect(replicadKernel().builtinDependencies).toEqual({ replicad: spec });
+    const ocjs = JSON.parse(
+      await readFile(new URL('../node_modules/replicad-opencascadejs/package.json', import.meta.url), 'utf8'),
+    ) as { name: string; version: string };
+    expect(replicadKernel().builtinDependencies).toEqual({
+      replicad: spec,
+      'replicad-opencascadejs': `npm:${ocjs.name}@${ocjs.version}`,
+    });
     const [, replicadModule] = registerModule.mock.calls.find(([name]) => name === 'replicad')!;
     expect(replicadModule.package).toEqual({ name: 'replicad', spec });
     expect(replicadModule.version).toBe(installed.version);

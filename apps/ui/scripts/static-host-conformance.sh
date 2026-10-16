@@ -30,8 +30,8 @@
 #
 # Exit codes:
 #   0  Every resource carries every header and the right content type
-#   1  A header or content type is missing or wrong, or a resource did not answer 200
-#   2  Usage, or a resource kind could not be discovered
+#   1  A header or content type is missing or wrong, a resource did not answer 200, or a kind was not found
+#   2  Usage
 #   3  Missing dependency
 
 set -euo pipefail
@@ -121,20 +121,20 @@ if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]]; then
   done
 fi
 
-for kind in chunk wasm worker; do
-  variable="${kind}_path"
-  if [[ -z "${!variable}" ]]; then
-    echo "ERROR: no $kind found on $base; set $(tr '[:lower:]' '[:upper:]' <<<"$kind")_PATH" >&2
-    echo "  document $document_path: status $document_code, content-type '$(header "$work/document.headers" content-type)'" >&2
-    echo "  its script and link references:" >&2
-    grep -oE '(src|href)="[^"]+"' "$work/document" | sed -n '1,20s/^/    /p' >&2 || true
-    exit 2
-  fi
-done
+if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]]; then
+  echo "  document $document_path: status $document_code, content-type '$(header "$work/document.headers" content-type)'" >&2
+  echo "  its script and link references:" >&2
+  grep -oE '(src|href)="[^"]+"' "$work/document" | sed -n '1,20s/^/    /p' >&2 || true
+fi
 
 failures=0
 check() {
   local kind="$1" path="$2" code="$3" headers="$4" type_pattern="$5"
+  if [[ -z "$path" ]]; then
+    printf 'MISS %-8s not found on the host; set %s_PATH\n' "$kind" "$(tr '[:lower:]' '[:upper:]' <<<"$kind")"
+    failures=$((failures + 1))
+    return
+  fi
   local problems=()
   [[ "$code" == 200 ]] || problems+=("status $code")
   local coop coep corp nosniff type
@@ -158,9 +158,9 @@ check() {
 
 echo "Static host conformance for $base"
 check document "$document_path" "$document_code" "$work/document.headers" '^text/html(;|$)'
-check chunk "$chunk_path" "$(fetch "$chunk_path" "$work/chunk")" "$work/chunk.headers" '^(text|application)/javascript(;|$)'
-check wasm "$wasm_path" "$(fetch "$wasm_path" "$work/wasm")" "$work/wasm.headers" '^application/wasm(;|$)'
-check worker "$worker_path" "$(fetch "$worker_path" "$work/worker")" "$work/worker.headers" '^(text|application)/javascript(;|$)'
+check chunk "$chunk_path" "$([[ -z "$chunk_path" ]] || fetch "$chunk_path" "$work/chunk")" "$work/chunk.headers" '^(text|application)/javascript(;|$)'
+check wasm "$wasm_path" "$([[ -z "$wasm_path" ]] || fetch "$wasm_path" "$work/wasm")" "$work/wasm.headers" '^application/wasm(;|$)'
+check worker "$worker_path" "$([[ -z "$worker_path" ]] || fetch "$worker_path" "$work/worker")" "$work/worker.headers" '^(text|application)/javascript(;|$)'
 
 if [[ "$failures" -eq 0 ]]; then
   echo "conformant: 4 of 4 resources"

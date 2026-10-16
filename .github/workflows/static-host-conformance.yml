@@ -28,12 +28,13 @@ jobs:
     name: Static host conformance (${{ matrix.host }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # A row with `required: false` is recorded, not enforced: the apex `tau.new` is still served by the legacy Fly app
-    # without the isolation headers (go-live X-5), and the custom domains follow the Netlify cutover.
+    # A pull request is held to the host `main` deploys to (staging). A row with `required: false` is recorded, not
+    # enforced: production serves the last `ui@` release, which this change has not reached, and the apex `tau.new` is
+    # still the legacy Fly app without the isolation headers (go-live X-5).
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('[{{"host":"{0}","required":true}}]', inputs.url)) || fromJSON('[{"host":"https://taucad-prod-us.netlify.app","required":true},{"host":"https://taucad-staging.netlify.app","required":true},{"host":"https://tau.new","required":false},{"host":"https://taucad.dev","required":false}]') }}
+        include: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('[{{"host":"{0}","required":true}}]', inputs.url)) || fromJSON('[{"host":"https://taucad-prod-us.netlify.app","required":false},{"host":"https://taucad-staging.netlify.app","required":true},{"host":"https://tau.new","required":false},{"host":"https://taucad.dev","required":false}]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

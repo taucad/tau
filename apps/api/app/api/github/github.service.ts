@@ -921,7 +921,8 @@ export class GithubService {
         app: z.object({ client_id: z.literal(clientId) }),
         user: z.object({ id: githubId }),
         installation: z.object({
-          id: z.literal(access.installationId ?? -1),
+          // Scoped authorizations omit this field; the installation itself was verified above.
+          id: z.literal(access.installationId ?? -1).optional(),
           account: z.object({ id: z.literal(access.ownerId) }),
           repository_selection: z.literal('selected'),
           permissions: z.record(z.string(), z.string()),

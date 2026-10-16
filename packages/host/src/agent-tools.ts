@@ -32,6 +32,7 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { MachineTypeId } from '@taucad/types';
 import { MachineSettingsOwner } from '@taucad/runtime/host';
+import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
@@ -417,6 +418,29 @@ export type HostToolRegistryOptions = {
    * in their own process. Omit it and the tool is not offered, and an unprepared kernel's refusal names `tau prepare`.
    */
   readonly prepareKernel?: HostPrepareKernel | undefined;
+  /**
+   * The managed acquisition profile (D25) `install_packages` runs under. Under `locked` it refuses with a
+   * `registry-unavailable` issue, contacts no registry and writes nothing. Defaults to `TAU_ACQUISITION` in this
+   * process's environment, read fail-closed: a value other than unset, empty or `open` is `locked`.
+   */
+  readonly acquisition?: 'open' | 'locked' | undefined;
+};
+
+/**
+ * The acquisition profile a host reads from its environment. Only `TAU_ACQUISITION` is read, through the runtime's
+ * managed-profile reader; a value that reader refuses is `locked`, so a misspelt profile never opens the registry
+ * (ruling X43).
+ *
+ * @param environment - Usually `process.env`.
+ * @returns `open` or `locked`.
+ */
+const hostAcquisition = (environment: Readonly<Record<string, string | undefined>>): 'open' | 'locked' => {
+  try {
+    const variable = 'TAU_ACQUISITION';
+    return readManagedPreparation({ [variable]: environment[variable] }).profile;
+  } catch {
+    return 'locked';
+  }
 };
 
 /**
@@ -481,6 +505,7 @@ const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestJob, too
  * ```
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
+  const acquisition = options.acquisition ?? hostAcquisition(process.env);
   /* Each root's registry, with the project id its print tools name. */
   const rooted = new Map<string, Readonly<{ registry: ToolRegistry; projectId: string | undefined }>>();
   const settingsOwners = new Map<string, MachineSettingsOwner>();
@@ -698,6 +723,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       ...(machines === undefined ? {} : { machines }),
       skillResolver,
       testingEnabled: geospec !== undefined,
+      acquisition,
     });
     return { registry, settingsOwner };
   };

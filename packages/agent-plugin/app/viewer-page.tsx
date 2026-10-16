@@ -2,30 +2,26 @@
  * The Tau viewer page: one bundle, two compositions (blueprint D10, I7).
  *
  * Inline (a card in the conversation) draws the canvas and two actions; the
- * tab (Codex's thread tab, fullscreen on any host, the loopback page) adds the
- * bottom control bar. Everything the page shows comes through the host bridge.
+ * tab (Codex's thread tab, fullscreen on any host, the loopback page) is the
+ * Tau workbench: a file tab, the app's viewer bar over the canvas with the view
+ * cube top-right, and the workbench panes beside it (viewer parity R1).
+ * Everything the page shows comes through the host bridge.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useActorRef } from '@xstate/react';
-import { FlipHorizontal, Maximize2, MessageSquarePlus, PanelRight, Ruler } from 'lucide-react';
+import { useActorRef, useSelector } from '@xstate/react';
+import { FileCode2, Maximize2, MessageSquarePlus, PanelRight } from 'lucide-react';
 import type { TauViewerCamera, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
 import type { GeometryComponentReference } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
-import { Separator } from '@taucad/ui/components/separator';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
-import { FitViewControl } from '@taucad/viewer/cad/fit-view-control';
-import { GridSizeIndicator } from '@taucad/viewer/cad/grid-control';
-import { MeasureControl } from '@taucad/viewer/cad/measure-control';
-import { MeasurementList, MeasureOptions } from '@taucad/viewer/cad/measure-tool-row';
-import { SectionViewControl } from '@taucad/viewer/cad/section-view-control';
-import { SectionEditor, SectionOptions, SectionStatus } from '@taucad/viewer/cad/section-tool-row';
+import { ViewerControls } from '@taucad/viewer/cad/viewer-controls';
 import { ViewerEnvironmentProvider, defaultViewerEnvironment } from '@taucad/viewer/environment/viewer-environment';
 import type { ViewerEnvironment } from '@taucad/viewer/environment/viewer-environment';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
-import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
@@ -36,8 +32,14 @@ import { loadModel } from '#app/model-loader.js';
 import { chatReferenceOf } from '#app/chat-reference.js';
 import { captureLiveView, startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
 import type { LiveLink } from '#app/live-link.js';
-import { SidePanel } from '#app/side-panel.jsx';
-import type { ViewOptions } from '#app/side-panel.jsx';
+import { createModelComponentActionMenus } from '@taucad/workbench-panes/component-menu/component-action-menu';
+import {
+  createComponentReveal,
+  createPageComponentActions,
+  useViewerComponentMenu,
+} from '#app/sources/component-menu.jsx';
+import type { ComponentMenuPane } from '#app/sources/component-menu.jsx';
+import { WorkbenchLane } from '#app/workbench-lane.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -151,106 +153,48 @@ function useShownModel(
 /** The agent's request to select components of one model (`show_model` with `select`). */
 type SelectRequest = Readonly<{ modelSha: string; componentIds: readonly string[] }> | undefined;
 
-/** A running tool's row: its name, its options, then Done (the app's `ToolRow`, without the app's focus hand-off). */
-function ToolRow({
-  name,
-  icon,
-  above,
-  children,
-  onDone,
-}: Readonly<{
-  name: string;
-  icon: React.ReactNode;
-  above?: React.ReactNode;
-  children: React.ReactNode;
-  onDone: () => void;
-}>): React.JSX.Element {
+/** The canvas region the view cube draws in. */
+const canvasRegionId = 'tau-viewer-canvas';
+
+/** A short confirmation over the canvas. */
+function Notice({ text }: Readonly<{ text: string }>): React.JSX.Element {
   return (
-    <div role='group' aria-label={`${name} options`} className='flex max-w-full flex-col gap-1 border-b pb-1'>
-      {above}
-      <div className='flex min-h-7 items-center gap-1'>
-        <span className='flex shrink-0 items-center gap-1 px-1 text-xs font-medium'>
-          {icon}
-          <span>{name}</span>
-        </span>
-        <Separator orientation='vertical' className='mx-1 data-[orientation=vertical]:h-4' />
-        {children}
-        <Button variant='secondary' size='xs' className='h-7' onClick={onDone}>
-          Done
-        </Button>
-      </div>
-    </div>
+    <p role='status' className='pointer-events-auto rounded-md border bg-popover px-2 py-1 text-xs shadow-xs'>
+      {text}
+    </p>
   );
 }
 
-/** The tab composition's bottom bar: grid readout, Section, Measure and Fit, each running tool's row above them. */
-function ViewerBar({ actions }: Readonly<{ actions: React.ReactNode }>): React.JSX.Element {
-  const graphicsRef = useGraphics();
-  const is2d = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
-  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
-  const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
-  const measurementCount = useGraphicsSelector((state) => state.context.measurements.length);
-  const [measurementsExpanded, setMeasurementsExpanded] = useState(false);
-
+/** The shown file as the workbench's one editor tab: its name, then its path, and the selected component. */
+function FileTab({
+  model,
+  selected,
+}: Readonly<{ model: TauViewerModel; selected: GeometryComponentReference | undefined }>): React.JSX.Element {
+  const path = model.sourceFile ?? model.path;
   return (
-    <div className='pointer-events-auto flex max-w-full min-w-min flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs'>
-      {!is2d && isSectionViewActive ? (
-        <ToolRow
-          name='Section view'
-          icon={<FlipHorizontal className='size-4 text-viewer-tool-active' />}
-          above={
-            <>
-              <SectionEditor />
-              <SectionStatus />
-            </>
-          }
-          onDone={() => {
-            graphicsRef.send({ type: 'setSectionViewActive', payload: false });
-          }}
-        >
-          <SectionOptions />
-        </ToolRow>
-      ) : null}
-      {!is2d && isMeasureActive ? (
-        <ToolRow
-          name='Measuring'
-          icon={<Ruler className='size-4 -rotate-45 text-viewer-tool-active' />}
-          above={
-            measurementsExpanded && measurementCount > 0 ? (
-              <MeasurementList
-                onEmptied={() => {
-                  setMeasurementsExpanded(false);
-                }}
-              />
-            ) : null
-          }
-          onDone={() => {
-            setMeasurementsExpanded(false);
-            graphicsRef.send({ type: 'setMeasureActive', payload: false });
-          }}
-        >
-          <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
-        </ToolRow>
-      ) : null}
+    <div className='flex h-9 shrink-0 items-center border-b px-0.5'>
       <div
-        role='group'
-        aria-label='Viewer controls'
-        className='flex flex-wrap items-center justify-center gap-1 self-center text-muted-foreground [&_button]:font-normal [&_button:hover]:text-foreground [&_button[aria-pressed=true]]:text-foreground'
+        title={path}
+        className='mx-0.5 flex h-7 max-w-full min-w-28 items-center gap-1.5 rounded-sm bg-accent px-2 text-[13px] text-foreground'
       >
-        <GridSizeIndicator />
-        {is2d ? null : (
-          <>
-            <SectionViewControl />
-            <MeasureControl />
-          </>
-        )}
-        <FitViewControl />
-        <Separator orientation='vertical' className='first:hidden data-[orientation=vertical]:h-4' />
-        {actions}
+        <FileCode2 aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+        <span className='truncate'>{basenameOf(path)}</span>
       </div>
+      {/* The folder only when the file is not at the project root, so the name shows once. */}
+      <p className='ml-2 min-w-0 truncate text-xs text-muted-foreground'>
+        {path === basenameOf(path) ? null : path}
+        {selected === undefined ? null : (
+          <span>
+            {path === basenameOf(path) ? '' : ' · '}
+            {selected.label}
+          </span>
+        )}
+      </p>
     </div>
   );
 }
+
+const basenameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
 /** What the canvas shows besides the model: progress, a failure, or the wait for a first model. */
 function StatusLine({ state }: Readonly<{ state: PageState }>): React.ReactNode {
@@ -310,14 +254,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   );
   const shown = state.kind === 'ready' ? state.current : previousOf(state);
   const isInline = view.composition === 'inline';
-  /* The tab opens with its panels beside a wide canvas; a narrow one keeps the canvas whole until asked. */
+  /* The tab opens with its panes beside a wide canvas; a narrow one keeps the canvas whole until asked. */
   const [isPanelOpen, setIsPanelOpen] = useState(() => globalThis.innerWidth >= 720);
-  const [viewOptions, setViewOptions] = useState<ViewOptions>({
-    enableGrid: true,
-    enableAxes: true,
-    enableLines: true,
-    enableSurfaces: true,
-  });
+  /* What the canvas draws follows the graphics actor, so Viewer settings and the panes change it as in the app. */
+  const enableGrid = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGrid);
+  const enableAxes = useSelector(graphicsRef, (snapshot) => snapshot.context.enableAxes);
+  const enableLines = useSelector(graphicsRef, (snapshot) => snapshot.context.enableLines);
+  const enableSurfaces = useSelector(graphicsRef, (snapshot) => snapshot.context.enableSurfaces);
+  const enableMatcap = useSelector(graphicsRef, (snapshot) => snapshot.context.enableMatcap);
+  const enableGizmo = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGizmo);
 
   useEffect(() => {
     setSelected(undefined);
@@ -403,7 +348,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         if (!(await whenDrawn(isDrawn))) {
           return { error: 'The viewer has not drawn a model yet.' };
         }
-        return rootRef.current === null ? { error: 'The viewer is not on screen.' } : captureLiveView(rootRef.current);
+        /* The canvas region alone: a pane may draw canvases of its own. */
+        const region = rootRef.current?.querySelector(`#${canvasRegionId}`) ?? rootRef.current;
+        return region === null ? { error: 'The viewer is not on screen.' } : captureLiveView(region);
       },
     });
     linkRef.current = link;
@@ -504,6 +451,43 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     void add();
   }, [bridge, shown, selected]);
 
+  /* The app's part menu (viewer parity V13): right-click a part on the canvas, or a row's menu in the Model pane. */
+  const reveal = useMemo(() => createComponentReveal(), []);
+  const [openPaneRequest, setOpenPaneRequest] = useState<
+    Readonly<{ pane: ComponentMenuPane; requestId: number }> | undefined
+  >(undefined);
+  const openPane = useCallback((pane: ComponentMenuPane) => {
+    setIsPanelOpen(true);
+    setOpenPaneRequest((request) => ({ pane, requestId: (request?.requestId ?? 0) + 1 }));
+  }, []);
+  const addPartToChat = useCallback(
+    (reference: GeometryComponentReference) => {
+      const model = latest.current.shown?.model;
+      if (model === undefined) {
+        return;
+      }
+      // async-iife: bootstrap — a menu click starts it; the notice reports its outcome.
+      void (async () => {
+        try {
+          setNotice(chatNotice[await bridge.addToChat(chatReferenceOf(model, reference))]);
+        } catch {
+          setNotice('Could not add to chat');
+        }
+      })();
+    },
+    [bridge],
+  );
+  const componentActions = useMemo(
+    () => createPageComponentActions({ addToChat: addPartToChat, openPane, reveal }),
+    [addPartToChat, openPane, reveal],
+  );
+  const rowMenus = useMemo(() => createModelComponentActionMenus(componentActions), [componentActions]);
+  const componentMenu = useViewerComponentMenu({ graphicsRef, actions: componentActions });
+  const closeComponentMenu = componentMenu.close;
+  useEffect(() => {
+    closeComponentMenu();
+  }, [shown?.model.sha256, closeComponentMenu]);
+
   useEffect(() => {
     if (notice === undefined) {
       return;
@@ -535,12 +519,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           variant='ghost'
           size='xs'
           aria-pressed={isPanelOpen}
+          aria-label={isPanelOpen ? 'Hide panes' : 'Show panes'}
           onClick={() => {
             setIsPanelOpen((open) => !open);
           }}
         >
           <PanelRight className='size-4' />
-          Panels
+          <span className='hidden @min-[520px]/viewer:inline'>Panes</span>
         </Button>
       )}
       {isInline && view.canRequestFullscreen ? (
@@ -578,8 +563,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 paddingLeft: view.safeArea.left,
               }}
             >
+              {isInline || shown === undefined ? null : <FileTab model={shown.model} selected={selected} />}
               <div className='flex min-h-0 flex-1'>
-                <div className='relative min-w-0 flex-1'>
+                <div
+                  id={canvasRegionId}
+                  className='@container/viewer relative min-w-0 flex-1 overflow-hidden'
+                  {...(isInline ? {} : componentMenu.regionProps)}
+                >
                   {shown === undefined && state.kind !== 'loading' ? (
                     <div className='flex size-full items-center justify-center p-4 text-center'>
                       {state.kind === 'failed' ? (
@@ -593,19 +583,29 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                       graphicsRef={graphicsRef}
                       artifact={shown?.artifact}
                       artifactHash={shown?.model.sha256}
-                      sourceFile={shown?.model.sourceFile}
+                      /* The unit the panes name: the source, or the GLB itself when it has none. */
+                      sourceFile={shown?.model.sourceFile ?? shown?.model.path}
                       enablePan={!isInline}
                       enableZoom={!isInline}
                       graphicsOptions={{
-                        ...viewOptions,
+                        enableGrid,
+                        enableAxes,
+                        enableLines,
+                        enableSurfaces,
+                        enableMatcap,
                         /* The view cube belongs to the tab; a card shows the canvas and two actions (E2). */
-                        enableGizmo: !isInline,
+                        enableGizmo: !isInline && enableGizmo,
                       }}
+                      /* Top-right of the canvas, as in the workbench (viewer parity V5). */
+                      gizmoContainer={isInline ? undefined : `#${canvasRegionId}`}
                       onComponentReference={setSelected}
+                      onComponentSecondaryPointerCandidate={
+                        isInline ? undefined : componentMenu.onComponentSecondaryPointerCandidate
+                      }
                     />
                   )}
                   <div className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-1 p-2'>
-                    {shown === undefined ? null : (
+                    {shown === undefined || !isInline ? null : (
                       <p className='rounded-md bg-background/80 px-2 py-1 text-xs font-medium'>
                         {shown.model.title}
                         {selected === undefined ? null : (
@@ -615,34 +615,40 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     )}
                     {shown === undefined ? null : <StatusLine state={state} />}
                   </div>
-                  {notice === undefined ? null : (
-                    <p
-                      role='status'
-                      className='absolute right-2 bottom-2 rounded-md border bg-popover px-2 py-1 text-xs shadow-xs'
-                    >
-                      {notice}
-                    </p>
+                  {/* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */}
+                  {isInline ? null : (
+                    <div className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'>
+                      {notice === undefined ? null : <Notice text={notice} />}
+                      <ViewerControls actions={actions} />
+                    </div>
                   )}
+                  {isInline && notice !== undefined ? (
+                    <div className='absolute right-2 bottom-2'>
+                      <Notice text={notice} />
+                    </div>
+                  ) : null}
                 </div>
                 {isInline || !isPanelOpen ? null : (
-                  <SidePanel
+                  <WorkbenchLane
                     bridge={bridge}
                     model={shown?.model}
-                    selected={selected}
-                    viewOptions={viewOptions}
-                    onViewOptionsChange={setViewOptions}
+                    graphicsRef={graphicsRef}
+                    onSelect={setSelected}
                     onParametersWritten={showAgain}
+                    onHide={() => {
+                      setIsPanelOpen(false);
+                    }}
+                    reveal={reveal}
+                    componentActions={rowMenus}
+                    openPaneRequest={openPaneRequest}
                   />
                 )}
               </div>
               {isInline ? (
                 <div className='flex items-center justify-end gap-1 border-t px-2 py-1'>{actions}</div>
-              ) : (
-                <div className='flex justify-center p-2'>
-                  <ViewerBar actions={actions} />
-                </div>
-              )}
+              ) : null}
             </main>
+            {isInline ? null : componentMenu.menu}
           </GraphicsProvider>
         </TooltipProvider>
       </KeyboardProvider>

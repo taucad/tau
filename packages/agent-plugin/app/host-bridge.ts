@@ -7,13 +7,7 @@
  * Everything above this module sees one bridge either way (blueprint I7: one
  * bundle, one composition).
  */
-import {
-  App,
-  PostMessageTransport,
-  applyDocumentTheme,
-  applyHostFonts,
-  applyHostStyleVariables,
-} from '@modelcontextprotocol/ext-apps';
+import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import type { McpUiHostCapabilities, McpUiHostContext } from '@modelcontextprotocol/ext-apps';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
@@ -90,26 +84,10 @@ const applyTheme = (theme: 'light' | 'dark'): void => {
 };
 
 /**
- * Structural Tau tokens and the MCP Apps host variables that replace them.
- * Accents keep the Tau hue (E6: the brand only on accents).
+ * The Tau tokens the host's variables replace: only the page background, so the page sits in the conversation
+ * seamlessly. Everything else keeps the Tau workbench's own tokens and Geist (viewer parity ruling R2).
  */
-const hostTokenMap: ReadonlyArray<readonly [string, string]> = [
-  ['--background', '--color-background-primary'],
-  ['--card', '--color-background-primary'],
-  ['--popover', '--color-background-primary'],
-  ['--sidebar-background', '--color-background-secondary'],
-  ['--muted', '--color-background-secondary'],
-  ['--secondary', '--color-background-secondary'],
-  ['--foreground', '--color-text-primary'],
-  ['--card-foreground', '--color-text-primary'],
-  ['--popover-foreground', '--color-text-primary'],
-  ['--sidebar-foreground', '--color-text-primary'],
-  ['--secondary-foreground', '--color-text-primary'],
-  ['--muted-foreground', '--color-text-secondary'],
-  ['--border', '--color-border-primary'],
-  ['--input', '--color-border-primary'],
-  ['--ring', '--color-ring-primary'],
-];
+const hostTokenMap: ReadonlyArray<readonly [string, string]> = [['--background', '--color-background-primary']];
 
 const isShowResult = (value: unknown): value is TauViewerShowResult =>
   typeof value === 'object' && value !== null && 'model' in value && typeof value.model === 'object';
@@ -211,8 +189,8 @@ const connectMcpApp = async (): Promise<HostBridge> => {
     };
   };
 
-  /* Colour and font come from the host (E6, G10): its variables land on the
-   * document root, and the structural Tau tokens point at them. */
+  /* The host sets light or dark and the background (R2): its variables land on the document root, and the page
+   * background points at the host's. */
   const applyContext = (context: McpUiHostContext | undefined): void => {
     if (context?.theme !== undefined) {
       applyTheme(context.theme);
@@ -227,9 +205,6 @@ const connectMcpApp = async (): Promise<HostBridge> => {
           document.documentElement.style.setProperty(token, `var(${hostVariable})`);
         }
       }
-    }
-    if (context?.styles?.css?.fonts !== undefined) {
-      applyHostFonts(context.styles.css.fonts);
     }
   };
 
@@ -333,7 +308,12 @@ const connectLoopback = (): HostBridge => {
   const callTool = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
     const response = await fetch('/api/tools/call', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-tau-viewer-token': token },
+      /* The linked model names the project the panes' tools run in. */
+      headers: {
+        'content-type': 'application/json',
+        'x-tau-viewer-token': token,
+        ...(modelId === null ? {} : { 'x-tau-viewer-model': modelId }),
+      },
       body: JSON.stringify({ name, arguments: args }),
     });
     const body: unknown = await response.json();

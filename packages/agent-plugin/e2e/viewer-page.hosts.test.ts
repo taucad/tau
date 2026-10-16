@@ -251,7 +251,9 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
   await page.exposeFunction('tauCallTool', async (name: string, args: Record<string, unknown>) =>
     callTool(client, name, args),
   );
-  await page.setContent(`<!doctype html><html><body style="margin:0"><script>${hostScript}</script></body></html>`);
+  await page.setContent(
+    `<!doctype html><html><body style="margin:0"><script type="module">${hostScript}</script></body></html>`,
+  );
   const content = contents[0];
   if (content === undefined || !('text' in content)) {
     throw new Error('The viewer resource has no text.');
@@ -341,10 +343,12 @@ beforeAll(async () => {
     logLevel: 'silent',
     build: {
       write: false,
-      lib: { entry: join(here, 'basic-host/host.ts'), formats: ['iife'], name: 'tauBasicHost' },
+      /* An ES module: Rolldown's IIFE output hoists zod's lazy locale init out of scope (`init_locales is not
+       * defined`), so the harness ran no code and every test failed before mounting. */
+      lib: { entry: join(here, 'basic-host/host.ts'), formats: ['es'], name: 'tauBasicHost' },
     },
   });
-  /* One library build without a watcher: one output whose first file is the IIFE. */
+  /* One library build without a watcher: one output whose first file is the module. */
   const [first] = [output].flat() as Array<{ output?: ReadonlyArray<{ code?: unknown }> }>;
   const code = first?.output?.[0]?.code;
   if (typeof code !== 'string') {
@@ -514,17 +518,17 @@ describe("the tab's panels (W10)", () => {
   });
 
   it(
-    "should list the structure, write a parameter edit Tau reads, and keep the page's view in the project",
+    "should open the workbench panes, write a parameter edit Tau reads, and keep the page's view in the project",
     async () => {
       const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
       const page = await mountInHarness(client, first, { displayMode: 'fullscreen' });
       const frame = viewerFrame(page);
       await drawn(frame, 'Add to chat');
-      const panels = frame.getByRole('complementary', { name: 'Model panels' });
+      const panels = frame.getByRole('complementary', { name: 'Workbench' });
       await panels.waitFor();
       const before = (first.structuredContent as { model: { id: string } }).model.id;
 
-      const width = panels.getByRole('spinbutton', { name: 'Input for Width' });
+      const width = panels.getByRole('tabpanel', { name: 'Parameters' }).getByRole('spinbutton', { name: /Width/u });
       await width.waitFor({ timeout: 60_000 });
       await width.fill('30');
       await width.press('Enter');
@@ -544,9 +548,26 @@ describe("the tab's panels (W10)", () => {
         )
         .not.toBe(before);
 
+      /* Right-clicking a part opens the app's part menu (viewer parity V13). */
+      const canvas = frame.locator(`#tau-viewer-canvas canvas`).first();
+      const box = await canvas.boundingBox();
+      if (box === null) {
+        throw new Error('The canvas has no box.');
+      }
+      await frame.locator('#tau-viewer-canvas').click({
+        button: 'right',
+        position: { x: box.width / 2, y: box.height / 2 },
+      });
+      const partMenu = frame.getByRole('menu');
+      await partMenu.waitFor({ timeout: 30_000 });
+      expect(await partMenu.getByRole('menuitem', { name: /Isolate/u }).count()).toBe(1);
+      await capture(page, 'part-menu');
+      await page.keyboard.press('Escape');
+
       /* The person hides a component; Tau opens the project with the page's camera and that display (Q14). */
+      await panels.getByRole('tab', { name: 'Model' }).click();
       await panels
-        .getByRole('list', { name: 'Components' })
+        .getByRole('tabpanel', { name: 'Model' })
         .getByRole('button', { name: /^Hide / })
         .first()
         .click();
@@ -741,7 +762,8 @@ describe('the viewer page from a text host', () => {
       await page.goto(viewerUrl ?? '');
 
       await drawn(page, 'Copy prompt');
-      expect(await page.getByText('main', { exact: true }).count()).toBe(1);
+      /* The workbench's file tab names the source the link shows. */
+      expect(await page.getByTitle('main.ts', { exact: true }).count()).toBe(1);
       await page.getByRole('group', { name: 'Viewer controls' }).waitFor();
       await capture(page, 'loopback');
       await page.close();

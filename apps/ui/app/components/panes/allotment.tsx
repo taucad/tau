@@ -3,8 +3,8 @@ import type { ComponentProps } from 'react';
 import { Allotment as NativeAllotment } from 'allotment';
 import type { AllotmentHandle } from 'allotment';
 import { cn } from '@taucad/ui/utils/cn';
-import { adjacentResizeViews, resizePairBounds } from '#components/panes/resize-handle.js';
-import { useResizeHandles } from '#components/panes/use-resize-handles.js';
+import { adjacentResizeViews, resizePairBounds } from '@taucad/workbench-panes/paneview/resize-handle';
+import { useResizeHandles } from '@taucad/workbench-panes/paneview/use-resize-handles';
 import { Spinner } from '#components/ui/spinner.js';
 
 type PaneProps = ComponentProps<typeof NativeAllotment.Pane>;

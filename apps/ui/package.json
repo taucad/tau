@@ -75,6 +75,7 @@
     "@taucad/viewer": "workspace:*",
     "@taucad/warehouse": "workspace:*",
     "@taucad/workbench": "workspace:*",
+    "@taucad/workbench-panes": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "better-auth": "catalog:",

@@ -111,17 +111,34 @@ export type ModelViewerProps = {
   readonly sourceFile?: string;
   /** Called with the structured reference of a component the person secondary-clicks (right-click or long press). */
   readonly onComponentReference?: (reference: GeometryComponentReference) => void;
+  /**
+   * Called on every right press on the model with the part under it, or `undefined` when it missed every part. The
+   * press precedes its release, so a host that opens a part menu decides on release whether the press was a click or
+   * a camera pan (the Tau app's viewer secondary gesture).
+   */
+  readonly onComponentSecondaryPointerCandidate?: (target: ModelComponentSecondaryPointerTarget | undefined) => void;
+  /**
+   * The element (or its selector) the view cube draws in. With one, the cube sits in that element's top-right corner,
+   * as in the Tau workbench; without one it sits in the canvas's bottom-right corner.
+   */
+  readonly gizmoContainer?: HTMLElement | string;
 };
 
 type ReferencingCadViewerProps = React.ComponentProps<typeof CadViewer> & {
   readonly onComponentReference?: (reference: GeometryComponentReference) => void;
+  readonly onComponentSecondaryPointerCandidate?: (target: ModelComponentSecondaryPointerTarget | undefined) => void;
 };
 
 /** The CAD viewer, turning a secondary click on a component into that component's structured reference. */
-function ReferencingCadViewer({ onComponentReference, ...properties }: ReferencingCadViewerProps): React.JSX.Element {
+function ReferencingCadViewer({
+  onComponentReference,
+  onComponentSecondaryPointerCandidate,
+  ...properties
+}: ReferencingCadViewerProps): React.JSX.Element {
   const modelInteractionRef = useModelInteractionRef();
   const handleSecondaryPointerCandidate = useCallback(
     (target: ModelComponentSecondaryPointerTarget | undefined) => {
+      onComponentSecondaryPointerCandidate?.(target);
       if (!target || !onComponentReference) {
         return;
       }
@@ -132,13 +149,17 @@ function ReferencingCadViewer({ onComponentReference, ...properties }: Referenci
         onComponentReference(reference);
       }
     },
-    [modelInteractionRef, onComponentReference],
+    [modelInteractionRef, onComponentReference, onComponentSecondaryPointerCandidate],
   );
 
   return (
     <CadViewer
       {...properties}
-      onModelComponentSecondaryPointerCandidate={onComponentReference ? handleSecondaryPointerCandidate : undefined}
+      onModelComponentSecondaryPointerCandidate={
+        onComponentReference === undefined && onComponentSecondaryPointerCandidate === undefined
+          ? undefined
+          : handleSecondaryPointerCandidate
+      }
     />
   );
 }
@@ -165,6 +186,8 @@ const ModelViewerCore = memo(function ModelViewerCore({
   error,
   sourceFile,
   onComponentReference,
+  onComponentSecondaryPointerCandidate,
+  gizmoContainer,
 }: ModelViewerCoreProps): React.JSX.Element {
   const effectiveState: ModelViewerState = viewerState ?? (artifact ? 'ready' : 'loading');
   const knownArtifact = useMemo(() => (artifact ? asKnownArtifact(artifact) : undefined), [artifact]);
@@ -236,6 +259,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
             artifactHash={artifactHash}
             sourceFile={sourceFile}
             onComponentReference={onComponentReference}
+            onComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
             enablePan={enablePan}
             enableZoom={enableZoom}
             enableGrid={graphicsOptions?.enableGrid}
@@ -244,6 +268,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
             enableSurfaces={graphicsOptions?.enableSurfaces}
             enableMatcap={graphicsOptions?.enableMatcap}
             enableGizmo={graphicsOptions?.enableGizmo}
+            gizmoContainer={gizmoContainer}
             className={graphicsOptions?.viewerClassName}
             stageOptions={stageOptions}
           />

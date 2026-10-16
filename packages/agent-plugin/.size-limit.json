@@ -1,13 +1,13 @@
 [
   {
-    "name": "total (ESM JS) \u2014 measured 1.11 kB brotli on 2026-10-10",
+    "name": "total (ESM JS) — measured 1.11 kB brotli on 2026-10-10",
     "path": "dist/**/*.mjs",
     "limit": "2 kB"
   },
   {
-    "name": "viewer page (single file) \u2014 measured 1.53 MB gzip on 2026-10-11 (the side panel adds the parameters form and model tree)",
+    "name": "viewer page (single file) — measured 1.89 MB gzip on 2026-10-16 (the shared workbench panes and part menu; provisional, to be re-baselined when the page is trimmed)",
     "path": "dist-app/app.html",
     "gzip": true,
-    "limit": "1.6 MB"
+    "limit": "2 MB"
   }
 ]

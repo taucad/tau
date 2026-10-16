@@ -53,7 +53,7 @@ import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { listGeometryEntryPaths } from '@taucad/workbench-panes/units/geometry-units';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import {

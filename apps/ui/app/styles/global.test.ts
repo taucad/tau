@@ -4,6 +4,7 @@ import { converter, parse, wcagContrast } from 'culori';
 import { describe, expect, it } from 'vitest';
 
 const tokenStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/tokens.css'), 'utf8');
+const baseStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/base.css'), 'utf8');
 const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
 const appStyleLinks = readFileSync(join(process.cwd(), 'app/styles/global.styles.ts'), 'utf8');
 const scrollShadowStyles = readFileSync(join(process.cwd(), 'app/styles/scroll-shadows.css'), 'utf8');
@@ -479,12 +480,13 @@ describe('scroll fades', () => {
 
 describe('focus outline fallback', () => {
   it('delegates focus geometry to the shared utility', () => {
-    const fallback = appStyles.slice(
-      appStyles.indexOf(':where(a, button, input, select, textarea, summary, [tabindex]):focus-visible'),
+    const fallback = baseStyles.slice(
+      baseStyles.indexOf(':where(a, button, input, select, textarea, summary, [tabindex]):focus-visible'),
     );
 
+    expect(appStyles).toContain("@import '@taucad/ui/styles/base.css';");
     expect(fallback.slice(0, fallback.indexOf('}'))).toContain('@apply focus-outline;');
-    expect(appStyles).not.toContain('focus-visible:outline-primary');
+    expect(`${baseStyles}\n${appStyles}`).not.toContain('focus-visible:outline-primary');
   });
 
   it('routes every app focus indicator through the utility', () => {

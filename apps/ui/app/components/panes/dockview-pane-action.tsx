@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 
 type DockviewPaneActionProperties = {
   readonly className?: string;

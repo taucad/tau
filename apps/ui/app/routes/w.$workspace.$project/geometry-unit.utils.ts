@@ -1,57 +1,39 @@
-/**
- * Sort geometry unit entries so that the main entry path appears first,
- * with remaining entries sorted alphabetically.
+/*
+ * The project's geometry entry helpers, now owned by `@taucad/workbench-panes`. They stay at this path for the chat
+ * composer, whose submit path the message queue model fences by source hash.
  */
-export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntryPath: string): Array<[string, T]> =>
-  [...entries].sort(([a], [b]) => {
-    if (a === mainEntryPath) {
-      return -1;
-    }
-    if (b === mainEntryPath) {
-      return 1;
-    }
-    return a.localeCompare(b);
-  });
+import {
+  findEntryGraphics as findSharedEntryGraphics,
+  listGeometryEntryPaths as listSharedGeometryEntryPaths,
+} from '@taucad/workbench-panes/units/geometry-units';
 
-// oxlint-disable-next-line typescript/no-restricted-types -- Workbench records use null for no selected entry.
-type GeometryEntryView = { readonly entryPath?: string | null };
+type SharedListArguments = Parameters<typeof listSharedGeometryEntryPaths>;
 
-/** Restored viewer paths remain discoverable before their CAD units are admitted. */
+/**
+ * Every geometry entry the project shows, main first.
+ *
+ * @param units - The admitted geometry units by entry path.
+ * @param views - The views and the entries they show.
+ * @param mainEntryPath - The project's main entry.
+ * @returns The entry paths.
+ */
 export const listGeometryEntryPaths = (
-  units: ReadonlyMap<string, unknown>,
-  views: ReadonlyMap<string, GeometryEntryView> | Readonly<Record<string, GeometryEntryView>>,
+  units: SharedListArguments[0],
+  views: SharedListArguments[1],
   mainEntryPath: string,
-): string[] => {
-  const paths = new Set(units.keys());
-  if (mainEntryPath) {
-    paths.add(mainEntryPath);
-  }
-  const records: Iterable<GeometryEntryView> =
-    views instanceof Map
-      ? (views as ReadonlyMap<string, GeometryEntryView>).values()
-      : Object.values(views as Readonly<Record<string, GeometryEntryView>>);
-  for (const view of records) {
-    if (view.entryPath) {
-      paths.add(view.entryPath);
-    }
-  }
-  return sortGeometryUnitEntries(
-    [...paths].map((path): [string, string] => [path, path]),
-    mainEntryPath,
-  ).map(([path]) => path);
-};
+): string[] => listSharedGeometryEntryPaths(units, views, mainEntryPath);
 
-/** Resolve the displayed entry from live panel bindings, independent of editor persistence. */
+/**
+ * The graphics of the view showing an entry.
+ *
+ * @param graphics - The views' graphics by view id.
+ * @param entryPaths - The entry each view shows.
+ * @param entryPath - The entry to find.
+ * @returns The graphics, or `undefined` when no view shows the entry.
+ */
 export const findEntryGraphics = <T>(
   graphics: ReadonlyMap<string, T>,
   // oxlint-disable-next-line typescript/no-restricted-types -- A live empty viewer has a null entry.
   entryPaths: ReadonlyMap<string, string | null>,
   entryPath: string,
-): T | undefined => {
-  for (const [viewId, actor] of graphics) {
-    if (entryPaths.get(viewId) === entryPath) {
-      return actor;
-    }
-  }
-  return undefined;
-};
+): T | undefined => findSharedEntryGraphics(graphics, entryPaths, entryPath);

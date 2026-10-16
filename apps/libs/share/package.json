@@ -45,6 +45,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/project-core": "workspace:*",
     "@taucad/types": "workspace:*",
     "jose": "^6.2.3",
     "jszip": "^3.10.1"

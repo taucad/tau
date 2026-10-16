@@ -3,7 +3,8 @@ import type { FunctionComponent } from 'react';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DockviewApi, DockviewReadyEvent, IDockviewHeaderActionsProps } from 'dockview-react';
-import { Dockview, dockviewStyleOverrides, scrollActiveTabIntoView } from '#components/panes/dockview.js';
+import { dockviewStyleOverrides } from '@taucad/workbench-panes/paneview/dockview-theme';
+import { Dockview, scrollActiveTabIntoView } from '#components/panes/dockview.js';
 
 vi.mock('dockview-react', async () => {
   const { createElement, useState } = await import('react');

@@ -5,8 +5,9 @@
 
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
+@import '@taucad/ui/styles/base.css';
 @import 'streamdown/styles.css';
-@import '../components/panes/pane-resize.css';
+@import '@taucad/workbench-panes/styles/panes.css';
 @import '../components/layout/application-shell.css';
 @import './scroll-shadows.css';
 @import './shiny-text.css';
@@ -25,6 +26,7 @@
 @source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../../packages/ui/src';
 @source '../../../../packages/viewer/src';
+@source '../../../../packages/workbench-panes/src';
 
 /*
  * Vendor cursor adapters. Dockview and lazy runtime styles are unlayered, so
@@ -402,39 +404,12 @@
 
 /* END ANIMATION UTILITIES */
 
-/*
-  The default border color has changed to `currentColor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
-*/
+/* The document base every Tau surface shares (border colour, focus fallback, body type, selection): @taucad/ui owns
+   it so the agent plugin viewer page draws the same. The app only adds its scrolling behaviour. */
 @layer base {
-  *,
-  ::after,
-  ::before,
-  ::backdrop,
-  ::file-selector-button {
-    border-color: var(--border, currentColor);
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  /* Focus fallback for controls that do not compose a shared primitive. `:where()` keeps it at zero
-     specificity so any component class still wins. Geometry lives in @taucad/ui's `focus-outline`
-     utility; never restate it here. */
-  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-    @apply focus-outline;
-  }
-
   html,
   body {
-    @apply scroll-smooth bg-background font-sans text-foreground antialiased;
+    @apply scroll-smooth;
     overflow: hidden;
     overscroll-behavior: none;
   }
@@ -488,10 +463,6 @@
       border: var(--scrollbar-padding) var(--scrollbar-track) solid;
       background-clip: padding-box;
     }
-  }
-
-  ::selection {
-    @apply bg-highlighter text-highlighter-foreground;
   }
 }
 

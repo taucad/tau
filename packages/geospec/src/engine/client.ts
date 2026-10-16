@@ -11,6 +11,33 @@ const nativeCanonicalProfile = 'geospec-jcs-v1';
 const maximumSafeWorkUnitLimit = 9_007_199_254_740_991;
 
 /**
+ * Default largest work-unit budget a spec may author through `loadModel` or `expectGeo` options:
+ * 64 times the engine's current 8 000 000-unit default. It is host policy, not a ceiling: a host
+ * raises it with `maximumWorkUnitLimit` on its assertion client, runner or model loader. The
+ * host's own `workUnitLimit` keeps the full safe-integer range.
+ * @public
+ */
+export const geoSpecMaximumWorkUnitLimit = 512_000_000;
+
+/**
+ * Resolve a host's largest authored work-unit budget.
+ *
+ * @param maximum - The host's configured maximum, when it sets one.
+ * @returns The maximum, defaulting to {@link geoSpecMaximumWorkUnitLimit}.
+ * @throws TypeError when the configured maximum is not a positive safe integer.
+ * @public
+ */
+export const resolveGeoSpecMaximumWorkUnitLimit = (maximum?: number): number => {
+  if (maximum === undefined) {
+    return geoSpecMaximumWorkUnitLimit;
+  }
+  if (!Number.isSafeInteger(maximum) || maximum <= 0) {
+    throw new TypeError(`GeoSpec maximumWorkUnitLimit must be a positive safe integer; received ${String(maximum)}.`);
+  }
+  return maximum;
+};
+
+/**
  * Exact core bytes of one claim evaluated in one engine call: the canonical plan, its one
  * canonical claim and the canonical result, as fresh bytes the client retains without copying.
  * @public
@@ -54,6 +81,7 @@ export type GeoSpecCanonicalClaimReport = {
   readonly canonicalResult: Uint8Array<ArrayBuffer>;
   readonly claim: Readonly<Record<string, JSONValue>>;
   readonly claimId: string;
+  /** Engine diagnostics; a `MATCHER_TIMEOUT` row also carries `details.limit`, `details.used` and `details.maximumLimit`. */
   readonly diagnostics: readonly JSONValue[];
   readonly evidence?: JSONValue;
   readonly polarity: GeoSpecClaimPolarity;
@@ -79,6 +107,8 @@ type GeoSpecNativeClaimContext = {
   readonly subject: GeoSpecNativeSubject;
   readonly subjectSlot: string;
   readonly workUnitLimit: number;
+  /** The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`. */
+  readonly maximumWorkUnitLimit?: number;
 };
 
 /** One authored matcher call lowered and evaluated by Rust in one engine call. @public */
@@ -168,6 +198,48 @@ const assertNativeClaimOptions = (options: NativePayloadOptions): void => {
     throw new TypeError('GeoSpec claim IDs and subject slots must be non-empty strings.');
   }
   assertNativeWorkUnitLimit(options.workUnitLimit);
+};
+
+/**
+ * Describe why an authored work-unit budget is outside the host's maximum.
+ *
+ * @param workUnitLimit - Candidate budget from authored options.
+ * @param label - The option path named in the message, e.g. `loadModel workUnitLimit`.
+ * @param maximum - The host's largest authored budget; defaults to {@link geoSpecMaximumWorkUnitLimit}.
+ * @returns The refusal message, or `undefined` for an omitted or in-bound budget.
+ * @internal
+ */
+export const geoSpecAuthoredWorkUnitLimitProblem = (
+  workUnitLimit: unknown,
+  label: string,
+  maximum: number = geoSpecMaximumWorkUnitLimit,
+): string | undefined =>
+  workUnitLimit === undefined ||
+  (typeof workUnitLimit === 'number' &&
+    Number.isSafeInteger(workUnitLimit) &&
+    workUnitLimit > 0 &&
+    workUnitLimit <= maximum)
+    ? undefined
+    : `GeoSpec ${label} must be a positive integer no greater than this host's maximum of ${maximum} (the host can raise it with maximumWorkUnitLimit); received ${typeof workUnitLimit === 'number' ? String(workUnitLimit) : typeof workUnitLimit}.`;
+
+/**
+ * Validate an authored work-unit budget against the host's maximum.
+ *
+ * @param workUnitLimit - Candidate budget from authored options.
+ * @param label - The option path named in the error, e.g. `loadModel workUnitLimit`.
+ * @param maximum - The host's largest authored budget; defaults to {@link geoSpecMaximumWorkUnitLimit}.
+ * @throws TypeError naming the option and the bound when the budget is not a positive integer within it.
+ * @public
+ */
+export const assertGeoSpecAuthoredWorkUnitLimit: (
+  workUnitLimit: unknown,
+  label: string,
+  maximum?: number,
+) => asserts workUnitLimit is number | undefined = (workUnitLimit, label, maximum) => {
+  const problem = geoSpecAuthoredWorkUnitLimitProblem(workUnitLimit, label, maximum);
+  if (problem !== undefined) {
+    throw new TypeError(problem);
+  }
 };
 
 /**
@@ -295,6 +367,48 @@ export const evaluateGeoSpecNativeQuery = (options: GeoSpecNativeQueryOptions): 
   });
 };
 
+const finiteCount = (value: JSONValue | undefined): number | undefined =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
+const isMatcherTimeout = (diagnostic: JSONValue): diagnostic is Record<string, JSONValue> =>
+  diagnostic !== null &&
+  typeof diagnostic === 'object' &&
+  !Array.isArray(diagnostic) &&
+  diagnostic['code'] === 'MATCHER_TIMEOUT';
+
+/**
+ * Give a work-budget refusal one numeric vocabulary for agents and rows.
+ *
+ * The engine reports `MATCHER_TIMEOUT` with `budget`/`unitsUsed`, `workUnitBudget`/`requiredWorkUnits`
+ * or no details at all, depending on the analysis that ran out. Rows read `details.limit` (the budget
+ * this claim submitted), `details.used` (units consumed or required, when the engine reports them)
+ * and `details.maximumLimit` (the largest budget this host lets a spec author). Only the parsed diagnostic is
+ * enriched: `canonicalResult` and `result` keep the engine's exact bytes and values.
+ *
+ * @param diagnostic - One parsed engine diagnostic.
+ * @param workUnitLimit - The budget this claim submitted.
+ * @param maximumLimit - The host's largest authored budget.
+ * @returns The diagnostic, with accounting added to a `MATCHER_TIMEOUT` row.
+ */
+const withWorkUnitAccounting = (diagnostic: JSONValue, workUnitLimit: number, maximumLimit: number): JSONValue => {
+  if (!isMatcherTimeout(diagnostic)) {
+    return diagnostic;
+  }
+  const { details } = diagnostic;
+  const reported = details !== null && typeof details === 'object' && !Array.isArray(details) ? details : {};
+  const limit = finiteCount(reported['budget']) ?? finiteCount(reported['workUnitBudget']) ?? workUnitLimit;
+  const used = finiteCount(reported['unitsUsed']) ?? finiteCount(reported['requiredWorkUnits']);
+  return {
+    ...diagnostic,
+    details: {
+      ...reported,
+      limit,
+      ...(used === undefined ? {} : { used }),
+      maximumLimit,
+    },
+  };
+};
+
 const evaluateNativePayload = (options: NativePayloadOptions): GeoSpecCanonicalClaimReport => {
   assertNativeClaimOptions(options);
   const request: JSONValue = {
@@ -342,7 +456,16 @@ const evaluateNativePayload = (options: NativePayloadOptions): GeoSpecCanonicalC
     canonicalResult,
     claim,
     claimId,
-    diagnostics,
+    // Without a MATCHER_TIMEOUT row the parsed result's own array is returned unchanged.
+    diagnostics: diagnostics.some((diagnostic) => isMatcherTimeout(diagnostic))
+      ? diagnostics.map((diagnostic) =>
+          withWorkUnitAccounting(
+            diagnostic,
+            options.workUnitLimit,
+            options.maximumWorkUnitLimit ?? geoSpecMaximumWorkUnitLimit,
+          ),
+        )
+      : diagnostics,
     ...(result['evidence'] === undefined ? {} : { evidence: result['evidence'] }),
     polarity: options.polarity,
     result,

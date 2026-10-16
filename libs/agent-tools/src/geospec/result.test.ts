@@ -6,6 +6,7 @@ import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecTestCase } from 'geospec/runner';
 import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import { runnerResultToTestModelOutput } from '#geospec/result.js';
+import type { GeoSpecKernelEvidence } from '#geospec/result.js';
 
 const project = (test: GeoSpecTestCase, file = 'gear.geospec.ts') =>
   runnerResultToTestModelOutput(
@@ -464,7 +465,9 @@ describe('canonical reports', () => {
           id: 'gear.geospec.ts:legacy fail',
           requirement: 'legacy fail',
           reason: 'GeoSpec test failed.',
-          suggestion: 'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
+          suggestion:
+            'Change the model so it meets this requirement, using the expected and actual values in the diagnostics. Keep the assertion and its tolerance.',
+          category: 'geometry',
           targetFile: 'gear.geospec.ts',
           diagnostics: [],
         },
@@ -500,5 +503,230 @@ describe('GeoSpec authoring recovery', () => {
     });
     expect(output.failures[0]?.suggestion).toContain('loadModel from geospec/model and expectGeo from geospec');
     expect(output.failures[0]?.suggestion).not.toMatch(/native|legacy/u);
+  });
+});
+
+describe('failure categories and suggestions', () => {
+  const refused = (diagnostic: GeometryDiagnostic, status: 'failed' | 'refused' = 'refused'): GeoSpecTestCase => ({
+    suite: ['shade'],
+    name: 'is one piece',
+    status: status === 'failed' ? 'failed' : 'inconclusive',
+    assertions: [
+      {
+        kind: 'connectedComponents',
+        subject: {},
+        expected: { count: 1 },
+        passed: false,
+        loadId: 'load-1',
+        diagnostics: [diagnostic],
+        report: claimReport({ claimId: 'claim-1', polarity: 'positive', seed: 1, status }),
+      },
+    ],
+    diagnostics: [],
+  });
+  const failureOf = (test: GeoSpecTestCase, kernels?: ReadonlyMap<string, GeoSpecKernelEvidence>) => {
+    const output = runnerResultToTestModelOutput(
+      {
+        success: false,
+        passed: 0,
+        failed: 1,
+        selectedTests: 1,
+        files: [
+          {
+            file: 'lamp.geospec.ts',
+            result: {
+              success: true,
+              passed: false,
+              tests: [test],
+              bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+              lineage: {
+                status: 'complete',
+                modules: [],
+                loads: [
+                  {
+                    loadId: 'load-1',
+                    status: 'complete',
+                    evidence: {
+                      loadId: 'load-1',
+                      status: 'complete',
+                      format: 'glb',
+                      parameters: {},
+                      ingestOptions: {},
+                      sourcePath: 'main.ts',
+                      artifacts: [{ name: 'main.glb', sha256: 'c'.repeat(64), byteLength: 3 }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      ['lamp.geospec.ts'],
+      kernels === undefined ? {} : { kernels },
+    );
+    expect(testModelOutputSchema.safeParse(output).success).toBe(true);
+    const [failure] = output.failures;
+    if (failure === undefined) {
+      throw new Error('Expected one failure row.');
+    }
+    return failure;
+  };
+  const weakening = /update the model or expected geometry assertion|weaken|relax the tolerance/iu;
+  const reducing = /\b(?:coarsen|coarser export|shrink|crop the|smaller part)\b/iu;
+
+  it.each([
+    {
+      code: 'GEOSPEC_ANALYSIS_LIMIT',
+      message: 'Connectivity scratch 6.1 GB exceeds the 256 MiB analysis limit.',
+      category: 'analysis-limit',
+      next: /Provision more resources[^]*not decided at this capacity/u,
+    },
+    {
+      code: 'GEOSPEC_RESOURCE_LIMIT',
+      message: 'Primary geometry 54 MB exceeds the 64 MiB subject limit.',
+      category: 'resource-limit',
+      next: /Provision more resources[^]*not decided at this capacity/u,
+    },
+    {
+      code: 'MATCHER_TIMEOUT',
+      message: 'Claim exhausted 8000000 work units.',
+      category: 'work-budget',
+      next: /workUnitLimit/u,
+    },
+    {
+      code: 'GEOSPEC_TEST_TIMEOUT',
+      message: 'GeoSpec test timed out after 20000ms.',
+      category: 'timeout',
+      next: /testTimeout/u,
+    },
+    {
+      code: 'GEOSPEC_SOME_FUTURE_CODE',
+      message: 'A refusal this host has never seen.',
+      category: 'infrastructure',
+      next: /not a geometry verdict/u,
+    },
+  ])(
+    'should map $code to its own $category category with a next step that keeps the claim',
+    ({ code, message, category, next }) => {
+      const failure = failureOf(refused({ code, severity: 'error', message }));
+      expect(failure.category).toBe(category);
+      expect(failure.suggestion).toMatch(next);
+      expect(failure.suggestion).not.toMatch(weakening);
+      expect(failure.suggestion).not.toMatch(reducing);
+    },
+  );
+
+  it('should drop an engine suggestion that reduces the model to fit a limit', () => {
+    const failure = failureOf(
+      refused({
+        code: 'GEOSPEC_ANALYSIS_LIMIT',
+        severity: 'error',
+        message: 'Connectivity scratch exceeds the analysis limit.',
+        suggestion: 'Load a coarser export or crop the subject.',
+      }),
+    );
+    expect(failure.suggestion).not.toMatch(reducing);
+    expect(failure.suggestion).toContain('Provision more resources');
+  });
+
+  it('should answer a whole-model claim on a region crop with its scope refusal, not a BRep or limit hint', () => {
+    const failure = failureOf(
+      refused({
+        code: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM',
+        severity: 'error',
+        message: "A 'connectedComponents' claim is about the whole model.",
+        suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
+      }),
+    );
+    expect(failure).toMatchObject({
+      category: 'unsupported-evidence',
+      suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
+    });
+  });
+
+  it('should read a byte-limit refusal under the shared evidence code as an analysis limit', () => {
+    const failure = failureOf(
+      refused({
+        code: 'GEOSPEC_UNSUPPORTED_EVIDENCE',
+        severity: 'error',
+        message: 'Material exact scratch exceeds the declared analysis byte limit.',
+      }),
+    );
+    expect(failure.category).toBe('analysis-limit');
+  });
+
+  it('should read an untyped admission limit load error as a resource limit', () => {
+    const failure = failureOf(
+      refused({
+        code: 'TEST_FAILED',
+        severity: 'error',
+        message: 'Primary geometry exceeds the configured binary subject limit.',
+      }),
+    );
+    expect(failure.category).toBe('resource-limit');
+  });
+
+  it('should keep a decided geometry failure as geometry and its own repair suggestion', () => {
+    const failure = failureOf(
+      refused(
+        {
+          code: 'GEOSPEC_CONNECTED_COMPONENTS_MISMATCH',
+          severity: 'error',
+          message: 'Expected 1 component, found 3.',
+          suggestion: "Join 'Canopy' to 'Socket' at the nearest gap.",
+        },
+        'failed',
+      ),
+    );
+    expect(failure).toMatchObject({
+      category: 'geometry',
+      suggestion: "Join 'Canopy' to 'Socket' at the nearest gap.",
+    });
+  });
+
+  it('should never pass through a suggestion that asks to weaken the assertion', () => {
+    const failure = failureOf(
+      refused(
+        {
+          code: 'GEOSPEC_CONNECTED_COMPONENTS_MISMATCH',
+          severity: 'error',
+          message: 'Expected 1 component, found 3.',
+          suggestion: 'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
+        },
+        'failed',
+      ),
+    );
+    expect(failure.suggestion).not.toMatch(weakening);
+    expect(failure.suggestion).toContain('Keep the assertion');
+  });
+
+  describe('evidence refusals', () => {
+    const brepRefusal = refused({
+      code: 'GEOSPEC_UNSUPPORTED_EVIDENCE',
+      severity: 'error',
+      message: 'toHaveAssemblyOccurrences() needs exact BRep evidence; the subject is a mesh.',
+      suggestion: "Load the model as STEP: loadModel({ file, format: 'step' }).",
+    });
+
+    it('should say the matcher is unsupported on a kernel without a STEP route and name the mesh matchers', () => {
+      const failure = failureOf(brepRefusal, new Map([['main.ts', { kernelId: 'picovoxel', directBrepStep: false }]]));
+      expect(failure.category).toBe('unsupported-evidence');
+      expect(failure.suggestion).toContain("kernel 'picovoxel'");
+      expect(failure.suggestion).toContain('unsupported on this kernel');
+      expect(failure.suggestion).toContain('toHaveConnectedComponents');
+      expect(failure.suggestion).not.toMatch(/format: 'step'|as step/iu);
+    });
+
+    it('should keep the STEP route for a kernel that has one', () => {
+      const failure = failureOf(brepRefusal, new Map([['main.ts', { kernelId: 'replicad', directBrepStep: true }]]));
+      expect(failure.suggestion).toBe("Load the model as STEP: loadModel({ file, format: 'step' }).");
+    });
+
+    it('should qualify the STEP route with the mesh-only alternative when the kernel is unknown', () => {
+      const failure = failureOf(brepRefusal);
+      expect(failure.suggestion).toContain("format: 'step'");
+      expect(failure.suggestion).toContain('mesh-only kernel this matcher is unsupported');
+    });
   });
 });

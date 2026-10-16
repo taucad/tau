@@ -9,6 +9,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
+import { geoSpecDefaultRunBudget } from '@taucad/chat/constants';
 import {
   createChatToolRegistry,
   createProviderRpcFileSystem,
@@ -575,6 +576,8 @@ const composeProjectHost = async (
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
+    // No outer RPC budget bounds a browser-placed test_model call; this host budget is the bound.
+    runnerTimeout: geoSpecDefaultRunBudget,
     ...(revisions === undefined
       ? {}
       : {

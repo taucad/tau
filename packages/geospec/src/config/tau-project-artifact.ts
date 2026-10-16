@@ -129,6 +129,7 @@ export const exportTauProjectArtifact = async (
         resolveRuntimeExportIntent({
           runtime: snapshotRuntime,
           format: descriptor.format,
+          kernelId: snapshot.data.kernelId,
         }),
       );
     }

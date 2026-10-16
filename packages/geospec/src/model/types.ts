@@ -39,12 +39,14 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  * small so typed runtime clients do not have to widen their full generic
  * method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited
  * through it when GeoSpec releases an owned runtime, so its host resources are
- * closed before the caller (for example a worker thread) exits.
+ * closed before the caller (for example a worker thread) exits. A client with
+ * `snapshotSource` lets one run reuse an identical file load after confirming
+ * that the source closure it exported is unchanged.
  *
  * @public
  */
 export type GeoSpecRuntimeClient = Pick<RuntimeClient, 'connect' | 'terminate'> &
-  Partial<Pick<RuntimeClient, 'shutdown'>> & {
+  Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
     open: (
       input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
     ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
@@ -81,6 +83,16 @@ export type GeoSpecRuntimeSourceAdapter = {
 };
 
 /**
+ * Axis-aligned crop box in canonical Z-up millimetres; every `min` axis is below its `max` axis.
+ *
+ * @public
+ */
+export type GeoSpecLoadRegion = {
+  readonly min: readonly [number, number, number];
+  readonly max: readonly [number, number, number];
+};
+
+/**
  * Direct geometry-source model load options.
  *
  * @public
@@ -108,6 +120,12 @@ export type LoadModelSourceOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /**
+   * Default work-unit budget for every claim on this subject: a positive integer no greater than
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
+   */
+  workUnitLimit?: number;
 };
 
 /**
@@ -138,6 +156,21 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /**
+   * Default work-unit budget for every claim on this subject: a positive integer no greater than
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
+   */
+  workUnitLimit?: number;
+  /**
+   * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
+   * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
+   * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
+   * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
+   * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
+   * it never stands for the whole model.
+   */
+  region?: GeoSpecLoadRegion;
 };
 
 /**
@@ -166,6 +199,21 @@ export type LoadModelFileOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /**
+   * Default work-unit budget for every claim on this subject: a positive integer no greater than
+   * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+   * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
+   */
+  workUnitLimit?: number;
+  /**
+   * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
+   * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
+   * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
+   * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
+   * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
+   * it never stands for the whole model.
+   */
+  region?: GeoSpecLoadRegion;
 };
 
 /**

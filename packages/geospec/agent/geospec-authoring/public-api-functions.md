@@ -1,6 +1,6 @@
 # geospec — Functions
 
-34 top-level symbols. Signatures are verbatim typescript.
+36 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -11,8 +11,9 @@ export declare function describe(name: string, function_: GeoSpecTestCallback): 
 
 // Start a geometry assertion chain
 // expectGeo (function)
-export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
+export declare function expectGeo(subject: GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecMatcher;
 //   subject: geometry subject under test
+//   options: Optional chain options, such as a larger `workUnitLimit` for a claim that refused with `MATCHER_TIMEOUT`
 
 // GeoSpec test helper used inside VM-executed test modules
 // it (function)
@@ -72,6 +73,13 @@ export declare function resolveRuntimeExportIntent(options: {
     format: RuntimeBackedModelFormat;
     meshLinearTolerance?: number;
     meshAngularToleranceDegrees?: number;
+    /**
+     * The kernel that evaluates this source, when the host knows it. Routes are
+     * then chosen among that kernel's own, so a mesh-only kernel is told its
+     * BRep matchers are unsupported instead of being sent to another kernel's
+     * STEP route.
+     */
+    kernelId?: string;
 }): RuntimeExportIntent | RuntimeExportIntentFailure;
 
 // clearCollectorGlobals (function)
@@ -125,6 +133,11 @@ export declare function isGeoSpecTestFile(path: string): boolean;
 export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promise<GeoSpecRunResult>;
 //   options: filesystem and test entry path
 
+// Whether a diagnostic or issue code belongs to the GeoSpec timeout family
+// isGeoSpecTimeoutCode (function)
+export declare function isGeoSpecTimeoutCode(code: string): code is GeoSpecTimeoutCode;
+//   code: Any diagnostic or issue code
+
 // Compose compiled assertion and model bindings with the SDK's serial lifecycle
 // createNativeGeoSpecRunner (function)
 export declare function createNativeGeoSpecRunner(options: GeoSpecNativeRunnerOptions): GeoSpecRunner;
@@ -167,6 +180,12 @@ export declare function createGeoSpecMatcherMethods<Result>(options: {
 // evaluateGeoSpecNativeQuery (function)
 export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOptions): GeoSpecCanonicalClaimReport;
 //   options: Query identity, subject and authored payload
+
+// Resolve a host's largest authored work-unit budget
+// Throws: TypeError when the configured maximum is not a positive safe integer.
+// resolveGeoSpecMaximumWorkUnitLimit (function)
+export declare function resolveGeoSpecMaximumWorkUnitLimit(maximum?: number): number;
+//   maximum: The host's configured maximum, when it sets one
 
 // Create Vitest matchers over an existing runner-independent client
 // createGeoSpecVitestAdapter (function)

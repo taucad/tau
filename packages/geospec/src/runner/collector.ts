@@ -20,11 +20,20 @@ import type {
   GeoSpecAssertionClientOptions,
   GeoSpecCanonicalClaimReport,
 } from '#assertion-client/index.js';
+import { assertGeoSpecAuthoredWorkUnitLimit } from '#engine/client.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import { diagnosticForTransport, geometryDiagnosticSchema } from '#model/errors.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
+import { geoSpecTimeoutCode } from '#runner/timeout-codes.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
-import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase } from '#runner/types.js';
+import type {
+  GeoSpecAssertion,
+  GeoSpecExpectOptions,
+  GeoSpecMatcher,
+  GeoSpecTestCase,
+  GeoSpecTestEvent,
+} from '#runner/types.js';
+import { regionScopeRefusal } from '#model/region-scope.js';
 import { resolveGeoSpecSubject } from '#model/subject.js';
 
 type GeoSpecTestFunction = () => unknown | PromiseLike<unknown>;
@@ -41,7 +50,7 @@ export type GeoSpecCollector = {
   describeSkip(name: string, _function?: GeoSpecTestFunction): void;
   it(name: string, function_: GeoSpecTestFunction): void;
   itSkip(name: string, _function?: GeoSpecTestFunction): void;
-  expectGeo(subject: unknown): GeoSpecMatcher;
+  expectGeo(subject: unknown, options?: GeoSpecExpectOptions): GeoSpecMatcher;
   waitForCompletion(testTimeout?: number, testNamePattern?: GeoSpecTestNamePattern): Promise<void>;
 };
 
@@ -50,6 +59,8 @@ export type GeoSpecCollectorOptions = {
   matcherWallBackstop?: number;
   forensic?: boolean;
   nativeAssertions: GeoSpecAssertionClientOptions;
+  /** Observes each selected test as it starts and settles, for host progress reporting. */
+  onTestEvent?: (event: GeoSpecTestEvent) => void;
 };
 
 export const collectorGlobalKey = '__GEOSPEC_COLLECTOR__';
@@ -79,9 +90,33 @@ export class GeoSpecAssertionError extends Error {
   }
 }
 
+class GeoSpecTestTimeoutError extends Error {
+  /** Milliseconds. */
+  public readonly testTimeout: number;
+
+  public constructor(testTimeout: number) {
+    super(`GeoSpec test timed out after ${testTimeout}ms.`);
+    this.name = 'GeoSpecTestTimeoutError';
+    this.testTimeout = testTimeout;
+  }
+}
+
 const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
   if (error instanceof GeoSpecAssertionError) {
     return [...error.diagnostics];
+  }
+
+  if (error instanceof GeoSpecTestTimeoutError) {
+    return [
+      {
+        code: geoSpecTimeoutCode.test,
+        severity: 'error',
+        message: `${error.message} The test still ran to completion before the run moved on; this is a wall-clock timeout, not a geometry verdict.`,
+        suggestion:
+          'Keep the assertion and the model as designed. Raise testTimeout (CLI --test-timeout) so the requirement can finish; if this host cannot give it the time, report it as not decided at this capacity.',
+        details: { testTimeout: error.testTimeout },
+      },
+    ];
   }
 
   // VM modules and worker transports do not share Error constructors. Validate
@@ -148,8 +183,6 @@ const recordAssertion = (assertion: GeoSpecAssertion, diagnostics: GeometryDiagn
   return assertion;
 };
 
-class GeoSpecTestTimeoutError extends Error {}
-
 const withTimeout = async <Result>(promise: Promise<Result>, testTimeout?: number): Promise<Result> => {
   if (testTimeout === undefined) {
     return promise;
@@ -160,7 +193,7 @@ const withTimeout = async <Result>(promise: Promise<Result>, testTimeout?: numbe
       promise,
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new GeoSpecTestTimeoutError(`GeoSpec test timed out after ${testTimeout}ms.`));
+          reject(new GeoSpecTestTimeoutError(testTimeout));
         }, testTimeout);
       }),
     ]);
@@ -219,6 +252,13 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
   const nativeClaimFailures = new WeakSet<GeoSpecAssertionError>();
   let activeTest: GeoSpecTestCase | undefined;
   let executed = false;
+  const notifyTestEvent = (type: GeoSpecTestEvent['type'], test: GeoSpecTestCase): void => {
+    try {
+      options.onTestEvent?.({ type, test });
+    } catch {
+      // Progress observers report; they never decide a verdict.
+    }
+  };
 
   const trackDefinitionPending = (
     operation: PromiseLike<unknown>,
@@ -251,7 +291,10 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
     });
   };
 
-  const recordInvocation = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion => {
+  const recordInvocation = (
+    invocation: GeoSpecAuthoringInvocation,
+    expectOptions: GeoSpecExpectOptions | undefined,
+  ): GeoSpecAssertion => {
     if (!isGeoSpecTestCase(activeTest)) {
       throw new Error('expectGeo() must be called inside it().');
     }
@@ -268,7 +311,19 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
       if (admission.load !== undefined) {
         assertion.loadId = admission.load.loadId;
       }
-      const methods = nativeClient.expectGeo(admission.identity);
+      const region = admission.load?.region;
+      if (region !== undefined) {
+        assertion.region = { min: [...region.min], max: [...region.max] };
+      }
+      const regionRefusal = regionScopeRefusal(region, invocation.kind);
+      if (regionRefusal !== undefined) {
+        return recordAssertion(assertion, [regionRefusal]);
+      }
+      const workUnitLimit = expectOptions?.workUnitLimit ?? admission.load?.workUnitLimit;
+      const methods = nativeClient.expectGeo(
+        admission.identity,
+        workUnitLimit === undefined ? undefined : { workUnitLimit },
+      );
       const chain = invocation.polarity === 'negative' ? methods.not : methods;
       // The shared authoring registry already supplies each method's argument tuple.
       const method = chain[invocation.matcher] as (...arguments_: readonly unknown[]) => GeoSpecCanonicalClaimReport;
@@ -370,9 +425,17 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
       recordSkipped(name);
     },
 
-    expectGeo(subject) {
-      return Object.assign(createGeoSpecMatcherMethods({ invoke: recordInvocation, polarity: 'positive', subject }), {
-        not: createGeoSpecMatcherMethods({ invoke: recordInvocation, polarity: 'negative', subject }),
+    expectGeo(subject, expectOptions) {
+      // Validate once at the chain, before any claim, so a bad budget names expectGeo.
+      assertGeoSpecAuthoredWorkUnitLimit(
+        expectOptions?.workUnitLimit,
+        'expectGeo workUnitLimit',
+        options.nativeAssertions.maximumWorkUnitLimit,
+      );
+      const invoke = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion =>
+        recordInvocation(invocation, expectOptions);
+      return Object.assign(createGeoSpecMatcherMethods({ invoke, polarity: 'positive', subject }), {
+        not: createGeoSpecMatcherMethods({ invoke, polarity: 'negative', subject }),
       });
     },
 
@@ -396,6 +459,7 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
         const previousTest = activeTest;
         activeTest = scheduledTest.test;
         scheduledTest.test.status = 'passed';
+        notifyTestEvent('test-start', scheduledTest.test);
         const startedAt = performance.now();
         const failures: unknown[] = [];
         const recordFailure = (error: unknown): void => {
@@ -450,6 +514,7 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
         } finally {
           activeTest = previousTest;
           scheduledTest.test.durationMs = performance.now() - startedAt;
+          notifyTestEvent('test-complete', scheduledTest.test);
         }
       }
     },

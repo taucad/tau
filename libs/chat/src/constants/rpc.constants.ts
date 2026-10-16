@@ -91,18 +91,130 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
 ]);
 
 /**
- * How long the server waits for a client to answer one RPC, in milliseconds.
+ * How long a server-relayed RPC waits for its client to answer, in milliseconds.
  *
- * This is the outermost budget in the chain, and it is deliberately shared: a
- * client-side timeout that outlives it never reaches the user, because the
- * server has already answered with the generic
- * `RPC execution timed out … the client may be disconnected or unresponsive`.
- * Every client budget — worker startup, a test run, an abort grace period —
- * must therefore be sized to expire inside this one.
+ * It bounds only an RPC the API relays to a browser client over Socket.IO
+ * (see the chat RPC error-handling policy). No host in this tree relays tool
+ * calls that way: the browser-placed agent host's tool registry dispatches
+ * each call in process, and nothing between `packages/agent-host` and the RPC
+ * dispatcher bounds it besides the turn's own abort signal. `test_model` there
+ * is bounded by {@link geoSpecDefaultRunBudget} instead.
  *
  * @public
  */
 export const rpcExecutionTimeout = 60_000;
+
+/**
+ * The browser GeoSpec run budget when the call names no `testTimeout`, in
+ * milliseconds. A run that outlives it is reported as `OPERATION_TIMEOUT`
+ * with the requirements it completed.
+ *
+ * @public
+ */
+export const geoSpecDefaultRunBudget = 180_000;
+
+/**
+ * The default longest browser GeoSpec run budget, in milliseconds, and so the
+ * default largest `test_model.testTimeout`. Host policy, not a ceiling: a host
+ * provisioned for longer verification raises it with `maxRunBudget`.
+ *
+ * @public
+ */
+export const geoSpecDefaultMaxRunBudget = 300_000;
+
+/**
+ * Milliseconds added to a `testTimeout` when it sets the browser run budget,
+ * for discovery, bundling and model loads around the slowest test.
+ *
+ * @public
+ */
+export const geoSpecRunBudgetHeadroom = 30_000;
+
+/**
+ * The default largest `test_model.workUnitLimit`: GeoSpec's default bound on
+ * one claim's authored engine work budget (`geoSpecMaximumWorkUnitLimit` in
+ * `geospec`), restated here because chat contracts do not depend on the engine
+ * package. Host policy, not a ceiling: a host raises it with `maxWorkUnitLimit`.
+ *
+ * @public
+ */
+export const geoSpecDefaultMaxWorkUnitLimit = 512_000_000;
+
+/**
+ * A host's GeoSpec maxima. Both are positive safe integers.
+ *
+ * @public
+ */
+export type GeoSpecHostLimits = {
+  /** The longest run budget and largest `testTimeout`. Milliseconds. */
+  readonly maxRunBudget: number;
+  /** The largest `workUnitLimit` a call may request. */
+  readonly maxWorkUnitLimit: number;
+};
+
+/**
+ * Resolve a host's GeoSpec maxima from its configuration.
+ *
+ * @param overrides - The host's configured maxima; omitted ones take the defaults.
+ * @returns The validated maxima.
+ * @throws TypeError when a configured maximum is not a positive safe integer.
+ * @public
+ */
+export const resolveGeoSpecHostLimits = (overrides: Partial<GeoSpecHostLimits> = {}): GeoSpecHostLimits => {
+  const limits = {
+    maxRunBudget: overrides.maxRunBudget ?? geoSpecDefaultMaxRunBudget,
+    maxWorkUnitLimit: overrides.maxWorkUnitLimit ?? geoSpecDefaultMaxWorkUnitLimit,
+  };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new TypeError(`GeoSpec ${name} must be a positive safe integer; received ${String(value)}.`);
+    }
+  }
+  return limits;
+};
+
+/**
+ * Why a `test_model` call asks for more than this host provides, or
+ * `undefined` when it fits. The call is refused, never silently clamped.
+ *
+ * @param args - The call's `testTimeout` and `workUnitLimit`.
+ * @param limits - The host's maxima.
+ * @returns The refusal message.
+ * @public
+ */
+export const geoSpecHostLimitProblem = (
+  args: { readonly testTimeout?: number | undefined; readonly workUnitLimit?: number | undefined },
+  limits: GeoSpecHostLimits,
+): string | undefined => {
+  const checks = [
+    ['testTimeout', args.testTimeout, limits.maxRunBudget, 'maxRunBudget'],
+    ['workUnitLimit', args.workUnitLimit, limits.maxWorkUnitLimit, 'maxWorkUnitLimit'],
+  ] as const;
+  for (const [name, value, maximum, option] of checks) {
+    if (value !== undefined && value > maximum) {
+      return `test_model ${name} ${value} exceeds this host's maximum of ${maximum}. The claims were not run, so nothing is decided; a host provisioned for more raises ${option}.`;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The browser GeoSpec run budget for one call: the host's budget, raised to
+ * cover the call's `testTimeout` plus {@link geoSpecRunBudgetHeadroom}, never
+ * above the host's maximum.
+ *
+ * @param hostBudget - The host's run budget. Milliseconds.
+ * @param testTimeout - The call's per-test timeout, when given. Milliseconds.
+ * @param maxRunBudget - The host's longest run budget. Milliseconds.
+ * @returns The run budget. Milliseconds.
+ * @public
+ */
+export const resolveGeoSpecRunBudget = (
+  hostBudget: number,
+  testTimeout?: number,
+  maxRunBudget: number = geoSpecDefaultMaxRunBudget,
+): number =>
+  Math.min(maxRunBudget, Math.max(hostBudget, testTimeout === undefined ? 0 : testTimeout + geoSpecRunBudgetHeadroom));
 
 /**
  * Error codes for RPC infrastructure failures.

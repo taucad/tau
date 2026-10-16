@@ -80,6 +80,9 @@ export const createNativeGeoSpecRunner = (options: GeoSpecNativeRunnerOptions): 
     createGeoSpecNativeModelLoader({
       ...options.model,
       engine: options.nativeAssertions.engine,
+      ...(options.nativeAssertions.maximumWorkUnitLimit === undefined
+        ? {}
+        : { maximumWorkUnitLimit: options.nativeAssertions.maximumWorkUnitLimit }),
     });
   const admitted = new Set<string>();
   const scopedLoader: ManagedGeoSpecNativeModelLoader = Object.assign(

@@ -1,3 +1,4 @@
+import { geoSpecTimeoutCode } from 'geospec/runner';
 import { describe, expect, it, vi } from 'vitest';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import {
@@ -93,6 +94,13 @@ const forensicCliHost = () => {
 };
 
 describe('parseGeoSpecCliArguments', () => {
+  it('should document every wall-clock timeout code together in the usage', () => {
+    for (const code of Object.values(geoSpecTimeoutCode)) {
+      expect(geoSpecCliUsage).toContain(code);
+    }
+    expect(geoSpecCliUsage).toContain('MATCHER_TIMEOUT');
+  });
+
   it('should show usage for no arguments and for --help', () => {
     expect(parseGeoSpecCliArguments([])).toStrictEqual({ kind: 'help', message: geoSpecCliUsage });
     expect(parseGeoSpecCliArguments(['--help']).kind).toBe('help');

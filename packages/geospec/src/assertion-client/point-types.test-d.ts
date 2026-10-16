@@ -22,6 +22,14 @@ const wrongLength: Parameters<GeoSpecAssertionMatchers['toHaveCircularHole']>[0]
   center: [1, 2],
 };
 
+const rangedCenter: Parameters<GeoSpecAssertionMatchers['toHaveCenterOfMass']>[0] = {
+  point: {
+    // @ts-expect-error Center of mass takes an exact point; per-axis ranges are not supported.
+    y: { greaterThan: 1 },
+  },
+};
+
 void holes;
+void rangedCenter;
 void patterns;
 void wrongLength;

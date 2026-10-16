@@ -9,6 +9,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
@@ -113,7 +114,13 @@ vi.mock('#tau/native-store.js', () => ({
 vi.mock('#main/updater.js', () => ({
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
-    return { check: state.updaterCheck, install: state.updaterInstall, status: () => 'Update ready' };
+    return {
+      check: state.updaterCheck,
+      install: state.updaterInstall,
+      status: () => 'Update ready',
+      snapshot: () => ({ phase: 'ready' }),
+      download: vi.fn(),
+    };
   },
 }));
 
@@ -476,18 +483,41 @@ describe('desktop main compute owner', () => {
   };
 
   it(
-    'should expose a native update action that can resume a deferred installation',
+    'should open the update surface from the native menu without a modal or restart',
     async () => {
       await bootstrap();
       await vi.waitFor(() => {
         expect(state.installedUpdateMenuItems.map((item) => item.label)).toEqual(['About Tau', 'Check for Updates…']);
       });
-      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      dialog.showMessageBox.mockClear();
       state.installedUpdateMenuItems[1]!.click!();
       await vi.waitFor(() => {
         expect(state.updaterCheck).toHaveBeenCalledOnce();
-        expect(state.updaterInstall).toHaveBeenCalledOnce();
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
+        expect(state.updaterInstall).not.toHaveBeenCalled();
+        expect(dialog.showMessageBox).not.toHaveBeenCalled();
       });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should refuse update IPC from an untrusted document',
+    async () => {
+      await bootstrap();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      await Promise.all(
+        [
+          desktopUpdateChannels.snapshot,
+          desktopUpdateChannels.check,
+          desktopUpdateChannels.install,
+          desktopUpdateChannels.download,
+        ].map(async (channel) => {
+          vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+          await expect(state.handlers.get(channel)!({ senderFrame: {} })).rejects.toThrow('Untrusted update request');
+        }),
+      );
+      expect(state.updaterInstall).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

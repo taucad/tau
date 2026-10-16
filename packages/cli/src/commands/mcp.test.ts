@@ -49,6 +49,8 @@ vi.mock('@taucad/runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof Runtime>()),
   createRuntimeClient,
 }));
+const exitNow = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('#exit-now.js', () => ({ exitNow }));
 vi.mock('@taucad/runtime/transport/node', () => ({ nodeWorkerTransport: vi.fn(() => ({})) }));
 vi.mock('@taucad/runtime/filesystem/node', () => ({ fromNodeFs: vi.fn(() => ({})) }));
 
@@ -72,7 +74,6 @@ describe('mcpCommand', () => {
    */
   const serve = async (rawArgs: readonly string[]) => {
     const mcpCommand = await importMcpCommand();
-    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as typeof process.exit);
     const running = runCommand(mcpCommand, { rawArgs: [...rawArgs] });
     const [served] = await vi.waitFor(() => {
       const call = serveLocalHostMcp.mock.calls.at(-1);
@@ -86,7 +87,7 @@ describe('mcpCommand', () => {
       stop: async (): Promise<void> => {
         process.emit('SIGTERM');
         await running;
-        expect(exit).toHaveBeenCalledWith(0);
+        expect(exitNow).toHaveBeenCalledWith(0);
       },
     };
   };

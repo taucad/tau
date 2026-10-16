@@ -398,6 +398,28 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('option')).toBeNull();
   });
 
+  it.each([
+    ['/home/tau/work', 'curl -fsSL https://claude.ai/install.sh | bash'],
+    [String.raw`C:\Users\tau\work`, 'irm https://claude.ai/install.ps1 | iex'],
+  ])('gives a daemon at %s the Claude installer for its own shell', async (workspaceRoot, command) => {
+    state.placements = [
+      {
+        ...codex(),
+        hostId: 'studio',
+        label: 'studio',
+        rung: 2,
+        workspaceRoot,
+        externalAgents: [{ id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_NOT_FOUND' }],
+      },
+    ];
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Claude Code, unavailable' }));
+
+    expect(screen.getByText(command)).toBeInTheDocument();
+  });
+
   it('reads an external agent’s reasoning from its own thought level, and hides its “Default”', () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];

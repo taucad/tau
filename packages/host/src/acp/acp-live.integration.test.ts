@@ -82,9 +82,10 @@ const prompt =
  * The adapters this host may actually bill against.
  *
  * `TAU_ACP_LIVE` is checked first so an ordinary `nx test host` neither probes
- * nor spends. Codex is asked whether it is logged in, which is free; Claude
- * keeps its credential in the macOS Keychain and offers no equivalent, so its
- * turn is its own authentication probe.
+ * nor spends. Each CLI is asked whether it is logged in, which is free:
+ * `codex login status` exits non-zero when it is not, and `claude auth status`
+ * prints `loggedIn`. Both run the executable discovery resolved, which is the
+ * one the adapter itself is told to run.
  *
  * @returns The resolved adapters, or an empty list when this host is not live.
  */
@@ -110,13 +111,20 @@ const liveAdapters = async (): Promise<{
   });
   const authenticated = await Promise.all(
     discovery.agents.map(async (adapter) => {
-      if (adapter.id !== 'codex') {
-        return true;
+      const cli = adapter.executablePath ?? adapter.cli;
+      if (adapter.id === 'codex' && cli !== undefined) {
+        return execFileAsync(cli, ['login', 'status'], { timeout: 30_000 }).then(
+          () => true,
+          () => false,
+        );
       }
-      return execFileAsync('codex', ['login', 'status'], { timeout: 30_000 }).then(
-        () => true,
-        () => false,
-      );
+      if (adapter.id === 'claude' && cli !== undefined) {
+        return execFileAsync(cli, ['auth', 'status'], { timeout: 30_000 }).then(
+          ({ stdout }) => (JSON.parse(String(stdout)) as { loggedIn?: boolean }).loggedIn === true,
+          () => false,
+        );
+      }
+      return true;
     }),
   );
   const authenticatedAgents = discovery.agents.filter((_adapter, index) => authenticated[index] === true);

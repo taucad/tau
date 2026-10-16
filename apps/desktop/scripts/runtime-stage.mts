@@ -21,7 +21,7 @@ import type { Integrity, PreparationPlugin } from '@taucad/runtime/preparation/n
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
-import { copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
+import { copyRuntimeClosure, copyTree } from '@taucad/nx/runtime-closure';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /** A `<platform>-<arch>` the desktop app is packaged for. */

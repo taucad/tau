@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "dist-acp",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
@@ -66,8 +67,6 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "catalog:",
-    "@agentclientprotocol/codex-acp": "catalog:",
     "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/assimp": "workspace:*",
@@ -105,7 +104,10 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@agentclientprotocol/claude-agent-acp": "catalog:",
+    "@agentclientprotocol/codex-acp": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",

@@ -21,11 +21,26 @@ export const externalAgentRefusalReasons: Readonly<Record<ExternalAgentRefusalCo
   EXTERNAL_AGENT_CONTENT_UNSUPPORTED: 'It cannot read the content this turn carries',
 };
 
+/** The shell family a host's fix command is written for. @public */
+export type ExternalAgentHostShell = 'posix' | 'windows';
+
 /* ponytail: a UI-side table for the pinned adapters; move it onto the
  * descriptor (the host knows each adapter's CLI) when another agent lands.
- * Only commands each vendor documents are listed. */
-const fixCommands: Readonly<Record<string, Partial<Record<ExternalAgentRefusalCode, string>>>> = {
-  claude: { CLI_NOT_FOUND: 'npm install -g @anthropic-ai/claude-code', CLI_TOO_OLD: 'claude update' },
+ * Only commands each vendor documents are listed; a pair is one command per
+ * host shell. */
+const fixCommands: Readonly<
+  Record<string, Partial<Record<ExternalAgentRefusalCode, string | Readonly<Record<ExternalAgentHostShell, string>>>>>
+> = {
+  claude: {
+    /* Anthropic's setup page leads with the native installer and lists npm
+     * under advanced options. */
+    CLI_NOT_FOUND: {
+      posix: 'curl -fsSL https://claude.ai/install.sh | bash',
+      windows: 'irm https://claude.ai/install.ps1 | iex',
+    },
+    CLI_TOO_OLD: 'claude update',
+    EXTERNAL_AGENT_AUTH_REQUIRED: 'claude auth login',
+  },
   codex: {
     CLI_NOT_FOUND: 'npm install -g @openai/codex',
     CLI_TOO_OLD: 'npm install -g @openai/codex@latest',
@@ -40,8 +55,15 @@ const fixCommands: Readonly<Record<string, Partial<Record<ExternalAgentRefusalCo
  *
  * @param agentId - The descriptor's agent id.
  * @param refusal - The host's refusal code.
+ * @param shell - The shell the host runs commands in; POSIX unless it is Windows.
  * @returns A copyable command, or `undefined`.
  * @public
  */
-export const externalAgentFixCommand = (agentId: string, refusal: ExternalAgentRefusalCode): string | undefined =>
-  fixCommands[agentId]?.[refusal];
+export const externalAgentFixCommand = (
+  agentId: string,
+  refusal: ExternalAgentRefusalCode,
+  shell: ExternalAgentHostShell = 'posix',
+): string | undefined => {
+  const command = fixCommands[agentId]?.[refusal];
+  return typeof command === 'string' ? command : command?.[shell];
+};

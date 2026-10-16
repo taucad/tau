@@ -1,9 +1,14 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 import {
   classifyCliOutcome,
   expectedCliGaps,
   isNotPreparedRefusal,
   mcpInitializeRequest,
+  vendorPayloads,
 } from '#check-pack-install-cli.js';
 
 describe('classifyCliOutcome', () => {
@@ -46,5 +51,31 @@ describe('mcpInitializeRequest', () => {
   it('should be one newline-terminated JSON-RPC initialize request', () => {
     expect(mcpInitializeRequest.endsWith('\n')).toBe(true);
     expect(JSON.parse(mcpInitializeRequest)).toMatchObject({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+  });
+});
+
+describe('vendorPayloads', () => {
+  it('should find a vendor CLI payload at any depth and nothing else', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tau-vendor-payloads-'));
+    try {
+      for (const directory of [
+        'node_modules/@openai/codex',
+        'node_modules/@taucad/cli/dist-acp/node_modules/x',
+        'node_modules/a/node_modules/@anthropic-ai/claude-agent-sdk',
+        'node_modules/a/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64',
+        'node_modules/@openai/codex/node_modules/@openai/codex-linux-x64',
+      ]) {
+        mkdirSync(join(root, directory), { recursive: true });
+      }
+
+      expect(vendorPayloads(join(root, 'node_modules')).toSorted()).toEqual(
+        [
+          join(root, 'node_modules/@openai/codex/node_modules/@openai/codex-linux-x64'),
+          join(root, 'node_modules/a/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64'),
+        ].toSorted(),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

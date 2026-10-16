@@ -701,9 +701,12 @@ const tauMcpHostErrorCodes = new Set([
 
 type NormalizedTauMcpCall = {
   readonly toolName: keyof typeof tauMcpSchemas;
-  readonly arguments: JsonValue;
+  /** The validated arguments; absent only while Claude is still streaming them. */
+  readonly arguments?: JsonValue;
   readonly outputSchema: JsonSchema;
   readonly grokServerName?: string;
+  /** Claude Code hands back the result as text: `structuredContent` as JSON, or the failure's own text. */
+  readonly claude?: true;
 };
 
 const normalizedTauMcpCall = (
@@ -716,21 +719,38 @@ const normalizedTauMcpCall = (
   const grok = agentId === 'grok' && grokTool?.['name'] === 'use_tool' && grokTool['namespace'] === 'grok_build';
   const qualifiedName = input?.['tool_name'];
   const grokPrefix = `${serverName}__`;
+  /* Claude names an MCP tool `mcp__<server>__<tool>` and passes its arguments as the whole input. */
+  const claudeName = asRecord(asRecord(update._meta)?.['claudeCode'])?.['toolName'];
+  const claudePrefix = `mcp__${serverName}__`;
+  const claude = agentId === 'claude' && typeof claudeName === 'string' && claudeName.startsWith(claudePrefix);
   const name = grok
     ? typeof qualifiedName === 'string' && qualifiedName.startsWith(grokPrefix)
       ? qualifiedName.slice(grokPrefix.length)
       : undefined
-    : input?.['tool'];
+    : claude
+      ? claudeName.slice(claudePrefix.length)
+      : input?.['tool'];
   if (
     serverName === undefined ||
-    (!grok && (input?.['server'] !== serverName || asRecord(update._meta)?.['is_mcp_tool_call'] !== true)) ||
+    (!grok && !claude && (input?.['server'] !== serverName || asRecord(update._meta)?.['is_mcp_tool_call'] !== true)) ||
     typeof name !== 'string' ||
     !Object.hasOwn(tauMcpSchemas, name)
   ) {
     return undefined;
   }
   const schema = tauMcpSchemas[name as keyof typeof tauMcpSchemas];
-  const parsed = schema.input.safeParse(input?.[grok ? 'tool_input' : 'arguments']);
+  const parsed = schema.input.safeParse(grok ? input?.['tool_input'] : claude ? input : input?.['arguments']);
+  if (claude) {
+    /* Claude announces the call before it has streamed the arguments, and a
+     * call's identity cannot change once it is logged, so the name alone
+     * qualifies it; the arguments join once they validate. */
+    return {
+      toolName: name as keyof typeof tauMcpSchemas,
+      ...(parsed.success ? { arguments: asJson(parsed.data) } : {}),
+      outputSchema: schema.output,
+      claude: true,
+    };
+  }
   return parsed.success
     ? {
         toolName: name as keyof typeof tauMcpSchemas,
@@ -783,6 +803,31 @@ const mcpResult = (
           },
         }
       : undefined;
+  }
+  if (tool.claude === true) {
+    /* Claude Code replaces a result's content with its `structuredContent` as
+     * JSON, and a failure keeps its `CODE: message` text. */
+    const blocks: readonly unknown[] | undefined =
+      typeof rawOutput === 'string'
+        ? [{ type: 'text', text: rawOutput }]
+        : Array.isArray(rawOutput)
+          ? rawOutput
+          : undefined;
+    const text = (blocks ?? [])
+      .flatMap((block) => {
+        const value = asRecord(block)?.['text'];
+        return typeof value === 'string' ? [value] : [];
+      })
+      .join('\n');
+    let structuredContent: unknown;
+    if (!failed && text !== '') {
+      try {
+        structuredContent = JSON.parse(text);
+      } catch {
+        /* Not JSON: refused by the output schema below. */
+      }
+    }
+    envelope = blocks === undefined ? undefined : { result: { structuredContent, content: blocks, isError: failed } };
   }
   if (!envelope) {
     return {

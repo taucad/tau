@@ -18,7 +18,7 @@ Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher
 
 ## Installation
 
-The plugin needs Node.js 24 or later and the Tau CLI. Tau's pre-1.0 releases are published under the `beta` tag:
+The plugin needs Node.js 24 or later, with the npm 11 it bundles, and the Tau CLI; npm 10 fails to resolve the CLI's dependency graph. Tau's pre-1.0 releases are published under the `beta` tag:
 
 ```bash
 npm install -g @taucad/cli@beta

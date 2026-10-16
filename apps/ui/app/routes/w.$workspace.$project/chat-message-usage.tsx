@@ -73,6 +73,7 @@ export function ChatMessageUsage({
   turns,
   credits,
   reference,
+  vendorReports = [],
 }: {
   readonly model: ResolvedModel;
   /** Display name of the external agent that produced the turn, if any. */
@@ -82,6 +83,7 @@ export function ChatMessageUsage({
   /** Credit summary line; omitted entirely on self-host or when the user hides costs. */
   readonly credits?: string | undefined;
   readonly reference?: string | undefined;
+  readonly vendorReports?: ReadonlyArray<NonNullable<UsageData['vendorReport']>> | undefined;
 }): React.JSX.Element {
   const tokens = formatNumberAbbreviation(totalOf(totals));
   const modelLabel = agent === undefined ? model.name : `${agent} · ${model.name}`;
@@ -95,6 +97,30 @@ export function ChatMessageUsage({
   const rows: Array<[string, string]> = [['Tokens', tokens]];
   if (credits !== undefined) {
     rows.push(['Credits', credits]);
+  }
+  if (agent !== undefined && vendorReports.length > 0) {
+    const complete =
+      vendorReports.length === turns &&
+      vendorReports.every(
+        (report) =>
+          report.costUsdTicks !== undefined && report.costIsPartial !== true && report.usageIsIncomplete !== true,
+      );
+    const ticks = vendorReports.reduce((sum, report) => sum + (report.costUsdTicks ?? 0), 0);
+    rows.push([
+      'Grok-reported cost',
+      complete && Number.isSafeInteger(ticks)
+        ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 10 }).format(
+            ticks / 10_000_000_000,
+          )
+        : 'Unavailable or partial',
+    ]);
+    if (vendorReports.some((report) => report.usageIsIncomplete === true)) {
+      rows.push(['Usage report', 'Incomplete']);
+    }
+    const calls = vendorReports.flatMap((report) => (report.modelCalls === undefined ? [] : [report.modelCalls]));
+    if (calls.length > 0) {
+      rows.push(['Reported model calls', String(calls.reduce((sum, value) => sum + value, 0))]);
+    }
   }
   if (turns > 1) {
     rows.push(['Turns', String(turns)]);

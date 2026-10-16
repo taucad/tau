@@ -32,7 +32,8 @@ import { isQuickLookEnabled } from '#shared/quick-look.js';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
-import { copyGeoSpecEngine, copyGeoSpecSourceRelink, copyTree } from './runtime-closure.mjs';
+import { copyTree } from '@taucad/nx/runtime-closure';
+import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
 import {
   desktopManifestFields,
   desktopPackageChannel,

@@ -7,10 +7,28 @@
   "targets": {
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "stage-acp"],
       "options": {
         "command": "tsdown",
         "cwd": "{projectRoot}"
+      }
+    },
+    "stage-acp": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "metadata": {
+        "description": "Stage the pinned ACP adapters and their runtime closure into dist-acp, without the vendor binaries their optional dependencies install, as the desktop app stages them."
+      },
+      "inputs": [
+        "{projectRoot}/scripts/stage-acp-adapters.mts",
+        "{workspaceRoot}/tools/nx/src/runtime-closure.ts",
+        "{workspaceRoot}/packages/host/src/acp/registry.ts",
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/tools/pnpm/patches/**/*"
+      ],
+      "outputs": ["{projectRoot}/dist-acp"],
+      "options": {
+        "command": "node --import @oxc-node/core/register packages/cli/scripts/stage-acp-adapters.mts"
       }
     },
     "dev-host": {

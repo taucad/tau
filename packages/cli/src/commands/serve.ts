@@ -1,4 +1,4 @@
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -247,14 +247,38 @@ const agentOptions = (args: {
     /* On by default and self-limiting: an adapter that is not installed, or a
      * CLI that is not on PATH, is simply not advertised. `--no-external-agents`
      * is the operator's off switch, not a prerequisite. Resolution is anchored
-     * on *this* module because the adapters are the distributed daemon's own
-     * dependencies, never a PATH lookup (OQ-X1). */
-    ...(args.externalAgents === false ? {} : { externalAgents: { resolveFrom: import.meta.url } }),
+     * on the package's own staged adapters, never a PATH lookup (OQ-X1). */
+    ...(args.externalAgents === false ? {} : { externalAgents: { resolveFrom: acpAdapterResolveFrom() } }),
     /* On by default, exactly as before, but as this host's own decision: the
      * daemon still offers `test_model` only where the GeoSpec engine resolves,
      * and `--no-test-model` withholds it from one that has it. */
     testModel: args.testModel !== false,
   };
+};
+
+/**
+ * Where `tau serve` resolves the pinned ACP adapters from.
+ *
+ * The package build stages them in `dist-acp` beside `dist`, without the vendor
+ * binaries their optional dependencies would install, so a published CLI
+ * resolves them there. A workspace checkout that has not built falls back to
+ * this module, where the adapters are devDependencies.
+ *
+ * @param from - Module URL to start from; this module's own by default.
+ * @returns The URL `resolveAcpAdapters` resolves from.
+ * @internal
+ */
+export const acpAdapterResolveFrom = (from: string = import.meta.url): string => {
+  for (let directory = dirname(fileURLToPath(from)); ; directory = dirname(directory)) {
+    const staged = join(directory, 'dist-acp', 'package.json');
+    if (existsSync(staged)) {
+      return pathToFileURL(staged).href;
+    }
+    /* The package root is the first directory with a manifest; `dist` has none. */
+    if (existsSync(join(directory, 'package.json')) || dirname(directory) === directory) {
+      return from;
+    }
+  }
 };
 
 /**

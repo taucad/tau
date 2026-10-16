@@ -20,6 +20,22 @@ const optionMetadataSchema = z.object({
   defaults: z.record(z.string(), z.json()),
 });
 
+const count = z.number().int().nonnegative();
+
+/** @public */
+export const tessellationReportSchema = z
+  .object({
+    triangles: count,
+    vertices: count,
+    elapsed: z.number().nonnegative(),
+    voxelSize: z.number().positive().optional(),
+    activeVoxels: count.optional(),
+    memoryBytes: count.optional(),
+  })
+  .describe(
+    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes.',
+  );
+
 /** @public */
 export const evaluateModelOutputSchema = z.object({
   status: z.enum(['ready', 'error']).describe('The current status of the model evaluation and default view.'),
@@ -28,6 +44,7 @@ export const evaluateModelOutputSchema = z.object({
   views: z.array(z.string()).optional().describe('Offered view IDs, default first; present when ready.'),
   instances: z.record(z.string(), z.array(z.object({ id: z.string(), title: z.string() }).strict())).optional(),
   exports: z.record(z.string(), z.string()).optional().describe('Export ID to extension; present when ready.'),
+  tessellation: tessellationReportSchema.optional(),
   capabilities: z
     .object({
       views: z.record(z.string(), optionMetadataSchema),

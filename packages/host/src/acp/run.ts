@@ -707,11 +707,14 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           code: 'EXTERNAL_AGENT_UNAVAILABLE',
         });
       }
+      /* A vendor session and its permission selections belong to the admitted host. */
+      const hostId = typeof turn.agent['hostId'] === 'string' ? turn.agent['hostId'] : undefined;
+      const ownedState = hostId === undefined || turn.state?.['hostId'] === hostId ? turn.state : undefined;
       /* This turn's own selection first, then what the chat's record remembered.
        * Neither: the adapter runs its own current model (V5 deleted the pin's
        * hard-coded default, so Tau never names a model the user did not pick). */
       const model =
-        (typeof turn.agent['model'] === 'string' ? turn.agent['model'] : undefined) ?? stringField(turn.state, 'model');
+        (typeof turn.agent['model'] === 'string' ? turn.agent['model'] : undefined) ?? stringField(ownedState, 'model');
       /* V19: direct mode is the workspace root, candidate mode the checkout the
        * host materialized for *this* run. The mode is read off the host's own
        * record of the prepared turn, never off what the agent claims. */
@@ -722,9 +725,9 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       /* A record naming a directory this turn does not run in — a pre-V2 per-run
        * copy, or the previous turn's candidate checkout — names a vendor session
        * about files this one cannot see; it starts fresh instead (r1 risk 7). */
-      const rememberedCwd = stringField(turn.state, 'cwd');
+      const rememberedCwd = stringField(ownedState, 'cwd');
       const cwdMoved = rememberedCwd !== undefined && rememberedCwd !== cwd;
-      const acpSessionId = cwdMoved ? undefined : stringField(turn.state, 'acpSessionId');
+      const acpSessionId = cwdMoved ? undefined : stringField(ownedState, 'acpSessionId');
       if (turn.message === undefined && acpSessionId === undefined) {
         throw Object.assign(new Error('The stopped agent session is unavailable. Try the turn again.'), {
           code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
@@ -738,8 +741,8 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       const materialized = await materializedTurn(turn);
       const selectedConfig = isRecord(turn.agent['config'])
         ? turn.agent['config']
-        : isRecord(turn.state?.['config'])
-          ? turn.state['config']
+        : isRecord(ownedState?.['config'])
+          ? ownedState['config']
           : undefined;
       const configuration = selectedConfig
         ? Object.fromEntries(
@@ -750,19 +753,21 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           )
         : undefined;
       const sessionMessageId = committedSessionMessageId(turn);
-      const priorUsage = acpSessionId === undefined ? undefined : usageField(turn.state);
-      const limit = limitField(turn.state);
+      const priorUsage = acpSessionId === undefined ? undefined : usageField(ownedState);
+      const limit = limitField(ownedState);
       /* M1 opens attempt n+1 on every reopening, so one live turn per request id (W7 RA-S14). */
       const requestId = `${turn.runId}:${String(turn.attempt)}`;
       const acquire: AcpAcquire = {
         requestId,
-        key: `${turn.agentId}:${turn.chatId}`,
+        key:
+          hostId === undefined ? `${turn.agentId}:${turn.chatId}` : JSON.stringify([hostId, turn.agentId, turn.chatId]),
         chatId: turn.chatId,
         cwd,
         at: now(),
         ...(capability === undefined ? {} : { capabilityExpiresAt: Date.parse(capability.expiresAt) }),
         opening: {
           adapter,
+          ...(hostId === undefined ? {} : { hostId }),
           cwd,
           mcpServers,
           ...(acpSessionId === undefined ? {} : { acpSessionId }),
@@ -789,7 +794,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
               promptBlocksOf(materialized, false) ??
               (stopRecorded(turn) ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock] : undefined),
           },
-          ...(turn.state === undefined ? {} : { record: turn.state }),
+          ...(ownedState === undefined ? {} : { record: ownedState }),
         },
       };
       const outcome = new Promise<AcpTurnResult>((resolve) => {

@@ -18,7 +18,7 @@ Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher
 
 ## Installation
 
-The plugin needs Node.js 24 or later and the Tau CLI. Tau's pre-1.0 releases are published under the `beta` tag:
+The plugin needs Node.js 24 or later, with the npm 11 it bundles, and the Tau CLI; npm 10 fails to resolve the CLI's dependency graph. Tau's pre-1.0 releases are published under the `beta` tag:
 
 ```bash
 npm install -g @taucad/cli@beta
@@ -29,16 +29,16 @@ Without a `tau` on `PATH`, the plugin runs `npx --yes --package=@taucad/cli@<thi
 ### Claude Code
 
 ```bash
-claude plugin marketplace add taucad/tau
+claude plugin marketplace add taucad/marketplace
 claude plugin install tau@taucad
 ```
 
-Claude Code 2.1.275 or later does both in one step: `claude plugin install tau --marketplace taucad/tau`, or `/plugin install tau --marketplace taucad/tau` inside a session. Add `--scope project` to record the plugin in the current project's settings rather than yours. The install is a copy under `~/.claude/plugins/cache/taucad/tau/<version>/`; `claude plugin update tau@taucad` refreshes it, and the next session runs it.
+Claude Code 2.1.275 or later does both in one step: `claude plugin install tau --marketplace taucad/marketplace`, or `/plugin install tau --marketplace taucad/marketplace` inside a session. Add `--scope project` to record the plugin in the current project's settings rather than yours. The install is a copy under `~/.claude/plugins/cache/taucad/tau/<version>/`; `claude plugin update tau@taucad` refreshes it, and the next session runs it.
 
 ### Codex
 
 ```bash
-codex plugin marketplace add taucad/tau
+codex plugin marketplace add taucad/marketplace
 codex plugin add tau@taucad
 ```
 
@@ -62,7 +62,7 @@ There are no peer dependencies.
 
 ```bash
 npm install -g @taucad/cli@beta
-claude plugin install tau --marketplace taucad/tau
+claude plugin install tau --marketplace taucad/marketplace
 mkdir bracket && cd bracket
 claude "Model a 40 mm wall bracket with two M4 screw holes in replicad. Write GeoSpec tests for its size and holes, make them pass, and show me a screenshot."
 ```

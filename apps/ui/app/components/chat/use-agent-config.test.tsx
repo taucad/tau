@@ -7,7 +7,7 @@ import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 const execution: { current: ChatComposerContextValue['execution']['execution'] } = {
   current: { kind: 'acp', hostId: 'origin', agentId: 'codex' },
 };
-const setActiveExecution = vi.fn();
+const setActiveExecution = vi.fn<ChatComposerContextValue['execution']['setActiveExecution']>();
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ execution: { execution: execution.current, setActiveExecution } }),
@@ -31,6 +31,7 @@ const session = (
   type: 'acp-session',
   id: 'state',
   agentId: 'codex',
+  hostId: 'origin',
   commands: [],
   configOptions,
   ...overrides,
@@ -39,14 +40,11 @@ const session = (
 const renderConfig = (initial: {
   sessionData: AcpSessionData | undefined;
   status: string;
-  discoveredThoughtLevel?: AcpSessionData['configOptions'][number];
+  discoveredOptions?: AcpSessionData['configOptions'];
 }) =>
-  renderHook(
-    ({ sessionData, status, discoveredThoughtLevel }) => useAgentConfig(sessionData, status, discoveredThoughtLevel),
-    {
-      initialProps: initial,
-    },
-  );
+  renderHook(({ sessionData, status, discoveredOptions }) => useAgentConfig(sessionData, status, discoveredOptions), {
+    initialProps: initial,
+  });
 
 const thoughtValue = (config: ReturnType<typeof useAgentConfig>): string | boolean | undefined => {
   const option = configOptionOf(config, 'thought_level');
@@ -84,8 +82,8 @@ describe('useAgentConfig', () => {
   });
 
   it('offers the discovered reasoning before a session, then reads the live session', () => {
-    const discoveredThoughtLevel = thinking('medium');
-    const view = renderConfig({ sessionData: undefined, status: 'ready', discoveredThoughtLevel });
+    const discoveredOptions = [thinking('medium')];
+    const view = renderConfig({ sessionData: undefined, status: 'ready', discoveredOptions });
     expect(thoughtValue(view.result.current)).toBe('medium');
     act(() => {
       view.result.current.select('thought_level', 'high');
@@ -99,18 +97,151 @@ describe('useAgentConfig', () => {
     });
     // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP option IDs retain the provider's wire spelling.
     execution.current = { kind: 'acp', hostId: 'origin', agentId: 'codex', config: { thought_level: 'high' } };
-    view.rerender({ sessionData: undefined, status: 'ready', discoveredThoughtLevel });
+    view.rerender({ sessionData: undefined, status: 'ready', discoveredOptions });
     expect(thoughtValue(view.result.current)).toBe('high');
     view.rerender({
       sessionData: session([thinking('medium', ['medium', 'high', 'max'])]),
       status: 'ready',
-      discoveredThoughtLevel,
+      discoveredOptions,
     });
     expect(view.result.current.options).toEqual([thinking('medium', ['medium', 'high', 'max'])]);
     expect(thoughtValue(view.result.current)).toBe('high');
-    view.rerender({ sessionData: session([thinking('medium')]), status: 'submitted', discoveredThoughtLevel });
-    view.rerender({ sessionData: session([thinking('medium')]), status: 'ready', discoveredThoughtLevel });
+    view.rerender({ sessionData: session([thinking('medium')]), status: 'submitted', discoveredOptions });
+    view.rerender({ sessionData: session([thinking('medium')]), status: 'ready', discoveredOptions });
     expect(thoughtValue(view.result.current)).toBe('medium');
+  });
+
+  it('should store pre-session permissions in an immutable execution choice and prefer later session controls', () => {
+    execution.current = { kind: 'acp', hostId: 'origin', agentId: 'grok' };
+    const permissions: AcpSessionData['configOptions'][number] = {
+      type: 'select',
+      id: 'tau.grok.permissions',
+      category: 'mode',
+      name: 'Permissions',
+      currentValue: 'ask',
+      options: [
+        { value: 'ask', name: 'Ask' },
+        { value: 'always-approve', name: 'Always approve' },
+      ],
+    };
+    const discoveredOptions = [permissions, thinking('medium')];
+    const view = renderConfig({ sessionData: undefined, status: 'ready', discoveredOptions });
+    expect(view.result.current.options).toEqual(discoveredOptions);
+    act(() => {
+      view.result.current.select(permissions.id, 'always-approve');
+    });
+    const selected: unknown = setActiveExecution.mock.lastCall?.[0];
+    expect(selected).toEqual({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'grok',
+      config: { 'tau.grok.permissions': 'always-approve' },
+    });
+    act(() => {
+      view.result.current.select(permissions.id, 'ask');
+    });
+    expect(selected).toEqual({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'grok',
+      config: { 'tau.grok.permissions': 'always-approve' },
+    });
+    view.rerender({ sessionData: session([], { agentId: 'grok' }), status: 'ready', discoveredOptions });
+    expect(view.result.current.options).toEqual([]);
+  });
+
+  it.each([
+    { hostId: 'origin', agentId: 'codex', model: 'model-a' },
+    { hostId: 'other-host', agentId: 'grok', model: 'model-a' },
+    { hostId: 'origin', agentId: 'grok', model: 'model-b' },
+  ])('should discard pending choices and stale callbacks when execution changes to $hostId/$agentId/$model', (next) => {
+    execution.current = { kind: 'acp', hostId: 'origin', agentId: 'grok', model: 'model-a' };
+    const view = renderConfig({ sessionData: undefined, status: 'ready', discoveredOptions: [thinking('medium')] });
+    const oldSelect = view.result.current.select;
+    act(() => {
+      oldSelect('tau.grok.permissions', 'always-approve');
+    });
+    execution.current = { kind: 'acp', ...next };
+    view.rerender({ sessionData: undefined, status: 'ready', discoveredOptions: [thinking('medium')] });
+    setActiveExecution.mockClear();
+    act(() => {
+      oldSelect('tau.grok.permissions', 'always-approve');
+    });
+    expect(setActiveExecution).not.toHaveBeenCalled();
+    const current = session([thinking('medium')], { agentId: next.agentId, hostId: next.hostId });
+    view.rerender({ sessionData: undefined, status: 'submitted', discoveredOptions: [thinking('medium')] });
+    view.rerender({ sessionData: current, status: 'ready', discoveredOptions: [thinking('medium')] });
+    expect(
+      setActiveExecution.mock.calls.some(
+        ([choice]) => choice.kind === 'acp' && Object.hasOwn(choice.config ?? {}, 'tau.grok.permissions'),
+      ),
+    ).toBe(false);
+  });
+
+  it.each(['other-host', undefined])(
+    'should ignore another or unknown session host %s even for the same agent',
+    (hostId) => {
+      execution.current = { kind: 'acp', hostId: 'origin', agentId: 'grok' };
+      const permissions: AcpSessionData['configOptions'][number] = {
+        type: 'select',
+        id: 'tau.grok.permissions',
+        name: 'Permissions',
+        category: 'mode',
+        currentValue: 'ask',
+        options: [
+          { value: 'ask', name: 'Ask' },
+          { value: 'always-approve', name: 'Always approve' },
+        ],
+      };
+      const foreign = session([{ ...permissions, currentValue: 'always-approve' }], { agentId: 'grok', hostId });
+      const view = renderConfig({ sessionData: foreign, status: 'ready', discoveredOptions: [permissions] });
+      expect(view.result.current.options).toEqual([permissions]);
+      expect(view.result.current.valueOf(permissions)).toBe('ask');
+      expect(setActiveExecution).not.toHaveBeenCalled();
+      view.rerender({ sessionData: foreign, status: 'submitted', discoveredOptions: [permissions] });
+      view.rerender({ sessionData: foreign, status: 'ready', discoveredOptions: [permissions] });
+      expect(setActiveExecution).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should use selected model reasoning while keeping the same session general controls', () => {
+    execution.current = { kind: 'acp', hostId: 'origin', agentId: 'codex', model: 'model-b' };
+    const mode: AcpSessionData['configOptions'][number] = {
+      type: 'select',
+      id: 'mode',
+      name: 'Permissions',
+      category: 'mode',
+      currentValue: 'ask',
+      options: [{ value: 'ask', name: 'Ask' }],
+    };
+    const model: AcpSessionData['configOptions'][number] = {
+      type: 'select',
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      currentValue: 'model-a',
+      options: [
+        { value: 'model-a', name: 'Model A' },
+        { value: 'model-b', name: 'Model B' },
+      ],
+    };
+    const view = renderConfig({
+      sessionData: session([mode, model, thinking('high')]),
+      status: 'ready',
+      discoveredOptions: [thinking('low', ['low', 'medium'])],
+    });
+    expect(configOptionOf(view.result.current, 'mode')).toEqual(mode);
+    expect(thoughtValue(view.result.current)).toBe('low');
+    act(() => {
+      view.result.current.select('thought_level', 'medium');
+    });
+    expect(setActiveExecution).toHaveBeenLastCalledWith({
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      model: 'model-b',
+      config: Object.fromEntries([['thought_level', 'medium']]),
+    });
   });
 
   it('shows the agent-confirmed value instead of a stale requested one', () => {

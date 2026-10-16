@@ -1306,8 +1306,8 @@ describe('picovoxel kernel', () => {
       const { result } = await evaluate({ module: sphereMinusBeam });
 
       expect(result.handle.shapes).toHaveLength(1);
-      // Two createVoxels calls, equals, subtract, then the kernel's toMesh.
-      expect(abort.checks).toBe(5);
+      // Two createVoxels calls, equals, subtract, then the kernel's toMesh and its active-voxel count.
+      expect(abort.checks).toBe(6);
     });
 
     it('should stop a superseded build at its next call, free the session, and build cleanly next time', async () => {
@@ -1359,7 +1359,8 @@ describe('picovoxel kernel', () => {
 
       expect(result.handle.shapes).toHaveLength(1);
       expect(sessions.author[0]!.options).toEqual({ memoryWarningBytes: 0, voxelSize: 1 });
-      expect(abort.checks).toBe(2);
+      // One createVoxels call, then the kernel's toMesh and its active-voxel count.
+      expect(abort.checks).toBe(3);
       expect(() => own!.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
       expect(context.authorResources.size).toBe(0);
     });
@@ -1382,7 +1383,8 @@ describe('picovoxel kernel', () => {
 
       await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
 
-      expect(abort.checks).toBe(2);
+      // One createVoxels call, then the kernel's toMesh and its active-voxel count.
+      expect(abort.checks).toBe(3);
       await expect(ownRuntime!.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
     });
   });
@@ -1621,6 +1623,71 @@ describe('picovoxel kernel', () => {
       );
 
       await expect(refused).rejects.toMatchObject({ issues: [{ code: 'KERNEL_CAPABILITY_MISSING' }] });
+    });
+  });
+
+  describe('cost reporting', () => {
+    it('reports triangles, vertices, meshing time and the grid with a rendered voxel field', async () => {
+      const { runtime, context, result } = await evaluate({ module: sphere(), parameters: { voxelSize: 1 } });
+      try {
+        const rendered = await definition.render!(
+          { handle: result.handle, view: 'model', options: {} },
+          runtime,
+          context,
+        );
+        const [shape] = result.handle.shapes;
+        expect(rendered.tessellation).toEqual({
+          triangles: shape!.triangles.length / 3,
+          vertices: shape!.vertices.length / 3,
+          elapsed: expect.any(Number) as number,
+          voxelSize: 1,
+          activeVoxels: expect.any(Number) as number,
+          memoryBytes: expect.any(Number) as number,
+        });
+        expect(rendered.tessellation!.triangles).toBeGreaterThan(0);
+        expect(rendered.tessellation!.elapsed).toBeGreaterThanOrEqual(0);
+        expect(rendered.tessellation!.activeVoxels).toBeGreaterThan(0);
+        expect(rendered.tessellation!.memoryBytes).toBeGreaterThan(0);
+      } finally {
+        await definition.onDispose!(context);
+      }
+    });
+
+    it('reports an authored mesh without voxel figures it does not have', async () => {
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+      try {
+        const rendered = await definition.render!(
+          { handle: result.handle, view: 'model', options: {} },
+          runtime,
+          context,
+        );
+        expect(rendered.tessellation).toEqual({
+          triangles: 12,
+          vertices: 8,
+          elapsed: expect.any(Number) as number,
+          voxelSize: 0.5,
+        });
+      } finally {
+        await definition.onDispose!(context);
+      }
+    });
+
+    it('keeps the report through a handle snapshot and refuses a malformed one', async () => {
+      const { runtime, context, result } = await evaluate({ module: sphere() });
+      try {
+        const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+        const fresh = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+        expect(fresh.tessellation).toEqual(result.handle.tessellation);
+        expect(() =>
+          definition.deserializeHandle!(
+            { serialized: { ...snapshot, tessellation: { ...snapshot.tessellation!, triangles: -1 } } },
+            runtime,
+            context,
+          ),
+        ).toThrow('tessellation: triangles must be a nonnegative number');
+      } finally {
+        await definition.onDispose!(context);
+      }
     });
   });
 

@@ -656,6 +656,31 @@ describe('ChatMessage agent media', () => {
 });
 
 describe('ChatMessage ACP session state', () => {
+  it('should show ACP retries and delegated work without requiring a plan', () => {
+    const message: MyUIMessage = {
+      id: 'msg-acp-progress',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-activity',
+          data: {
+            type: 'acp-activity',
+            id: 'progress-1',
+            agentId: 'grok',
+            activity: { kind: 'retry', status: 'running', label: 'Retrying' },
+            subagents: [{ id: 'child-1', description: 'Check cube dimensions', status: 'running' }],
+            servedModel: 'grok-4.7',
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+    render(<ChatMessage messageId='msg-acp-progress' />);
+    expect(screen.getByRole('status', { name: 'Agent activity' })).toHaveTextContent('Retrying');
+    expect(screen.getByRole('button', { name: /Check cube dimensions/u })).toHaveTextContent('Working');
+    expect(screen.getByText(/Model used: grok-4.7/u)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Agent plan' })).not.toBeInTheDocument();
+  });
   it('renders the current ACP plan as one read-only plan surface', () => {
     const message: MyUIMessage = {
       id: 'msg-acp-plan',

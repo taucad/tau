@@ -104,6 +104,7 @@ const codexSession: AcpSessionData = {
   type: 'acp-session',
   id: 'state',
   agentId: 'codex',
+  hostId: 'desktop',
   commands: [],
   configOptions: [
     {
@@ -235,6 +236,50 @@ describe('ChatTextareaBar', () => {
       hostId: 'desktop',
       agentId: 'codex',
       config: { mode: 'agent' },
+    });
+  });
+
+  it('should offer discovered Grok permissions before the first turn and store the selected execution', async () => {
+    // JSDOM omits the browser scrolling primitive used by the real command menu.
+    globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'grok' };
+    placements.current = [
+      {
+        hostId: 'desktop',
+        rung: 'in-process',
+        label: 'This Mac',
+        workspaceRoot: '',
+        online: true,
+        externalAgents: [
+          {
+            id: 'grok',
+            displayName: 'Grok Build',
+            models: [],
+            configOptions: [
+              {
+                type: 'select',
+                id: 'tau.grok.permissions',
+                category: 'mode',
+                name: 'Permissions',
+                currentValue: 'ask',
+                options: [
+                  { value: 'ask', name: 'Ask' },
+                  { value: 'always-approve', name: 'Always approve' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    renderBar();
+    await userEvent.click(screen.getByRole('button', { name: 'Mode: Ask' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Always approve' }));
+    expect(setActiveExecution).toHaveBeenLastCalledWith({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'grok',
+      config: { 'tau.grok.permissions': 'always-approve' },
     });
   });
 

@@ -16,7 +16,9 @@ Library.Go(1.0f, () =>
 });
 ```
 
-Tau captures the final scene as mesh topology, not precise BRep. Smaller voxels raise memory and runtime cost sharply. Use project-relative assets.
+Tau captures the final scene as mesh topology, not precise BRep. Use project-relative assets.
+
+Choose a voxel size h of about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds. Iterate with per-call `parameters`, e.g. `{ "VoxelSizeMm": 1.5 }` on `evaluate_model`, `screenshot` or `export_model` (see Interactive parameters); they are never saved. Stay coarse while iterating and export at the author's value. Tau never changes the voxel size itself; edit the source value only when the author asks.
 
 ## Materials
 

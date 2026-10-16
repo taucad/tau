@@ -28,6 +28,51 @@ beforeEach(() => {
 });
 describe('compact permission requests', () => {
   it.each([
+    { optionId: 'always-allow', kind: 'allow_always', name: 'always allow', label: 'Always allow', allowed: true },
+    { optionId: 'allow-once', kind: 'allow_once', name: 'allow once', label: 'Allow once', allowed: true },
+    { optionId: 'reject-once', kind: 'reject_once', name: 'reject once', label: 'Deny', allowed: false },
+  ] as const)(
+    'should label Grok $optionId clearly without changing its decision',
+    async ({ optionId, kind, name, label, allowed }) => {
+      const respond = vi.fn(async () => undefined);
+      render(
+        <ChatPermissionRequest
+          approval={{ ...approval, agentId: 'grok', options: [{ optionId, kind, name }] }}
+          name='Grok Build'
+          onRespond={respond}
+        />,
+      );
+      const user = userEvent.setup();
+      const button = screen.getByRole('button', { name: label });
+      button.focus();
+      await user.keyboard('{Enter}');
+      expect(respond).toHaveBeenCalledExactlyOnceWith(allowed, optionId);
+      expect(button).toBeDisabled();
+    },
+  );
+  it('should preserve scoped and other agents’ permission labels', () => {
+    const request = {
+      ...approval,
+      agentId: 'grok',
+      options: [{ optionId: 'always-allow', kind: 'allow_always', name: 'Allow this tool for this project' }],
+    };
+    const respond = vi.fn(async () => undefined);
+    const { rerender } = render(<ChatPermissionRequest approval={request} name='Grok Build' onRespond={respond} />);
+    expect(screen.getByRole('button', { name: 'Allow this tool for this project' })).toBeInTheDocument();
+    rerender(
+      <ChatPermissionRequest
+        approval={{
+          ...request,
+          agentId: 'codex',
+          options: [{ optionId: 'allow-once', kind: 'allow_once', name: 'allow once' }],
+        }}
+        name='Codex'
+        onRespond={respond}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'allow once' })).toBeInTheDocument();
+  });
+  it.each([
     ['tau__evaluate_model', 'Render model'],
     ['tau__test_model', 'Run tests'],
     ['mcp__tau__screenshot', 'Capture screenshots'],

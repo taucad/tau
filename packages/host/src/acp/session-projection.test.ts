@@ -38,7 +38,7 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   signal: new AbortController().signal,
 });
 
-it.each(['grok', 'codex'])('should project every additional Tau MCP capability for %s', async (agentId) => {
+it.each(['grok', 'codex', 'claude'])('should project every additional Tau MCP capability for %s', async (agentId) => {
   const cases = [
     ['get_parameters', { targetFile: 'main.py' }, { status: 'unresolved', diagnostics: [] }],
     [
@@ -78,11 +78,15 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
           rawInput:
             agentId === 'grok'
               ? { tool_name: `tau__${name}`, tool_input: input }
-              : { server: 'tau', tool: name, arguments: input },
+              : agentId === 'claude'
+                ? input
+                : { server: 'tau', tool: name, arguments: input },
           _meta:
             agentId === 'grok'
               ? { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } }
-              : { is_mcp_tool_call: true },
+              : agentId === 'claude'
+                ? { claudeCode: { toolName: `mcp__tau__${name}` } }
+                : { is_mcp_tool_call: true },
         },
         {
           sessionUpdate: 'tool_call_update',
@@ -91,7 +95,9 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
           rawOutput:
             agentId === 'grok'
               ? { type: 'MCP', tool_name: name, server_name: 'tau', output: { OkayOutput: JSON.stringify(carrier) } }
-              : { result: { structuredContent: carrier, content: [] } },
+              : agentId === 'claude'
+                ? JSON.stringify(carrier)
+                : { result: { structuredContent: carrier, content: [] } },
         },
       ],
       agentId,
@@ -106,6 +112,100 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
     });
     expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: name, content: output, isError: false });
   }
+});
+
+it('should name a streamed Claude MCP call as Tau’s tool before its arguments arrive', async () => {
+  /* Captured from claude-agent-acp 0.70.0 (W7 live run): the call is announced
+   * with `{}`, refined with its arguments, and its result is the
+   * `structuredContent` JSON Claude Code hands its model. */
+  const meta = { claudeCode: { toolName: 'mcp__tau__evaluate_model' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-mcp',
+        title: 'mcp__tau__evaluate_model',
+        rawInput: {},
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp',
+        status: 'pending',
+        rawInput: { targetFile: 'main.py' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp',
+        status: 'completed',
+        rawOutput: JSON.stringify({ status: 'ready' }),
+        _meta: meta,
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[0]).toMatchObject({
+    role: 'tool-input',
+    toolName: 'evaluate_model',
+    content: { targetFile: 'main.py' },
+    metadata: { tauInternal: { presentation: 'tau-mcp' } },
+  });
+  expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: 'evaluate_model', isError: false });
+});
+
+it('should keep a Claude MCP failure’s Tau error code', async () => {
+  const meta = { claudeCode: { toolName: 'mcp__tau__evaluate_model' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-mcp-failed',
+        title: 'mcp__tau__evaluate_model',
+        rawInput: { targetFile: 'main.py' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp-failed',
+        status: 'failed',
+        rawOutput: [{ type: 'text', text: 'TOOL_NOT_ALLOWED: evaluate_model is not allowed in this run.' }],
+        _meta: meta,
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'evaluate_model',
+    content: { errorCode: 'TOOL_NOT_ALLOWED', message: 'evaluate_model is not allowed in this run.' },
+    isError: true,
+  });
+});
+
+it('should leave a Claude tool from another MCP server as Claude named it', async () => {
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-other',
+        title: 'mcp__other__evaluate_model',
+        rawInput: { targetFile: 'main.py' },
+        _meta: { claudeCode: { toolName: 'mcp__other__evaluate_model' } },
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[0]).toMatchObject({ role: 'tool-input', toolName: 'mcp__other__evaluate_model' });
 });
 
 it('should normalize a qualified Grok MCP call and its JSON output', async () => {
@@ -1859,6 +1959,130 @@ it('should retain a completed-only summary without losing earlier transcript sec
   ]);
 });
 
+it('should durably retain Grok activity, child outcomes and served model without changing selection', async () => {
+  const events: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({
+    turn: stubTurn(events),
+    agentId: 'grok',
+    requestId: 'turn-1',
+    createId: randomUUID,
+  });
+  projection.sessionState({
+    sessionId: 'session-1',
+    commands: [],
+    configOptions: [{ id: 'model', currentValue: 'selected-model' }],
+  });
+  projection.grokNotification({ sessionId: 'other', update: { sessionUpdate: 'served_model', display_name: 'wrong' } });
+  projection.grokNotification({
+    sessionId: 'session-1',
+    _meta: { promptId: 'old' },
+    update: { sessionUpdate: 'served_model', display_name: 'stale' },
+  });
+  projection.grokNotification({
+    sessionId: 'session-1',
+    _meta: { promptId: 'turn-1' },
+    update: { sessionUpdate: 'served_model', display_name: 'Actual Grok' },
+  });
+  projection.grokNotification({
+    sessionId: 'session-1',
+    _meta: { promptId: 'turn-1' },
+    update: {
+      sessionUpdate: 'subagent_spawned',
+      subagent_id: 'worker',
+      child_session_id: 'child',
+      parent_session_id: 'session-1',
+      parent_prompt_id: 'turn-1',
+      subagent_type: 'explore',
+      description: 'Inspect fixtures',
+      attempt_id: 'attempt-1',
+    },
+  });
+  projection.grokNotification({
+    sessionId: 'session-1',
+    update: {
+      sessionUpdate: 'auto_compact_started',
+      tokens_used: 80,
+      context_window: 100,
+      percentage: 80,
+      reason: 'Window full',
+    },
+  });
+  projection.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done' } });
+  projection.report({
+    model: 'selected-model',
+    grokUsage: {
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      costUsdTicks: 0,
+      costIsPartial: false,
+      usageIsIncomplete: false,
+    },
+  });
+  await projection.flush();
+  const messages = events.flatMap((event) =>
+    event.type === 'message.appended'
+      ? [event.message]
+      : event.type === 'message.envelope-replaced'
+        ? [event.replacement]
+        : [],
+  );
+  const last = messages.at(-1);
+  expect(last?.metadata?.responseModel).toBe('Actual Grok');
+  expect(last?.metadata?.tauInternal?.['vendorCost']).toEqual({
+    amount: 0,
+    currency: 'USD',
+    reportedBy: 'grok',
+    costUsdTicks: 0,
+  });
+  const presentation = messages.findLast((message) =>
+    JSON.stringify(message.content).includes('"type":"acp-activity"'),
+  );
+  expect(presentation?.content).toMatchObject([
+    {
+      servedModel: 'Actual Grok',
+      subagents: [{ id: 'child', status: 'unobserved', description: 'Inspect fixtures' }],
+    },
+  ]);
+  expect(JSON.stringify(presentation?.content)).not.toContain('"activity"');
+});
+
+it('should count Grok cached input once while retaining its full vendor ledger', () => {
+  const response = {
+    stopReason: 'end_turn',
+    _meta: {
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+        cachedReadTokens: 40,
+        cacheCreationTokens: 10,
+      },
+    },
+  } as const;
+  expect(promptUsageOf(response, 'grok', undefined)).toEqual({
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 120,
+    cachedReadTokens: 40,
+    cachedWriteTokens: 10,
+  });
+  expect(
+    promptUsageOf(response, 'grok', {
+      inputTokens: 50,
+      outputTokens: 20,
+      totalTokens: 120,
+      cachedReadTokens: 40,
+      cachedWriteTokens: 10,
+    }),
+  ).toEqual({
+    inputTokens: 100,
+    outputTokens: 40,
+    totalTokens: 240,
+    cachedReadTokens: 80,
+    cachedWriteTokens: 20,
+  });
+});
 const permissionObservation = {
   version: 1,
   provider: 'codex',

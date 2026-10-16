@@ -47,6 +47,18 @@ export const usageDataSchema = z.object({
    * Tau neither funded nor priced it. Absent for Tau's own turns.
    */
   agent: z.string().optional(),
+  /** External agent telemetry, never a funded Tau receipt or a Tau price. */
+  vendorReport: z
+    .object({
+      costUsdTicks: z.number().int().nonnegative().optional(),
+      costIsPartial: z.boolean().optional(),
+      usageIsIncomplete: z.boolean().optional(),
+      modelCalls: z.number().int().nonnegative().optional(),
+      // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- External Grok wire field.
+      apiDurationMs: z.number().nonnegative().optional(),
+      numTurns: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
   /** Funded Tau operation whose receipt is the only source of this turn's credits. */
   operationId: billingIdentifierSchema.optional(),
   /** The invocation attempt the operation was bound to; a support reference. */
@@ -221,9 +233,31 @@ export const acpConfigOptionSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+const acpActivitySchema = z.object({
+  kind: z.enum(['retry', 'compaction']),
+  status: z.enum(['running', 'completed', 'failed', 'cancelled']),
+  label: z.string().max(256),
+  detail: z.string().max(8192).optional(),
+});
+
+const acpSubagentSchema = z.object({
+  id: z.string().max(256),
+  attemptId: z.string().max(256).optional(),
+  description: z.string().max(8192).optional(),
+  model: z.string().max(256).optional(),
+  status: z.enum(['running', 'completed', 'failed', 'cancelled', 'unobserved']),
+  toolCalls: z.number().int().nonnegative().optional(),
+  turns: z.number().int().nonnegative().optional(),
+  duration: z.number().nonnegative().optional(),
+  tokensUsed: z.number().nonnegative().optional(),
+  output: z.string().max(65_536).optional(),
+  error: z.string().max(8192).optional(),
+});
+
 /** Durable latest-value presentation state for one ACP session. @public */
 export const acpSessionDataSchema = z.object({
   type: z.literal('acp-session'),
+  hostId: z.string().min(1).max(256).optional(),
   id: z.string(),
   agentId: z.string(),
   sessionId: z.string().optional(),
@@ -234,6 +268,18 @@ export const acpSessionDataSchema = z.object({
   modeId: z.string().optional(),
   modes: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullish() })).optional(),
 });
+
+/** Per-turn external agent activity, retained beside the work it describes. @public */
+export const acpActivityDataSchema = z.object({
+  type: z.literal('acp-activity'),
+  id: z.string(),
+  agentId: z.string(),
+  activity: acpActivitySchema.optional(),
+  subagents: z.array(acpSubagentSchema).max(64).optional(),
+  servedModel: z.string().max(256).optional(),
+});
+/** @public */
+export type AcpActivityData = z.infer<typeof acpActivityDataSchema>;
 
 /** @public */
 export type AcpSessionData = z.infer<typeof acpSessionDataSchema>;
@@ -247,4 +293,5 @@ export const dataPartSchema = z.object({
   'context-compaction': contextCompactionDataSchema,
   'context-usage': contextUsageDataSchema,
   'acp-session': acpSessionDataSchema,
+  'acp-activity': acpActivityDataSchema,
 });

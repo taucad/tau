@@ -30,6 +30,7 @@ import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
+import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
@@ -289,7 +290,11 @@ function renderAssistantPart(
     }
 
     case 'data-acp-session': {
-      return <ChatMessageAcpPlan key={`${messageId}-acp-plan-${index}`} data={part.data} />;
+      return <ChatMessageAcpPlan key={`${messageId}-acp-session-${index}`} data={part.data} />;
+    }
+
+    case 'data-acp-activity': {
+      return <ChatAcpActivity key={`${messageId}-acp-activity-${index}`} data={part.data} />;
     }
 
     case 'dynamic-tool': {

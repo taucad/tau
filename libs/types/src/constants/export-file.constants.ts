@@ -7,9 +7,9 @@ import { mimeTypes } from '#constants/mime-types.constants.js';
  * to valid file extensions at compile time.
  *
  * @param format - Known export file extension.
- * @param name - Output filename.
+ * @param name - Output filename; `.${format}` is appended when it does not already end in it.
  * @param bytes - Exported file bytes.
- * @returns A named export with its canonical MIME type.
+ * @returns A named export with its canonical MIME type and a filename carrying the format's extension.
  *
  * @public
  */
@@ -17,4 +17,8 @@ export const createExportFile = (
   format: keyof typeof mimeTypes,
   name: string,
   bytes: Uint8Array<ArrayBuffer>,
-): ExportFile => ({ name, bytes, mimeType: mimeTypes[format] });
+): ExportFile => ({
+  name: name.toLowerCase().endsWith(`.${format}`) ? name : `${name}.${format}`,
+  bytes,
+  mimeType: mimeTypes[format],
+});

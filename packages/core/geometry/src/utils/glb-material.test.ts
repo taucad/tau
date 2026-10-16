@@ -80,6 +80,33 @@ describe('standard glTF material serialization', () => {
     },
   );
 
+  it.each([
+    [0.952, 0.979, 1.021],
+    [1, 2, 3],
+  ])('should preserve specular color above one in binary and JSON output: %j', async (...specularColorFactor) => {
+    const authored = { extensions: { KHR_materials_specular: { specularColorFactor } } };
+    const { json } = await new NodeIO().binaryToJSON(writeGlb(input(authored)));
+    expect(json.materials).toEqual([authored]);
+    expect(JSON.parse(new TextDecoder().decode(writeGltfJson(input(authored)))).materials).toEqual([authored]);
+  });
+
+  it.each([-0.1, Number.NaN, Infinity, -Infinity])('should reject invalid specular color component %s', (channel) => {
+    const authored = { extensions: { KHR_materials_specular: { specularColorFactor: [1, channel, 1] } } };
+    expect(() => writeGlb(input(authored))).toThrow(TypeError);
+    expect(() => writeGlb(input(authored))).toThrow(/specularColorFactor/);
+  });
+
+  it.each([
+    { extensions: { KHR_materials_specular: { specularFactor: 1.021 } } },
+    { extensions: { KHR_materials_specular: { specularColorFactor: [1, 2] } } },
+    { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1.021, 1] } },
+    { emissiveFactor: [1, 1, 1.021] },
+    { extensions: { KHR_materials_sheen: { sheenColorFactor: [1, 1, 1.021] } } },
+    { extensions: { KHR_materials_volume: { attenuationColor: [1, 1, 1.021] } } },
+  ])('should retain other factor bounds and specular vector length: %j', (invalid) => {
+    expect(() => writeGlb(input(invalid))).toThrow(TypeError);
+  });
+
   it('should reject missing texture resources with an actionable property path', () => {
     expect(() => writeGlb(input({ normalTexture: { index: 2 } }))).toThrow(/normalTexture.index.*2/);
   });

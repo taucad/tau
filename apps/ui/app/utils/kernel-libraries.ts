@@ -50,5 +50,6 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
     minicssgrid: '0.0.9',
     spicey: '0.0.14',
     debug: '4.4.3',
+    flatbush: '4.6.2',
   },
 };

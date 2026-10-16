@@ -457,6 +457,7 @@ export const tscircuitKernel = defineKernel({
     minicssgrid: { name: 'minicssgrid', version: '0.0.9' },
     spicey: { name: 'spicey', version: '0.0.14' },
     debug: { name: 'debug', version: '4.4.3' },
+    flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
   version: '1.1.0',

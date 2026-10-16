@@ -84,6 +84,7 @@ describe('tscircuit package identity', () => {
       react: react!.version,
       'react-dom': react!.version,
       debug: '4.4.3',
+      flatbush: '4.6.2',
     });
     expect(Object.fromEntries(registerModule.mock.calls.map(([name, entry]) => [name, entry.package]))).toEqual({
       react: { name: 'react', spec: react!.version },

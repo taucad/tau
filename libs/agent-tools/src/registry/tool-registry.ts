@@ -313,6 +313,8 @@ export type ChatToolRegistryOptions = {
   readonly workbench?: RpcWorkbenchClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
   readonly testingEnabled: boolean;
+  /** The host's managed acquisition profile; `locked` makes `install_packages` refuse with no request. */
+  readonly acquisition?: 'open' | 'locked' | undefined;
 };
 
 /**
@@ -418,6 +420,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
         ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
         ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+        ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
         workbench,
       });
       const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {

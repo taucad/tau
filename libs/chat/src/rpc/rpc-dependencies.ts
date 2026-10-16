@@ -302,6 +302,11 @@ export type RpcDependencies = {
   revisions?: RpcRevisionsClient;
   parameters?: RpcParameterClient;
   workbench?: RpcWorkbenchClient;
+  /**
+   * The host's managed acquisition profile (`TAU_ACQUISITION`). Under `locked` the host makes no registry request, so
+   * `install_packages` refuses with `registry-unavailable` and writes nothing. Absent is `open`.
+   */
+  acquisition?: 'open' | 'locked';
 };
 
 /**

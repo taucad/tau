@@ -662,6 +662,8 @@ const composeProjectHost = async (
       },
       revisions,
       testingEnabled: provide.testingEnabled ?? false,
+      // X43: under the locked profile the page's own install_packages makes no registry request.
+      acquisition: runtimeConfig.acquisition,
     });
   };
   const toolRegistry = toolRegistryOver(workspaceProvider, fileSystem);

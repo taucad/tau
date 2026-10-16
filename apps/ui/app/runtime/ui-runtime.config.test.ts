@@ -7,17 +7,20 @@ import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 
 const tauApiUrlEnvironmentKey = 'TAU_API_URL';
 const tauWebSocketUrlEnvironmentKey = 'TAU_WEBSOCKET_URL';
+const tauAcquisitionEnvironmentKey = 'TAU_ACQUISITION';
 
 describe('createUiRuntimeConfig', () => {
   it('should return the typed UI runtime config parsed from page environment values', () => {
     const config = createUiRuntimeConfig({
       [tauApiUrlEnvironmentKey]: 'https://api.tau.test',
       [tauWebSocketUrlEnvironmentKey]: 'wss://api.tau.test',
+      [tauAcquisitionEnvironmentKey]: 'open',
     });
 
     expect(config).toEqual({
       tauApiUrl: 'https://api.tau.test',
       tauWebSocketUrl: 'wss://api.tau.test',
+      acquisition: 'open',
     } satisfies RuntimeConfigInput<typeof runtime>);
     expect(uiRuntimeConfigSchema.parse(config)).toEqual(config);
   });
@@ -26,6 +29,7 @@ describe('createUiRuntimeConfig', () => {
     const invalidEnvironment = {
       [tauApiUrlEnvironmentKey]: undefined,
       [tauWebSocketUrlEnvironmentKey]: undefined,
+      [tauAcquisitionEnvironmentKey]: 'open',
     } as unknown as Parameters<typeof createUiRuntimeConfig>[0];
 
     try {
@@ -47,6 +51,32 @@ describe('createUiRuntimeConfig', () => {
     expect(resolvedRuntime.middleware[0]).toMatchObject({
       id: 'observability',
       options: { reportUrl: 'https://api.tau.test/v1/telemetry/ingest' },
+    });
+  });
+
+  it('should hand the locked acquisition profile to the in-browser bundler', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(
+      runtime,
+      createUiRuntimeConfig({
+        [tauApiUrlEnvironmentKey]: 'https://api.tau.test',
+        [tauWebSocketUrlEnvironmentKey]: 'wss://api.tau.test',
+        [tauAcquisitionEnvironmentKey]: 'locked',
+      }),
+    );
+
+    expect(resolvedRuntime.bundlers.find(({ id }) => id === 'esbuild')).toMatchObject({
+      options: { acquisition: 'locked' },
+    });
+  });
+
+  it('should keep the open profile when the environment sets none', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+
+    expect(resolvedRuntime.bundlers.find(({ id }) => id === 'esbuild')).toMatchObject({
+      options: { acquisition: 'open' },
     });
   });
 });

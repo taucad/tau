@@ -32,7 +32,7 @@ type UiRuntimeOptions = {
 
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [
-    esbuild(),
+    esbuild({ bundlers: { default: { acquisition: config.acquisition } } }),
     opencascade(),
     openrscad(),
     jscad(),

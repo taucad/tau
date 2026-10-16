@@ -6,6 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { tessellationSpanAttributes } from '#framework/tessellation-span-attributes.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, MediaType, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
@@ -4465,6 +4466,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const meshSpan = this.tracer.startSpan('kernel.mesh', {
       phase: 'computingGeometry',
     });
+    let meshSpanAttributes: ReturnType<typeof tessellationSpanAttributes> = {};
     try {
       const runtime = this.createRuntime();
       const computeMesh = async (handlerInput: RenderRequest): Promise<RenderResult> => {
@@ -4592,6 +4594,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (!meshResult.success) {
         return meshResult;
       }
+      meshSpanAttributes = tessellationSpanAttributes(meshResult.data.tessellation, meshResult.issues);
 
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
       // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
@@ -4601,7 +4604,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         issues: [...createResult.issues, ...meshResult.issues],
       };
     } finally {
-      meshSpan.end();
+      meshSpan.end(meshSpanAttributes);
     }
   }
 

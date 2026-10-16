@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { tauBillingAccountArgs, tauDatabaseExecArgs } from '#support/tau-account.js';
+import { tauBillingAccountArgs, tauDatabaseCommand, tauDatabaseExecArgs } from '#support/tau-account.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -204,6 +204,70 @@ describe('completed-artifact database isolation', () => {
       expect(() => tauDatabaseExecArgs('select 1', environment)).toThrow(/every run-owned database identity/u);
     },
   );
+});
+
+describe('database command placement', () => {
+  it('should exec psql inside the Compose container by default', () => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['TAU_E2E_POSTGRES_DATABASE'] = 'tau_dev';
+
+    expect(tauDatabaseCommand('select 1', environment)).toEqual({
+      file: 'docker',
+      args: [
+        'exec',
+        'tau-postgres',
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'dev_user',
+        '-d',
+        'tau_dev',
+        '-c',
+        'select 1',
+      ],
+    });
+  });
+
+  it('should run psql over loopback against host services, which a Docker-less runner starts', () => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['TAU_E2E_SERVICES'] = 'host';
+    environment['TAU_E2E_POSTGRES_DATABASE'] = 'tau_dev';
+
+    expect(tauDatabaseCommand('select 1', environment)).toEqual({
+      file: 'psql',
+      args: [
+        '-h',
+        'localhost',
+        '-p',
+        '5432',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'dev_user',
+        '-d',
+        'tau_dev',
+        '-c',
+        'select 1',
+      ],
+    });
+  });
+
+  it('should refuse host services for a completed-artifact run, which owns its Compose database', () => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['TAU_E2E_SERVICES'] = 'host';
+    environment['TAU_E2E_COMPLETED_ARTIFACT'] = 'true';
+
+    expect(() => tauDatabaseCommand('select 1', environment)).toThrow(/owns its Compose database/u);
+  });
+
+  it('should refuse an injectable host database identity', () => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['TAU_E2E_SERVICES'] = 'host';
+    environment['TAU_E2E_POSTGRES_DATABASE'] = 'tau_dev; drop';
+
+    expect(() => tauDatabaseCommand('select 1', environment)).toThrow(/unsupported characters/u);
+  });
 });
 
 describe('development billing account command', () => {

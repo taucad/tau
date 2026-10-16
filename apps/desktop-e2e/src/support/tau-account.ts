@@ -10,7 +10,7 @@ import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } 
  * Test-account seeding (work item Z2, auth blueprint A7).
  *
  * A node-side port of `apps/ui-e2e`'s `uiAuthenticateTauTestUser`: sign up, verify
- * the email straight through the docker postgres, sign in and keep the **bearer**
+ * the email straight through the suite's PostgreSQL, sign in and keep the **bearer**
  * token better-auth returns in `set-auth-token`. The desktop shell takes that token
  * through `TAU_DESKTOP_TOKEN`, which is the seeded alternative to the interactive
  * loopback flow (charter A7).
@@ -190,8 +190,43 @@ export const tauDatabaseExecArgs = (
   return ['exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', database, '-c', statement];
 };
 
+/** One `psql` invocation against this run's database: the program to run and its arguments. */
+export type TauDatabaseCommand = {
+  readonly file: string;
+  readonly args: readonly string[];
+};
+
+/**
+ * Build the `psql` invocation for this run's database.
+ *
+ * With `TAU_E2E_SERVICES=host` PostgreSQL runs as a host process, as on GitHub's macOS runners, which have no Docker
+ * (`scripts/start-macos-services.sh`): `psql` then reaches the same superuser and database over loopback. Everywhere
+ * else it runs inside the Compose container through `docker exec`.
+ */
+export const tauDatabaseCommand = (
+  statement: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): TauDatabaseCommand => {
+  if (environment['TAU_E2E_SERVICES'] !== 'host') {
+    return { file: 'docker', args: tauDatabaseExecArgs(statement, environment) };
+  }
+  if (environment['TAU_E2E_COMPLETED_ARTIFACT'] === 'true') {
+    throw new Error('A completed-artifact run owns its Compose database; it cannot use host services.');
+  }
+  const user = environment['TAU_E2E_POSTGRES_USER'] ?? 'dev_user';
+  const database = environment['TAU_E2E_POSTGRES_DATABASE'] ?? localDatabaseName();
+  if (![user, database].every((value) => /^[a-zA-Z0-9_.-]+$/u.test(value))) {
+    throw new Error('Desktop E2E database identity contains unsupported characters.');
+  }
+  return {
+    file: 'psql',
+    args: ['-h', 'localhost', '-p', '5432', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', database, '-c', statement],
+  };
+};
+
 const executeTauDatabase = async (statement: string): Promise<void> => {
-  await execFileAsync('docker', tauDatabaseExecArgs(statement), { encoding: 'utf8' });
+  const { file, args } = tauDatabaseCommand(statement);
+  await execFileAsync(file, args, { encoding: 'utf8' });
 };
 
 /**

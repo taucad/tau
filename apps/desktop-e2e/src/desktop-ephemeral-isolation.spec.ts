@@ -25,13 +25,18 @@ const directorySnapshot = async (root: string): Promise<readonly string[]> => {
   return entries.map(String).sort();
 };
 
-const openConverter = async (page: Page): Promise<void> => {
-  await page.goto('app://tau/convert', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
+/** The route lists its input formats once its converter client has connected and reported capabilities. */
+const waitForConverterReady = async (page: Page): Promise<void> => {
+  await page.getByRole('heading', { name: 'Convert', exact: true }).waitFor({ state: 'visible' });
   await page
-    .getByText(/^[1-9]\d* formats supported$/u)
+    .getByRole('listitem', { name: /\(GLB\)$/u })
     .filter({ visible: true })
     .waitFor({ state: 'visible', timeout: 120_000 });
+};
+
+const openConverter = async (page: Page): Promise<void> => {
+  await page.goto('app://tau/convert', { waitUntil: 'domcontentloaded' });
+  await waitForConverterReady(page);
 };
 
 const uploadNamedCube = async (page: Page, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
@@ -101,7 +106,7 @@ const downloadGlb = async (
   await secondaryFormat.click();
   const path = join(dirname(desktopSession.homeRoot), `.e2e-${name}.glb`);
   const download = await captureNextDesktopDownload(desktopSession, path, async () =>
-    page.getByRole('button', { name: 'Download', exact: true }).click(),
+    page.getByRole('button', { name: 'Download GLB', exact: true }).click(),
   );
   expect(download.filename).toMatch(/\.glb$/u);
   return Uint8Array.from(await readFile(path));
@@ -192,11 +197,7 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
   );
   const secondPage = await nextWindow;
   secondPage.setDefaultTimeout(60_000);
-  await secondPage.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
-  await secondPage
-    .getByText(/^[1-9]\d* formats supported$/u)
-    .filter({ visible: true })
-    .waitFor({ state: 'visible', timeout: 120_000 });
+  await waitForConverterReady(secondPage);
   const secondRuntimePid = await waitForNewUtility(session, utilitiesBeforeSecond);
 
   await Promise.all([uploadObject(session.page, cubeObject(1)), uploadObject(secondPage, cubeObject(3))]);

@@ -150,7 +150,7 @@ test('[completed-artifact] the import review preview renders a disk upload', asy
     .locator('input[type="file"][accept]')
     .last()
     .setInputFiles([join(birdhouse, 'main.ts'), join(birdhouse, 'tau.json')]);
-  await expectVisible(page.getByText('Review Import', { exact: true }), 60_000);
+  await expectVisible(page.getByText('Review import', { exact: true }), 60_000);
   const placeholder = page.getByText('Select a file to preview', { exact: true });
   if ((await placeholder.count()) > 0) {
     await page

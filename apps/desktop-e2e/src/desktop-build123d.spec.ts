@@ -676,7 +676,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       const capture = (): void => {
         const status = [...document.querySelectorAll('span')].find((element) => {
           const text = element.textContent.trim().toLowerCase();
-          return text === 'buffering...' || text === 'rendering...';
+          return text === 'buffering…' || text === 'rendering…';
         });
         const state = status?.textContent.trim().toLowerCase();
         const next = state ?? 'idle';
@@ -701,7 +701,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
             return (
               states.length >= 2 &&
               states.at(-1) === 'idle' &&
-              states.every((state, index) => state === (index % 2 === 0 ? 'rendering...' : 'idle'))
+              states.every((state, index) => state === (index % 2 === 0 ? 'rendering…' : 'idle'))
             );
           }),
         { timeout: 120_000 },
@@ -716,7 +716,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       return target.__tauPicoGkStates ?? [];
     });
     expect(multiStepStates.length).toBeGreaterThanOrEqual(2);
-    expect(multiStepStates).toEqual(multiStepStates.map((_, index) => (index % 2 === 0 ? 'rendering...' : 'idle')));
+    expect(multiStepStates).toEqual(multiStepStates.map((_, index) => (index % 2 === 0 ? 'rendering…' : 'idle')));
     expect(multiStepStates.at(-1)).toBe('idle');
 
     // Observe a fresh lifecycle before restoring bytes: the previous scene is
@@ -815,7 +815,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
 
     const workersBeforeReload = ownedPicoGkWorkers(session.application.process().pid);
     expect(workersBeforeReload).not.toHaveLength(0);
-    const renderingStatus = page.getByText('rendering...', { exact: true });
+    const renderingStatus = page.getByText('rendering…', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
     writeFileSync(sourcePath, slowPicogkSource, 'utf8');
     await expectVisible(renderingStatus, 120_000);

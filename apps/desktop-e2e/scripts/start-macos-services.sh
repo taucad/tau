@@ -12,6 +12,7 @@
 #   None
 # Optional env vars:
 #   RUNNER_TEMP   Where MinIO keeps its data and the services their logs (default: /tmp)
+#   GITHUB_PATH   When set (GitHub Actions), PostgreSQL's bin directory is added to later steps' PATH
 #
 # Usage:
 #   apps/desktop-e2e/scripts/start-macos-services.sh
@@ -59,6 +60,11 @@ END $$;
 SQL
 "$pg/psql" -h localhost -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'tau_dev'" | grep -q 1 \
   || "$pg/createdb" -h localhost -O dev_user tau_dev
+
+# The suite's account helpers run `psql` against this server (TAU_E2E_SERVICES=host), and the keg is not linked.
+if [ -n "${GITHUB_PATH:-}" ]; then
+  echo "$pg" >> "$GITHUB_PATH"
+fi
 
 brew services start redis
 wait_for Redis redis-cli -h localhost ping

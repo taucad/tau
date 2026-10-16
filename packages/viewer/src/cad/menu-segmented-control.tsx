@@ -15,6 +15,9 @@ type MenuSegmentedControlProps = Readonly<{
 /**
  * A segmented control inside a dropdown menu: one row of equal segments, one of them selected. Each segment is a menu
  * radio item, so the menu's arrow keys reach it and Enter or Space selects it; the menu stays open after a choice.
+ *
+ * @param props - The accessible name, the selected value, the segments and the change handler.
+ * @returns The labelled radio group.
  */
 export function MenuSegmentedControl({
   label,

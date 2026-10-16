@@ -120,6 +120,7 @@ const stubCliDirectory = async (versions: Readonly<Record<string, string>>): Pro
   return directory;
 };
 
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 describe.skipIf(process.platform === 'win32')('executable resolution', () => {
   const resolveFrom = new URL('../../../cli/src/commands/serve.ts', import.meta.url).href;
 
@@ -159,9 +160,8 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     const probed = await probeAcpAgents(discovery, { environment });
 
     expect(probed.agents).toEqual([]);
-    expect(probed.refused).toEqual([
-      expect.objectContaining({ id: 'claude', code: 'CLI_TOO_OLD', message: expect.stringContaining('2.1.232') }),
-    ]);
+    expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_TOO_OLD' })]);
+    expect(probed.refused[0]?.message).toContain('2.1.232');
   });
 
   it('leaves the executable unset when PATH has no such CLI, so the probe refuses it', async () => {
@@ -180,6 +180,8 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_NOT_FOUND' })]);
   });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- end of wire-named environments. */
 
 describe('probeAcpAgents', () => {
   it('checks the version floor for native CLIs before advertising them', async () => {

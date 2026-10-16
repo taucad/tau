@@ -2620,7 +2620,7 @@ describe('authentication, initialize and prompt content', () => {
   }, 30_000);
 
   it('offers the CLI login for an agent that lists no auth method and refuses at prompt', async () => {
-    /* claude-agent-acp 0.70.0 advertises no auth method and turns the CLI's
+    /* Claude's adapter (0.70.0) advertises no auth method and turns the CLI's
      * "Please run /login" into `-32000` on `session/prompt`; the profile's own
      * login command is then the only affordance to show. */
     const claude: AcpAdapter = {

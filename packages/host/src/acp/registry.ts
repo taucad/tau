@@ -1,17 +1,21 @@
 /**
  * Which external ACP agents this daemon can start, and where their adapters are.
  *
- * OQ-X1 (pin-and-review): the adapters are **exact-pinned dependencies of the
- * distributed daemon** (`packages/cli`, and the desktop app). Native ACP CLIs
- * run the user's installed executable directly; neither path uses `npx` at
- * runtime. An agent the user has not installed is refused. The
- * pins below are the reviewed set; the review cadence is quarterly, because
- * these adapters wrap vendor SDKs that move fast
- * (`docs/research/external-agent-acp-topology.md`).
+ * OQ-X1 (pin-and-review): the adapters are exact-pinned, and **staged into
+ * each distributed product without vendor binaries; the user's CLI runs**. The
+ * desktop app and `packages/cli` (`dist-acp`) both copy each adapter's runtime
+ * closure and follow none of its optional dependencies, so the `claude` and
+ * `codex` an adapter would bundle are absent, and `executableEnv` points it at
+ * the CLI resolution found on PATH instead. Native ACP CLIs run the user's
+ * installed executable directly; no path uses `npx` at runtime. An agent the
+ * user has not installed is refused. The pins below are the reviewed set; the
+ * review cadence is quarterly, because these adapters wrap vendor SDKs that
+ * move fast (`docs/research/external-agent-acp-topology.md`,
+ * `docs/research/agent-plugin-install-path-blueprint.md`).
  *
  * Resolution is relative to a caller-supplied module URL rather than this file:
- * the adapters belong to `packages/cli`, so `tau serve` passes its own
- * `import.meta.url` and a test passes a fixture path instead.
+ * `tau serve` passes its staged `dist-acp` root, the desktop app its own
+ * `import.meta.url`, and a test a fixture path instead.
  *
  * The profile array is the **only** per-agent knowledge in the tree (V14): the
  * descriptor every other tier renders is built from it here, so adding an agent

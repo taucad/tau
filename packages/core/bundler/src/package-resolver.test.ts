@@ -84,6 +84,57 @@ describe('resolveDependencyTree', () => {
     ]);
   });
 
+  it('should nest a dependency with its peer when the peer conflicts with a version the project requires, as npm does', async () => {
+    // `cells` depends on `view@18`, whose peer `lib@^18` cannot sit at the root beside the project's `lib@19`.
+    const extra = {
+      cells: packument('cells', [version('cells', '1.0.0', { dependencies: { view: '^18' } })]),
+      view: packument('view', [version('view', '18.0.0', { peerDependencies: { lib: '^18' } })]),
+      lib: packument('lib', [version('lib', '18.0.0'), version('lib', '19.0.0')]),
+    };
+    const result = await resolveDependencyTree({
+      manifest: { dependencies: { cells: '1.0.0', lib: '19.0.0' } },
+      registry: registryOf(extra),
+      signal,
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(
+      Object.fromEntries(Object.entries(result.lock?.packages ?? {}).map(([path, entry]) => [path, entry.version])),
+    ).toEqual({
+      '': undefined,
+      'node_modules/cells': '1.0.0',
+      'node_modules/cells/node_modules/lib': '18.0.0',
+      'node_modules/cells/node_modules/view': '18.0.0',
+      'node_modules/lib': '19.0.0',
+    });
+  });
+
+  it('should nest a peer that fits no level under the package the project does not depend on directly, as npm does', async () => {
+    // `widget`'s peer `lib@^18` fits neither the root (`lib@19.0.0`) nor `tool`'s own level (`lib@19.0.1`).
+    const extra = {
+      tool: packument('tool', [version('tool', '1.0.0', { dependencies: { lib: '19.0.1', widget: '^1' } })]),
+      widget: packument('widget', [version('widget', '1.0.0', { peerDependencies: { lib: '^18' } })]),
+      lib: packument('lib', [version('lib', '18.0.0'), version('lib', '19.0.0'), version('lib', '19.0.1')]),
+    };
+    const result = await resolveDependencyTree({
+      manifest: { dependencies: { tool: '1.0.0', lib: '19.0.0' } },
+      registry: registryOf(extra),
+      signal,
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(
+      Object.fromEntries(Object.entries(result.lock?.packages ?? {}).map(([path, entry]) => [path, entry.version])),
+    ).toEqual({
+      '': undefined,
+      'node_modules/lib': '19.0.0',
+      'node_modules/tool': '1.0.0',
+      'node_modules/tool/node_modules/lib': '19.0.1',
+      'node_modules/widget': '1.0.0',
+      'node_modules/widget/node_modules/lib': '18.0.0',
+    });
+  });
+
   it('should ignore optional peers and record optional platform dependencies without materialising them', async () => {
     const extra = {
       host: packument('host', [

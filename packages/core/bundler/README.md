@@ -90,8 +90,10 @@ const { lock, issues } = await installPackages({
 - `mode: 'upgrade'` resolves the names in `upgrade` afresh, or every package when `upgrade` is omitted.
 - Resolution follows npm 7+: the highest version satisfying each range (the `latest` tag first when it
   satisfies), each package placed at the shallowest `node_modules` level without a conflicting
-  version, nested under its dependent otherwise. A missing peer is installed beside its dependent;
-  optional peers are not installed. Optional dependencies are recorded with their `os`/`cpu`
+  version, nested under its dependent otherwise. A missing peer is installed beside its dependent; a
+  package whose peer conflicts with a version already beside it nests deeper with that peer, and a
+  peer that fits no level of a package the project does not depend on directly nests under that
+  package (npm without `--strict-peer-deps`). Optional peers are not installed. Optional dependencies are recorded with their `os`/`cpu`
   constraints; `devDependencies` are recorded with `dev: true`.
 - Writes are two checked writes through the filesystem authority: package.json against the bytes read
   (only when `add`/`remove` changed it), then package-lock.json against its own previous bytes and the

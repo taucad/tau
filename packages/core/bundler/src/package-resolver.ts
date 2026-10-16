@@ -307,8 +307,11 @@ const rootEntry = (manifest: Readonly<Record<string, unknown>>): PackageLockEntr
 
 /**
  * Resolve package.json ranges into a complete lockfileVersion 3 tree, placing each package at the shallowest
- * conflict-free `node_modules` level as npm 7+ does. Missing non-optional peers are installed beside their dependent;
- * optional dependencies are recorded with their `os`/`cpu` constraints. Nothing is downloaded or executed.
+ * conflict-free `node_modules` level as npm 7+ does. Missing non-optional peers are installed beside their dependent; a
+ * package whose peer conflicts with a version already beside it nests deeper with that peer, and a peer that fits no
+ * level of a package the project does not depend on directly nests under that package (npm without
+ * `--strict-peer-deps`). Optional dependencies are recorded with their `os`/`cpu` constraints. Nothing is downloaded
+ * or executed.
  * @param input - Manifest, optional previous lock and upgrade names, packument source and cancellation.
  * @returns The lock, or the issues that prevent one; `install-script-skipped` issues are warnings.
  * @public
@@ -451,6 +454,34 @@ export const resolveDependencyTree = async (
         }),
     );
 
+  // Whether every non-optional peer of `entry` placed at `level` resolves compatibly there or can be placed beside it.
+  const peersFit = (level: TreeNode, entry: PackageLockEntry): boolean =>
+    Object.entries(entry.peerDependencies ?? {}).every(([peer, raw]) => {
+      if (entry.peerDependenciesMeta?.[peer]?.optional === true) {
+        return true;
+      }
+      const visible = resolveFrom(level, peer);
+      const peerSpec = parseSpec(peer, raw);
+      return (
+        visible === undefined || peerSpec === undefined || visible.parent !== level || satisfiesSpec(visible, peerSpec)
+      );
+    });
+
+  // As npm does without --strict-peer-deps, a peer that fits no level beside a package the project does not depend on
+  // directly nests under that package ("overriding peer dependency"); a direct dependency's peer conflict is refused.
+  const nestedPeerLevel = (
+    node: TreeNode,
+    edge: Edge,
+    candidate: Pick<TreeNode, 'realName' | 'version'>,
+  ): TreeNode | undefined =>
+    edge.kind === 'peer' &&
+    node !== root &&
+    !root.edges.some((rootEdge) => rootEdge.to === node) &&
+    !node.children.has(edge.name) &&
+    canPlace(node, edge.name, candidate)
+      ? node
+      : undefined;
+
   while (queue.length > 0) {
     signal.throwIfAborted();
     queue.sort((left, right) => left.depth - right.depth || comparePaths(left.path, right.path));
@@ -496,7 +527,15 @@ export const resolveDependencyTree = async (
         levels.unshift(level);
       }
       const candidate = { realName: spec.name, version: choice.version };
-      const level = levels.find((option) => !option.children.has(edge.name) && canPlace(option, edge.name, candidate));
+      const placeable = levels.filter(
+        (option) => !option.children.has(edge.name) && canPlace(option, edge.name, candidate),
+      );
+      // As npm places a package with its peers: skip a level where one of the candidate's own peers already resolves
+      // to an incompatible version beside it, so the package nests where that peer can be placed with it.
+      const level =
+        placeable.find((option) => peersFit(option, choice.entry)) ??
+        placeable[0] ??
+        nestedPeerLevel(node, edge, candidate);
       if (level === undefined) {
         report({
           code: 'peer-conflict',

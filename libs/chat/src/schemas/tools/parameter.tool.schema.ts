@@ -36,6 +36,20 @@ const wireJsonObjectSchema = z
   .pipe(jsonObjectSchema);
 
 /**
+ * Parameter values for one geometry call, merged over the active parameter group as caller
+ * overrides (`defaults ← stored group ← these values`) and never written to the project. Keys
+ * are parameter names; a nested parameter is a nested object, as in GeoSpec `loadModel`.
+ * The kernel admits them against the model's parameter schema, so an unknown name or an
+ * out-of-range value fails the call instead of being ignored. @public
+ */
+export const parameterOverridesSchema = z
+  .any()
+  .describe(
+    'Parameter values for this call only, e.g. {"voxelSize": 0.5}. Merged over the active parameter group and never saved; omit to use the stored values.',
+  )
+  .pipe(jsonObjectSchema);
+
+/**
  * The admitted manifest a parameter read or operation was built from. A source change produces a
  * new manifest revision, so this one token covers every semantic input. @public
  */
@@ -151,6 +165,33 @@ export const getParametersInputSchema = z
   .object({
     targetFile: rootedFilePathSchema.describe('Geometry source file relative to the project root.'),
     resolutionMode: z.enum(['default', 'declared-only']).optional(),
+    detail: z
+      .enum(['values', 'full'])
+      .optional()
+      .describe(
+        'values (default): each parameter with its value, default, unit and constraints. full: the whole admitted manifest with unit provenance; read it before trusting or changing a unitInferred field.',
+      ),
+  })
+  .strict();
+
+/**
+ * One parameter of the active group as the agent reads and writes it, keyed by its instance
+ * pointer in {@link getParametersOutputSchema}. @public
+ */
+export const parameterValueSchema = z
+  .object({
+    value: jsonValueSchema
+      .optional()
+      .describe('Effective value in the active group: its stored value, else the default.'),
+    default: jsonValueSchema.optional(),
+    unit: z.string().optional().describe('Unit of value, default and constraints.'),
+    unitInferred: z
+      .literal(true)
+      .optional()
+      .describe('Tau inferred the unit from the parameter name; the source did not declare it.'),
+    constraints: z.record(z.string(), jsonValueSchema).optional(),
+    enum: z.array(jsonValueSchema).optional(),
+    description: z.string().optional(),
   })
   .strict();
 
@@ -158,7 +199,12 @@ export const getParametersInputSchema = z
 export const getParametersOutputSchema = z
   .object({
     status: z.enum(['resolved', 'unresolved']),
-    manifest: parameterManifestWireSchema.optional(),
+    detail: z.enum(['values', 'full']).optional().describe('The projection a resolved read returned.'),
+    parameters: z
+      .record(z.string(), parameterValueSchema)
+      .optional()
+      .describe('The values projection, keyed by instance pointer such as /voxelSize.'),
+    manifest: parameterManifestWireSchema.optional().describe('The full projection: the admitted manifest.'),
     current: parameterAuthoritySnapshotSchema.optional(),
     diagnostics: z.array(parameterDiagnosticSchema).optional(),
     sourceRevision: sourceRevisionSchema
@@ -167,11 +213,14 @@ export const getParametersOutputSchema = z
   })
   .strict()
   .superRefine((output, context) => {
-    if (output.status === 'resolved' && (output.manifest === undefined || output.current === undefined)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Resolved parameters require manifest and current authority state',
-      });
+    if (output.status === 'resolved') {
+      const projected = output.detail === 'full' ? output.manifest : output.parameters;
+      if (output.detail === undefined || projected === undefined || output.current === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Resolved parameters require their detail projection and current authority state',
+        });
+      }
     }
     if (output.status === 'unresolved' && output.diagnostics === undefined) {
       context.addIssue({
@@ -308,6 +357,10 @@ export const applyParameterOperationOutputSchema = z.object({ outcome: parameter
 export type GetParametersInput = z.infer<typeof getParametersInputSchema>;
 /** @public */
 export type GetParametersOutput = z.infer<typeof getParametersOutputSchema>;
+/** @public */
+export type ParameterValue = z.infer<typeof parameterValueSchema>;
+/** @public */
+export type ParameterOverrides = z.infer<typeof parameterOverridesSchema>;
 /** @public */
 export type ApplyParameterOperationInput = z.infer<typeof applyParameterOperationInputSchema>;
 /** @public */

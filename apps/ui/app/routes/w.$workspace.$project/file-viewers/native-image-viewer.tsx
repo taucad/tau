@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Download, Maximize2, Minus, Plus } from 'lucide-react';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import type { NativeImageFormat } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';
 import { sniffNativeImageFormat } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';

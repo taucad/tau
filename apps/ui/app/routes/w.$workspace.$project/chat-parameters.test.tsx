@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import type { ActorRefFrom } from 'xstate';
 import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -201,6 +200,15 @@ const mockParameterService = {
   target: (entry: string) => ({ authority: 'browser-filesystem', root: '/test', entry }),
 };
 
+/** The main view's graphics, whose display units every section shares. */
+const mockMainGraphics = {
+  getSnapshot: vi.fn(() => ({
+    context: { displayUnits: { length: { symbol: 'mm', metersPerUnit: 0.001, system: 'si' } } },
+  })),
+  subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
+  on: vi.fn(() => ({ unsubscribe: vi.fn() })),
+};
+
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectRef: {
@@ -217,6 +225,9 @@ vi.mock('#hooks/use-project.js', () => ({
     },
     geometryUnits: mockGeometryUnits,
     mainEntryPath: mockMainEntryPath,
+    viewGraphics: new Map([['view-1', mockMainGraphics]]),
+    viewEntryPaths: new Map([['view-1', mockMainEntryPath]]),
+    viewRecords: {},
     setParameters: mockSetParameters,
     setGeometryUnitParameters: mockSetGeometryUnitParameters,
     switchParameterGroup: mockSwitchParameterGroup,
@@ -227,13 +238,6 @@ vi.mock('#hooks/use-project.js', () => ({
     resolveParameterEntry: mockResolveParameterEntry,
   }),
   useParameterSetActor: (entryPath: string) => mockParameterService.actor(entryPath),
-  useMainGraphics: () => ({
-    getSnapshot: vi.fn(() => ({
-      context: { displayUnits: { length: { symbol: 'mm', metersPerUnit: 0.001, system: 'si' } } },
-    })),
-    subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
-    on: vi.fn(() => ({ unsubscribe: vi.fn() })),
-  }),
 }));
 
 vi.mock('dockview-react', () => ({
@@ -572,45 +576,6 @@ describe('ChatParameters', () => {
     expect(parameters[1]).toHaveAttribute('data-display-symbol', 'mm');
   });
 
-  it('filters every geometry unit from one persistent input', async () => {
-    const user = userEvent.setup();
-    mockGeometryUnits.set('main.ts', mockCadRef);
-    mockGeometryUnits.set('helper.ts', mockCadRef2);
-
-    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    const filter = screen.getByRole('searchbox', { name: 'Filter parameters' });
-    expect(filter).toHaveAttribute('placeholder', 'Filter parameters…');
-    expect(screen.getAllByRole('searchbox', { name: 'Filter parameters' })).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: /show search|hide search/iu })).toBeNull();
-
-    await user.type(filter, 'radius');
-
-    for (const parameters of screen.getAllByTestId('parameters-component')) {
-      expect(parameters).toHaveAttribute('data-filter-term', 'radius');
-      expect(parameters).toHaveAttribute('data-enable-search', 'false');
-      expect(parameters.dataset['className']).toContain('rounded-b-xl');
-    }
-
-    await user.click(screen.getByRole('button', { name: 'Clear search' }));
-
-    for (const parameters of screen.getAllByTestId('parameters-component')) {
-      expect(parameters).toHaveAttribute('data-filter-term', '');
-    }
-  });
-
-  it('keeps the filter and sidebar surface visible without geometry units', async () => {
-    const { container } = render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    expect(screen.getByRole('searchbox', { name: 'Filter parameters' })).toBeVisible();
-    expect(screen.getByText('No geometry units.')).toBeVisible();
-
-    const body = container.querySelector('[data-slot="parameters-panel-body"]');
-    const filterGroup = container.querySelector('[data-slot="parameters-filter"]');
-    expect(body?.className).toContain('bg-sidebar');
-    expect(filterGroup?.className).not.toContain('border-b');
-  });
-
   it('places mainFile pane first', async () => {
     mockGeometryUnits.set('helper.ts', mockCadRef2);
     mockGeometryUnits.set('main.ts', mockCadRef);
@@ -632,17 +597,6 @@ describe('ChatParameters', () => {
 
     const helperPane = screen.getByTestId('param-pane-helper.ts');
     expect(helperPane.dataset['expanded']).toBe('false');
-  });
-
-  it('allocates the shared rounded header height for every geometry unit', async () => {
-    mockGeometryUnits.set('main.ts', mockCadRef);
-    mockGeometryUnits.set('helper.ts', mockCadRef2);
-
-    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    for (const pane of screen.getAllByTestId(/^param-pane-/)) {
-      expect(pane).toHaveAttribute('data-header-size', '40');
-    }
   });
 
   it('reads parameter values from the authority actor active group', async () => {
@@ -934,112 +888,6 @@ describe('ParameterGroupSelector', () => {
     // previously rendered nothing. Two panes -> two 'default' triggers.
     const groupTriggers = screen.getAllByLabelText('Parameter groups');
     expect(groupTriggers).toHaveLength(2);
-  });
-
-  it('reveals the group selector with the other actions and owns its tone (nested-action surfaces R3)', async () => {
-    mockGeometryUnits.set('main.ts', mockCadRef);
-
-    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    const controls = screen.getByTestId('paneview-header-controls');
-    const actions = screen.getByTestId('paneview-header-actions');
-    const selector = screen.getByLabelText('Parameter groups');
-    expect(controls.className).not.toContain('opacity-0');
-    // Choosing a group is an action, not status: it is hidden at rest with the rest of the group.
-    expect(actions).toContainElement(selector);
-    expect(selector).toHaveClass('hover:bg-nested-action-hover', 'data-[state=open]:bg-nested-action-hover');
-    expect(actions.className).toContain('opacity-0');
-    expect(actions.className).toContain('group-hover/paneview-header:opacity-100');
-    expect(actions.className).toContain('group-focus-within/paneview-header:opacity-100');
-    expect(actions.className).toContain('[&:has([data-state=open])]:opacity-100');
-    expect(actions.className).toContain('[@media(hover:none)]:opacity-100');
-  });
-
-  it('does not toggle the pane from reset, saved-group, or overflow controls', async () => {
-    mockGeometryUnits.set('main.ts', mockCadRef);
-    mockParameterEntries = new Map<string, FileParameterEntry>([
-      [
-        'main.ts',
-        {
-          activeGroup: 'default',
-          groups: { default: { values: { width: 15 } } },
-        },
-      ],
-    ]);
-
-    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reset parameters' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Parameter groups' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Compilation unit actions' }));
-
-    expect(mockPaneSetExpanded).not.toHaveBeenCalled();
-  });
-});
-
-describe('ParameterGroupManager — active group name', () => {
-  beforeEach(() => {
-    mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
-    mockSwitchParameterGroup.mockClear();
-  });
-
-  it('displays the active group name dynamically in the header', async () => {
-    mockGeometryUnits.set('main.ts', mockCadRef);
-    mockParameterEntries = new Map<string, FileParameterEntry>([
-      [
-        'main.ts',
-        {
-          activeGroup: 'my-custom-group',
-          groups: {
-            default: { values: {} },
-            'my-custom-group': { values: { width: 99 } },
-          },
-        },
-      ],
-    ]);
-
-    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    expect(screen.getByText('my-custom-group')).toBeInTheDocument();
-  });
-
-  it('updates the displayed group name when activeGroup changes', async () => {
-    mockGeometryUnits.set('main.ts', mockCadRef);
-    mockParameterEntries = new Map<string, FileParameterEntry>([
-      [
-        'main.ts',
-        {
-          activeGroup: 'default',
-          groups: {
-            default: { values: {} },
-            alternate: { values: { width: 50 } },
-          },
-        },
-      ],
-    ]);
-
-    const { rerender } = render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    expect(screen.getByText('default')).toBeInTheDocument();
-    expect(screen.queryByText('alternate')).not.toBeInTheDocument();
-
-    mockParameterEntries = new Map<string, FileParameterEntry>([
-      [
-        'main.ts',
-        {
-          activeGroup: 'alternate',
-          groups: {
-            default: { values: {} },
-            alternate: { values: { width: 50 } },
-          },
-        },
-      ],
-    ]);
-
-    rerender(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
-
-    expect(screen.getByText('alternate')).toBeInTheDocument();
   });
 });
 

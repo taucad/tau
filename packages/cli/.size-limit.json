@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 61.4 kB brotli on 2026-10-15 (55.54 kB before the native MCP surface), with `tau mcp` and its thread per project, `tau install` and the npm lock installer, the built-in Zoo kernel, the runtime-worker entry and the machine providers; the serve workspace guard adds 0.65 kB and `tau prepare` with the preparation host 3.56 kB; the native MCP surface (`prepare_kernel`, the unprepared-kernel stand-ins, the thread environment allowlist and drain-then-recompose) 5.01 kB; native kernels over `tau serve` (the composition each runtime child is handed, `prepare_kernel` and the worker launches the daemon brokers for its children) 0.85 kB; `tau serve` resolving its staged ACP adapters from `dist-acp` 0.15 kB (62.15 kB on 2026-10-16)",
+    "name": "total (ESM JS) — measured 61.4 kB brotli on 2026-10-15 (55.54 kB before the native MCP surface), with `tau mcp` and its thread per project, `tau install` and the npm lock installer, the built-in Zoo kernel, the runtime-worker entry and the machine providers; the serve workspace guard adds 0.65 kB and `tau prepare` with the preparation host 3.56 kB; the native MCP surface (`prepare_kernel`, the unprepared-kernel stand-ins, the thread environment allowlist and drain-then-recompose) 5.01 kB; native kernels over `tau serve` (the composition each runtime child is handed, `prepare_kernel` and the worker launches the daemon brokers for its children) 0.85 kB; `tau serve` resolving its staged ACP adapters from `dist-acp` 0.15 kB; the viewer's runtime client and source snapshotter for the Export and Share panes about 0.6 kB (62.15 kB before them on 2026-10-16)",
     "path": "dist/**/*.mjs",
-    "limit": "62.5 kB"
+    "limit": "63.5 kB"
   }
 ]

@@ -24,7 +24,7 @@ vi.mock('#hooks/use-cookie.js', async () => {
   };
 });
 
-vi.mock('#components/panes/paneview-header.js', () => ({
+vi.mock('@taucad/workbench-panes/paneview/paneview-header', () => ({
   PaneviewHeader: ({ title, children }: { title: string; children: React.ReactNode }) => (
     <div data-testid={`console-header-${title}`}>
       <span>{title}</span>

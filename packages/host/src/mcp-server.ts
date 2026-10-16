@@ -21,7 +21,7 @@
  * every turn of a chat and a capability tied to a run would expire under it.
  */
 
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -48,6 +48,9 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
+import { createMcpViewerExport } from '#mcp-viewer-export.js';
+import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
+import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 /**
@@ -804,6 +807,16 @@ export type LocalHostMcpOptions = {
    * tools alone.
    */
   readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
+  /**
+   * The project runtime `export_model` uses, per project folder. With it, the viewer page's Export pane lists the
+   * entry's formats and their options; without it, the page offers no Export pane tools.
+   */
+  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime>) | undefined;
+  /**
+   * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page's direct
+   * link packs every project file git does not ignore.
+   */
+  readonly snapshotSource?: SourceSnapshotter | undefined;
 };
 
 /** A local MCP server serving one agent. @public */
@@ -915,6 +928,21 @@ export const serveLocalHostMcp = async (
        * session records the approval with its attestations (machines contract R15). */
     });
   };
+  /** One adapter call in one project, answered as `tools/call` puts it in `structuredContent`. */
+  const dispatchIn = async (
+    workspaceRoot: string,
+    call: TauMcpHostCall,
+    dispatchOptions: TauMcpDispatchOptions,
+  ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
+    const route = routeCall(call);
+    if ('errorCode' in route) {
+      return route;
+    }
+    const result = await invokeIn({ workspaceRoot, tool: route.tool, args: route.args, call: dispatchOptions });
+    return present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch((error: unknown) =>
+      hostFault(route.tool, error),
+    );
+  };
   const viewer =
     options.viewerPage === undefined
       ? undefined
@@ -950,6 +978,13 @@ export const serveLocalHostMcp = async (
             }
             return artifactPath;
           },
+          snapshotSource: options.snapshotSource,
+          ...(options.runtimeClient === undefined
+            ? {}
+            : { export: createMcpViewerExport({ runtimeFor: options.runtimeClient }) }),
+          /* The loopback page's panes reach the same host tools an MCP App page reaches through `tools/call`. */
+          hostCall: async ({ root, call, signal }) =>
+            dispatchIn(root, call, { toolCallId: `loopback:${randomUUID()}`, signal }),
         });
   const server = await serveTauMcpStdio(
     {
@@ -963,21 +998,7 @@ export const serveLocalHostMcp = async (
         )
         .map((definition) => hostToolOf(definition)),
       screenshotImages: 'inline',
-      dispatch: async (call, dispatchOptions) => {
-        const route = routeCall(call);
-        if ('errorCode' in route) {
-          return route;
-        }
-        const result = await invokeIn({
-          workspaceRoot: rootOf(dispatchOptions.meta),
-          tool: route.tool,
-          args: route.args,
-          call: dispatchOptions,
-        });
-        return present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch((error: unknown) =>
-          hostFault(route.tool, error),
-        );
-      },
+      dispatch: async (call, dispatchOptions) => dispatchIn(rootOf(dispatchOptions.meta), call, dispatchOptions),
     },
     streams,
   );

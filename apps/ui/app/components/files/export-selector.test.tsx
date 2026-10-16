@@ -159,7 +159,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 }));
 
 const { ExportSelector } = await import('./export-selector.js');
-const { groupExportFormatsByFidelity } = await import('./export-format-groups.js');
+const { groupExportFormatsByFidelity } = await import('@taucad/workbench-panes/export/export-source');
 
 const compiledSelector = await (async () => {
   const { transformSync } = await import('oxc-transform-react');

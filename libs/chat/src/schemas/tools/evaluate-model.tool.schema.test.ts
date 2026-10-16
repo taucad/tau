@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { toolName } from '#constants/tool.constants.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
 import { evaluateModelInputSchema, evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
+import { screenshotInputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 
 describe('evaluateModelInputSchema', () => {
   it('rejects obsolete geometry and rendering request keys', () => {
@@ -12,6 +13,19 @@ describe('evaluateModelInputSchema', () => {
       expect(evaluateModelInputSchema.safeParse(request).success).toBe(false);
     }
     expect(evaluateModelInputSchema.safeParse({ targetFile: 'main.ts', includeCapabilities: true }).success).toBe(true);
+  });
+
+  it('should validate default view options with the very schema screenshot uses', () => {
+    expect(evaluateModelInputSchema.shape.options).toBe(screenshotInputSchema.shape.options);
+    expect(evaluateModelInputSchema.parse({ targetFile: 'main.ts', options: { tessellation: 'low' } })).toEqual({
+      targetFile: 'main.ts',
+      options: { tessellation: 'low' },
+    });
+    expect(evaluateModelInputSchema.parse({ targetFile: 'main.ts' })).not.toHaveProperty('options');
+    for (const options of ['low', ['low'], null, { tessellation: () => 'low' }]) {
+      expect(evaluateModelInputSchema.safeParse({ targetFile: 'main.ts', options }).success).toBe(false);
+      expect(screenshotInputSchema.safeParse({ targetFile: 'main.ts', options }).success).toBe(false);
+    }
   });
 });
 

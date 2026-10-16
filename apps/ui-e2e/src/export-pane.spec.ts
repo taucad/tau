@@ -166,7 +166,16 @@ test('mounts and exports a transcoded mesh route with its options in declared un
   // Replicad has no native 3MF writer, so 3MF is the assimp route whose edge pins the glTF source options.
   await selectFormat('3MF');
   await openOptions('3MF');
-  await target.click(panel.getByRole('button', { name: 'Group: Tessellation' }), { timeout: 15_000 });
+  // Tessellation is a preset or explicit tolerances; the tolerance inputs belong to the explicit form.
+  const tessellation = panel.getByRole('combobox', { name: 'Select for Tessellation' });
+  await target.expectVisible(tessellation, 15_000);
+  await target.click(tessellation);
+  await target.click(selectors.getByRole('option', { name: 'Explicit' }));
+  const explicitGroup = panel.getByRole('button', { name: 'Group: Explicit' });
+  await target.expectVisible(explicitGroup, 15_000);
+  if ((await target.getAttribute(explicitGroup, 'aria-expanded')) !== 'true') {
+    await target.click(explicitGroup);
+  }
 
   const linearTolerance = panel.getByLabelText('Input for Linear Tolerance').first();
   await target.expectVisible(linearTolerance, 15_000);

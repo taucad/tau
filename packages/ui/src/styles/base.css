@@ -1,0 +1,36 @@
+/*
+ * Tau's document base: what every surface that draws Tau components needs beside the tokens. Import it after
+ * `tokens.css`, inside the same Tailwind build.
+ *
+ * Tailwind 4 draws a bare `border` in `currentColor`; Tau components rely on the border token instead, so without
+ * this layer every outline renders in the text colour.
+ */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border, currentColor);
+  }
+
+  /* Focus fallback for controls that do not compose a shared primitive. `:where()` keeps it at zero specificity so
+     any component class still wins. Geometry lives in the `focus-outline` utility; never restate it here. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply focus-outline;
+  }
+
+  html,
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, var(--border)) var(--scrollbar-track, transparent);
+  }
+
+  ::selection {
+    @apply bg-highlighter text-highlighter-foreground;
+  }
+}

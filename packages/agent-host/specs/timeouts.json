@@ -837,6 +837,14 @@
       "owner": "agent-plugin-ui-blueprint W10"
     },
     {
+      "id": "D29",
+      "bound": "Viewer Share pane's direct link: each git call that lists the project's files, 10 s",
+      "site": "packages/host/src/mcp-viewer-share.ts",
+      "token": "timeout: gitTimeout",
+      "class": "External edge",
+      "owner": "agent-plugin-viewer-parity-blueprint V10"
+    },
+    {
       "id": "M11",
       "bound": "Desktop recovery waits for actual utility settlement before replacing its service",
       "site": "apps/desktop/src/main/services-broker.ts",

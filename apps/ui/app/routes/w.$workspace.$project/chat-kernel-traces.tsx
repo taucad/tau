@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import type {

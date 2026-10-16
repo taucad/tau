@@ -253,7 +253,7 @@ function createMockCadUnit(options?: {
   entryPath?: string;
   parameters?: Record<string, unknown>;
   latestRenderingOutcome?: 'success' | 'failure';
-  document?: { export: ReturnType<typeof vi.fn> } | false;
+  document?: { export: ReturnType<typeof vi.fn>; view?: ReturnType<typeof vi.fn> } | false;
 }) {
   const rendering = options?.rendering ?? gltfRendering;
   const evaluation = {
@@ -1996,6 +1996,85 @@ describe('rpc-handlers', () => {
           success: false,
           errorCode: 'UNKNOWN',
           message: 'Actor stopped',
+        });
+      });
+
+      describe('default view options', () => {
+        const optionedUnit = (rendering: Rendering) => {
+          const view = {
+            rendering: vi.fn(async () => ({ superseded: false, rendering })),
+            close: vi.fn(),
+          };
+          const document = { export: vi.fn(), view: vi.fn(() => view) };
+          const cadUnit = createMockCadUnit({ value: 'idle', document });
+          const projectRef = createMockProjectRef({ geometryUnits: new Map([['main.scad', cadUnit]]) });
+          mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
+          return { deps: buildDeps({ projectRef }), document, view };
+        };
+
+        it('renders the default view with the options evaluate_model was given and reports its mesh cost', async () => {
+          const tessellation = { triangles: 96, vertices: 50, elapsed: 3 };
+          const { deps, document, view } = optionedUnit({
+            ...gltfRendering,
+            artifact: { ...gltfRendering.artifact, tessellation },
+          });
+
+          const result = await deps.kernelClient.evaluateModel({
+            targetFile: 'main.scad',
+            options: { tessellation: 'low' },
+          });
+
+          expect(result).toEqual({
+            success: true,
+            status: 'ready',
+            kernelIssues: [],
+            views: ['model'],
+            instances: {},
+            exports: { stl: 'stl' },
+            tessellation,
+          });
+          expect(document.view).toHaveBeenCalledExactlyOnceWith('model', { options: { tessellation: 'low' } });
+          expect(view.close).toHaveBeenCalledOnce();
+        });
+
+        it('reads the settled viewer projection without rendering again when options are omitted', async () => {
+          const { deps, document } = optionedUnit(gltfRendering);
+
+          await expect(deps.kernelClient.evaluateModel({ targetFile: 'main.scad' })).resolves.toEqual({
+            success: true,
+            status: 'ready',
+            kernelIssues: [],
+            views: ['model'],
+            instances: {},
+            exports: { stl: 'stl' },
+          });
+          expect(document.view).not.toHaveBeenCalled();
+        });
+
+        it('refuses options the default view rejects with VALIDATION_ERROR', async () => {
+          const { deps, view } = optionedUnit({
+            success: false,
+            requestId: 'request-2',
+            evaluationId: 'evaluation-1',
+            transient: false,
+            issues: [
+              {
+                code: 'VIEW_OPTIONS_INVALID',
+                message: 'model option tessellation: Invalid input',
+                type: 'kernel',
+                severity: 'error',
+              },
+            ],
+          });
+
+          await expect(
+            deps.kernelClient.evaluateModel({ targetFile: 'main.scad', options: { tessellation: 'coarse' } }),
+          ).resolves.toEqual({
+            success: false,
+            errorCode: 'VALIDATION_ERROR',
+            message: 'model option tessellation: Invalid input',
+          });
+          expect(view.close).toHaveBeenCalledOnce();
         });
       });
     });

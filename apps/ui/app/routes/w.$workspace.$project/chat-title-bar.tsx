@@ -15,7 +15,7 @@ import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';
 import { FloatingPanelButtonGroup, FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { ChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
 import { useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';

@@ -61,7 +61,7 @@ import type {
   modelInteractionMachine,
 } from '@taucad/viewer/machines/model-interaction.machine';
 import { useModelComponentActions } from '#components/geometry/cad/model-component-actions.js';
-import type { ModelComponentActionTarget } from '#components/geometry/cad/model-component-actions.js';
+import type { ModelComponentActionTarget } from '@taucad/workbench-panes/component-menu/component-actions';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';

@@ -2,7 +2,7 @@ import { XIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -20,10 +20,10 @@ import {
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 import { useProject } from '#hooks/use-project.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
 import { GeometryUnitTiming, GeometryUnitSummary } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
 import { actorSessionIdOf } from '#lib/xstate.lib.js';
 import {

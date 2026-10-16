@@ -1,5 +1,10 @@
 import { Cpu } from 'lucide-react';
-import { DropdownMenuItem, DropdownMenuSwitchItem } from '@taucad/ui/components/dropdown-menu';
+import {
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSwitchItem,
+} from '@taucad/ui/components/dropdown-menu';
 import { DropdownMenuDisclosureItem } from '@taucad/ui/components/menu-disclosure-item';
 import { DropdownMenuSliderItem } from '@taucad/ui/components/menu-slider-item';
 
@@ -14,6 +19,9 @@ type SchemaNode = Readonly<{
   exclusiveMinimum?: unknown;
   exclusiveMaximum?: unknown;
   multipleOf?: unknown;
+  examples?: unknown;
+  enum?: unknown;
+  oneOf?: unknown;
   properties?: Readonly<Record<string, SchemaNode>>;
   'x-tau-unit'?: unknown;
 }>;
@@ -37,16 +45,39 @@ type NumberField = Readonly<{
 type BooleanField = Readonly<{ kind: 'boolean'; path: readonly string[]; label: string }>;
 
 /**
+ * A setting that is one of a list of presets or an explicit object, never both: a `oneOf` of a string enum and an
+ * object. Choosing the explicit form shows the object's number rows; choosing a preset replaces the whole value.
+ */
+type ChoiceField = Readonly<{
+  kind: 'choice';
+  path: readonly string[];
+  label: string;
+  presets: readonly string[];
+  explicitFields: readonly NumberField[];
+  /** The explicit object a switch from a preset starts with: each field's example value. */
+  explicitSeed: Readonly<Record<string, number>>;
+}>;
+
+/** The choice row's value for the explicit form; preset names are the enum's own strings. */
+const explicitChoice = 'explicit';
+
+/**
  * A run of settings under an optional heading: the schema's top-level leaves, or one object's leaves.
  *
  * @public
  */
 export type KernelSettingsGroup = Readonly<{
   label: string | undefined;
-  fields: ReadonlyArray<NumberField | BooleanField>;
+  fields: ReadonlyArray<NumberField | BooleanField | ChoiceField>;
 }>;
 
 const asNumber = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined);
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+const firstExample = (node: SchemaNode): number | undefined =>
+  Array.isArray(node.examples) ? asNumber(node.examples[0]) : undefined;
 
 /** `linearTolerance` → `Linear tolerance`, the menu's sentence case. */
 const humanize = (key: string): string => {
@@ -79,7 +110,7 @@ const toField = (
     return undefined;
   }
   const isInteger = node.type === 'integer';
-  const defaultValue = asNumber(node.default) ?? asNumber(fallback) ?? 0;
+  const defaultValue = asNumber(node.default) ?? asNumber(fallback) ?? firstExample(node) ?? 0;
   const step = asNumber(node.multipleOf) ?? stepFor(defaultValue, isInteger);
   const minimum = asNumber(node.minimum);
   const maximum = asNumber(node.maximum);
@@ -104,7 +135,48 @@ const toField = (
 };
 
 /**
- * The settings a view's option schema offers: its top-level leaves, then each object's leaves under its title.
+ * Read a `oneOf` of exactly one string enum and one object with properties as a preset-or-explicit choice.
+ *
+ * @param key - The setting's property name.
+ * @param node - The setting's schema.
+ * @returns The choice field, or `undefined` when the schema is not that union.
+ */
+const toChoiceField = (key: string, node: SchemaNode): ChoiceField | undefined => {
+  if (!Array.isArray(node.oneOf) || node.oneOf.length !== 2) {
+    return undefined;
+  }
+  const branches = node.oneOf as SchemaNode[];
+  const presetBranch = branches.find((branch) => branch.type === 'string' && Array.isArray(branch.enum));
+  const explicitBranch = branches.find((branch) => branch.type === 'object' && branch.properties);
+  const presets = (presetBranch?.enum as unknown[] | undefined)?.filter((value) => typeof value === 'string');
+  if (!presets || presets.length === 0 || presets.includes(explicitChoice) || !explicitBranch?.properties) {
+    return undefined;
+  }
+  const explicitFields: NumberField[] = [];
+  const explicitSeed: Record<string, number> = {};
+  for (const [leaf, child] of Object.entries(explicitBranch.properties)) {
+    const field = toField([key, leaf], child, undefined);
+    if (field?.kind === 'number') {
+      explicitFields.push(field);
+      explicitSeed[leaf] = firstExample(child) ?? field.min;
+    }
+  }
+  if (explicitFields.length === 0) {
+    return undefined;
+  }
+  return {
+    kind: 'choice',
+    path: [key],
+    label: typeof node.title === 'string' ? node.title : humanize(key),
+    presets,
+    explicitFields,
+    explicitSeed,
+  };
+};
+
+/**
+ * The settings a view's option schema offers: its top-level leaves, then each object's leaves under its title, and
+ * each preset-or-explicit choice under its own title.
  *
  * @public
  */
@@ -113,6 +185,11 @@ export const kernelSettingsGroups = (schema: unknown, defaults: Record<string, u
   const loose: Array<NumberField | BooleanField> = [];
   const groups: KernelSettingsGroup[] = [];
   for (const [key, node] of Object.entries(properties)) {
+    const choice = toChoiceField(key, node);
+    if (choice) {
+      groups.push({ label: choice.label, fields: [choice] });
+      continue;
+    }
     if (node.type === 'object' && node.properties) {
       const nested = (defaults[key] ?? node.default ?? {}) as Record<string, unknown>;
       const fields = Object.entries(node.properties).flatMap(([leaf, child]) => {
@@ -142,6 +219,7 @@ const readPath = (source: Record<string, unknown>, path: readonly string[]): unk
 
 /**
  * The whole option set with one setting changed: a kernel reads every declared value, not only the changed one.
+ * A nested leaf merges only into an object: a preset string beside it is replaced, never merged.
  *
  * @public
  */
@@ -159,11 +237,7 @@ export const withSetting = (
   if (leaf === undefined) {
     return { ...merged, [key]: value };
   }
-  const nested = {
-    ...(defaults[key] as Record<string, unknown> | undefined),
-    ...(values[key] as Record<string, unknown> | undefined),
-    [leaf]: value,
-  };
+  const nested = { ...asRecord(defaults[key]), ...asRecord(values[key]), [leaf]: value };
   return { ...merged, [key]: nested };
 };
 
@@ -210,6 +284,31 @@ export function KernelSettings({
 }: KernelSettingsProps): React.JSX.Element {
   const changedCount = countChangedSettings(groups, values, defaults);
   const valueAt = (path: readonly string[]): unknown => readPath(values, path) ?? readPath(defaults, path);
+  const renderNumber = (field: NumberField): React.JSX.Element => (
+    <DropdownMenuSliderItem
+      key={field.path.join('.')}
+      value={Number(valueAt(field.path) ?? field.min)}
+      min={field.min}
+      max={field.max}
+      hasMinimum={field.hasMinimum}
+      hasMaximum={field.hasMaximum}
+      step={field.step}
+      trailingAdornment={field.unit}
+      aria-label={field.label}
+      onValueChange={(next) => {
+        // A typed value outside an exclusive bound is not a setting the kernel accepts.
+        if (
+          (field.exclusiveMinimum !== undefined && next <= field.exclusiveMinimum) ||
+          (field.exclusiveMaximum !== undefined && next >= field.exclusiveMaximum)
+        ) {
+          return;
+        }
+        onChange(withSetting({ values, defaults }, field.path, next));
+      }}
+    >
+      {field.label}
+    </DropdownMenuSliderItem>
+  );
   return (
     <DropdownMenuDisclosureItem
       icon={<Cpu />}
@@ -229,43 +328,60 @@ export function KernelSettings({
                 {group.label}
               </div>
             ) : null}
-            {group.fields.map((field) =>
-              field.kind === 'number' ? (
-                <DropdownMenuSliderItem
-                  key={field.path.join('.')}
-                  value={Number(valueAt(field.path) ?? field.min)}
-                  min={field.min}
-                  max={field.max}
-                  hasMinimum={field.hasMinimum}
-                  hasMaximum={field.hasMaximum}
-                  step={field.step}
-                  trailingAdornment={field.unit}
-                  aria-label={field.label}
-                  onValueChange={(next) => {
-                    // A typed value outside an exclusive bound is not a setting the kernel accepts.
-                    if (
-                      (field.exclusiveMinimum !== undefined && next <= field.exclusiveMinimum) ||
-                      (field.exclusiveMaximum !== undefined && next >= field.exclusiveMaximum)
-                    ) {
-                      return;
-                    }
-                    onChange(withSetting({ values, defaults }, field.path, next));
-                  }}
-                >
-                  {field.label}
-                </DropdownMenuSliderItem>
-              ) : (
-                <DropdownMenuSwitchItem
-                  key={field.path.join('.')}
-                  isChecked={valueAt(field.path) === true}
-                  onIsCheckedChange={(isChecked) => {
-                    onChange(withSetting({ values, defaults }, field.path, isChecked));
-                  }}
-                >
-                  {field.label}
-                </DropdownMenuSwitchItem>
-              ),
-            )}
+            {group.fields.map((field) => {
+              if (field.kind === 'boolean') {
+                return (
+                  <DropdownMenuSwitchItem
+                    key={field.path.join('.')}
+                    isChecked={valueAt(field.path) === true}
+                    onIsCheckedChange={(isChecked) => {
+                      onChange(withSetting({ values, defaults }, field.path, isChecked));
+                    }}
+                  >
+                    {field.label}
+                  </DropdownMenuSwitchItem>
+                );
+              }
+              if (field.kind === 'number') {
+                return renderNumber(field);
+              }
+              const current = valueAt(field.path);
+              const selected = typeof current === 'string' ? current : explicitChoice;
+              return (
+                <div key={field.path.join('.')} className='flex flex-col gap-1'>
+                  {/* The enclosing group carries the setting's name. */}
+                  <DropdownMenuRadioGroup
+                    value={selected}
+                    onValueChange={(next) => {
+                      if (next === selected) {
+                        return;
+                      }
+                      onChange(
+                        withSetting(
+                          { values, defaults },
+                          field.path,
+                          next === explicitChoice ? { ...field.explicitSeed } : next,
+                        ),
+                      );
+                    }}
+                  >
+                    {[...field.presets, explicitChoice].map((option) => (
+                      <DropdownMenuRadioItem
+                        key={option}
+                        value={option}
+                        onSelect={(event) => {
+                          // Keep the menu open so the explicit rows can be edited next.
+                          event.preventDefault();
+                        }}
+                      >
+                        {humanize(option)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  {selected === explicitChoice ? field.explicitFields.map((explicit) => renderNumber(explicit)) : null}
+                </div>
+              );
+            })}
           </div>
         ))}
         <DropdownMenuItem

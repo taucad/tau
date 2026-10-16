@@ -2310,6 +2310,9 @@ importers:
 
   apps/libs/share:
     dependencies:
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../../../packages/core/project
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -2736,6 +2739,9 @@ importers:
       '@taucad/workbench':
         specifier: workspace:*
         version: link:../../packages/workbench
+      '@taucad/workbench-panes':
+        specifier: workspace:*
+        version: link:../../packages/workbench-panes
       '@taucad/zoo':
         specifier: workspace:*
         version: link:../../packages/plugins/zoo
@@ -3488,6 +3494,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -3500,6 +3509,9 @@ importers:
       '@taucad/viewer':
         specifier: workspace:*
         version: link:../viewer
+      '@taucad/workbench-panes':
+        specifier: workspace:*
+        version: link:../workbench-panes
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 6.1.1(oxc-transform-react@0.148.0)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -3768,6 +3780,13 @@ importers:
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   packages/core/project:
+    dependencies:
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.12
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
     devDependencies:
       zod:
         specifier: 'catalog:'
@@ -5479,6 +5498,88 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  packages/workbench-panes:
+    dependencies:
+      '@rjsf/core':
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
+      '@rjsf/utils':
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
+      class-variance-authority:
+        specifier: 'catalog:'
+        version: 0.7.1
+      dockview-react:
+        specifier: ^8.2.0
+        version: 8.5.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 0.552.0(react@19.2.7)
+      radix-ui:
+        specifier: 'catalog:'
+        version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+    devDependencies:
+      '@taucad/nx':
+        specifier: workspace:*
+        version: link:../../tools/nx
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      '@taucad/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
+      '@taucad/viewer':
+        specifier: workspace:*
+        version: link:../viewer
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@testing-library/user-event':
+        specifier: ^14.6.1
+        version: 14.6.7(@testing-library/dom@10.4.2)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.17)
+      '@xstate/react':
+        specifier: 7.0.0-alpha.3
+        version: 7.0.0-alpha.3(@types/react@19.2.17)(react@19.2.7)(xstate@6.0.0-alpha.59)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.7
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.7(react@19.2.7)
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)

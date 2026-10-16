@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) with physical materials and the realm hold — measured 21.54 kB brotlied on 2026-10-12",
+    "name": "total (ESM JS) with physical materials, the realm hold and tessellation presets — measured 22.34 kB brotlied on 2026-10-16",
     "path": ["dist/**/*.mjs"],
-    "limit": "22 kB"
+    "limit": "23 kB"
   },
   {
     "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",

@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 747 packages, with the license each declares.
+The web and desktop apps include the following 750 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -408,6 +408,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [diff](https://github.com/kpdecker/jsdiff) | 8.0.4 | BSD-3-Clause |
 | [diff](https://github.com/kpdecker/jsdiff) | 9.0.0 | BSD-3-Clause |
 | [diff3](https://github.com/axosoft/diff3) | 0.0.3 | MIT |
+| [dockview](https://github.com/dockview/dockview) | 8.5.1 | MIT |
+| [dockview-core](https://github.com/dockview/dockview) | 8.5.1 | MIT |
+| [dockview-react](https://github.com/dockview/dockview) | 8.5.1 | MIT |
 | [dompurify](https://github.com/cure53/DOMPurify) | 3.4.16 | (MPL-2.0 OR Apache-2.0) |
 | [draco3d](https://github.com/google/draco) | 1.5.7 | Apache-2.0 |
 | [draco3dgltf](https://github.com/google/draco) | 1.5.7 | Apache-2.0 |

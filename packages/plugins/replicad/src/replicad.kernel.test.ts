@@ -3370,6 +3370,8 @@ describe('OC API Call Tracing', () => {
       file: createGeometryFile('box.ts'),
       parameters: {},
       content: { includeEdges: false, includeTopology: false },
+      // Explicit tolerances, so the span attributes do not depend on the size-derived default preset.
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
     });
     await collectTelemetry();
 
@@ -3420,6 +3422,8 @@ describe('OC API Call Tracing', () => {
       file: createGeometryFile('box.ts'),
       parameters: {},
       content: { includeEdges: true, includeTopology: false },
+      // Explicit tolerances, so the span attributes do not depend on the size-derived default preset.
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
     });
     await collectTelemetry();
 

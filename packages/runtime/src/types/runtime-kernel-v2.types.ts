@@ -27,7 +27,8 @@ import { validateRuntimeContentDeclarations } from '#types/runtime-content.types
 export type MediaType = SharedMediaType;
 /**
  * What one rendered mesh output cost: its size and the time spent producing it. Voxel kernels add
- * the grid that produced the mesh. Every count describes the delivered output, never a request.
+ * the grid that produced the mesh; OCCT kernels add the requested form and the tolerances it
+ * resolved to. Every count describes the delivered output, never a request.
  * @public
  */
 export type TessellationReport = Readonly<{
@@ -43,6 +44,14 @@ export type TessellationReport = Readonly<{
   activeVoxels?: number;
   /** Native bytes held by the fields the mesh came from; voxel kernels only. */
   memoryBytes?: number;
+  /** The requested tessellation form: a quality preset name, or `'explicit'` for explicit tolerances. */
+  requested?: 'low' | 'medium' | 'high' | 'extra-high' | 'explicit';
+  /** Absolute chordal deviation in millimetres the mesh was produced at, after any downgrade. */
+  linearTolerance?: number;
+  /** Angular tolerance in degrees the mesh was produced at, after any downgrade. */
+  angularTolerance?: number;
+  /** Coarser steps taken because the requested mesh exceeded the triangle budget; zero when none. */
+  downgraded?: number;
 }>;
 /** A single rendered view with its declared media type, optional units and mesh cost. @public */
 export type Artifact = Readonly<{

@@ -5,7 +5,7 @@ import { Button } from '@taucad/ui/components/button';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
-import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
+import { groupExportFormatsByFidelity } from '@taucad/workbench-panes/export/export-source';
 import type { FormatEntry } from '#utils/export-formats.utils.js';
 import { getFormatInfo } from '#utils/export-formats.utils.js';
 import { cn } from '@taucad/ui/utils/cn';

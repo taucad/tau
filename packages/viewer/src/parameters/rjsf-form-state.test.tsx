@@ -5,7 +5,7 @@ import { customizeValidator } from '@rjsf/validator-ajv8';
 import { assimpEdgeSchemas } from '@taucad/assimp';
 import { imageEdgeSchemas } from '@taucad/image';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { toJSONSchema } from 'zod';
 import type { ZodType } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
@@ -228,5 +228,64 @@ describe('RJSF form-state policy', () => {
 
     expect(hydrated).toEqual(defaults);
     expect(validationErrors(hydrated, schema).map((error) => error.stack)).toEqual([]);
+  });
+
+  it('should start an object option empty, never spread from the string option it replaces', async () => {
+    const onChange = vi.fn();
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        tessellation: {
+          default: 'high',
+          oneOf: [
+            { type: 'string', title: 'Preset', enum: ['low', 'medium', 'high', 'extra-high'] },
+            {
+              type: 'object',
+              title: 'Explicit',
+              additionalProperties: false,
+              minProperties: 1,
+              properties: {
+                linearTolerance: { type: 'number', exclusiveMinimum: 0, examples: [0.02] },
+                angularTolerance: { type: 'number', exclusiveMinimum: 0, examples: [20] },
+              },
+            },
+          ],
+        },
+      },
+    };
+    render(
+      <TooltipProvider>
+        <Form
+          schema={schema}
+          formData={{ tessellation: 'high' }}
+          validator={validator}
+          templates={templates}
+          fields={rjsfFields}
+          widgets={widgets}
+          uiSchema={uiSchema}
+          idPrefix={rjsfIdPrefix}
+          idSeparator={rjsfIdSeparator}
+          formContext={formContext}
+          experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
+          onChange={onChange}
+        />
+      </TooltipProvider>,
+    );
+
+    // Radix renders a native select beside its trigger; jsdom cannot open the popover, so drive the native one.
+    const select = screen
+      .getByRole('combobox', { name: 'Select for Tessellation' })
+      .parentElement?.querySelector('select');
+    const explicit = [...(select?.options ?? [])].find((option) => option.textContent === 'Explicit');
+    expect(explicit).toBeDefined();
+    fireEvent.change(select!, { target: { value: explicit?.value } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ formData: { tessellation: {} } }),
+        expect.anything(),
+      );
+    });
+    expect(screen.getByLabelText('Input for Linear Tolerance')).toBeInTheDocument();
   });
 });

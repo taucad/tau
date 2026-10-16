@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisions, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';

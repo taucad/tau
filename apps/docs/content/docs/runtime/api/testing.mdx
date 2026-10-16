@@ -48,20 +48,6 @@ Callers own clients returned by `createTestRuntimeClient` and must call `shutdow
 
 `validateGlbData`, `glbToDocument`, `getInspectReport`, `getGeometryStatsFromInspect`, and `getBoundingBoxFromInspect` inspect binary glTF. `extractGltfFromResult`, `extractGltfFromExportResult`, `createGeometryTestHelpers`, `createGeometryVariant`, and `getSignedVolumeFromGlb` work over runtime results, alongside shared color, coordinate, and naming assertions.
 
-## Native Dependency Preparation
-
-The Node-only `@taucad/runtime-testing/preparation` entry tests `tau-plugin.json` preparation without the network.
-
-| Function                                                                                | Description                                                                                                               |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `createFixtureClosure`                                                                  | Pin in-test payloads by their real digests; returns the manifest, parsed deployment, registry routes and a seed writer    |
-| `tarGz` / `storedZip` / `wheel` / `utf8`                                                | Build in-test payload archives and bytes                                                                                  |
-| `writeSeedDirectory`                                                                    | Write blobs in the seed layout (`blobs/sha256/<hex>`, `tau-seed.json`) every host reads                                   |
-| `createFakeRegistry`                                                                    | An injected `fetch` that answers routed URLs and records every request                                                    |
-| `startPayloadMirror`                                                                    | A loopback `node:http` mirror over a seed directory that records requests and can answer a path with a status or redirect |
-| `installFetchTripwire` / `forbidGlobalFetch`                                            | Fail any global `fetch`, naming the URL                                                                                   |
-| `readGoldenReceipts` / `compareWithGolden` / `goldenSummaryRow` / `appendGoldenSummary` | Compare a sealed receipt with a `tau-plugin.golden.json` entry and report it in a CI summary                              |
-
 ## Usage
 
 ```typescript

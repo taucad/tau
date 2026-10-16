@@ -63,19 +63,25 @@ export const picogkKernel = defineKernel({
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  /* A marching-cubes mesh has no B-rep edges, so the complete native answer to `includeEdges` is
+   * the model's own lines and no overlay. Claiming it keeps the fallback dihedral detector, which
+   * finds only voxel staircase and scales with the largest meshes Tau renders, off every PicoGK
+   * mesh. Topology is not claimed: it is always written and cannot yet be withheld on request. */
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
   exports: {
     glb: {
       title: 'glTF binary',
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: picogkExportSchemas.glb,
+      content: ['includeEdges'],
     },
     gltf: {
       title: 'glTF JSON',
       mimeType: 'model/gltf+json',
       extension: 'gltf',
       optionsSchema: picogkExportSchemas.gltf,
+      content: ['includeEdges'],
     },
   },
 

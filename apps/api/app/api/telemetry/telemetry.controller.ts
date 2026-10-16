@@ -3,6 +3,7 @@ import { Body, Controller, Post, HttpCode, UseGuards } from '@nestjs/common';
 import { IngestEntryName, AttributeKey, knownAgentIds } from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
 import { AuthGuard } from '#auth/auth.guard.js';
+import { OptionalAuth, OptionalUser } from '#auth/decorators/auth.decorator.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 
@@ -18,9 +19,24 @@ const maximumSyncPending = 10_000;
 export class TelemetryController {
   public constructor(private readonly metrics: MetricsService) {}
 
+  /**
+   * Record a batch of client metrics.
+   *
+   * A signed-out page still runs the client runtime that reports them, so the
+   * route accepts its batch rather than answering every flush with a 401. It
+   * records only signed-in batches, which keeps the series bounded to real
+   * accounts.
+   *
+   * @param body - The validated metric batch.
+   * @param userId - The signed-in user, when there is one.
+   */
   @Post('ingest')
   @HttpCode(204)
-  public ingest(@Body() body: IngestPayloadDto): void {
+  @OptionalAuth()
+  public ingest(@Body() body: IngestPayloadDto, @OptionalUser('id') userId: string | undefined): void {
+    if (userId === undefined) {
+      return;
+    }
     for (const entry of body.entries) {
       this.recordEntry(entry, entry.duration / 1000);
     }

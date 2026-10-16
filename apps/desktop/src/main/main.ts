@@ -1,3 +1,4 @@
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
 import { createCallbackLogic } from 'xstate';
@@ -107,6 +108,7 @@ import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
+import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
 import { startNativeStore } from '#tau/native-store.js';
 import {
@@ -1009,6 +1011,36 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  const updaterReady = Promise.withResolvers<DesktopUpdater>();
+  ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    return updater.snapshot();
+  });
+  ipcMain.handle(desktopUpdateChannels.check, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.check();
+  });
+  ipcMain.handle(desktopUpdateChannels.install, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.install();
+  });
+  ipcMain.handle(desktopUpdateChannels.download, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.download();
+  });
+
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
@@ -1782,19 +1814,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
       }
       return response.json() as Promise<unknown>;
     },
-    confirm: async ({ title, detail, accept }) => {
-      if (otaProbe) {
-        return true;
+    installForProbe: otaProbe !== undefined,
+    onState: (snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && trusted(window.webContents.mainFrame)) {
+          window.webContents.send(desktopUpdateChannels.changed, snapshot);
+        }
       }
-      const { response } = await dialog.showMessageBox({
-        type: 'info',
-        message: title,
-        detail,
-        buttons: [accept, 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      return response === 0;
     },
     openExternal: async (url) => shell.openExternal(url),
     log: (level, event, detail) => {
@@ -1802,19 +1828,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
+  updaterReady.resolve(updater);
   const checkForUpdates = async (): Promise<void> => {
-    await updater.check();
-    const { response } = await dialog.showMessageBox({
-      type: 'info',
-      message: `Tau ${app.getVersion()} · ${desktopChannel}`,
-      detail: updater.status(),
-      buttons: ['OK', 'Restart to install'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (response === 1) {
-      await updater.install();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await createMainWindow();
     }
+    focusMainWindow();
+    await updater.check(true);
   };
   const applicationMenu = Menu.getApplicationMenu();
   const appSubmenu = applicationMenu?.items[0]?.submenu;

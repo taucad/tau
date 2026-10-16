@@ -1,3 +1,5 @@
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
+import type { DesktopUpdateBridge } from '@taucad/types/desktop-updates';
 import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
 import { browserChannels } from '@taucad/types/browser';
 import { mock } from 'vitest-mock-extended';
@@ -244,5 +246,30 @@ describe('desktop browser bridge', () => {
     expect(listener).toHaveBeenCalledExactlyOnceWith(snapshot);
     unsubscribe();
     expect(ipcRenderer.off).toHaveBeenCalledWith(browserChannels.state, registration[1]);
+  });
+});
+
+describe('desktop update preload bridge', () => {
+  it('should expose only fixed update actions and remove the state listener on unsubscribe', async () => {
+    const { updates } = state.exposed.get('tau') as { readonly updates: DesktopUpdateBridge };
+    const receive = vi.fn();
+    const unsubscribe = updates.subscribe(receive);
+    const snapshot = { revision: 2, phase: 'ready' };
+    state.listeners.get(desktopUpdateChannels.changed)?.[0]?.({}, snapshot);
+    expect(receive).toHaveBeenCalledWith(snapshot);
+    await updates.snapshot();
+    await updates.check();
+    await updates.install();
+    await updates.download();
+    for (const channel of [
+      desktopUpdateChannels.snapshot,
+      desktopUpdateChannels.check,
+      desktopUpdateChannels.install,
+      desktopUpdateChannels.download,
+    ]) {
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(channel);
+    }
+    unsubscribe();
+    expect(state.listeners.get(desktopUpdateChannels.changed)).toEqual([]);
   });
 });

@@ -39,13 +39,26 @@ import {
   resolveOcctModuleFactory,
   wrapOcForExceptions,
   wrapOcWithTracing,
+  createTessellationBudgetExceededIssue,
+  occtExplicitTessellationDefaults,
+  occtTriangleBudgets,
 } from '@taucad/occt-core';
 
 import { opencascadeOptionsSchema, opencascadeRenderSchema, opencascadeExportSchemas } from '#opencascade.schemas.js';
 
-import type { OcctModuleFactory, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcctResolvedTessellation, OcTracingSummary } from '@taucad/occt-core';
 
-import { createIncrementalMesh, meshShapesToGltf, parseHexColor } from '#opencascade-mesh.js';
+import {
+  countGlbMesh,
+  countStlTriangles,
+  createIncrementalMesh,
+  finishShapesGlb,
+  parseHexColor,
+  renderShapesWithinBudget,
+  resolveOpencascadeTessellation,
+  toMeshTolerances,
+  writeShapesGlb,
+} from '#opencascade-mesh.js';
 import type { ShapeEntry } from '#opencascade.types.js';
 
 import { opencascadeDetectPattern } from '#opencascade.constants.js';
@@ -792,21 +805,17 @@ export const opencascadeKernel = defineKernel({
         phase: 'computingGeometry',
       });
 
-      const { tessellation } = options;
-      const { linearTolerance, angularTolerance } = tessellation;
-      const gltfData = await (async () => {
-        try {
-          return await meshShapesToGltf(context.oc, handle, {
-            linearTolerance,
-            angularTolerance: angularTolerance * (Math.PI / 180),
-            inParallel: context.isParallelMeshing,
-          });
-        } finally {
-          meshSpan.end();
-        }
-      })();
-
-      return { content: gltfData };
+      try {
+        // The render hook cannot tell a viewer preview from a capture, so every render takes the
+        // preview budget.
+        return await renderShapesWithinBudget(context.oc, handle, {
+          request: { tessellation: options.tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
+          budget: occtTriangleBudgets.preview,
+          inParallel: context.isParallelMeshing,
+        });
+      } finally {
+        meshSpan.end();
+      }
     } catch (error) {
       const issue = formatOcRuntimeError(error, context.oc, {});
       throw new OcctBuildError([issue]);
@@ -830,16 +839,20 @@ export const opencascadeKernel = defineKernel({
           return emptyGlbExport();
         }
 
-        const { linearTolerance, angularTolerance } = options.tessellation;
         const { coordinateSystem, unit } = options;
+        const requested = resolveOpencascadeTessellation(context.oc, handle, {
+          tessellation: options.tessellation,
+          explicitDefaults: occtExplicitTessellationDefaults.export,
+        });
 
-        const gltfData = await meshShapesToGltf(context.oc, handle, {
-          linearTolerance,
-          angularTolerance: angularTolerance * (Math.PI / 180),
+        const rawGlb = writeShapesGlb(context.oc, handle, {
+          ...toMeshTolerances(requested),
           inParallel: context.isParallelMeshing,
           coordinateSystem,
           unit,
         });
+        assertWithinExportBudget(requested, countGlbMesh(rawGlb).triangles);
+        const gltfData = await finishShapesGlb(rawGlb, handle);
 
         return { files: [createExportFile('glb', 'model.glb', asBuffer(gltfData))] };
       }
@@ -865,17 +878,22 @@ export const opencascadeKernel = defineKernel({
         }
 
         const { oc } = context;
-        const { linearTolerance, angularTolerance } = options.tessellation;
-        const angularToleranceRad = angularTolerance * (Math.PI / 180);
+        const requested = resolveOpencascadeTessellation(oc, handle, {
+          tessellation: options.tessellation,
+          explicitDefaults: occtExplicitTessellationDefaults.export,
+        });
         const { coordinateSystem } = options;
 
         const results = handle.map((entry) =>
           exportOpencascadeStlEntry(oc, entry, {
-            linearTolerance,
-            angularTolerance: angularToleranceRad,
+            ...toMeshTolerances(requested),
             inParallel: context.isParallelMeshing,
             coordinateSystem,
           }),
+        );
+        assertWithinExportBudget(
+          requested,
+          results.reduce((total, file) => total + countStlTriangles(file.bytes), 0),
         );
 
         return { files: nonemptyExportFiles(results) };
@@ -918,6 +936,21 @@ export const opencascadeKernel = defineKernel({
     context.occt.release();
   },
 });
+
+/**
+ * Exports refuse instead of coarsening: an over-budget mesh fails with a suggested tessellation.
+ *
+ * @param requested - The resolved request the export meshed with.
+ * @param triangles - Triangles the export produced.
+ */
+function assertWithinExportBudget(requested: OcctResolvedTessellation, triangles: number): void {
+  const budget = occtTriangleBudgets.export;
+  if (triangles > budget) {
+    throw new OcctBuildError([
+      createTessellationBudgetExceededIssue({ producer: 'opencascade', requested, triangles, budget }),
+    ]);
+  }
+}
 
 class OcctBuildError extends Error {
   public readonly issues: KernelIssue[];

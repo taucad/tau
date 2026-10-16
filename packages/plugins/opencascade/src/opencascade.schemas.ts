@@ -10,7 +10,11 @@
 
 import { z } from 'zod';
 import { coordinateSystemSchema } from '@taucad/runtime/kernel';
-import { occtGltfExportSchema, occtRenderOptionSchema, occtStlExportSchema } from '@taucad/occt-core';
+import {
+  occtQualityGltfExportSchema,
+  occtQualityRenderOptionSchema,
+  occtQualityStlExportSchema,
+} from '@taucad/occt-core';
 
 /**
  * OpenCascade kernel initialization options schema.
@@ -39,20 +43,22 @@ export const opencascadeOptionsSchema = z.object({
 });
 
 /**
- * OpenCascade render option schema.
+ * OpenCascade render option schema: `tessellation` is a quality preset (default `medium`) or explicit
+ * tolerances in millimetres and degrees, never both.
  * @public
  */
 // oxlint-disable-next-line unicorn-js/prefer-export-from -- `no-barrel-files` forbids the re-export form outside index.ts.
-export const opencascadeRenderSchema = occtRenderOptionSchema;
+export const opencascadeRenderSchema = occtQualityRenderOptionSchema;
 
 /**
  * OpenCascade per-format export schemas.
  *
+ * Mesh exports take a quality preset (default `high`) or explicit tolerances, never both.
  * STEP uses XCAF for color/material preservation and exposes coordinate-system intent.
  * @public
  */
 export const opencascadeExportSchemas = {
-  stl: occtStlExportSchema,
+  stl: occtQualityStlExportSchema,
   step: coordinateSystemSchema,
-  glb: occtGltfExportSchema,
+  glb: occtQualityGltfExportSchema,
 } as const satisfies Record<string, z.ZodType>;

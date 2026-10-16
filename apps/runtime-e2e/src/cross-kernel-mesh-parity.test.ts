@@ -114,6 +114,8 @@ function buildNormalMap(vertices: VertexNormal[]): Map<string, { nx: number; ny:
 
 describe('Cross-kernel mesh parity', { timeout: 120_000 }, () => {
   it('should produce matching normals and positions for a cylinder', async () => {
+    // Both kernels mesh at the same explicit tolerances; each kernel's default may differ.
+    const parityTessellation = { linearTolerance: 0.02, angularTolerance: 20 };
     const replicadResult = await createTestGeometry({
       runtime: replicadRuntime,
       files: {
@@ -124,6 +126,7 @@ export default function main() {
 }`,
       },
       open: { source: { path: 'cylinder.ts' } },
+      view: (document) => document.view('model', { options: { tessellation: parityTessellation } }),
     });
     assertRenderingSuccess(replicadResult, 'replicad createGeometry');
     const replicadGlb = extractGltfFromResult(replicadResult);
@@ -139,6 +142,7 @@ export default function main() {
 }`,
       },
       open: { source: { path: 'cylinder.ts' } },
+      view: (document) => document.view('model', { options: { tessellation: parityTessellation } }),
     });
     assertRenderingSuccess(occtResult, 'occt createGeometry');
     const occtGlb = extractGltfFromResult(occtResult);

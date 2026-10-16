@@ -114,6 +114,21 @@ const preferenceStore = () => {
     notify(name);
   };
 
+  /* Another tab's or window's write: drop the cached value so the next read sees it (D2, R1). */
+  if (typeof globalThis.addEventListener === 'function') {
+    globalThis.addEventListener('storage', (event: StorageEvent) => {
+      if (event.key === null) {
+        const names = [...cache.keys()];
+        cache.clear();
+        for (const name of names) {
+          notify(name);
+        }
+      } else if (cache.delete(event.key)) {
+        notify(event.key);
+      }
+    });
+  }
+
   return { get, remove, subscribe, update };
 };
 

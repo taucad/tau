@@ -1979,6 +1979,41 @@ describe('chat activity indicator closeout: projection seams', () => {
   const states = (message: MyUIMessage | undefined): string[] =>
     (message?.parts ?? []).map((part) => `${part.type}:${String(Reflect.get(part, 'state') ?? '-')}`);
 
+  it.each(['grok', 'codex'])(
+    'keeps %s tool identity across an approval pause and input refinement',
+    async (agentId) => {
+      const input = {
+        id: 'screenshot-input',
+        role: 'tool-input',
+        toolCallId: 'screenshot-call',
+        toolName: 'screenshot',
+        content: { targetFile: 'main.py', mode: 'multi_angle' },
+        metadata: { tauInternal: { origin: 'external', agentId, presentation: 'tau-mcp' } },
+      } as const;
+      const result = await reduce([
+        lifecycle('admitted'),
+        lifecycle('running'),
+        { ...base, type: 'message.appended', message: input },
+        interrupt('requested'),
+        lifecycle('paused'),
+        interrupt('resolved'),
+        lifecycle('running'),
+        { ...base, type: 'message.envelope-replaced', messageId: input.id, replacement: input },
+        {
+          ...base,
+          type: 'message.appended',
+          message: { ...input, id: 'screenshot-output', role: 'tool-output', content: { images: [] }, isError: false },
+        },
+      ]);
+
+      expect(result.error).toBeUndefined();
+      const calls = result.message?.parts.filter(
+        (part) => part.type === 'dynamic-tool' && part.toolCallId === input.toolCallId,
+      );
+      expect(calls).toEqual([expect.objectContaining({ state: 'output-available', output: { images: [] } })]);
+    },
+  );
+
   it('should resume a checkpointed ACP thought after an approval pause without a reducer error', async () => {
     const thought = { messageId: 'thought-1', contentIndex: 0 };
     const result = await reduce([

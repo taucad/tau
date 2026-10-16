@@ -47,6 +47,8 @@ export type LinkedGithubFixtureDescription = Readonly<{
 export type LinkedGithubFixtureState = Readonly<{
   /** `POST …/git-receive-pack` requests git answered: one per push. */
   pushes: number;
+  writeEnabled: boolean;
+  writeTokens: number;
   /** `POST …/git-upload-pack` requests git answered: one per fetch with something to negotiate. */
   fetches: number;
   /** Git requests that arrived without the minted GitHub credential. */
@@ -86,7 +88,9 @@ const accountId = 4_242_001;
 const installationId = 4_242_002;
 const repositoryId = 4_242_003;
 /** A fake token: it never leaves the browser context, and git never sees it. */
-const accessToken = 'tau-e2e-linked-github-token';
+const accessToken = 'tau-e2e-linked-github-read-token';
+const writeAccessToken = 'tau-e2e-linked-github-write-token';
+const writeAuthorization = `Basic ${Buffer.from(`x-access-token:${writeAccessToken}`).toString('base64')}`;
 const expectedAuthorization = `Basic ${Buffer.from(`x-access-token:${accessToken}`).toString('base64')}`;
 const userId = 'tau-e2e-linked-github-user';
 
@@ -231,17 +235,30 @@ const apiAnswer = (method: string, url: URL): { status: number; body: unknown } 
       },
     };
   }
+  if (path === '/v1/auth/account-info') {
+    return { status: 200, body: { user: { id: String(accountId), name: 'tau-e2e', email: 'tau-e2e@example.com' } } };
+  }
+  if (path === '/v1/auth/list-accounts') {
+    return {
+      status: 200,
+      body: [
+        {
+          id: 'oauth-account',
+          accountId: String(accountId),
+          userId,
+          providerId: 'github',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          scopes: ['read:user', 'user:email', 'gist'],
+        },
+      ],
+    };
+  }
   if (path === '/v1/github/configuration') {
     return { status: 200, body: { installUrl: 'https://github.com/apps/tau-e2e/installations/new' } };
   }
   if (path === '/v1/github/connections' && method === 'GET') {
     return { status: 200, body: [connection] };
-  }
-  if (path === `/v1/github/connections/${connectionId}/token` && method === 'POST') {
-    return {
-      status: 200,
-      body: { accessToken, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), generation: 1 },
-    };
   }
   if (path === '/v1/github/installations') {
     return {
@@ -287,6 +304,9 @@ export const startLinkedGithubFixture = async (options: LinkedGithubFixtureOptio
   await requireGit(['config', 'http.receivepack', 'true'], repositoryPath);
 
   let pushes = 0;
+  let writeEnabled = false;
+  let gistEnabled = true;
+  let writeTokens = 0;
   let fetches = 0;
   let uncredited = 0;
   const unanswered: string[] = [];
@@ -312,8 +332,14 @@ export const startLinkedGithubFixture = async (options: LinkedGithubFixtureOptio
     }
     const remote = new URL(target);
     const rest = remote.pathname.slice(new URL(cloneUrl).pathname.length);
-    if (request.headers()['x-tau-proxy-authorization'] !== expectedAuthorization) {
+    const received = request.headers()['x-tau-proxy-authorization'];
+    const writing = rest === '/git-receive-pack' || remote.searchParams.get('service') === 'git-receive-pack';
+    if (
+      writing ? received !== writeAuthorization : ![expectedAuthorization, writeAuthorization].includes(received ?? '')
+    ) {
       uncredited += 1;
+      await route.fulfill({ status: 403, headers: cors(request), body: 'Insufficient repository permission' });
+      return;
     }
     const answer = await gitBackend(root, {
       method: request.method(),
@@ -357,7 +383,65 @@ export const startLinkedGithubFixture = async (options: LinkedGithubFixtureOptio
       await proxy(route, request, url);
       return;
     }
-    const answer = apiAnswer(request.method(), url);
+    let answer: { status: number; body: unknown } | undefined;
+    if (url.pathname === `/v1/github/connections/${connectionId}/token` && request.method() === 'POST') {
+      const input = request.postDataJSON() as { repositoryId?: number; operation?: string };
+      if (input.repositoryId !== repositoryId || !['read', 'write'].includes(input.operation ?? '')) {
+        answer = { status: 400, body: { code: 'GITHUB_TOKEN_TARGET_REQUIRED' } };
+      } else if (input.operation === 'write' && !writeEnabled) {
+        answer = { status: 403, body: { code: 'GITHUB_REPOSITORY_WRITE_DISABLED' } };
+      } else {
+        if (input.operation === 'write') {
+          writeTokens += 1;
+        }
+        answer = {
+          status: 200,
+          body: {
+            accessToken: input.operation === 'write' ? writeAccessToken : accessToken,
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            generation: 1,
+          },
+        };
+      }
+    } else if (url.pathname === `/v1/github/connections/${connectionId}/repositories/${repositoryId}/access`) {
+      answer = {
+        status: 200,
+        body: {
+          repositoryId,
+          ownerId: accountId,
+          fullName: repositoryFullName,
+          cloneUrl,
+          canRead: true,
+          canWrite: true,
+          writeEnabled,
+          authorizationVersion: 1,
+          verifiedAt: new Date().toISOString(),
+        },
+      };
+    } else if (
+      url.pathname === `/v1/github/connections/${connectionId}/repositories/${repositoryId}/write` &&
+      request.method() === 'POST'
+    ) {
+      writeEnabled = (request.postDataJSON() as { enabled: boolean }).enabled;
+      answer = { status: 200, body: { writeEnabled } };
+    } else if (url.pathname === '/v1/github/gists/capability') {
+      answer = {
+        status: 200,
+        body: {
+          status: gistEnabled ? 'connected' : 'disabled',
+          enabled: gistEnabled,
+          grantedScopes: ['read:user', 'user:email', 'gist'],
+          authorizationUrl: 'https://github.com/settings/connections/applications/tau-e2e',
+          account: { id: accountId, login },
+          verifiedAt: new Date().toISOString(),
+        },
+      };
+    } else if (url.pathname === '/v1/github/gists/use' && request.method() === 'POST') {
+      gistEnabled = (request.postDataJSON() as { enabled: boolean }).enabled;
+      answer = { status: 200, body: { enabled: gistEnabled } };
+    } else {
+      answer = apiAnswer(request.method(), url);
+    }
     if (answer === undefined) {
       unanswered.push(`${request.method()} ${url.pathname}`);
     }
@@ -379,6 +463,8 @@ export const startLinkedGithubFixture = async (options: LinkedGithubFixtureOptio
         head.code === 0 ? Number(await requireGit(['rev-list', '--count', 'refs/heads/main'], repositoryPath)) : 0;
       return {
         pushes,
+        writeEnabled,
+        writeTokens,
         fetches,
         uncredited,
         commits,

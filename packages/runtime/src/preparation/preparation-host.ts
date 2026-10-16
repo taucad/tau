@@ -1,11 +1,16 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import { Topic } from '@taucad/events';
 import { admitCapacityWrite, measureCapacityDomain } from '@taucad/filesystem';
 
-import { computeClosureIntegrity, computeTreeIntegrity } from '#preparation/closure-receipt.js';
+import {
+  computeClosureIntegrity,
+  computeTreeIntegrity,
+  launchIndexPath,
+  renderLaunchIndex,
+} from '#preparation/closure-receipt.js';
 import { runSealStep, SealRefused } from '#preparation/closure-seal.js';
 import { verifyClosureTree } from '#preparation/closure-verify.js';
 import { detectHostIndicators } from '#preparation/host-indicators.js';
@@ -19,6 +24,7 @@ import {
   collectStoreGarbage,
   createStaging,
   linkEntry,
+  readLaunch,
   readLink,
   readReceipt,
   sealClosure,
@@ -32,10 +38,12 @@ import { targetKey } from '#preparation/plugin-deployment.js';
 import { selectVariant } from '#preparation/select-variant.js';
 import type {
   ClosureDescription,
+  ClosureLaunch,
   ClosureVerification,
   CollectGarbageInput,
   CreatePreparationHostOptions,
   GarbageReport,
+  LaunchInspection,
   PluginPreparation,
   PluginSelection,
   PreparationHost,
@@ -82,10 +90,13 @@ type Resolved =
       };
     };
 
-type DependencyState =
+/** A sealed closure as one reader sees it, with the Tau version that sealed it. */
+type Sealed<View> = { readonly view: View; readonly tauVersion: string };
+
+type DependencyState<View = ClosureReceipt> =
   | {
       readonly state: 'ready' | 'stale';
-      readonly receipt: ClosureReceipt;
+      readonly receipt: View;
       readonly key: string;
       readonly better?: DependencyTarget;
       readonly resolved: Resolved;
@@ -108,6 +119,53 @@ const hostKeyOf = (indicators: HostIndicators): string =>
     : `${indicators.os}-${indicators.arch}`;
 
 const megabytes = (byteLength: number): string => `${(byteLength / 1e6).toFixed(1)} MB`;
+
+const byPath = (left: ReceiptFile, right: ReceiptFile): number =>
+  left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+
+/**
+ * Write a closure's launch index from its rows and return the index's own row; nothing when the plugin names no
+ * launch set. The index derives from the rows alone, so a repair writes the same bytes the seal did.
+ * @param plugin - The plugin that names the launch set.
+ * @param closure - The closure root, its identity and every row except the index's.
+ * @returns The index's receipt row.
+ */
+const writeLaunchIndex = async (
+  plugin: PreparationPlugin,
+  closure: Pick<ClosureReceipt, 'root' | 'dependency' | 'closureIntegrity' | 'files'>,
+): Promise<ReceiptFile | undefined> => {
+  if (plugin.launchSet === undefined) {
+    return undefined;
+  }
+  const rows = new Map(closure.files.map((row) => [row.path, row]));
+  const files = plugin.launchSet(closure.files).map((path) => {
+    const row = rows.get(path);
+    if (row === undefined) {
+      throw new Error(
+        `${plugin.package} names ${path} in its launch set, but the ${closure.dependency} closure has no such file.`,
+      );
+    }
+    return row;
+  });
+  const text = renderLaunchIndex({
+    schemaVersion: 1,
+    package: plugin.package,
+    dependency: closure.dependency,
+    closureIntegrity: closure.closureIntegrity,
+    files,
+  });
+  const path = join(closure.root, launchIndexPath);
+  await writeAtomically(path, text);
+  // The row's mode must not depend on the umask.
+  await chmod(path, 0o644);
+  const bytes = Buffer.from(text, 'utf8');
+  return {
+    path: launchIndexPath,
+    byteLength: bytes.byteLength,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    mode: 0o644,
+  };
+};
 
 const limiter = (limit: number): (<T>(task: () => Promise<T>) => Promise<T>) => {
   let active = 0;
@@ -302,23 +360,36 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     };
   };
 
+  const fullReceipt = async (key: string): Promise<Sealed<ClosureReceipt> | undefined> => {
+    const receipt = await readReceipt(layout, key);
+    return receipt === undefined ? undefined : { view: receipt, tauVersion: receipt.tauVersion };
+  };
+  const launchView = async (key: string): Promise<Sealed<ClosureLaunch> | undefined> => {
+    const sealed = await readLaunch(layout, key);
+    return sealed === undefined ? undefined : { view: sealed.launch, tauVersion: sealed.tauVersion };
+  };
+
   // What a launch would use: the closure this host recorded while it is still a declared variant, else the one
   // selection picks now. A sealed closure launches as recorded; a better variant is reported, never fetched here.
-  const dependencyState = async (
+  const dependencyState = async <View>(
     plugin: PreparationPlugin,
     dependency: string,
-    link: Readonly<Record<string, string>>,
-  ): Promise<DependencyState> => {
+    source: {
+      readonly link: Readonly<Record<string, string>>;
+      readonly read: (key: string) => Promise<Sealed<View> | undefined>;
+    },
+  ): Promise<DependencyState<View>> => {
+    const { link, read } = source;
     const resolved = await resolveDependency(plugin, dependency);
     const recorded = link[linkEntry(plugin.package, dependency)];
     const declared = await declaredVariants(plugin, dependency);
     if (recorded !== undefined && declared.has(recorded)) {
-      const receipt = await readReceipt(layout, recorded);
-      if (receipt !== undefined) {
+      const sealed = await read(recorded);
+      if (sealed !== undefined) {
         const better = resolved.kind === 'selected' && resolved.key !== recorded ? resolved.variant.target : undefined;
         return {
-          state: receipt.tauVersion === tauVersion ? 'ready' : 'stale',
-          receipt,
+          state: sealed.tauVersion === tauVersion ? 'ready' : 'stale',
+          receipt: sealed.view,
           key: recorded,
           resolved,
           ...(better === undefined ? {} : { better }),
@@ -328,11 +399,16 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     if (resolved.kind === 'blocked') {
       return { state: 'unsupported', resolved };
     }
-    const receipt = await readReceipt(layout, resolved.key);
-    if (receipt === undefined) {
+    const sealed = await read(resolved.key);
+    if (sealed === undefined) {
       return { state: 'absent', resolved };
     }
-    return { state: receipt.tauVersion === tauVersion ? 'ready' : 'stale', receipt, key: resolved.key, resolved };
+    return {
+      state: sealed.tauVersion === tauVersion ? 'ready' : 'stale',
+      receipt: sealed.view,
+      key: resolved.key,
+      resolved,
+    };
   };
 
   const blockedState = (
@@ -346,42 +422,74 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     detail: resolved.detail,
   });
 
-  const inspect = async (input: PluginSelection): Promise<PluginPreparation> => {
-    const { plugin, dependencies, key } = normalize(input);
-    const selection = { package: plugin.package, dependencies };
+  // The sealed closures a selection would use, through one reader; `ready` names every dependency's closure in this
+  // host's link file, so a concurrent GC keeps them.
+  const readSelection = async <View extends Pick<ClosureReceipt, 'dependency'>>(
+    input: PluginSelection,
+    read: (key: string) => Promise<Sealed<View> | undefined>,
+  ): Promise<
+    | { readonly status: 'blocked'; readonly resolved: Extract<Resolved, { kind: 'blocked' }> }
+    | { readonly status: 'idle' }
+    | {
+        readonly status: 'ready';
+        readonly views: Record<string, View>;
+        readonly better: Record<string, DependencyTarget>;
+      }
+  > => {
+    const { plugin, dependencies } = normalize(input);
     const link = await readLink(layout, hostPath);
-    const states = await Promise.all(dependencies.map(async (dependency) => dependencyState(plugin, dependency, link)));
+    const states = await Promise.all(
+      dependencies.map(async (dependency) => dependencyState(plugin, dependency, { link, read })),
+    );
     const unsupported = states.find((state) => state.state === 'unsupported');
     if (unsupported?.state === 'unsupported') {
-      return { selection, revision: nextRevision(key), state: blockedState(randomUUID(), unsupported.resolved) };
+      return { status: 'blocked', resolved: unsupported.resolved };
     }
     const ready = states.filter(
-      (state): state is Extract<DependencyState, { state: 'ready' | 'stale' }> => state.state === 'ready',
+      (state): state is Extract<DependencyState<View>, { state: 'ready' | 'stale' }> => state.state === 'ready',
     );
     if (ready.length !== dependencies.length) {
-      return { selection, revision: nextRevision(key), state: { status: 'idle' } };
+      return { status: 'idle' };
     }
-    const receipts: Record<string, ClosureReceipt> = {};
+    const views: Record<string, View> = {};
     const better: Record<string, DependencyTarget> = {};
     const used: Record<string, string> = {};
     for (const state of ready) {
-      receipts[state.receipt.dependency] = state.receipt;
+      views[state.receipt.dependency] = state.receipt;
       used[linkEntry(plugin.package, state.receipt.dependency)] = state.key;
       if (state.better !== undefined) {
         better[state.receipt.dependency] = state.better;
       }
     }
     await writeLink(layout, hostPath, used);
-    return {
-      selection,
-      revision: nextRevision(key),
-      state: {
-        status: 'ready',
-        attemptId: randomUUID(),
-        receipts,
-        ...(Object.keys(better).length === 0 ? {} : { betterVariantAvailable: better }),
-      },
-    };
+    return { status: 'ready', views, better };
+  };
+
+  const inspect = async (input: PluginSelection): Promise<PluginPreparation> => {
+    const { plugin, dependencies, key } = normalize(input);
+    const selection = { package: plugin.package, dependencies };
+    const found = await readSelection(input, fullReceipt);
+    const state: PreparationState =
+      found.status === 'blocked'
+        ? blockedState(randomUUID(), found.resolved)
+        : found.status === 'idle'
+          ? { status: 'idle' }
+          : {
+              status: 'ready',
+              attemptId: randomUUID(),
+              receipts: found.views,
+              ...(Object.keys(found.better).length === 0 ? {} : { betterVariantAvailable: found.better }),
+            };
+    return { selection, revision: nextRevision(key), state };
+  };
+
+  const inspectLaunch = async (input: PluginSelection): Promise<LaunchInspection> => {
+    const found = await readSelection(input, launchView);
+    return found.status === 'blocked'
+      ? blockedState(randomUUID(), found.resolved)
+      : found.status === 'idle'
+        ? { status: 'idle' }
+        : { status: 'ready', closures: found.views };
   };
 
   const silent = { onPhase: () => undefined, onBytes: () => undefined };
@@ -399,7 +507,16 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     ...attempt,
   });
 
-  // Re-unpack, from verified blobs, only the payloads whose files differ, and remove files the receipt does not list.
+  /*
+   * Re-unpack, from verified blobs, only the payloads whose files differ, remove files the receipt does not list, run
+   * the seal step again when it must, rewrite the launch index, and check the result against the receipt.
+   *
+   * Every payload is restored into staging before the closure is touched, so a payload no source holds (offline)
+   * leaves it sealed and unchanged. Then the receipt moves aside: while its files change the closure is unsealed, so
+   * nothing launches it, verifies it intact or hands it to a seal step, which sees the root as the first seal did. The
+   * receipt goes back last, once every row matches; a repair that fails or stops before then leaves the closure
+   * unsealed, which every reader reports as absent and the next preparation rebuilds.
+   */
   const repairClosure = async (input: {
     readonly plugin: PreparationPlugin;
     readonly receipt: ClosureReceipt;
@@ -408,20 +525,30 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     readonly extra: readonly string[];
     /** Run the plugin's seal step again once the payloads are restored. */
     readonly reseal: boolean;
+    /** Rewrite the launch index, which derives from the receipt's rows. */
+    readonly reindex: boolean;
     readonly offline: boolean;
     readonly signal: AbortSignal;
   }): Promise<void> => {
-    const { receipt, signal } = input;
+    const { plugin, receipt, signal } = input;
     const staging = await createStaging(layout, `repair-${randomUUID()}`);
     try {
       const indexes: AcquisitionContext['indexes'] = new Map();
+      const restored: Array<{ readonly directory: string; readonly rows: readonly ReceiptFile[] }> = [];
       for (const payload of input.variant.payloads.filter(({ name }) => input.payloads.includes(name))) {
-        const context = acquisitionContext(input.plugin, { staging, offline: input.offline, signal, indexes });
+        const context = acquisitionContext(plugin, { staging, offline: input.offline, signal, indexes });
         // oxlint-disable-next-line no-await-in-loop -- payloads are repaired one at a time
         const acquired = await acquirePayload(payload, context);
-        const unpacked = join(staging, `unpack-${payload.name}`);
+        const directory = join(staging, `unpack-${payload.name}`);
         // oxlint-disable-next-line no-await-in-loop -- ditto
-        const rows = await unpackPayload({ payload, bytes: acquired.bytes, root: unpacked, signal });
+        const rows = await unpackPayload({ payload, bytes: acquired.bytes, root: directory, signal });
+        restored.push({ directory, rows });
+      }
+
+      const seal = join(receipt.root, 'receipt.json');
+      const keptSeal = join(staging, 'receipt.json');
+      await rename(seal, keptSeal);
+      for (const { directory, rows } of restored) {
         for (const row of rows) {
           const target = join(receipt.root, ...row.path.split('/'));
           // oxlint-disable-next-line no-await-in-loop -- each file replaces its damaged copy in place
@@ -429,7 +556,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           // oxlint-disable-next-line no-await-in-loop -- ditto
           await rm(target, { recursive: true, force: true });
           // oxlint-disable-next-line no-await-in-loop -- ditto
-          await rename(join(unpacked, ...row.path.split('/')), target);
+          await rename(join(directory, ...row.path.split('/')), target);
         }
       }
       await Promise.all(
@@ -444,7 +571,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
             .map(async (row) => rm(join(receipt.root, ...row.path.split('/')), { force: true })),
         );
         const resealed = await runSealStep({
-          plugin: input.plugin,
+          plugin,
           dependency: receipt.dependency,
           target: receipt.target,
           root: receipt.root,
@@ -455,6 +582,20 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           throw new SealRefused(resealed.refusal);
         }
       }
+      if (input.reseal || input.reindex) {
+        await writeLaunchIndex(plugin, {
+          ...receipt,
+          files: receipt.files.filter((row) => row.path !== launchIndexPath),
+        });
+      }
+      const after = await verifyClosureTree(receipt, signal);
+      if (after.changed.length > 0 || after.extra.length > 0) {
+        throw new PreparationError(
+          'INTEGRITY_MISMATCH',
+          `Repairing ${plugin.package} ${receipt.dependency} did not restore ${after.changed[0]?.path ?? after.extra[0] ?? 'its files'}; the closure is left unsealed, so the next tau prepare rebuilds it. The store at ${layout.root} may be changed by something else.`,
+        );
+      }
+      await rename(keptSeal, seal);
       await advanceGeneration(layout);
     } finally {
       await rm(staging, { recursive: true, force: true });
@@ -481,7 +622,9 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     }
     const declared = await declaredVariants(plugin, receipt.dependency);
     const variant = declared.get(input.key);
-    const named = new Set(found.changed.map((row) => row.payload));
+    // The launch index derives from the receipt, so a changed index is rewritten rather than recompiled.
+    const reindex = found.changed.some((row) => row.path === launchIndexPath);
+    const named = new Set(found.changed.filter((row) => row.path !== launchIndexPath).map((row) => row.payload));
     const order = (variant?.payloads ?? []).map(({ name }) => name);
     // A row with no payload was written by the seal step: rerunning it restores the row, unless the plugin has none.
     const sealedRowChanged = named.has(undefined);
@@ -498,6 +641,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         payloads,
         extra: found.extra,
         reseal: plugin.seal !== undefined && (sealedRowChanged || payloads.length > 0),
+        reindex,
         offline: input.offline,
         signal,
       });
@@ -506,13 +650,6 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         return { ...base, status: 'stale', payloads, files };
       }
       throw error;
-    }
-    const after = await verifyClosureTree(receipt, signal);
-    if (after.changed.length > 0 || after.extra.length > 0) {
-      throw new PreparationError(
-        'INTEGRITY_MISMATCH',
-        `Repairing ${plugin.package} ${receipt.dependency} did not restore ${after.changed[0]?.path ?? after.extra[0] ?? 'its files'}; the store at ${layout.root} is being changed by something else.`,
-      );
     }
     return { ...base, status: 'repaired', payloads, files };
   };
@@ -555,7 +692,9 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       if (verified.status === 'stale') {
         return { receipts, work, unrepairable: item.dependency };
       }
-      const refreshed: ClosureReceipt = { ...sealed, tauVersion, preparedAt: new Date().toISOString() };
+      // The stamp goes first, as at seal time, so launches read it from the receipt's head.
+      const { tauVersion: _previous, ...rest } = sealed;
+      const refreshed: ClosureReceipt = { tauVersion, ...rest, preparedAt: new Date().toISOString() };
       // oxlint-disable-next-line no-await-in-loop -- ditto
       await writeAtomically(join(sealed.root, 'receipt.json'), `${JSON.stringify(refreshed, undefined, 2)}\n`);
       // oxlint-disable-next-line no-await-in-loop -- ditto
@@ -783,11 +922,23 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           const { reason, message, detail } = sealed.refusal;
           return finish({ status: 'blocked', attemptId, reason, message, ...(detail === undefined ? {} : { detail }) });
         }
-        const files = [...unpacked, ...sealed.rows].toSorted((left, right) => (left.path < right.path ? -1 : 1));
+        const staged = join(attemptStaging, item.key);
+        const built = [...unpacked, ...sealed.rows];
+        // The launch index is written after the seal step and receipted like its files, so treeIntegrity covers it.
+        // oxlint-disable-next-line no-await-in-loop -- ditto
+        const index = await writeLaunchIndex(plugin, {
+          root: staged,
+          dependency: item.dependency,
+          closureIntegrity: item.closureIntegrity,
+          files: built,
+        });
+        const files = (index === undefined ? built : [...built, index]).toSorted(byPath);
         // oxlint-disable-next-line no-await-in-loop -- ditto
         const treeIntegrity = await computeTreeIntegrity(files);
         const root = join(layout.closures, item.key);
+        // `tauVersion` comes first, so a launch reads the stamp from the receipt's head (readLaunch).
         const receipt: ClosureReceipt = {
+          tauVersion,
           package: plugin.package,
           dependency: item.dependency,
           target: item.variant.target,
@@ -800,13 +951,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
             name: payload.name,
             integrity: payload.integrity,
             sha256: keys.get(payload.integrity) ?? '',
-            acquiredFrom: sources.get(payload.integrity) ?? { kind: 'origin', location: '' },
+            acquiredFrom: sources.get(payload.integrity)!,
           })),
           preparedAt: new Date().toISOString(),
-          tauVersion,
         };
         signal.throwIfAborted();
-        const staged = join(attemptStaging, item.key);
         // The receipt is the last file written inside staging: its presence after the rename is the seal.
         // oxlint-disable-next-line no-await-in-loop -- ditto
         await writeFile(join(staged, 'receipt.json'), `${JSON.stringify(receipt, undefined, 2)}\n`, { flag: 'wx' });
@@ -892,6 +1041,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
 
   return {
     inspect,
+    inspectLaunch,
     async prepare(input: PrepareInput): Promise<PrepareOutcome> {
       if (disposed) {
         throw new Error('This preparation host was disposed; create another to prepare.');
@@ -921,7 +1071,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const results: ClosureVerification[] = [];
       for (const dependency of dependencies) {
         // oxlint-disable-next-line no-await-in-loop -- closures are verified one at a time; each is already parallel
-        const state = await dependencyState(plugin, dependency, link);
+        const state = await dependencyState(plugin, dependency, { link, read: fullReceipt });
         if (state.state !== 'ready' && state.state !== 'stale') {
           results.push({
             package: plugin.package,
@@ -955,7 +1105,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const rows = await Promise.all(
         [...plugins.values()].flatMap((plugin) =>
           Object.keys(plugin.deployment.dependencies).map(async (dependency): Promise<ClosureDescription> => {
-            const state = await dependencyState(plugin, dependency, link);
+            const state = await dependencyState(plugin, dependency, { link, read: fullReceipt });
             const base = { package: plugin.package, dependency };
             if (state.state === 'unsupported') {
               return { ...base, state: 'unsupported' };

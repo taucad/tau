@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
 
 import type { PicogkKernelOptions } from '#picogk-resources.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
@@ -11,18 +11,12 @@ const muxerPath = 'dotnet/dotnet';
 const workerAssemblyPath = 'tau-worker/Tau.PicoGK.Worker.dll';
 
 /*
- * The files hashed at every launch besides the muxer: the worker's entry assets, the hosts that load the runtime and
- * every native library the worker can load. The rest of the closure was verified when it was sealed (D8, I11).
+ * The files hashed at every launch besides the muxer (D8, ruling X29): those the process loads first, before the
+ * worker can answer its handshake. The hosts that load the runtime, the worker assembly, PicoGK and the native engine.
+ * Every other file (the framework assemblies, CoreCLR, the JIT, SkiaSharp, Roslyn) was verified when the closure was
+ * sealed and is re-verified, by name, when the worker exits before its handshake (I11).
  */
-const launchResources: ReadonlyArray<{ readonly pattern: RegExp; readonly required?: string }> = [
-  { pattern: /^tau-worker\/Tau\.PicoGK\.Worker\.dll$/u, required: workerAssemblyPath },
-  {
-    pattern: /^tau-worker\/Tau\.PicoGK\.Worker\.runtimeconfig\.json$/u,
-    required: 'tau-worker/Tau.PicoGK.Worker.runtimeconfig.json',
-  },
-  { pattern: /^tau-worker\/Tau\.PicoGK\.Worker\.deps\.json$/u },
-  { pattern: /^tau-worker\/PicoGK\.dll$/u, required: 'tau-worker/PicoGK.dll' },
-  { pattern: /^tau-worker\/[^/]+\.(?:dylib|so)$/u },
+const launchResources: ReadonlyArray<{ readonly pattern: RegExp; readonly required: string }> = [
   {
     pattern: /^dotnet\/host\/fxr\/[^/]+\/libhostfxr\.(?:dylib|so)$/u,
     required: 'dotnet/host/fxr/<version>/libhostfxr',
@@ -31,16 +25,26 @@ const launchResources: ReadonlyArray<{ readonly pattern: RegExp; readonly requir
     pattern: /^dotnet\/shared\/Microsoft\.NETCore\.App\/[^/]+\/libhostpolicy\.(?:dylib|so)$/u,
     required: 'dotnet/shared/Microsoft.NETCore.App/<version>/libhostpolicy',
   },
-  {
-    pattern: /^dotnet\/shared\/Microsoft\.NETCore\.App\/[^/]+\/libcoreclr\.(?:dylib|so)$/u,
-    required: 'dotnet/shared/Microsoft.NETCore.App/<version>/libcoreclr',
-  },
-  { pattern: /^dotnet\/shared\/Microsoft\.NETCore\.App\/[^/]+\/libclrjit\.(?:dylib|so)$/u },
-  {
-    pattern: /^dotnet\/shared\/Microsoft\.NETCore\.App\/[^/]+\/System\.Private\.CoreLib\.dll$/u,
-    required: 'dotnet/shared/Microsoft.NETCore.App/<version>/System.Private.CoreLib.dll',
-  },
+  { pattern: /^tau-worker\/Tau\.PicoGK\.Worker\.dll$/u, required: workerAssemblyPath },
+  { pattern: /^tau-worker\/PicoGK\.dll$/u, required: 'tau-worker/PicoGK.dll' },
+  { pattern: /^tau-worker\/picogk[^/]*\.(?:dylib|so)$/u, required: 'tau-worker/picogk.<version>.dylib' },
 ];
+
+const launchRows = (files: readonly ReceiptFile[]): ReceiptFile[] =>
+  files.filter(
+    (file) => file.symlinkTarget === undefined && launchResources.some(({ pattern }) => pattern.test(file.path)),
+  );
+
+/**
+ * PicoGK's launch set (D8, ruling X29): the `dotnet` muxer, `hostfxr`, `hostpolicy`, the worker assembly, `PicoGK.dll`
+ * and the native engine. The preparation host records their rows in the closure's launch index, which every launch
+ * reads and hashes; the rest of the closure is re-verified when the worker exits before its handshake.
+ * @param files - Every row of the sealed closure.
+ * @returns Closure-relative paths, sorted.
+ * @public
+ */
+export const picogkLaunchSet = (files: readonly ReceiptFile[]): readonly string[] =>
+  [muxerPath, ...launchRows(files).map(({ path }) => path)].toSorted();
 
 /** Kernel options for a PicoGK worker launched from a prepared closure. @public */
 export type PicogkClosureOptions = PicogkKernelOptions & {
@@ -53,12 +57,13 @@ export type PicogkClosureOptions = PicogkKernelOptions & {
  * assembly (D6), the closure root is the sandbox's readable runtime root, and each launch hashes the muxer and the
  * named resources against the digests the receipt recorded.
  *
- * @param receipt - The receipt of the `runtime` dependency of `@taucad/picogk`, from a preparation host.
+ * @param receipt - The `runtime` closure of `@taucad/picogk`: its receipt, or the launch view a preparation host's
+ *   `inspectLaunch` reads from its launch index.
  * @returns Absolute, integrity-pinned kernel options.
  * @throws When the receipt lacks a file the launch needs; `tau prepare picogk --verify` repairs the closure.
  * @public
  */
-export const picogkOptionsFromClosure = (receipt: ClosureReceipt): PicogkClosureOptions => {
+export const picogkOptionsFromClosure = (receipt: ClosureLaunch): PicogkClosureOptions => {
   const files = new Map(
     receipt.files.filter((file) => file.symlinkTarget === undefined).map((file) => [file.path, file.sha256]),
   );
@@ -70,12 +75,11 @@ export const picogkOptionsFromClosure = (receipt: ClosureReceipt): PicogkClosure
   if (muxerSha256 === undefined) {
     throw missing(muxerPath);
   }
-  const resourceFiles = [...files]
-    .filter(([path]) => launchResources.some(({ pattern }) => pattern.test(path)))
-    .toSorted(([left], [right]) => (left < right ? -1 : 1))
-    .map(([path, sha256]) => ({ relativePath: path, path: join(receipt.root, path), sha256 }));
+  const resourceFiles = launchRows(receipt.files)
+    .toSorted((left, right) => (left.path < right.path ? -1 : 1))
+    .map(({ path, sha256 }) => ({ relativePath: path, path: join(receipt.root, path), sha256 }));
   for (const { pattern, required } of launchResources) {
-    if (required !== undefined && !resourceFiles.some(({ relativePath }) => pattern.test(relativePath))) {
+    if (!resourceFiles.some(({ relativePath }) => pattern.test(relativePath))) {
       throw missing(required);
     }
   }

@@ -6,6 +6,7 @@ import { projectToManifest } from '@taucad/types';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
+import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
 
 let rowRuns = 0;
 const { mockGetProjectClosePlan, mockCloseProject } = vi.hoisted(() => ({
@@ -14,6 +15,15 @@ const { mockGetProjectClosePlan, mockCloseProject } = vi.hoisted(() => ({
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+}));
+const { mockOpenInFileManager } = vi.hoisted(() => ({ mockOpenInFileManager: vi.fn(async () => undefined) }));
+let canOpenInFileManager = false;
+vi.mock('#hooks/use-native-file-manager.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof NativeFileManager>()),
+  useOpenProjectInFileManager: () =>
+    canOpenInFileManager
+      ? { label: 'Open in Finder', icon: 'finder', isOpening: false, open: mockOpenInFileManager }
+      : undefined,
 }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({
   pluralize: (count: number, noun: string) => `${String(count)} ${noun}${count === 1 ? '' : 's'}`,
@@ -48,6 +58,7 @@ const createActions = (): ProjectActions => ({
 describe('ProjectActionDropdown', () => {
   beforeEach(() => {
     rowRuns = 0;
+    canOpenInFileManager = false;
     vi.clearAllMocks();
     mockGetProjectClosePlan.mockResolvedValue({
       stoppableRunCount: 0,
@@ -68,6 +79,24 @@ describe('ProjectActionDropdown', () => {
 
     await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
     expect(actions.handleDelete).toHaveBeenCalledWith(project);
+  });
+
+  it('opens a disk-backed project in the native file manager like the sidebar does', async () => {
+    const user = userEvent.setup();
+    const actions = createActions();
+    const { unmount } = render(<ProjectActionDropdown project={project} actions={actions} />);
+    await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
+    expect(screen.queryByRole('menuitem', { name: 'Open in Finder' })).not.toBeInTheDocument();
+    unmount();
+
+    canOpenInFileManager = true;
+    render(<ProjectActionDropdown project={project} actions={actions} />);
+    await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
+    const items = screen.getAllByRole('menuitem');
+    expect(items[0]).toHaveAccessibleName('Open in Finder');
+    expect(items[0]?.querySelector('use[href="#finder"]')).toBeInTheDocument();
+    await user.click(items[0]!);
+    expect(mockOpenInFileManager).toHaveBeenCalledOnce();
   });
 
   it('asks before trashing a project with running work', async () => {

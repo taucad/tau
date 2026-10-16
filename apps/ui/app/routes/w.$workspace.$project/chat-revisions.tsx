@@ -1095,6 +1095,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onDisconnect={commands.disconnectRemote}
             onCancel={commands.cancelRemote}
             onSync={commands.syncNow}
+            onPushGithub={commands.pushGithub}
             syncChats={project?.syncChats !== false}
             onSyncChatsChange={(enabled) => {
               // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose

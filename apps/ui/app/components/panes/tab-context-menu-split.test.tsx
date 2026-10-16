@@ -11,12 +11,34 @@ import type {
 import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
+
+const { projectRef, mockReveal } = vi.hoisted(() => {
+  const snapshot = { context: { project: { id: 'proj_one' } } };
+  return {
+    projectRef: {
+      send: () => undefined,
+      getSnapshot: () => snapshot,
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    },
+    mockReveal: vi.fn(),
+  };
+});
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     editorRef: { send: vi.fn() },
-    projectRef: { send: vi.fn() },
+    projectRef,
   }),
+}));
+
+let canReveal = true;
+vi.mock('#hooks/use-native-file-manager.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof NativeFileManager>()),
+  useRevealInFileManager: (projectId: string | undefined) =>
+    canReveal && projectId === 'proj_one'
+      ? { label: 'Reveal in Finder', icon: 'finder', reveal: mockReveal }
+      : undefined,
 }));
 
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
@@ -126,4 +148,40 @@ describe.each(surfaces)('$name tab context-menu split', ({ Component, params }) 
       expect(fixture.addGroup).not.toHaveBeenCalled();
     },
   );
+});
+
+describe.each(surfaces)('$name tab context-menu file manager', ({ Component, params }) => {
+  it('should reveal the tab file next to Reveal in File Tree', async () => {
+    canReveal = true;
+    mockReveal.mockClear();
+    const user = userEvent.setup();
+    const fixture = createTabFixture({ params, title: 'main.ts' });
+    render(
+      <TooltipProvider>
+        <Component {...fixture.properties} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByText('main.ts'));
+    const items = await screen.findAllByRole('menuitem');
+    const fileTree = items.findIndex((item) => item.textContent === 'Reveal in File Tree');
+    expect(items[fileTree + 1]).toHaveAccessibleName('Reveal in Finder');
+    expect(items[fileTree + 1]?.querySelector('use[href="#finder"]')).toBeInTheDocument();
+    await user.click(items[fileTree + 1]!);
+    expect(mockReveal).toHaveBeenCalledExactlyOnceWith('src/main.ts');
+  });
+
+  it('should omit the action where the host has no native file manager', async () => {
+    canReveal = false;
+    const fixture = createTabFixture({ params, title: 'main.ts' });
+    render(
+      <TooltipProvider>
+        <Component {...fixture.properties} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByText('main.ts'));
+    await screen.findByRole('menuitem', { name: 'Reveal in File Tree' });
+    expect(screen.queryByRole('menuitem', { name: 'Reveal in Finder' })).not.toBeInTheDocument();
+  });
 });

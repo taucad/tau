@@ -1003,7 +1003,12 @@ const skillsPublished = (
         method: 'initialize',
         params: {
           protocolVersion,
-          clientCapabilities,
+          // Grok's delegated reader is text-only even for images/PDFs. Keep its
+          // native multimodal reader. Grok currently couples native reads and writes.
+          clientCapabilities:
+            context.adapter.id === 'grok'
+              ? { ...clientCapabilities, fs: { readTextFile: false, writeTextFile: false } }
+              : clientCapabilities,
           clientInfo: { name: 'tau-host', version: '1' },
         },
       }),

@@ -109,7 +109,7 @@ type Harness = Readonly<{
   dispose: () => Promise<void>;
 }>;
 
-const isomorphicHarness = async (): Promise<Harness> => {
+const isomorphicHarness = async (fetch?: typeof globalThis.fetch): Promise<Harness> => {
   const filesystem = await createMemoryProvider();
   /* The S4 `/checkouts/<id>` route, as the page will install it: one provider
    * per checkout, handed to the adapter, never a path joined above the project. */
@@ -136,7 +136,10 @@ const isomorphicHarness = async (): Promise<Harness> => {
         /* The host's credential, as a header the client resolves per request
          * (I8). A disk host returns a bearer; the browser returns nothing here
          * and sends the session cookie instead (`credentials: 'include'`). */
-        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+        http: createRevisionHttpClient({
+          authorization: () => 'Bearer session-token',
+          ...(fetch === undefined ? {} : { fetch }),
+        }),
       }),
     writeRawRef: async (name, head) => {
       await filesystem.mkdir(`.git/${name.slice(0, name.lastIndexOf('/'))}`, { recursive: true });
@@ -1901,6 +1904,53 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     }
     return bytes;
   })();
+
+  it('keeps LFS and Git bound to the approved destination when the saved remote changes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-bound-'));
+    const fixture = await startGitHttpBackend({ root: join(root, 'approved') });
+    const other = await startGitHttpBackend({ root: join(root, 'changed') });
+    let changeRemote: (() => Promise<void>) | undefined;
+    const writer = await isomorphicHarness(async (input, init) => {
+      const response = await globalThis.fetch(input, init);
+      if (
+        (input instanceof Request ? input.url : String(input)).includes('service=git-receive-pack') &&
+        changeRemote !== undefined
+      ) {
+        const change = changeRemote;
+        changeRemote = undefined;
+        await change();
+      }
+      return response;
+    });
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Bound large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'origin', url: fixture.url, provider: 'github', repositoryId: '1' });
+      changeRemote = async () =>
+        port.setRemote({ name: 'origin', url: other.url, provider: 'github', repositoryId: '2' });
+      const result = await port.push({
+        remote: 'origin',
+        repositoryUrl: fixture.url,
+        refs: [{ name: 'refs/heads/main' }],
+      });
+      expect(changeRemote).toBeUndefined();
+      expect(result.refs[0]?.status).toBe('updated');
+      expect(fixture.uploadCount()).toBe(1);
+      expect(other.trail()).toStrictEqual([]);
+    } finally {
+      await fixture.close();
+      await other.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
 
   it('uploads once before the ref push, and a second store reads the bytes back', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-'));

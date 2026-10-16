@@ -58,10 +58,6 @@ async function openMeasureFixture(backend: 'webgl' | 'webgpu', locator = measure
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(`/__e2e/example-fixture?locator=${locator}&graphicsBackend=${backend}`);
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
-  const declineCookies = selectors.getByRole('button', { name: /^decline$/i });
-  if (await target.isVisible(declineCookies).catch(() => false)) {
-    await target.click(declineCookies);
-  }
 
   const closeParameters = selectors.getByRole('button', { name: /^close parameters$/i });
   const closeParametersResult = await target.read(closeParameters).catch(() => ({ count: 0 }));

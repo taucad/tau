@@ -39,6 +39,29 @@ describe('desktopEnvironment', () => {
     });
   });
 
+  it('leaves analytics out of a build without a PostHog key', () => {
+    expect(
+      Object.keys(desktopEnvironment({}, { postHogClientKey: '' })).filter((name) => name.startsWith('POSTHOG_')),
+    ).toEqual([]);
+  });
+
+  it('enables analytics with the baked key and the default PostHog hosts', () => {
+    expect(desktopEnvironment({}, { postHogClientKey: 'phc_baked' })).toMatchObject({
+      POSTHOG_API_HOST: 'https://us.i.posthog.com',
+      POSTHOG_UI_HOST: 'https://us.posthog.com',
+      POSTHOG_CLIENT_KEY: 'phc_baked',
+    });
+  });
+
+  it('keeps the baked analytics key and host in a locked packaged build', () => {
+    expect(
+      desktopEnvironment(
+        { POSTHOG_API_HOST: 'https://attacker.example', POSTHOG_CLIENT_KEY: 'phc_attacker' },
+        { locked: true, postHogClientKey: 'phc_baked' },
+      ),
+    ).toMatchObject({ POSTHOG_API_HOST: 'https://us.i.posthog.com', POSTHOG_CLIENT_KEY: 'phc_baked' });
+  });
+
   it('ignores endpoint, renderer, client-root, executable and e2e overrides in a locked packaged build', () => {
     const environment = desktopEnvironment(
       {
@@ -95,6 +118,13 @@ describe('desktopEnvironment', () => {
       TAU_WEBSOCKET_URL: 'wss://api.tau.new',
       TAU_FRONTEND_URL: 'https://tau.new',
     });
+  });
+
+  it.each([
+    ['false', false],
+    ['true', true],
+  ])('should publish TAU_DEBUG=%s to the renderer as %s', (raw, expected) => {
+    expect(clientEnvironment({ TAU_DEBUG: raw })['TAU_DEBUG']).toBe(expected);
   });
 
   it('publishes the machines opt-in for an unlocked qualification build', () => {

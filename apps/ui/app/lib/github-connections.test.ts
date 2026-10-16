@@ -41,11 +41,15 @@ describe('githubConnections', () => {
     vi.unstubAllGlobals();
   });
 
-  it('should send no content-type on bodiless token, remove and cancel requests', async () => {
+  it('should name the repository and operation on token requests and omit content-type on deletes', async () => {
     fetch.mockResolvedValueOnce(Response.json(token));
-    await githubConnections.token('connection-1');
-    expect(fetch.mock.lastCall?.[1]).toMatchObject({ method: 'POST', credentials: 'include' });
-    expect(headersOf(fetch).has('content-type')).toBe(false);
+    await githubConnections.token('connection-1', { repositoryId: 30, operation: 'read' });
+    expect(fetch.mock.lastCall?.[1]).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      body: JSON.stringify({ repositoryId: 30, operation: 'read' }),
+    });
+    expect(headersOf(fetch).get('content-type')).toBe('application/json');
 
     /* The API answers both deletes 204 with no body. */
     fetch.mockResolvedValueOnce(new Response(undefined, { status: 204 }));
@@ -108,7 +112,9 @@ describe('a removed GitHub account (R23)', () => {
 
   it("should say what reconnecting does where a project's backup credential is minted", async () => {
     fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
-    const error: unknown = await githubConnections.token('connection-1').catch((error: unknown) => error);
+    const error: unknown = await githubConnections
+      .token('connection-1', { repositoryId: 30, operation: 'read' })
+      .catch((error: unknown) => error);
 
     expect(error).toMatchObject({ status: 401, code: 'GITHUB_CONNECTION_NOT_FOUND' });
     expect(githubErrorMessage(error)).toBe('Reconnect GitHub to back up this project.');
@@ -116,7 +122,9 @@ describe('a removed GitHub account (R23)', () => {
 
   it('should send a linked import to the account list, not to the backup', async () => {
     fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
-    const error: unknown = await githubConnections.token('connection-1', 'import').catch((error: unknown) => error);
+    const error: unknown = await githubConnections
+      .token('connection-1', { repositoryId: 30, operation: 'read', purpose: 'import' })
+      .catch((error: unknown) => error);
 
     expect(error).toMatchObject({ status: 401, code: 'GITHUB_CONNECTION_NOT_FOUND' });
     expect(githubErrorMessage(error)).toBe(

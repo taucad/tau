@@ -24,6 +24,7 @@ const author = { name: 'Tau', email: 'tau@example.com' };
 
 type HelperFixture = Readonly<{
   url: string;
+  repositoryPath: string;
   /** Every helper call, one line each: `generic` or `scoped`. */
   helperCalls: () => Promise<readonly string[]>;
   close: () => Promise<void>;
@@ -36,9 +37,12 @@ type HelperFixture = Readonly<{
  *
  * @returns The fixture.
  */
-const helperFixture = async (): Promise<HelperFixture> => {
+const helperFixture = async (authenticated = true): Promise<HelperFixture> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-revisions-helper-'));
-  const fixture = await startGitHttpBackend({ root, requireAuthorization: 'Bearer the-valid-app-token' });
+  const fixture = await startGitHttpBackend({
+    root,
+    ...(authenticated ? { requireAuthorization: 'Bearer the-valid-app-token' } : {}),
+  });
   const repositoryPath = join(root, 'project');
   const helperLog = join(root, 'helper.log');
   const wrapper = join(root, 'git-isolated');
@@ -50,6 +54,7 @@ const helperFixture = async (): Promise<HelperFixture> => {
   );
   return {
     url: fixture.url,
+    repositoryPath,
     helperCalls: async () => {
       try {
         const log = await readFile(helperLog, 'utf8');
@@ -69,6 +74,8 @@ const helperFixture = async (): Promise<HelperFixture> => {
         ...(credential === undefined ? {} : { remoteCredential: credential }),
       });
       await port.init({ author });
+      execFileSync('git', ['config', 'user.name', author.name], { cwd: repositoryPath });
+      execFileSync('git', ['config', 'user.email', author.email], { cwd: repositoryPath });
       await port.setRemote({ name: 'origin', url: fixture.url });
       execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${helperLog}; }; f`], {
         cwd: repositoryPath,
@@ -116,6 +123,99 @@ describe.runIf(gitToolchainOnPath)('native git credential helper exclusivity (ru
     }
   }, 180_000);
 
+  it('should pin a push to the configured URL instead of a different pushurl', async () => {
+    const fixture = await helperFixture();
+    try {
+      const port = await fixture.port(() => ({
+        repositoryUrl: fixture.url,
+        authorization: 'Bearer the-valid-app-token',
+      }));
+      execFileSync(
+        'git',
+        ['config', 'remote.origin.pushurl', join(fixture.repositoryPath, 'not-the-approved-repository.git')],
+        { cwd: fixture.repositoryPath },
+      );
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'Local revision'], { cwd: fixture.repositoryPath });
+      const result = await port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }], atomic: true });
+      expect(result.refs[0]?.status).toBe('updated');
+      const remote = await port.listRemoteRefs('origin');
+      expect(remote.some((ref) => ref.name === 'refs/heads/main')).toBe(true);
+      expect(await fixture.helperCalls()).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  }, 180_000);
+
+  it('should refuse a tagged GitHub remote with no scoped credential before consulting personal helpers', async () => {
+    const fixture = await helperFixture();
+    try {
+      const port = await fixture.port();
+      await port.setRemote({ name: 'origin', url: fixture.url, provider: 'github', repositoryId: '99' });
+      await expect(port.listRemoteRefs('origin')).rejects.toMatchObject({ code: 'REMOTE_REAUTHORIZATION_REQUIRED' });
+      expect(await fixture.helperCalls()).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  }, 180_000);
+
+  it.each(['insteadOf', 'pushInsteadOf'])(
+    'should refuse a %s destination rewrite before any transfer',
+    async (kind) => {
+      const fixture = await helperFixture();
+      try {
+        const port = await fixture.port(() => ({
+          repositoryUrl: fixture.url,
+          authorization: 'Bearer the-valid-app-token',
+        }));
+        execFileSync('git', ['config', `url.https://other.example/.${kind}`, fixture.url], {
+          cwd: fixture.repositoryPath,
+        });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'Local revision'], { cwd: fixture.repositoryPath });
+        await expect(
+          port.push({ remote: 'origin', repositoryUrl: fixture.url, refs: [{ name: 'refs/heads/main' }] }),
+        ).rejects.toMatchObject({ code: 'INVALID_TRANSPORT' });
+        expect(await fixture.helperCalls()).toEqual([]);
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000,
+  );
+
+  it('should refuse a destination replaced after approval before using its helpers', async () => {
+    const fixture = await helperFixture();
+    try {
+      const port = await fixture.port();
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'Local revision'], { cwd: fixture.repositoryPath });
+      await expect(
+        port.push({
+          remote: 'origin',
+          repositoryUrl: 'https://github.com/approved/repository.git',
+          refs: [{ name: 'refs/heads/main' }],
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_TRANSPORT' });
+      expect(await fixture.helperCalls()).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  }, 180_000);
+
+  it('should allow anonymous public reads without ambient credentials but refuse writes', async () => {
+    const fixture = await helperFixture(false);
+    try {
+      const port = await fixture.port();
+      await port.setRemote({ name: 'origin', url: fixture.url, provider: 'github', repositoryId: '99' });
+      await expect(port.listRemoteRefs('origin')).resolves.toEqual([]);
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'Local revision'], { cwd: fixture.repositoryPath });
+      await expect(port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      });
+      expect(await fixture.helperCalls()).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  }, 180_000);
+
   it('should keep the user credential helpers for a remote Tau holds no credential for', async () => {
     const fixture = await helperFixture();
     try {
@@ -127,4 +227,41 @@ describe.runIf(gitToolchainOnPath)('native git credential helper exclusivity (ru
       await fixture.close();
     }
   }, 180_000);
+});
+
+describe.runIf(gitToolchainOnPath)('GitHub SSH credentials', () => {
+  it('blocks an HTTPS read rewritten to ambient SSH', async () => {
+    const fixture = await helperFixture();
+    try {
+      const port = await fixture.port();
+      await port.setRemote({ name: 'origin', url: 'https://github.com/owner/project.git' });
+      execFileSync('git', ['config', 'url.git@github.com:.insteadOf', 'https://github.com/'], {
+        cwd: fixture.repositoryPath,
+      });
+      const sshLog = join(fixture.repositoryPath, 'ssh-called');
+      execFileSync('git', ['config', 'core.sshCommand', `sh -c 'echo called > ${sshLog}; exit 1'`], {
+        cwd: fixture.repositoryPath,
+      });
+      await expect(port.fetch({ remote: 'origin' })).rejects.toThrow('Native Git failed');
+      await expect(readFile(sshLog)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fixture.helperCalls()).toStrictEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it.each(['git@github.com:owner/project.git', 'ssh://git@github.com/owner/project.git'])(
+    'rejects %s before native authentication',
+    async (url) => {
+      const fixture = await helperFixture();
+      try {
+        const port = await fixture.port();
+        await port.setRemote({ name: 'origin', url, provider: 'github', repositoryId: '1' });
+        await expect(port.fetch({ remote: 'origin' })).rejects.toThrow('using HTTPS');
+        expect(await fixture.helperCalls()).toStrictEqual([]);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
 });

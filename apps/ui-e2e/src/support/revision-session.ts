@@ -18,12 +18,6 @@ export const visibleRevisionsPanel = '[data-slot="revisions-panel-body"]:visible
 /** The always-on header chip; its accessible name carries branch, head and state. */
 export const revisionChip = (): Locator => selectors.getByRole('button', { name: /^Open Revisions\./u });
 
-const declineCookies = async (): Promise<void> => {
-  const decline = selectors.getByRole('button', { name: 'Decline' }).last();
-  await target.expectVisible(decline, 15_000);
-  await target.click(decline);
-};
-
 /**
  * Seed a project through the e2e fixture route and wait for its workspace.
  *
@@ -33,7 +27,6 @@ export const openFixture = async (query: string): Promise<void> => {
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(`/__e2e/project-file-tree${query}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 180_000);
-  await declineCookies();
 };
 
 /** The platform's save chord. */

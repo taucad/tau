@@ -2,12 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import {
-  declineCookies,
-  measureHorizontalOverflow,
-  readPageSemantics,
-  seriousAxeViolations,
-} from '#support/page-audit.js';
+import { measureHorizontalOverflow, readPageSemantics, seriousAxeViolations } from '#support/page-audit.js';
 
 /*
  * The Community explorer (community-page-refresh blueprint, W2.3): URL-backed
@@ -29,7 +24,6 @@ const openCommunity = async (path = '/community'): Promise<void> => {
   await target.setViewport(laptop);
   await target.navigate(path);
   await target.expectVisible(search, 60_000);
-  await declineCookies();
 };
 
 const searchParameters = async (): Promise<Record<string, string>> =>

@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useAuthenticate } from '@better-auth-ui/react';
 import { CircleAlert, CircleCheck, Loader2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -9,7 +10,11 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
-import { connectGithubGist, parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
+import {
+  connectGithubGist,
+  getGithubGistConnectionStatus,
+  parseGithubGistAuthorizationReturn,
+} from '#lib/share-providers.js';
 import type { GithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -18,7 +23,7 @@ export const handle: Handle = {
 };
 
 const outcomeTitle: Record<GithubGistAuthorizationReturn['outcome'], string> = {
-  returned: 'Gist access granted',
+  returned: 'Checking Gist access',
   cancelled: 'Gist access was not granted',
   failed: 'GitHub authorization could not be completed',
 };
@@ -43,6 +48,12 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
   // Redirects to /auth/sign-in?redirectTo=<this URL> when signed out, so the person comes back here.
   const { data: session } = useAuthenticate(authClient);
   const { signOut } = useAuthLinks({ redirectTo: pathname });
+  const verification = useQuery({
+    queryKey: ['github', 'gist-return', session?.user.id, search],
+    queryFn: getGithubGistConnectionStatus,
+    enabled: session !== null && session !== undefined && authorizationReturn?.outcome === 'returned',
+    retry: false,
+  });
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -82,7 +93,7 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
   }
 
   const outcome = authorizationReturn?.outcome;
-  const granted = outcome === 'returned';
+  const granted = outcome === 'returned' && verification.data === 'connected';
 
   return (
     <div className='flex min-h-svh items-center justify-center p-6'>
@@ -101,17 +112,27 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
             )}
           </div>
           <CardTitle className='text-xl font-semibold'>
-            {outcome === undefined ? 'Allow Gist access' : outcomeTitle[outcome]}
+            {granted
+              ? 'Gist access granted'
+              : outcome === 'returned' && !verification.isPending
+                ? 'Gist access needs attention'
+                : outcome === undefined
+                  ? 'Allow Gist access'
+                  : outcomeTitle[outcome]}
           </CardTitle>
           <CardDescription>
             {granted
-              ? 'You can return to Tau.'
-              : (authorizationReturn?.failure ?? (
-                  <>
-                    Tau shares projects as GitHub Gists. This adds Gist access to the Tau account{' '}
-                    <strong className='break-all'>{session.user.email}</strong>.
-                  </>
-                ))}
+              ? 'You can return to Tau. Nothing has been published.'
+              : verification.data === 'disabled'
+                ? 'Gist access is granted, but sharing is off in Tau. Enable it in Security settings when you need it.'
+                : verification.error
+                  ? 'GitHub access could not be verified. Try again before sharing.'
+                  : (authorizationReturn?.failure ?? (
+                      <>
+                        Tau shares projects as GitHub Gists. This adds Gist access to the Tau account{' '}
+                        <strong className='break-all'>{session.user.email}</strong>.
+                      </>
+                    ))}
           </CardDescription>
         </CardHeader>
 
@@ -122,21 +143,27 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
                 {error}
               </p>
             )}
-            <Button
-              className='w-full'
-              disabled={starting}
-              onClick={() => {
-                // async-iife: user gesture -- a click handler cannot await; `allow` settles every branch into state.
-                void allow();
-              }}
-            >
-              {starting ? (
-                <Loader2 className='size-4 animate-spin' aria-hidden='true' />
-              ) : (
-                <SvgIcon id='github' className='size-4' aria-hidden='true' />
-              )}
-              Allow Gist access
-            </Button>
+            {verification.data === 'disabled' ? (
+              <Button asChild className='w-full'>
+                <Link to='/?settings=security'>Manage Gist sharing</Link>
+              </Button>
+            ) : (
+              <Button
+                className='w-full'
+                disabled={starting || (outcome === 'returned' && verification.isPending)}
+                onClick={() => {
+                  // async-iife: user gesture -- a click handler cannot await; `allow` settles every branch into state.
+                  void allow();
+                }}
+              >
+                {starting ? (
+                  <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+                ) : (
+                  <SvgIcon id='github' className='size-4' aria-hidden='true' />
+                )}
+                Allow Gist access
+              </Button>
+            )}
             <Button asChild variant='ghost' className='w-full'>
               <Link to={signOut}>Use a different Tau account</Link>
             </Button>

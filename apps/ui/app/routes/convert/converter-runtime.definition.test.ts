@@ -8,7 +8,7 @@ import { createConverterSource } from '@taucad/converter/contracts';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { converterExportFormats, converterImportFormats, converterRuntime } from '@taucad/converter/runtime';
 import type { ConverterRuntimeClient } from '@taucad/converter/runtime';
-import cubeGlbBase64 from '#routes/_index/assets/gear-8.glb?base64';
+import cubeGlbBase64 from '#routes/convert/gear-8.glb?base64';
 
 vi.mock('draco3dgltf', () => ({
   default: {

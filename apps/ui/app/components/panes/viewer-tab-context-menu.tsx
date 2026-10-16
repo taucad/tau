@@ -10,7 +10,9 @@ import {
   closeAllPanelsInGroup,
   copyPathToClipboard,
 } from '#components/panes/tab-context-menu-actions.js';
+import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
+import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -28,7 +30,9 @@ type ViewerPanelParameters = {
  */
 function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
   const { api } = properties;
-  const { editorRef } = useProject();
+  const { editorRef, projectRef } = useProject();
+  const projectId = useSelector(projectRef, (state) => state.context.project?.id);
+  const revealInFileManager = useRevealInFileManager(projectId);
   const workspace = useProjectWorkspace({ enableNoContext: true });
 
   const entryPath = (properties.params as ViewerPanelParameters | undefined)?.entryPath;
@@ -147,6 +151,19 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
         <FolderTree />
         Reveal in File Tree
       </ContextMenuItem>
+      {revealInFileManager ? (
+        <ContextMenuItem
+          disabled={!entryPath}
+          onSelect={() => {
+            if (entryPath) {
+              void revealInFileManager.reveal(entryPath);
+            }
+          }}
+        >
+          <NativeFileManagerIcon icon={revealInFileManager.icon} />
+          {revealInFileManager.label}
+        </ContextMenuItem>
+      ) : null}
     </>
   );
 }

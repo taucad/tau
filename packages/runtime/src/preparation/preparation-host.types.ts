@@ -231,6 +231,11 @@ export type PreparationHost = {
   /** Current state from receipts alone: no network, no plugin code, no download. */
   inspect(input: PluginSelection): Promise<PluginPreparation>;
   /**
+   * What a launch uses, read from each closure's launch index and its receipt's version stamp: the per-launch read,
+   * whose cost does not grow with the closure (I11). It reports `ready` exactly when {@link inspect} does.
+   */
+  inspectLaunch(input: PluginSelection): Promise<LaunchInspection>;
+  /**
    * Prepare a selection, joining an attempt already running in this host for the same selection.
    * @throws {PreparationError} After emitting `failed`.
    */
@@ -261,7 +266,11 @@ export type SealClosureInput = {
   readonly dependency: string;
   /** The selected variant's target. */
   readonly target: DependencyTarget;
-  /** Absolute closure root: the staging directory while preparing, the sealed closure while repairing. */
+  /**
+   * Absolute closure root: the staging directory while preparing, the sealed closure while repairing. It holds only
+   * the payloads' files and what an earlier run of the step added: the host's own `receipt.json` and launch index are
+   * never there while the step runs.
+   */
   readonly root: string;
   /** Rows of the files the payloads wrote, sorted by path. */
   readonly files: readonly ReceiptFile[];
@@ -299,7 +308,32 @@ export type PreparationPlugin = {
    * @returns A refusal when this host cannot run the closure, else `undefined`.
    */
   readonly seal?: (input: SealClosureInput) => Promise<SealClosureRefusal | undefined>;
+  /**
+   * The launch set: closure-relative paths of the files the kernel's process loads first, which every launch hashes
+   * (D8, ruling X29). The host writes their rows to the closure's launch index at seal time, so a launch reads that
+   * small file instead of the full receipt; the rest of the closure is re-verified after a failed handshake. Keep it
+   * to the executable and the few files the process opens before it is ready.
+   * @param files - Every row of the closure being sealed.
+   * @returns Paths that `files` lists.
+   */
+  readonly launchSet?: (files: readonly ReceiptFile[]) => readonly string[];
 };
+
+/**
+ * What a launch needs of one sealed closure: where it is, which pins it holds and the rows of its launch set (every
+ * row, for a closure sealed without a launch index).
+ * @public
+ */
+export type ClosureLaunch = Pick<ClosureReceipt, 'package' | 'dependency' | 'root' | 'closureIntegrity' | 'files'>;
+
+/**
+ * {@link PreparationHost.inspectLaunch}'s answer: the closures a launch uses, or why there are none.
+ * @public
+ */
+export type LaunchInspection =
+  | { readonly status: 'ready'; readonly closures: Readonly<Record<string, ClosureLaunch>> }
+  | { readonly status: 'idle' }
+  | Extract<PreparationState, { status: 'blocked' }>;
 
 /**
  * Options of {@link createPreparationHost}.

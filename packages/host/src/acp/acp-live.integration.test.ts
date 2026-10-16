@@ -59,7 +59,8 @@ import { createHostMcpEndpoint } from '#mcp-server.js';
 const execFileAsync = promisify(execFile);
 
 /** A bounded prompt that must exercise the adapter's real filesystem tool. */
-const prompt = 'Use your filesystem read tool to read main.scad, then report the cube dimension. You must call a tool.';
+const prompt =
+  'Open main.scad in the current directory with your file-reading tool, then report the cube dimension. You must read the file. Do not use shell commands or search tools.';
 
 /**
  * The adapters this host may actually bill against.
@@ -172,6 +173,19 @@ const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly 
 };
 
 const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] => reduceEventLog(events);
+
+/** Replay direct-session events with the same row envelope the durable appender supplies. */
+const directMessagesOf = (events: readonly ExternalAgentLogEvent[]): readonly ProviderMessage[] =>
+  messagesOf(
+    events.map((event, sequence) => ({
+      ...event,
+      version: 1,
+      leaderEpoch: 'test',
+      sequence,
+      recordedAt: new Date(0).toISOString(),
+      runId: 'run-live-direct',
+    })),
+  );
 
 const textOf = (message: ProviderMessage): string =>
   typeof message.content === 'string'
@@ -318,13 +332,14 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
       const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-capture-'));
       roots.push(workspaceRoot);
       const views = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+      // Large enough for native image normalization; filenames carry no color hints.
       const pixels = [
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z8AARAAI/gH/xp559wAAAABJRU5ErkJggg==',
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+M8ARAAHAAH/YKtA0QAAAABJRU5ErkJggg==',
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNgYPgPRAAFAgH/wSuWnwAAAABJRU5ErkJggg==',
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4/58BiAAP9wP96sqNrAAAAABJRU5ErkJggg==',
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==',
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+P8fiAAL+wP9PaUBYwAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdLep8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3IPanc8OLDQitxAAAAAElFTkSuQmCC',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdLu58QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ24Pbjs8OLsrFddAAAAAElFTkSuQmCC',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdNvJ8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ2oPcf88OIhvJ6vAAAAAElFTkSuQmCC',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAdklEQVR4nO3PQQkAMAzAwPo33Yno4xgEIuAyu/N1XtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWjBsQcyl+HSnr9raQAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAdklEQVR4nO3PQQkAMAzAwPo33Yno4xgEIuAyO/t1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWHHtBp+HSthEAJgAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAdklEQVR4nO3PQQkAMAzAwPo33Yno4xgEIuAys/t3XtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWjBrQdQt+HSQM5t4gAAAABJRU5ErkJggg==',
       ];
       const registry: ToolRegistry = {
         list: () => [],
@@ -381,9 +396,7 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
           ],
         });
         await session.prompt(
-          adapter.id === 'codex'
-            ? 'Call mcp.tau.screenshot with targetFile main.scad and mode multi_angle. Open each of the six returned local PNG files with your image viewing tool, then list the six view names. Do not edit files.'
-            : 'Call tau test_model with files ["main.geospec.ts"], then call tau screenshot with targetFile main.scad and mode multi_angle. Report the test counts and list the six view names from the results. Do not edit files or call other Tau tools.',
+          'Call tau test_model with files ["main.geospec.ts"], then call tau screenshot with targetFile main.scad and mode multi_angle. Inspect the actual pixels of all six images and report the dominant color of each view in order. Do not infer colors from names or inspect file bytes with code. Do not edit files or call other Tau tools.',
           {
             append: async (batch) => {
               events.push(...batch);
@@ -394,7 +407,7 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
           },
           selectedModel(adapter.id),
         );
-        const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+        const messages = directMessagesOf(events);
         expect(
           messages.some(
             (message) => message.role === 'tool-output' && message.toolName === 'screenshot' && !message.isError,
@@ -405,25 +418,18 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
             messages.find((message) => message.role === 'tool-output' && message.toolName === toolName.testModel),
           ).toMatchObject({ isError: false, content: { failures: [], passed: 0, total: 0 } });
         }
+        const answer = messages
+          .filter((message) => message.role === 'assistant')
+          .map((message) => textOf(message))
+          .join(' ')
+          .toLowerCase();
+        expect(answer).toMatch(/red[\s\S]*green[\s\S]*blue[\s\S]*yellow[\s\S]*magenta[\s\S]*cyan/u);
         const attachments = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
         expect(attachments).toHaveLength(6);
         const stored = await Promise.all(
           attachments.map(async (name) => readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments', name))),
         );
         expect(stored.map((bytes) => bytes.toString('base64')).sort()).toEqual([...pixels].sort());
-        if (adapter.id === 'codex') {
-          const imageViews = messages.flatMap((message) =>
-            message.role === 'tool-input' && message.toolName.startsWith('View Image ') ? [message.toolName] : [],
-          );
-          expect(imageViews).toHaveLength(6);
-          expect(new Set(imageViews).size).toBe(6);
-          expect(
-            messages.filter(
-              (message) =>
-                message.role === 'tool-output' && message.toolName.startsWith('View Image ') && !message.isError,
-            ),
-          ).toHaveLength(6);
-        }
       } finally {
         await session?.close();
         await release();
@@ -541,7 +547,7 @@ describe.each(adapters)('live $id question through Tau', (adapter) => {
         },
         selectedModel(adapter.id),
       );
-      const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+      const messages = directMessagesOf(events);
       const answered = messages.find(
         (message) => message.role === 'tool-output' && message.toolName === toolName.askQuestions && !message.isError,
       );
@@ -957,7 +963,7 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('a live ACP chat acr
 const grokAdapter = adapters.find((adapter) => adapter.id === 'grok');
 
 describe.skipIf(!liveEnabled || grokAdapter === undefined)('native Grok skills through ACP', () => {
-  it('should read a published skill support file through the ACP filesystem', async () => {
+  it('should read a published skill support file', async () => {
     if (!grokAdapter) {
       throw new Error('The selected Grok adapter is unavailable.');
     }

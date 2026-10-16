@@ -2,10 +2,12 @@ import { readFile, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 
-import { build123dOptionsFromClosure, sealBuild123dClosure } from '@taucad/build123d';
+import { build123dLaunchSet, build123dOptionsFromClosure, sealBuild123dClosure } from '@taucad/build123d';
 import type { Build123dClosureOptions } from '@taucad/build123d';
 import { defaultPayloadStore } from '@taucad/host';
-import { picogkOptionsFromClosure } from '@taucad/picogk';
+import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
+import type { NativeRuntimeVerifier } from '@taucad/native-process-core';
+import { picogkLaunchSet, picogkOptionsFromClosure } from '@taucad/picogk';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 import {
   createPreparationHost,
@@ -13,10 +15,11 @@ import {
   parsePluginDeployment,
   PreparationError,
   readManagedPreparation,
+  reverifyClosure,
   selectVariant,
 } from '@taucad/runtime/preparation/node';
 import type {
-  ClosureReceipt,
+  ClosureLaunch,
   Integrity,
   ManagedPreparation,
   PreparationHost,
@@ -34,19 +37,50 @@ export type PreparedNativeKernel =
   | { readonly build123d: Build123dClosureOptions }
   | { readonly picogk: PicogkKernelOptions };
 
-// Per package: the options its sealed closure gives, and the seal step, if any, that runs before the closure is sealed.
+// Per package: the options its sealed closure gives, the seal step, if any, that runs before the closure is sealed,
+// and the launch set its launch index records (D8, X29).
 const adopters: Readonly<
   Record<
     string,
-    { readonly options: (receipt: ClosureReceipt) => PreparedNativeKernel; readonly seal?: PreparationPlugin['seal'] }
+    {
+      readonly options: (closure: ClosureLaunch) => PreparedNativeKernel;
+      readonly seal?: PreparationPlugin['seal'];
+      readonly launchSet: NonNullable<PreparationPlugin['launchSet']>;
+    }
   >
 > = {
   // Build123d compiles its bytecode and proves the closure imports before the seal (D22).
   '@taucad/build123d': {
-    options: (receipt) => ({ build123d: build123dOptionsFromClosure(receipt) }),
+    options: (closure) => ({ build123d: build123dOptionsFromClosure(closure) }),
     seal: sealBuild123dClosure,
+    launchSet: build123dLaunchSet,
   },
-  '@taucad/picogk': { options: (receipt) => ({ picogk: picogkOptionsFromClosure(receipt) }) },
+  '@taucad/picogk': {
+    options: (closure) => ({ picogk: picogkOptionsFromClosure(closure) }),
+    launchSet: picogkLaunchSet,
+  },
+};
+
+/**
+ * D8: a native worker that exits before its handshake re-verifies its closure against the receipt beside it, so the
+ * refusal names the damaged file. A runtime root without a receipt was a sealed closure when it was composed, so a
+ * repair that stopped half way is named too.
+ * @param root - The worker's closure root.
+ * @param signal - Aborts the re-verification.
+ * @returns The damaged files and the repair, or `undefined` when the closure is intact.
+ */
+export const verifyStoreClosure: NativeRuntimeVerifier = async (root, signal) => {
+  const files = await reverifyClosure(root, signal);
+  if (files?.length === 0) {
+    return undefined;
+  }
+  return {
+    files: files ?? ['receipt.json'],
+    remedy:
+      files === undefined
+        ? 'Run `tau prepare` for the kernel to rebuild it.'
+        : 'Run `tau prepare --verify` to repair it.',
+  };
 };
 
 /**
@@ -78,19 +112,20 @@ export const nativePreparationPlugins = async (): Promise<readonly PreparationPl
     }
     // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
     const manifest: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-    const seal = adopters[packageName]?.seal;
+    const adopter = adopters[packageName];
     plugins.push({
       package: packageName,
       deployment: parsePluginDeployment(manifest, `${packageName} tau-plugin.json`),
       directory: dirname(manifestPath),
-      ...(seal && { seal }),
+      ...(adopter?.seal && { seal: adopter.seal }),
+      ...(adopter && { launchSet: adopter.launchSet }),
     });
   }
   return plugins;
 };
 
-// A preparation host over the shared payload store; `inspect` reads receipts and never downloads, so an inspect-only
-// host starts no attempt and holds nothing to dispose.
+// A preparation host over the shared payload store; `inspectLaunch` reads launch indexes and never downloads, so an
+// inspect-only host starts no attempt and holds nothing to dispose.
 const storeReader = (plugin: PreparationPlugin, store = defaultPayloadStore()): PreparationHost => {
   const managed = readManaged();
   return createPreparationHost({
@@ -121,10 +156,11 @@ export const nativeKernelFor = async (
     for (const [name, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
       if (extensions.includes(extension)) {
         // oxlint-disable-next-line no-await-in-loop -- at most one installed kernel owns an extension
-        const { state } = await storeReader(plugin).inspect({ package: plugin.package, dependencies: requires });
-        const receipt = state.status === 'ready' ? state.receipts[requires[0]] : undefined;
-        if (receipt !== undefined) {
-          return adopters[plugin.package]?.options(receipt);
+        const state = await storeReader(plugin).inspectLaunch({ package: plugin.package, dependencies: requires });
+        const closure = state.status === 'ready' ? state.closures[requires[0]] : undefined;
+        if (closure !== undefined) {
+          installNativeRuntimeVerifier(verifyStoreClosure);
+          return adopters[plugin.package]?.options(closure);
         }
         return state.status === 'blocked' && state.reason === 'unsupported-target'
           ? { code: 'UNSUPPORTED_TARGET', message: state.message }
@@ -167,8 +203,9 @@ const preparationBytes = (plugin: PreparationPlugin, requires: readonly string[]
 
 /**
  * Compose every native kernel the CLI declares from the payload store: a sealed closure gives its kernel options, and
- * any other state gives the refusal the runtime answers that kernel's files with. Receipts only: nothing is
- * downloaded and no closure is verified, so this is a per-launch cost (I11).
+ * any other state gives the refusal the runtime answers that kernel's files with. Launch indexes only: nothing is
+ * downloaded, no closure is verified and no full receipt is parsed, so this is a per-launch cost (I11). A worker that
+ * then exits before its handshake re-verifies its closure and names what differs (D8).
  * @returns The composition.
  */
 export const composeNativeKernels = async (): Promise<NativeComposition> => {
@@ -183,12 +220,13 @@ export const composeNativeKernels = async (): Promise<NativeComposition> => {
   for (const plugin of await nativePreparationPlugins()) {
     for (const [kernel, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
       // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
-      const { state } = await storeReader(plugin, store).inspect({ package: plugin.package, dependencies: requires });
-      const receipt = state.status === 'ready' ? state.receipts[requires[0]] : undefined;
-      const options = receipt === undefined ? undefined : adopters[plugin.package]?.options(receipt);
-      if (receipt !== undefined && options !== undefined) {
+      const state = await storeReader(plugin, store).inspectLaunch({ package: plugin.package, dependencies: requires });
+      const closure = state.status === 'ready' ? state.closures[requires[0]] : undefined;
+      const options = closure === undefined ? undefined : adopters[plugin.package]?.options(closure);
+      if (closure !== undefined && options !== undefined) {
+        installNativeRuntimeVerifier(verifyStoreClosure);
         Object.assign(kernels, options);
-        closureRoots.push(receipt.root);
+        closureRoots.push(closure.root);
         continue;
       }
       const unsupported = state.status === 'blocked' && state.reason === 'unsupported-target';

@@ -20,7 +20,7 @@ import {
 import type { FastifyReply } from 'fastify';
 
 import { AuthGuard } from '#auth/auth.guard.js';
-import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { OptionalAuth, OptionalUser, PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import {
   ApproveHostPairingDto,
   CreateCloudHostDto,
@@ -93,10 +93,16 @@ export class HostsController {
     return token;
   }
 
+  /**
+   * The caller's paired computers. A signed-out caller has none, which the agent picker shows as an empty list
+   * rather than a directory outage.
+   */
   @Get()
-  @UseAuth()
-  public async listDevices(@User('id') userId: string): Promise<Awaited<ReturnType<HostsService['listDevices']>>> {
-    return this.hostsService.listDevices(userId);
+  @OptionalAuth()
+  public async listDevices(
+    @OptionalUser('id') userId: string | undefined,
+  ): Promise<Awaited<ReturnType<HostsService['listDevices']>>> {
+    return userId === undefined ? [] : this.hostsService.listDevices(userId);
   }
 
   /**

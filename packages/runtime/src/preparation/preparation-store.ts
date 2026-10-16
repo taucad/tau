@@ -7,18 +7,20 @@
 //   blobs/sha256/<hex>                  verified payload bytes, kept after sealing
 //   blobs/alias/<algorithm>-<hex>       the sha256 key of a blob pinned by sha384 or sha512
 //   closures/sha256/<hex>/receipt.json  the seal: written last, inside staging, before the rename
+//   closures/sha256/<hex>/launch.json   the launch index: the launch set's rows, itself a receipted file
 //   links/<sha256(hostPath)>.json       the closures each host installation uses (the GC roots)
 //   tmp/<attemptId>/owner.json          one staging directory per attempt, swept when its owner is gone
 //   tmp/gc-<id>/                        closures being deleted
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { integrityToHex } from '@taucad/archive-core';
 
-import type { GarbageReport } from '#preparation/preparation-host.types.js';
+import { launchIndexPath, parseLaunchIndex } from '#preparation/closure-receipt.js';
+import type { ClosureLaunch, GarbageReport } from '#preparation/preparation-host.types.js';
 import type { ClosureReceipt, Integrity } from '#preparation/preparation.types.js';
 
 /** Staging, orphan blobs and dead GC directories older than this are removed. Milliseconds. */
@@ -231,6 +233,71 @@ export const readReceipt = async (layout: StoreLayout, key: string): Promise<Clo
   } catch {
     return undefined;
   }
+};
+
+const namesKey = (integrity: Integrity, key: string): boolean => {
+  try {
+    return sha256Key(integrity) === key;
+  } catch {
+    return false;
+  }
+};
+
+/** Bytes of a receipt's head that hold its version stamp, which the host writes as the first key. */
+const stampBytes = 512;
+const stampPattern = /^\{\s*"tauVersion":\s*("(?:[^"\\]|\\.)*")/u;
+
+/**
+ * The Tau version stamp of a sealed closure, read from the head of its receipt: the host writes `tauVersion` first, so
+ * a launch learns whether the seal is current without parsing every row.
+ * @param root - The closure root.
+ * @returns The stamp, absent when the head holds none (a receipt written before the stamp moved first); `undefined`
+ *   when the closure is not sealed.
+ */
+const readStamp = async (root: string): Promise<{ readonly tauVersion?: string } | undefined> => {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(join(root, 'receipt.json'), 'r');
+    const head = Buffer.alloc(stampBytes);
+    const { bytesRead } = await handle.read(head, 0, stampBytes, 0);
+    const quoted = stampPattern.exec(head.subarray(0, bytesRead).toString('utf8'))?.[1];
+    return quoted === undefined ? {} : { tauVersion: JSON.parse(quoted) as string };
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close();
+  }
+};
+
+/**
+ * What a launch needs of `closures/sha256/<key>`: its launch index and its receipt's version stamp. A closure sealed
+ * without an index, or before the stamp moved first, is read from its full receipt instead.
+ * @internal
+ * @param layout - The store.
+ * @param key - The closure's sha256 hex key.
+ * @returns The launch view and the stamp, or `undefined` when the closure is not sealed.
+ */
+export const readLaunch = async (
+  layout: StoreLayout,
+  key: string,
+): Promise<{ readonly launch: ClosureLaunch; readonly tauVersion: string } | undefined> => {
+  const root = join(layout.closures, key);
+  const [stamp, text] = await Promise.all([
+    readStamp(root),
+    readFile(join(root, launchIndexPath), 'utf8').catch(() => undefined),
+  ]);
+  if (stamp === undefined) {
+    return undefined;
+  }
+  const { tauVersion } = stamp;
+  const index = text === undefined ? undefined : parseLaunchIndex(text);
+  // An index that names other pins than the closure it sits in is damage: the full receipt still answers.
+  if (tauVersion === undefined || index === undefined || !namesKey(index.closureIntegrity, key)) {
+    const receipt = await readReceipt(layout, key);
+    return receipt === undefined ? undefined : { launch: receipt, tauVersion: receipt.tauVersion };
+  }
+  const { package: packageName, dependency, closureIntegrity, files } = index;
+  return { launch: { package: packageName, dependency, root, closureIntegrity, files }, tauVersion };
 };
 
 /**

@@ -19,15 +19,19 @@ export type LinkedAccountsProps = {
  *
  * @returns A JSX element containing the linked accounts card
  */
-export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.Element {
+export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.Element | undefined {
   const { authClient, localization, socialProviders } = useAuth();
 
   const { data: accounts, isPending } = useListAccounts(authClient);
 
-  const linkedAccounts = accounts?.filter((account) => account.providerId !== 'credential');
+  const linkedAccounts = accounts?.filter(
+    (account) => account.providerId !== 'credential' && account.providerId !== 'github',
+  );
   const linkedProviderIds = new Set(linkedAccounts?.map((account) => account.providerId) ?? []);
   const unlinkedSocialProviders =
-    socialProviders?.filter((provider) => !linkedProviderIds.has(getProviderId(provider))) ?? [];
+    socialProviders?.filter(
+      (provider) => getProviderId(provider) !== 'github' && !linkedProviderIds.has(getProviderId(provider)),
+    ) ?? [];
 
   const allRows = [
     ...(linkedAccounts?.map((account) => ({
@@ -42,6 +46,9 @@ export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.El
     })),
   ];
 
+  if (!isPending && allRows.length === 0) {
+    return undefined;
+  }
   return (
     <div>
       <h2 className='mb-3 text-sm font-semibold'>{localization.settings.linkedAccounts}</h2>

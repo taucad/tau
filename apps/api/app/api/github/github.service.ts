@@ -21,7 +21,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
-import { githubConnection } from '#database/schema.js';
+import { githubConnection, githubRepositoryWrite } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 
 const apiVersion = '2026-03-10';
@@ -249,6 +249,19 @@ const connectionSummary = (
   ...(row.avatarUrl === null ? {} : { avatarUrl: row.avatarUrl }),
   generation: row.generation,
 });
+
+type RepositoryAccess = Readonly<{
+  repositoryId: number;
+  ownerId: number;
+  installationId: number | undefined;
+  fullName: string;
+  cloneUrl: string;
+  canRead: boolean;
+  canWrite: boolean;
+  writeEnabled: boolean;
+  authorizationVersion: number;
+  verifiedAt: string;
+}>;
 
 @Injectable()
 export class GithubService {
@@ -599,6 +612,7 @@ export class GithubService {
           pending.refreshTokenExpiresAt === undefined ? null : new Date(pending.refreshTokenExpiresAt),
         keyVersion: this.keyVersion,
         generation,
+        authorizationVersion: (existing?.authorizationVersion ?? 0) + 1,
         updatedAt: new Date(),
       };
       const [row] =
@@ -775,6 +789,196 @@ export class GithubService {
     throw new ServiceUnavailableException({ code: 'GITHUB_REFRESH_BUSY' });
   }
 
+  /** Fresh provider evidence and the separate Tau write-use decision. */
+  public async repositoryAccess(userId: string, connectionId: string, repositoryId: number): Promise<RepositoryAccess> {
+    const row = await this.owned(userId, connectionId);
+    const { accessToken } = await this.token(userId, connectionId);
+    let repository: z.infer<typeof repositorySchema>;
+    try {
+      repository = repositorySchema.parse(await this.apiJson(`/repositories/${String(repositoryId)}`, accessToken));
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        await this.databaseService.database
+          .delete(githubRepositoryWrite)
+          .where(
+            and(
+              eq(githubRepositoryWrite.connectionId, connectionId),
+              eq(githubRepositoryWrite.repositoryId, repositoryId),
+            ),
+          );
+      }
+      throw error;
+    }
+    const permission = await this.installationHolds(
+      repository,
+      accessToken,
+      `${userId}:${connectionId}:${String(row.generation)}`,
+    );
+    const readable =
+      repository.id === repositoryId &&
+      permission !== undefined &&
+      repository.permissions?.pull === true &&
+      !repository.disabled;
+    const writable =
+      readable && permission.contents === 'write' && repository.permissions?.push === true && !repository.archived;
+    const policy = await this.databaseService.database.query.githubRepositoryWrite.findFirst({
+      where: and(
+        eq(githubRepositoryWrite.connectionId, connectionId),
+        eq(githubRepositoryWrite.repositoryId, repositoryId),
+      ),
+    });
+    const writeEnabled =
+      writable &&
+      policy?.ownerId === repository.owner.id &&
+      policy.installationId === permission.installationId &&
+      policy.authorizationVersion === row.authorizationVersion;
+    if (policy !== undefined && !writeEnabled) {
+      await this.databaseService.database
+        .delete(githubRepositoryWrite)
+        .where(
+          and(
+            eq(githubRepositoryWrite.connectionId, connectionId),
+            eq(githubRepositoryWrite.repositoryId, repositoryId),
+          ),
+        );
+    }
+    return {
+      repositoryId: repository.id,
+      ownerId: repository.owner.id,
+      installationId: permission?.installationId,
+      fullName: repository.full_name,
+      cloneUrl: repository.clone_url,
+      canRead: readable,
+      canWrite: writable,
+      writeEnabled,
+      authorizationVersion: row.authorizationVersion,
+      verifiedAt: new Date().toISOString(),
+    };
+  }
+
+  /** A setting change never obtains a write credential or pushes project bytes. */
+  public async setRepositoryWrite(
+    userId: string,
+    connectionId: string,
+    input: { repositoryId: number; enabled: boolean },
+  ): Promise<{ writeEnabled: boolean }> {
+    await this.owned(userId, connectionId);
+    if (!input.enabled) {
+      await this.databaseService.database
+        .delete(githubRepositoryWrite)
+        .where(
+          and(
+            eq(githubRepositoryWrite.connectionId, connectionId),
+            eq(githubRepositoryWrite.repositoryId, input.repositoryId),
+          ),
+        );
+      return { writeEnabled: false };
+    }
+    const access = await this.repositoryAccess(userId, connectionId, input.repositoryId);
+    if (!access.canWrite || access.installationId === undefined) {
+      throw new ForbiddenException({ code: 'GITHUB_REPOSITORY_WRITE_DENIED' });
+    }
+    await this.databaseService.database
+      .insert(githubRepositoryWrite)
+      .values({
+        connectionId,
+        repositoryId: input.repositoryId,
+        ownerId: access.ownerId,
+        installationId: access.installationId,
+        authorizationVersion: access.authorizationVersion,
+      })
+      .onConflictDoUpdate({
+        target: [githubRepositoryWrite.connectionId, githubRepositoryWrite.repositoryId],
+        set: {
+          ownerId: access.ownerId,
+          installationId: access.installationId,
+          authorizationVersion: access.authorizationVersion,
+          updatedAt: new Date(),
+        },
+      });
+    return { writeEnabled: true };
+  }
+
+  /** The root credential is never returned over HTTP; each client lease names one repository and operation. */
+  public async repositoryToken(
+    userId: string,
+    connectionId: string,
+    input: { repositoryId: number; operation: 'read' | 'write' },
+  ): Promise<{ accessToken: string; expiresAt: string; generation: number }> {
+    const access = await this.repositoryAccess(userId, connectionId, input.repositoryId);
+    if (!access.canRead) {
+      throw new ForbiddenException({ code: 'GITHUB_REPOSITORY_READ_DENIED' });
+    }
+    if (input.operation === 'write' && !access.writeEnabled) {
+      throw new ForbiddenException({ code: 'GITHUB_REPOSITORY_WRITE_DISABLED' });
+    }
+    const root = await this.token(userId, connectionId);
+    const { clientId, clientSecret } = this.requireConfiguration();
+    const result = z
+      .object({
+        token: z.string().min(1),
+        expires_at: z.iso.datetime({ offset: true }),
+        app: z.object({ client_id: z.literal(clientId) }),
+        user: z.object({ id: githubId }),
+        installation: z.object({
+          id: z.literal(access.installationId ?? -1),
+          account: z.object({ id: z.literal(access.ownerId) }),
+          repository_selection: z.literal('selected'),
+          permissions: z.record(z.string(), z.string()),
+        }),
+      })
+      .safeParse(
+        await this.githubJson(`https://api.github.com/applications/${encodeURIComponent(clientId)}/token/scoped`, {
+          method: 'POST',
+          headers: {
+            accept: 'application/vnd.github+json',
+            authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+            'content-type': 'application/json',
+            'x-github-api-version': apiVersion,
+          },
+          body: JSON.stringify({
+            access_token: root.accessToken,
+            target_id: access.ownerId,
+            repository_ids: [input.repositoryId],
+            permissions: { contents: input.operation, metadata: 'read' },
+          }),
+        }),
+      );
+    const row = await this.owned(userId, connectionId);
+    if (
+      !result.success ||
+      result.data.user.id !== row.githubSubject ||
+      result.data.token === root.accessToken ||
+      Date.parse(result.data.expires_at) <= Date.now() ||
+      Date.parse(result.data.expires_at) > Date.now() + 28_800_000 ||
+      result.data.installation.permissions['contents'] !== input.operation ||
+      result.data.installation.permissions['metadata'] !== 'read' ||
+      Object.keys(result.data.installation.permissions).some((key) => key !== 'contents' && key !== 'metadata')
+    ) {
+      throw new BadGatewayException({ code: 'GITHUB_SCOPED_TOKEN_INVALID' });
+    }
+    if (row.authorizationVersion !== access.authorizationVersion) {
+      throw new ConflictException({ code: 'GITHUB_AUTHORIZATION_CHANGED' });
+    }
+    // Recheck after the network exchange so disabling while GitHub issues a token wins.
+    if (input.operation === 'write') {
+      const policy = await this.databaseService.database.query.githubRepositoryWrite.findFirst({
+        where: and(
+          eq(githubRepositoryWrite.connectionId, connectionId),
+          eq(githubRepositoryWrite.repositoryId, input.repositoryId),
+        ),
+      });
+      if (
+        policy?.ownerId !== access.ownerId ||
+        policy.installationId !== access.installationId ||
+        policy.authorizationVersion !== row.authorizationVersion
+      ) {
+        throw new ForbiddenException({ code: 'GITHUB_REPOSITORY_WRITE_DISABLED' });
+      }
+    }
+    return { accessToken: result.data.token, expiresAt: result.data.expires_at, generation: root.generation };
+  }
+
   private async refresh(
     userId: string,
     initial: ConnectionRow,
@@ -934,11 +1138,14 @@ export class GithubService {
     const path = `/repositories/${String(repositoryId)}`;
     const repository = repositorySchema.parse(await this.apiJson(path, accessToken, `${cacheScope}:${path}`));
     // Without the user's permissions the summary reports `unknown` access.
-    return this.repositorySummary(
-      (await this.installationHolds(repository, accessToken, cacheScope))
-        ? repository
-        : { ...repository, permissions: undefined },
-    );
+    const permission = await this.installationHolds(repository, accessToken, cacheScope);
+    return this.repositorySummary({
+      ...repository,
+      permissions:
+        permission === undefined || repository.permissions === undefined
+          ? undefined
+          : { ...repository.permissions, push: permission.contents === 'write' && repository.permissions.push },
+    });
   }
 
   /**
@@ -949,7 +1156,7 @@ export class GithubService {
     repository: z.infer<typeof repositorySchema>,
     accessToken: string,
     cacheScope: string,
-  ): Promise<boolean> {
+  ): Promise<{ installationId: number; contents: 'read' | 'write' } | undefined> {
     const listed = async <T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> =>
       schema.parse(await this.apiJson(path, accessToken, `${cacheScope}:${path}`));
     let installation: z.infer<typeof installationSchema> | undefined;
@@ -964,11 +1171,16 @@ export class GithubService {
         break;
       }
     }
-    if (installation === undefined || installation.suspended_at !== null) {
-      return false;
+    if (
+      installation === undefined ||
+      installation.suspended_at !== null ||
+      !['read', 'write'].includes(installation.permissions['contents'] ?? '')
+    ) {
+      return undefined;
     }
+    const permission = installation.permissions['contents'] === 'write' ? 'write' : 'read';
     if (installation.repository_selection === 'all') {
-      return true;
+      return { installationId: installation.id, contents: permission };
     }
     for (let page = 1; page <= installationLookupPages; page += 1) {
       // oxlint-disable-next-line no-await-in-loop -- pages are read only until the repository appears.
@@ -977,13 +1189,13 @@ export class GithubService {
         z.object({ total_count: z.number(), repositories: z.array(repositorySchema) }),
       );
       if (body.repositories.some((item) => item.id === repository.id)) {
-        return true;
+        return { installationId: installation.id, contents: permission };
       }
       if (page * 100 >= body.total_count) {
         break;
       }
     }
-    return false;
+    return undefined;
   }
 
   /** One branch by exact name; names may contain `/`. */

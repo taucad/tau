@@ -23,11 +23,10 @@ vi.mock('#components/auth/settings/security/linked-account.js', () => ({
 afterEach(cleanup);
 
 describe('linked provider IDs', () => {
-  it('matches custom provider IDs without duplicating an already linked account', () => {
+  it('matches custom provider IDs while leaving GitHub to its dedicated connection card', () => {
     render(<LinkedAccounts />);
     expect(screen.getAllByTestId('account').map((row) => row.textContent)).toEqual([
       'company-sso:row-1',
-      'github:unlinked',
       'other-sso:unlinked',
     ]);
   });

@@ -41,112 +41,94 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
   });
 
-  it('should disable WebGPU by default and persist an opt-in', () => {
-    const storage = createMockStorage();
-    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
-    setFlagOverrides({ webGpu: true }, storage);
-    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
-    setFlagOverrides({ webGpu: false }, storage);
-    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
-  });
+  it.each(['webGpu', 'webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
+    'should keep the hidden %s flag at its disabled default despite an override',
+    (flag) => {
+      const storage = createMockStorage();
+      expect(isFeatureEnabled(flag, storage)).toBe(false);
+      setFlagOverrides({ [flag]: true }, storage);
+      expect(isFeatureEnabled(flag, storage)).toBe(false);
+    },
+  );
 
   it('should return default value when no overrides exist', () => {
     const storage = createMockStorage();
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
-  });
-
-  it('should enable Parts by default and honor a disabled override', () => {
-    expect(isFeatureEnabled('partsWarehouse', createMockStorage())).toBe(true);
-    expect(
-      isFeatureEnabled('partsWarehouse', createMockStorage({ 'tau:flags': JSON.stringify({ partsWarehouse: false }) })),
-    ).toBe(false);
-  });
-
-  it('should return false for the Plugins Store flag by default', () => {
-    const storage = createMockStorage();
-    expect(isFeatureEnabled('pluginsStore', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should return overridden value when override is set to true', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: true }),
+      'tau:flags': JSON.stringify({ marketingLanding: true }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(true);
-  });
-
-  it('should return overridden value for the Plugins Store flag', () => {
-    const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ pluginsStore: true }),
-    });
-    expect(isFeatureEnabled('pluginsStore', storage)).toBe(true);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(true);
   });
 
   it('should return overridden value when override is set to false', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: false }),
+      'tau:flags': JSON.stringify({ marketingLanding: false }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should return default when storage has empty object', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({}),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to default for non-boolean override values', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: 'yes' }),
+      'tau:flags': JSON.stringify({ marketingLanding: 'yes' }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should ignore unknown flag keys and return default', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({ unknownFlag: true }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to defaults for malformed JSON', () => {
     const storage = createMockStorage({
       'tau:flags': 'not-json',
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should return default when storage key is absent', () => {
     const storage = createMockStorage();
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to defaults for array JSON', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify([true]),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to defaults for primitive JSON values', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify(42),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to default for numeric value instead of boolean', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: 1 }),
+      'tau:flags': JSON.stringify({ marketingLanding: 1 }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 
   it('should fall back to default for null value', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: null }),
+      'tau:flags': JSON.stringify({ marketingLanding: null }),
     });
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
   });
 });
 
@@ -176,66 +158,66 @@ describe('getAllFlags', () => {
 
   it('should merge overrides with defaults', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: true }),
+      'tau:flags': JSON.stringify({ marketingLanding: true }),
     });
     const flags = getAllFlags(storage);
-    expect(flags).toStrictEqual({ ...featureFlagDefaults, planMode: true });
+    expect(flags).toStrictEqual({ ...featureFlagDefaults, marketingLanding: true });
   });
 
   it('should ignore unknown keys in overrides', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: true, somethingElse: false }),
+      'tau:flags': JSON.stringify({ marketingLanding: true, somethingElse: false }),
     });
     const flags = getAllFlags(storage);
-    expect(flags).toStrictEqual({ ...featureFlagDefaults, planMode: true });
+    expect(flags).toStrictEqual({ ...featureFlagDefaults, marketingLanding: true });
     expect(flags).not.toHaveProperty('somethingElse');
   });
 
   it('should coerce invalid values to defaults via zod', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: 'not-a-boolean' }),
+      'tau:flags': JSON.stringify({ marketingLanding: 'not-a-boolean' }),
     });
     const flags = getAllFlags(storage);
-    expect(flags.planMode).toBe(false);
+    expect(flags.marketingLanding).toBe(false);
   });
 });
 
 describe('setFlagOverrides', () => {
   it('should write overrides to storage', () => {
     const storage = createMockStorage();
-    setFlagOverrides({ planMode: true }, storage);
-    expect(isFeatureEnabled('planMode', storage)).toBe(true);
+    setFlagOverrides({ marketingLanding: true }, storage);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(true);
   });
 
   it('should merge with existing overrides', () => {
     const storage = createMockStorage({
-      'tau:flags': JSON.stringify({ planMode: false }),
+      'tau:flags': JSON.stringify({ marketingLanding: false }),
     });
-    setFlagOverrides({ planMode: true }, storage);
+    setFlagOverrides({ marketingLanding: true }, storage);
 
     const raw = storage.getItem('tau:flags');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
-    expect(parsed['planMode']).toBe(true);
+    expect(parsed['marketingLanding']).toBe(true);
   });
 
   it('should reset internal cache after writing', () => {
     const storage = createMockStorage();
 
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
-    setFlagOverrides({ planMode: true }, storage);
-    expect(isFeatureEnabled('planMode', storage)).toBe(true);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
+    setFlagOverrides({ marketingLanding: true }, storage);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(true);
   });
 });
 
 describe('resetFlagCache', () => {
   it('should allow re-reading from storage after reset', () => {
     const storage = createMockStorage();
-    expect(isFeatureEnabled('planMode', storage)).toBe(false);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(false);
 
-    storage.setItem('tau:flags', JSON.stringify({ planMode: true }));
+    storage.setItem('tau:flags', JSON.stringify({ marketingLanding: true }));
     resetFlagCache();
-    expect(isFeatureEnabled('planMode', storage)).toBe(true);
+    expect(isFeatureEnabled('marketingLanding', storage)).toBe(true);
   });
 });
 
@@ -255,15 +237,16 @@ describe('zod schema fallback', () => {
   it('should strip extra keys and keep only registered flags', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({
+        marketingLanding: true,
+        tauDebug: true,
         planMode: true,
-        pluginsStore: true,
         extra: 'data',
         another: 42,
       }),
     });
     const flags = getAllFlags(storage);
     expect(Object.keys(flags)).toStrictEqual(Object.keys(featureFlagDefaults));
-    expect(flags.planMode).toBe(true);
-    expect(flags.pluginsStore).toBe(true);
+    expect(flags.marketingLanding).toBe(true);
+    expect(flags.tauDebug).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
 - **Parametric Editor** — Adjustable parameters with real-time preview
 - **Multi-Kernel** — Choose the right CAD engine for your project
 - **Embeddable** — Components to bring CAD into any web application
+- **Runs Outside Tau** — Every project keeps its ecosystem's own files (`package.json`, `pyproject.toml`, a `.csproj`), so it runs with `npm ci`, `uv`, `dotnet`, OpenSCAD or the Zoo CLI; the [standalone-project jobs](https://github.com/taucad/tau/actions/workflows/ci.yml?query=branch%3Amain) ([source](.github/workflows/ci.yml)) check each template against Tau's own export on every push to `main`
 
 ## Use Cases
 

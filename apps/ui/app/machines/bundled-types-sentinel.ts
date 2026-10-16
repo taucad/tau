@@ -6,10 +6,12 @@
  *
  * ponytail: the identity is the build's, not the payload's, so a payload that
  * changes *within* one build identity is not detected. Only a dev server can
- * do that (`tauBuildId` is minted per build / per dev-server start), so
- * regenerating bundled declarations against a running dev server needs a dev
- * server restart. Upgrade path if that ever bites: emit a payload digest at
- * build time and stamp that instead (charter D19, R1 AR-R1-5).
+ * do that (`tauBuildId` is minted per dev-server start), so regenerating
+ * bundled declarations against a running dev server needs a dev server
+ * restart. A production web worker stamps its own content-hashed script path
+ * (`#lib/build-identity`), which changes whenever the payload baked into it
+ * does. Upgrade path if that ever bites: emit a payload digest at build time
+ * and stamp that instead (charter D19, R1 AR-R1-5).
  */
 
 import type { BundledTypesMountEntry, BundledTypesPayload } from '#machines/bundled-types-mount.js';
@@ -86,7 +88,7 @@ const sentinelEntry = (stamp: string): BundledTypesMountEntry => ({
  * @param fileService - Workspace file service owning the `/node_modules` mount.
  * @param payload - Declaration bundles to mirror.
  * @param mirror - `populate` performs the (expensive) mirroring; `buildIdentity`
- *   identifies the build that produced `payload` (`tauBuildId`) and is
+ *   identifies the build that produced `payload` (`#lib/build-identity`) and is
  *   `undefined` where no build injected one, which falls back to comparing the
  *   payload digest.
  * @returns `'skipped'` when the mount already held this payload, `'populated'` otherwise.

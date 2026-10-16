@@ -6,7 +6,7 @@
  * `useChatComposer()` hook and never branch on which provider is in scope —
  * the runtime branch collapses to the two provider constructors.
  *
- * - **`<ChatComposerProvider surface>`** — composer-only (marketing CTA,
+ * - **`<ChatComposerProvider surface>`** — composer-only (the
  *   library empty state). Cookie-only model/kernel; `status: 'ready'`; `stop`
  *   is a no-op; `contextUsage` and `session` are `undefined`. Its draft keeps
  *   no record, but stores attachments in the surface's own directory.

@@ -7,7 +7,7 @@
  *
  * Usage (non-React):
  *   import { isFeatureEnabled } from '#flags/feature-flags.js';
- *   if (isFeatureEnabled('planMode')) { … }
+ *   if (isFeatureEnabled('tauDebug')) { … }
  *
  * For React components prefer the `useFeature` hook instead.
  */

@@ -151,6 +151,7 @@ const start = (
     remote?: string | undefined;
     online?: boolean;
     queueError?: unknown;
+    automaticPush?: boolean;
   }> = {},
 ): Harness => {
   const effects = createFakePromiseActors();
@@ -162,7 +163,9 @@ const start = (
     'readPending',
     options.queueError === undefined ? { output: options.pending ?? emptyQueue } : { error: options.queueError },
   );
-  effects.script('readRemote', { output: { remote: 'remote' in options ? options.remote : 'tau' } });
+  effects.script('readRemote', {
+    output: { remote: 'remote' in options ? options.remote : 'tau', automaticPush: options.automaticPush },
+  });
   const actors: SyncActors = {
     readPending: effects.actor('readPending'),
     writePending: effects.actor('writePending'),
@@ -2092,6 +2095,8 @@ describe('syncMachine', () => {
       { type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2', branch: 'main' },
       { type: 'recordsChanged' },
       { type: 'syncNow', pushId: 'push-1', remote: 'tau' },
+      { type: 'pushNow', pushId: 'manual-1', repositoryUrl: 'https://github.com/studio/model.git' },
+      { type: 'remoteConnected', remote: 'github', automaticPush: false },
       { type: 'open' },
       { type: 'close' },
       { type: 'remoteConnected', remote: 'tau' },
@@ -3230,5 +3235,73 @@ describe('syncMachine telemetry (W36 D1)', () => {
     });
 
     harness.stop();
+  });
+});
+
+describe('explicit repository pushes', () => {
+  it('should fetch but never push on open, save, close, hidden, sync or reconnection', async () => {
+    const h = start({ automaticPush: false, remote: 'github' });
+    try {
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: true } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      for (const trigger of ['save', 'hidden', 'close'] as const) {
+        h.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger, revisionId: 'local', branch: 'main' });
+      }
+      h.actor.send({ type: 'close' });
+      h.clock.advance(60_000);
+      expect(h.effects.inputsFor('push')).toHaveLength(0);
+      h.actor.send({ type: 'syncNow' });
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: true } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      expect(h.effects.inputsFor('push')).toHaveLength(0);
+      h.actor.send({ type: 'remoteConnected', remote: 'github', automaticPush: false });
+      // Rehydration keeps the provider's manual mode.
+      await settleWhenRunning(h.effects, 'readPending', { output: emptyQueue });
+      await settleWhenRunning(h.effects, 'readRemote', { output: { remote: 'github', automaticPush: false } });
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: true } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      expect(h.effects.inputsFor('push')).toHaveLength(0);
+      expect(h.guard.take('deadLetter')).toEqual([]);
+    } finally {
+      h.stop();
+    }
+  });
+  it('should consume one explicit request without retrying or flushing later saves', async () => {
+    const h = start({ automaticPush: false, remote: 'github' });
+    try {
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {} } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      h.actor.send({ type: 'pushNow', pushId: 'gesture', repositoryUrl: 'https://github.com/studio/model.git' });
+      await vi.waitFor(() => {
+        expect(h.effects.running('push')).toBe(1);
+      });
+      expect(h.effects.inputsFor('push').at(-1)).toMatchObject({ remote: 'github', explicit: true });
+      h.actor.send({
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger: 'close',
+        revisionId: 'later',
+        branch: 'main',
+      });
+      h.effects.settle('push', { error: new Error('offline') });
+      await settleWhenRunning(h.effects, 'writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      h.clock.advance(600_000);
+      expect(h.effects.inputsFor('push')).toHaveLength(1);
+      expect(h.emitted).toContainEqual({ type: 'pushSettled', pushId: 'gesture', outcome: 'queued' });
+      expect(h.guard.take('deadLetter')).toEqual([]);
+    } finally {
+      h.stop();
+    }
   });
 });

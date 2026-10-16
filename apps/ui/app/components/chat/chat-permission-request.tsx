@@ -10,6 +10,24 @@ import { useFeature } from '#flags/use-feature.js';
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;
 
+const tauPermissionTitles = new Map<string, string>([
+  ['evaluate_model', 'Render model'],
+  ['test_model', 'Run tests'],
+  ['screenshot', 'Capture screenshots'],
+  ['export_model', 'Export model'],
+  ['arrange_workbench', 'Arrange workbench'],
+  ['get_parameters', 'Read parameters'],
+  ['apply_parameter_operation', 'Change parameters'],
+  ['list_machines', 'List machines'],
+  ['get_machine', 'Inspect machine'],
+  ['machine_action', 'Control machine'],
+  ['stop_machine', 'Stop machine'],
+  ['get_print_profiles', 'Read print profiles'],
+  ['request_job', 'Request job'],
+  ['check_job', 'Check job'],
+  ['ask_questions', 'Ask questions'],
+]);
+
 /** Human request facts; full provider prose and arguments remain available in Debug. */
 export function permissionContent(approval: AgentHostApproval): {
   title: string;
@@ -23,7 +41,9 @@ export function permissionContent(approval: AgentHostApproval): {
   // Older hosts embedded serialized arguments in prose; never present that payload as a title.
   const prompt = approval.prompt.split(/ with (?=[{[])/u)[0] ?? approval.prompt;
   const isOpaque = /^Allow (?:call_|elicitation:)/u.test(prompt);
-  const title = suppliedTitle ?? (isOpaque ? 'Permission requested · action not described' : prompt);
+  const rawTitle = suppliedTitle ?? (isOpaque ? 'Permission requested · action not described' : prompt);
+  const tauName = /^(?:tau__|mcp__tau__)([a-z_]+)$/u.exec(rawTitle)?.[1];
+  const title = (tauName === undefined ? undefined : tauPermissionTitles.get(tauName)) ?? rawTitle;
   const facts: Array<[string, string]> = [];
   for (const [label, value] of [
     ['Command', args?.['command'] ?? args?.['cmd']],

@@ -50,14 +50,17 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await connectPickedFolder(session);
       expect(await selectAgent(page, 'Grok Build', 'Grok 4.7')).toMatch(/^Agent and model: Grok Build, /u);
       await page.getByRole('button', { name: /^Agent and model: Grok Build/u }).click();
-      const reasoning = page.getByRole('tablist', { name: /Reasoning for Grok Build/u });
+      await page.getByRole('button', { name: /^Effort for /u }).click();
+      const reasoning = page.locator('[data-slot="effort-list"]');
       await expect
-        .poll(async () => reasoning.getByRole('tab').allTextContents())
+        .poll(async () =>
+          reasoning
+            .getByRole('option')
+            .evaluateAll((options) => options.map((option) => option.getAttribute('aria-label')?.split(',')[0])),
+        )
         .toEqual(['Low', 'Medium', 'High', 'Extra High']);
-      await reasoning.getByRole('tab', { name: 'Low', exact: true }).click();
-      await expect
-        .poll(async () => reasoning.getByRole('tab', { name: 'Low', exact: true }).getAttribute('aria-selected'))
-        .toBe('true');
+      await reasoning.getByRole('option', { name: /^Low(?:,|$)/u }).click();
+      await expectVisible(page.getByRole('button', { name: /^Effort for .*: Low\. Change$/u }));
       await session.capture('grok-reasoning-order');
       await page.keyboard.press('Escape');
       // Home also mounts the empty-project composer below the primary composer.

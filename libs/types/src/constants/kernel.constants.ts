@@ -73,9 +73,6 @@ Library.Go(Params.VoxelSizeMm, () => { });
 
 public static class Params
 {
-    // About one third of the thinnest wall or strut. For voxel size h, time scales with 1/h³,
-    // memory and triangles with 1/h². To iterate, pass {"VoxelSizeMm": 1.5} as parameters to
-    // evaluate_model, screenshot or export_model rather than editing this value.
     [Range(0.05, 5.0)]
     [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
     public static float VoxelSizeMm { get; set; } = 0.5f;

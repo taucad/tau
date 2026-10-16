@@ -49,9 +49,10 @@ type WorkerModule = {
 };
 type WorkerInput = {
   readonly modules: readonly WorkerModule[];
+  readonly diagnosticIterations: number;
   readonly iterations: number;
 };
-type WorkerOutput = { readonly crossOriginIsolated: boolean; readonly row: ModuleRow };
+type WorkerOutput = { readonly crossOriginIsolated: boolean; readonly row?: ModuleRow; readonly time?: number };
 
 /** Milliseconds a module may add to its load under integrity (ruling X31). */
 const overheadLimit = 200;
@@ -104,9 +105,10 @@ record(
   }`,
 );
 
-/* Diagnostics: for modules of 10 MB or more, also time other digests and buffered loads. */
+/* Diagnostics, not gated: for the largest modules, also time other digests and buffered (non-streaming) loads. */
+const diagnosticIterations = 3;
 const workerModules: WorkerModule[] = modules.map((module) => {
-  if (module.bytes < 10_000_000) {
+  if (module.bytes < 40_000_000) {
     return module;
   }
   const bytes = read(module.path);
@@ -134,7 +136,25 @@ import { compileWasmStreaming } from '${harness}/loader.js';
 const registry = globalThis[Symbol.for('taucad.assetIntegrity')];
 const median = (values) => { const s = values.toSorted((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const outcome = async (run) => { try { await run(); return { ok: true }; } catch (error) { return { ok: false, error: String(error?.message ?? error).slice(0, 200) }; } };
+const variant = async ({ module, variant, value, iterations }) => {
+  const url = new URL('/' + module.path, location.href).href;
+  const load = {
+    buffered: (href) => fetch(href).then((response) => response.arrayBuffer()).then((bytes) => WebAssembly.compile(bytes)),
+    'buffered-sha384': (href) => fetch(href, { integrity: registry.get(url) }).then((response) => response.arrayBuffer()).then((bytes) => WebAssembly.compile(bytes)),
+  }[variant] ?? ((href) => { registry.set(href, value); return compileWasmStreaming(href); });
+  const times = [];
+  for (let index = 0; index < iterations; index += 1) {
+    const start = performance.now();
+    await load(url + '?' + variant + '=' + index);
+    times.push(performance.now() - start);
+  }
+  return median(times);
+};
 self.onmessage = async ({ data }) => {
+  if (data.variant !== undefined) {
+    self.postMessage({ crossOriginIsolated: self.crossOriginIsolated, time: await variant(data) });
+    return;
+  }
   const rows = [];
   for (const module of [data.module]) {
     const url = new URL('/' + module.path, location.href).href;
@@ -153,17 +173,7 @@ self.onmessage = async ({ data }) => {
         (kind === 'checked' ? checked : plain).push(performance.now() - start);
       }
     }
-    let variants;
-    if (module.variants) {
-      variants = {};
-      const time = async (name, run) => { const times = []; for (let index = 0; index < data.iterations; index += 1) { const start = performance.now(); await run(name + '=' + index); times.push(performance.now() - start); } variants[name] = median(times); };
-      for (const [name, value] of Object.entries(module.variants)) {
-        await time(name, (query) => { const href = url + '?' + query; registry.set(href, value); return compileWasmStreaming(href); });
-      }
-      await time('buffered', async (query) => WebAssembly.compile(await (await fetch(url + '?' + query)).arrayBuffer()));
-      await time('buffered-sha384', async (query) => WebAssembly.compile(await (await fetch(url + '?' + query, { integrity })).arrayBuffer()));
-    }
-    rows.push({ path: module.path, bytes: module.bytes, registered: integrity !== undefined, untampered, tamperedWithIntegrity, tamperedWithoutIntegrity, checked: median(checked), plain: median(plain), variants });
+    rows.push({ path: module.path, bytes: module.bytes, registered: integrity !== undefined, untampered, tamperedWithIntegrity, tamperedWithoutIntegrity, checked: median(checked), plain: median(plain) });
   }
   self.postMessage({ crossOriginIsolated: self.crossOriginIsolated, row: rows[0] });
 };
@@ -282,26 +292,48 @@ for (const [label, type] of engines) {
     try {
       const page = await browser.newPage();
       await page.goto(`${origin}${harness}/`);
-      const input: WorkerInput = { modules: workerModules, iterations };
-      // One fresh worker per module, as a kernel worker would have, so compiled modules never accumulate.
+      const input: WorkerInput = { modules: workerModules, iterations, diagnosticIterations };
+      // One fresh worker per module (and per diagnostic), as a kernel worker would have, so compiled modules never
+      // accumulate; a worker that does not answer in five minutes fails the browser rather than the job.
       const measured = await page.evaluate(
         async ({ script, data }) => {
+          const run = async (message: unknown): Promise<WorkerOutput> => {
+            const worker = new Worker(script, { type: 'module' });
+            try {
+              return await new Promise<WorkerOutput>((resolve, reject) => {
+                const timer = setTimeout(() => {
+                  reject(new Error('worker timed out after 300 s'));
+                }, 300_000);
+                worker.addEventListener('message', (event: MessageEvent<WorkerOutput>) => {
+                  clearTimeout(timer);
+                  resolve(event.data);
+                });
+                worker.addEventListener('error', (event) => {
+                  clearTimeout(timer);
+                  reject(new Error(event.message));
+                });
+                worker.postMessage(message);
+              });
+            } finally {
+              worker.terminate();
+            }
+          };
           const rows: ModuleRow[] = [];
           let isolated = true;
           for (const module of data.modules) {
-            const worker = new Worker(script, { type: 'module' });
-            const output = await new Promise<WorkerOutput>((resolve, reject) => {
-              worker.addEventListener('message', (event: MessageEvent<WorkerOutput>) => {
-                resolve(event.data);
-              });
-              worker.addEventListener('error', (event) => {
-                reject(new Error(event.message));
-              });
-              worker.postMessage({ module, iterations: data.iterations });
-            });
-            worker.terminate();
+            const output = await run({ module, iterations: data.iterations });
             isolated &&= output.crossOriginIsolated;
-            rows.push(output.row);
+            const variants: Record<string, number> = {};
+            for (const [name, value] of Object.entries({
+              ...module.variants,
+              ...(module.variants ? { buffered: '', 'buffered-sha384': '' } : {}),
+            })) {
+              const timed = await run({ module, variant: name, value, iterations: data.diagnosticIterations });
+              variants[name] = timed.time ?? Number.NaN;
+            }
+            if (output.row !== undefined) {
+              rows.push(module.variants === undefined ? output.row : { ...output.row, variants });
+            }
           }
           return { crossOriginIsolated: isolated, rows };
         },
@@ -310,6 +342,8 @@ for (const [label, type] of engines) {
       results.push({ browser: label, version: browser.version(), ...measured });
       record(measured.crossOriginIsolated, `${label} ${browser.version()} crossOriginIsolated in the kernel worker`);
       reportRows(label, measured.rows);
+      // Written after each browser, so a later browser that hangs still leaves this one's evidence.
+      writeFileSync(path.join(evidence, 'summary.txt'), `${lines.join('\n')}\n`);
     } finally {
       await browser.close();
     }

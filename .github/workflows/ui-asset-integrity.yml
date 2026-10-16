@@ -46,6 +46,7 @@ jobs:
           TAU_FRONTEND_URL: http://localhost:3000
         run: pnpm nx build ui --outputStyle=static
       - name: Re-hash the receipt, tamper and measure
+        timeout-minutes: 40
         run: node apps/ui/scripts/check-asset-integrity.mts apps/ui/build/client "$RUNNER_TEMP/evidence" 5
       - name: Summarize
         if: always()

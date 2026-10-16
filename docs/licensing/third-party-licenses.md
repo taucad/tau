@@ -19,7 +19,7 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-10-13*
+*Generated on 2026-10-16*
 
 ## Summary
 
@@ -34,7 +34,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 | ISC | 6 |
 | SEE LICENSE IN LICENSE.md | 1 |
 | WTFPL OR ISC | 1 |
-| MIT | 75 |
+| MIT | 76 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -133,6 +133,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **isarray** v1.0.0 — [Repository](https://github.com/juliangruber/isarray)
 - **isarray** v2.0.5 — [Repository](https://github.com/juliangruber/isarray)
 - **isomorphic-git** v1.38.5 — [Repository](https://github.com/isomorphic-git/isomorphic-git)
+- **jose** v6.2.12 — [Repository](https://github.com/panva/jose)
 - **js-tokens** v9.0.1 — [Repository](https://github.com/lydell/js-tokens)
 - **jsonfile** v2.4.0 — [Repository](https://github.com/jprichardson/node-jsonfile)
 - **lie** v3.3.0 — [Repository](https://github.com/calvinmetcalf/lie)

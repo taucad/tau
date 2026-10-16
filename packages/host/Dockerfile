@@ -4,12 +4,12 @@
 #
 # Stages mirror apps/api/Dockerfile deliberately — same base, same cache split,
 # same prune — because they solve the same problem in the same workspace:
-#   base    : node:26-slim with pnpm pinned via `npm i -g` (no Corepack).
+#   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps    : workspace skeleton only (lockfile + every workspace package.json
 #             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build cli` (with its workspace deps).
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
-#   runtime : minimal `node:26-slim` running as non-root `tau` (uid 1001).
+#   runtime : minimal `node:24-slim` running as non-root `tau` (uid 1001).
 #   tau-store : empty by default; `scripts/build-native-image.sh` replaces it
 #             with a payload store it prepared using the runtime image itself.
 #   native  : runtime plus that baked store, so build123d is `ready` with no
@@ -53,13 +53,14 @@
 #     `git lfs install --system` so that clone smudges large files rather than
 #     leaving pointers in the working tree.
 
-# Node 26, not the API image's 24.3.0: tsdown's config loader trips a Node bug
-# fixed in 24.11.1 ("Failed to load the config file due to a known Node.js bug"),
-# which every workspace package's build hits. The workspace's own answer to this
-# is the same one — package builds run under 26.7.0 while tests and the daemon
-# run under 24.10.0 — and one version across build and runtime keeps a single
-# native ABI in the pruned tree.
-ARG NODE_VERSION=26.7.0
+# Node 24.20.0, CI's own version (`.github/actions/setup-nx`), not the API
+# image's 24.3.0: tsdown's config loader trips a Node bug fixed in 24.11.1
+# ("Failed to load the config file due to a known Node.js bug"), which every
+# workspace package's build hits. Not Node 26 either: under 26.7.0
+# `@oxc-node/core` refuses top-level await ("not available in the configured
+# target environment"), which fails `cli:stage-acp`. One version across build
+# and runtime keeps a single native ABI in the pruned tree.
+ARG NODE_VERSION=24.20.0
 # The workspace's `packageManager` pin: the deploy below needs pnpm 11.
 ARG PNPM_VERSION=11.7.0
 

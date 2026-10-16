@@ -83,6 +83,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── Build ─────────────────────────────────────────────────────────────────
 FROM deps AS build
 COPY . .
+# The root tsconfig references the e2e projects, which the context leaves out.
+# `@oxc-node/core` (it runs `cli:stage-acp`) then falls back to a target without
+# top-level await; point it at the base tsconfig instead.
+ENV OXC_TSCONFIG_PATH=/app/tools/typescript/base.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     pnpm nx run cli:build-deps && pnpm nx build cli

@@ -16,14 +16,9 @@ repos
 # -- Generated reports and artifacts ------------------------------------------
 /out
 
-# -- E2E test projects (not needed in the host image) -------------------------
-# Their tsconfig files stay: the root tsconfig references both projects, and
-# `@oxc-node/core` (which runs `cli:stage-acp`) falls back to a target without
-# top-level await when a referenced tsconfig is missing.
+# -- E2E test projects (not needed in the API production image) ---------------
 apps/ui-e2e
 apps/api-e2e
-!apps/ui-e2e/tsconfig*.json
-!apps/api-e2e/tsconfig*.json
 
 # -- Documentation (not needed at build time) ---------------------------------
 docs

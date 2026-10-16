@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ReleaseScope } from '#check-release-projects.js';
-import { findReleaseScopeMismatches, findVersionPlanScopeMismatches, selectorsIn } from '#check-release-projects.js';
+import {
+  findGroupVersionMismatches,
+  findPreStableBumpMismatches,
+  findReleaseScopeMismatches,
+  findVersionPlanScopeMismatches,
+  parseProjectList,
+  selectorsIn,
+} from '#check-release-projects.js';
 
 const scope: ReleaseScope = {
   selectors: [
@@ -10,6 +17,7 @@ const scope: ReleaseScope = {
   ],
   publishable: ['react', 'runtime'],
   releaseTrain: ['react', 'rpc', 'runtime'],
+  versions: { react: '0.1.0-beta.5', runtime: '0.1.0-beta.5' },
   publishesWholeGroup: true,
 };
 
@@ -101,6 +109,62 @@ describe('findVersionPlanScopeMismatches', () => {
         scope.releaseTrain,
       ),
     ).toEqual(['.nx/version-plans/broken.md: missing YAML frontmatter']);
+  });
+});
+
+describe('findGroupVersionMismatches', () => {
+  it('accepts a fixed group on one version', () => {
+    expect(findGroupVersionMismatches({ react: '0.1.0-beta.5', runtime: '0.1.0-beta.5' })).toEqual([]);
+  });
+
+  it('reports every version of a split group with the projects carrying it', () => {
+    const mismatches = findGroupVersionMismatches({
+      react: '0.1.0-beta.5',
+      runtime: '0.1.0-beta.5',
+      viewer: '0.0.1',
+      ui: undefined,
+    });
+
+    expect(mismatches).toEqual([
+      'the fixed release group carries 3 versions, not one: 0.1.0-beta.5 (react, runtime); 0.0.1 (viewer); (none) (ui)',
+    ]);
+  });
+});
+
+describe('findPreStableBumpMismatches', () => {
+  const plan = (body: string) => ({ path: '.nx/version-plans/a.md', text: `---\n${body}\n---\n\nChange.\n` });
+
+  it('accepts minor and patch plans below 1.0.0', () => {
+    expect(findPreStableBumpMismatches([plan('runtime: minor\nhost: patch')], '0.1.0-beta.5')).toEqual([]);
+  });
+
+  it('rejects a major or premajor plan below 1.0.0, naming the plan and project', () => {
+    const mismatches = findPreStableBumpMismatches([plan('runtime: major\nhost: premajor')], '0.1.0-beta.5');
+
+    expect(mismatches).toHaveLength(2);
+    expect(mismatches[0]).toContain('.nx/version-plans/a.md: "runtime: major"');
+    expect(mismatches[1]).toContain('"host: premajor"');
+  });
+
+  it('accepts a major plan once the group has reached 1.0.0', () => {
+    expect(findPreStableBumpMismatches([plan('runtime: major')], '1.0.0')).toEqual([]);
+  });
+
+  it('leaves unreadable frontmatter to the scope check', () => {
+    expect(findPreStableBumpMismatches([{ path: 'b.md', text: 'no frontmatter' }], '0.1.0')).toEqual([]);
+  });
+});
+
+describe('parseProjectList', () => {
+  it('reads the list past a banner that starts with a bracket', () => {
+    const stdout =
+      '◇ injected env (0) from apps/api/.env // tip: ◈ [www.vestauth.com]\n[www.vestauth.com]\n["cli","runtime"]\n';
+
+    expect(parseProjectList(stdout)).toEqual(['cli', 'runtime']);
+  });
+
+  it('fails when no line is a project list', () => {
+    expect(() => parseProjectList('[www.example.com]\n')).toThrow('printed no project list');
   });
 });
 

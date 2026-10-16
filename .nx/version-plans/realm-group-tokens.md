@@ -1,7 +1,7 @@
 ---
-runtime: major
-replicad: major
-opencascade: major
+runtime: minor
+replicad: minor
+opencascade: minor
 ---
 
 `services.realm.hold` takes a typed group token instead of a string, so a hold returns exactly the type its backend declares and the realm registry needs no cast. Declare each realm-shared backend once at module scope with `createRealmGroup<Value>(name)` from `@taucad/runtime/kernel` and pass it as `group`; the hold input is now the named `RealmHoldInput<Value>`, and `RealmGroup` and `RealmHoldInput` are exported from `@taucad/runtime/kernel` and `@taucad/runtime/types`.

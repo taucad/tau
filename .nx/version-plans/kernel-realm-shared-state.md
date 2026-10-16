@@ -1,14 +1,14 @@
 ---
-runtime: major
-runtime-testing: major
-replicad: major
-opencascade: major
-esbuild: major
-rolldown: major
-manifold: major
-jscad: major
-picovoxel: major
-tscircuit: major
+runtime: minor
+runtime-testing: minor
+replicad: minor
+opencascade: minor
+esbuild: minor
+rolldown: minor
+manifold: minor
+jscad: minor
+picovoxel: minor
+tscircuit: minor
 ---
 
 Keep runtime clients that share one JavaScript realm from corrupting each other's kernels. The in-process transport and `webSocketHost` in factory mode build every kernel worker in the caller's realm, so a second client used to rebind replicad's OpenCASCADE instance and overwrite the built-in module registry; the first client's later renders and exports then failed with `KERNEL_BINDING_FAILED`.

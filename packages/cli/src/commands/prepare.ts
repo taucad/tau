@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { defaultPayloadStore } from '@taucad/host';
 import {
   createPreparationHost,
@@ -6,6 +8,7 @@ import {
   PreparationError,
 } from '@taucad/runtime/preparation/node';
 import type {
+  ClosureReceipt,
   ClosureVerification,
   HostIndicators,
   ManagedPreparation,
@@ -17,6 +20,20 @@ import { defineCommand } from 'citty';
 import type { ArgsDef, CommandDef, ParsedArgs } from 'citty';
 import type { ConsolaInstance } from 'consola';
 
+import {
+  auditClosure,
+  auditDirectory,
+  exportBlobs,
+  exportManifest,
+  indexedPackages,
+  readPluginSbom,
+  readSeedIndex,
+  readSupplementalNotices,
+  verifySeed,
+  writeAuditUnit,
+  writeSeedIndex,
+} from '#commands/prepare-seed.js';
+import type { ClosureAudit, SeedClosure } from '#commands/prepare-seed.js';
 import { nativePreparationPlugins, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
@@ -111,6 +128,29 @@ const prepareArgs = {
     description: 'With --gc, report what would be removed and remove nothing',
     default: false,
   },
+  bundle: {
+    type: 'string',
+    description:
+      'Prepare the kernel (every kernel this host supports when none is named) and export its payloads, manifest and audit unit into this seed directory',
+    required: false,
+  },
+  seed: {
+    type: 'string',
+    description: 'Prepare from this seed directory with no request: the kernel named, or every kernel the seed indexes',
+    required: false,
+  },
+  'verify-seed': {
+    type: 'string',
+    description:
+      'Check a seed directory before importing it: every blob, pin, closure identity and audit unit; nothing is prepared',
+    required: false,
+  },
+  audit: {
+    type: 'boolean',
+    description:
+      'Audit every prepared closure with no request: files against the receipt, the SBOM and the licence notices',
+    default: false,
+  },
   json: {
     type: 'boolean',
     description: 'Print one machine-readable record on stdout',
@@ -131,6 +171,8 @@ type Session = {
   readonly store: string;
   readonly indicators: HostIndicators | undefined;
   readonly managed: ManagedPreparation;
+  /** `--seed`: prepare from the store and the seed only, as `TAU_ACQUISITION=locked` with `TAU_PAYLOAD_DIR` does. */
+  readonly offline: boolean;
   readonly signal: AbortSignal;
   readonly stoppedBy: () => NodeJS.Signals | undefined;
 };
@@ -199,17 +241,116 @@ const verify = async ({ args, host, plugins, managed, signal }: Session): Promis
   }
 };
 
-const prepare = async (session: Session, output: ConsolaInstance): Promise<void> => {
-  const { args, host, plugins, store, managed, signal } = session;
-  if (args.kernel === undefined) {
-    const known = kernelsOf(plugins);
-    throw cliError(
-      'ARG_KERNEL_MISSING',
-      `Name the kernel to prepare (${known.length === 0 ? 'none are installed' : known.join(', ')}), or pass --inspect, --verify or --gc.`,
-      exitCodes.usage,
+/** The sealed closures of the kernels a verb covers: one kernel's dependencies, or every dependency of every plugin. */
+const sealedReceipts = async (
+  { host, plugins }: Pick<Session, 'host' | 'plugins'>,
+  kernel: string | undefined,
+): Promise<Array<{ readonly plugin: PreparationPlugin; readonly receipt: ClosureReceipt }>> => {
+  const targets =
+    kernel === undefined
+      ? plugins.map((plugin) => ({ plugin, dependencies: undefined }))
+      : [findKernel(plugins, kernel)];
+  const sealed: Array<{ readonly plugin: PreparationPlugin; readonly receipt: ClosureReceipt }> = [];
+  for (const { plugin, dependencies } of targets) {
+    // oxlint-disable-next-line no-await-in-loop -- closures are read one plugin at a time
+    const { state } = await host.inspect({
+      package: plugin.package,
+      ...(dependencies === undefined ? {} : { dependencies }),
+    });
+    if (state.status === 'ready') {
+      sealed.push(...Object.values(state.receipts).map((receipt) => ({ plugin, receipt })));
+    }
+  }
+  return sealed;
+};
+
+const auditLine = (row: ClosureAudit): string => {
+  const gaps = [
+    ...(row.files === 'intact' ? [] : ['files differ from the receipt']),
+    ...(row.sbom.length === 0 ? [] : [`no SBOM component for ${row.sbom.join(', ')}`]),
+    ...(row.notices.length === 0 ? [] : [`no notices for ${row.notices.join(', ')}`]),
+  ];
+  return `${row.package} ${row.dependency}: ${row.ok ? 'ok' : gaps.join('; ')} (${String(row.noticeFiles.length)} notice files)`;
+};
+
+/** Audit sealed closures: re-verify every file offline, then check the SBOM and the notices (D26). */
+const auditReceipts = async (
+  session: Session,
+  sealed: ReadonlyArray<{ readonly plugin: PreparationPlugin; readonly receipt: ClosureReceipt }>,
+): Promise<ClosureAudit[]> => {
+  const rows: ClosureAudit[] = [];
+  for (const { plugin, receipt } of sealed) {
+    // oxlint-disable-next-line no-await-in-loop -- closures are audited one at a time
+    const [verified] = await session.host.verify({
+      package: plugin.package,
+      dependencies: [receipt.dependency],
+      offline: true,
+      signal: session.signal,
+    });
+    rows.push(
+      auditClosure({
+        plugin,
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        sbom: await readPluginSbom(plugin),
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        supplemental: await readSupplementalNotices(plugin),
+        receipt,
+        files: verified?.status === 'intact' ? 'intact' : 'stale',
+      }),
     );
   }
-  const { kernel } = args;
+  return rows;
+};
+
+const auditFailure = (rows: readonly ClosureAudit[]): Error | undefined => {
+  const failed = rows.filter((row) => !row.ok);
+  return failed.length === 0
+    ? undefined
+    : cliError(
+        'AUDIT_FAILED',
+        `${failed.map((row) => auditLine(row)).join('\n')}\nRun tau prepare --verify to repair files; a missing SBOM component or notice is a packaging defect of the plugin.`,
+        { exit: exitCodes.refused, details: failed },
+      );
+};
+
+const audit = async (session: Session): Promise<void> => {
+  const rows = await auditReceipts(session, await sealedReceipts(session, session.args.kernel));
+  await (session.args.json
+    ? emit({ kind: 'audit', ok: rows.every((row) => row.ok), closures: rows })
+    : writeStdout(
+        rows.length === 0 ? 'No native kernel is prepared.\n' : `${rows.map((row) => auditLine(row)).join('\n')}\n`,
+      ));
+  const failure = auditFailure(rows);
+  if (failure !== undefined) {
+    throw failure;
+  }
+};
+
+/** The kernels a bundle or a seed covers when none is named. */
+const coveredKernels = async (session: Session, packages?: readonly string[]): Promise<string[]> => {
+  const described = await session.host.describe();
+  const unsupported = new Set(
+    described.filter((row) => row.state === 'unsupported').map((row) => `${row.package}\u0000${row.dependency}`),
+  );
+  return session.plugins
+    .filter((plugin) => packages === undefined || packages.includes(plugin.package))
+    .flatMap((plugin) =>
+      Object.entries(plugin.deployment.kernels)
+        .filter(([, row]) =>
+          row.requires.every((dependency) => !unsupported.has(`${plugin.package}\u0000${dependency}`)),
+        )
+        .map(([kernel]) => kernel),
+    )
+    .toSorted();
+};
+
+/** Prepare one kernel and return its receipts, or throw the scripted refusal. */
+const prepareKernel = async (
+  session: Session,
+  kernel: string,
+  output: ConsolaInstance,
+): Promise<[ClosureReceipt, ...ClosureReceipt[]]> => {
+  const { args, host, plugins, managed, signal } = session;
   const { plugin, dependencies } = findKernel(plugins, kernel);
   let reported = 0;
   const unsubscribe = host.on('preparation', ({ selection, state }) => {
@@ -234,7 +375,7 @@ const prepare = async (session: Session, output: ConsolaInstance): Promise<void>
     outcome = await host.prepare({
       package: plugin.package,
       dependencies,
-      offline: args.offline || managed.offline,
+      offline: args.offline || session.offline || managed.offline,
       signal,
     });
   } catch (error) {
@@ -245,13 +386,138 @@ const prepare = async (session: Session, output: ConsolaInstance): Promise<void>
   if (outcome.status !== 'ready') {
     throw refusal(kernel, outcome, session.stoppedBy());
   }
-  const receipts = dependencies.flatMap((dependency) => outcome.receipts[dependency] ?? []);
-  const [first] = receipts;
+  const [first, ...rest] = dependencies.flatMap((dependency) => outcome.receipts[dependency] ?? []);
   if (first === undefined) {
     throw new Error(
-      `${kernel} is ready but holds no receipt; the store at ${store} is inconsistent. Run tau prepare --verify.`,
+      `${kernel} is ready but holds no receipt; the store at ${session.store} is inconsistent. Run tau prepare --verify.`,
     );
   }
+  return [first, ...rest];
+};
+
+/** `--bundle <dir>`: prepare, audit, then export each closure's blobs, manifest and audit unit, and index them. */
+const bundle = async (session: Session, directory: string, output: ConsolaInstance): Promise<void> => {
+  const kernels = session.args.kernel === undefined ? await coveredKernels(session) : [session.args.kernel];
+  if (kernels.length === 0) {
+    throw cliError('NOTHING_TO_BUNDLE', 'No native kernel runs on this host, so there is nothing to bundle.', {
+      exit: exitCodes.refused,
+    });
+  }
+  const sealed = new Map<string, { readonly plugin: PreparationPlugin; readonly receipt: ClosureReceipt }>();
+  for (const kernel of kernels) {
+    const { plugin } = findKernel(session.plugins, kernel);
+    // oxlint-disable-next-line no-await-in-loop -- kernels are prepared one at a time
+    for (const receipt of await prepareKernel(session, kernel, output)) {
+      sealed.set(receipt.closureIntegrity, { plugin, receipt });
+    }
+  }
+  const rows = await auditReceipts(session, [...sealed.values()]);
+  const failure = auditFailure(rows);
+  if (failure !== undefined) {
+    throw failure;
+  }
+  const closures: SeedClosure[] = [];
+  for (const [index, { plugin, receipt }] of [...sealed.values()].entries()) {
+    const row = rows[index];
+    // oxlint-disable-next-line no-await-in-loop -- one closure at a time on one disk
+    const payloads = await exportBlobs({ store: session.store, directory, plugin, receipt });
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const version = await exportManifest(directory, plugin);
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const sbom = await readPluginSbom(plugin);
+    if (sbom !== undefined && row !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await writeAuditUnit({ directory, plugin, receipt, sbom, audit: row });
+    }
+    closures.push({
+      package: receipt.package,
+      version,
+      dependency: receipt.dependency,
+      target: receipt.target,
+      closureIntegrity: receipt.closureIntegrity,
+      treeIntegrity: receipt.treeIntegrity,
+      payloads,
+      audit: auditDirectory(receipt.closureIntegrity),
+    });
+  }
+  const [first] = sealed.values();
+  const index = await writeSeedIndex(directory, first?.receipt.tauVersion ?? '', closures);
+  const byteLength = closures.flatMap((closure) => closure.payloads).reduce((sum, row) => sum + row.byteLength, 0);
+  await (session.args.json
+    ? emit({ kind: 'bundle', directory, kernels, closures, indexed: index.closures.length, byteLength })
+    : writeStdout(
+        `Bundled ${kernels.join(', ')} into ${directory}: ${String(closures.length)} closures, ${String(closures.flatMap((closure) => closure.payloads).length)} payloads (${megabytes(byteLength)}).\n`,
+      ));
+};
+
+/** `--seed <dir>`: prepare the named kernel, or every kernel the seed indexes, with no request. */
+const seed = async (session: Session, directory: string, output: ConsolaInstance): Promise<void> => {
+  let kernels: string[];
+  if (session.args.kernel === undefined) {
+    let packages: readonly string[];
+    try {
+      packages = indexedPackages(await readSeedIndex(directory));
+    } catch (error) {
+      throw cliError('SEED_INVALID', error instanceof Error ? error.message : String(error), {
+        exit: exitCodes.refused,
+      });
+    }
+    kernels = await coveredKernels(session, packages);
+  } else {
+    kernels = [session.args.kernel];
+  }
+  const prepared: Array<Pick<ClosureReceipt, 'package' | 'dependency' | 'closureIntegrity' | 'treeIntegrity'>> = [];
+  for (const kernel of kernels) {
+    // oxlint-disable-next-line no-await-in-loop -- kernels are prepared one at a time
+    for (const receipt of await prepareKernel(session, kernel, output)) {
+      prepared.push({
+        package: receipt.package,
+        dependency: receipt.dependency,
+        closureIntegrity: receipt.closureIntegrity,
+        treeIntegrity: receipt.treeIntegrity,
+      });
+    }
+  }
+  await (session.args.json
+    ? emit({ kind: 'seed', status: 'ready', directory, kernels, closures: prepared })
+    : writeStdout(
+        `${kernels.length === 0 ? 'The seed indexes no kernel this host can run.' : `${kernels.join(', ')} prepared from ${directory}.`}\n`,
+      ));
+};
+
+/** `--verify-seed <dir>`: hash every blob and audit unit of a bundle; refuse when anything is missing or differs. */
+const verifySeedDirectory = async (session: Session, directory: string): Promise<void> => {
+  const report = await verifySeed(directory);
+  await (session.args.json
+    ? emit({ kind: 'verify-seed', ok: report.problems.length === 0, ...report })
+    : writeStdout(
+        `${[
+          `${directory}: ${String(report.closures.length)} closures, ${String(report.blobs)} blobs (${megabytes(report.byteLength)}), prepared with Tau ${report.tauVersion || 'unknown'}`,
+          ...report.problems.map((problem) => `${problem.path}: ${problem.problem}`),
+        ].join('\n')}\n`,
+      ));
+  if (report.problems.length > 0) {
+    throw cliError(
+      'SEED_INVALID',
+      `${directory} is incomplete or altered: ${String(report.problems.length)} problems. Export it again with tau prepare --bundle.`,
+      { exit: exitCodes.refused, details: report.problems },
+    );
+  }
+};
+
+const prepare = async (session: Session, output: ConsolaInstance): Promise<void> => {
+  const { args, plugins } = session;
+  if (args.kernel === undefined) {
+    const known = kernelsOf(plugins);
+    throw cliError(
+      'ARG_KERNEL_MISSING',
+      `Name the kernel to prepare (${known.length === 0 ? 'none are installed' : known.join(', ')}), or pass --inspect, --verify, --audit, --bundle, --seed, --verify-seed or --gc.`,
+      exitCodes.usage,
+    );
+  }
+  const { kernel } = args;
+  const receipts = await prepareKernel(session, kernel, output);
+  const [first] = receipts;
   const byteLength = receipts.flatMap((receipt) => receipt.files).reduce((sum, file) => sum + file.byteLength, 0);
   await (args.json
     ? emit({
@@ -263,6 +529,26 @@ const prepare = async (session: Session, output: ConsolaInstance): Promise<void>
         byteLength,
       })
     : writeStdout(`${kernel} is ready (${megabytes(byteLength)}, ${first.closureIntegrity}).\n`));
+};
+
+/**
+ * The verbs that take a directory: `--verify-seed`, `--bundle` and `--seed`, else an ordinary prepare.
+ * @param session - The composed host and arguments.
+ * @param output - Progress output.
+ * @returns When the verb finishes.
+ */
+const dispatchDirectory = async (session: Session, output: ConsolaInstance): Promise<void> => {
+  const { args } = session;
+  if (args['verify-seed'] !== undefined) {
+    return verifySeedDirectory(session, resolve(args['verify-seed']));
+  }
+  if (args.bundle !== undefined) {
+    return bundle(session, resolve(args.bundle), output);
+  }
+  if (args.seed !== undefined) {
+    return seed(session, resolve(args.seed), output);
+  }
+  return prepare(session, output);
 };
 
 /**
@@ -280,6 +566,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
     async run({ args }) {
       const output = await createOutput();
       const managed = readManaged();
+      const seedDirectory = args.seed === undefined ? managed.seed : resolve(args.seed);
       const plugins = await (options.plugins ?? nativePreparationPlugins)();
       const store = defaultPayloadStore();
       const indicators = detectHostIndicators();
@@ -290,7 +577,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
         ...(options.hostPath === undefined ? {} : { hostPath: options.hostPath }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
-        ...(managed.seed === undefined ? {} : { seed: managed.seed }),
+        ...(seedDirectory === undefined ? {} : { seed: seedDirectory }),
         selection: managed.selection,
       });
       const controller = new AbortController();
@@ -308,6 +595,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
         store,
         indicators,
         managed,
+        offline: args.seed !== undefined,
         signal: controller.signal,
         stoppedBy: () => stoppedBy,
       };
@@ -318,7 +606,9 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
             ? collectGarbage(session)
             : args.verify
               ? verify(session)
-              : prepare(session, output));
+              : args.audit
+                ? audit(session)
+                : dispatchDirectory(session, output));
       } finally {
         process.off('SIGINT', onSignal);
         process.off('SIGTERM', onSignal);

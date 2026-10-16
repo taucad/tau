@@ -534,12 +534,14 @@ jobs:
             echo
             echo "- sha256 \`$LAYER_SHA256\`"
             echo "- release \`$LAYER_TAG\`"
-            echo "- pin: the \`picogk-tau-plugin\` artifact (\`tau-plugin.json\`)"
+            echo "- pin: the \`picogk-tau-plugin\` artifact (\`tau-plugin.json\` and its SBOM \`tau-plugin.cdx.json\`)"
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: picogk-tau-plugin
-          path: out/picogk-layer/tau-plugin.json
+          path: |
+            out/picogk-layer/tau-plugin.json
+            out/picogk-layer/tau-plugin.cdx.json
           if-no-files-found: error
           retention-days: 30
 

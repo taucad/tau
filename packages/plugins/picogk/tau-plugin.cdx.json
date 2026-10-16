@@ -1,0 +1,84 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "@taucad/picogk",
+      "name": "@taucad/picogk",
+      "description": "The native PicoGK runtime closure: Microsoft's .NET runtime archive and the Tau framework-dependent layer."
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1",
+      "type": "library",
+      "supplier": {
+        "name": "Tau"
+      },
+      "name": "tau-picogk-layer",
+      "version": "picogk-layer-cd5fdf6669b8ee08",
+      "purl": "pkg:github/taucad/tau@picogk-layer-cd5fdf6669b8ee08?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://cdn.tau.new/blobs/sha256/cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-cd5fdf6669b8ee08/tau-picogk-layer-darwin-arm64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:sbom",
+          "value": "tau-worker/tau-picogk-sbom.cdx.json"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e96a8a8108d5a3b70e827567b2493ede540f3705c1209e7f34736ba6aa398dd4d0d15f31eb667c9cca3dbcd30ad83b315a86d5e9a13fd2c370e2fc0cece72436",
+      "type": "platform",
+      "supplier": {
+        "name": "Microsoft"
+      },
+      "name": "dotnet-runtime",
+      "version": "10.0.11",
+      "purl": "pkg:generic/microsoft/dotnet-runtime@10.0.11?download_url=https%3A%2F%2Fbuilds.dotnet.microsoft.com%2Fdotnet%2FRuntime%2F10.0.11%2Fdotnet-runtime-10.0.11-osx-arm64.tar.gz",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e96a8a8108d5a3b70e827567b2493ede540f3705c1209e7f34736ba6aa398dd4d0d15f31eb667c9cca3dbcd30ad83b315a86d5e9a13fd2c370e2fc0cece72436"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    }
+  ]
+}

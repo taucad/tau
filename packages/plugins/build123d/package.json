@@ -21,6 +21,7 @@
     "python",
     "tau-plugin.json",
     "tau-plugin.cdx.json",
+    "notices",
     "agent",
     "project",
     "LICENSE",

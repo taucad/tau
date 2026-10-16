@@ -20,6 +20,7 @@ import { consola } from 'consola';
 
 import { acquisitionOf } from '#acquisition.js';
 import type { Acquisition } from '#acquisition.js';
+import { stageUiEnvironment } from '#ui-environment.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, exitCodes } from '#output.js';
@@ -475,11 +476,24 @@ export const serveCommand = defineCommand({
     if (args.computeMode !== 'off' && args.computeMode !== 'memory' && args.computeMode !== 'durable') {
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
-    const agent = agentOptions(args);
-    if (args.machines && !agent) {
+    const configured = agentOptions(args);
+    if (args.machines && !configured) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
     const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
+    /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
+    const acquisitionValue = process.env['TAU_ACQUISITION'];
+    const stagedUi =
+      configured?.uiRoot === undefined
+        ? undefined
+        : await stageUiEnvironment(configured.uiRoot, {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
+            TAU_ACQUISITION:
+              acquisitionValue === undefined || acquisitionValue.trim() === ''
+                ? undefined
+                : acquisitionOf(acquisitionValue),
+          });
+    const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
@@ -618,6 +632,7 @@ export const serveCommand = defineCommand({
         computeConnection?.dispose();
         await computeWorker?.terminate();
         await kernels.dispose().catch(() => undefined);
+        await stagedUi?.dispose();
       }
     }
   },

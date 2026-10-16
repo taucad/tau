@@ -1,0 +1,18 @@
+cadquery-ocp-novtk 7.9.3.1.1
+
+The cadquery-ocp-novtk wheels carry no licence text of their own. Their metadata
+declares Apache-2.0, and they are built from the CadQuery/OCP sources:
+
+- LICENSE: the CadQuery/OCP licence, Apache License 2.0, Copyright 2020 OCP
+  contributors (https://github.com/CadQuery/OCP/blob/master/LICENSE).
+- OCCT-LGPL-2.1.txt and OCCT-LGPL-exception.txt: the wheels bundle the shared
+  libraries of Open CASCADE Technology 7.9.3 (libTK*), licensed under the GNU
+  Lesser General Public License 2.1 with the Open CASCADE exception 1.0
+  (https://dev.opencascade.org/resources/licensing).
+
+The Linux wheels also bundle system libraries (libpng, libjpeg-turbo, libtiff,
+libwebp, freetype, fontconfig, FreeImage, LibRaw, OpenJPEG, OpenEXR, jxrlib,
+JBIG-KIT, Little CMS, liblzma, libzstd, libgomp and libuuid). Each wheel lists
+them, with their versions and package URLs, in
+cadquery_ocp_novtk-7.9.3.1.1.dist-info/sboms/auditwheel.cdx.json inside the
+closure.

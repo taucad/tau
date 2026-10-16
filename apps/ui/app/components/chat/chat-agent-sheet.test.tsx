@@ -400,7 +400,7 @@ describe('ChatAgentSheet', () => {
 
   it.each([
     ['/home/tau/work', 'curl -fsSL https://claude.ai/install.sh | bash'],
-    ['C:\\Users\\tau\\work', 'irm https://claude.ai/install.ps1 | iex'],
+    [String.raw`C:\Users\tau\work`, 'irm https://claude.ai/install.ps1 | iex'],
   ])('gives a daemon at %s the Claude installer for its own shell', async (workspaceRoot, command) => {
     state.placements = [
       {

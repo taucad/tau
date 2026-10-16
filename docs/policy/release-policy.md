@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-15'
+updated: '2026-10-16'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -19,6 +19,8 @@ This document defines the versioning, building, and publishing strategy for the 
 Nx Release with version plans provides native monorepo integration and decouples version intent from commit messages. Fixed versioning across packages simplifies compatibility for consumers. npm Trusted Publishing (OIDC) and build provenance eliminate stored secrets and provide supply-chain transparency. CI-only publishing prevents accidental or unauthorized releases.
 
 ## Packages in Scope
+
+The fixed release group is every `tag:type:package` project that is not private: 56 packages on 2026-10-16. `scripts/src/check-release-projects.ts` resolves that set from the project graph in the release gate, so the table below names the main packages and families rather than every member.
 
 | Package                   | Description                                               |
 | ------------------------- | --------------------------------------------------------- |
@@ -59,7 +61,7 @@ Versions follow [SemVer 2.0.0](https://semver.org/):
 
 ### Pre-1.0 Convention
 
-While packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`.
+While packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`. A version plan therefore records a breaking change as `minor`: a `major` (or `premajor`) entry in any plan would release the whole fixed group as `1.0.0`. `check-release-projects` refuses such a plan while the group is below `1.0.0`, and it asserts that every package of the group carries one version.
 
 ## Version Management: Nx Release with Version Plans
 
@@ -164,25 +166,31 @@ npm audit signatures
 The release process is split between local and CI:
 
 ```
-Developer                          CI (GitHub Actions)
-─────────                          ──────────────────
-1. nx release plan
-2. Commit + push PR
-3. PR merged to main
-4. nx release --skip-publish
-   ├─ Apply version plans
+Operator                           CI (GitHub Actions)
+────────                           ──────────────────
+1. Version plans merged with the
+   changes they describe
+2. On a branch: nx release
+   --skip-publish (stable) or the
+   beta-train command (prerelease)
    ├─ Update package.json versions
-   ├─ Generate changelogs
-   ├─ Commit + tag (v{version})
-   └─ Push tag
-                                   5. Operator dispatches the publish
-                                      workflow on the tag
-                                      ├─ nx run scripts:release-gate (validators,
-                                      │  release checks, pkgcheck/test/typecheck/
-                                      │  lint by tag, surface audit, quick start)
+   ├─ Changelogs (stable only)
+   └─ Commit the release (root scope)
+3. Pull request, CI green,
+   squash-merge
+4. Tag the merge commit v{version}
+   (or skip when the tag ruleset
+   refuses it)
+                                   5. Operator dispatches publish.yml
+                                      on the tag (or on main at the
+                                      merge commit)
+                                      ├─ check-payload-urls
+                                      ├─ nx run scripts:release-gate
                                       ├─ Assert pnpm is the publisher
                                       ├─ nx release publish --dry-run
-                                      └─ nx release publish
+                                      └─ nx release publish --tag=beta
+6. Verify the train, then promote
+   it (promote-npm-train.ts)
 ```
 
 Nx synthesises an `nx-release-publish` target for every publishable project with `dependsOn: ['^nx-release-publish']`, so Nx already orders the whole fixed group by dependency and marks the dependents of a failed publish `skipped`. `nx.json` `targetDefaults` adds `pkgcheck` to that `dependsOn`, so each package's gate runs as a native dependency of its own publish. The workflow therefore runs a single `nx release publish` over the whole fixed group. Subset selection of a fixed group is still not permitted (`nx release publish -p` rejects it) and is no longer needed.
@@ -197,7 +205,8 @@ For alpha, beta, and release candidate versions:
 - Prerelease versions follow the format `X.Y.Z-alpha.N`
 - Prereleases do not generate changelog entries in the stable changelog
 - A beta train of the whole fixed group runs `nx release version prerelease --preid beta --first-release` with git and staging disabled, which keeps the version plans for the next stable release; the `package-release` skill owns the exact command
-- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` before Trusted Publishing can publish it
+- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` before Trusted Publishing can publish it, and the first trusted publish must follow within two days of the binding. Every name of the group had been published this way by 2026-10-16
+- The train publishes under `beta` only and never moves `latest`; promotion is a separate operator step (below)
 
 ## Operator Publish Handoff
 
@@ -230,28 +239,38 @@ NX_CLOUD=false pnpm nx release --dry-run --skip-publish --first-release
 pnpm nx release --skip-publish --first-release
 ```
 
-`main` accepts changes only through pull requests, so the operator pushes the release commit on a branch, squash-merges its pull request once CI is green, and tags the merge commit `v<version>` (the local tag Nx created points at the pre-merge commit). The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. When the tag ruleset prevents the tag, dispatching on `main` at the merge commit publishes the same versions, because the publish reads them from the package manifests. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
+`main` accepts changes only through pull requests, so the operator pushes the release commit on a branch, squash-merges its pull request once CI is green, and tags the merge commit `v<version>` (the local tag Nx created points at the pre-merge commit). The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. When the tag ruleset prevents the tag, dispatching on `main` at the merge commit publishes the same versions, because the publish reads them from the package manifests. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`.
+
+### Promotion and Deprecations
+
+The train publishes under `beta`, so `latest` keeps naming what was there before: a `0.0.0` bootstrap placeholder that holds no code, a version published by hand in June 2026, or, for `@taucad/replicad`, an unrelated replicad fork that held the name before Tau. Installing a package without a tag therefore gets the wrong package until the train is promoted.
+
+After the train is installed and verified, the operator promotes it from an npm session:
 
 ```bash
-npm dist-tag add '<package>@<released-version>' latest
+node scripts/src/promote-npm-train.ts --version <released-version>          # prints the plan
+node scripts/src/promote-npm-train.ts --version <released-version> --apply  # runs it
 ```
 
-The first successful train publication claims the decided names `geospec` and `@taucad/geospec-engine`. Do not publish placeholder packages merely to reserve either name; the Trusted Publishing bootstrap placeholder is the only exception.
+The script reads the public registry and refuses the whole plan if any package of the group lacks the version or its SLSA provenance attestation. Otherwise it plans, in order:
 
-### Superseded Package Deprecations
+- `npm dist-tag add <package>@<version> latest` for every package of the group;
+- the deprecation of each `0.0.0` bootstrap placeholder;
+- the deprecation of every `@taucad/replicad` version not published from `taucad/tau`, pointing to `@taulabs/replicad`;
+- the deprecation of the superseded packages below.
 
-Only after the replacement train is installed and verified, deprecate the exact superseded ranges with replacement pointers:
+Every command is idempotent, so a rerun after a failure continues. The superseded packages and their pointers live in the script:
 
-```bash
-npm deprecate '@taucad/converter@0.1.0-beta.0' 'Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino.'
-npm deprecate '@taucad/events@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/memory@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/types@0.1.0-beta.0' 'Use @taucad/runtime/types.'
-npm deprecate '@taucad/json-schema@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/utils@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/fs-client@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
-npm deprecate '@taucad/telemetry@0.1.0-beta.0' 'Internal Tau application package; no public replacement.'
-```
+| Package version                    | Deprecation message                                               |
+| ---------------------------------- | ----------------------------------------------------------------- |
+| `@taucad/converter@0.1.0-beta.0`   | Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino. |
+| `@taucad/events@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
+| `@taucad/memory@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
+| `@taucad/types@0.1.0-beta.0`       | Use @taucad/runtime/types.                                        |
+| `@taucad/json-schema@0.1.0-beta.0` | Bundled into @taucad/runtime.                                     |
+| `@taucad/utils@0.1.0-beta.0`       | Bundled into @taucad/runtime.                                     |
+| `@taucad/fs-client@0.1.0-beta.0`   | Use @taucad/runtime/filesystem.                                   |
+| `@taucad/telemetry@0.1.0-beta.0`   | Internal Tau application package; no public replacement.          |
 
 The retired `@taucad/testing` package has no one-to-one replacement: its chat schema and prompt/harness concerns moved to their owners before the narrower `@taucad/runtime-testing` package was created. Do not deprecate it with a misleading replacement pointer.
 
@@ -272,7 +291,7 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 1. **No npm tokens in CI**: Trusted Publishing eliminates stored credentials
 2. **Provenance attestation**: Every package is cryptographically signed
 3. **Version plan review**: Version bumps are reviewed as part of the PR process
-4. **CI-only publishing**: Packages cannot be published from developer machines (Trusted Publishing is scoped to the CI workflow)
+4. **CI-only publishing**: Each name's trusted publisher is `taucad/tau` and `publish.yml`, so a token-free publish comes only from that workflow. The binding names no GitHub environment, so a dispatch of `publish.yml` on any ref of the repository can publish; pinning it to an environment needs the workflow's `environment` and every name's binding to change together
 5. **Lockfile integrity**: `pnpm install --frozen-lockfile` in CI prevents dependency tampering
 
 ## Decision Log
@@ -297,3 +316,4 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-10 | One-tap release: the release run deploys production     | Merging a release PR is the release; one approval in its run takes it to production, and the Command Center follows that run by its merge commit          |
 | 2026-10 | Drop the production approval for the UI and API         | The approval came hours after the merge and added no information; staging rehearsal, rollback and fix-forward for migrations are the controls instead     |
 | 2026-10 | Draft-first immutable application releases              | Immutable releases accept assets only before publication; the fixed `desktop-feed` release is retired because installed apps read the R2 feed (DEL-20)    |
+| 2026-10 | Pre-1.0 plans and a promotion script for the npm train  | The beta trains bypass version plans and leave `latest` on placeholders and a fork; `major` plans would have released the group as 1.0.0 (charter D28)    |

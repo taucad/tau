@@ -767,6 +767,28 @@ describe('serializeMessage', () => {
       );
     });
 
+    it.each([
+      [
+        'a voxel kernel',
+        { triangles: 1308, vertices: 656, elapsed: 41.6, voxelSize: 0.5, activeVoxels: 2846, memoryBytes: 1_296_848 },
+        'Mesh: 1308 triangles, 656 vertices, 42 ms (voxelSize 0.5 mm, 2846 active voxels, 1296848 bytes)',
+      ],
+      ['a mesh kernel', { triangles: 12, vertices: 8, elapsed: 3 }, 'Mesh: 12 triangles, 8 vertices, 3 ms'],
+    ])('serializes the evaluate_model mesh cost of %s', (_kernel, tessellation, line) => {
+      const message = baseMessage([
+        {
+          type: 'tool-evaluate_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready', tessellation },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        `<tool_call name="evaluate_model">\ntargetFile: main.ts\n</tool_call>\n<tool_result>\nStatus: ready\n${line}\n</tool_result>`,
+      );
+    });
+
     it('serializes tool in input-available state as Pending', () => {
       const message = baseMessage([
         {

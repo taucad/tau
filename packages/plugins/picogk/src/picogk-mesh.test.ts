@@ -10,7 +10,7 @@ import {
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { describe, expect, it } from 'vitest';
 
-import { picogkArtifactToGlb as adaptV8 } from '#picogk-mesh.js';
+import { picogkArtifactToGlb as adaptV8, picogkTessellation } from '#picogk-mesh.js';
 import type { PicogkBuild as SceneBuild } from '#picogk.protocol.js';
 
 // Existing scalar fixtures retain their malformed-region mutations; split them at the test boundary.
@@ -720,5 +720,54 @@ describe('PicoGK mesh artifact adapter', () => {
   ])('rejects an invalid %s', (_name, mutate, message) => {
     const value = mutate(artifact());
     expect(() => picogkArtifactToGlb(value.bytes, value.result as PicogkBuild)).toThrow(message);
+  });
+});
+
+describe('PicoGK tessellation report', () => {
+  const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+  const prototype = (
+    id: string,
+    kind: 'triangles' | 'lines',
+    counts: Readonly<{ positionCount: number; indexCount: number }>,
+  ): SceneBuild['prototypes'][number] => ({
+    id,
+    kind,
+    positionOffset: 0,
+    positionCount: counts.positionCount,
+    normalOffset: 0,
+    normalCount: kind === 'triangles' ? counts.positionCount : 0,
+    indexOffset: 0,
+    indexCount: counts.indexCount,
+    indexComponentType: 5125,
+  });
+  const occurrence = (id: number, prototypeId: string) => ({
+    id: `component:picogk-${id}`,
+    prototypeId,
+    matrix: [...identity] as SceneBuild['occurrences'][number]['matrix'],
+    color: [1, 1, 1, 1] as [number, number, number, number],
+    metallic: 0,
+    roughness: 1,
+  });
+  const { result } = artifact();
+
+  it('counts every drawn occurrence of a mesh prototype and the worker meshing time', () => {
+    expect(
+      picogkTessellation({
+        prototypes: [
+          prototype('prototype:1', 'triangles', { positionCount: 24, indexCount: 36 }),
+          prototype('prototype:2', 'lines', { positionCount: 6, indexCount: 2 }),
+        ],
+        occurrences: [occurrence(1, 'prototype:1'), occurrence(2, 'prototype:1'), occurrence(3, 'prototype:2')],
+        timings: { ...result.timings, meshConstruction: 12.5, meshExtraction: 3, normalGeneration: 1.5, emit: 99 },
+      }),
+    ).toEqual({ triangles: 24, vertices: 16, elapsed: 17 });
+  });
+
+  it('reports an empty scene as zero cost', () => {
+    expect(picogkTessellation({ prototypes: [], occurrences: [], timings: result.timings })).toEqual({
+      triangles: 0,
+      vertices: 0,
+      elapsed: 0,
+    });
   });
 });

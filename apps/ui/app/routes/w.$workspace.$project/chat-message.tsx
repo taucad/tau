@@ -13,6 +13,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
+import { providerPermissionResolutionSchema } from '@taucad/agent-host/wire';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -295,7 +296,8 @@ function renderAssistantPart(
       // Pending decisions belong above the composer; their settled record stays inspectable here.
       if (part.toolName === agentApprovalToolName) {
         const approval = parseAgentHostApproval(part.input);
-        const outcome = isRecord(part.output) ? part.output['outcome'] : undefined;
+        const resolution = providerPermissionResolutionSchema.safeParse(part.output).data;
+        const outcome = resolution?.outcome ?? (isRecord(part.output) ? part.output['outcome'] : undefined);
         if (
           approval === undefined ||
           approval.login !== undefined ||
@@ -310,6 +312,7 @@ function renderAssistantPart(
             approval={approval}
             name={approval.agentId ? externalAgentDisplayName(approval.agentId) : 'Agent'}
             outcome={outcome}
+            resolution={resolution}
           />
         );
       }

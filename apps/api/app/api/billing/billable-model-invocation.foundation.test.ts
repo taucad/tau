@@ -392,10 +392,7 @@ describe('BillableModelInvocationService process recovery', () => {
     const server = createServer((_request, response) => {
       requests += 1;
       if (delayProvider) {
-        setTimeout(() => {
-          response.writeHead(200, { 'content-type': 'text/event-stream' });
-          response.end();
-        }, 500);
+        // Hold headers until the real invocation deadline aborts the supplier request.
         return;
       }
       if (rejectProvider) {
@@ -526,14 +523,16 @@ describe('BillableModelInvocationService process recovery', () => {
 
       rejectProvider = false;
       delayProvider = true;
-      const deadlineOwner = createOwner(`http://127.0.0.1:${address.port}`, 100);
+      // Admission uses real SQL; leave it time to finish before exercising the supplier deadline.
+      const deadlineOwner = createOwner(`http://127.0.0.1:${address.port}`, 5000);
       await expect(
         invoke({ owner: deadlineOwner, authUserId: funded.authUserId, attemptKey: `deadline-${randomUUID()}` }),
-      ).rejects.toThrow();
+      ).rejects.toSatisfy((error: unknown) => gatewayCode(error) === 'PROVIDER_UNAVAILABLE');
       expect(requests).toBe(3);
     } finally {
       const closed = once(server, 'close');
       server.close();
+      server.closeAllConnections();
       await closed;
     }
   }, 60_000);

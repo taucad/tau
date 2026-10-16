@@ -39,7 +39,6 @@ const options = (overrides: Partial<DesktopUpdaterOptions> = {}): DesktopUpdater
   environment: {},
   autoUpdater: squirrel(),
   fetchJson: vi.fn(async () => feed('0.3.0')),
-  confirm: vi.fn(async () => true),
   prepareToRestart: vi.fn(async () => true),
   openExternal: vi.fn(async () => undefined),
   log: vi.fn(),
@@ -96,7 +95,7 @@ describe('startDesktopUpdater', () => {
     expect(disabled.autoUpdater.setFeedURL).not.toHaveBeenCalled();
   });
 
-  it('lets Squirrel download a newer macOS release and restarts once the person accepts', async () => {
+  it('should download quietly and restart only after an explicit install', async () => {
     const autoUpdater = squirrel();
     const updater = startDesktopUpdater(options({ autoUpdater, schedule: vi.fn() }));
     await updater.check();
@@ -107,9 +106,10 @@ describe('startDesktopUpdater', () => {
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
 
     autoUpdater.listeners.get('update-downloaded')?.();
-    await vi.waitFor(() => {
-      expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
-    });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(updater.snapshot().phase).toBe('ready');
+    await updater.install();
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 
   it('never starts a Squirrel download for a release that is not newer', async () => {
@@ -133,7 +133,12 @@ describe('startDesktopUpdater', () => {
     );
     await updater.check();
     expect(autoUpdater.setFeedURL).not.toHaveBeenCalled();
-    expect(openExternal).toHaveBeenCalledWith('https://github.com/taucad/tau/releases/tag/desktop%400.3.0');
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(updater.snapshot().phase).toBe('available');
+    await updater.download();
+    expect(openExternal).toHaveBeenCalledWith(
+      'https://downloads.tau.new/releases/desktop%400.3.0/Tau-linux-x64.tar.gz',
+    );
   });
 
   it('logs a feed failure and keeps running', async () => {
@@ -199,7 +204,7 @@ describe('staging and restart safety', () => {
 
   it('should retry a native failure even after a download completed', async () => {
     const autoUpdater = squirrel();
-    const updater = startDesktopUpdater(options({ autoUpdater, confirm: async () => false }));
+    const updater = startDesktopUpdater(options({ autoUpdater }));
     await updater.check();
     autoUpdater.listeners.get('update-downloaded')?.();
     autoUpdater.listeners.get('error')?.(new Error('download validation failed'));
@@ -215,16 +220,48 @@ describe('staging and restart safety', () => {
     const updater = startDesktopUpdater(options({ autoUpdater, prepareToRestart }));
     await updater.check();
     autoUpdater.listeners.get('update-downloaded')?.();
+    const installation = updater.install();
+    expect(updater.snapshot().phase).toBe('saving');
+    await updater.install();
     await vi.waitFor(() => {
       expect(prepareToRestart).toHaveBeenCalledOnce();
     });
     expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     saving.resolve(false);
-    await saving.promise;
+    await installation;
+    expect(updater.snapshot().phase).toBe('restart-blocked');
     expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     prepareToRestart.mockResolvedValue(true);
     await vi.waitFor(async () => {
       await updater.install();
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+describe('quiet update snapshots', () => {
+  it('should retain pending readiness across checks and reveal only manual requests', async () => {
+    const autoUpdater = squirrel();
+    const onState = vi.fn();
+    const updater = startDesktopUpdater(options({ autoUpdater, onState }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    const ready = updater.snapshot();
+    expect(ready).toMatchObject({ phase: 'ready', requestId: 0, version: '0.3.0' });
+    await updater.check();
+    expect(updater.snapshot()).toEqual(ready);
+    await updater.check(true);
+    expect(updater.snapshot()).toMatchObject({ phase: 'ready', requestId: 1 });
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(onState).toHaveBeenLastCalledWith(updater.snapshot());
+  });
+  it('should preserve automated installation only for a bounded candidate probe', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(options({ autoUpdater, installForProbe: true, candidateTag: 'desktop@0.3.0' }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
       expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
     });
   });

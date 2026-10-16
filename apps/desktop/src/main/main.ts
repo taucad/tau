@@ -1,3 +1,4 @@
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
 import { createCallbackLogic } from 'xstate';
@@ -47,6 +48,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
+  defaultPayloadStore,
   discoverAcpAgents,
   externalAgentDescriptors,
   keepAwakeWhileStreaming,
@@ -106,10 +108,13 @@ import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
+import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
+  revealPathChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -422,12 +427,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const environment = desktopEnvironment(process.env, { locked: environmentLocked, channel: desktopChannel });
 
   const logDirectory = join(app.getPath('userData'), 'logs');
-  const build123dResourceRoot = app.isPackaged
-    ? join(process.resourcesPath, 'python')
-    : join(import.meta.dirname, '../../resources/python');
-  const picogkResourceRoot = app.isPackaged
-    ? join(process.resourcesPath, 'picogk')
-    : join(import.meta.dirname, '../../resources/picogk');
   /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
   const gitEnvironment = bundledGitEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
@@ -557,6 +556,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   if (!isDevelopment) {
     const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    /* Product analytics post straight to PostHog; never an authenticated origin, so no bearer reaches it. */
+    const analyticsOrigin = environment['POSTHOG_CLIENT_KEY'] ? originOf(environment['POSTHOG_API_HOST']) : undefined;
+    const connectOrigins = [storageOrigin, analyticsOrigin].filter((origin): origin is string => origin !== undefined);
     registerAppProtocol({
       clientRoot,
       protocol,
@@ -564,9 +566,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* OQ-P11: development and staging only. Unpackaged is exactly that here — a packaged app
        * has no developer to take the profile. */
       jsProfiling: !app.isPackaged,
-      contentSecurityPolicy: contentSecurityPolicy(
-        storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
-      ),
+      contentSecurityPolicy: contentSecurityPolicy([...authenticatedOrigins, ...connectOrigins]),
     });
     log.log('info', 'main.app-protocol-registered', { clientRoot });
   }
@@ -622,8 +622,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      TAU_BUILD123D_RESOURCE_ROOT: build123dResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     /* A fork-loop guard, not a concurrency policy: a live project costs one to
@@ -681,6 +679,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * for it: the fork and its module graph are ~176 ms the person would
    * otherwise wait for with a project already on screen (W-L03-4). */
   runtimeMain.prewarm();
+  /* W6 (D10, D24): seed the shared payload store from the closures this app ships, then tell the kernel utilities
+   * which sealed closure each native kernel runs from; a utility composes its runtime once that frame arrives. The
+   * staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  const nativeStoreAbort = new AbortController();
+  const nativeStore = startNativeStore({
+    store: desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore(),
+    bundle: app.isPackaged ? join(process.resourcesPath, 'payloads') : undefined,
+    hostPath: app.getPath('exe'),
+    environment: process.env,
+    post: (frame) => {
+      runtimeMain.post(frame);
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+    signal: nativeStoreAbort.signal,
+  });
 
   const geometry = createGeometryBroker({
     utilityEntry: geometryUtilityEntry,
@@ -996,6 +1011,36 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  const updaterReady = Promise.withResolvers<DesktopUpdater>();
+  ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    return updater.snapshot();
+  });
+  ipcMain.handle(desktopUpdateChannels.check, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.check();
+  });
+  ipcMain.handle(desktopUpdateChannels.install, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.install();
+  });
+  ipcMain.handle(desktopUpdateChannels.download, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted update request');
+    }
+    const updater = await updaterReady.promise;
+    await updater.download();
+  });
+
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
@@ -1124,6 +1169,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (error) {
       throw new Error(error);
     }
+  });
+
+  /* A file opens in its default app under `openPath`, so a file or folder the
+   * person names inside a project is selected in its parent instead. */
+  ipcMain.handle(revealPathChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || path.includes('\0')) {
+      throw new Error('Desktop shell refused the reveal request.');
+    }
+    const target = roots.canonical(path);
+    if (target === undefined) {
+      throw new Error('Reopen this folder from Tau before revealing it in the file manager.');
+    }
+    await stat(target);
+    shell.showItemInFolder(target);
   });
 
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
@@ -1648,6 +1707,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
               log.log('error', 'main.shutdown', error);
             }
             zooProxyToken.dispose();
+            nativeStoreAbort.abort();
+            await nativeStore;
             try {
               runtimeMain.dispose();
             } catch (error) {
@@ -1753,19 +1814,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
       }
       return response.json() as Promise<unknown>;
     },
-    confirm: async ({ title, detail, accept }) => {
-      if (otaProbe) {
-        return true;
+    installForProbe: otaProbe !== undefined,
+    onState: (snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && trusted(window.webContents.mainFrame)) {
+          window.webContents.send(desktopUpdateChannels.changed, snapshot);
+        }
       }
-      const { response } = await dialog.showMessageBox({
-        type: 'info',
-        message: title,
-        detail,
-        buttons: [accept, 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      return response === 0;
     },
     openExternal: async (url) => shell.openExternal(url),
     log: (level, event, detail) => {
@@ -1773,19 +1828,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
+  updaterReady.resolve(updater);
   const checkForUpdates = async (): Promise<void> => {
-    await updater.check();
-    const { response } = await dialog.showMessageBox({
-      type: 'info',
-      message: `Tau ${app.getVersion()} · ${desktopChannel}`,
-      detail: updater.status(),
-      buttons: ['OK', 'Restart to install'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (response === 1) {
-      await updater.install();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await createMainWindow();
     }
+    focusMainWindow();
+    await updater.check(true);
   };
   const applicationMenu = Menu.getApplicationMenu();
   const appSubmenu = applicationMenu?.items[0]?.submenu;

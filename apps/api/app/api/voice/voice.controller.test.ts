@@ -104,13 +104,21 @@ describe('VoiceController over HTTP', () => {
     expect(dictationStatusSchema.parse(off.json())).toStrictEqual({ available: false });
   });
 
-  it('should require a signed-in user', async () => {
+  it('should require a signed-in user to transcribe', async () => {
     const app = await createApp(stubProvider(noEvents).provider, false);
 
-    const [transcription, status] = [await post(app), await app.inject({ method: 'GET', url: '/v1/voice/status' })];
+    const transcription = await post(app);
 
     expect(transcription.statusCode).toBe(401);
-    expect(status.statusCode).toBe(401);
+  });
+
+  it('should report dictation as unavailable to a signed-out caller', async () => {
+    const app = await createApp(stubProvider(noEvents).provider, false);
+
+    const status = await app.inject({ method: 'GET', url: '/v1/voice/status' });
+
+    expect(status.statusCode).toBe(200);
+    expect(dictationStatusSchema.parse(status.json())).toStrictEqual({ available: false });
   });
 
   it('should forward the WAV bytes and stream provider events as NDJSON', async () => {

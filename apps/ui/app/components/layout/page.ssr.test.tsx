@@ -22,7 +22,6 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       enablePageHeader: [{ handle: { enablePageHeader: false } }],
       enableOverflowY: [],
       providers: [],
-      enablePageFooter: [],
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({ AppSidebar: () => <aside>Server sidebar</aside> }));
@@ -47,9 +46,7 @@ vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => null }));
 vi.mock('#components/ui/utils/compose.js', () => ({
   Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('#components/layout/page-footer.js', () => ({ PageFooter: () => null }));
 vi.mock('#components/icons/tau-wordmark.js', () => ({ TauWordmark: () => <svg /> }));
-vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
 vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
 
 /* A server render reads its environment from process.env, as the SSR server is configured; the command

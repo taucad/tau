@@ -23,6 +23,10 @@ export const clientEnvironmentNames = [
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'NODE_ENV',
+  /* Desktop product analytics run whenever the build carries a key; `desktopEnvironment` fills these. */
+  'POSTHOG_API_HOST',
+  'POSTHOG_UI_HOST',
+  'POSTHOG_CLIENT_KEY',
 ] as const;
 
 /** Names without which the renderer throws on its first API call. */
@@ -49,13 +53,20 @@ const channelClientEnvironment = {
   },
 } as const satisfies Record<DesktopChannel, Record<(typeof requiredClientEnvironmentNames)[number], string>>;
 
+/** PostHog hosts for the renderer's analytics, matching `apps/ui`'s web defaults. */
+const desktopAnalyticsHosts = {
+  POSTHOG_API_HOST: 'https://us.i.posthog.com',
+  POSTHOG_UI_HOST: 'https://us.posthog.com',
+} as const;
+
 /**
  * Names a locked packaged build never takes from its environment.
  *
  * Each one redirects where the signed app sends the session bearer, which
  * origins it trusts with the preload bridge, what it serves as the SPA or what
- * it executes — so a value planted by the launcher (or, before the login-shell
- * prefix deny-list, by an rc file) must not reach a release build.
+ * it executes, or where its analytics (which identify the signed-in user) go — so a
+ * value planted by the launcher (or, before the login-shell prefix deny-list, by an
+ * rc file) must not reach a release build.
  */
 export const packagedLockedEnvironmentNames = [
   'TAU_API_URL',
@@ -66,6 +77,8 @@ export const packagedLockedEnvironmentNames = [
   'TAU_DESKTOP_CLIENT_ROOT',
   'TAU_BAMBU_STUDIO_PATH',
   'TAU_MACHINES_ENABLED',
+  'POSTHOG_API_HOST',
+  'POSTHOG_CLIENT_KEY',
 ] as const;
 
 /** Test-only switches (`TAU_E2E_*`) a locked packaged build ignores as well. */
@@ -135,11 +148,16 @@ export const packagedChannel = (appPath: string): DesktopChannel =>
  * @param source - Main's inherited environment.
  * @param options - `locked` drops every packaged-locked name first (a packaged build without the override opt-in);
  *   `channel` picks the endpoints that fill the gaps (`production` when omitted).
- * @returns A copy with the channel's endpoints wherever an endpoint was absent or blank.
+ *   `postHogClientKey` replaces the build's baked analytics key (tests).
+ * @returns A copy with the channel's endpoints, and the analytics defaults, wherever a value was absent or blank.
  */
 export const desktopEnvironment = (
   source: NodeJS.ProcessEnv = process.env,
-  options: { readonly locked?: boolean | undefined; readonly channel?: DesktopChannel | undefined } = {},
+  options: {
+    readonly locked?: boolean | undefined;
+    readonly channel?: DesktopChannel | undefined;
+    readonly postHogClientKey?: string | undefined;
+  } = {},
 ): NodeJS.ProcessEnv => {
   const environment = { ...source };
   if (options.locked) {
@@ -151,22 +169,48 @@ export const desktopEnvironment = (
       environment[name] = defaults[name];
     }
   }
+  /* Analytics need a project key; a build without one (local, unsigned) leaves them out entirely. */
+  const configuredKey = environment['POSTHOG_CLIENT_KEY']?.trim() ?? '';
+  const postHogClientKey = configuredKey === '' ? (options.postHogClientKey ?? tauPostHogClientKey) : configuredKey;
+  if (postHogClientKey) {
+    environment['POSTHOG_CLIENT_KEY'] = postHogClientKey;
+    for (const [name, value] of Object.entries(desktopAnalyticsHosts)) {
+      if (!environment[name]?.trim()) {
+        environment[name] = value;
+      }
+    }
+  }
   return environment;
 };
 
 /**
+ * Whether an environment switch is on: `'1'` or `'true'`, case-insensitive.
+ *
+ * The same rule `apps/ui`'s environment schema applies to `TAU_DEBUG`, so the
+ * desktop shell and the web server agree on what turns a switch on.
+ *
+ * @param value - The raw environment value.
+ * @returns True only for the canonical truthy strings.
+ */
+const isEnvironmentSwitchOn = (value: string | undefined): boolean => /^(1|true)$/iu.test(value ?? '');
+
+/**
  * Select the renderer-visible environment.
+ *
+ * `TAU_DEBUG` crosses as the boolean the renderer's `ClientEnvironment`
+ * declares, as the web server's parsed `window.ENV` does: a raw `'false'`
+ * would be truthy to every `ENV.TAU_DEBUG` reader.
  *
  * @param source - Main's own environment.
  * @returns A flat record of the defined allowlisted names.
  */
-export const clientEnvironment = (source: NodeJS.ProcessEnv = process.env): Record<string, string> => {
+export const clientEnvironment = (source: NodeJS.ProcessEnv = process.env): Record<string, string | boolean> => {
   const resolved = desktopEnvironment(source);
-  const environment: Record<string, string> = {};
+  const environment: Record<string, string | boolean> = {};
   for (const name of clientEnvironmentNames) {
     const value = resolved[name];
     if (value !== undefined) {
-      environment[name] = value;
+      environment[name] = name === 'TAU_DEBUG' ? isEnvironmentSwitchOn(value) : value;
     }
   }
   return environment;

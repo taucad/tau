@@ -10,7 +10,7 @@
  * and carries the Open CASCADE Technology notice with the unmodified LGPL-2.1
  * and Open CASCADE exception texts, read from the installed `geospec-engine`
  * package together with the OCCT revision its SOURCE-RELINK receipt pins. The
- * UI renders the file at `/legal/open-source`; the macOS package ships the same
+ * website (`apps/www`) renders the file at `/legal/open-source/`; the macOS package ships the same
  * file inside the app bundle.
  *
  * Usage: node --import tsx scripts/src/update-open-source-notices.mts [--check]
@@ -33,8 +33,8 @@ const rootDirectory = join(__dirname, '../..');
 const appDirectories = [join(rootDirectory, 'apps/ui'), join(rootDirectory, 'apps/desktop')];
 const engineName = 'geospec-engine';
 const tscircuitLicenseFile = join(rootDirectory, 'packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md');
-export const outputFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt');
-const desktopRuntimeFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/desktop-runtime-notices.json');
+export const outputFile = join(rootDirectory, 'apps/www/content/legal/open-source.md');
+const desktopRuntimeFile = join(rootDirectory, 'apps/www/content/legal/desktop-runtime-notices.json');
 const picoGkWorkerLockFile = join(rootDirectory, 'packages/plugins/picogk/dotnet/Tau.PicoGK.Worker/packages.lock.json');
 
 /** Workspace devDependencies that only serve tests or the build, never the shipped bundle. */

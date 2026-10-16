@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- form field keys are the ACP adapters' wire names */
 import { describe, expect, it } from 'vitest';
-import type { CreateElicitationRequest } from '@agentclientprotocol/sdk';
+import { agent, client } from '@agentclientprotocol/sdk';
+import type { CreateElicitationRequest, CreateElicitationResponse } from '@agentclientprotocol/sdk';
 
 import { askOfElicitation, elicitationResponseOf } from '#acp/elicitation-questions.js';
 
@@ -35,7 +36,7 @@ const claudeRequest: CreateElicitationRequest = {
 };
 
 /* The shape codex-acp 1.7.0 sends for request_user_input (`buildUserInputRequest`). */
-const codexRequest: CreateElicitationRequest = {
+const codexRequest = {
   mode: 'form',
   sessionId: 's1',
   toolCallId: 'item_1',
@@ -64,7 +65,7 @@ const codexRequest: CreateElicitationRequest = {
   },
   // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- codex-acp's wire field name.
   _meta: { codex: { autoResolutionMs: 30_000 } },
-};
+} satisfies CreateElicitationRequest;
 
 describe('askOfElicitation', () => {
   it('reads a Claude AskUserQuestion form with its recommended option and own-words field', () => {
@@ -83,9 +84,10 @@ describe('askOfElicitation', () => {
           id: 'question_0',
           header: 'Seeds',
           question: 'Restore the evidence rows, or drop the seeds?',
+          field: { type: 'string', required: true },
           options: [
-            { label: 'Paste rows', description: 'The test stays.' },
-            { label: 'Drop seeds', description: 'Remove them.' },
+            { value: 'Paste rows', label: 'Paste rows', description: 'The test stays.' },
+            { value: 'Drop seeds (Recommended)', label: 'Drop seeds', description: 'Remove them.' },
           ],
           recommended: 1,
           allowsText: true,
@@ -105,7 +107,11 @@ describe('askOfElicitation', () => {
         id: 'publish',
         header: 'Publish',
         question: 'How should the fork publish?',
-        options: [{ label: 'npm token', description: 'CI publishes.' }, { label: 'From your Mac' }],
+        field: { type: 'string', required: true },
+        options: [
+          { value: 'npm token (Recommended)', label: 'npm token', description: 'CI publishes.' },
+          { value: 'From your Mac', label: 'From your Mac' },
+        ],
         recommended: 0,
         allowsText: true,
       },
@@ -197,4 +203,175 @@ describe('elicitationResponseOf', () => {
       content: { name: 'tau-ci' },
     });
   });
+});
+
+describe('typed form fidelity', () => {
+  it('should refuse an unsupported required object field instead of asking for text', () => {
+    expect(
+      askOfElicitation(
+        {
+          mode: 'form',
+          sessionId: 's1',
+          message: 'Structured input',
+          requestedSchema: {
+            type: 'object',
+            required: ['shape'],
+            properties: { shape: { type: 'object' } },
+          },
+        },
+        context,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('should reject a fractional integer and refuse partial required content', () => {
+    const form = askOfElicitation(
+      {
+        mode: 'form',
+        sessionId: 's1',
+        message: 'Copies',
+        requestedSchema: {
+          type: 'object',
+          required: ['count'],
+          properties: { count: { type: 'integer', minimum: 1, maximum: 5 } },
+        },
+      },
+      context,
+    )!;
+    expect(elicitationResponseOf(form, { questions: { count: { text: '1.5', at } } })).toEqual({ action: 'cancel' });
+    expect(elicitationResponseOf(form, { questions: { count: { text: '6', at } } })).toEqual({ action: 'cancel' });
+  });
+});
+
+it('should preserve exact values with duplicate labels, arrays, numbers, false, and optional omission', () => {
+  const form = askOfElicitation(
+    {
+      mode: 'form',
+      sessionId: 's1',
+      message: 'Typed values',
+      requestedSchema: {
+        type: 'object',
+        required: ['pick', 'tags', 'count', 'enabled'],
+        properties: {
+          pick: {
+            type: 'string',
+            oneOf: [
+              { const: 'a', title: 'Same' },
+              { const: 'b', title: 'Same' },
+            ],
+          },
+          tags: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', enum: ['red', 'blue', 'green'] } },
+          count: { type: 'integer', minimum: 1, maximum: 5 },
+          enabled: { type: 'boolean' },
+          note: { type: 'string' },
+        },
+      },
+    },
+    context,
+  )!;
+  expect(
+    elicitationResponseOf(form, {
+      questions: {
+        pick: { value: 'b', at },
+        tags: { value: ['red', 'blue'], at },
+        count: { value: 3, at },
+        enabled: { value: false, at },
+        note: { skipped: true, at },
+      },
+    }),
+  ).toEqual({ action: 'accept', content: { pick: 'b', tags: ['red', 'blue'], count: 3, enabled: false } });
+  for (const value of [['red'], ['red', 'red'], ['red', 'blue', 'green'], ['red', 'unknown']]) {
+    expect(
+      elicitationResponseOf(form, {
+        questions: {
+          pick: { value: 'b', at },
+          tags: { value, at },
+          count: { value: 3, at },
+          enabled: { value: false, at },
+        },
+      }),
+    ).toEqual({ action: 'cancel' });
+  }
+});
+
+it('should refuse secret-bearing fields before writing a project record', () => {
+  expect(
+    askOfElicitation(
+      {
+        mode: 'form',
+        sessionId: 's1',
+        message: 'Secret',
+        requestedSchema: {
+          type: 'object',
+          properties: { secret: { type: 'string', _meta: { codex: { isSecret: true } } } },
+        },
+      },
+      context,
+    ),
+  ).toBeUndefined();
+});
+
+it('should refuse a secret companion field even when its choice field is ordinary', () => {
+  const { properties } = codexRequest.requestedSchema;
+  expect(
+    askOfElicitation(
+      {
+        ...codexRequest,
+        requestedSchema: {
+          ...codexRequest.requestedSchema,
+          properties: {
+            ...properties,
+            publish_other: {
+              type: 'string',
+              _meta: { codex: { questionId: 'publish', isOtherAnswer: true, isSecret: true } },
+            },
+          },
+        },
+      },
+      context,
+    ),
+  ).toBeUndefined();
+});
+
+it('should answer titled arrays after real SDK request parsing without an items type', async () => {
+  const receiver = client().onRequest('elicitation/create', ({ params }): CreateElicitationResponse => {
+    const form = askOfElicitation(params, context);
+    return form === undefined
+      ? { action: 'decline' }
+      : elicitationResponseOf(form, { questions: { colors: { value: ['red', 'blue'], at } } });
+  });
+  const response = await agent().connectWith(receiver, async (remote) =>
+    remote.request('elicitation/create', {
+      mode: 'form',
+      sessionId: 's1',
+      message: 'Colors',
+      requestedSchema: {
+        type: 'object',
+        required: ['colors'],
+        properties: {
+          colors: {
+            type: 'array',
+            items: {
+              anyOf: [
+                { const: 'red', title: 'Red' },
+                { const: 'blue', title: 'Blue' },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  );
+  expect(response).toEqual({ action: 'accept', content: { colors: ['red', 'blue'] } });
+});
+
+it.each([
+  { type: 'object', allOf: [{ required: ['other'] }], properties: { name: { type: 'string' } } },
+  { type: 'object', properties: { amount: { type: 'number', const: 5 } } },
+  { type: 'object', properties: { name: { type: 'string', oneOf: [{ const: 'a', title: 'A' }], enum: ['b'] } } },
+  { type: 'object', properties: { colors: { type: 'array', items: { type: 'string', enum: ['a'], pattern: '^b$' } } } },
+])('should refuse unsupported validation rather than discard it: %j', (requestedSchema) => {
+  expect(
+    askOfElicitation({ mode: 'form', sessionId: 's1', message: 'Form', requestedSchema }, context),
+  ).toBeUndefined();
 });

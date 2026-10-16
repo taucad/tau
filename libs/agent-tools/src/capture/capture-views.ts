@@ -10,6 +10,8 @@
  * @module
  */
 
+import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
+
 /**
  * The six canonical orthographic views a multi-angle capture returns.
  *
@@ -32,6 +34,48 @@ export type CaptureExportOptionsInput = {
   readonly includeEdges?: boolean | undefined;
   /** Square capture edge length in pixels. */
   readonly size: number;
+  /** One axis-aligned cut, in the model's Z-up millimetre frame. */
+  readonly section?: ScreenshotSection | undefined;
+};
+
+/** Camera direction of the single isometric capture, from the subject toward the camera. */
+const isometricDirection = [0.6123724357, -0.6123724357, 0.5] as const;
+
+const sectionAxes = { xy: 2, xz: 1, yz: 0 } as const;
+const axisNames = ['x', 'y', 'z'] as const;
+
+/**
+ * The side a section keeps: the caller's, else the one whose cut face looks at the single-mode
+ * camera, the rule the viewer's own section tool uses (`resolveSectionPlaneFlip`).
+ *
+ * @param section - The requested cut.
+ * @returns The retained side along the plane's normal axis.
+ * @public
+ */
+export const resolveCaptureSectionKeep = (section: ScreenshotSection): 'negative' | 'positive' =>
+  section.keep ?? (isometricDirection[sectionAxes[section.plane]] > 0 ? 'negative' : 'positive');
+
+/**
+ * One sentence naming what a sectioned capture kept, for the screenshot result's `message`.
+ *
+ * @param section - The requested cut.
+ * @returns For example `Section xy: kept z ≤ 6 mm; the cut face is capped.`
+ * @public
+ */
+export const describeCaptureSection = (section: ScreenshotSection): string =>
+  `Section ${section.plane}: kept ${axisNames[sectionAxes[section.plane]]} ${
+    resolveCaptureSectionKeep(section) === 'negative' ? '≤' : '≥'
+  } ${section.offsetMm} mm; the cut face is capped.`;
+
+/** The renderer's retained half-space for one cut, in the capture's metre world. */
+const sectionPlanes = (section: ScreenshotSection) => {
+  const axis = sectionAxes[section.plane];
+  const sign = resolveCaptureSectionKeep(section) === 'negative' ? -1 : 1;
+  const point: [number, number, number] = [0, 0, 0];
+  const normal: [number, number, number] = [0, 0, 0];
+  point[axis] = section.offsetMm / 1000;
+  normal[axis] = sign;
+  return { planes: [{ point, normal }] as [{ point: typeof point; normal: typeof normal }] } as const;
 };
 
 const buildOptions = (options: CaptureExportOptionsInput) => {
@@ -44,6 +88,7 @@ const buildOptions = (options: CaptureExportOptionsInput) => {
     world: { up: '+z', forward: '-y', unit: 'meter' },
     axes: true,
     scaleBar: true,
+    ...(options.section === undefined ? {} : { sections: sectionPlanes(options.section) }),
   } as const;
   return options.mode === 'multi_angle'
     ? ({
@@ -67,7 +112,7 @@ const buildOptions = (options: CaptureExportOptionsInput) => {
         mode: 'single',
         camera: {
           framing: 'bounds',
-          direction: [0.6123724357, -0.6123724357, 0.5],
+          direction: isometricDirection,
           up: [0, 0, 1],
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },

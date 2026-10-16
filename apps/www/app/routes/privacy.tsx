@@ -1,7 +1,6 @@
 import { Button } from '@taucad/ui/components/button';
-import { SiteLink } from '#www/site-link.js';
-import { appOrigin } from '#www/environment.js';
-import { out, intro } from '#www/page-components.js';
+import { Link } from 'react-router';
+import { intro } from '#www/page-components.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -17,13 +16,14 @@ export const content = (): React.JSX.Element => (
           clear choices.
         </>
       ),
-      body: 'This page covers this marketing website. The Tau application has its own privacy and account terms.',
+      body: 'This page covers this marketing website. The Privacy Policy covers your Tau account and the Tau app.',
     })}
     <article className='cell prose'>
       <h2>Optional analytics</h2>
       <p>
-        Analytics is off by default. When an approved analytics endpoint is configured, you can allow a small set of
-        page and action events or continue without them. Declining does not change the site’s content.
+        Analytics is off by default. You can allow optional analytics or continue without it; the same choice applies to
+        the Tau web app on this domain, where it covers PostHog product analytics including session recording. Declining
+        does not change the site’s content.
       </p>
       <p>
         We do not use session replay, automatic click capture, fingerprinting, account identifiers or form contents.
@@ -32,9 +32,9 @@ export const content = (): React.JSX.Element => (
       </p>
       <h2>Browser storage</h2>
       <p>
-        Your analytics preference is stored on this device. If you allow analytics, a browser-local marker can indicate
-        a returning visit without sending a persistent visitor identifier. You can withdraw consent and clear these
-        markers below.
+        Your analytics preference is stored in a cookie on this device, shared with the Tau web app. If you allow
+        analytics, a browser-local marker can indicate a returning visit without sending a persistent visitor
+        identifier. You can withdraw consent and clear these markers below.
       </p>
       <Button variant='outline' data-consent-reset disabled>
         Reset analytics preference
@@ -47,7 +47,14 @@ export const content = (): React.JSX.Element => (
         app, documentation or GitHub takes you to a separate service with its own terms.
       </p>
       <p>
-        <SiteLink href={`${appOrigin}/legal/privacy`}>Read the Tau application privacy policy {out}</SiteLink>
+        <Link to='/legal/privacy/' prefetch='intent'>
+          Read the Tau Privacy Policy
+        </Link>{' '}
+        and the{' '}
+        <Link to='/legal/cookies/' prefetch='intent'>
+          Storage and Cookie Policy
+        </Link>
+        .
       </p>
     </article>
   </section>

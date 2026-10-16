@@ -130,14 +130,17 @@ describe('createInitialProject', () => {
     expect(Object.keys(files).sort()).toEqual(paths);
   });
 
-  it('should keep the replicad project unchanged: its main file and a package.json declaring replicad', async () => {
+  it('should declare both Replicad and its OpenCascade runtime in the project', async () => {
     const { files } = await createForKernel('replicad');
 
     expect(JSON.parse(decode(files['package.json']?.content))).toEqual({
       name: 'plate',
       private: true,
       type: 'module',
-      dependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
+      dependencies: {
+        replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0',
+        'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0',
+      },
     });
   });
 

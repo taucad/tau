@@ -29,7 +29,6 @@ describe('desktop home surface', () => {
 
     expect(screen.getByText('desktop hero')).toBeInTheDocument();
     expect(screen.getByText('project library')).toBeInTheDocument();
-    expect(handle.enablePageFooter).toBe(false);
     expect(handle.enablePageWrapper).toBe(true);
   });
 

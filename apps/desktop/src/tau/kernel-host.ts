@@ -15,6 +15,7 @@ import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 import { installZooProxyCredential } from '@taucad/zoo/proxy';
 
 import { debugRuntime, runtime } from '#tau/desktop-runtime.definition.js';
+import { receiveNativeKernels } from '#tau/native-kernels.js';
 
 const ephemeral = process.env['TAU_RUNTIME_EPHEMERAL'] === '1';
 /* Attach `parentPort` synchronously: main posts the wire port immediately
@@ -22,6 +23,10 @@ const ephemeral = process.env['TAU_RUNTIME_EPHEMERAL'] === '1';
 serveElectronRuntime({
   ...(ephemeral ? { fileSystem: fromMemoryFs() } : {}),
   runtime: process.env['TAU_RUNTIME_DEBUG'] === '1' ? debugRuntime : runtime,
+});
+/* Main posts the native kernels' sealed closures once the payload store is seeded; the runtime composes after. */
+process.parentPort.on('message', ({ data }) => {
+  receiveNativeKernels(data);
 });
 /* This process runs project code, so it never holds the session: main publishes
  * a Zoo-scoped token after the boot frame, and again whenever the session changes. */

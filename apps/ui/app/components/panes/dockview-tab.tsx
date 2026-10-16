@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Box } from 'lucide-react';
+import { Box, X } from 'lucide-react';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**
@@ -61,11 +62,17 @@ export function DockviewTabIcon({
  *
  * Reuses the dv-default-tab / dv-default-tab-content / dv-default-tab-action
  * class names so all built-in + theme CSS applies unchanged.
+ *
+ * The close glyph is a pointer target only. A focusable control inside
+ * `role="tab"` is a nested interactive, so keyboard and assistive technology
+ * close through Dockview's tablist Delete/Backspace handler, which the tab
+ * advertises with `aria-keyshortcuts`, and through the tab's context menu.
  */
 export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
   const { api, icon, leadingIcon = 'extension' } = properties;
   const [title, setTitle] = useState(api.title ?? '');
   const rootRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLSpanElement>(null);
   const fullTitle = resolveFullTitle(properties, title);
 
   // Keep title in sync when the panel updates it
@@ -87,6 +94,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
     }
 
     tab.setAttribute('aria-label', fullTitle);
+    tab.setAttribute('aria-keyshortcuts', 'Delete');
 
     return () => {
       if (tab.getAttribute('aria-label') === fullTitle) {
@@ -94,6 +102,40 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
       }
     };
   }, [fullTitle]);
+
+  /*
+   * Dockview listens natively on `.dv-tab`, which sits between this portal and
+   * the React root, so React handlers run after it has already activated the
+   * tab or started a drag. Like Dockview's own default tab action, the close
+   * target cancels its pointerdown natively so the tab ignores it.
+   */
+  useEffect(() => {
+    const close = closeRef.current;
+    if (!close) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      event.preventDefault();
+    };
+
+    const handleClick = (event: MouseEvent): void => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      event.preventDefault();
+      api.close();
+    };
+
+    close.addEventListener('pointerdown', handlePointerDown);
+    close.addEventListener('click', handleClick);
+
+    return () => {
+      close.removeEventListener('pointerdown', handlePointerDown);
+      close.removeEventListener('click', handleClick);
+    };
+  }, [api]);
 
   return (
     <Tooltip>
@@ -105,6 +147,16 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
           <span className='dv-default-tab-content mr-0! flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden'>
             <DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />
             <span className='dockview-tab-title fade-label flex-1'>{title}</span>
+          </span>
+          <span
+            ref={closeRef}
+            aria-hidden
+            className={nestedActionVariants({
+              className:
+                'dv-default-tab-action fade-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 hover:bg-nested-action-hover! pointer-coarse:opacity-100',
+            })}
+          >
+            <X className='size-3.5' />
           </span>
         </div>
       </TooltipTrigger>

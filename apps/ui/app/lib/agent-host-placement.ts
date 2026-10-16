@@ -264,6 +264,10 @@ export const discoverOriginAgentHost = async (
     readonly signal?: AbortSignal | undefined;
   } = {},
 ): Promise<TauHostDescriptor | undefined> => {
+  // Dotted access: Vite substitutes `import.meta.env.X` textually (see `#lib/build-target`).
+  if (import.meta.env.TAU_ORIGIN_AGENT_HOST === 'absent') {
+    return undefined;
+  }
   const origin = options.origin ?? pageOrigin();
   if (origin === undefined) {
     return undefined;

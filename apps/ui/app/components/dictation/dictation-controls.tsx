@@ -5,13 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 import { dictationLabels } from '#components/dictation/use-dictation.js';
-import type { DictationPhase } from '#components/dictation/use-dictation.js';
-
-/** Bars below this share of the track render at the minimum height, so they ripple instead of sitting flat. */
-const waveformIdleHeight = 0.125;
-/** Bars per idle ripple period and the phase offset between neighbours, matching the 1.2s ripple. */
-const waveformIdleWavelength = 24;
-const waveformIdleStep = 1200 / waveformIdleWavelength;
+import type { DictationPhase, DictationWaveform } from '#components/dictation/use-dictation.js';
 
 type DictationControls = {
   readonly phase: DictationPhase;
@@ -62,11 +56,11 @@ export const DictationButton = memo(function ({ phase, onStart, onStop }: Dictat
 
 export const DictationRecording = memo(function ({
   phase,
-  levels,
+  waveform: { levels, batch },
   onCancel,
 }: {
   readonly phase: DictationPhase;
-  readonly levels: readonly number[];
+  readonly waveform: DictationWaveform;
   readonly onCancel: () => void;
 }): React.JSX.Element {
   return (
@@ -92,26 +86,27 @@ export const DictationRecording = memo(function ({
           aria-label='Microphone waveform'
           data-slot='dictation-waveform'
           data-level={levels.at(-1) ?? 0}
-          className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
+          className='flex h-7 min-w-0 flex-1 items-center justify-end overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
         >
-          {levels.map((level, index) => {
-            const height = Math.max(0, Math.min(1, level * 8));
-            return (
+          {/* Each batch shifts the levels one slot left, where the finished glide already shows them. Swapping
+              between two identical glides restarts it in that same frame, so the row travels continuously
+              instead of stepping, even through silence. */}
+          <div
+            className={cn(
+              'flex h-full shrink-0 items-center gap-0.75',
+              batch % 2 === 0 ? 'animate-dictation-scroll' : 'animate-dictation-scroll-alternate',
+            )}
+          >
+            {levels.map((level, index) => (
               <span
                 // Fixed time slots, never interactive or reordered.
                 // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
                 key={index}
-                className={cn(
-                  'max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current',
-                  height < waveformIdleHeight && 'animate-dictation-idle',
-                )}
-                style={{
-                  height: `${height * 100}%`,
-                  animationDelay: `${(index % waveformIdleWavelength) * -waveformIdleStep}ms`,
-                }}
+                className='max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
+                style={{ height: `${Math.max(0, Math.min(1, level * 8)) * 100}%` }}
               />
-            );
-          })}
+            ))}
+          </div>
         </div>
       ) : null}
       <span

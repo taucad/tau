@@ -400,45 +400,70 @@ describe('dictation recording and transcription', () => {
 });
 
 describe('dictation idle waveform', () => {
-  it.each(['light', 'dark'] as const)('should keep moving while the microphone is silent in %s mode', async (theme) => {
-    await page.viewport(800, 480);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    dictationAvailable = true;
-    transcription = Promise.withResolvers<string>();
-    renderComposer({ status: 'ready', inputText: '' });
-    await page.getByRole('button', { name: 'Dictate', exact: true }).click();
-    await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
-    act(() => {
-      // A silent microphone: every batch reports zero level.
-      for (let index = 0; index < 40; index++) {
-        recordLevel?.(0);
-      }
+  /** Pauses the row's batch glide at `time` milliseconds and waits for that frame to paint. */
+  const seekGlide = async (row: HTMLElement, time: number): Promise<CSSAnimation> => {
+    const [glide] = row.getAnimations() as CSSAnimation[];
+    expect(glide, 'the bar row should glide between batches').toBeDefined();
+    glide!.pause();
+    glide!.currentTime = time;
+    await new Promise((resolve) => {
+      requestAnimationFrame(resolve);
     });
-    const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
-    const frames: string[] = [];
-    const transforms: string[] = [];
-    for (let frame = 0; frame < 4; frame++) {
-      // oxlint-disable-next-line no-await-in-loop -- Frames are sampled sequentially in time.
-      await new Promise((resolve) => {
-        setTimeout(resolve, 170);
+    return glide!;
+  };
+
+  it.each(['light', 'dark'] as const)(
+    'should scroll a flat dotted line while the microphone is silent in %s mode',
+    async (theme) => {
+      await page.viewport(800, 480);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      dictationAvailable = true;
+      transcription = Promise.withResolvers<string>();
+      renderComposer({ status: 'ready', inputText: '' });
+      await page.getByRole('button', { name: 'Dictate', exact: true }).click();
+      await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+      act(() => {
+        // A silent microphone still delivers a zero-level batch every 100ms.
+        for (let index = 0; index < 40; index++) {
+          recordLevel?.(0);
+        }
       });
-      transforms.push(
-        [...waveform.querySelectorAll('span')]
-          .slice(-24)
-          .map((bar) => getComputedStyle(bar).transform)
-          .join('|'),
-      );
-      // oxlint-disable-next-line no-await-in-loop -- Frames are sampled sequentially in time.
-      const { base64 } = await page.screenshot({
-        element: waveform,
-        base64: true,
-        path: `../../../../../out/test-results/composer/dictation-idle-${theme}-frame-${frame}.png`,
+      const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
+      const bars = [...waveform.querySelectorAll('span')];
+      const row = bars[0]!.parentElement!;
+      // Silence stays a flat line of equal dots: no invented amplitude.
+      expect(new Set(bars.map((bar) => bar.getBoundingClientRect().height)).size).toBe(1);
+
+      // Four moments within one batch: the line itself travels left, so every captured frame differs.
+      const frames: string[] = [];
+      const offsets: number[] = [];
+      for (const [frame, time] of [0, 25, 50, 75].entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- Frames are captured one glide moment at a time.
+        await seekGlide(row, time);
+        offsets.push(bars.at(-1)!.getBoundingClientRect().left);
+        // oxlint-disable-next-line no-await-in-loop -- Frames are captured one glide moment at a time.
+        const { base64 } = await page.screenshot({
+          element: waveform,
+          base64: true,
+          path: `../../../../../out/test-results/composer/dictation-idle-${theme}-frame-${frame}.png`,
+        });
+        frames.push(base64);
+      }
+      expect(offsets).toEqual(offsets.toSorted((left, right) => right - left));
+      expect(new Set(offsets).size).toBe(offsets.length);
+      expect(new Set(frames).size).toBe(frames.length);
+
+      // The next batch shifts the levels one slot and restarts the glide, so the row continues seamlessly.
+      const finished = await seekGlide(row, 100);
+      const before = bars.at(-1)!.getBoundingClientRect().left;
+      act(() => {
+        recordLevel?.(0);
       });
-      frames.push(base64);
-    }
-    expect(new Set(transforms).size).toBe(transforms.length);
-    expect(new Set(frames).size).toBe(frames.length);
-  });
+      const restarted = await seekGlide(row, 0);
+      expect(restarted.animationName).not.toBe(finished.animationName);
+      expect(bars.at(-2)!.getBoundingClientRect().left).toBeCloseTo(before, 1);
+    },
+  );
 });
 
 describe('question dictation', () => {

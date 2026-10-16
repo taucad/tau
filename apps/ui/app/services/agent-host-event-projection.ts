@@ -3,13 +3,19 @@ import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessageMetadata } from '@taucad/agent-host';
 import { userProviderMessageSchema } from '@taucad/agent-host';
-import { externalAgentStopSchema } from '@taucad/agent-host/wire';
+import {
+  externalAgentStopSchema,
+  providerPermissionSchema,
+  providerPermissionResolutionSchema,
+} from '@taucad/agent-host/wire';
+import type { ProviderPermission } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
+import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
@@ -33,9 +39,8 @@ const failedOutputText = (value: unknown): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
-    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
-  );
+  const decoded = externalToolOutputText(value);
+  const output = decoded?.trim() ? decoded : typeof value['error'] === 'string' ? value['error'] : undefined;
   const result =
     isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
   const resultText = result
@@ -408,6 +413,16 @@ const assistantChunks = (
         title: embedded['uri'],
         filename: embedded['uri'],
       });
+      continue;
+    }
+    if (
+      value['type'] === 'provider-permission-observation' &&
+      tauInternal?.['kind'] === 'provider-permission-observation'
+    ) {
+      const parsed = providerPermissionResolutionSchema.safeParse(value['resolution']);
+      if (parsed.success && typeof value['interruptId'] === 'string' && value['interruptId'] !== '') {
+        chunks.push({ type: 'tool-output-available', toolCallId: value['interruptId'], output: parsed.data });
+      }
       continue;
     }
     if (value['type'] === 'acp-session') {
@@ -891,11 +906,11 @@ export const projectAgentHostLiveEvent = (
   return chunks;
 };
 
-/** Whether this run left a checkpointed block open, so its next delta continues the same part. */
+/** Whether this run has open parts that must survive an approval pause in the same SDK step. */
 const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undefined): boolean => {
   const prefix = `[${JSON.stringify(runId)},`;
   for (const [key, block] of streamedBlocks ?? []) {
-    if (block.type !== 'tool' && !block.closed && key.startsWith(prefix)) {
+    if (!block.closed && key.startsWith(prefix)) {
       return true;
     }
   }
@@ -918,12 +933,13 @@ const lifecycleChunks = (
       ];
     }
     case 'running': {
-      return [{ type: 'start-step' }];
+      // Input refinements are step-scoped in the SDK; a resumed call must not become a second tool part.
+      return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'start-step' }];
     }
     case 'paused': {
       /* The reducer forgets its active parts on `finish-step` without closing
-       * them, so a resumed checkpoint block would throw on its next delta
-       * (chat activity indicator closeout R5). The step stays open instead. */
+       * them. Keep the step open until its text and tools settle, so resume
+       * continues those same parts. */
       return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'finish-step' }];
     }
     case 'completed': {
@@ -968,6 +984,8 @@ export type AgentHostApproval = {
   readonly kind: 'approval' | 'operator' | 'safeguard';
   readonly prompt: string;
   readonly options: readonly AgentHostApprovalOption[];
+  /** Provider-requested scope; recording an answer does not verify provider policy persistence. */
+  readonly providerPermission?: ProviderPermission | undefined;
   /**
    * External agent that raised this interrupt, when one did.
    *
@@ -1058,6 +1076,7 @@ const interruptRequestSchema = z.looseObject({
     .looseObject({
       toolCall: z.looseObject({ title: z.string().optional(), rawInput: z.json().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      providerPermission: z.unknown().optional(),
       input: z.json().optional(),
       requestId: z.string().min(1).optional(),
       jobId: z.string().min(1).optional(),
@@ -1193,6 +1212,7 @@ const loginOf = (payload: unknown): AgentHostLogin | undefined => {
 
 const interruptResolutionSchema = z.looseObject({
   outcome: z.enum(['approved', 'denied', 'cancelled']).optional(),
+  optionId: z.string().min(1).max(512).optional(),
 });
 
 const agentHostApprovalSchema = z.object({
@@ -1200,6 +1220,7 @@ const agentHostApprovalSchema = z.object({
   kind: z.enum(['approval', 'operator', 'safeguard']),
   prompt: z.string(),
   options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string().optional() })),
+  providerPermission: providerPermissionSchema.optional(),
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
   context: agentHostApprovalContextSchema.optional(),
@@ -1224,10 +1245,18 @@ const approvalChunks = (
 ): readonly UIMessageChunk[] => {
   if (event.phase === 'resolved') {
     // `reason` carries the outcome verbatim on every host that writes one.
-    const outcome = interruptResolutionSchema.safeParse(event.payload).data?.outcome ?? event.reason;
-    return [{ type: 'tool-output-available', toolCallId: event.interruptId, output: { outcome } }];
+    const resolution = interruptResolutionSchema.safeParse(event.payload).data;
+    const outcome = resolution?.outcome ?? event.reason;
+    return [
+      {
+        type: 'tool-output-available',
+        toolCallId: event.interruptId,
+        output: { outcome, ...(resolution?.optionId === undefined ? {} : { optionId: resolution.optionId }) },
+      },
+    ];
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
+  const providerPermission = providerPermissionSchema.safeParse(request?.context?.providerPermission).data;
   const login = loginOf(event.payload);
   const context = approvalContextOf(request?.context);
   const content = request?.context?.toolCall?.['content'];
@@ -1250,6 +1279,7 @@ const approvalChunks = (
       ...(option.kind === undefined ? {} : { kind: option.kind }),
     })),
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
+    ...(providerPermission === undefined ? {} : { providerPermission }),
     ...(login === undefined ? {} : { login }),
     ...(context === undefined ? {} : { context }),
     ...(request?.context?.toolCall === undefined && request?.context?.input === undefined

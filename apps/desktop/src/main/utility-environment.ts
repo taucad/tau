@@ -180,8 +180,6 @@ export const utilityEnvironmentNames = [
   /* Opt-in debug logging across main and utility processes. */
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
-  'TAU_BUILD123D_RESOURCE_ROOT',
-  'TAU_PICOGK_RESOURCE_ROOT',
   /* Where the person's Bambu Studio lives when it is not at the platform default;
    * the kernel utility slices with it, main reads its presets (blueprint D12). */
   'TAU_BAMBU_STUDIO_PATH',

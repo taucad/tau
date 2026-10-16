@@ -64,7 +64,7 @@ export type SyncFacet = Readonly<{
    * `Not backed up · n`, which is the honest reading — the difference between
    * them is whether this host will retry on its own.
    */
-  state: 'noRemote' | 'checking' | 'backedUp' | 'pending' | 'queued' | 'conflicted' | 'failed';
+  state: 'manual' | 'noRemote' | 'checking' | 'backedUp' | 'pending' | 'queued' | 'conflicted' | 'failed';
   /** Inbound work, independent of the short backup-status checking window. */
   pullPhase?: 'idle' | 'fetching' | 'applying' | 'records';
   /** This actor has acknowledged authored integration for its current remote. Never persisted. */

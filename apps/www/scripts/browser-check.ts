@@ -57,6 +57,13 @@ try {
       '/download/',
       '/blog/',
       '/privacy/',
+      '/legal/',
+      '/legal/terms/',
+      '/legal/privacy/',
+      '/legal/cookies/',
+      '/legal/acceptable-use/',
+      '/legal/subprocessors/',
+      '/legal/open-source/',
       '/missing-page',
     ];
     await serial(routes, async (path) => {
@@ -269,7 +276,12 @@ try {
   assert.equal(events[0].headers['referer'], undefined);
   assert.equal(JSON.stringify(events[0].body).includes('secret-bearer'), false);
   assert.equal(JSON.stringify(events[0].body).includes('person@example.com'), false);
-  await page.getByRole('button', { name: 'Analytics preferences' }).click();
+  const acceptedCookies = await context.cookies();
+  assert.equal(
+    acceptedCookies.find(({ name }) => name === 'tau-cookie-consent')?.value,
+    encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 })),
+  );
+  await page.getByRole('button', { name: 'Cookie preferences' }).click();
   await page.getByRole('button', { name: 'Allow analytics', exact: true }).click();
   await page.waitForTimeout(100);
   assert.equal(events.length, 1);
@@ -284,7 +296,11 @@ try {
   assert.equal(events.filter((item) => item.body['event'] === 'marketing_cta_click').length, 1);
   await page.goto(origin + '/privacy/');
   await page.getByRole('button', { name: 'Reset analytics preference' }).click();
-  assert.equal(await page.evaluate(() => localStorage.getItem('tau-www-analytics-consent-v1')), null);
+  const withdrawnCookies = await context.cookies();
+  assert.equal(
+    withdrawnCookies.find(({ name }) => name === 'tau-cookie-consent'),
+    undefined,
+  );
   assert.equal(await page.evaluate(() => localStorage.getItem('tau-www-visited-v1')), null);
   await context.close();
   const gpc = await browser.newContext();
@@ -333,6 +349,7 @@ try {
           'secret/query exclusion',
           'referrer omission',
           'pageview dedup',
+          'shared consent cookie written for the app',
           'withdrawal storage reset',
           'GPC default suppression',
         ],

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import {
-  declineCookies,
   hoverContrastViolations,
   measureFilledButtonFocusRings,
   measureHorizontalOverflow,
@@ -34,7 +33,6 @@ const openRoute = async (route: string, viewport: { width: number; height: numbe
   await target.setViewport(viewport);
   await target.navigate(route);
   await target.expectVisible(selectors.getByRole('main'), 60_000);
-  await declineCookies();
   const landed = new URL(await target.currentUrl()).pathname;
   if (landed !== route) {
     return `${route} redirected to ${landed}; it needs an account the e2e environment has not got.`;

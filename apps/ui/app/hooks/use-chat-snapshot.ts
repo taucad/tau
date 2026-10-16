@@ -16,7 +16,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
-import { viewName } from '#workbench-records/projection.js';
+import { viewName } from '#workbench-records/view-titles.js';
 import { useFeature } from '#flags/use-feature.js';
 
 const emptyLayoutSnapshot = (): undefined => undefined;

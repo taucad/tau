@@ -40,7 +40,7 @@ export type LinkedAccountProps = {
 const getUnlinkConsequence = (providerName: string, provider: SocialProvider, accountLabel?: string): string => {
   const signIn = `You will no longer be able to sign in to Tau with ${providerName}${accountLabel ? ` (${accountLabel})` : ''}.`;
   return provider === 'github'
-    ? `${signIn} Tau also uses this account to publish and manage your GitHub Gists.`
+    ? `${signIn} This also disconnects Gist sharing in Tau. Existing Gists and repository connections remain. Your authorization on GitHub is not revoked.`
     : signIn;
 };
 

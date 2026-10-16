@@ -24,6 +24,8 @@ import type {
 import { createAskId, recordAsk, settleAsk, waitForAnswers } from '@taucad/chat/rpc';
 import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import { askOfGrok, grokQuestionResponseOf } from '#acp/grok-questions.js';
+import { createGrokPermissionReadback } from '#acp/grok-permission-readback.js';
+import { providerPermissionPayload } from '#acp/provider-permission.js';
 import type { Ask, AskAnswers } from '@taucad/chat';
 import { askOutcomeOf } from '@taucad/chat/schemas/questions';
 
@@ -147,11 +149,17 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
     if (seams.appendSession) {
       writers.set(input.key, seams.appendSession);
     }
+    const localPermissionReadback = createGrokPermissionReadback({
+      adapter: input.adapter,
+      cwd: input.cwd,
+      signal: seams.signal,
+    });
     const agent = { id: input.adapter.id, displayName: input.adapter.displayName };
     const projection = createTurnProjection({
       turn: seams,
       createId: effects.createId,
       agentId: input.adapter.id,
+      permissionReadback: input.permissionReadback,
       ...(input.adapter.nativeToolName ? { nativeToolName: input.adapter.nativeToolName } : {}),
       ...(input.priorUsage === undefined ? {} : { priorUsage: input.priorUsage }),
       ...(input.tauMcp ? { tauMcpServerName: 'tau' } : {}),
@@ -277,10 +285,18 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
           track(background, async () => {
             let answer: AcpVendorAnswer = { result: { outcome: { outcome: 'cancelled' } } };
             try {
-              const resolution = await projection.approve({
-                prompt: params.toolCall.title ?? `Allow ${params.toolCall.toolCallId}?`,
-                payload: asJson({ toolCall: params.toolCall, options: params.options }),
-              });
+              const readback = await localPermissionReadback?.prepare(params).catch(() => undefined);
+              seams.signal.throwIfAborted();
+              const resolution = await projection.approve(
+                {
+                  prompt: params.toolCall.title ?? `Allow ${params.toolCall.toolCallId}?`,
+                  payload: providerPermissionPayload(params, input.adapter, {
+                    negotiated: input.permissionReadback,
+                    localPrepared: readback !== undefined,
+                  }),
+                },
+                readback,
+              );
               const optionId = chooseOption(params.options, resolution);
               if (optionId !== undefined) {
                 answer = { result: { outcome: { outcome: 'selected', optionId } } };

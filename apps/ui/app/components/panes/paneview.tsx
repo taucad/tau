@@ -3,6 +3,7 @@ import { useCallback, useImperativeHandle, useRef } from 'react';
 import { PaneviewReact } from 'dockview-react';
 import type { PaneviewApi, PaneviewReadyEvent } from 'dockview-react';
 import { cn } from '@taucad/ui/utils/cn';
+import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { paneviewResizeHandle } from '#components/panes/resize-handle.js';
 import { useResizeHandles } from '#components/panes/use-resize-handles.js';
 
@@ -26,6 +27,7 @@ export function Paneview({
   );
   return (
     <div className='size-full' data-resize-owner ref={rootRef}>
+      <DockviewStyles />
       <PaneviewReact {...properties} className={cn('section-resize', className)} onReady={ready} />
     </div>
   );

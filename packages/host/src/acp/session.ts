@@ -55,6 +55,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { permissionObservationOf, redactPermissionMetadata } from '#acp/provider-permission.js';
 
 import { CreateElicitationRequest as CreateElicitationRequestGuards } from '@agentclientprotocol/sdk';
 import type {
@@ -74,7 +75,13 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
-import type { ExternalAgentLogin, ExternalAgentStop } from '@taucad/agent-host/wire';
+import { providerPermissionSchema } from '@taucad/agent-host/wire';
+import type {
+  ExternalAgentLogin,
+  ExternalAgentStop,
+  ProviderPermissionObservation,
+  ProviderPermissionResolution,
+} from '@taucad/agent-host/wire';
 import type {
   ExternalAgentLogEvent,
   JsonObject,
@@ -87,8 +94,31 @@ import type {
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
+import { seemsBinary } from '@taucad/filesystem/content-metadata';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
+import {
+  getParametersInputSchema,
+  getParametersOutputSchema,
+  applyParameterOperationInputSchema,
+  applyParameterOperationOutputSchema,
+} from '@taucad/chat/schemas/tools/parameter';
+import {
+  machineActionInputSchema,
+  machineActionOutputSchema,
+  stopMachineInputSchema,
+  stopMachineOutputSchema,
+  getPrintProfilesInputSchema,
+  getPrintProfilesOutputSchema,
+  requestJobInputSchema,
+  requestJobOutputSchema,
+  checkJobInputSchema,
+  checkJobOutputSchema,
+  listMachinesInputSchema,
+  listMachinesOutputSchema,
+  getMachineInputSchema,
+  getMachineOutputSchema,
+} from '@taucad/chat/schemas/tools/machine';
 import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
 import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
@@ -280,10 +310,28 @@ export const readSessionTextFile = async (
     if (skillRoot === undefined || !(error instanceof Error) || !('code' in error) || error.code !== maskedPathCode) {
       throw error;
     }
-    return readSessionTextFile(skillRoot, { ...params, path: resolve(cwd, params.path) }, remaining);
+    try {
+      return await readSessionTextFile(skillRoot, { ...params, path: resolve(cwd, params.path) }, remaining);
+    } catch (skillError) {
+      if (skillError instanceof Error && 'code' in skillError && skillError.code === maskedPathCode) {
+        throw error;
+      }
+      throw skillError;
+    }
   }
   const provider = new NodeFsProvider(cwd);
-  const content = new TextDecoder().decode(await provider.readFile(path));
+  const bytes = await provider.readFile(path);
+  let content: string;
+  try {
+    if (seemsBinary(bytes)) {
+      throw new TypeError('Binary file');
+    }
+    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new TypeError(
+      'ACP fs/read_text_file supports UTF-8 text only. Images must be delivered as image content blocks.',
+    );
+  }
   /* `unknown`, because ACP spells "no window" as an omitted field *and* as an
    * explicit JSON `null`, and a reader that trusted the declared type would
    * turn the second one into line zero and drop the file's first line. */
@@ -587,6 +635,43 @@ type JsonSchema = {
 };
 
 const tauMcpSchemas = {
+  [toolName.getParameters]: {
+    input: getParametersInputSchema,
+    output: getParametersOutputSchema,
+  },
+  [toolName.applyParameterOperation]: {
+    input: applyParameterOperationInputSchema,
+    output: applyParameterOperationOutputSchema,
+  },
+  [toolName.machineAction]: {
+    input: machineActionInputSchema,
+    output: machineActionOutputSchema,
+  },
+  [toolName.stopMachine]: {
+    input: stopMachineInputSchema,
+    output: stopMachineOutputSchema,
+  },
+  [toolName.getPrintProfiles]: {
+    input: getPrintProfilesInputSchema,
+    output: getPrintProfilesOutputSchema,
+  },
+  [toolName.requestJob]: {
+    input: requestJobInputSchema,
+    output: requestJobOutputSchema,
+  },
+  [toolName.checkJob]: {
+    input: checkJobInputSchema,
+    output: checkJobOutputSchema,
+  },
+  [toolName.listMachines]: {
+    input: listMachinesInputSchema,
+    output: z.object({ value: listMachinesOutputSchema }).transform(({ value }) => value),
+  },
+  [toolName.getMachine]: {
+    input: getMachineInputSchema,
+    output: z.object({ value: getMachineOutputSchema }).transform(({ value }) => value),
+  },
+
   [toolName.arrangeWorkbench]: { input: arrangeWorkbenchInputSchema, output: arrangeWorkbenchOutputSchema },
   [toolName.evaluateModel]: { input: evaluateModelInputSchema, output: evaluateModelOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
@@ -930,6 +1015,8 @@ export type AcpAgentFacts = {
   /** Login methods the agent offered, in its own order; empty when it needs none. */
   readonly authMethods: readonly AuthMethod[];
   readonly agentInfo: Implementation | undefined;
+  /** This pinned connection negotiated the optional settings readback extension. */
+  readonly permissionReadback?: boolean | undefined;
 };
 
 /** One live ACP session: an adapter child, its connection, and the vendor session. @public */
@@ -978,7 +1065,10 @@ type TurnProjection = {
   readonly title: string | undefined;
   update(update: SessionUpdate): void;
   sessionState(state: AcpSessionPresentation): void;
-  approve(request: Parameters<ExternalAgentTurn['approve']>[0]): ReturnType<ExternalAgentTurn['approve']>;
+  approve(
+    request: Parameters<ExternalAgentTurn['approve']>[0],
+    readback?: { readonly observe: () => Promise<ProviderPermissionObservation> },
+  ): ReturnType<ExternalAgentTurn['approve']>;
   /**
    * The vendor's own end-of-turn report, before the last block is committed.
    *
@@ -1170,6 +1260,8 @@ export const createTurnProjection = (options: {
   readonly turn: AcpPromptTurn;
   readonly createId: () => string;
   readonly agentId: string;
+  /** The pinned connection negotiated settings readback; never inferred from a tool update. */
+  readonly permissionReadback?: boolean | undefined;
   /** Where this agent puts a call's native name; defaults to {@link acpNativeToolNamePaths}. */
   readonly nativeToolName?: readonly string[] | undefined;
   /** The session's cumulative usage as of the end of the previous turn; see {@link usageMetadata}. */
@@ -1218,6 +1310,18 @@ export const createTurnProjection = (options: {
   let pending: AssistantBlock | undefined;
   let lastBlock: AssistantBlock | undefined;
   let finalized = false;
+  const observationStopped = (): boolean => finalized || turn.signal.aborted;
+  const requestedPermissionCalls = new Set<string>();
+  const ambiguousPermissionCalls = new Set<string>();
+  const permissionDecisions = new Map<
+    string,
+    {
+      interruptId: string;
+      resolution: ProviderPermissionResolution;
+      observed?: boolean;
+      readback?: { readonly observe: () => Promise<ProviderPermissionObservation> };
+    }
+  >();
   let finalCarrierId: string | undefined;
   /**
    * Tool calls awaiting their result, with the fullest facts seen so far, so a
@@ -1739,7 +1843,90 @@ export const createTurnProjection = (options: {
 
   return {
     update: (update) => {
-      enqueue(async () => project(update));
+      enqueue(async () => {
+        if (finalized) {
+          return;
+        }
+        if (update.sessionUpdate === 'tool_call_update' || update.sessionUpdate === 'tool_call') {
+          const decision = permissionDecisions.get(update.toolCallId);
+          const terminal = update.status === 'completed' || update.status === 'failed';
+          let observation = options.permissionReadback
+            ? permissionObservationOf(update._meta?.['tau/permissionPersistence'])
+            : undefined;
+          // Wire readback belongs only to the negotiated Codex adapter. Native Grok uses the host reader.
+          if (observation?.provider !== 'codex') {
+            observation = undefined;
+          }
+          if (decision?.readback && !decision.observed && terminal && !turn.signal.aborted) {
+            decision.observed = true;
+            try {
+              observation = permissionObservationOf(await decision.readback.observe());
+              if (observation?.provider !== 'grok') {
+                observation = undefined;
+              }
+            } catch {
+              // Optional settings observation must never swallow the provider's actual tool result.
+              observation = undefined;
+            }
+          }
+          if (
+            !observationStopped() &&
+            decision &&
+            permissionDecisions.get(update.toolCallId) === decision &&
+            observation &&
+            terminal &&
+            observation.toolCallId === update.toolCallId &&
+            observation.optionId === decision.resolution.optionId
+          ) {
+            permissionDecisions.delete(update.toolCallId);
+            await append([
+              {
+                type: 'message.appended',
+                message: {
+                  id: options.createId(),
+                  role: 'assistant',
+                  content: [
+                    asJson({
+                      type: 'provider-permission-observation',
+                      interruptId: decision.interruptId,
+                      resolution: { ...decision.resolution, observation },
+                    }),
+                  ],
+                  metadata: {
+                    tauInternal: {
+                      kind: 'provider-permission-observation',
+                      origin: 'external',
+                      agentId: options.agentId,
+                    },
+                  },
+                },
+              },
+            ]);
+          }
+          // The adapter sends a separate terminal readback notification before the ordinary tool result.
+          // Consuming it as a completion would discard the real output that follows.
+          if (
+            options.permissionReadback &&
+            update._meta &&
+            'tau/permissionPersistence' in update._meta &&
+            update.sessionUpdate === 'tool_call_update' &&
+            Object.keys(update).every((key) => ['sessionUpdate', 'toolCallId', 'status', '_meta'].includes(key))
+          ) {
+            return;
+          }
+          // The extension is parsed above; unvalidated metadata must not survive in ordinary tool facts.
+          if (update._meta && 'tau/permissionPersistence' in update._meta) {
+            const metadata = Object.fromEntries(
+              Object.entries(update._meta).filter(([key]) => key !== 'tau/permissionPersistence'),
+            );
+            await project({ ...update, _meta: metadata });
+          } else {
+            await project(update);
+          }
+          return;
+        }
+        await project(update);
+      });
     },
     sessionState: (state) => {
       enqueue(async () => {
@@ -1747,28 +1934,68 @@ export const createTurnProjection = (options: {
         await publishSessionState();
       });
     },
-    approve: async (request) => {
+    approve: async (request, readback) => {
       await settleProjection();
       await flushBoundary();
       const payload = asRecord(request.payload);
       const requestedCall = asRecord(payload?.['toolCall']);
       const toolCallId = requestedCall?.['toolCallId'];
       const open = typeof toolCallId === 'string' ? openToolCalls.get(toolCallId) : undefined;
+      if (typeof toolCallId === 'string') {
+        if (requestedPermissionCalls.has(toolCallId)) {
+          ambiguousPermissionCalls.add(toolCallId);
+        }
+        requestedPermissionCalls.add(toolCallId);
+        permissionDecisions.delete(toolCallId);
+      }
+      const decide = async (approval: Parameters<ExternalAgentTurn['approve']>[0]) => {
+        const resolution = await turn.approve(approval);
+        const permission = providerPermissionSchema.safeParse(payload?.['providerPermission']).data;
+        const codexReadback =
+          options.permissionReadback === true &&
+          resolution.optionId === 'allow_always' &&
+          permission?.readback === 'config-layers';
+        const grokReadback =
+          readback !== undefined &&
+          resolution.optionId === 'always-allow' &&
+          permission?.readback === 'permission-file';
+        if (
+          !turn.signal.aborted &&
+          !finalized &&
+          typeof toolCallId === 'string' &&
+          !ambiguousPermissionCalls.has(toolCallId) &&
+          resolution.outcome === 'approved' &&
+          (codexReadback || grokReadback) &&
+          permission.options.some(
+            (option) => option.optionId === resolution.optionId && option.requestedScope === 'persistent',
+          )
+        ) {
+          permissionDecisions.set(toolCallId, {
+            interruptId: resolution.interruptId,
+            resolution: { outcome: resolution.outcome, optionId: resolution.optionId },
+            ...(readback ? { readback } : {}),
+          });
+        }
+        return resolution;
+      };
       if (!open) {
-        return turn.approve(request);
+        return decide(request);
       }
       const title =
         (typeof requestedCall?.['title'] === 'string' && requestedCall['title'] !== ''
           ? requestedCall['title']
           : open.facts.title) ?? open.toolName;
-      const summary = JSON.stringify(open.input).slice(0, 500);
-      return turn.approve({
+      const safeInput = redactPermissionMetadata(open.input);
+      const summary = JSON.stringify(safeInput).slice(0, 500);
+      return decide({
         prompt: `Allow ${title}${summary === 'null' ? '' : ` with ${summary}`}?`,
-        payload: asJson({
-          ...payload,
-          toolCall: { ...open.facts, ...requestedCall, title },
-          input: open.input,
-        }),
+        payload: redactPermissionMetadata(
+          asJson({
+            ...payload,
+            toolCall: { ...open.facts, ...requestedCall, title },
+            input: safeInput,
+          }),
+        ),
       });
     },
     report: (input) => {

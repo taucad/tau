@@ -778,11 +778,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    *
    * @returns The client, or `undefined` when there is no remote or no transport.
    */
-  const lfsClient = async (): Promise<ReturnType<typeof createLfsClient> | undefined> => {
+  const lfsClient = async (selected?: Remote): Promise<ReturnType<typeof createLfsClient> | undefined> => {
     if (options.http === undefined) {
       return undefined;
     }
-    const [remote] = await port.listRemotes();
+    const candidates = selected === undefined ? await port.listRemotes() : [selected];
+    const [remote] = candidates;
     return remote === undefined
       ? undefined
       : createLfsClient({
@@ -1834,7 +1835,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           );
         }
       }
-      const url = await remoteUrl(input.remote);
+      const url = configuredRemote?.url ?? (await remoteUrl(input.remote));
+      if (input.repositoryUrl !== undefined && url !== input.repositoryUrl) {
+        throw new RevisionPortError(
+          'INVALID_TRANSPORT',
+          'The repository destination changed. Review it before pushing.',
+        );
+      }
       /* The one advertisement (E4): `receive-pack`'s own, which carries the
        * capabilities the request below may use as well as the refs. Seam 1 of 3
        * (N1), exactly as in `advertisedReferences`. */
@@ -1852,7 +1859,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * remote already holds, so this is one upload per object (V13) — and only
        * those are read, because an object fetched from this remote is still a
        * pointer here until somebody opens it. */
-      const client = await lfsClient();
+      const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
       if (client !== undefined) {
         const pointers = await offeredPointers(ordered);
         try {

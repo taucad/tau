@@ -4,4 +4,6 @@ export {
   canonicalCaptureViews,
   type CaptureExportOptions,
   type CaptureExportOptionsInput,
+  describeCaptureSection,
+  resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';

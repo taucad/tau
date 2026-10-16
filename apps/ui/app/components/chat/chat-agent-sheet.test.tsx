@@ -15,6 +15,7 @@ Element.prototype.scrollIntoView = vi.fn();
 const cost = { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const fable = {
   id: 'anthropic-claude-fable-5.1',
+  providerKind: 'tau-hosted',
   name: 'Fable 5.1',
   provider: { id: 'anthropic', name: 'Anthropic' },
   details: { family: 'claude', cost, contextWindow: 1_000_000 },
@@ -23,6 +24,7 @@ const fable = {
 } as unknown as Model;
 const haiku = {
   id: 'anthropic-claude-haiku-5.5',
+  providerKind: 'tau-hosted',
   name: 'Haiku 5.5',
   provider: { id: 'anthropic', name: 'Anthropic' },
   details: { family: 'claude', cost: { ...cost, outputTokens: 5 }, contextWindow: 200_000 },
@@ -74,10 +76,13 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 const models: {
   defaultExecution: ChatComposerContextValue['execution']['execution'];
   catalog: { status: 'loading' } | { status: 'unavailable' } | { status: 'loaded'; models: Model[] };
+  pinnedIds: string[];
 } = {
   defaultExecution: { kind: 'tau', model: fable.id, effort: 'low' },
   catalog: { status: 'loaded', models: catalog },
+  pinnedIds: [],
 };
+const setPinned = vi.fn();
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     data: catalog,
@@ -85,6 +90,8 @@ vi.mock('#hooks/use-models.js', () => ({
     defaultExecution: models.defaultExecution,
     lastTauExecution: { kind: 'tau', model: fable.id, effort: 'low' },
     catalog: models.catalog,
+    pinnedIds: models.pinnedIds,
+    setPinned,
   }),
 }));
 
@@ -99,24 +106,6 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
     return { formattedKeyCombination: '⌘/' };
   },
 }));
-
-/* The Settings disclosure is a remembered preference; a remount reads what the last one wrote. */
-const preferences = vi.hoisted(() => new Map<string, unknown>());
-vi.mock('#hooks/use-cookie.js', async () => {
-  const { useState } = await import('react');
-  return {
-    useCookie: <T,>(name: string, fallback: T) => {
-      const [value, setValue] = useState<T>(() => (preferences.has(name) ? (preferences.get(name) as T) : fallback));
-      return [
-        value,
-        (next: T) => {
-          preferences.set(name, next);
-          setValue(next);
-        },
-      ] as const;
-    },
-  };
-});
 
 vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ open: vi.fn() }),
@@ -203,31 +192,58 @@ describe('ChatAgentSheet', () => {
     state.canSelectExecution = true;
     models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
     models.catalog = { status: 'loaded', models: catalog };
-    preferences.clear();
+    models.pinnedIds = [];
   });
 
   it('names the trigger with the model and its level, and shows the model’s own glyph', () => {
     renderSheet();
 
-    const trigger = screen.getByRole('button', { name: 'Agent and model: Fable 5.1, reasoning High' });
+    const trigger = screen.getByRole('button', { name: 'Agent and model: Fable 5.1, effort High' });
     expect(within(trigger).getByTestId('svg-icon')).toHaveAttribute('data-icon', 'claude');
     expect(trigger).toHaveTextContent('High');
   });
 
-  it('opens on the chosen level, so an arrow key changes it at once', async () => {
+  it('opens with focus on the Model row and shows the level in an Effort row', async () => {
     renderSheet();
-    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await openSheet();
 
-    const reasoning = screen.getByRole('tablist', { name: 'Reasoning for Fable 5.1' });
-    const high = within(reasoning).getByRole('tab', { name: 'High' });
-    expect(high).toHaveFocus();
-    expect(
-      within(reasoning)
-        .getAllByRole('tab')
-        .map((tab) => tab.textContent),
-    ).toEqual(['Low', 'Medium', 'High', 'Extra high']);
-    await userEvent.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Effort for Fable 5.1: High. Change' })).toHaveTextContent(
+      /^EffortHigh$/u,
+    );
+  });
+
+  it('chooses a level on the effort page, Recommended on the model’s default and the lede after the last level', async () => {
+    renderSheet();
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Fable 5\.1/u }));
+
+    const levels = screen.getAllByRole('option');
+    expect(levels.map((level) => level.getAttribute('aria-label'))).toEqual([
+      'Low',
+      'Medium',
+      'High, recommended',
+      'Extra high',
+    ]);
+    expect(screen.getByRole('option', { name: 'High, recommended' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByText('Recommended')).toHaveLength(1);
+    const lede = screen.getByText(/^Higher effort means more thorough responses/u);
+    expect(lede).toHaveTextContent('uses your credits faster.');
+    expect(levels.at(-1)?.compareDocumentPosition(lede)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await userEvent.click(screen.getByRole('option', { name: 'Medium' }));
     expect(setActiveEffort).toHaveBeenCalledWith('medium');
+    expect(screen.getByRole('button', { name: /^Effort for Fable 5\.1/u })).toHaveFocus();
+  });
+
+  it('steps back from the effort page on Backspace, to the Effort row', async () => {
+    renderSheet();
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Fable 5\.1/u }));
+    await userEvent.keyboard('{Backspace}');
+
+    expect(screen.getByRole('button', { name: /^Effort for Fable 5\.1/u })).toHaveFocus();
+    expect(setActiveEffort).not.toHaveBeenCalled();
   });
 
   it('shows no reasoning section, and no level on the trigger, for a model with none to choose', async () => {
@@ -238,7 +254,7 @@ describe('ChatAgentSheet', () => {
 
     const trigger = screen.getByRole('button', { name: 'Agent and model: Haiku 5.5' });
     await userEvent.click(trigger);
-    expect(screen.queryByRole('tablist', { name: /Reasoning/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Effort/u })).toBeNull();
     expect(screen.getByRole('button', { name: 'Model: Haiku 5.5. Change' })).toHaveFocus();
   });
 
@@ -247,8 +263,7 @@ describe('ChatAgentSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
 
-    expect(screen.getByRole('group', { name: 'Frontier' })).toBeInTheDocument();
-    /* Level controls are tabs, never options: options are only ever models (Finding 8). */
+    expect(screen.getByRole('group', { name: 'Anthropic' })).toBeInTheDocument();
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Haiku 5.5', 'Fable 5.1High']);
     await userEvent.click(screen.getByRole('option', { name: /Haiku/u }));
 
@@ -431,10 +446,10 @@ describe('ChatAgentSheet', () => {
       valueOf: (option) => option.currentValue,
       select,
     });
-    await userEvent.click(screen.getByRole('button', { name: /Codex.*reasoning Medium/u }));
-    await userEvent.click(
-      within(screen.getByRole('tablist', { name: /Reasoning for Codex/u })).getByRole('tab', { name: 'High' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /Codex.*effort Medium/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Codex/u }));
+    expect(screen.getByText(/uses your Codex limits faster\.$/u)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('option', { name: 'High' }));
     expect(select).toHaveBeenCalledWith('thought_level', 'high');
   });
 
@@ -473,17 +488,19 @@ describe('ChatAgentSheet', () => {
       valueOf: (option) => option.currentValue,
       select,
     });
-    await userEvent.click(screen.getByRole('button', { name: /Grok Build.*reasoning High/u }));
-    const reasoning = within(screen.getByRole('tablist', { name: /Reasoning for Grok Build/u }));
-    expect(reasoning.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+    await userEvent.click(screen.getByRole('button', { name: /Grok Build.*effort High/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Grok Build/u }));
+    expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
       'Low',
       'Medium',
-      'High',
+      'High, Thorough reasoning and quality. Recommended.',
       'Extra High',
     ]);
-    expect(reasoning.getByRole('tab', { name: 'High' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: /^High/u })).toHaveAttribute('aria-selected', 'true');
+    /* The agent's own words are the description; Tau badges no default for an external agent. */
     expect(screen.getByText('Thorough reasoning and quality. Recommended.')).toBeInTheDocument();
-    await userEvent.click(reasoning.getByRole('tab', { name: 'Extra High' }));
+    expect(screen.queryByText('Recommended')).toBeNull();
+    await userEvent.click(screen.getByRole('option', { name: 'Extra High' }));
     expect(select).toHaveBeenCalledWith('reasoning_effort', 'xhigh');
   });
 
@@ -560,49 +577,42 @@ describe('ChatAgentSheet', () => {
     act(() => {
       keybindings.get('/')?.();
     });
-    expect(await screen.findByRole('tablist', { name: 'Reasoning for Fable 5.1' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Effort for Fable 5\.1/u })).toBeInTheDocument();
 
     await userEvent.keyboard('{Escape}');
     expect(focusEditor).toHaveBeenCalled();
   });
 
-  it('keeps the agent’s options behind a closed Settings row that names what is not at its default', async () => {
+  it('keeps the agent’s options on a Settings page behind a row that names what is not at its default', async () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];
     renderSheet(vi.fn(), codexConfig({ mode: 'plan', fast: 'on' }));
     await openSheet();
 
-    const settings = screen.getByRole('button', { name: /^Settings/u });
-    expect(settings).toHaveAttribute('aria-expanded', 'false');
+    const settings = screen.getByRole('button', { name: 'Settings: Plan · Fast mode. Change' });
     expect(settings).toHaveTextContent('Plan · Fast mode');
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent('Settings');
+    /* Focus lands on the first control: the chosen Collaboration mode. */
+    expect(
+      within(screen.getByRole('tablist', { name: 'Collaboration mode' })).getByRole('tab', { name: 'Plan' }),
+    ).toHaveFocus();
     expect(screen.getByRole('switch', { name: 'Fast mode' })).toBeChecked();
-    expect(screen.getByRole('tablist', { name: 'Collaboration mode' })).toBeInTheDocument();
     expect(screen.getByText('Plan before making changes')).toBeInTheDocument();
-  });
 
-  it('remembers Settings open across a remount, as across a reload', async () => {
-    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
-    state.placements = [codex()];
-    const { unmount } = renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }));
-    await openSheet();
-    await userEvent.click(screen.getByRole('button', { name: /^Settings/u }));
-    unmount();
-
-    renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }));
-    await openSheet();
-    expect(screen.getByRole('button', { name: /^Settings/u })).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Settings/u })).toHaveFocus();
   });
 
   it('draws an Off/On choice as a switch row, writes the agent’s own values and marks the trigger', async () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];
     const select = vi.fn();
-    preferences.set('chat-op-agent-settings', true);
     renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }, select));
     await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Settings/u }));
 
     const fast = screen.getByRole('switch', { name: 'Fast mode' });
     expect(fast).toHaveAccessibleDescription('1.5x speed, increased usage');
@@ -669,5 +679,53 @@ describe('ChatAgentSheet', () => {
 
     expect(screen.getByPlaceholderText('Search Codex models…')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Codex' })).toBeNull();
+  });
+
+  describe('pinned models', () => {
+    it('lists pinned models first, and pins from the row without choosing the model', async () => {
+      models.pinnedIds = [fable.id];
+      renderSheet();
+      await openSheet();
+      await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
+
+      expect(within(screen.getByRole('group', { name: 'Pinned' })).getByRole('option')).toHaveTextContent(
+        /^Fable 5\.1/u,
+      );
+      expect(within(screen.getByRole('group', { name: 'Anthropic' })).getByRole('option')).toHaveTextContent(
+        /^Haiku 5\.5/u,
+      );
+      expect(screen.getByRole('button', { name: 'Pin Fable 5.1' })).toHaveAttribute('aria-pressed', 'true');
+
+      const pin = screen.getByRole('button', { name: 'Pin Haiku 5.5' });
+      expect(pin).toHaveAttribute('aria-pressed', 'false');
+      expect(pin).toHaveAttribute('tabindex', '-1');
+      await userEvent.click(pin);
+      expect(setPinned).toHaveBeenCalledWith(haiku, true);
+      expect(setActiveModel).not.toHaveBeenCalled();
+    });
+
+    it('toggles the highlighted model’s pin on Shift+Enter, while Enter still chooses', async () => {
+      renderSheet();
+      await openSheet();
+      await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
+
+      await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
+      expect(setPinned).toHaveBeenCalledWith(fable, true);
+      expect(setActiveModel).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{ArrowUp}{Enter}');
+      expect(setActiveModel).toHaveBeenCalledWith(haiku.id);
+    });
+
+    it('offers no pin on an external agent’s models', async () => {
+      state.placements = [codex()];
+      renderSheet();
+      await openSheet();
+      await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+      await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
+
+      expect(screen.getByRole('option', { name: 'GPT-5.6-Sol' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Pin /u })).toBeNull();
+    });
   });
 });

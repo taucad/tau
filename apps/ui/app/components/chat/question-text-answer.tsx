@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { ArrowUp } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { InputGroup, InputGroupTextarea } from '@taucad/ui/components/input-group';
@@ -13,6 +14,7 @@ export function QuestionTextAnswer({
   draft,
   onDraftChange,
   isOpen,
+  isPending = false,
   shouldTakeFocus,
   placeholder,
   onHold,
@@ -22,6 +24,7 @@ export function QuestionTextAnswer({
   readonly draft: string;
   readonly onDraftChange: Dispatch<SetStateAction<string>>;
   readonly isOpen: boolean;
+  readonly isPending?: boolean;
   readonly shouldTakeFocus: boolean;
   readonly placeholder: string;
   readonly onHold: () => void;
@@ -105,7 +108,7 @@ export function QuestionTextAnswer({
         style={{ minHeight: isDictating ? recordingHeight : undefined }}
       >
         {isDictating ? (
-          <DictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+          <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
         ) : (
           <InputGroupTextarea
             ref={textRef}
@@ -138,6 +141,7 @@ export function QuestionTextAnswer({
                 variant='ghost'
                 size='icon-xs'
                 aria-label='Send answer'
+                aria-busy={isPending}
                 className={cn(
                   'primary-action rounded-full',
                   'shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
@@ -148,6 +152,7 @@ export function QuestionTextAnswer({
                 }}
               >
                 <ArrowUp aria-hidden='true' />
+                {isPending ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
             </TooltipTrigger>
             <TooltipContent>

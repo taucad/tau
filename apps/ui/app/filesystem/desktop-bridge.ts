@@ -1,3 +1,4 @@
+import type { DesktopUpdateBridge } from '@taucad/types/desktop-updates';
 /**
  * Renderer-side seam onto the Electron shell.
  *
@@ -32,6 +33,7 @@ import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
  * plain values and functions only, which is all `contextBridge` can carry.
  */
 type DesktopShell = {
+  readonly updates?: DesktopUpdateBridge;
   /** Relay tag preload stamps on the message carrying a services port. */
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
@@ -284,7 +286,11 @@ export type DesktopBridge = {
   readonly directories?: {
     readonly openLabel: string;
     readonly openIcon: 'finder' | 'file-explorer' | 'folder';
+    /** Label for selecting a file or folder in its parent, e.g. `Reveal in Finder`. */
+    readonly revealLabel: string;
     open(path: string): Promise<void>;
+    /** Select a file or folder inside a granted root in the file manager. */
+    reveal(path: string): Promise<void>;
   };
   readonly dialog: {
     /**
@@ -472,3 +478,7 @@ export const onDesktopMachineNavigation = (handler: (route: string) => void): ((
   const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.quit?.onNavigate(handler) ?? ((): void => undefined);
 };
+
+/** Updates are available only through the desktop preload, never in a web session. */
+export const desktopUpdates = (): DesktopUpdateBridge | undefined =>
+  isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau?.updates : undefined;

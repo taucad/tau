@@ -11,9 +11,6 @@ describe('page shell and populated Projects', () => {
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
     await target.navigate('/projects');
     await target.expectVisible(selectors.getByRole('searchbox', { name: 'Search projects' }), 60_000);
-    const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
-    await target.expectVisible(decline, 15_000);
-    await target.click(decline);
     const geometry = await target.evaluate(() => {
       const scroller = document.querySelector('main > section');
       const card = document.querySelector('ul[aria-label="Projects"] > li');
@@ -57,9 +54,6 @@ describe('mobile Preview controls', () => {
     await target.navigate('/__e2e/project-navigation');
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
     const editorUrl = new URL(await target.currentUrl()).pathname;
-    const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
-    await target.expectVisible(decline, 15_000);
-    await target.click(decline);
     await target.setViewport({ width: 320, height: 720 });
     await target.navigate(`${editorUrl}/preview`);
     const workbench = selectors.getByRole('button', { name: 'Workbench', exact: true });
@@ -101,7 +95,6 @@ describe('compact owned Preview parameters', () => {
     await target.navigate('/__e2e/example-fixture?locator=replicad.v8-engine');
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
     const editorUrl = new URL(await target.currentUrl()).pathname;
-    await target.click(selectors.getByRole('button', { name: 'Decline', exact: true }));
     await target.navigate(`${editorUrl}/preview`);
     const angle = selectors.getByRole('spinbutton', { name: 'Input for Crank Angle' });
     await target.expectVisible(angle, 60_000);
@@ -142,9 +135,6 @@ describe.each(['Light', 'Dark', 'Black', 'High Contrast'])('Projects in %s', (th
     await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }));
     await target.keyboardPress('Escape');
     await target.expectHidden(selectors.getByRole('dialog', { name: /^settings$/iu }));
-    const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
-    await target.expectVisible(decline, 15_000);
-    await target.click(decline);
     for (const width of [320, 390, 768, 1280, 1920, 2560]) {
       // oxlint-disable-next-line no-await-in-loop -- Each width owns the same page and must settle before measurement.
       await target.setViewport({ width, height: 720 });

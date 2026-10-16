@@ -24,7 +24,6 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       enablePageHeader: [{ handle: { enablePageHeader: false } }],
       enableOverflowY: [],
       providers: [],
-      enablePageFooter: [],
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({ AppSidebar: () => <aside>Hydrated sidebar</aside> }));
@@ -49,9 +48,7 @@ vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => null }));
 vi.mock('#components/ui/utils/compose.js', () => ({
   Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('#components/layout/page-footer.js', () => ({ PageFooter: () => null }));
 vi.mock('#components/icons/tau-wordmark.js', () => ({ TauWordmark: () => <svg /> }));
-vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
 vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
 
 const { Page } = await import('#components/layout/page.js');

@@ -1,3 +1,5 @@
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
+import type { DesktopUpdateBridge } from '@taucad/types/desktop-updates';
 import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
 import { browserChannels } from '@taucad/types/browser';
 import { mock } from 'vitest-mock-extended';
@@ -5,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
   openDirectoryChannel,
+  revealPathChannel,
   quitChannels,
   slicersChannels,
   windowFullscreenChannel,
@@ -189,7 +192,13 @@ describe('desktop preload Quick Look bridge', () => {
 describe('native directory access', () => {
   it('should advertise the native file manager and forward the selected directory', async () => {
     const tau = state.exposed.get('tau') as {
-      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+      directories: {
+        openLabel: string;
+        openIcon: string;
+        revealLabel: string;
+        open(path: string): Promise<void>;
+        reveal(path: string): Promise<void>;
+      };
     };
     expect(tau.directories.openLabel).toBe(
       process.platform === 'darwin'
@@ -203,6 +212,15 @@ describe('native directory access', () => {
     );
     await tau.directories.open('/picked/Project');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
+    expect(tau.directories.revealLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Reveal in Finder'
+        : process.platform === 'win32'
+          ? 'Reveal in File Explorer'
+          : 'Reveal in file manager',
+    );
+    await tau.directories.reveal('/picked/Project/main.ts');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(revealPathChannel, '/picked/Project/main.ts');
   });
 });
 
@@ -228,5 +246,30 @@ describe('desktop browser bridge', () => {
     expect(listener).toHaveBeenCalledExactlyOnceWith(snapshot);
     unsubscribe();
     expect(ipcRenderer.off).toHaveBeenCalledWith(browserChannels.state, registration[1]);
+  });
+});
+
+describe('desktop update preload bridge', () => {
+  it('should expose only fixed update actions and remove the state listener on unsubscribe', async () => {
+    const { updates } = state.exposed.get('tau') as { readonly updates: DesktopUpdateBridge };
+    const receive = vi.fn();
+    const unsubscribe = updates.subscribe(receive);
+    const snapshot = { revision: 2, phase: 'ready' };
+    state.listeners.get(desktopUpdateChannels.changed)?.[0]?.({}, snapshot);
+    expect(receive).toHaveBeenCalledWith(snapshot);
+    await updates.snapshot();
+    await updates.check();
+    await updates.install();
+    await updates.download();
+    for (const channel of [
+      desktopUpdateChannels.snapshot,
+      desktopUpdateChannels.check,
+      desktopUpdateChannels.install,
+      desktopUpdateChannels.download,
+    ]) {
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(channel);
+    }
+    unsubscribe();
+    expect(state.listeners.get(desktopUpdateChannels.changed)).toEqual([]);
   });
 });

@@ -264,7 +264,7 @@ describe('remoteMachine', () => {
     await settle();
     expect(actor.getSnapshot().matches('connected')).toBe(true);
     expect(received).toStrictEqual([
-      { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name },
+      { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name, automaticPush: true },
       /* L2-F8: the connect confirmation reaches the root too. */
       { type: 'childToast', subject: 'remote', tone: 'info', message: 'This project is backed up.' },
     ]);
@@ -1180,7 +1180,7 @@ describe('remoteMachine', () => {
       });
       /* The root retired `sync` on `connect`; the remote that stays is handed back to it. */
       expect(parent.events.filter((event) => event.type === 'remoteConnected')).toStrictEqual([
-        { type: 'remoteConnected', kind: 'git', url: githubRemote.url, name: githubRemote.name },
+        { type: 'remoteConnected', kind: 'git', url: githubRemote.url, name: githubRemote.name, automaticPush: false },
       ]);
       expect(selectRemoteFacet(actor.getSnapshot()).refusedReplacement?.attempt).toBe(1);
 

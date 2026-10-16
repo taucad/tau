@@ -1,6 +1,31 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
+import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.js';
+
+/** The axis-aligned planes a screenshot section can cut along, named as `arrange_workbench` names them. @public */
+export const screenshotSectionPlanes = ['xy', 'xz', 'yz'] as const;
+
+/**
+ * One axis-aligned section cut through a 3D view, in the model's Z-up millimetre frame (the frame
+ * GeoSpec measures in). The renderer clips surfaces and lines and caps the cut. @public
+ */
+export const screenshotSectionSchema = z
+  .object({
+    plane: z
+      .enum(screenshotSectionPlanes)
+      .describe('xy is a horizontal cut (normal Z); xz has normal Y; yz has normal X.'),
+    offsetMm: z.number().describe("The plane's position along its normal axis, in millimetres from the model origin."),
+    keep: z
+      .enum(['negative', 'positive'])
+      .optional()
+      .describe(
+        'The side to retain along the normal axis: negative keeps coordinates at or below offsetMm. Defaults to the side whose cut face looks at the single-mode camera.',
+      ),
+  })
+  .strict();
+/** @public */
+export type ScreenshotSection = z.infer<typeof screenshotSectionSchema>;
 
 /**
  * Input schema for screenshot tool.
@@ -22,6 +47,8 @@ export const screenshotInputSchema = z
       .describe('JSON object of options declared by the selected view.')
       .pipe(z.record(z.string(), z.json()))
       .optional(),
+    section: screenshotSectionSchema.optional().describe('Cut a 3D view open along one axis plane.'),
+    parameters: parameterOverridesSchema.optional(),
   })
   .strict();
 /** @public */

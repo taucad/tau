@@ -429,6 +429,9 @@ const config = [
       // Same class: a bundler fixture whose asset queries, JSX and untyped modules
       // the bundler suites check; it is outside the tau-examples tsconfig.
       'libs/tau-examples/src/kernels/replicad/bundler-feature-matrix/**',
+      // Same class: the standalone-project runners run with Node outside Tau, beside a
+      // fixture project; oxlint still checks them, and the W23 CI jobs run them.
+      'libs/tau-examples/src/standalone/*/run.mjs',
       // Same class: the compute-reuse baseline harness (charter W0) is an
       // opt-in benchmark reaching runtime-internal seams through a loader
       // hook; `.mts` files outside the project tsconfig.
@@ -727,7 +730,7 @@ const config = [
      * package aliases, so they intentionally opt out of the workspace absolute
      * import and extension requirements.
      */
-    files: ['libs/tau-examples/src/kernels/**/*.ts'],
+    files: ['libs/tau-examples/src/kernels/**/*.ts', 'libs/tau-examples/src/standalone/**/*.ts'],
     rules: {
       'import-x/extensions': 'off',
       'import-x/consistent-type-specifier-style': 'off',
@@ -743,7 +746,7 @@ const config = [
      * entry points and generated constructors intentionally do not follow
      * JavaScript's capitalisation heuristics.
      */
-    files: ['libs/tau-examples/src/kernels/opencascade/**/*.ts'],
+    files: ['libs/tau-examples/src/kernels/opencascade/**/*.ts', 'libs/tau-examples/src/standalone/opencascadejs/*'],
     rules: {
       'new-cap': 'off',
     },

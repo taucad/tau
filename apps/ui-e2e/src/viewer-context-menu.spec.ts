@@ -52,11 +52,6 @@ type MenuRowGeometry = {
   readonly width: number;
 };
 
-async function dismissCookieBanner(): Promise<void> {
-  const declineCookies = selectors.getByRole('button', { name: /^decline$/i });
-  await target.click(declineCookies, { timeout: 5000 }).catch(() => undefined);
-}
-
 async function readMenuItemVisualState(locator: Locator): Promise<MenuItemVisualState> {
   return target.evaluateLocator(locator, (element) => {
     const style = getComputedStyle(element);
@@ -264,7 +259,6 @@ async function openSeededProject(): Promise<void> {
   await target.setViewport({ width: 1280, height: 900 });
   await target.navigate(seedRoute);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  await dismissCookieBanner();
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region'), 60_000);
   await target.expectVisible(selectors.getByCss(canvasSelector), 60_000);
   await waitForViewerBridge();

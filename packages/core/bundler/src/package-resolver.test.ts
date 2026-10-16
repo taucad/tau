@@ -72,6 +72,22 @@ describe('resolveDependencyTree', () => {
     expect(lock?.packages['node_modules/react-dom/node_modules/react']).toBeUndefined();
   });
 
+  it('should nest a transitive React 18 consumer below a React 19 project', async () => {
+    const result = await resolveDependencyTree({
+      manifest: { dependencies: { host: '1.0.0', react: '19.0.0' } },
+      registry: registryOf({
+        host: packument('host', [version('host', '1.0.0', { dependencies: { 'react-dom': '^18' } })]),
+        react: packument('react', [version('react', '18.3.1'), version('react', '19.0.0')]),
+      }),
+      signal,
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.lock?.packages['node_modules/react']?.version).toBe('19.0.0');
+    expect(result.lock?.packages['node_modules/react-dom']).toBeUndefined();
+    expect(result.lock?.packages['node_modules/host/node_modules/react-dom']?.version).toBe('18.3.1');
+    expect(result.lock?.packages['node_modules/host/node_modules/react']?.version).toBe('18.3.1');
+  });
+
   it('should refuse an unsatisfiable peer with peer-conflict and no lock', async () => {
     const result = await resolveDependencyTree({
       manifest: { dependencies: { react: '^17', 'react-dom': '^18' } },

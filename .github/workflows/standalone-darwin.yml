@@ -1,0 +1,110 @@
+# The nuget row of the standalone-project oracles (native dependency charter W23, D34, I14; go-live
+# row PRJ-1), whose other rows run in `ci.yml`: the PicoGK project Tau creates restores and runs
+# outside Tau with the .NET SDK alone (`dotnet restore --locked-mode`, then `dotnet run`, which
+# builds the model headless against NuGet PicoGK 2.3.0), and its geometry matches `tau export` of
+# the same project from Tau's own PicoGK build. PicoGK's upstream engine ships for osx-arm64 and
+# win-x64 only, so the row runs on macOS: on every pull request that affects a project with a
+# `test:native-darwin` target, selected through Nx, and on every push to `main`.
+#
+# A workflow of its own, as `native-darwin.yml` is, so that `ci.yml` finishes with its Linux lanes:
+# a macOS queue here no longer delays a staging candidate. The row still reports its own status on
+# `main` and on pull requests. Not a required check: the macOS queue must never hold a merge
+# (ruling X10). A pull request run that Dependabot itself triggered never requests a macOS runner.
+name: Standalone darwin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches-ignore:
+      - production
+
+permissions:
+  contents: read
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_NO_CLOUD: 'true'
+
+# A newer push to a pull request cancels its outdated run; each push to `main` has a group of its
+# own and is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Select the nuget row
+    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # Every push to `main` runs the row; a pull request runs it when it affects a project with a
+      # `test:native-darwin` target. `pipefail` so a failing `nx show projects` fails the step;
+      # `tail -1` drops Nx's log lines.
+      - name: Select the row
+        id: plan
+        run: |
+          set -o pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          projects=$(pnpm nx show projects --affected --with-target test:native-darwin --json | tail -1)
+          echo "Affected native darwin-arm64 projects: $projects"
+          if [ "$projects" = '[]' ]; then echo "run=false"; else echo "run=true"; fi >> "$GITHUB_OUTPUT"
+
+  standalone-darwin:
+    name: Standalone projects (nuget, macos-26)
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
+      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
+      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - name: Install the .NET 10 SDK
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
+          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/dotnet"
+          tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
+          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
+
+      - name: Check every template outside Tau
+        run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"

@@ -1,9 +1,8 @@
-import { X } from 'lucide-react';
-import { PaneButton } from '#components/ui/pane-button.js';
 import type { ComponentProps, FunctionComponent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { DockviewApi, DockviewReadyEvent, DockviewTheme, IDockviewHeaderActionsProps } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
+import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
@@ -372,23 +371,6 @@ export function Dockview({
         <div className='flex h-full items-center gap-1'>
           <DockviewTabOverflowPicker {...actionProperties} getIcon={getTabIcon} leadingIcon={tabLeadingIcon} />
           {CallerActions ? <CallerActions {...actionProperties} /> : null}
-          {actionProperties.activePanel ? (
-            <PaneButton
-              aria-label={`Close ${actionProperties.activePanel.api.title ?? actionProperties.activePanel.id}`}
-              tooltip='Close active tab'
-              onClick={(event) => {
-                const groupElement = actionProperties.group.element;
-                const dockviewElement = event.currentTarget.closest<HTMLElement>('.dockview-theme-tau');
-                actionProperties.activePanel?.api.close();
-                const nextTab =
-                  groupElement.querySelector<HTMLElement>('.dv-tab[aria-selected="true"]') ??
-                  dockviewElement?.querySelector<HTMLElement>('.dv-tab[aria-selected="true"], button');
-                (nextTab?.isConnected ? nextTab : resizeRootRef.current)?.focus();
-              }}
-            >
-              <X aria-hidden className='size-3.5' />
-            </PaneButton>
-          ) : null}
         </div>
       );
     };
@@ -447,11 +429,11 @@ export function Dockview({
     <OmniScroller
       ref={resizeRootRef}
       data-resize-owner
-      tabIndex={-1}
       className={cn('pane-resize size-full', dockviewStyleOverrides, desktopDockviewStyleOverrides)}
       viewportSelector='.dv-tabs-container'
       onClick={handleTabClick}
     >
+      <DockviewStyles />
       <DockviewReact
         {...properties}
         className={className}

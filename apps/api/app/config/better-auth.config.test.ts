@@ -293,6 +293,28 @@ describe('getBetterAuthConfig abuse gates', () => {
     expect(auth.options.account.encryptOAuthTokens).toBe(true);
   });
 
+  it('should refuse browser OAuth token getters in the runtime auth router', async () => {
+    const { config } = createConfig();
+    const auth = betterAuth({
+      ...config,
+      database: memoryAdapter({ user: [], session: [], account: [], verification: [], apikey: [] }),
+    });
+    for (const path of ['get-access-token', 'refresh-token']) {
+      // oxlint-disable-next-line no-await-in-loop -- assert each disabled route's actual HTTP response.
+      const response = await auth.handler(
+        new Request(`http://localhost:4000/v1/auth/${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
+          body: JSON.stringify({ accountId: 'linked' }),
+        }),
+      );
+      expect(response.status).toBe(404);
+      // oxlint-disable-next-line no-await-in-loop -- inspect each route's bounded response.
+      expect(await response.text()).not.toContain('accessToken');
+    }
+    expect(typeof auth.api.getAccessToken).toBe('function');
+  });
+
   it('caps session reads without reducing the global auth limit', async () => {
     const { staticAuthConfig } = await import('#config/auth.js');
     const counts = new Map<string, number>();

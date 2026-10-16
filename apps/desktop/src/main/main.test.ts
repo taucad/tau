@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -9,6 +9,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
@@ -16,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
   openDirectoryChannel,
+  revealPathChannel,
   machinesChannels,
   quitChannels,
   servicesPortRelayTag,
@@ -98,12 +100,27 @@ const state = vi.hoisted(() => ({
   installedUpdateMenuItems: [] as UpdateMenuItem[],
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
+  nativeStoreOptions: undefined as unknown,
+  runtimePost: vi.fn(),
+}));
+
+vi.mock('#tau/native-store.js', () => ({
+  startNativeStore: vi.fn(async (options: unknown) => {
+    state.nativeStoreOptions = options;
+    return undefined;
+  }),
 }));
 
 vi.mock('#main/updater.js', () => ({
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
-    return { check: state.updaterCheck, install: state.updaterInstall, status: () => 'Update ready' };
+    return {
+      check: state.updaterCheck,
+      install: state.updaterInstall,
+      status: () => 'Update ready',
+      snapshot: () => ({ phase: 'ready' }),
+      download: vi.fn(),
+    };
   },
 }));
 
@@ -248,7 +265,7 @@ vi.mock('electron', () => ({
       webRequest: {},
     },
   },
-  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => '') },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   utilityProcess: { fork: vi.fn() },
 }));
 
@@ -259,7 +276,7 @@ vi.mock('@taucad/runtime/electron/main', () => ({
       state.resolveFork = options.resolveFork;
       state.runtimeMaxUtilities = options.maxUtilities;
       state.kernelUtilityEntry = options.utilityEntry;
-      return { connect: vi.fn(), dispose: vi.fn(), post: vi.fn(), prewarm: state.runtimePrewarm };
+      return { connect: vi.fn(), dispose: vi.fn(), post: state.runtimePost, prewarm: state.runtimePrewarm };
     },
   ),
 }));
@@ -269,6 +286,7 @@ vi.mock('@taucad/host', async (importOriginal) => {
     await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
+    defaultPayloadStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
@@ -465,18 +483,41 @@ describe('desktop main compute owner', () => {
   };
 
   it(
-    'should expose a native update action that can resume a deferred installation',
+    'should open the update surface from the native menu without a modal or restart',
     async () => {
       await bootstrap();
       await vi.waitFor(() => {
         expect(state.installedUpdateMenuItems.map((item) => item.label)).toEqual(['About Tau', 'Check for Updates…']);
       });
-      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      dialog.showMessageBox.mockClear();
       state.installedUpdateMenuItems[1]!.click!();
       await vi.waitFor(() => {
         expect(state.updaterCheck).toHaveBeenCalledOnce();
-        expect(state.updaterInstall).toHaveBeenCalledOnce();
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
+        expect(state.updaterInstall).not.toHaveBeenCalled();
+        expect(dialog.showMessageBox).not.toHaveBeenCalled();
       });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should refuse update IPC from an untrusted document',
+    async () => {
+      await bootstrap();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      await Promise.all(
+        [
+          desktopUpdateChannels.snapshot,
+          desktopUpdateChannels.check,
+          desktopUpdateChannels.install,
+          desktopUpdateChannels.download,
+        ].map(async (channel) => {
+          vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+          await expect(state.handlers.get(channel)!({ senderFrame: {} })).rejects.toThrow('Untrusted update request');
+        }),
+      );
+      expect(state.updaterInstall).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );
@@ -529,6 +570,23 @@ describe('desktop main compute owner', () => {
     expect(shell.openPath).not.toHaveBeenCalled();
     vi.mocked(shell.openPath).mockResolvedValueOnce('No file manager available');
     await expect(open({ senderFrame: {} }, directory)).rejects.toThrow('No file manager available');
+  }, 120_000);
+
+  it('should reveal only granted files and folders in the file manager', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'main.ts'), '');
+    const { shell } = await import('electron');
+    const reveal = state.handlers.get(revealPathChannel)!;
+    await expect(reveal({ senderFrame: {} }, join(directory, 'main.ts'))).resolves.toBeUndefined();
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(join(await realpath(directory), 'main.ts'));
+    vi.mocked(shell.showItemInFolder).mockClear();
+    await expect(reveal({ senderFrame: {} }, join(tmpdir(), 'outside.ts'))).rejects.toThrow('Reopen this folder');
+    await expect(reveal({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(reveal({ senderFrame: {} }, join(directory, 'missing.ts'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(reveal({ senderFrame: {} }, join(directory, 'escape', 'x'))).rejects.toThrow('Reopen this folder');
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
   }, 120_000);
 
   it(
@@ -1471,13 +1529,40 @@ describe('desktop main machine store', () => {
     'passes the staged esbuild binary to the geometry utility that bundles GeoSpec files',
     async () => {
       await boot();
-      const geometryEnvironment = state.utilityEnvironmentAdditions.find(
-        (additions) =>
-          'TAU_DESKTOP_LOG_DIR' in additions &&
-          !('TAU_DESKTOP_MACHINES_DIR' in additions) &&
-          !('TAU_BUILD123D_RESOURCE_ROOT' in additions),
+      // The kernel and geometry utilities; the services utility is the one that receives the config directory.
+      const runtimeEnvironments = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_DESKTOP_LOG_DIR' in additions && !('TAU_CONFIG_DIR' in additions),
       );
-      expect(geometryEnvironment?.['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
+      expect(runtimeEnvironments).toHaveLength(2);
+      for (const environment of runtimeEnvironments) {
+        expect(environment['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'seeds the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    async () => {
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.nativeStoreOptions).toBeDefined();
+      });
+      const options = state.nativeStoreOptions as {
+        readonly store: string;
+        readonly bundle: string | undefined;
+        readonly hostPath: string;
+        readonly post: (frame: unknown) => void;
+      };
+      // Unpackaged there is no bundle to seed from; the store is the one every Tau host on the machine shares.
+      expect(options).toMatchObject({ store: join(state.userData, 'store'), bundle: undefined });
+      expect(options.hostPath).toBe(join(state.userData, 'exe'));
+      const frame = { type: 'tau:native-kernels', kernels: [] };
+      options.post(frame);
+      expect(state.runtimePost).toHaveBeenCalledWith(frame);
+      for (const additions of state.utilityEnvironmentAdditions) {
+        expect(Object.keys(additions).filter((name) => name.endsWith('_RESOURCE_ROOT'))).toEqual([]);
+      }
     },
     bootMilliseconds,
   );

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
@@ -74,6 +74,21 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expectVisible(page.getByRole('article').getByText(/^8127[.!]?$/u));
       expect(readEvents()).toContain('"agentId":"grok"');
       await session.capture('grok-composer-continuity');
+      const memoryRun = latestCompletedRun(readEvents());
+      writeFileSync(
+        join(session.pickedDirectory, slug, 'visual-check.png'),
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAdklEQVR4nO3PQQkAMAzAwPo33Yno4xgEIuAyO/t1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWHHtBp+HSthEAJgAAAABJRU5ErkJggg==',
+          'base64',
+        ),
+      );
+      await sendPrompt(
+        page,
+        'Open visual-check.png with your file-reading tool and identify its dominant color. Inspect the image itself; do not decode its bytes with code. Reply with only the color.',
+      );
+      await expect.poll(() => latestCompletedRun(readEvents()), { timeout: 180_000 }).not.toBe(memoryRun);
+      await expectVisible(page.getByRole('article').getByText(/^(?:magenta|fuchsia)[.!]?$/iu));
+      await session.capture('grok-composer-image-read');
       const secondRun = latestCompletedRun(readEvents());
       await sendPrompt(
         page,
@@ -86,9 +101,26 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expect
         .poll(
           async () => {
+            const scroll = page.getByRole('button', { name: 'Scroll to bottom', exact: true });
+            if (await scroll.isVisible()) {
+              await scroll.click();
+            }
+            // Permission pauses can collapse these groups before the tool starts running.
+            const group = page
+              .getByRole('button', { name: /Rendering models|Running tests|Capturing images/u, expanded: false })
+              .first();
+            // Concurrent tools can have separate collapsed groups; inspect all before approving either.
+            // oxlint-disable-next-line no-await-in-loop -- Each click removes that group from the collapsed locator.
+            while (await group.isVisible()) {
+              // oxlint-disable-next-line no-await-in-loop -- Re-resolve the first remaining group after each click.
+              await group.click();
+            }
             const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();
             const loading = await page.locator('[data-status="loading"]:visible').allTextContents();
-            for (const label of [...activity, ...loading]) {
+            const permissions = await page
+              .locator('[aria-label="Approval required"], [aria-label="Request allowed"]')
+              .allTextContents();
+            for (const label of [...activity, ...loading, ...permissions]) {
               if (/tau__(?:evaluate_model|test_model|screenshot)/u.test(label)) {
                 rawMcpLabels.add(label);
               }
@@ -140,6 +172,7 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
           toolResult(readEvents(), { runId: cadRun, toolName: 'screenshot', targetFile: 'main.py' }),
         ).images,
       ).toHaveLength(6);
+      expect(await page.getByText('Image capture failed', { exact: true }).count()).toBe(0);
       expect(readEvents()).toContain('cad-build123d');
       await session.capture('grok-composer-cad');
     } catch (error) {

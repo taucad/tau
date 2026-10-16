@@ -496,7 +496,20 @@ export const resolveDependencyTree = async (
         levels.unshift(level);
       }
       const candidate = { realName: spec.name, version: choice.version };
-      const level = levels.find((option) => !option.children.has(edge.name) && canPlace(option, edge.name, candidate));
+      // Keep a package below incompatible peers instead of hoisting it into an unsatisfiable sibling set.
+      const level = levels.find(
+        (option) =>
+          !option.children.has(edge.name) &&
+          canPlace(option, edge.name, candidate) &&
+          Object.entries(choice.entry.peerDependencies ?? {}).every(([name, range]) => {
+            if (node === root || choice.entry.peerDependenciesMeta?.[name]?.optional === true) {
+              return true;
+            }
+            const sibling = option.children.get(name);
+            const peerSpec = parseSpec(name, range);
+            return sibling === undefined || (peerSpec !== undefined && satisfiesSpec(sibling, peerSpec));
+          }),
+      );
       if (level === undefined) {
         report({
           code: 'peer-conflict',

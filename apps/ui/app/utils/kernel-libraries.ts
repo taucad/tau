@@ -19,6 +19,7 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
     '@tscircuit/core': '0.0.1844',
     '@tscircuit/props': '0.0.646',
     react: '19.2.7',
+    'react-dom': '19.2.7',
     '@tscircuit/capacity-autorouter': '0.0.879',
     '@tscircuit/checks': '0.0.183',
     '@tscircuit/circuit-json-util': '0.0.111',

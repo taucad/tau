@@ -67,6 +67,7 @@ describe('tscircuit package identity', () => {
       '@tscircuit/core': core!.version,
       '@tscircuit/props': props!.version,
       react: react!.version,
+      'react-dom': react!.version,
     });
     expect(Object.fromEntries(registerModule.mock.calls.map(([name, entry]) => [name, entry.package]))).toEqual({
       react: { name: 'react', spec: react!.version },

@@ -114,7 +114,7 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                     0),
                 captured.Mechanism,
                 captured.Warnings,
-                captured.Resources, captured.WorkCounters) with { ComputeRecords = computeRecords };
+                captured.Resources, captured.WorkCounters) with { ComputeRecords = computeRecords, VoxelSize = library.fVoxelSize };
         }
         catch (Exception error)
         {

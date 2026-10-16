@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-export const picogkProtocolVersion = 8;
+export const picogkProtocolVersion = 9;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -165,6 +165,8 @@ export const picogkBuildSchema = z
     recycleAfterResponse: z.boolean(),
     timings: picogkWorkerTimingsSchema,
     metrics: picogkWorkerMetricsSchema,
+    /** Voxel edge length in millimetres the model's `Library.Go` ran with; absent without a voxel library. */
+    voxelSize: z.number().positive().optional(),
   })
   .strict()
   .superRefine((scene, context) => {

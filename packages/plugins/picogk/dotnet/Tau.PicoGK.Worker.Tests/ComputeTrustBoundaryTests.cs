@@ -79,7 +79,7 @@ public sealed partial class WorkerTests
         var request=(JsonObject)identity.DeepClone();request.Remove("version");request.Remove("records");
         request["preloadManifest"]=Path.Combine(directory,"preload.json");request["resultManifest"]=Path.Combine(directory,"result.json");request["maxEncodedBytes"]=268435456;request["maxNativeBytes"]=268435456;request["maxEntries"]=4096;
         Write("main.cs","using PicoGK;using System.Numerics;Library.Go(.5f,()=>{using var shape=Voxels.voxSphere(Library.oLibrary(),Vector3.Zero,8f);Library.oViewer().Add(shape);using var mesh=new Mesh(shape);Library.oViewer().Add(mesh);});");
-        var input=JsonSerializer.Serialize(new{protocolVersion=8,requestId="cold",method="build",@params=new{entryPath="main.cs",parameters=new{},computeReuse=request}})+"\n";
+        var input=JsonSerializer.Serialize(new{protocolVersion=9,requestId="cold",method="build",@params=new{entryPath="main.cs",parameters=new{},computeReuse=request}})+"\n";
         var output=new StringWriter();Assert.Equal(0,Program.Run(["--workspace",root,"--artifacts",root,"--parent-pid",Environment.ProcessId.ToString()],new StringReader(input),output,new StringWriter()));
         Assert.Contains("artifactPath",output.ToString());
         var manifest=JsonNode.Parse(File.ReadAllText(Path.Combine(directory,"result.json")))!.AsObject();Assert.NotEmpty(manifest["records"]!.AsArray());

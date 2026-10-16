@@ -86,6 +86,7 @@ const buildResult = (id = 'component:picogk-1') => ({
     picoGkNativeBytes: 0,
     processWorkingSetBytes: 20,
   },
+  voxelSize: 0.25,
 });
 
 const contextData = () => ({
@@ -372,6 +373,7 @@ describe('PicoGK kernel', () => {
       triangles: 1,
       vertices: 3,
       elapsed: workerTimings.meshConstruction + workerTimings.meshExtraction + workerTimings.normalGeneration,
+      voxelSize: 0.25,
     });
     const serialized = definition.serializeHandle!({ handle }, runtime, value);
     const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtime, value);
@@ -381,6 +383,24 @@ describe('PicoGK kernel', () => {
     expect(definition.deserializeHandle!({ serialized: new Uint8Array(handle.glb) }, runtime, value)).toEqual({
       glb: handle.glb,
     });
+    // A snapshot written before the report carried the voxel size still restores, without one.
+    const { voxelSize: _voxelSize, ...withoutVoxelSize } = handle.tessellation!;
+    expect(
+      definition.deserializeHandle!(
+        { serialized: { glb: handle.glb, tessellation: withoutVoxelSize } },
+        runtime,
+        value,
+      ),
+    ).toEqual({ glb: handle.glb, tessellation: withoutVoxelSize });
+    const restoreWithVoxelSize = (voxelSize: number) => () =>
+      definition.deserializeHandle!(
+        { serialized: { glb: handle.glb, tessellation: { ...handle.tessellation!, voxelSize } } },
+        runtime,
+        value,
+      );
+    for (const voxelSize of [0, -1, Number.POSITIVE_INFINITY]) {
+      expect(restoreWithVoxelSize(voxelSize)).toThrow();
+    }
     expect(() =>
       definition.deserializeHandle!(
         { serialized: { glb: handle.glb, tessellation: { ...handle.tessellation!, triangles: -1 } } },

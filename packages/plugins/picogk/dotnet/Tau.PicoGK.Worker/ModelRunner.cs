@@ -43,7 +43,9 @@ internal sealed record ModelExecutionResult(
     JsonElement? Mechanism,
     IReadOnlyList<Issue> Warnings,
     MaterialResources? Resources = null, WorkCounters? WorkCounters = null,
-    IReadOnlyList<TauComputeStableRecord>? ComputeRecords = null);
+    IReadOnlyList<TauComputeStableRecord>? ComputeRecords = null,
+    // The voxel edge length in millimetres `Library.Go` ran the model with; null without a library.
+    float? VoxelSize = null);
 
 internal sealed record LayoutStability(float MinimumArea, float MaximumEdgeSum, float CreaseMargin, float MinimumFanArea, int MaximumFanFaces, float UvAxisMargin);
 

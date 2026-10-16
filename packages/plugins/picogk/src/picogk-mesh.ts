@@ -439,13 +439,13 @@ export const picogkArtifactToGlb = (
 
 /**
  * What the delivered PicoGK mesh cost: triangles and vertices drawn across every occurrence, and the
- * worker's mesh construction, extraction and normal generation time. Line prototypes carry no
- * triangles and are not counted.
+ * worker's mesh construction, extraction and normal generation time, with the voxel size the model
+ * ran at when it had one. Line prototypes carry no triangles and are not counted.
  * @param result - Validated build descriptor returned by the worker.
  * @returns The rendered view's tessellation report.
  */
 export const picogkTessellation = (
-  result: Pick<PicogkBuild, 'prototypes' | 'occurrences' | 'timings'>,
+  result: Pick<PicogkBuild, 'prototypes' | 'occurrences' | 'timings' | 'voxelSize'>,
 ): TessellationReport => {
   const meshes = new Map(
     result.prototypes.filter(({ kind }) => kind === 'triangles').map((prototype) => [prototype.id, prototype]),
@@ -460,12 +460,22 @@ export const picogkTessellation = (
     }
   }
   const { meshConstruction, meshExtraction, normalGeneration } = result.timings;
-  return { triangles, vertices, elapsed: meshConstruction + meshExtraction + normalGeneration };
+  return {
+    triangles,
+    vertices,
+    elapsed: meshConstruction + meshExtraction + normalGeneration,
+    ...(result.voxelSize === undefined ? {} : { voxelSize: result.voxelSize }),
+  };
 };
 
 const meshCount = z.number().int().nonnegative();
 
 /** A PicoGK tessellation report restored from a handle snapshot. @internal */
 export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
-  .object({ triangles: meshCount, vertices: meshCount, elapsed: z.number().nonnegative() })
+  .object({
+    triangles: meshCount,
+    vertices: meshCount,
+    elapsed: z.number().nonnegative(),
+    voxelSize: z.number().positive().optional(),
+  })
   .strict();

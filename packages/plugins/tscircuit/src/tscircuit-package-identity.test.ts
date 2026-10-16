@@ -28,12 +28,27 @@ const readInstalled = async (
     peerDependencies?: Record<string, string>;
   };
 
+const additionalRuntimePackages = [
+  '@tscircuit/soup-util',
+  'connectivity-map',
+  '@tscircuit/copper-pour-solver',
+  '@tscircuit/image-utils',
+  '@tscircuit/infer-cable-insertion-point',
+  '@tscircuit/miniflex',
+  '@tscircuit/schematic-trace-solver',
+  '@tscircuit/solver-utils',
+  'calculate-elbow',
+  'graphics-debug',
+  'minicssgrid',
+  'spicey',
+];
+
 describe('tscircuit package identity', () => {
   it('should pin every required engine peer to the installed project version', async () => {
     const core = await readInstalled('@tscircuit/core');
     const dependencies = tscircuitKernel().builtinDependencies;
     await Promise.all(
-      [...Object.keys(core.peerDependencies ?? {}), '@tscircuit/soup-util', 'connectivity-map'].map(async (name) => {
+      [...Object.keys(core.peerDependencies ?? {}), ...additionalRuntimePackages].map(async (name) => {
         const installed = await readInstalled(name);
         expect(dependencies?.[name], name).toBe(installed.version);
         expect(dependencies?.[name], name).toMatch(/^\d+\.\d+\.\d+$/);
@@ -53,7 +68,7 @@ describe('tscircuit package identity', () => {
 
     const peers = Object.fromEntries(
       await Promise.all(
-        [...Object.keys(core!.peerDependencies ?? {}), '@tscircuit/soup-util', 'connectivity-map'].map(
+        [...Object.keys(core!.peerDependencies ?? {}), ...additionalRuntimePackages].map(
           async (name): Promise<readonly [string, string]> => {
             const installed = await readInstalled(name);
             return [name, installed.version];
@@ -68,6 +83,7 @@ describe('tscircuit package identity', () => {
       '@tscircuit/props': props!.version,
       react: react!.version,
       'react-dom': react!.version,
+      debug: '4.4.3',
     });
     expect(Object.fromEntries(registerModule.mock.calls.map(([name, entry]) => [name, entry.package]))).toEqual({
       react: { name: 'react', spec: react!.version },

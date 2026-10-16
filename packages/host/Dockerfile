@@ -38,11 +38,10 @@
 #     image therefore runs as `tau`; never run it with `--user 0`. The container
 #     must also be allowed to create user namespaces; see
 #     `scripts/build-native-image.sh` for the `docker run` options.
-#   - The image carries no ACP adapters' CLIs: `claude-agent-acp`/`codex-acp`
-#     resolve as `@taucad/cli` dependencies but the entrypoint starts the daemon
-#     with `--no-external-agents`, so nothing spawns them. Dropping them from the
-#     image means making them optional peers of `@taucad/cli` — a package change,
-#     not a Dockerfile one.
+#   - The image carries no ACP agent CLIs: the build stages the two adapters
+#     into the CLI's `dist-acp` without their vendor binaries, and the
+#     entrypoint starts the daemon with `--no-external-agents`, so nothing
+#     spawns them.
 #   - No pairing happens here. A cloud host is provisioned by the API, which
 #     mints the device credential and passes it in as `TAU_HOST_CREDENTIAL`;
 #     the entrypoint writes it to `$TAU_CONFIG_DIR/host.json`, exactly the file

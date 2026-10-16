@@ -75,6 +75,10 @@ jobs:
           {
             echo "== probe"; cat "$EVIDENCE/probe.txt" 2>/dev/null || echo "(no probe output)"
             echo "== oracle"; cat "$EVIDENCE/summary.txt" 2>/dev/null || echo "(no oracle summary)"
+            echo "== build (failed Nx tasks)"
+            for task in $(grep -oE -- '- [a-z0-9@/_-]+:[a-z0-9:_-]+$' "$EVIDENCE/build.log" 2>/dev/null | cut -c3- | sort -u); do
+              grep -m1 -A40 -F -- "> nx run $task" "$EVIDENCE/build.log" | cut -c1-240
+            done || true
             echo "== build (tail)"; tail -n 40 "$EVIDENCE/build.log" 2>/dev/null | cut -c1-240 || true
           } > "$report"
           { echo '```'; cat "$report"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

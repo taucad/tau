@@ -14,6 +14,8 @@ import { resolveMechanismComponents, transformMechanism } from '@taucad/kinemati
 import type { Issue } from '@taucad/kinematics';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
 
+import { z } from 'zod';
+
 import type { PicogkBuild } from '#picogk.protocol.js';
 
 const scalarBytes = 4;
@@ -460,3 +462,10 @@ export const picogkTessellation = (
   const { meshConstruction, meshExtraction, normalGeneration } = result.timings;
   return { triangles, vertices, elapsed: meshConstruction + meshExtraction + normalGeneration };
 };
+
+const meshCount = z.number().int().nonnegative();
+
+/** A PicoGK tessellation report restored from a handle snapshot. @internal */
+export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
+  .object({ triangles: meshCount, vertices: meshCount, elapsed: z.number().nonnegative() })
+  .strict();

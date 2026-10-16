@@ -15,7 +15,7 @@ import {
 } from '@taucad/chat/schemas/tools/parameter';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
-import type { ExportFile, KernelIssue, TessellationReport } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue, KernelIssueCode, TessellationReport } from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -304,10 +304,17 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
 
+/** Kernel issue codes for caller-supplied options the kernel's schema refused: the caller's input, not the model, is wrong. */
+const optionIssueCodes: ReadonlySet<KernelIssueCode> = new Set(['VIEW_OPTIONS_INVALID', 'EXPORT_OPTIONS_INVALID']);
+
+const isOptionIssue = (issue: KernelIssue): boolean => optionIssueCodes.has(issue.code);
+
 const issueErrorCode = (issues: readonly KernelIssue[]) =>
   issues.some((issue) => issue.code === 'AUTHENTICATION_ERROR')
     ? rpcClientErrorCode.authenticationError
-    : rpcClientErrorCode.unknown;
+    : issues.some((issue) => isOptionIssue(issue))
+      ? rpcClientErrorCode.validationError
+      : rpcClientErrorCode.unknown;
 
 const requireImageFiles = (
   files: readonly ExportFile[] | undefined,
@@ -362,7 +369,7 @@ export const createRuntimeAgentClients = (
     typeof input.runtime === 'function' ? input.runtime() : input.runtime;
 
   const kernelClient: RpcRuntimeClient = {
-    async evaluateModel({ targetFile, includeCapabilities, parameters }, context) {
+    async evaluateModel({ targetFile, includeCapabilities, options, parameters }, context) {
       const rooted = assertRootedPath(targetFile);
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
@@ -385,12 +392,31 @@ export const createRuntimeAgentClients = (
         let { sourceRevision } = evaluation;
         let ready = evaluation.success;
         let tessellation: TessellationReport | undefined;
-        if (evaluation.success && evaluation.views.length > 0) {
-          const view = document.view();
+        const [defaultView] = evaluation.success ? evaluation.views : [];
+        if (evaluation.success && defaultView === undefined && options !== undefined) {
+          return {
+            success: false,
+            errorCode: rpcClientErrorCode.validationError,
+            message: 'options apply to the default view, and this model offers no view. Omit options for this file.',
+          };
+        }
+        if (defaultView !== undefined) {
+          const view = options === undefined ? document.view() : document.view(defaultView.id, { options });
           try {
             const projected = await view.rendering({ signal: context?.signal });
             if (projected.superseded) {
               throw new Error('Default view rendering was superseded');
+            }
+            // Options the default view refused are the caller's input error, refused as screenshot refuses them.
+            const refused = projected.rendering.success
+              ? []
+              : projected.rendering.issues.filter((issue) => isOptionIssue(issue));
+            if (options !== undefined && refused.length > 0) {
+              return {
+                success: false,
+                errorCode: rpcClientErrorCode.validationError,
+                message: issueMessage(refused, 'View options were refused'),
+              };
             }
             issues = [...issues, ...projected.rendering.issues];
             sourceRevision = projected.rendering.sourceRevision ?? sourceRevision;

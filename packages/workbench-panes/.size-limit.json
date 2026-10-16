@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/workbench-panes runtime",
+    "path": "dist/**/*.mjs",
+    "limit": "80 kB"
+  }
+]

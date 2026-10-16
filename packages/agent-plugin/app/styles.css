@@ -1,10 +1,26 @@
 @import 'tailwindcss' source(none);
+@import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
+/* The Tau app's base layer: token borders, focus rings, selection and thin scrollbars (viewer parity V1). */
+@import '@taucad/ui/styles/base.css';
+@import 'dockview-react/dist/styles/dockview.css';
+@import '@taucad/workbench-panes/styles/panes.css';
 
 /* The page draws only what these sources use. */
 @source '.';
 @source '../../ui/src';
 @source '../../viewer/src';
+@source '../../workbench-panes/src';
+
+/* Geist, as the Tau app draws it (R2), inlined: the page has no origin to fetch a font from. geist exports only its
+ * JS entries, never the raw font files, so the path is the package's own. */
+@font-face {
+  font-family: 'Geist Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2-variations');
+}
 
 /* The running viewer tool's glyph, as the app defines it (`apps/ui/app/styles/global.css`). */
 :root {
@@ -20,12 +36,9 @@
   --color-viewer-tool-active: var(--viewer-tool-active);
 }
 
-/* The host's font (E6): it sets `--font-sans` on the root; no font is bundled. */
 html,
 body {
   margin: 0;
-  font-family: var(--font-sans);
-  background-color: var(--background);
 }
 
 /* In a card the conversation scrolls vertically; a horizontal drag still orbits (E5, G21).

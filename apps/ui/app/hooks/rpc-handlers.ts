@@ -14,6 +14,7 @@ import type {
   RpcCall,
   RpcClientErrorCode,
   RpcResult,
+  EvaluateModelRpcInput,
   EvaluateModelRpcResult,
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
@@ -36,7 +37,7 @@ import type {
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
 import { asKnownArtifact } from '@taucad/runtime';
-import type { KernelIssue, ViewOffer } from '@taucad/runtime';
+import type { KernelIssue, Rendering, ViewOffer } from '@taucad/runtime';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -447,12 +448,111 @@ function geometryFailureMessage(issues: readonly KernelIssue[]): string {
   return issues.map((issue) => issue.message).join('; ');
 }
 
+type DefaultViewVerdict = Pick<
+  Extract<EvaluateModelRpcResult, { success: true }>,
+  'status' | 'kernelIssues' | 'sourceRevision' | 'tessellation'
+>;
+
+/** The default view's verdict from the settled viewer projection. */
+function viewerVerdict(cadSnapshot: SnapshotFrom<typeof cadMachine>, targetFile: string): DefaultViewVerdict {
+  const { evaluation, lastProjection } = cadSnapshot.context;
+  const sourceRevision =
+    (lastProjection?.evaluationId === evaluation?.id ? lastProjection?.sourceRevision : undefined) ??
+    evaluation?.sourceRevision;
+  const ready =
+    evaluation?.success === true &&
+    (evaluation.views.length === 0 || cadSnapshot.context.latestRenderingOutcome === 'success');
+  return {
+    status: ready ? 'ready' : 'error',
+    kernelIssues: cadSnapshot.context.kernelIssues.get(targetFile) ?? [],
+    ...(sourceRevision ? { sourceRevision } : {}),
+  };
+}
+
+/** The default view's verdict from the rendering made with the caller's options. */
+function optionedVerdict(cadSnapshot: SnapshotFrom<typeof cadMachine>, optioned: Rendering): DefaultViewVerdict {
+  const { evaluation } = cadSnapshot.context;
+  const sourceRevision = optioned.sourceRevision ?? evaluation?.sourceRevision;
+  const tessellation = optioned.success ? optioned.artifact.tessellation : undefined;
+  return {
+    status: evaluation?.success === true && optioned.success ? 'ready' : 'error',
+    kernelIssues: [...(evaluation?.issues ?? []), ...optioned.issues],
+    ...(sourceRevision ? { sourceRevision } : {}),
+    ...(tessellation === undefined ? {} : { tessellation }),
+  };
+}
+
+type DefaultViewRendering =
+  | Readonly<{ success: true; rendering: Rendering }>
+  | Readonly<{ success: false; errorCode: RpcClientErrorCode; message: string }>;
+
+/**
+ * Render the settled unit's default view once more with the caller's options, as the agent host does,
+ * without changing what the viewer shows. Options the view refuses are the caller's input error.
+ */
+async function renderDefaultViewWith(
+  cadSnapshot: SnapshotFrom<typeof cadMachine>,
+  input: Readonly<{ targetFile: string; options: NonNullable<EvaluateModelRpcInput['options']> }>,
+  signal: AbortSignal | undefined,
+): Promise<DefaultViewRendering | undefined> {
+  const { document, evaluation } = cadSnapshot.context;
+  if (!evaluation?.success) {
+    return undefined;
+  }
+  const [defaultView] = evaluation.views;
+  if (defaultView === undefined) {
+    return {
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+      message: 'options apply to the default view, and this model offers no view. Omit options for this file.',
+    };
+  }
+  if (!document) {
+    return {
+      success: false,
+      errorCode: rpcClientErrorCode.unknown,
+      message: `Runtime client not connected for ${input.targetFile}`,
+    };
+  }
+  const view = document.view(defaultView.id, { options: input.options });
+  try {
+    const projected = await view.rendering({ signal });
+    if (projected.superseded) {
+      return {
+        success: false,
+        errorCode: rpcClientErrorCode.unknown,
+        message: `Default view rendering for ${input.targetFile} was superseded`,
+      };
+    }
+    const refused = projected.rendering.success
+      ? []
+      : projected.rendering.issues.filter((issue) => issue.code === 'VIEW_OPTIONS_INVALID');
+    if (refused.length > 0) {
+      return {
+        success: false,
+        errorCode: rpcClientErrorCode.validationError,
+        message: geometryFailureMessage(refused),
+      };
+    }
+    return { success: true, rendering: projected.rendering };
+  } catch (error) {
+    signal?.throwIfAborted();
+    return {
+      success: false,
+      errorCode: rpcClientErrorCode.unknown,
+      message: error instanceof Error ? error.message : 'Default view rendering failed',
+    };
+  } finally {
+    view.close();
+  }
+}
+
 function createBrowserRuntimeClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   operationTimeoutForFile: (path: string) => Promise<number | undefined>,
 ): RpcRuntimeClient {
   return {
-    async evaluateModel({ targetFile, includeCapabilities }, context): Promise<EvaluateModelRpcResult> {
+    async evaluateModel({ targetFile, includeCapabilities, options }, context): Promise<EvaluateModelRpcResult> {
       const resolved = await ensureGeometryUnit(projectRef, targetFile, {
         operationTimeoutForFile,
         signal: context?.signal,
@@ -464,14 +564,17 @@ function createBrowserRuntimeClient(
         const { cadSnapshot } = resolved;
         context?.signal?.throwIfAborted();
         const { evaluation, kernelClient, activeKernelId } = cadSnapshot.context;
-        const lastProjection =
-          cadSnapshot.context.lastProjection?.evaluationId === evaluation?.id
-            ? cadSnapshot.context.lastProjection
-            : undefined;
-        const kernelIssues = cadSnapshot.context.kernelIssues.get(targetFile) ?? [];
-        const ready =
-          evaluation?.success === true &&
-          (evaluation.views.length === 0 || cadSnapshot.context.latestRenderingOutcome === 'success');
+        const viewed =
+          options === undefined
+            ? undefined
+            : await renderDefaultViewWith(cadSnapshot, { targetFile, options }, context?.signal);
+        if (viewed?.success === false) {
+          return viewed;
+        }
+        const verdict =
+          viewed === undefined
+            ? viewerVerdict(cadSnapshot, targetFile)
+            : optionedVerdict(cadSnapshot, viewed.rendering);
         const offered = evaluation?.success
           ? {
               views: evaluation.views.map(({ id }) => id),
@@ -507,11 +610,7 @@ function createBrowserRuntimeClient(
             : {};
         return {
           success: true,
-          status: ready ? 'ready' : 'error',
-          kernelIssues,
-          ...((lastProjection?.sourceRevision ?? evaluation?.sourceRevision)
-            ? { sourceRevision: lastProjection?.sourceRevision ?? evaluation?.sourceRevision }
-            : {}),
+          ...verdict,
           ...offered,
           ...capabilities,
         };

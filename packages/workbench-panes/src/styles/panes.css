@@ -1,0 +1,2 @@
+/* The shared panes' own CSS: the resize affordances every pane engine draws. Import it after Tailwind. */
+@import './pane-resize.css';

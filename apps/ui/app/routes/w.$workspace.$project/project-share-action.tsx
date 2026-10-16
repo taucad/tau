@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
@@ -7,11 +8,13 @@ import { parameterEntryPath, projectToManifest, serializeProjectManifest } from 
 import { randomUuid } from '@taucad/utils/id';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
+import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
 
 type ProjectShareNavigationIntent = {
   readonly shouldOpen: boolean;
@@ -67,6 +70,23 @@ export function ProjectShareRouteIntent(): undefined {
   }, [openPanel, search]);
 
   return undefined;
+}
+
+/**
+ * The workbench's host for the shared Share pane: the project's units and claims, with this panel's share source.
+ *
+ * @param props - The share source and the pane.
+ * @returns The host.
+ */
+export function ProjectShareHost({
+  source,
+  children,
+}: {
+  readonly source: ShareSource;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  const sources = useMemo(() => ({ share: source }), [source]);
+  return <ProjectWorkbenchPanesHost sources={sources}>{children}</ProjectWorkbenchPanesHost>;
 }
 
 export function ProjectShareWorkbenchPanel(): React.JSX.Element {
@@ -194,6 +214,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       initialMethod={navigationIntent.initialMethod}
       githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
       githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
+      host={ProjectShareHost}
     />
   );
 }

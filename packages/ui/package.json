@@ -108,6 +108,10 @@
     "./components/tooltip": "./src/components/tooltip.tsx",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
     "./hooks/use-tick-animation": "./src/hooks/use-tick-animation.ts",
+    "./styles/base.css": {
+      "types": "./src/styles/base.css.d.ts",
+      "default": "./src/styles/base.css"
+    },
     "./styles/tokens.css": {
       "types": "./src/styles/tokens.css.d.ts",
       "default": "./src/styles/tokens.css"
@@ -467,6 +471,10 @@
         "types": "./dist/hooks/use-tick-animation.d.mts",
         "import": "./dist/hooks/use-tick-animation.mjs",
         "default": "./dist/hooks/use-tick-animation.mjs"
+      },
+      "./styles/base.css": {
+        "types": "./dist/styles/base.css.d.ts",
+        "default": "./dist/styles/base.css"
       },
       "./styles/tokens.css": {
         "types": "./dist/styles/tokens.css.d.ts",

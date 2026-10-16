@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { Check, ChevronDown, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Check, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
@@ -11,10 +12,22 @@ import type { ShareProtection, ShareProviderDescriptor } from '@taucad/share/pro
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
-import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Textarea } from '@taucad/ui/components/textarea';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
+import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
+import type { WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
+import { SharePane, SharePaneFrame } from '@taucad/workbench-panes/share/share-pane';
+import type {
+  ShareLinkContext,
+  ShareLinkExtension,
+  ShareLinkMethod,
+  ShareLinkOutcome,
+  ShareLinkRequest,
+  ShareMethodIcon,
+  ShareMethodSource,
+  ShareSource,
+} from '@taucad/workbench-panes/share/share-source';
 import { toast } from '#components/ui/sonner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -29,7 +42,6 @@ import type { PublicationAccessGrant } from '#components/publish/publication-acc
 import { ENV } from '#environment.config.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
-import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import {
   awaitGithubGistConnection,
   connectGithubGist,
@@ -41,6 +53,15 @@ import {
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
+/**
+ * What wraps the shared Share pane with the host it reads: the project's workbench host in the workbench, or a
+ * stand-alone host with no units.
+ */
+export type ProjectShareHost = ComponentType<{
+  readonly source: ShareSource;
+  readonly children: ReactNode;
+}>;
+
 export type ProjectSharePanelProps = {
   readonly projectId: string;
   readonly projectName: string;
@@ -51,6 +72,8 @@ export type ProjectSharePanelProps = {
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
   readonly githubAuthorizationFailure?: string;
+  /** The host the pane reads; a stand-alone host with no units when absent. */
+  readonly host?: ProjectShareHost;
 };
 
 export type ShareMethod = 'direct' | 'tau' | 'github-gist';
@@ -62,8 +85,6 @@ const shareMethodDescriptors = shareProviderRegistry.descriptors.filter(
   (descriptor): descriptor is ShareProviderDescriptor & { readonly id: ShareMethod } =>
     isShareMethod(descriptor.id) && descriptor.capabilities.includes('project.publish'),
 );
-const shareMethodGroups = [{ name: 'Share with', items: shareMethodDescriptors }];
-const getShareMethodValue = (descriptor: ShareProviderDescriptor): string => descriptor.id;
 
 /**
  * The sharing method this panel opens on.
@@ -93,11 +114,22 @@ const resolveShareMethod = (
   return offered?.id ?? 'direct';
 };
 
-function ShareMethodIcon({ method, className }: { readonly method: ShareMethod; readonly className?: string }) {
-  if (method === 'direct') {
-    return <Link2 className={className} aria-hidden />;
-  }
-  return <SvgIcon id={method === 'tau' ? 'tau' : 'github'} className={className} aria-hidden />;
+const DirectIcon: ShareMethodIcon = Link2;
+const TauIcon: ShareMethodIcon = ({ className }) => <SvgIcon id='tau' className={className} aria-hidden />;
+const GithubIcon: ShareMethodIcon = ({ className }) => <SvgIcon id='github' className={className} aria-hidden />;
+
+const noUnits = (): readonly WorkbenchUnit[] => [];
+
+/** The pane's host outside the workbench: no units, only this source. */
+function StandaloneShareHost({
+  source,
+  children,
+}: {
+  readonly source: ShareSource;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  const host = useMemo((): WorkbenchPanesHost => ({ useUnits: noUnits, share: source }), [source]);
+  return <WorkbenchPanesHostProvider value={host}>{children}</WorkbenchPanesHostProvider>;
 }
 
 type ProjectShareEnvelope = {
@@ -214,7 +246,9 @@ const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undef
       visibility: publicationRecord['visibility'],
       createdAt: publicationRecord['createdAt'],
       urls: { share: (urls as Record<string, unknown>)['share'] as string },
-      access: { grants: (access as Record<string, unknown>)['grants'] as PublicationAccessGrant[] },
+      access: {
+        grants: (access as Record<string, unknown>)['grants'] as PublicationAccessGrant[],
+      },
     };
   }
   return {
@@ -274,241 +308,123 @@ const getSnapshotCopy = (state: 'unpublished' | 'published-current' | 'published
   return 'Publish a snapshot to create a shareable viewer link.';
 };
 
-function ShareMethodPicker({
-  isDisabled = false,
-  value,
-  onChange,
-  isPortableEnabled = true,
-}: {
-  readonly isDisabled?: boolean;
-  readonly value: ShareMethod;
-  readonly onChange: (value: ShareMethod) => void;
-  readonly isPortableEnabled?: boolean;
-}): React.JSX.Element | undefined {
-  if (!isPortableEnabled) {
-    return undefined;
+type PortableMethod = Exclude<ShareMethod, 'tau'>;
+
+const describeWarnings = (warnings: ShareProjectSnapshot['warnings']): string | undefined =>
+  warnings.length > 0
+    ? `Shared with ${String(warnings.length)} unresolved ${warnings.length === 1 ? 'dependency' : 'dependencies'}.`
+    : undefined;
+
+const failureMessage = (failure: unknown): string => (failure instanceof Error ? failure.message : 'Sharing failed.');
+
+type PortablePublication = {
+  readonly locator: ShareLocator;
+  readonly protection: ShareProtection;
+};
+
+type PortableResult =
+  | (PortablePublication & {
+      readonly url: string;
+      readonly warning: string | undefined;
+    })
+  | { readonly failure: unknown; readonly warning: string | undefined };
+
+/**
+ * Collect the snapshot and publish it through one portable provider.
+ *
+ * @param method - The provider.
+ * @param collectSnapshot - Collects the project snapshot.
+ * @param request - The protection and options the person chose.
+ * @returns The link and what it points at, or the failure; either with the snapshot's warning once it was collected.
+ */
+const publishPortable = async (
+  method: PortableMethod,
+  collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>,
+  { protection, options, signal }: ShareLinkRequest,
+): Promise<PortableResult> => {
+  let warning: string | undefined;
+  try {
+    const provider = await shareProviderRegistry.load(method);
+    const providerPublish = provider.publish;
+    if (!providerPublish) {
+      throw new Error('This sharing method cannot publish projects.');
+    }
+    const snapshot = await collectSnapshot(signal);
+    warning = describeWarnings(snapshot.warnings);
+    const { url, locator } = await withBrowserShareProviderContext(async (context) => {
+      const published = await providerPublish(
+        {
+          snapshot,
+          protection,
+          visibility: method === 'github-gist' && options['public-gist'] === true ? 'public' : 'unlisted',
+          signal,
+        },
+        context,
+      );
+      return {
+        url: formatShareUrl({
+          origin: context.origin,
+          locator: published.locator,
+          secrets: published.secrets,
+        }),
+        locator: published.locator,
+      };
+    });
+    return { url, locator, protection, warning };
+  } catch (error) {
+    return { failure: error, warning };
   }
+};
 
-  const selectedDescriptor = shareMethodDescriptors.find((descriptor) => descriptor.id === value);
-  if (!selectedDescriptor) {
-    return undefined;
-  }
+const featureCalloutClassName =
+  'rounded-md border border-feature/30 bg-feature/10 px-3 py-2 text-sm text-feature dark:text-feature/80';
 
-  return (
-    <div className='min-w-0'>
-      <p className='mb-1.5 text-xs font-medium text-muted-foreground'>Share with</p>
-      <ComboBoxResponsive<ShareProviderDescriptor>
-        groupedItems={shareMethodGroups}
-        getValue={getShareMethodValue}
-        value={selectedDescriptor}
-        isSearchEnabled={false}
-        title='Choose sharing method'
-        description='Choose where to publish or store this project.'
-        popoverProperties={{ className: 'w-[var(--radix-popover-trigger-width)] min-w-56' }}
-        isDisabled={() => isDisabled}
-        renderLabel={(descriptor, selectedItem) => {
-          if (!isShareMethod(descriptor.id)) {
-            return undefined;
-          }
-          return (
-            <span className='flex w-full min-w-0 items-center justify-between gap-3'>
-              <span className='flex min-w-0 items-center gap-2'>
-                <ShareMethodIcon method={descriptor.id} className='size-4 shrink-0' />
-                <span className='truncate'>{descriptor.label}</span>
-              </span>
-              {selectedItem?.id === descriptor.id ? <Check className='size-4 shrink-0' aria-hidden /> : null}
-            </span>
-          );
-        }}
-        onSelect={(next) => {
-          if (isShareMethod(next)) {
-            onChange(next);
-          }
-        }}
-      >
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          className='w-full min-w-0 justify-between'
-          disabled={isDisabled}
-          aria-label={`Share with ${selectedDescriptor.label}`}
-        >
-          <span className='flex min-w-0 items-center gap-2'>
-            <ShareMethodIcon method={selectedDescriptor.id} className='size-4 shrink-0' />
-            <span className='truncate'>{selectedDescriptor.label}</span>
-          </span>
-          <ChevronDown className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-        </Button>
-      </ComboBoxResponsive>
-    </div>
-  );
-}
-
-function SharePanelFrame({
-  children,
-  description,
-  isDisabled = false,
-  isPortableEnabled,
-  method,
-  onMethodChange,
-}: {
-  readonly children: React.ReactNode;
-  readonly description: string;
-  readonly isDisabled?: boolean;
-  readonly isPortableEnabled: boolean;
-  readonly method: ShareMethod;
-  readonly onMethodChange: (value: ShareMethod) => void;
-}): React.JSX.Element {
-  const titleId = useId();
-  return (
-    <section aria-labelledby={titleId} className='flex size-full min-h-0 min-w-0 flex-col bg-background'>
-      <header className='shrink-0 border-b border-border p-4'>
-        <h2 id={titleId} className='text-base font-semibold'>
-          Share project
-        </h2>
-        <p className='mt-1 text-sm text-muted-foreground'>{description}</p>
-        <div className='mt-4 min-w-0'>
-          <ShareMethodPicker
-            isDisabled={isDisabled}
-            value={method}
-            onChange={onMethodChange}
-            isPortableEnabled={isPortableEnabled}
-          />
-        </div>
-      </header>
-      <div className='min-h-0 flex-1 overflow-y-auto p-4'>{children}</div>
-    </section>
-  );
-}
-
-function PortableShareBody({
-  method,
-  collectSnapshot,
-  signIn,
-  githubAuthorizationOutcome,
-  githubAuthorizationFailure,
-  onBusyChange,
-}: {
-  readonly method: Exclude<ShareMethod, 'tau'>;
+type GithubGistExtensionOptions = {
   readonly collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly signIn: string;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
   readonly githubAuthorizationFailure?: string;
-  readonly onBusyChange: (busy: boolean) => void;
-}): React.JSX.Element {
-  const [busy, setBusy] = useState(false);
-  const [operationError, setError] = useState<string>();
-  const [shareUrl, setShareUrl] = useState<string>();
+};
+
+/**
+ * The GitHub Gist method's part of the link body: the Gist connection it needs before sharing, the browser grant on
+ * desktop, and management of the Gist this panel made (R8).
+ *
+ * @param context - The link body's state.
+ * @param options - The snapshot collector, the sign-in link and the outcome of a GitHub return.
+ * @returns What the body adds.
+ */
+function useGithubGistExtension(
+  context: ShareLinkContext,
+  { collectSnapshot, signIn, githubAuthorizationOutcome, githubAuthorizationFailure }: GithubGistExtensionOptions,
+): ShareLinkExtension {
+  const { setBusy, setError, setShareUrl, reset, focusPrimary } = context;
   /* The Gist this panel made, so it can be managed where it was made (R8). */
-  const [publication, setPublication] = useState<{
-    readonly locator: ShareLocator;
-    readonly protection: ShareProtection;
-  }>();
-  const [warnings, setWarnings] = useState<ShareProjectSnapshot['warnings']>([]);
+  const [publication, setPublication] = useState<PortablePublication>();
   const settings = useSettingsDialog();
   const githubCapability = useQuery({
     queryKey: ['github', 'gist-status'],
     queryFn: getGithubGistConnectionStatus,
-    enabled: method === 'github-gist',
     retry: false,
     staleTime: 0,
   });
   const githubStatus = githubCapability.data;
-  const error =
-    operationError ?? (githubCapability.error ? 'Could not check the GitHub connection. Try again.' : undefined);
-  const [encrypted, setEncrypted] = useState(false);
-  const [password, setPassword] = useState('');
-  const [includePassword, setIncludePassword] = useState(true);
-  const [publicGist, setPublicGist] = useState(false);
   /* D16c: desktop runs the Gist grant in the system browser and waits here for it. */
   const [browserConsent, setBrowserConsent] = useState<'waiting' | 'cancelled' | 'timed-out'>();
-  const operationRef = useRef<AbortController | undefined>(undefined);
   const consentRef = useRef<AbortController | undefined>(undefined);
-  const primaryRef = useRef<HTMLButtonElement>(null);
-  const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
-  useEffect(() => {
-    onBusyChange(busy);
-  }, [busy, onBusyChange]);
   /* The Cancel that was clicked unmounts; focus returns to the button that started the grant. */
   useEffect(() => {
     if (browserConsent === 'cancelled') {
-      primaryRef.current?.focus();
+      focusPrimary();
     }
-  }, [browserConsent]);
-  useEffect(() => {
-    return () => {
-      operationRef.current?.abort();
+  }, [browserConsent, focusPrimary]);
+  useEffect(
+    () => () => {
       consentRef.current?.abort();
-    };
-  }, []);
-
-  const publish = async (): Promise<void> => {
-    const controller = new AbortController();
-    operationRef.current?.abort();
-    operationRef.current = controller;
-    setBusy(true);
-    setError(undefined);
-    try {
-      if (shareUrl) {
-        await navigator.clipboard.writeText(shareUrl);
-        triggerCopiedTick();
-        toast.success('Link copied');
-        return;
-      }
-      const provider = await shareProviderRegistry.load(method);
-      const providerPublish = provider.publish;
-      if (!providerPublish) {
-        throw new Error('This sharing method cannot publish projects.');
-      }
-      const snapshot = await collectSnapshot(controller.signal);
-      setWarnings(snapshot.warnings);
-      const protection: ShareProtection = encrypted
-        ? { kind: 'password', password, includePassword }
-        : { kind: 'none' };
-      const { url, locator } = await withBrowserShareProviderContext(async (context) => {
-        const published = await providerPublish(
-          {
-            snapshot,
-            protection,
-            visibility: method === 'github-gist' && publicGist ? 'public' : 'unlisted',
-            signal: controller.signal,
-          },
-          context,
-        );
-        return {
-          url: formatShareUrl({
-            origin: context.origin,
-            locator: published.locator,
-            secrets: published.secrets,
-          }),
-          locator: published.locator,
-        };
-      });
-      setShareUrl(url);
-      setPublication({ locator, protection });
-      try {
-        await navigator.clipboard.writeText(url);
-        triggerCopiedTick();
-        toast.success(method === 'direct' ? 'Direct link copied' : 'GitHub Gist link copied');
-      } catch {
-        setError('The link was created but clipboard access was denied. Copy it below.');
-      }
-    } catch (error) {
-      if (isShareError(error) && error.code === 'SHARE_PERMISSION_REQUIRED') {
-        void githubCapability.refetch();
-      } else if (isShareError(error) && error.code === 'SHARE_AUTH_REQUIRED') {
-        void githubCapability.refetch();
-      }
-      setError(error instanceof Error ? error.message : 'Sharing failed.');
-    } finally {
-      if (operationRef.current === controller) {
-        operationRef.current = undefined;
-      }
-      setBusy(false);
-    }
-  };
+    },
+    [],
+  );
 
   const connect = async (): Promise<void> => {
     setBusy(true);
@@ -551,16 +467,25 @@ function PortableShareBody({
   /* Unpublished: the link is gone, so the panel offers to make a new one. */
   const forgetPublication = (): void => {
     setPublication(undefined);
-    setShareUrl(undefined);
-    setWarnings([]);
-    setError(undefined);
+    reset();
   };
 
-  const isDirect = method === 'direct';
-  const passwordBytes = new TextEncoder().encode(password.normalize('NFC')).byteLength;
-  const passwordValid =
-    !encrypted || (passwordBytes >= sharePasswordLimits.minBytes && passwordBytes <= sharePasswordLimits.maxBytes);
-  const needsConnection = !isDirect && githubStatus !== 'connected';
+  const share = async (request: ShareLinkRequest): Promise<ShareLinkOutcome> => {
+    const result = await publishPortable('github-gist', collectSnapshot, request);
+    if ('failure' in result) {
+      if (
+        isShareError(result.failure) &&
+        (result.failure.code === 'SHARE_PERMISSION_REQUIRED' || result.failure.code === 'SHARE_AUTH_REQUIRED')
+      ) {
+        void githubCapability.refetch();
+      }
+      return { error: failureMessage(result.failure), warning: result.warning };
+    }
+    setPublication({ locator: result.locator, protection: result.protection });
+    return { url: result.url, warning: result.warning };
+  };
+
+  const needsConnection = githubStatus !== 'connected';
   const connectionLabel =
     githubStatus === 'disabled'
       ? 'Manage Gist sharing'
@@ -571,146 +496,51 @@ function PortableShareBody({
           : githubStatus === 'not-connected'
             ? 'Connect GitHub'
             : 'Sign in';
-  return (
-    <div className='flex flex-col gap-4'>
-      <div className='rounded-lg border bg-muted/30 p-4'>
-        <div className='flex items-start gap-3'>
-          {isDirect ? (
-            <ShieldCheck className='mt-0.5 size-5 text-primary' aria-hidden />
-          ) : (
-            <SvgIcon id='github' className='mt-0.5 size-5' aria-hidden />
-          )}
-          <div className='min-w-0 text-sm'>
-            <p className='font-medium'>
-              {encrypted
-                ? `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`
-                : isDirect
-                  ? 'No upload through Tau'
-                  : 'Stored on GitHub'}
-            </p>
-            <p className='mt-1 text-muted-foreground'>
-              {encrypted
-                ? 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.'
-                : isDirect
-                  ? 'The compressed project stays in the URL. Anyone with the link can open it.'
-                  : 'Tau sends the compressed project to GitHub using your Gist connection.'}
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className='flex flex-col gap-3'>
-        <div className='flex items-start gap-2'>
-          <Checkbox
-            id='portable-share-encrypted'
-            checked={encrypted}
-            disabled={busy || Boolean(shareUrl)}
-            onCheckedChange={(checked) => {
-              setEncrypted(checked === true);
-            }}
-          />
-          <Label htmlFor='portable-share-encrypted' className='font-normal'>
-            Encrypt with a password
-          </Label>
-        </div>
-        {encrypted ? (
-          <div className='ml-6 flex flex-col gap-3'>
-            <div className='flex flex-col gap-2'>
-              <Label htmlFor='portable-share-password'>Password</Label>
-              <Input
-                id='portable-share-password'
-                type='password'
-                autoComplete='new-password'
-                value={password}
-                disabled={busy || Boolean(shareUrl)}
-                aria-invalid={password.length > 0 && !passwordValid}
-                onChange={(event) => {
-                  setPassword(event.target.value);
-                }}
-              />
-              <p className='text-xs text-muted-foreground'>
-                Use {sharePasswordLimits.minBytes}–{sharePasswordLimits.maxBytes} UTF-8 bytes ({passwordBytes} entered).
-              </p>
-            </div>
-            <div className='flex items-start gap-2'>
-              <Checkbox
-                id='portable-share-include-password'
-                checked={includePassword}
-                disabled={busy || Boolean(shareUrl)}
-                onCheckedChange={(checked) => {
-                  setIncludePassword(checked === true);
-                }}
-              />
-              <Label htmlFor='portable-share-include-password' className='font-normal'>
-                Include password in the link
-              </Label>
-            </div>
+
+  return {
+    error: githubCapability.error ? 'Could not check the GitHub connection. Try again.' : undefined,
+    isPending: githubStatus === undefined,
+    share,
+    callouts: (
+      <>
+        {/* `returned` is the wait for the status check, so it goes once that answers:
+         * connected needs no words, and anything else has its own line below. */}
+        {githubAuthorizationOutcome && !(githubAuthorizationOutcome === 'returned' && githubStatus !== undefined) ? (
+          <div className={featureCalloutClassName}>
+            {githubAuthorizationOutcome === 'returned'
+              ? 'GitHub authorization returned. Checking Gist access…'
+              : githubAuthorizationOutcome === 'cancelled'
+                ? 'GitHub Gist access was not granted.'
+                : (githubAuthorizationFailure ?? 'GitHub authorization could not be completed. Try again.')}
           </div>
         ) : null}
-        {isDirect ? null : (
-          <div className='flex items-start gap-2'>
-            <Checkbox
-              id='portable-share-public-gist'
-              checked={publicGist}
-              disabled={busy || Boolean(shareUrl)}
-              onCheckedChange={(checked) => {
-                setPublicGist(checked === true);
-              }}
-            />
-            <Label htmlFor='portable-share-public-gist' className='font-normal'>
-              Publish as a public Gist
-            </Label>
+        {browserConsent ? (
+          <div role='status' className={featureCalloutClassName}>
+            {browserConsent === 'waiting'
+              ? 'Finish in your browser. Tau continues here once GitHub grants Gist access.'
+              : browserConsent === 'cancelled'
+                ? 'Stopped waiting for your browser. Gist access was not changed here.'
+                : 'Gist access did not arrive within 10 minutes. Try again.'}
           </div>
-        )}
-      </div>
-      {/* `returned` is the wait for the status check, so it goes once that answers:
-       * connected needs no words, and anything else has its own line below. */}
-      {!isDirect &&
-      githubAuthorizationOutcome &&
-      !(githubAuthorizationOutcome === 'returned' && githubStatus !== undefined) ? (
-        <div className='rounded-md border border-feature/30 bg-feature/10 px-3 py-2 text-sm text-feature dark:text-feature/80'>
-          {githubAuthorizationOutcome === 'returned'
-            ? 'GitHub authorization returned. Checking Gist access…'
-            : githubAuthorizationOutcome === 'cancelled'
-              ? 'GitHub Gist access was not granted.'
-              : (githubAuthorizationFailure ?? 'GitHub authorization could not be completed. Try again.')}
-        </div>
-      ) : null}
-      {!isDirect && browserConsent ? (
-        <div
-          role='status'
-          className='rounded-md border border-feature/30 bg-feature/10 px-3 py-2 text-sm text-feature dark:text-feature/80'
-        >
-          {browserConsent === 'waiting'
-            ? 'Finish in your browser. Tau continues here once GitHub grants Gist access.'
-            : browserConsent === 'cancelled'
-              ? 'Stopped waiting for your browser. Gist access was not changed here.'
-              : 'Gist access did not arrive within 10 minutes. Try again.'}
-        </div>
-      ) : null}
-      {!isDirect && githubStatus && githubStatus !== 'connected' && browserConsent !== 'waiting' ? (
-        <div className='rounded-md border border-feature/30 bg-feature/10 px-3 py-2 text-sm text-feature dark:text-feature/80'>
-          {githubStatus === 'disabled'
-            ? 'Gist sharing is off in Tau. Enable it in Security settings to share again.'
-            : githubStatus === 'reconnect-required'
-              ? 'Reconnect GitHub to verify access before sharing.'
-              : githubStatus === 'signed-out'
-                ? 'Sign in to Tau before connecting GitHub.'
-                : githubStatus === 'permission-required'
-                  ? 'GitHub is connected, but Tau needs Gist access before it can publish.'
-                  : 'Connect GitHub to create a Gist.'}
-        </div>
-      ) : null}
-      {error ? (
-        <div className='rounded-md border border-feature/40 bg-feature/10 px-3 py-2 text-sm text-feature'>{error}</div>
-      ) : null}
-      {warnings.length > 0 ? (
-        <div className='rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm'>
-          Shared with {warnings.length} unresolved {warnings.length === 1 ? 'dependency' : 'dependencies'}.
-        </div>
-      ) : null}
-      {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
-      <div className='flex flex-wrap justify-end gap-2'>
-        {method === 'github-gist' && publication && githubStatus === 'connected' ? (
+        ) : null}
+        {githubStatus && githubStatus !== 'connected' && browserConsent !== 'waiting' ? (
+          <div className={featureCalloutClassName}>
+            {githubStatus === 'disabled'
+              ? 'Gist sharing is off in Tau. Enable it in Security settings to share again.'
+              : githubStatus === 'reconnect-required'
+                ? 'Reconnect GitHub to verify access before sharing.'
+                : githubStatus === 'signed-out'
+                  ? 'Sign in to Tau before connecting GitHub.'
+                  : githubStatus === 'permission-required'
+                    ? 'GitHub is connected, but Tau needs Gist access before it can publish.'
+                    : 'Connect GitHub to create a Gist.'}
+          </div>
+        ) : null}
+      </>
+    ),
+    actions: (
+      <>
+        {publication && githubStatus === 'connected' ? (
           <GithubGistManagement
             locator={publication.locator}
             protection={publication.protection}
@@ -725,80 +555,129 @@ function PortableShareBody({
             Cancel
           </Button>
         ) : null}
-        {!isDirect && githubStatus === 'signed-out' ? (
-          <Button asChild>
-            <NavLink to={signIn}>Sign in</NavLink>
-          </Button>
-        ) : (
-          <Button
-            ref={primaryRef}
-            type='button'
-            disabled={busy || !passwordValid || (!isDirect && githubStatus === undefined)}
-            onClick={() => {
-              if (githubStatus === 'disabled' && !isDirect) {
-                settings.open('security', 'github-permissions');
-              } else {
-                void (needsConnection ? connect() : publish());
-              }
-            }}
-          >
-            {busy ? (
-              <Loader2 className='size-4 animate-spin' aria-hidden />
-            ) : copied ? (
-              <Check className='size-3.5' aria-hidden />
-            ) : isDirect ? (
-              <Link2 className='size-3.5' aria-hidden />
-            ) : (
-              <SvgIcon id='github' className='size-3.5' aria-hidden />
-            )}
-            <span>
-              {needsConnection
-                ? connectionLabel
-                : shareUrl
-                  ? 'Copy link'
-                  : isDirect
-                    ? 'Copy direct link'
-                    : 'Create Gist and copy link'}
-            </span>
-          </Button>
-        )}
-      </div>
-    </div>
-  );
+      </>
+    ),
+    primary:
+      githubStatus === 'signed-out'
+        ? {
+            element: (
+              <Button asChild>
+                <NavLink to={signIn}>Sign in</NavLink>
+              </Button>
+            ),
+          }
+        : needsConnection
+          ? {
+              label: connectionLabel,
+              onActivate: () => {
+                if (githubStatus === 'disabled') {
+                  settings.open('security', 'github-permissions');
+                } else {
+                  void connect();
+                }
+              },
+            }
+          : undefined,
+  };
 }
 
-function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.Element {
-  const {
-    projectId,
-    projectName,
-    projectDescription = '',
-    projectUpdatedAt,
-    entryPath,
-    collectSnapshot,
-    initialMethod,
-    githubAuthorizationOutcome,
-    githubAuthorizationFailure,
-  } = properties;
-  const { pathname, search } = useLocation();
-  const [chosenMethod, setChosenMethod] = useState<ShareMethod | undefined>(initialMethod);
-  const [rememberedMethod, setRememberedMethod] = useCookie<unknown>(cookieName.shareProvider, undefined);
-  const shareMethod = resolveShareMethod(chosenMethod, rememberedMethod, Boolean(collectSnapshot));
-  const setShareMethod = useCallback(
-    (next: ShareMethod): void => {
-      setChosenMethod(next);
-      setRememberedMethod(next);
-    },
-    [setRememberedMethod],
-  );
-  const [portableBusy, setPortableBusy] = useState(false);
-  const signInReturnTo = useMemo(() => {
-    const authorizationReturn = parseGithubGistAuthorizationReturn(search);
-    const parameters = new URLSearchParams(authorizationReturn?.remainingSearch ?? search);
-    parameters.set('workbench', 'share');
-    parameters.set('shareProvider', shareMethod);
-    return `${pathname}?${parameters.toString()}`;
-  }, [pathname, search, shareMethod]);
-  const { signIn } = useAuthLinks({ redirectTo: signInReturnTo });
+/**
+ * The direct link and GitHub Gist methods over one snapshot collector.
+ *
+ * @param options - The snapshot collector, the sign-in link and the outcome of a GitHub return.
+ * @returns The two link methods, in registry order.
+ */
+const usePortableShareMethods = (
+  options: GithubGistExtensionOptions,
+): Readonly<Record<PortableMethod, ShareLinkMethod>> => {
+  const { collectSnapshot, signIn, githubAuthorizationOutcome, githubAuthorizationFailure } = options;
+  return useMemo(() => {
+    const labelOf = (id: ShareMethod): string =>
+      shareMethodDescriptors.find((descriptor) => descriptor.id === id)?.label ?? id;
+    const encryption = {
+      minBytes: sharePasswordLimits.minBytes,
+      maxBytes: sharePasswordLimits.maxBytes,
+      notice: {
+        title: `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`,
+        text: 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.',
+      },
+    };
+    const extensionOptions = {
+      collectSnapshot,
+      signIn,
+      githubAuthorizationOutcome,
+      githubAuthorizationFailure,
+    };
+    const portableShare =
+      (method: PortableMethod) =>
+      async (request: ShareLinkRequest): Promise<ShareLinkOutcome> => {
+        const result = await publishPortable(method, collectSnapshot, request);
+        return 'failure' in result
+          ? { error: failureMessage(result.failure), warning: result.warning }
+          : { url: result.url, warning: result.warning };
+      };
+    return {
+      direct: {
+        kind: 'link',
+        id: 'direct',
+        label: labelOf('direct'),
+        icon: DirectIcon,
+        description: 'Create a self-contained link that works without a Tau account or storage.',
+        notice: {
+          icon: <ShieldCheck className='mt-0.5 size-5 text-primary' aria-hidden />,
+          title: 'No upload through Tau',
+          text: 'The compressed project stays in the URL. Anyone with the link can open it.',
+        },
+        encryption,
+        action: { label: 'Copy direct link', icon: DirectIcon },
+        copiedMessage: 'Direct link copied',
+        share: portableShare('direct'),
+      },
+      'github-gist': {
+        kind: 'link',
+        id: 'github-gist',
+        label: labelOf('github-gist'),
+        icon: GithubIcon,
+        description: 'Store a portable project artifact in a revision-pinned GitHub Gist.',
+        notice: {
+          icon: <SvgIcon id='github' className='mt-0.5 size-5' aria-hidden />,
+          title: 'Stored on GitHub',
+          text: 'Tau sends the compressed project to GitHub using your Gist connection.',
+        },
+        encryption,
+        options: [{ id: 'public-gist', label: 'Publish as a public Gist' }],
+        action: { label: 'Create Gist and copy link', icon: GithubIcon },
+        copiedMessage: 'GitHub Gist link copied',
+        /* The pane keys a body by method and calls this once per render of it, so it is a hook of that body. */
+        // oxlint-disable-next-line react-hooks/rules-of-hooks -- called by the link body as its own hook.
+        useExtension: (context) => useGithubGistExtension(context, extensionOptions),
+        share: portableShare('github-gist'),
+      },
+    };
+  }, [collectSnapshot, githubAuthorizationFailure, githubAuthorizationOutcome, signIn]);
+};
+
+type TauShareOptions = {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly projectDescription: string;
+  readonly projectUpdatedAt: ProjectSharePanelProps['projectUpdatedAt'];
+  readonly entryPath: string;
+  readonly isActive: boolean;
+  readonly signIn: string;
+};
+
+/**
+ * The Tau-hosted link: the project's own `publish.machine` and its publication envelope.
+ *
+ * Its state lives with the panel rather than in the method's body, so a draft survives choosing another method and
+ * coming back, as it did before the pane moved into `@taucad/workbench-panes`.
+ *
+ * @param options - The project, whether the hosted method is the one shown, and the sign-in link.
+ * @returns What the pane draws for the method.
+ */
+function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
+  const { projectId, projectName, projectDescription, projectUpdatedAt, entryPath, isActive, signIn } = options;
   /*
    * Publishing is the project's own `publish.machine`, invoked by the revision
    * root in the file-manager worker (A38, S32). This panel holds no actor: it
@@ -868,13 +747,13 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   }, [apiBaseUrl, projectId]);
 
   useEffect(() => {
-    if (shareMethod === 'tau') {
+    if (isActive) {
       queueMicrotask(() => {
         // oxlint-disable-next-line no-void -- `loadEnvelope` reports its own failures into panel state.
         void loadEnvelope();
       });
     }
-  }, [loadEnvelope, shareMethod]);
+  }, [loadEnvelope, isActive]);
 
   useEffect(() => {
     if (!publishShareUrl || lastHandledShareUrlRef.current === publishShareUrl) {
@@ -918,32 +797,6 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     [envelope, projectUpdatedAt],
   );
 
-  if (shareMethod !== 'tau' && collectSnapshot) {
-    return (
-      <SharePanelFrame
-        method={shareMethod}
-        isDisabled={portableBusy}
-        onMethodChange={setShareMethod}
-        isPortableEnabled
-        description={
-          shareMethod === 'direct'
-            ? 'Create a self-contained link that works without a Tau account or storage.'
-            : 'Store a portable project artifact in a revision-pinned GitHub Gist.'
-        }
-      >
-        <PortableShareBody
-          key={shareMethod}
-          method={shareMethod}
-          collectSnapshot={collectSnapshot}
-          signIn={signIn}
-          githubAuthorizationOutcome={githubAuthorizationOutcome}
-          githubAuthorizationFailure={githubAuthorizationFailure}
-          onBusyChange={setPortableBusy}
-        />
-      </SharePanelFrame>
-    );
-  }
-
   /**
    * Publish is one gesture: open the dialog's machine on this project's names
    * and confirm the draft. The machine holds the confirm until it has read the
@@ -986,7 +839,10 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
       const response = await fetch(`${apiBaseUrl}/v1/publications/${publication.id}/visibility`, {
         method: 'PATCH',
         credentials: 'include',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ visibility: nextVisibility }),
       });
 
@@ -1019,256 +875,340 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     });
   };
 
-  if (envelopeError) {
-    const signInRequired = envelopeError === 'SIGN_IN_REQUIRED';
-    return (
-      <SharePanelFrame
-        method={shareMethod}
-        isDisabled={busy || visibilityMutating}
-        onMethodChange={setShareMethod}
-        isPortableEnabled={Boolean(collectSnapshot)}
-        description={
-          signInRequired ? 'Sign in to persist this project with Tau.' : 'Tau-hosted sharing is unavailable right now.'
-        }
-      >
-        <div className='flex flex-col gap-4'>
-          <div
-            className={cn(
-              'rounded-md border px-3 py-2 text-sm',
-              signInRequired
-                ? 'border-feature/30 bg-feature/10 text-feature dark:text-feature/80'
-                : 'border-border bg-muted/40 text-muted-foreground',
-            )}
-          >
-            {signInRequired
-              ? 'A Tau account keeps this hosted share available over time.'
-              : 'Check your connection and try again.'}
+  return () => {
+    if (envelopeError) {
+      const signInRequired = envelopeError === 'SIGN_IN_REQUIRED';
+      return (
+        <SharePaneFrame
+          isDisabled={busy || visibilityMutating}
+          description={
+            signInRequired
+              ? 'Sign in to persist this project with Tau.'
+              : 'Tau-hosted sharing is unavailable right now.'
+          }
+        >
+          <div className='flex flex-col gap-4'>
+            <div
+              className={cn(
+                'rounded-md border px-3 py-2 text-sm',
+                signInRequired
+                  ? 'border-feature/30 bg-feature/10 text-feature dark:text-feature/80'
+                  : 'border-border bg-muted/40 text-muted-foreground',
+              )}
+            >
+              {signInRequired
+                ? 'A Tau account keeps this hosted share available over time.'
+                : 'Check your connection and try again.'}
+            </div>
+            <div className='flex justify-end'>
+              {signInRequired ? (
+                <Button asChild>
+                  <NavLink to={signIn}>Sign in</NavLink>
+                </Button>
+              ) : (
+                <Button
+                  type='button'
+                  onClick={() => {
+                    // oxlint-disable-next-line no-void -- ditto.
+                    void loadEnvelope();
+                  }}
+                >
+                  Try again
+                </Button>
+              )}
+            </div>
           </div>
-          <div className='flex justify-end'>
-            {signInRequired ? (
-              <Button asChild>
-                <NavLink to={signIn}>Sign in</NavLink>
-              </Button>
-            ) : (
+        </SharePaneFrame>
+      );
+    }
+
+    if (loadingEnvelope) {
+      return (
+        <SharePaneFrame isDisabled={busy} description='Loading sharing settings…'>
+          <div className='flex min-h-36 items-center justify-center'>
+            <Loader2 className='size-5 animate-spin text-muted-foreground' aria-hidden />
+          </div>
+        </SharePaneFrame>
+      );
+    }
+
+    const publication = envelope?.currentPublication;
+
+    if (publication && !publishingAnother) {
+      return (
+        <SharePaneFrame isDisabled={busy || visibilityMutating} description={getSnapshotCopy(snapshotState)}>
+          <div className='flex flex-col gap-4'>
+            <div className='flex flex-col gap-4'>
+              <div>
+                <h3 className='truncate text-sm font-medium'>{publication.title}</h3>
+                <p className='mt-1 text-xs text-muted-foreground'>Version {publication.tag}</p>
+                {publication.description ? (
+                  <p className='mt-1 line-clamp-2 text-sm text-muted-foreground'>{publication.description}</p>
+                ) : null}
+              </div>
+              <PublicationAccessPanel
+                apiBaseUrl={apiBaseUrl}
+                publicationId={publication.id}
+                shareUrl={publication.urls.share}
+                visibility={publication.visibility}
+                visibilityMutating={visibilityMutating}
+                grants={publication.access.grants.filter((grant) => grant.status === 'active')}
+                onVisibilityChange={handleVisibilityChange}
+                onGrantsChanged={loadEnvelope}
+              />
+            </div>
+
+            {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
+
+            <div className='flex flex-wrap justify-end gap-2'>
               <Button
                 type='button'
+                variant='outline'
+                disabled={busy || visibilityMutating}
                 onClick={() => {
-                  // oxlint-disable-next-line no-void -- ditto.
-                  void loadEnvelope();
+                  setPublishingAnother(true);
                 }}
               >
-                Try again
+                Publish another version
               </Button>
-            )}
+              <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
+                {busy ? (
+                  <Loader2 className='size-4 animate-spin' aria-hidden />
+                ) : copied ? (
+                  <Check className='size-3.5' aria-hidden />
+                ) : (
+                  <RefreshCw className='size-3.5' aria-hidden />
+                )}
+                <span>
+                  {snapshotState === 'published-stale'
+                    ? 'Republish this version and copy link'
+                    : 'Republish this version'}
+                </span>
+              </Button>
+            </div>
           </div>
-        </div>
-      </SharePanelFrame>
-    );
-  }
+        </SharePaneFrame>
+      );
+    }
 
-  if (loadingEnvelope) {
     return (
-      <SharePanelFrame
-        method={shareMethod}
+      <SharePaneFrame
         isDisabled={busy}
-        onMethodChange={setShareMethod}
-        isPortableEnabled={Boolean(collectSnapshot)}
-        description='Loading sharing settings…'
-      >
-        <div className='flex min-h-36 items-center justify-center'>
-          <Loader2 className='size-5 animate-spin text-muted-foreground' aria-hidden />
-        </div>
-      </SharePanelFrame>
-    );
-  }
-
-  const publication = envelope?.currentPublication;
-
-  if (publication && !publishingAnother) {
-    return (
-      <SharePanelFrame
-        method={shareMethod}
-        isDisabled={busy || visibilityMutating}
-        onMethodChange={setShareMethod}
-        isPortableEnabled={Boolean(collectSnapshot)}
-        description={getSnapshotCopy(snapshotState)}
+        description={`${getSnapshotCopy('unpublished')} The version you name is backed up to the cloud and served from there.`}
       >
         <div className='flex flex-col gap-4'>
           <div className='flex flex-col gap-4'>
-            <div>
-              <h3 className='truncate text-sm font-medium'>{publication.title}</h3>
-              <p className='mt-1 text-xs text-muted-foreground'>Version {publication.tag}</p>
-              {publication.description ? (
-                <p className='mt-1 line-clamp-2 text-sm text-muted-foreground'>{publication.description}</p>
-              ) : null}
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='share-version'>Version name</Label>
+              <Input
+                id='share-version'
+                list='share-version-options'
+                value={versionName}
+                disabled={busy}
+                onChange={(event) => {
+                  setChosenName(event.target.value);
+                }}
+              />
+              <datalist id='share-version-options'>
+                {existingNames.map((name: string) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <p className='text-xs text-muted-foreground'>
+                People who open your link see this version. Publishing again with the same name moves the link forward.
+              </p>
             </div>
-            <PublicationAccessPanel
-              apiBaseUrl={apiBaseUrl}
-              publicationId={publication.id}
-              shareUrl={publication.urls.share}
-              visibility={publication.visibility}
-              visibilityMutating={visibilityMutating}
-              grants={publication.access.grants.filter((grant) => grant.status === 'active')}
-              onVisibilityChange={handleVisibilityChange}
-              onGrantsChanged={loadEnvelope}
-            />
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='share-title'>Title</Label>
+              <Input
+                id='share-title'
+                value={title}
+                disabled={busy}
+                onChange={(event) => {
+                  setTitle(event.target.value);
+                }}
+              />
+            </div>
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='share-description'>Description (optional)</Label>
+              <Textarea
+                id='share-description'
+                value={description}
+                disabled={busy}
+                rows={3}
+                onChange={(event) => {
+                  setDescription(event.target.value);
+                }}
+              />
+            </div>
+            <div className='flex flex-col gap-2'>
+              <Label>Visibility</Label>
+              <RadioGroup
+                value={effectiveVisibility}
+                disabled={busy}
+                onValueChange={(value) => {
+                  setVisibility(value as PublishVisibility);
+                }}
+                className='flex flex-col gap-2'
+              >
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
+                  <Label
+                    htmlFor='share-vis-private'
+                    className={cn('font-normal', !canCreatePrivateShares && 'text-muted-foreground')}
+                  >
+                    Private (only you and people you share with)
+                  </Label>
+                  {canCreatePrivateShares || !isPlanResolved ? undefined : (
+                    <button
+                      type='button'
+                      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+                      onClick={() => {
+                        requestUpgrade();
+                      }}
+                    >
+                      <CommercialUpgradeLabel />
+                    </button>
+                  )}
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='public' id='share-vis-public' />
+                  <Label htmlFor='share-vis-public' className='font-normal'>
+                    Public
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+            {effectiveVisibility === 'private' ? (
+              <PublicationEmailTagsField
+                id='share-shared-emails'
+                label='Share with specific emails (optional)'
+                emails={sharedEmails}
+                disabled={busy}
+                placeholder='teammate@example.com'
+                onEmailsChange={setSharedEmails}
+              />
+            ) : null}
           </div>
 
           {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
 
-          <div className='flex flex-wrap justify-end gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              disabled={busy || visibilityMutating}
-              onClick={() => {
-                setPublishingAnother(true);
-              }}
-            >
-              Publish another version
-            </Button>
-            <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
+          <div className='flex justify-end'>
+            <Button type='button' disabled={!canPublish} onClick={handlePublish}>
               {busy ? (
-                <Loader2 className='size-4 animate-spin' aria-hidden />
-              ) : copied ? (
-                <Check className='size-3.5' aria-hidden />
+                <>
+                  <Loader2 className='size-4 animate-spin' aria-hidden />
+                  <span>Publishing…</span>
+                </>
               ) : (
-                <RefreshCw className='size-3.5' aria-hidden />
+                <>
+                  {copied ? <Check className='size-3.5' aria-hidden /> : <Link2 className='size-3.5' aria-hidden />}
+                  <span>Publish and copy link</span>
+                </>
               )}
-              <span>
-                {snapshotState === 'published-stale'
-                  ? 'Republish this version and copy link'
-                  : 'Republish this version'}
-              </span>
             </Button>
           </div>
         </div>
-      </SharePanelFrame>
+      </SharePaneFrame>
     );
-  }
+  };
+}
 
+/**
+ * The Share pane's source over this project: the direct link and GitHub Gist when a snapshot can be collected, and
+ * the Tau-hosted link, with the method choice remembered in a cookie (R8).
+ *
+ * @param properties - The project and how to collect its snapshot.
+ * @returns The source.
+ */
+export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, 'host'>): ShareSource {
+  const {
+    projectId,
+    projectName,
+    projectDescription = '',
+    projectUpdatedAt,
+    entryPath,
+    collectSnapshot,
+    initialMethod,
+    githubAuthorizationOutcome,
+    githubAuthorizationFailure,
+  } = properties;
+  const { pathname, search } = useLocation();
+  const [chosenMethod, setChosenMethod] = useState<ShareMethod | undefined>(initialMethod);
+  const [rememberedMethod, setRememberedMethod] = useCookie<unknown>(cookieName.shareProvider, undefined);
+  const shareMethod = resolveShareMethod(chosenMethod, rememberedMethod, Boolean(collectSnapshot));
+  const setShareMethod = useCallback(
+    (next: string): void => {
+      if (isShareMethod(next)) {
+        setChosenMethod(next);
+        setRememberedMethod(next);
+      }
+    },
+    [setRememberedMethod],
+  );
+  const signInReturnTo = useMemo(() => {
+    const authorizationReturn = parseGithubGistAuthorizationReturn(search);
+    const parameters = new URLSearchParams(authorizationReturn?.remainingSearch ?? search);
+    parameters.set('workbench', 'share');
+    parameters.set('shareProvider', shareMethod);
+    return `${pathname}?${parameters.toString()}`;
+  }, [pathname, search, shareMethod]);
+  const { signIn } = useAuthLinks({ redirectTo: signInReturnTo });
+  const portable = usePortableShareMethods({
+    collectSnapshot: collectSnapshot ?? missingSnapshot,
+    signIn,
+    githubAuthorizationOutcome,
+    githubAuthorizationFailure,
+  });
+  const renderTau = useTauShareBody({
+    projectId,
+    projectName,
+    projectDescription,
+    projectUpdatedAt,
+    entryPath,
+    isActive: shareMethod === 'tau',
+    signIn,
+  });
+
+  return useMemo((): ShareSource => {
+    const methods = shareMethodDescriptors.flatMap((descriptor): ShareMethodSource[] => {
+      if (descriptor.id === 'tau') {
+        return [
+          {
+            kind: 'custom',
+            id: 'tau',
+            label: descriptor.label,
+            icon: TauIcon,
+            render: renderTau,
+          },
+        ];
+      }
+      return collectSnapshot ? [{ ...portable[descriptor.id], label: descriptor.label }] : [];
+    });
+    return {
+      methods,
+      method: shareMethod,
+      onMethodChange: setShareMethod,
+      notify: (message) => {
+        toast.success(message);
+      },
+    };
+  }, [collectSnapshot, portable, renderTau, setShareMethod, shareMethod]);
+}
+
+const missingSnapshot = async (): Promise<ShareProjectSnapshot> => {
+  throw new Error('The project snapshot is unavailable.');
+};
+
+function ProjectSharePanelBody({
+  host: Host = StandaloneShareHost,
+  ...properties
+}: ProjectSharePanelProps): React.JSX.Element {
+  const source = useProjectShareSource(properties);
   return (
-    <SharePanelFrame
-      method={shareMethod}
-      isDisabled={busy}
-      onMethodChange={setShareMethod}
-      isPortableEnabled={Boolean(collectSnapshot)}
-      description={`${getSnapshotCopy('unpublished')} The version you name is backed up to the cloud and served from there.`}
-    >
-      <div className='flex flex-col gap-4'>
-        <div className='flex flex-col gap-4'>
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-version'>Version name</Label>
-            <Input
-              id='share-version'
-              list='share-version-options'
-              value={versionName}
-              disabled={busy}
-              onChange={(event) => {
-                setChosenName(event.target.value);
-              }}
-            />
-            <datalist id='share-version-options'>
-              {existingNames.map((name: string) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <p className='text-xs text-muted-foreground'>
-              People who open your link see this version. Publishing again with the same name moves the link forward.
-            </p>
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-title'>Title</Label>
-            <Input
-              id='share-title'
-              value={title}
-              disabled={busy}
-              onChange={(event) => {
-                setTitle(event.target.value);
-              }}
-            />
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-description'>Description (optional)</Label>
-            <Textarea
-              id='share-description'
-              value={description}
-              disabled={busy}
-              rows={3}
-              onChange={(event) => {
-                setDescription(event.target.value);
-              }}
-            />
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label>Visibility</Label>
-            <RadioGroup
-              value={effectiveVisibility}
-              disabled={busy}
-              onValueChange={(value) => {
-                setVisibility(value as PublishVisibility);
-              }}
-              className='flex flex-col gap-2'
-            >
-              <div className='flex items-center gap-2'>
-                <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
-                <Label
-                  htmlFor='share-vis-private'
-                  className={cn('font-normal', !canCreatePrivateShares && 'text-muted-foreground')}
-                >
-                  Private (only you and people you share with)
-                </Label>
-                {canCreatePrivateShares || !isPlanResolved ? undefined : (
-                  <button
-                    type='button'
-                    className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
-                    onClick={() => {
-                      requestUpgrade();
-                    }}
-                  >
-                    <CommercialUpgradeLabel />
-                  </button>
-                )}
-              </div>
-              <div className='flex items-center gap-2'>
-                <RadioGroupItem value='public' id='share-vis-public' />
-                <Label htmlFor='share-vis-public' className='font-normal'>
-                  Public
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-          {effectiveVisibility === 'private' ? (
-            <PublicationEmailTagsField
-              id='share-shared-emails'
-              label='Share with specific emails (optional)'
-              emails={sharedEmails}
-              disabled={busy}
-              placeholder='teammate@example.com'
-              onEmailsChange={setSharedEmails}
-            />
-          ) : null}
-        </div>
-
-        {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
-
-        <div className='flex justify-end'>
-          <Button type='button' disabled={!canPublish} onClick={handlePublish}>
-            {busy ? (
-              <>
-                <Loader2 className='size-4 animate-spin' aria-hidden />
-                <span>Publishing…</span>
-              </>
-            ) : (
-              <>
-                {copied ? <Check className='size-3.5' aria-hidden /> : <Link2 className='size-3.5' aria-hidden />}
-                <span>Publish and copy link</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-    </SharePanelFrame>
+    <Host source={source}>
+      <SharePane />
+    </Host>
   );
 }
 

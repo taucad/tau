@@ -3,6 +3,8 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import type * as XStateModule from 'xstate';
+import { useWorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
+import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
 import type { ProjectSharePanelProps } from '#components/publish/project-share-panel.js';
 import {
   parseProjectShareNavigationIntent,
@@ -63,7 +65,10 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId: project.id,
     projectRef,
     editorRef,
-    entriesRecord: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
+    entriesRecord: {
+      version: 1,
+      entries: { 'main.ts': { renderTimeout: 30_000 } },
+    },
   }),
 }));
 
@@ -259,6 +264,37 @@ describe('ProjectShareWorkbenchPanel', () => {
       </MemoryRouter>,
     );
     expect(capturedPanelProperties?.projectUpdatedAt).toBe(20);
+  });
+
+  it('hands the shared pane the project host with its share source', () => {
+    render(
+      <MemoryRouter>
+        <ProjectShareWorkbenchPanel />
+      </MemoryRouter>,
+    );
+    const Host = capturedPanelProperties!.host!;
+    const source: ShareSource = { methods: [] };
+    let seen: ReturnType<typeof useWorkbenchPanesHost> | undefined;
+    function Probe(): undefined {
+      seen = useWorkbenchPanesHost();
+      return undefined;
+    }
+
+    render(
+      <Host source={source}>
+        <Probe />
+      </Host>,
+    );
+
+    expect(seen?.share).toBe(source);
+    expect(seen?.claimUnits).toBeTypeOf('function');
+    projectSend.mockClear();
+    const release = seen!.claimUnits!(['main.ts']);
+    release();
+    expect(projectSend.mock.calls.map(([event]) => (event as { type: string }).type)).toEqual([
+      'claimGeometryUnit',
+      'releaseGeometryUnit',
+    ]);
   });
 });
 

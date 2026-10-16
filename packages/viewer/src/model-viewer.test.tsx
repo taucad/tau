@@ -25,14 +25,29 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
   useModelInteractionRef: () => undefined,
 }));
 
+const cadViewerProps = vi.hoisted(() => ({
+  onModelComponentSecondaryPointerCandidate: undefined as
+    | ((target: { readonly unitId: string; readonly componentId: string } | undefined) => void)
+    | undefined,
+}));
+
 vi.mock('#cad/cad-viewer.jsx', () => ({
-  CadViewer: (props: { readonly enablePan?: boolean; readonly enableZoom?: boolean }) => (
-    <div
-      data-testid='cad-viewer'
-      data-enable-pan={String(props.enablePan ?? false)}
-      data-enable-zoom={String(props.enableZoom ?? false)}
-    />
-  ),
+  CadViewer: (props: {
+    readonly enablePan?: boolean;
+    readonly enableZoom?: boolean;
+    readonly onModelComponentSecondaryPointerCandidate?: (
+      target: { readonly unitId: string; readonly componentId: string } | undefined,
+    ) => void;
+  }) => {
+    cadViewerProps.onModelComponentSecondaryPointerCandidate = props.onModelComponentSecondaryPointerCandidate;
+    return (
+      <div
+        data-testid='cad-viewer'
+        data-enable-pan={String(props.enablePan ?? false)}
+        data-enable-zoom={String(props.enableZoom ?? false)}
+      />
+    );
+  },
 }));
 
 vi.mock('@taucad/ui/components/loader', () => ({
@@ -167,6 +182,28 @@ describe('ModelViewer', () => {
   });
 
   // ── Graphics machine integration ───────────────────────────────────
+
+  describe('secondary pointer candidate', () => {
+    it('hands every right press on the model to onComponentSecondaryPointerCandidate', () => {
+      const onCandidate = vi.fn();
+      render(
+        <ModelViewer
+          artifact={testArtifact}
+          artifactHash={testHash}
+          onComponentSecondaryPointerCandidate={onCandidate}
+        />,
+      );
+      const target = { unitId: 'file:src/main.ts', componentId: 'component:arm' };
+      cadViewerProps.onModelComponentSecondaryPointerCandidate?.(target);
+      cadViewerProps.onModelComponentSecondaryPointerCandidate?.(undefined);
+      expect(onCandidate.mock.calls).toEqual([[target], [undefined]]);
+    });
+
+    it('listens for secondary presses only when a callback asks for them', () => {
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
+      expect(cadViewerProps.onModelComponentSecondaryPointerCandidate).toBeUndefined();
+    });
+  });
 
   describe('graphics machine integration', () => {
     it('should send updateGeometry to graphicsMachine when geometry is provided', () => {

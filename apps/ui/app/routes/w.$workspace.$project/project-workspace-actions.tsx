@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
 import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';

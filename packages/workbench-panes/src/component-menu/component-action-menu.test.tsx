@@ -1,0 +1,895 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, renderHook, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
+import { ContextMenu, ContextMenuTrigger } from '@taucad/ui/components/context-menu';
+import { createSourceModelInteractionUnitId } from '@taucad/viewer/machines/model-interaction.machine';
+import {
+  createModelComponentActionMenus,
+  ModelComponentActionDropdown,
+} from '#component-menu/component-action-menu.jsx';
+import type { ModelComponentHostActions } from '#component-menu/component-actions.js';
+import {
+  useViewerModelComponentActionMenuData,
+  ViewerModelComponentActionMenu,
+} from '#component-menu/viewer-component-action-menu.jsx';
+import {
+  createGraphicsRefForUnit,
+  createNode as createUnitNode,
+  createStaticGraphicsRef,
+} from '#model/model.test-utils.jsx';
+import type { GraphicsRef } from '#host/workbench-host.jsx';
+
+const mocks = {
+  addToChat: vi.fn(),
+  revealInExplorer: vi.fn(),
+  showKinematics: vi.fn(),
+  openPreview: vi.fn(),
+};
+
+type SpyGraphicsRef = GraphicsRef & { readonly send: ReturnType<typeof vi.fn> };
+
+/** A graphics actor stand-in whose `send` is a spy. */
+const createSpyGraphicsRef = (): SpyGraphicsRef => Object.assign(createStaticGraphicsRef(), { send: vi.fn() });
+
+/** Every host verb, as the Tau app supplies them. */
+const allActions: ModelComponentHostActions = {
+  addToChat: mocks.addToChat,
+  revealInExplorer: mocks.revealInExplorer,
+  showKinematics: mocks.showKinematics,
+  openPreview: mocks.openPreview,
+};
+
+const componentId = 'component:first';
+const unitId = 'file:src/main.ts';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- Fixture data verifies the user's authored material value as text, not UI styling.
+const carrierBaseColor = '#285e88';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- The glTF default is source-data evidence, not a UI palette choice.
+const defaultBaseColor = '#ffffff';
+
+const capabilities: GeometryComponentManifest['capabilities'] = {
+  canHide: true,
+  canIsolate: true,
+  canFocus: true,
+  canAdjustOpacity: true,
+  hasDrawings: false,
+  hasPreciseTopology: false,
+  exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
+};
+
+function createNode(): GeometryComponentNode {
+  return {
+    id: componentId,
+    name: 'Planetary housing',
+    kind: 'part',
+    selector: 'node/0',
+    parentId: 'root',
+    childIds: [],
+    depth: 1,
+    path: ['Model', 'Planetary housing'],
+    meshNodeIndices: [0],
+    primitiveIndices: [0],
+    materialIndices: [0],
+    capabilities,
+  };
+}
+
+function createManifest(node = createNode(), sourceFile?: string): GeometryComponentManifest {
+  return {
+    schemaVersion: 1,
+    sourceFile,
+    rootId: 'root',
+    nodeOrder: ['root', node.id],
+    capabilities,
+    nodesById: {
+      root: {
+        id: 'root',
+        name: 'Model',
+        kind: 'model',
+        selector: 'root',
+        childIds: [node.id],
+        depth: 0,
+        path: ['Model'],
+        meshNodeIndices: [],
+        primitiveIndices: [],
+        materialIndices: [],
+        capabilities,
+      },
+      [node.id]: node,
+    },
+  };
+}
+
+const fireSliderPointerEvent = (
+  element: HTMLElement,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  clientX: number,
+): void => {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX,
+  });
+  Object.defineProperty(event, 'pointerId', { value: 1 });
+  fireEvent(element, event);
+};
+
+beforeEach(() => {
+  for (const mock of Object.values(mocks)) {
+    mock.mockReset();
+  }
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function renderViewerModelComponentActionMenu({
+  isFocused = false,
+  appearance,
+}: {
+  readonly isFocused?: boolean;
+  readonly appearance?: GeometryComponentAppearance;
+} = {}): SpyGraphicsRef {
+  const node = createNode();
+  node.appearance = appearance;
+  const manifest = createManifest(node, 'src/main.ts');
+  const graphicsRef = createSpyGraphicsRef();
+
+  render(
+    <ViewerModelComponentActionMenu
+      isOpen
+      point={{ clientX: 120, clientY: 160 }}
+      data={{
+        manifest,
+        node,
+        graphicsRef,
+        unitId,
+        source: 'viewer',
+        isFocused,
+        isIsolated: false,
+        hasHiddenComponents: false,
+        hasOpacityOverrides: false,
+        opacity: 1,
+        actions: allActions,
+      }}
+      onOpenChange={vi.fn()}
+    />,
+  );
+  return graphicsRef;
+}
+
+describe('model component action menu', () => {
+  it('heads the menu with the material swatch only and opens a part preview from the first item', async () => {
+    const node = {
+      ...createNode(),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+      appearance: {
+        materials: [{ materialIndex: 0, color: carrierBaseColor }],
+      },
+    };
+    const graphicsRef = createSpyGraphicsRef();
+    render(
+      <>
+        <button type='button' data-model-part-button='' data-model-component-id={componentId}>
+          Planetary housing row
+        </button>
+        <ModelComponentActionDropdown
+          manifest={createManifest(node)}
+          node={node}
+          graphicsRef={graphicsRef}
+          unitId={unitId}
+          source='explorer'
+          isFocused={false}
+          isIsolated={false}
+          hasHiddenComponents={false}
+          hasOpacityOverrides={false}
+          opacity={1}
+          actions={allActions}
+          actionButtonClassName=''
+          preview={{ status: 'pending', bytes: new Uint8Array([1]) }}
+        />
+      </>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const menu = screen.getByRole('menu');
+    expect(menu.querySelector('img')).toBeNull();
+    expect(menu.querySelectorAll('[data-slot="material-swatch"]')).toHaveLength(1);
+    expect(within(menu).queryByText('Preview loading')).toBeNull();
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items[1]).toHaveAccessibleName('Open preview');
+    await user.click(items[1]!);
+    expect(mocks.openPreview).toHaveBeenCalledWith({
+      graphicsRef,
+      unitId,
+      componentId,
+      source: 'explorer',
+      // Focus returns to the Explorer row, not the menu trigger.
+      origin: screen.getByRole('button', { name: 'Planetary housing row' }),
+    });
+  });
+
+  it('offers no preview for a group without renderable geometry', async () => {
+    const node: ReturnType<typeof createNode> = {
+      ...createNode(),
+      kind: 'assembly',
+    };
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node)}
+        node={node}
+        graphicsRef={createSpyGraphicsRef()}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        opacity={1}
+        actions={allActions}
+        actionButtonClassName=''
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Open preview' })).toBeNull();
+  });
+
+  it('offers retry only for a failed Explorer preview', async () => {
+    const node = createNode();
+    const retry = vi.fn();
+    const graphicsRef = createSpyGraphicsRef();
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node)}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        opacity={1}
+        actions={allActions}
+        actionButtonClassName=''
+        preview={{ status: 'failed' }}
+        onRetryPreview={retry}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Retry preview' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it.each(['explorer', 'viewer'] as const)(
+    'should expose source material factors as read-only text in the %s menu',
+    async (source) => {
+      const user = userEvent.setup();
+      const appearance: GeometryComponentAppearance = {
+        materials: [
+          {
+            materialIndex: 0,
+            color: carrierBaseColor,
+            metalness: 0.65,
+            roughness: 0.32,
+          },
+        ],
+      };
+      let graphicsRef: SpyGraphicsRef;
+      if (source === 'viewer') {
+        graphicsRef = renderViewerModelComponentActionMenu({ appearance });
+      } else {
+        const node = { ...createNode(), appearance };
+        graphicsRef = createSpyGraphicsRef();
+        render(
+          <ModelComponentActionDropdown
+            manifest={createManifest(node)}
+            node={node}
+            graphicsRef={graphicsRef}
+            unitId={unitId}
+            source='explorer'
+            isFocused={false}
+            isIsolated={false}
+            hasHiddenComponents={false}
+            hasOpacityOverrides={false}
+            opacity={1}
+            actions={allActions}
+            actionButtonClassName=''
+          />,
+        );
+        await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+      }
+
+      // The menu opens on its part: a collapsed row with the name and a swatch; the factors wait inside.
+      const partRow = screen.getByRole('menuitem', {
+        name: /Planetary housing/,
+      });
+      expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
+      expect(partRow).toHaveAttribute('aria-expanded', 'false');
+      expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('group', {
+          name: 'Inspection for Planetary housing',
+        }),
+      ).not.toBeInTheDocument();
+      await user.click(partRow);
+      expect(partRow).toHaveAttribute('aria-expanded', 'true');
+      const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+      expect(summary.getAllByText('Not measured')).toHaveLength(2);
+      expect(summary.getByText('Volume not measured yet.')).toBeVisible();
+      await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
+      expect(summary.getByText(carrierBaseColor)).toBeVisible();
+      expect(summary.getByText('0.65')).toBeVisible();
+      expect(summary.getByText('0.32')).toBeVisible();
+      expect(summary.queryByRole('slider')).not.toBeInTheDocument();
+      expect(summary.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(summary.queryByRole('textbox')).not.toBeInTheDocument();
+      await user.click(summary.getByText('0.65'));
+      expect(screen.getByRole('menuitem', { name: 'Focus on part' })).toBeVisible();
+      expect(graphicsRef.send).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should show mixed values without hiding equal values or their format-default provenance', async () => {
+    renderViewerModelComponentActionMenu({
+      appearance: {
+        materials: [
+          { materialIndex: 0, metalness: 0.2, roughness: 1 },
+          { materialIndex: 1, color: defaultBaseColor, metalness: 0.8 },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('menuitem', { name: /Planetary housing/ }));
+    const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+    await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
+    expect(summary.getByText('Mixed: 0.2, 0.8')).toBeVisible();
+    expect(summary.getByText('1 (includes glTF default)')).toBeVisible();
+    expect(summary.getByText('#ffffff (includes glTF default)')).toBeVisible();
+  });
+
+  it('should distinguish glTF defaults, unavailable factors and unlit shading', async () => {
+    renderViewerModelComponentActionMenu({
+      appearance: {
+        materials: [
+          {},
+          {
+            materialIndex: 0,
+            color: 'unavailable',
+            metalness: 'unavailable',
+            roughness: 'unavailable',
+          },
+          { materialIndex: 1, isUnlit: true },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('menuitem', { name: /Planetary housing/ }));
+    const summary = within(screen.getByRole('group', { name: 'Inspection for Planetary housing' }));
+    await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
+    expect(summary.getByText('Mixed: #ffffff (glTF default), Unavailable')).toBeVisible();
+    expect(summary.getAllByText('Mixed: 1 (glTF default), Unavailable, Not used (unlit)')).toHaveLength(2);
+  });
+
+  it('should dispatch actions with the supplied source and add geometry references to chat', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const manifest = createManifest(node, 'src/main.ts');
+    const graphicsRef = createSpyGraphicsRef();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={manifest}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='viewer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        actionButtonClassName='size-5'
+        opacity={1}
+        actions={allActions}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    await user.click(screen.getByText('Add to chat'));
+
+    expect(mocks.addToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: 'src/main.ts', componentId }),
+      expect.objectContaining({ node, unitId, source: 'viewer' }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    await user.click(screen.getByText('Hide'));
+
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'hideModelComponent',
+      unitId,
+      componentId,
+      source: 'viewer',
+    });
+  });
+
+  it('should render the same action surface for coordinate-anchored viewer menus', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const manifest = createManifest(node, 'src/main.ts');
+    const graphicsRef = createSpyGraphicsRef();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest,
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+          actions: allActions,
+        }}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Add to chat' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Reveal in Explorer' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Hide' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Isolate' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Show all' })).toBeDisabled();
+    expect(screen.getByText('Opacity')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Reset opacity' })).toBeDisabled();
+
+    await user.click(screen.getByRole('menuitem', { name: 'Hide' }));
+
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'hideModelComponent',
+      unitId,
+      componentId,
+      source: 'viewer',
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('should type and scrub opacity through the viewer source without closing the menu', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const graphicsRef = createSpyGraphicsRef();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest: createManifest(node, 'src/main.ts'),
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+          actions: allActions,
+        }}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
+    expect(input).toHaveValue('100');
+    expect(screen.getByText('%')).toBeInTheDocument();
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, '42');
+    await user.keyboard('{Enter}');
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId,
+      opacity: 0.42,
+      source: 'viewer',
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    const sliderItem = input.closest<HTMLElement>('[data-slot="viewer-model-component-action-slider-item"]')!;
+    Object.defineProperty(sliderItem, 'offsetWidth', {
+      configurable: true,
+      value: 100,
+    });
+    fireSliderPointerEvent(sliderItem, 'pointerdown', 100);
+    fireSliderPointerEvent(sliderItem, 'pointermove', 80);
+    fireSliderPointerEvent(sliderItem, 'pointerup', 80);
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId,
+      opacity: 0.8,
+      source: 'viewer',
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should reveal viewer components in Explorer without adding the action to Explorer menus', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const manifest = createManifest(node, 'src/main.ts');
+    const graphicsRef = createSpyGraphicsRef();
+
+    const { unmount } = render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest,
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+          actions: allActions,
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('menuitem', { name: 'Reveal in Explorer' }));
+
+    expect(mocks.revealInExplorer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manifest,
+        node,
+        graphicsRef,
+        unitId,
+        source: 'viewer',
+      }),
+    );
+    unmount();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={manifest}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        actionButtonClassName='size-5'
+        opacity={1}
+        actions={allActions}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+
+    expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
+  });
+
+  it('should reveal the joint that moves a part in the Kinematics pane only for parts in a mechanism link', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const data = {
+      node,
+      graphicsRef: createSpyGraphicsRef(),
+      unitId,
+      source: 'viewer',
+      isFocused: false,
+      isIsolated: false,
+      hasHiddenComponents: false,
+      hasOpacityOverrides: false,
+      opacity: 1,
+      actions: allActions,
+    } as const;
+    const { rerender } = render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{ ...data, manifest: createManifest(node) }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('menuitem', { name: 'Show kinematics' })).toBeDisabled();
+
+    const mechanism: GeometryComponentManifest['mechanism'] = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'rad' },
+      root: 'base',
+      links: {
+        base: { components: ['root'] },
+        arm: { components: [componentId] },
+      },
+      joints: {
+        hinge: {
+          type: 'revolute',
+          parent: 'base',
+          child: 'arm',
+          origin: [0, 0, 0],
+          axis: [0, 0, 1],
+        },
+      },
+    };
+    rerender(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          ...data,
+          manifest: { ...createManifest(node, 'src/main.ts'), mechanism },
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Show kinematics' }));
+
+    expect(mocks.showKinematics).toHaveBeenCalledWith(expect.objectContaining({ node, unitId }), componentId);
+  });
+
+  it('should enable and dispatch unit-wide visibility and opacity recovery actions', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const graphicsRef = createSpyGraphicsRef();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node, 'src/main.ts')}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents
+        hasOpacityOverrides
+        actionButtonClassName='size-5'
+        opacity={0.5}
+        actions={allActions}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const isolate = screen.getByRole('menuitem', { name: 'Isolate' });
+    const showAll = screen.getByRole('menuitem', { name: 'Show all' });
+    expect(showAll).toBeEnabled();
+    expect(isolate.nextElementSibling).toBe(showAll);
+    await user.click(showAll);
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'showHiddenModelComponents',
+      unitId,
+      source: 'explorer',
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const resetOpacity = screen.getByRole('menuitem', {
+      name: 'Reset opacity',
+    });
+    expect(resetOpacity).toBeEnabled();
+    await user.click(resetOpacity);
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'resetModelComponentOpacities',
+      unitId,
+      source: 'explorer',
+    });
+  });
+
+  it('should focus the coordinate-anchored viewer menu itself on open, not its first row', () => {
+    // Materials make the part-name row a focusable first row.
+    renderViewerModelComponentActionMenu({
+      appearance: {
+        materials: [{ materialIndex: 0, color: carrierBaseColor }],
+      },
+    });
+
+    expect(document.activeElement).toBe(screen.getByRole('menu'));
+  });
+
+  it('should move coordinate-anchored viewer menu focus to enabled items on pointer hover', async () => {
+    const user = userEvent.setup();
+    renderViewerModelComponentActionMenu();
+
+    const focusItem = screen.getByRole('menuitem', { name: 'Focus on part' });
+    const addToChatItem = screen.getByRole('menuitem', { name: 'Add to chat' });
+    focusItem.focus();
+
+    expect(document.activeElement).toBe(focusItem);
+
+    await user.hover(addToChatItem);
+
+    expect(document.activeElement).toBe(addToChatItem);
+  });
+
+  it('should not move coordinate-anchored viewer menu focus to disabled items on pointer movement', () => {
+    renderViewerModelComponentActionMenu({ isFocused: true });
+
+    const disabledFocusItem = screen.getByRole('menuitem', {
+      name: 'Focus on part',
+    });
+    const addToChatItem = screen.getByRole('menuitem', { name: 'Add to chat' });
+    addToChatItem.focus();
+
+    expect(disabledFocusItem).toBeDisabled();
+
+    fireEvent.pointerEnter(disabledFocusItem);
+    fireEvent.pointerMove(disabledFocusItem);
+
+    expect(document.activeElement).toBe(addToChatItem);
+  });
+  it('leaves out every host item whose verb the host lacks, keeping the graphics items in order', async () => {
+    const user = userEvent.setup();
+    const node = {
+      ...createNode(),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const graphicsRef = createSpyGraphicsRef();
+    render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest: createManifest(node, 'src/main.ts'),
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const labels = within(screen.getByRole('menu'))
+      .getAllByRole('menuitem')
+      .slice(1)
+      .map((item) => item.textContent);
+    expect(labels).toEqual(['Focus on part', 'Hide', 'Isolate', 'Show all', 'Reset opacity']);
+    await user.click(screen.getByRole('menuitem', { name: 'Focus on part' }));
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'focusModelComponent',
+      unitId,
+      componentId,
+      source: 'viewer',
+    });
+  });
+
+  it('orders every item as the Tau app does when the host has every verb', () => {
+    const node = {
+      ...createNode(),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest: createManifest(node, 'src/main.ts'),
+          node,
+          graphicsRef: createSpyGraphicsRef(),
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+          preview: { status: 'failed' },
+          onRetryPreview: vi.fn(),
+          actions: allActions,
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const labels = within(screen.getByRole('menu'))
+      .getAllByRole('menuitem')
+      .slice(1)
+      .map((item) => item.textContent);
+    expect(labels).toEqual([
+      'Open preview',
+      'Focus on part',
+      'Add to chat',
+      'Reveal in Explorer',
+      'Retry preview',
+      'Show kinematics',
+      'Hide',
+      'Isolate',
+      'Show all',
+      'Reset opacity',
+    ]);
+  });
+
+  it('binds row menus to the host verbs for the Model pane', async () => {
+    const user = userEvent.setup();
+    const { Dropdown, ContextContent } = createModelComponentActionMenus({
+      addToChat: mocks.addToChat,
+    });
+    const node = createNode();
+    const props = {
+      manifest: createManifest(node, 'src/main.ts'),
+      node,
+      graphicsRef: createSpyGraphicsRef(),
+      unitId,
+      source: 'explorer',
+      isFocused: false,
+      isIsolated: false,
+      hasHiddenComponents: false,
+      hasOpacityOverrides: false,
+      opacity: 1,
+    } as const;
+    const { unmount } = render(<Dropdown {...props} actionButtonClassName='' />);
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Show kinematics' })).toBeNull();
+    await user.click(screen.getByRole('menuitem', { name: 'Add to chat' }));
+    expect(mocks.addToChat).toHaveBeenCalledOnce();
+    unmount();
+
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger>Row</ContextMenuTrigger>
+        <ContextContent {...props} />
+      </ContextMenu>,
+    );
+    fireEvent.contextMenu(screen.getByText('Row'));
+    expect(await screen.findByRole('menuitem', { name: 'Add to chat' })).toBeInTheDocument();
+  });
+
+  it('follows the unit the viewer menu opens on', () => {
+    const graphicsRef = createGraphicsRefForUnit('src/main.ts', [createUnitNode('a', 'Arm')], {
+      hiddenComponentIds: ['a'],
+    });
+    const liveUnitId = createSourceModelInteractionUnitId('src/main.ts');
+    type HookProps = { readonly target: { unitId: string; componentId: string } | undefined };
+    const initialProps: HookProps = { target: undefined };
+    const { result, rerender } = renderHook(
+      ({ target }: HookProps) =>
+        useViewerModelComponentActionMenuData({
+          graphicsRef,
+          target,
+          actions: allActions,
+        }),
+      { initialProps },
+    );
+    expect(result.current).toBeUndefined();
+
+    rerender({ target: { unitId: liveUnitId, componentId: 'a' } });
+    expect(result.current).toMatchObject({
+      unitId: liveUnitId,
+      source: 'viewer',
+      hasHiddenComponents: true,
+      opacity: 1,
+      actions: allActions,
+    });
+    expect(result.current?.node.name).toBe('Arm');
+
+    rerender({ target: { unitId: liveUnitId, componentId: 'missing' } });
+    expect(result.current).toBeUndefined();
+  });
+});

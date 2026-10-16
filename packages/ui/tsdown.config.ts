@@ -84,6 +84,8 @@ const baseConfig: UserConfig = {
   copy: ({ outDir }) => [
     { from: 'src/styles/tokens.css', to: `${outDir}/styles` },
     { from: 'src/styles/tokens.css.d.ts', to: `${outDir}/styles` },
+    { from: 'src/styles/base.css', to: `${outDir}/styles` },
+    { from: 'src/styles/base.css.d.ts', to: `${outDir}/styles` },
   ],
   dts: true,
   minify: true,

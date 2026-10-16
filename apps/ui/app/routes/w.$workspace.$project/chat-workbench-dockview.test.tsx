@@ -94,7 +94,7 @@ vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', () => ({
     </>
   ),
 }));
-vi.mock('#components/ui/pane-button.js', () => ({
+vi.mock('@taucad/workbench-panes/components/pane-button', () => ({
   PaneButton: ({
     tooltip: _tooltip,
     tooltipSide: _tooltipSide,

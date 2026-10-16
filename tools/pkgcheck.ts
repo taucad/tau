@@ -499,6 +499,10 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   '@taucad/viewer': {
     '#*.jsx': '.tsx components and hooks share every directory with .ts modules; the canonical #*.js reaches only .ts',
   },
+  // The workbench panes are React components beside their .ts sources and types, as in the viewer.
+  '@taucad/workbench-panes': {
+    '#*.jsx': '.tsx panes share every directory with .ts sources and types; the canonical #*.js reaches only .ts',
+  },
   // The viewer page builds from app/ into one HTML file (not the plugin's src/ launcher), and its
   // basic-host harness sits in e2e/; relative imports are banned workspace-wide.
   '@taucad/agent-plugin': {

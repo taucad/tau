@@ -10,13 +10,13 @@ import type { DockviewApi, IDockviewPanelProps, IPaneviewPanelProps, PaneviewApi
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Allotment } from '#components/panes/allotment.js';
 import { Dockview } from '#components/panes/dockview.js';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import {
   PaneviewHeader,
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 
 declare module 'vitest/internal/browser' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Augments the installed browser command registry.

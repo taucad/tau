@@ -49,6 +49,7 @@
     "./cad/part-thumbnail-state": "./src/cad/part-thumbnail-state.ts",
     "./cad/section-tool-row": "./src/cad/section-tool-row.tsx",
     "./cad/section-view-control": "./src/cad/section-view-control.tsx",
+    "./cad/viewer-controls": "./src/cad/viewer-controls.tsx",
     "./cad/viewer-settings": "./src/cad/viewer-settings.tsx",
     "./constants/length-units": "./src/constants/length-units.ts",
     "./environment/viewer-environment": "./src/environment/viewer-environment.tsx",
@@ -97,16 +98,17 @@
     "./graphics/three/utils/three-shader-debug": "./src/graphics/three/utils/three-shader-debug.ts",
     "./graphics/three/utils/tsl-node-graph-snapshot": "./src/graphics/three/utils/tsl-node-graph-snapshot.ts",
     "./hooks/use-graphics": "./src/hooks/use-graphics.tsx",
+    "./hooks/use-viewer-shortcuts": "./src/hooks/use-viewer-shortcuts.ts",
     "./hooks/use-webgl-context-tracker": "./src/hooks/use-webgl-context-tracker.tsx",
     "./lib/renderer-telemetry": "./src/lib/renderer-telemetry.ts",
     "./machines/graphics.machine": "./src/machines/graphics.machine.ts",
     "./machines/kinematics.machine": "./src/machines/kinematics.machine.ts",
     "./machines/model-interaction.machine": "./src/machines/model-interaction.machine.ts",
     "./model-viewer": "./src/model-viewer.tsx",
+    "./panels/structure-section": "./src/panels/structure-section.tsx",
     "./parameters/parameter-edit": "./src/parameters/parameter-edit.ts",
     "./parameters/parameter-group-card": "./src/parameters/parameter-group-card.tsx",
     "./parameters/parameter-select": "./src/parameters/parameter-select.tsx",
-    "./panels/structure-section": "./src/panels/structure-section.tsx",
     "./parameters/parameters": "./src/parameters/parameters.tsx",
     "./parameters/parameters-boolean": "./src/parameters/parameters-boolean.tsx",
     "./parameters/parameters-number": "./src/parameters/parameters-number.tsx",
@@ -192,6 +194,11 @@
         "types": "./dist/cad/section-view-control.d.mts",
         "import": "./dist/cad/section-view-control.mjs",
         "default": "./dist/cad/section-view-control.mjs"
+      },
+      "./cad/viewer-controls": {
+        "types": "./dist/cad/viewer-controls.d.mts",
+        "import": "./dist/cad/viewer-controls.mjs",
+        "default": "./dist/cad/viewer-controls.mjs"
       },
       "./cad/viewer-settings": {
         "types": "./dist/cad/viewer-settings.d.mts",
@@ -433,6 +440,11 @@
         "import": "./dist/hooks/use-graphics.mjs",
         "default": "./dist/hooks/use-graphics.mjs"
       },
+      "./hooks/use-viewer-shortcuts": {
+        "types": "./dist/hooks/use-viewer-shortcuts.d.mts",
+        "import": "./dist/hooks/use-viewer-shortcuts.mjs",
+        "default": "./dist/hooks/use-viewer-shortcuts.mjs"
+      },
       "./hooks/use-webgl-context-tracker": {
         "types": "./dist/hooks/use-webgl-context-tracker.d.mts",
         "import": "./dist/hooks/use-webgl-context-tracker.mjs",
@@ -463,6 +475,11 @@
         "import": "./dist/model-viewer.mjs",
         "default": "./dist/model-viewer.mjs"
       },
+      "./panels/structure-section": {
+        "types": "./dist/panels/structure-section.d.mts",
+        "import": "./dist/panels/structure-section.mjs",
+        "default": "./dist/panels/structure-section.mjs"
+      },
       "./parameters/parameter-edit": {
         "types": "./dist/parameters/parameter-edit.d.mts",
         "import": "./dist/parameters/parameter-edit.mjs",
@@ -477,11 +494,6 @@
         "types": "./dist/parameters/parameter-select.d.mts",
         "import": "./dist/parameters/parameter-select.mjs",
         "default": "./dist/parameters/parameter-select.mjs"
-      },
-      "./panels/structure-section": {
-        "types": "./dist/panels/structure-section.d.mts",
-        "import": "./dist/panels/structure-section.mjs",
-        "default": "./dist/panels/structure-section.mjs"
       },
       "./parameters/parameters": {
         "types": "./dist/parameters/parameters.d.mts",

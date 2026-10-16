@@ -2,7 +2,7 @@ import { ChevronsDown, Filter, Settings, Terminal, Trash } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { Paneview } from '#components/panes/paneview.js';
+import { Paneview } from '@taucad/workbench-panes/paneview/paneview';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { Virtuoso } from 'react-virtuoso';
 import type { LogEntry, LogLevel, LogOrigin } from '@taucad/types';
@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
@@ -27,11 +27,11 @@ import {
   paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
-} from '#components/panes/paneview-header.js';
+} from '@taucad/workbench-panes/paneview/paneview-header';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
-import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
 import {
   getInitialPanelOptions,
   usePaneviewPersistence,

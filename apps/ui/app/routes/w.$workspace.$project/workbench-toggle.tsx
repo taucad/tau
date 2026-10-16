@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { DockviewTabsComboBox } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 
 type WorkbenchToggleProperties = {
   readonly isOpen: boolean;

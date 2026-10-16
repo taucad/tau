@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
-import { PaneButton } from '#components/ui/pane-button.js';
+import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { proposeEntriesCorrection } from '#workbench-records/entries-repair.js';

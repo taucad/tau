@@ -97,7 +97,7 @@ describe('compact permission requests', () => {
       await pending.promise;
     });
     expect(screen.getByRole('button', { name: option.name, busy: true })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('waiting for confirmation');
+    expect(screen.getByRole('status')).toHaveTextContent('Sending response…');
     rerender(
       <ChatPermissionRequest
         approval={approval}
@@ -130,7 +130,7 @@ describe('compact permission requests', () => {
     render(<ChatPermissionRequest approval={approval} name='Codex' onRespond={respond} />);
     await user.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Try again');
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't send your response. Try again.");
     });
     expect(screen.queryByText(/raw host detail/u)).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow', busy: false })).toBeEnabled();
@@ -208,36 +208,61 @@ describe('compact permission requests', () => {
           outcome={outcome}
         />,
       );
-      expect(screen.getByText('Response recorded · provider saving unverified')).toBeInTheDocument();
+      expect(screen.getByText('Response recorded · saving unverified')).toBeInTheDocument();
       expect(screen.queryByText('Request allowed')).toBeNull();
       expect(screen.queryByText(/response sent|permission saved/iu)).toBeNull();
     },
   );
+  it('should retain a session choice as a request when history is reopened', () => {
+    const storedApproval: AgentHostApproval = {
+      ...approval,
+      providerPermission: {
+        owner: 'provider',
+        persistence: 'unverified',
+        options: [{ optionId: 'session', requestedScope: 'session' }],
+      },
+    };
+    render(
+      <ChatPermissionRequest
+        approval={storedApproval}
+        name='Codex'
+        outcome='approved'
+        resolution={{ outcome: 'approved', optionId: 'session' }}
+      />,
+    );
+    expect(screen.getByText('Session approval requested')).toBeInTheDocument();
+    expect(screen.queryByText(/saved|ask again|repeated|session ended/iu)).toBeNull();
+  });
   it.each([
-    { stored: 'present', effective: 'allowed', reason: 'policy-observed', expected: 'Allowed in Codex settings' },
+    {
+      stored: 'present',
+      effective: 'allowed',
+      reason: 'policy-observed',
+      expected: 'Allowed in Codex settings when checked',
+    },
     {
       stored: 'present',
       effective: 'unknown',
       reason: 'policy-observed',
-      expected: 'Preference found · effective approval not confirmed',
+      expected: 'Preference found · approval unverified',
     },
     {
       stored: 'present',
       effective: 'overridden',
       reason: 'policy-overridden',
-      expected: 'Preference found · another Codex rule takes precedence',
+      expected: 'Preference found · overridden when checked',
     },
     {
       stored: 'absent',
       effective: 'unknown',
       reason: 'policy-absent',
-      expected: 'Not found in Codex settings · future requests may ask again',
+      expected: 'Preference not found in Codex settings',
     },
     {
       stored: 'unknown',
       effective: 'unknown',
       reason: 'config-read-failed',
-      expected: 'Response recorded · Codex saving could not be checked',
+      expected: 'Response recorded · saving unverified',
     },
   ] as const)(
     'should render observed provider policy without claiming a new save: $stored/$effective',
@@ -308,7 +333,7 @@ describe('compact permission requests', () => {
         }}
       />,
     );
-    expect(screen.getByText('Preference found · effective approval not confirmed')).toBeInTheDocument();
+    expect(screen.getByText('Preference found · approval unverified')).toBeInTheDocument();
     expect(screen.queryByText(/Allowed in Grok settings|permission saved/iu)).toBeNull();
   });
   it('should retain the selected once scope after remount without suggesting a policy save', () => {
@@ -381,7 +406,7 @@ describe('compact permission requests', () => {
       />,
     );
     expect(screen.getByText('Allowed once · response recorded')).toBeInTheDocument();
-    expect(screen.queryByText('Allowed in Codex settings')).toBeNull();
+    expect(screen.queryByText('Allowed in Codex settings when checked')).toBeNull();
   });
   it.each(['approved', 'denied', 'cancelled'])(
     'retains a settled %s record without consent actions or diagnostics',

@@ -1376,3 +1376,128 @@ it.skipIf(!grokPersistenceAdapter || process.env['TAU_ACP_LIVE_GROK_PERSISTENCE'
   },
   300_000,
 );
+
+it.skipIf(!grokPersistenceAdapter || process.env['TAU_ACP_LIVE_GROK_SHELL'] !== '1')(
+  'should qualify an isolated Grok shell permission across provider restart',
+  async () => {
+    if (!grokPersistenceAdapter || grokPersistenceAdapter.modulePath !== undefined) {
+      throw new Error('Native Grok is required for shell qualification');
+    }
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'tau-grok-shell-')));
+    roots.push(root);
+    const profile = join(root, 'profile');
+    const workspaceRoot = join(root, 'workspace');
+    await mkdir(profile, { mode: 0o700 });
+    await mkdir(workspaceRoot, { mode: 0o700 });
+    await copyFile(join(process.env['GROK_HOME'] ?? join(homedir(), '.grok'), 'auth.json'), join(profile, 'auth.json'));
+    await chmod(join(profile, 'auth.json'), 0o600);
+    const isolatedAdapter = {
+      ...grokPersistenceAdapter,
+      args: ['--no-auto-update', '--permission-mode', 'default', 'agent', '--no-leader', 'stdio'],
+      spawnEnv: { ...grokPersistenceAdapter.spawnEnv, GROK_HOME: profile },
+    };
+    const command = `python3 -c "print('TAU_SHELL_PERMISSION_PROBE_OK')"`;
+    const phases: JsonObject[] = [];
+    let approvals = 0;
+    let requests = 0;
+    const runAttempt = async (attempt: number): Promise<void> => {
+      const requestedCommand = attempt === 2 ? command.replace('PROBE_OK', 'DIFFERENT') : command;
+      const session = await openAcpSession({ adapter: isolatedAdapter, cwd: workspaceRoot, createId: randomUUID });
+      const observed: ExternalAgentLogEvent[] = [];
+      try {
+        await session.prompt(
+          `Run this exact harmless shell command once: ${requestedCommand}. Do not read or edit files, use MCP, or run any other command. Reply with the command output.`,
+          {
+            append: async (events) => {
+              observed.push(...events);
+            },
+            publishLive: async () => undefined,
+            signal: AbortSignal.timeout(120_000),
+            approve: async (request) => {
+              requests++;
+              const parsed = z
+                .object({
+                  toolCall: z
+                    .object({
+                      title: z.string().optional(),
+                      kind: z.string().optional(),
+                      rawInput: z.json().optional(),
+                    })
+                    .optional(),
+                  options: z.array(z.object({ optionId: z.string(), kind: z.string(), name: z.string() })),
+                })
+                .parse(request.payload);
+              phases.push({ phase: 'approval', attempt, request: parsed });
+              const raw = z
+                .object({ command: z.string().optional(), cmd: z.string().optional() })
+                .safeParse(parsed.toolCall?.rawInput).data;
+              const exact = (raw?.command ?? raw?.cmd) === command;
+              const always = parsed.options.find((option) => option.kind === 'allow_always');
+              if (!exact || !always || attempt !== 0) {
+                return { interruptId: randomUUID(), outcome: 'cancelled' };
+              }
+              expect(always.name).toBe('Allow this command in future');
+              approvals++;
+              return { interruptId: randomUUID(), outcome: 'approved', optionId: always.optionId };
+            },
+          },
+          selectedModel('grok'),
+        );
+        const messages = directMessagesOf(observed);
+        const completed = messages.some(
+          (message) =>
+            message.role === 'tool-output' &&
+            !message.isError &&
+            JSON.stringify(message.content).includes('TAU_SHELL_PERMISSION_PROBE_OK'),
+        );
+        if (attempt === 0) {
+          expect(
+            messages.filter((message) => message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation'),
+          ).toMatchObject([
+            {
+              content: [
+                {
+                  resolution: {
+                    outcome: 'approved',
+                    optionId: 'always-allow',
+                    observation: { provider: 'grok', stored: 'present', effective: 'unknown' },
+                  },
+                },
+              ],
+            },
+          ]);
+        }
+        const permissionFile = join(profile, 'sessions', encodeURIComponent(workspaceRoot), 'permission.toml');
+        const settings = await readFile(permissionFile, 'utf8').catch(() => '');
+        phases.push({ phase: 'completed', attempt, requests, approvals, completed, settings });
+        expect(
+          z
+            .object({ allowed_bash_commands: z.array(z.string()), allow_bash_execute: z.boolean() })
+            .parse(parseToml(settings)),
+        ).toEqual({
+          allowed_bash_commands: [command],
+          allow_bash_execute: false,
+        });
+        expect(requests).toBe(attempt === 2 ? 2 : 1);
+        expect(completed).toBe(attempt !== 2);
+        expect(approvals).toBe(1);
+      } finally {
+        await session.close();
+      }
+    };
+    try {
+      await runAttempt(0);
+      await runAttempt(1);
+      await runAttempt(2);
+    } finally {
+      const evidence = process.env['TAU_ACP_LIVE_EVIDENCE'];
+      if (evidence) {
+        await writeFile(
+          resolve(process.env['NX_WORKSPACE_ROOT'] ?? process.cwd(), evidence),
+          JSON.stringify({ phases }, undefined, 2),
+        );
+      }
+    }
+  },
+  300_000,
+);

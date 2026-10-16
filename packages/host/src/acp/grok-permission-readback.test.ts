@@ -280,3 +280,65 @@ printf 'grok 1.0.52 (0920c8169e27)\n'
     expect(await createGrokPermissionReadback({ ...f, adapter })?.prepare(request())).toBeUndefined();
   });
 });
+
+const shellRequest = (command = 'python3 -c "print(42)"'): RequestPermissionRequest => ({
+  ...request(),
+  toolCall: { toolCallId: 'shell-call', kind: 'execute', rawInput: { variant: 'Bash', command, is_background: false } },
+});
+
+describe('Grok exact shell preference readback', () => {
+  it('should observe a persisted exact command without claiming effective approval', async () => {
+    const f = await fixture();
+    const prepared = await createGrokPermissionReadback(f)?.prepare(shellRequest());
+    expect(prepared).toBeDefined();
+    await f.save(`allowed_bash_commands = ['python3 -c "print(42)"']`);
+    expect(await prepared?.observe()).toMatchObject({
+      toolCallId: 'shell-call',
+      stored: 'present',
+      preexisting: false,
+      effective: 'unknown',
+      reason: 'policy-observed',
+    });
+  });
+  it.each([
+    'allow_bash_execute = true',
+    'allowed_bash_globs = ["python3 *"]',
+    `allowed_mcp_tools = ['python3 -c "print(42)"']`,
+    `allowed_bash_commands = ['python3  -c "print(42)"']`,
+  ])('should not claim the exact command is saved for broader or different settings: %s', async (settings) => {
+    const f = await fixture();
+    const prepared = await createGrokPermissionReadback(f)?.prepare(shellRequest());
+    await f.save(settings);
+    expect(await prepared?.observe()).toMatchObject({ stored: 'absent', effective: 'unknown' });
+  });
+  it('should preserve preexisting and denied command observations', async () => {
+    const f = await fixture();
+    await f.save(`allowed_bash_commands = ['python3 -c "print(42)"']`);
+    const prepared = await createGrokPermissionReadback(f)?.prepare(shellRequest());
+    await f.save(
+      `allowed_bash_commands = ['python3 -c "print(42)"']\ndisallowed_bash_commands = ['python3 -c "print(42)"']`,
+    );
+    expect(await prepared?.observe()).toMatchObject({ stored: 'present', preexisting: true, effective: 'overridden' });
+  });
+  it.each([
+    { variant: 'Python', command: 'python3 -c "print(42)"', is_background: false },
+    { variant: 'Bash', command: '', is_background: false },
+    { variant: 'Bash', command: 'echo\u0000bad', is_background: false },
+    { variant: 'Bash', command: 'python3 -c "print(42)"', is_background: true },
+  ])('should leave unqualified shell inputs unverified: %j', async (rawInput) => {
+    const f = await fixture();
+    const input = shellRequest();
+    expect(
+      await createGrokPermissionReadback(f)?.prepare({ ...input, toolCall: { ...input.toolCall, rawInput } }),
+    ).toBeUndefined();
+  });
+  it('should leave unreadable or cancelled shell settings unknown', async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    const prepared = await createGrokPermissionReadback({ ...f, signal: controller.signal })?.prepare(shellRequest());
+    await f.save('allowed_bash_commands = 42');
+    expect(await prepared?.observe()).toMatchObject({ stored: 'unknown', reason: 'config-read-failed' });
+    controller.abort();
+    expect(await prepared?.observe()).toMatchObject({ stored: 'unknown', reason: 'request-cancelled' });
+  });
+});

@@ -178,7 +178,7 @@ it('should wrap provider readback status at 320px with enlarged text', async () 
   );
   const region = screen.getByRole('region');
   expect(region.scrollWidth).toBeLessThanOrEqual(region.clientWidth);
-  expect(screen.getByText('Preference found · another Codex rule takes precedence')).toBeVisible();
+  expect(screen.getByText('Preference found · overridden when checked')).toBeVisible();
   expect(screen.queryByRole('button')).toBeNull();
   await page.screenshot({ path: '../../../../../out/test-results/message-queue/provider-readback-enlarged.png' });
 });

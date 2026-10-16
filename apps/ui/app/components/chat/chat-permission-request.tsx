@@ -143,29 +143,29 @@ const permissionStatus = ({
       const observation = resolution?.observation;
       if (selected?.requestedScope === 'persistent' && observation?.optionId === selected.optionId) {
         if (observation.stored === 'present' && observation.effective === 'allowed') {
-          return `Allowed in ${name} settings`;
+          return `Allowed in ${name} settings when checked`;
         }
         if (observation.stored === 'present' && observation.effective === 'overridden') {
-          return `Preference found · another ${name} rule takes precedence`;
+          return `Preference found · overridden when checked`;
         }
         if (observation.stored === 'present') {
-          return 'Preference found · effective approval not confirmed';
+          return 'Preference found · approval unverified';
         }
         if (observation.stored === 'absent') {
-          return `Not found in ${name} settings · future requests may ask again`;
+          return `Preference not found in ${name} settings`;
         }
-        return `Response recorded · ${name} saving could not be checked`;
+        return `Response recorded · saving unverified`;
       }
       if (selected?.requestedScope === 'once') {
         return 'Allowed once · response recorded';
       }
       if (selected?.requestedScope === 'session') {
-        return 'Session approval requested · response recorded';
+        return 'Session approval requested';
       }
     } else if (selected?.requestedScope === 'once') {
       return 'Denied · response recorded';
     }
-    return 'Response recorded · provider saving unverified';
+    return 'Response recorded · saving unverified';
   }
   return outcome === 'approved'
     ? 'Request allowed'
@@ -280,12 +280,12 @@ function PermissionRequest({
       ) : null}
       {failure && !isSettled ? (
         <p role='alert' className='text-xs/5'>
-          Your response was not saved. Try again.{isDebug ? ` ${failure}` : ''}
+          Couldn&apos;t send your response. Try again.{isDebug ? ` ${failure}` : ''}
         </p>
       ) : null}
       {isSending ? (
         <p role='status' className='text-xs/5 text-muted-foreground'>
-          Saving response · waiting for confirmation
+          Sending response…
         </p>
       ) : null}
       {!isSettled && onRespond ? (

@@ -176,3 +176,22 @@ it('should redact credential header pairs without hiding ordinary headers', () =
     ],
   });
 });
+
+it('should name the exact command scope only for qualified Grok shell choices', () => {
+  const shell: RequestPermissionRequest = {
+    sessionId: 'session',
+    toolCall: {
+      toolCallId: 'shell',
+      kind: 'execute',
+      rawInput: { variant: 'Bash', command: 'python3 -c "print(42)"', is_background: false },
+    },
+    options: [{ optionId: 'always-allow', kind: 'allow_always', name: "Yes, and don't ask again for bash commands" }],
+  };
+  expect(providerPermissionPayload(shell, { id: 'grok' }, { localPrepared: true })).toMatchObject({
+    options: [{ optionId: 'always-allow', kind: 'allow_always', name: 'Allow this command in future' }],
+  });
+  expect(providerPermissionPayload(shell, { id: 'grok' })).toMatchObject({ options: shell.options });
+  expect(providerPermissionPayload(shell, { id: 'other' }, { localPrepared: true })).toMatchObject({
+    options: shell.options,
+  });
+});

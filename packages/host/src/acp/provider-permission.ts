@@ -86,12 +86,12 @@ export const providerPermissionPayload = (
         reason: z.literal('unconfigured-mcp-server'),
       })
       .safeParse(request.toolCall._meta?.['tau/permissionPersistence']).success;
-  const grokMcp = adapter.id === 'grok' && readback.localPrepared;
+  const grokQualified = adapter.id === 'grok' && readback.localPrepared;
   const providerPermission: ProviderPermission = {
     owner: 'provider',
     persistence: 'unverified',
     ...(codexMcp && readback.negotiated ? { readback: unsupported ? 'unsupported' : 'config-layers' } : {}),
-    ...(grokMcp ? { readback: 'permission-file' } : {}),
+    ...(grokQualified ? { readback: 'permission-file' } : {}),
     ...(unsupported ? { unsupportedReason: 'unconfigured-mcp-server' } : {}),
     options: request.options.map((option) => ({
       optionId: option.optionId,
@@ -103,7 +103,7 @@ export const providerPermissionPayload = (
             : option.kind === 'allow_always' && option.optionId === 'allow_always'
               ? 'persistent'
               : 'unspecified'
-        : grokMcp
+        : grokQualified
           ? option.kind === 'allow_once' || option.kind === 'reject_once'
             ? 'once'
             : option.kind === 'allow_always' && option.optionId === 'always-allow'
@@ -124,7 +124,14 @@ export const providerPermissionPayload = (
         ...(toolCall.content === undefined ? {} : { content: toolCall.content }),
         ...(toolCall.locations === undefined ? {} : { locations: toolCall.locations }),
       },
-      options: request.options.map(({ optionId, name, kind }) => ({ optionId, name, kind })),
+      options: request.options.map(({ optionId, name, kind }) => ({
+        optionId,
+        name:
+          grokQualified && request.toolCall.kind === 'execute' && optionId === 'always-allow' && kind === 'allow_always'
+            ? 'Allow this command in future'
+            : name,
+        kind,
+      })),
       providerPermission,
     }),
   );

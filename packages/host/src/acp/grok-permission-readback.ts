@@ -17,11 +17,26 @@ const probeTimeout = 2000;
 const permissions = z.object({
   allowed_mcp_tools: z.array(z.string()).default([]),
   disallowed_mcp_tools: z.array(z.string()).default([]),
+  allowed_bash_commands: z.array(z.string()).default([]),
+  disallowed_bash_commands: z.array(z.string()).default([]),
 });
 const rawInput = z.object({ tool_name: z.string().min(1).max(256) });
+const shellInput = z.object({
+  variant: z.literal('Bash'),
+  command: z
+    .string()
+    .min(1)
+    .max(32_768)
+    .refine((command) => !command.includes('\0')),
+  is_background: z.literal(false),
+});
 
 type Snapshot =
-  | { state: 'present'; allowed: readonly string[]; denied: readonly string[] }
+  | {
+      state: 'present';
+      mcp: { allowed: readonly string[]; denied: readonly string[] };
+      shell: { allowed: readonly string[]; denied: readonly string[] };
+    }
   | { state: 'missing' | 'unknown' };
 type Location = { home: string; directory: string; legacy?: string };
 type PreparedObservation = { observe(): Promise<ProviderPermissionObservation> };
@@ -86,7 +101,11 @@ const readSettings = async (home: string, directory: string): Promise<Snapshot> 
       }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead));
       const settings = permissions.parse(parse(text));
-      return { state: 'present', allowed: settings.allowed_mcp_tools, denied: settings.disallowed_mcp_tools };
+      return {
+        state: 'present',
+        mcp: { allowed: settings.allowed_mcp_tools, denied: settings.disallowed_mcp_tools },
+        shell: { allowed: settings.allowed_bash_commands, denied: settings.disallowed_bash_commands },
+      };
     } finally {
       await file.close();
     }
@@ -244,26 +263,30 @@ export const createGrokPermissionReadback = (options: {
   return {
     async prepare(request) {
       const input = rawInput.safeParse(request.toolCall.rawInput);
+      const shell = shellInput.safeParse(request.toolCall.rawInput);
+      const family = request.toolCall.kind === 'execute' && shell.success ? 'shell' : 'mcp';
+      const subject = family === 'shell' && shell.success ? shell.data.command : input.data?.tool_name;
       if (
         signal?.aborted === true ||
-        request.toolCall.kind !== 'other' ||
-        !input.success ||
+        (family === 'mcp' && (request.toolCall.kind !== 'other' || !input.success)) ||
+        subject === undefined ||
         request._meta?.['clientIdentifier'] !== undefined ||
         !request.options.some((option) => option.optionId === 'always-allow' && option.kind === 'allow_always')
       ) {
         return undefined;
       }
-      const tool = input.data.tool_name;
+
       const { toolCallId } = request.toolCall;
       if (toolCallId.length === 0 || toolCallId.length > 512) {
         return undefined;
       }
-      const boundary = tool.indexOf('__');
+      const boundary = subject.indexOf('__');
       if (
-        !/^[A-Za-z_][\w-]*$/u.test(tool) ||
-        boundary < 1 ||
-        boundary + 2 === tool.length ||
-        tool.includes('__', boundary + 1)
+        family === 'mcp' &&
+        (!/^[A-Za-z_][\w-]*$/u.test(subject) ||
+          boundary < 1 ||
+          boundary + 2 === subject.length ||
+          subject.includes('__', boundary + 1))
       ) {
         return undefined;
       }
@@ -274,17 +297,17 @@ export const createGrokPermissionReadback = (options: {
       }
       const before = await snapshot(location, signal);
       const preexisting =
-        before.state === 'unknown' ? 'unknown' : before.state === 'present' && before.allowed.includes(tool);
+        before.state === 'unknown' ? 'unknown' : before.state === 'present' && before[family].allowed.includes(subject);
       return {
         async observe() {
           const after = await snapshot(location, signal);
           const stored =
             after.state === 'unknown'
               ? 'unknown'
-              : after.state === 'present' && after.allowed.includes(tool)
+              : after.state === 'present' && after[family].allowed.includes(subject)
                 ? 'present'
                 : 'absent';
-          const denied = after.state === 'present' && after.denied.includes(tool);
+          const denied = after.state === 'present' && after[family].denied.includes(subject);
           return {
             version: 1,
             provider: 'grok',

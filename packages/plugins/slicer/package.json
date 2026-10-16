@@ -1,6 +1,6 @@
 {
   "name": "@taucad/slicer",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "FFF slicing to Bambu gcode.3mf with a reference engine and a tau-slicer-service client",
   "type": "module",
   "sideEffects": false,

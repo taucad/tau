@@ -1,6 +1,6 @@
 {
   "name": "@taucad/host",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Tau Host daemon for pairing browsers with supervised remote CAD runtimes",
   "type": "module",
   "sideEffects": false,

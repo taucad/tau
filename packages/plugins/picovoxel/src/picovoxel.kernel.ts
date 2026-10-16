@@ -43,7 +43,7 @@ import {
   resolveSourcePath,
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
-import type { KernelServices, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { KernelServices, RuntimeLogger, TessellationReport } from '@taucad/runtime/kernel';
 import {
   readMechanismExport,
   resolveShapeName,
@@ -682,6 +682,94 @@ const snapshotMaterial = (value: unknown, label: string, textureCount: number): 
 };
 
 /**
+ * Largest field whose active voxels are counted for the cost report. `gridHash()` is the facade's only
+ * count and deep-copies the grid, so a larger field reports its memory without the count rather than
+ * doubling its memory for a report.
+ */
+const activeVoxelCountMaxBytes = 256 * 1024 * 1024;
+
+/** One delivered shape and what producing its mesh cost. */
+type MeasuredShape = Readonly<{
+  shape: PicovoxelShapeSnapshot;
+  /** Milliseconds. */
+  elapsed: number;
+  voxels?: Readonly<{ activeVoxels?: number; memoryBytes: number }>;
+}>;
+
+/**
+ * Sum what the delivered meshes cost. Voxel figures cover the returned `Voxels` fields only; an
+ * authored `Mesh` adds its triangles and vertices but no grid. `elapsed` is the meshing and
+ * snapshot time, not the author's `main()`.
+ *
+ * @param measured - Delivered shapes with their meshing cost.
+ * @param voxelSize - The session's voxel edge length in millimetres.
+ * @returns The handle's tessellation report.
+ */
+const tessellationOf = (measured: readonly MeasuredShape[], voxelSize: number): TessellationReport => {
+  let triangles = 0;
+  let vertices = 0;
+  let elapsed = 0;
+  let activeVoxels: number | undefined = 0;
+  let memoryBytes: number | undefined;
+  for (const { shape, elapsed: shapeElapsed, voxels } of measured) {
+    triangles += shape.triangles.length / 3;
+    vertices += shape.vertices.length / 3;
+    elapsed += shapeElapsed;
+    if (voxels) {
+      memoryBytes = (memoryBytes ?? 0) + voxels.memoryBytes;
+      // A partial sum would understate the grid, so one uncounted field drops the total.
+      activeVoxels =
+        activeVoxels === undefined || voxels.activeVoxels === undefined
+          ? undefined
+          : activeVoxels + voxels.activeVoxels;
+    }
+  }
+  return {
+    triangles,
+    vertices,
+    elapsed,
+    voxelSize,
+    ...(memoryBytes === undefined ? {} : { memoryBytes, ...(activeVoxels === undefined ? {} : { activeVoxels }) }),
+  };
+};
+
+/**
+ * Restore a serialized tessellation report at the snapshot trust boundary.
+ *
+ * @param value - The serialized report, or `undefined` for a handle written without one.
+ * @returns The checked report.
+ */
+const snapshotTessellation = (value: unknown): TessellationReport | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  const count = (key: string, optional = false): number | undefined => {
+    const field = isRecordObject(value) ? value[key] : undefined;
+    if (field === undefined && optional) {
+      return undefined;
+    }
+    if (typeof field !== 'number' || !Number.isFinite(field) || field < 0) {
+      throw new TypeError(`Invalid PicoVoxel serialized tessellation: ${key} must be a nonnegative number.`);
+    }
+    return field;
+  };
+  const triangles = count('triangles')!;
+  const vertices = count('vertices')!;
+  const elapsed = count('elapsed')!;
+  const voxelSize = count('voxelSize', true);
+  const activeVoxels = count('activeVoxels', true);
+  const memoryBytes = count('memoryBytes', true);
+  return {
+    triangles,
+    vertices,
+    elapsed,
+    ...(voxelSize === undefined ? {} : { voxelSize }),
+    ...(activeVoxels === undefined ? {} : { activeVoxels }),
+    ...(memoryBytes === undefined ? {} : { memoryBytes }),
+  };
+};
+
+/**
  * Normalize `main()`'s result. `[]` is an empty scene (the geospec empty-scene convention).
  *
  * With a `region`, each Voxels part is trimmed to the box before meshing so it stays a closed shell,
@@ -690,13 +778,15 @@ const snapshotMaterial = (value: unknown, label: string, textureCount: number): 
  *
  * @param result - The value `main()` returned.
  * @param sessionLane - The session's resolved lane.
- * @param region - The crop box, when the build asked for one.
+ * @param session - The session's voxel size and the build's crop box.
+ * @param session.voxelSize - The session's voxel edge length in millimetres.
+ * @param session.region - The crop box, when the build asked for one.
  * @returns The durable native handle.
  */
 const normalizeResult = (
   result: unknown,
   sessionLane: PicovoxelLane,
-  region?: PicovoxelRegion,
+  { voxelSize, region }: { readonly voxelSize: number; readonly region?: PicovoxelRegion },
 ): PicovoxelNativeHandle => {
   const model = isRecordObject(result) && 'shapes' in result ? result : undefined;
   const modelShapes = model?.['shapes'];
@@ -709,7 +799,7 @@ const normalizeResult = (
     : Array.isArray(result)
       ? result
       : [result];
-  const shapes = values.map((value: unknown, index) => {
+  const measured = values.map((value: unknown, index): MeasuredShape | undefined => {
     let shape = value;
     let name: string | undefined;
     let authoredMaterial: unknown;
@@ -745,7 +835,9 @@ const normalizeResult = (
           `PicoVoxel ${part.name} (output ${index + 1}) is a Mesh, which cannot be cropped to a region without opening its surface. Return Voxels (mesh.toVoxels()) for a region build, or omit region.`,
         );
       }
-      return { ...snapshotMesh(shape, part, sessionLane), ...appearance };
+      const started = performance.now();
+      const snapshot = { ...snapshotMesh(shape, part, sessionLane), ...appearance };
+      return { shape: snapshot, elapsed: performance.now() - started };
     }
     if (isVoxels(shape)) {
       if (shape.isEmpty) {
@@ -753,20 +845,31 @@ const normalizeResult = (
           `PicoVoxel ${part.name} (output ${index + 1}) is an empty Voxels field. Return [] for an empty scene.`,
         );
       }
-      if (region === undefined) {
-        return { ...snapshotMesh(shape.toMesh(), part, sessionLane), ...appearance };
-      }
-      const cropped = shape.trim({ min: region.min, max: region.max });
+      const started = performance.now();
+      const field = region === undefined ? shape : shape.trim({ min: region.min, max: region.max });
       // A part the box misses entirely is outside the region, not an authoring error.
-      return cropped.isEmpty ? undefined : { ...snapshotMesh(cropped.toMesh(), part, sessionLane), ...appearance };
+      if (field.isEmpty) {
+        return undefined;
+      }
+      const snapshot = { ...snapshotMesh(field.toMesh(), part, sessionLane), ...appearance };
+      const elapsed = performance.now() - started;
+      // Read after meshing so the grid query never counts toward the reported meshing time.
+      const memoryBytes = field.memUsage;
+      const voxels =
+        memoryBytes <= activeVoxelCountMaxBytes
+          ? { activeVoxels: field.gridHash().activeVoxels, memoryBytes }
+          : { memoryBytes };
+      return { shape: snapshot, elapsed, voxels };
     }
     throw new TypeError(
       `PicoVoxel main() result ${index + 1} must be Mesh, Voxels or { shape: Mesh | Voxels, name?: string, material?: Material }; received ${describeValue(shape)}.`,
     );
   });
+  const delivered = measured.filter((entry) => entry !== undefined);
   return {
-    shapes: shapes.filter((shape) => shape !== undefined),
+    shapes: delivered.map(({ shape }) => shape),
     ...resources,
+    tessellation: tessellationOf(delivered, voxelSize),
     ...(region === undefined ? {} : { region: { min: [...region.min], max: [...region.max] } }),
   };
 };
@@ -1157,16 +1260,13 @@ export const picovoxelKernel = defineKernel({
       let pico: Pico | undefined;
       let recycleReason: string | undefined;
       try {
-        pico = await openSession(context, runtime, {
-          artifact: sessionArtifact,
-          lane,
-          voxelSize: resolveVoxelSize(parameters),
-        });
+        const voxelSize = resolveVoxelSize(parameters);
+        pico = await openSession(context, runtime, { artifact: sessionArtifact, lane, voxelSize });
         runtime.logger.debug(
           `PicoVoxel session variant=${sessionArtifact} pthreads=${pico.module.PThread?.runningWorkers.length ?? 0} lane=${pico.lane}`,
         );
         const result = await runMain(module, withAbortChecks(pico), parameters);
-        const nativeHandle = normalizeResult(result, lane, options.region);
+        const nativeHandle = normalizeResult(result, lane, { voxelSize, region: options.region });
         const { mechanism, issues } = await readMechanismExport({
           module,
           parameters,
@@ -1249,6 +1349,7 @@ export const picovoxelKernel = defineKernel({
           issues = warnings;
         },
       }),
+      ...(handle.tessellation === undefined ? {} : { tessellation: handle.tessellation }),
       issues,
     };
   },
@@ -1283,9 +1384,11 @@ export const picovoxelKernel = defineKernel({
       throw new TypeError('Invalid PicoVoxel serialized handle: expected a shapes array.');
     }
     const resources = snapshotResources(serialized);
+    const tessellation = snapshotTessellation(serialized.tessellation);
     return {
       ...resources,
       ...(serialized.region === undefined ? {} : { region: picovoxelRegionSchema.parse(serialized.region) }),
+      ...(tessellation === undefined ? {} : { tessellation }),
       ...(serialized.mechanism === undefined ? {} : { mechanism: snapshotJson(serialized.mechanism) }),
       ...(serialized.mechanismIssues === undefined
         ? {}

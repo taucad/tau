@@ -12,7 +12,9 @@ import type { GlbNode, GlbResources, TauCadTopologyComponent, TauCadTopologyPayl
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
 import type { Issue } from '@taucad/kinematics';
-import type { KernelIssue } from '@taucad/runtime/kernel';
+import type { KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
+
+import { z } from 'zod';
 
 import type { PicogkBuild } from '#picogk.protocol.js';
 
@@ -434,3 +436,36 @@ export const picogkArtifactToGlb = (
     onIssues,
   });
 };
+
+/**
+ * What the delivered PicoGK mesh cost: triangles and vertices drawn across every occurrence, and the
+ * worker's mesh construction, extraction and normal generation time. Line prototypes carry no
+ * triangles and are not counted.
+ * @param result - Validated build descriptor returned by the worker.
+ * @returns The rendered view's tessellation report.
+ */
+export const picogkTessellation = (
+  result: Pick<PicogkBuild, 'prototypes' | 'occurrences' | 'timings'>,
+): TessellationReport => {
+  const meshes = new Map(
+    result.prototypes.filter(({ kind }) => kind === 'triangles').map((prototype) => [prototype.id, prototype]),
+  );
+  let triangles = 0;
+  let vertices = 0;
+  for (const { prototypeId } of result.occurrences) {
+    const prototype = meshes.get(prototypeId);
+    if (prototype) {
+      triangles += prototype.indexCount / 3;
+      vertices += prototype.positionCount / 3;
+    }
+  }
+  const { meshConstruction, meshExtraction, normalGeneration } = result.timings;
+  return { triangles, vertices, elapsed: meshConstruction + meshExtraction + normalGeneration };
+};
+
+const meshCount = z.number().int().nonnegative();
+
+/** A PicoGK tessellation report restored from a handle snapshot. @internal */
+export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
+  .object({ triangles: meshCount, vertices: meshCount, elapsed: z.number().nonnegative() })
+  .strict();

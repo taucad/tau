@@ -74,6 +74,25 @@ describe('@taucad/mcp', () => {
     });
   });
 
+  it('returns the default view mesh cost in the evaluate_model result through a connected client', async () => {
+    const tessellation = {
+      triangles: 1308,
+      vertices: 656,
+      elapsed: 42,
+      voxelSize: 0.5,
+      activeVoxels: 2846,
+      memoryBytes: 1_296_848,
+    };
+    const client = await connect({ dispatch: async () => ({ success: true, status: 'ready', tessellation }) });
+    try {
+      const result = await client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } });
+      expect(result.structuredContent).toEqual({ status: 'ready', tessellation });
+      expect(result.content).toEqual([{ type: 'text', text: JSON.stringify({ status: 'ready', tessellation }) }]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('should carry failure details as text the SDK client delivers instead of rejecting', async () => {
     const failure = {
       errorCode: 'TOOL_OUTPUT_VALIDATION_FAILED',

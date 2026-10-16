@@ -228,6 +228,58 @@ describe('transport conformance — in-process (C2)', () => {
     }
   });
 
+  it('delivers the kernel tessellation report with the rendered artifact', async () => {
+    const tessellation = {
+      triangles: 12,
+      vertices: 8,
+      elapsed: 3.25,
+      voxelSize: 0.5,
+      activeVoxels: 40,
+      memoryBytes: 2048,
+    };
+    const kernel = defineKernel({
+      id: 'in-process-tessellation',
+      name: 'In-process tessellation fixture',
+      version: '1.0.0',
+      extensions: ['mesh'],
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve(input) {
+        return { resolved: [input.entryPath], unresolved: [] };
+      },
+      async describe() {
+        const declaration = createParameterDeclaration();
+        if (!declaration.success) {
+          return declaration;
+        }
+        return { success: true, data: { parameters: declaration.data }, issues: declaration.issues };
+      },
+      async evaluate() {
+        return { handle: {}, views: ['model'] as const };
+      },
+      async render() {
+        return { content: new Uint8Array([1, 2, 3]), tessellation };
+      },
+    })();
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime: defineRuntime({ kernels: [kernel] }), fileSystem: fromMemoryFs() }),
+    });
+    try {
+      const document = client.open({ source: { files: { 'part.mesh': 'part' } } });
+      const outcome = await document.view('model').rendering();
+      if (outcome.superseded || !outcome.rendering.success) {
+        throw new Error('Expected a rendered model view.');
+      }
+      expect(outcome.rendering.artifact.tessellation).toEqual(tessellation);
+      document.close();
+    } finally {
+      await client.shutdown();
+    }
+  });
+
   it('publishes and reuses durable compute through the public in-process factory', async () => {
     const action: ComputeAction = {
       schemaVersion: 1,

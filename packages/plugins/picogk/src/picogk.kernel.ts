@@ -9,17 +9,26 @@ import {
   createKernelSuccess,
   defineKernel,
 } from '@taucad/runtime/kernel';
-import type { KernelIssue } from '@taucad/runtime/kernel';
+import type { KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
-import { picogkArtifactToGlb } from '#picogk-mesh.js';
+import { picogkArtifactToGlb, picogkTessellation, picogkTessellationSchema } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
-export type PicogkNativeHandle = { readonly glb: Uint8Array<ArrayBuffer> };
+export type PicogkNativeHandle = {
+  readonly glb: Uint8Array<ArrayBuffer>;
+  /** What the delivered mesh cost, reported with each rendered view. */
+  readonly tessellation?: TessellationReport;
+};
+
+/** Snapshot of a native handle: its GLB bytes, with the mesh cost when the build reported one. */
+type PicogkSerializedHandle =
+  | Uint8Array<ArrayBuffer>
+  | Readonly<{ glb: Uint8Array<ArrayBuffer>; tessellation: TessellationReport }>;
 
 // Tau metadata remains execution context; the generated root thumbnail is not an execution input.
 const tauSystemArtifacts = new Set(['tau.json', 'thumbnail.webp']);
@@ -259,8 +268,9 @@ export const picogkKernel = defineKernel({
           computeJob = undefined;
         }
         span.end({ ...result.timings, ...result.metrics });
+        const handle: PicogkNativeHandle = { glb, tessellation: picogkTessellation(result) };
         return {
-          handle: { glb },
+          handle,
           issues,
         };
       } finally {
@@ -279,7 +289,7 @@ export const picogkKernel = defineKernel({
   },
 
   async render({ handle }) {
-    return { content: handle.glb };
+    return { content: handle.glb, ...(handle.tessellation ? { tessellation: handle.tessellation } : {}) };
   },
 
   async export(input) {
@@ -297,10 +307,23 @@ export const picogkKernel = defineKernel({
     }
   },
 
-  serializeHandle: ({ handle }) => new Uint8Array(handle.glb),
-  deserializeHandle: ({ serialized }) => ({
-    glb: new Uint8Array(serialized),
-  }),
+  // A handle without a report snapshots as its GLB bytes alone, as it always has.
+  serializeHandle: ({ handle }): PicogkSerializedHandle =>
+    handle.tessellation === undefined
+      ? new Uint8Array(handle.glb)
+      : { glb: new Uint8Array(handle.glb), tessellation: handle.tessellation },
+  deserializeHandle: ({ serialized }): PicogkNativeHandle => {
+    if (serialized instanceof Uint8Array) {
+      return { glb: new Uint8Array(serialized) };
+    }
+    if (!(serialized.glb instanceof Uint8Array)) {
+      throw new TypeError('Invalid PicoGK serialized handle: expected GLB bytes.');
+    }
+    return {
+      glb: new Uint8Array(serialized.glb),
+      tessellation: picogkTessellationSchema.parse(serialized.tessellation),
+    };
+  },
 
   async onDispose(context) {
     try {

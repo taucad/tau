@@ -1,5 +1,6 @@
 import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/kernel';
 import {
   formatComponentId,
   formatPrimitiveSelector,
@@ -57,6 +58,8 @@ export type PicovoxelNativeHandle = GlbResources & {
   readonly mechanismIssues?: readonly KernelIssue[];
   /** Crop box the voxel parts were trimmed to; absent for the whole model. */
   readonly region?: PicovoxelRegion;
+  /** What the delivered meshes cost to produce, reported with each rendered view. */
+  readonly tessellation?: TessellationReport;
 };
 
 type PicovoxelGltfOptions = GeometryOutputTransformOptions & {

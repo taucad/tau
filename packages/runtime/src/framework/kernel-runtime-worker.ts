@@ -781,6 +781,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           content: output.content,
           mimeType: declaration.mimeType,
           ...(output.units ? { units: output.units } : {}),
+          ...(output.tessellation ? { tessellation: output.tessellation } : {}),
         },
         issues: [...(output.issues ?? [])],
       };

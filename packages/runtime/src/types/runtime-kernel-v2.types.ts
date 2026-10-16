@@ -25,11 +25,31 @@ import { validateRuntimeContentDeclarations } from '#types/runtime-content.types
 
 /** Known media types complete in editors; other media types remain legal. @public */
 export type MediaType = SharedMediaType;
-/** A single rendered view with its declared media type and optional units. @public */
+/**
+ * What one rendered mesh output cost: its size and the time spent producing it. Voxel kernels add
+ * the grid that produced the mesh. Every count describes the delivered output, never a request.
+ * @public
+ */
+export type TessellationReport = Readonly<{
+  /** Triangles in the delivered mesh, summed over its parts. */
+  triangles: number;
+  /** Vertices in the delivered mesh, summed over its parts. */
+  vertices: number;
+  /** Milliseconds the kernel spent producing the mesh from its native geometry. */
+  elapsed: number;
+  /** Voxel edge length in millimetres the mesh was produced at; voxel kernels only. */
+  voxelSize?: number;
+  /** Active voxels in the fields the mesh came from; voxel kernels only. */
+  activeVoxels?: number;
+  /** Native bytes held by the fields the mesh came from; voxel kernels only. */
+  memoryBytes?: number;
+}>;
+/** A single rendered view with its declared media type, optional units and mesh cost. @public */
 export type Artifact = Readonly<{
   mimeType: MediaType;
   content: Uint8Array<ArrayBuffer> | string;
   units?: Readonly<CadUnits>;
+  tessellation?: TessellationReport;
 }>;
 /** A named export file with an open media type. @public */
 export type ExportFile = Omit<ExistingExportFile, 'mimeType'> & { readonly mimeType: MediaType };
@@ -122,6 +142,8 @@ export type RenderInput<Handle, Views> = {
 export type RenderOutput = Readonly<{
   content: Uint8Array<ArrayBuffer> | string;
   units?: Readonly<CadUnits>;
+  /** Cost of the rendered mesh, reported to hosts and agents with the artifact. */
+  tessellation?: TessellationReport;
   issues?: readonly KernelIssue[];
   mimeType?: never;
 }>;

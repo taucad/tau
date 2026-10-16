@@ -862,8 +862,19 @@ export const serveCommand = defineCommand({
       if (started === 'signal') {
         return;
       }
-      if (configuredAgent !== undefined) {
-        const url = await served.promise;
+      /* The agent channel names its URL once it listens; a daemon that stops first, or a signal, has nothing to announce. */
+      const url =
+        configuredAgent === undefined
+          ? undefined
+          : await Promise.race([
+              served.promise,
+              daemon.closed.then(
+                () => undefined,
+                () => undefined,
+              ),
+              stopped.promise.then(() => undefined),
+            ]);
+      if (configuredAgent !== undefined && url !== undefined) {
         await announceServed({
           url,
           workspace: configuredAgent.workspaceRoot,

@@ -11,6 +11,38 @@ import { defineMiddleware } from '@taucad/runtime/middleware';
 import { nonemptyExportFiles } from '@taucad/runtime/kernel';
 
 /**
+ * Largest triangle primitive the render-phase fallback edge detector processes.
+ *
+ * The dihedral detector is linear in triangles but dominates render time on
+ * dense meshes; render primitives above this count are left without generated
+ * edges and the skip is logged. Export keeps detecting edges on every
+ * primitive so explicit export bytes stay stable.
+ * @internal
+ */
+export const gltfEdgeDetectionMaxTriangles = 500_000;
+
+/**
+ * Read the positions and supported indices of a triangle primitive.
+ *
+ * @param primitive - The glTF primitive to inspect
+ * @returns Float32 positions with Uint16/Uint32 indices, or undefined when the primitive is not an eligible triangle mesh
+ */
+function readTriangleInput(
+  primitive: Primitive,
+): { positions: Float32Array; indices: Uint32Array | Uint16Array | undefined } | undefined {
+  if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
+    return undefined;
+  }
+  const positions = primitive.getAttribute('POSITION')?.getArray();
+  if (!(positions instanceof Float32Array)) {
+    return undefined;
+  }
+  const indexArray = primitive.getIndices()?.getArray();
+  const indices = indexArray instanceof Uint32Array || indexArray instanceof Uint16Array ? indexArray : undefined;
+  return { positions, indices };
+}
+
+/**
  * Create fallback edge primitives for every eligible triangle mesh in a glTF document.
  *
  * For each triangle primitive:
@@ -23,11 +55,18 @@ import { nonemptyExportFiles } from '@taucad/runtime/kernel';
  * once fallback is selected, authored lines do not prove that every triangle
  * primitive already carries a complete auxiliary overlay.
  *
+ * Triangle primitives above `maxTriangles` are skipped, one warning each.
+ *
  * @param document - The glTF document to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
+ * @param budget - Optional per-primitive triangle limit and the logger that reports skips
  * @returns Whether any edge primitives were added
  */
-function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: number): boolean {
+function addEdgePrimitivesToDocument(
+  document: Document,
+  thresholdDegrees: number,
+  budget?: { maxTriangles: number; logger: RuntimeLogger },
+): boolean {
   let edgesAdded = false;
 
   // Create unlit extension for edge materials (lazily initialized)
@@ -57,30 +96,18 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
     const primitivesToAdd: Primitive[] = [];
 
     for (const primitive of mesh.listPrimitives()) {
-      // Only process triangle primitives
-      if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
+      const triangles = readTriangleInput(primitive);
+      if (!triangles) {
         continue;
       }
+      const { positions, indices } = triangles;
 
-      // Get position accessor
-      const positionAccessor = primitive.getAttribute('POSITION');
-      if (!positionAccessor) {
+      const triangleCount = Math.floor((indices?.length ?? positions.length / 3) / 3);
+      if (budget && triangleCount > budget.maxTriangles) {
+        budget.logger.warn(
+          `Skipping fallback edge detection for a primitive with ${triangleCount} triangles (limit ${budget.maxTriangles})`,
+        );
         continue;
-      }
-
-      const positions = positionAccessor.getArray();
-      if (!(positions instanceof Float32Array)) {
-        continue;
-      }
-
-      // Get index accessor (optional)
-      const indexAccessor = primitive.getIndices();
-      let indices: Uint32Array | Uint16Array | undefined;
-      if (indexAccessor) {
-        const indexArray = indexAccessor.getArray();
-        if (indexArray instanceof Uint32Array || indexArray instanceof Uint16Array) {
-          indices = indexArray;
-        }
       }
 
       // Run edge detection
@@ -149,6 +176,7 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
  *
  * @param content - The GLB or JSON glTF bytes to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
+ * @param options - Export resources, output format and the optional per-primitive triangle budget
  * @returns The requested glTF format with owner-local edges added, or the original if no work was needed
  */
 async function addEdgePrimitivesToGltf(
@@ -157,7 +185,12 @@ async function addEdgePrimitivesToGltf(
   {
     resources = {},
     outputFormat = 'glb',
-  }: { resources?: JSONDocument['resources']; outputFormat?: 'glb' | 'gltf' } = {},
+    budget,
+  }: {
+    resources?: JSONDocument['resources'];
+    outputFormat?: 'glb' | 'gltf';
+    budget?: { maxTriangles: number; logger: RuntimeLogger };
+  } = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
   const io = new WebIO().registerExtensions(allExtensions);
   io.registerExtensions([KHRMaterialsUnlit]);
@@ -172,7 +205,7 @@ async function addEdgePrimitivesToGltf(
         resources,
       });
 
-  if (!addEdgePrimitivesToDocument(document, thresholdDegrees)) {
+  if (!addEdgePrimitivesToDocument(document, thresholdDegrees, budget)) {
     return content;
   }
   if (outputFormat === 'gltf') {
@@ -214,7 +247,9 @@ async function addEdgesToResult(
 
   logger.trace('Adding edge primitives to GLTF geometry');
 
-  const content = await addEdgePrimitivesToGltf(result.data.content, thresholdDegrees);
+  const content = await addEdgePrimitivesToGltf(result.data.content, thresholdDegrees, {
+    budget: { maxTriangles: gltfEdgeDetectionMaxTriangles, logger },
+  });
   if (content === result.data.content) {
     return result;
   }

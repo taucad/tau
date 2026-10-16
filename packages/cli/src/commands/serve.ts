@@ -18,6 +18,8 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
+import { acquisitionOf } from '#acquisition.js';
+import type { Acquisition } from '#acquisition.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, exitCodes } from '#output.js';
@@ -49,10 +51,18 @@ const computeStoreWorkerModulePath = (): string =>
     ),
   );
 
-const childArguments = (options: {
+/**
+ * The arguments of one runtime child. The daemon starts it with a minimal environment, so the acquisition profile
+ * travels as `--acquisition=locked`.
+ * @param options - Plugins, config module, Zoo proxy and the acquisition profile.
+ * @returns The child's argv.
+ * @internal
+ */
+export const childArguments = (options: {
   readonly plugin: unknown;
   readonly config?: string;
   readonly zooProxyUrl: string;
+  readonly acquisition: Acquisition;
 }): string[] => {
   const plugins = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
@@ -63,6 +73,7 @@ const childArguments = (options: {
     ...plugins.map((plugin) => `--plugin=${plugin}`),
     ...(options.config ? [`--config=${options.config}`] : []),
     `--zoo-proxy-url=${options.zooProxyUrl}`,
+    ...(options.acquisition === 'locked' ? ['--acquisition=locked'] : []),
   ];
 };
 
@@ -542,7 +553,12 @@ export const serveCommand = defineCommand({
       relayUrl: new URL(args.relay),
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
-        args: childArguments({ plugin: args.plugin, config: args.config, zooProxyUrl }),
+        args: childArguments({
+          plugin: args.plugin,
+          config: args.config,
+          zooProxyUrl,
+          acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
+        }),
         native: kernels.native,
       },
       zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },

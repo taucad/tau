@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 import { nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
@@ -82,4 +82,18 @@ describe('desktop runtime kernels', () => {
     // The credential rides the WebSocket upgrade, never kernel options (they feed cache keys and middleware).
     expect(zooKernel?.options).not.toHaveProperty('token');
   });
+
+  it('should compose the bundler under the locked acquisition profile only when TAU_ACQUISITION says so', async () => {
+    vi.stubEnv('TAU_ACQUISITION', '');
+    const open = await resolveDesktopRuntime();
+    vi.stubEnv('TAU_ACQUISITION', 'locked');
+    const locked = await resolveDesktopRuntime();
+
+    expect(open.bundlers.find(({ id }) => id === 'esbuild')).not.toHaveProperty('options.acquisition');
+    expect(locked.bundlers.find(({ id }) => id === 'esbuild')?.options).toMatchObject({ acquisition: 'locked' });
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });

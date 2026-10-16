@@ -2,6 +2,7 @@ export { normalizeAssetImportAttributes, resolveAssetIntent, splitAssetSpecifier
 export type { AssetImportAttributeRewrite, BundlerSourceIntent, NormalizedAssetImports } from '#asset-imports.js';
 export { createBundlerSourceHost } from '#bundler-source-host.js';
 export type {
+  BundlerAcquisition,
   BundlerSource,
   BundlerSourceHost,
   BundlerSourceHostOptions,

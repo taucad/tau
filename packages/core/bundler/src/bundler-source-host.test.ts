@@ -377,4 +377,44 @@ describe('createBundlerSourceHost', () => {
       expect(observation.issues[0]?.message).toContain('Run Install');
     });
   });
+  describe('with the locked acquisition profile', () => {
+    it('makes zero fetch calls and refuses unlocked and URL imports with package-not-locked', async () => {
+      const fetchMock = vi.fn<typeof fetch>();
+      vi.stubGlobal('fetch', fetchMock);
+      const lockedSession = (files: Readonly<Record<string, string>>): BundlerSourceSession =>
+        createBundlerSourceHost({ filesystem: createTestFileSystem(files), acquisition: 'locked' }).beginSession({
+          mode: 'bundle',
+          signal: new AbortController().signal,
+          entryPath: 'src/main.ts',
+        });
+
+      const unlocked = lockedSession({
+        'src/main.ts': '',
+        'src/value.ts': '',
+        'package.json': JSON.stringify({ dependencies: { 'd3-shape': '^3.2.0' } }),
+      });
+      const bare = await unlocked.resolve({ specifier: 'd3-shape/arc', importer: 'src/main.ts' });
+      const url = await unlocked.resolve({ specifier: 'https://esm.sh/d3-shape@3', importer: 'src/main.ts' });
+      const fromUrl = await unlocked.resolve({ specifier: './arc.js', importer: 'https://esm.sh/d3-shape@3' });
+
+      expect(bare).toMatchObject({ kind: 'unsupported', issue: { code: 'package-not-locked', name: 'd3-shape' } });
+      expect(messageOf(bare)).toMatch(/^package-not-locked: 'd3-shape' is not in the project's package-lock\.json/u);
+      expect(messageOf(bare)).toContain('TAU_ACQUISITION=locked');
+      for (const refused of [url, fromUrl]) {
+        expect(refused).toMatchObject({ kind: 'unsupported', issue: { code: 'package-not-locked' } });
+        // oxlint-disable-next-line no-await-in-loop -- two refusals, loaded in order
+        await expect(unlocked.load(refused)).rejects.toThrow(/^package-not-locked:/u);
+      }
+      await expect(unlocked.resolve({ specifier: './value.js', importer: 'src/main.ts' })).resolves.toMatchObject({
+        kind: 'project',
+      });
+
+      const installed = lockedSession(lockedProject({ 'src/main.ts': '', ...installedFiles }));
+      const locked = await installed.resolve({ specifier: 'esm-pkg', importer: 'src/main.ts' });
+      expect(locked).toMatchObject({ kind: 'package', name: 'esm-pkg', version: '1.0.0' });
+      await expect(installed.load(locked)).resolves.toMatchObject({ intent: 'script' });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });

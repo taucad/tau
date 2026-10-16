@@ -1,5 +1,6 @@
 import { EsbuildBundler, executeCode, initializeEsbuild } from '#vm/esbuild-core.js';
 import type { BundleResult } from '#vm/esbuild-core.js';
+import type { BundlerAcquisition } from '@taucad/bundler-core';
 import type { BuiltinModule } from '@taucad/runtime/bundler';
 import type { VmExecuteResult, VmFileSystem } from '#vm/types.js';
 
@@ -20,6 +21,8 @@ export type EsbuildModuleVmOptions = {
    * Runtime render loops opt into this; standalone test runners usually need repeatable execution.
    */
   cacheExecution?: boolean;
+  /** `locked` refuses imports that would be downloaded (`package-not-locked`); default `open`. */
+  acquisition?: BundlerAcquisition;
 };
 
 /**
@@ -87,6 +90,7 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
     builtinModules,
     sourceMaps: options.sourceMaps,
     autoExportNames: options.autoExportNames,
+    acquisition: options.acquisition,
   });
   await bundler.initialize();
 

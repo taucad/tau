@@ -6,6 +6,7 @@ import type { PicogkKernelOptions } from '@taucad/picogk';
 import { cliZooCloseErrors } from '#zoo-proxy.js';
 import { unavailableKernelsPlugin } from '#unprepared-kernels.js';
 import type { UnavailableNativeKernel } from '#unprepared-kernels.js';
+import type { Acquisition } from '#acquisition.js';
 
 /** A plugin factory whose default invocation is valid for `--plugin`. @public */
 export type DefaultInvocablePluginFactory = {
@@ -27,6 +28,8 @@ export type CliRuntimeOptions = {
   readonly unavailableKernels?: readonly UnavailableNativeKernel[];
   /** The Zoo proxy the KCL kernel connects to; defaults to Tau Cloud's (see `cliZooProxyUrl`). */
   readonly zooProxyUrl?: string;
+  /** `locked` (`TAU_ACQUISITION=locked`): the bundler refuses every import it would download (`package-not-locked`). */
+  readonly acquisition?: Acquisition;
 };
 
 /**
@@ -39,7 +42,7 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
   /*
    * Array order is kernel-selection precedence. Extensions and routes stay owned by the packages.
    */
-  const modules = await Promise.all([
+  const [middlewareModule, esbuildModule, ...kernelModules] = await Promise.all([
     import('@taucad/middleware'),
     import('@taucad/esbuild'),
     import('@taucad/replicad'),
@@ -63,7 +66,11 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
   ]);
   const unavailable = unavailableKernelsPlugin(options.unavailableKernels ?? []);
   const builtIns = [
-    ...modules.map(({ plugin }) => plugin()),
+    middlewareModule.plugin(),
+    esbuildModule.plugin(
+      options.acquisition === 'locked' ? { bundlers: { default: { acquisition: 'locked' } } } : undefined,
+    ),
+    ...kernelModules.map(({ plugin }) => plugin()),
     /* The credential rides the WebSocket upgrade (`#zoo-proxy.ts`), never these options. */
     zoo({
       kernels: {

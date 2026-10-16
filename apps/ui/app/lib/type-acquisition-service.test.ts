@@ -490,6 +490,28 @@ describe('TypeAcquisitionService', () => {
   // Import scanning and dedup
   // =========================================================================
 
+  describe('locked acquisition profile', () => {
+    it('should register static types and acquire nothing, making no request', async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+      service.initialize(mockMonaco.monaco, { staticTypes: [staticReplicad], dynamicTypes: false });
+      const { model } = createMockModel({
+        content: "import debounce from 'lodash/debounce';\nimport x from 'https://esm.sh/three';",
+      });
+      mockMonaco.monaco._addModel(model);
+
+      service.startWatching();
+      vi.advanceTimersByTime(600);
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(mockMonaco.monaco.typescript.typescriptDefaults.addExtraLib).toHaveBeenCalledWith(
+        staticReplicad.content,
+        'file:///node_modules/replicad/index.d.ts',
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('import scanning', () => {
     beforeEach(() => {
       service.initialize(mockMonaco.monaco, { staticTypes: [staticReplicad] });

@@ -122,6 +122,26 @@ describe('Rolldown over a locked node_modules tree', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('refuses an unlocked import with package-not-locked and no request under the locked profile', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const vm = await createRolldownModuleVm({
+        filesystem: fileSystem({ 'main.ts': "import isNumber from 'is-number'; export const ok = isNumber(1);" }),
+        acquisition: 'locked',
+      });
+      const bundled = await vm.bundle('main.ts');
+      expect(bundled).toMatchObject({
+        success: false,
+        issues: [{ code: 'BUNDLER_FAILED', details: { code: 'package-not-locked', name: 'is-number' } }],
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      vm.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describeBundlerConformance({

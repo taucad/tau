@@ -396,5 +396,10 @@ export type EffectiveProfile = {
   readonly proxy: 'env-proxy' | 'none';
   /** Which certificate authorities Node trusts for downloads. */
   readonly ca: 'bundled' | 'extra' | 'system';
+  /**
+   * The managed variables (`TAU_ACQUISITION`, `TAU_PAYLOAD_*`, `TAU_CONFIG_DIR`) and the proxy and CA variables set in
+   * this environment, by name only: a proxy URL can carry a credential.
+   */
+  readonly variables: readonly string[];
   readonly closures: readonly ClosureDescription[];
 };

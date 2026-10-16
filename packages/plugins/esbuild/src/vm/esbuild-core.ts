@@ -8,6 +8,7 @@ import type * as NodeUrl from 'node:url';
 
 import { createBundlerSourceHost } from '@taucad/bundler-core';
 import type {
+  BundlerAcquisition,
   BundlerSourceHost,
   BundlerSourceIntent,
   BundlerSourceResolution,
@@ -38,6 +39,7 @@ export type BundlerOptions = {
   builtinModules: Map<string, BuiltinModule>;
   sourceMaps?: boolean;
   autoExportNames?: string[];
+  acquisition?: BundlerAcquisition;
 };
 
 let esbuildInitialized = false;
@@ -295,6 +297,7 @@ export class EsbuildBundler {
     this.#host = createBundlerSourceHost({
       filesystem: options.filesystem,
       autoExportNames: options.autoExportNames,
+      ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
     });
   }
 

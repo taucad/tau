@@ -150,6 +150,21 @@ describe('installCommand', () => {
     expect(existsSync(join(project, 'package-lock.json'))).toBe(false);
   });
 
+  it('refuses with registry-unavailable under the locked profile, contacting no registry and writing nothing', async () => {
+    vi.stubEnv('TAU_ACQUISITION', 'locked');
+
+    await expect(runCommand(installCommand, { rawArgs: [project, '--add', 'a@^1'] })).rejects.toMatchObject({
+      code: 'registry-unavailable',
+      exit: exitCodes.refused,
+      message: expect.stringContaining('TAU_ACQUISITION=locked') as unknown,
+    });
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(existsSync(join(project, 'package-lock.json'))).toBe(false);
+    expect(await readFile(join(project, 'package.json'), 'utf8')).toBe(
+      '{\n  "name": "fixture",\n  "private": true\n}\n',
+    );
+  });
+
   it('asks for a range when --add names only a package', async () => {
     await expect(runCommand(installCommand, { rawArgs: [project, '--add', 'a'] })).rejects.toMatchObject({
       code: 'ARG_ADD_INVALID',

@@ -217,6 +217,57 @@ describe.runIf(supported)('tau prepare', () => {
     expect(fetches).toHaveLength(2);
   });
 
+  it('G1: should make no request on a warm store under TAU_ACQUISITION=locked: prepare and inspect read receipts only', async () => {
+    await runCommand(command(), { rawArgs: ['demo'] });
+    expect(fetches).toHaveLength(2);
+    vi.stubEnv('TAU_ACQUISITION', 'locked');
+    stdout = [];
+
+    await runCommand(command(), { rawArgs: ['demo', '--json'] });
+    await runCommand(command(), { rawArgs: ['--inspect', '--json'] });
+
+    expect(records().map(({ kind, status, profile }) => ({ kind, status, profile }))).toEqual([
+      { kind: 'prepare', status: 'ready', profile: undefined },
+      { kind: 'profile', status: undefined, profile: 'locked' },
+    ]);
+    expect(fetches).toHaveLength(2);
+  });
+
+  it('G6: should print the effective profile an auditor reads, naming the variables set but never their values', async () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
+    const environment = {
+      TAU_ACQUISITION: 'locked',
+      TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/tau/',
+      TAU_PAYLOAD_DIR: join(sandbox, 'seed'),
+      TAU_PAYLOAD_EMULATION: '0',
+      HTTPS_PROXY: 'http://user:proxy-secret@proxy.corp.example:3128',
+      NODE_USE_ENV_PROXY: '1',
+      NODE_EXTRA_CA_CERTS: '/etc/corp/ca.pem',
+    };
+    /* eslint-enable @typescript-eslint/naming-convention -- end of the environment variable names */
+    for (const [name, value] of Object.entries(environment)) {
+      vi.stubEnv(name, value);
+    }
+
+    await runCommand(command(), { rawArgs: ['--inspect', '--json'] });
+
+    expect(records()[0]).toMatchObject({
+      kind: 'profile',
+      profile: 'locked',
+      store: join(sandbox, 'config', 'payloads'),
+      mirror: 'https://mirror.corp.example/tau/',
+      noFallback: true,
+      seed: join(sandbox, 'seed'),
+      emulation: false,
+      proxy: 'env-proxy',
+      ca: 'extra',
+      variables: expect.arrayContaining([...Object.keys(environment), 'TAU_CONFIG_DIR']) as unknown,
+      closures: [{ package: '@taucad/demo', dependency: 'engine', state: 'absent' }],
+    });
+    expect(stdout.join('')).not.toContain('proxy-secret');
+    expect(fetches).toEqual([]);
+  });
+
   it('should repair a tampered closure with --verify and report it', async () => {
     await runCommand(command(), { rawArgs: ['demo', '--json'] });
     const store = join(sandbox, 'config', 'payloads');

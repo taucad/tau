@@ -22,6 +22,8 @@ export const clientEnvironmentNames = [
   'TAU_BILLING_ENVIRONMENT',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
+  /* The managed acquisition profile: `locked` keeps the editor's type acquisition static. */
+  'TAU_ACQUISITION',
   'NODE_ENV',
   /* Desktop product analytics run whenever the build carries a key; `desktopEnvironment` fills these. */
   'POSTHOG_API_HOST',

@@ -3,6 +3,7 @@ import type { ModuleType, Plugin, RolldownLog } from '@rolldown/browser';
 
 import { createBundlerSourceHost, normalizeAssetImportAttributes } from '@taucad/bundler-core';
 import type {
+  BundlerAcquisition,
   BundlerFileSystem,
   BundlerSource,
   BundlerSourceHost,
@@ -23,6 +24,8 @@ type VmOptions = {
   readonly filesystem: BundlerFileSystem;
   readonly autoExportNames?: readonly string[];
   readonly cacheExecution?: boolean;
+  /** `locked` refuses imports that would be downloaded (`package-not-locked`); default `open`. */
+  readonly acquisition?: BundlerAcquisition;
 };
 
 type ExecuteResult<T> =
@@ -275,7 +278,11 @@ export class RolldownModuleVm {
    */
   public constructor(options: VmOptions, api: RolldownApi) {
     this.#api = api;
-    this.#host = createBundlerSourceHost({ filesystem: options.filesystem, autoExportNames: options.autoExportNames });
+    this.#host = createBundlerSourceHost({
+      filesystem: options.filesystem,
+      autoExportNames: options.autoExportNames,
+      ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
+    });
     this.#cacheExecution = options.cacheExecution === true;
   }
 

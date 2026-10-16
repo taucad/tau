@@ -55,7 +55,7 @@ Each sealed closure carries a `ClosureReceipt`: the declaring package and depend
 
 ## Managed machines
 
-`readManagedPreparation` interprets `TAU_ACQUISITION`, `TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_TARGET` and `TAU_PAYLOAD_EMULATION` into a `ManagedPreparation`. Its `AcquisitionProfile` is `open` or `locked`; `locked` never falls back to a manifest URL. `describeEffectiveProfile` assembles the `EffectiveProfile` that `tau prepare --inspect --json` prints for an auditor.
+`readManagedPreparation` interprets `TAU_ACQUISITION`, `TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_TARGET` and `TAU_PAYLOAD_EMULATION` into a `ManagedPreparation`. Its `AcquisitionProfile` is `open` or `locked`; `locked` never falls back to a manifest URL. `describeEffectiveProfile` assembles the `EffectiveProfile` that `tau prepare --inspect --json` prints for an auditor. Its `variables` lists which managed, proxy and CA variables are set, by name only, because a proxy URL can carry a credential. Under `locked`, Tau's hosts also compose their bundler with `acquisition: 'locked'`, so a JavaScript import outside the project's lock fails with `package-not-locked` rather than downloading.
 
 ## Errors
 

@@ -152,8 +152,9 @@ const inspect = async ({ args, host, store, indicators, managed }: Session): Pro
     (row) =>
       `${row.package} ${row.dependency}: ${row.state}${row.byteLength === undefined ? '' : ` (${megabytes(row.byteLength)})`}`,
   );
+  const variables = profile.variables.length === 0 ? [] : [`variables ${profile.variables.join(', ')}`];
   await writeStdout(
-    `${[`profile ${profile.profile}${profile.noFallback ? ' (no fallback)' : ''}, store ${profile.store}`, ...rows].join('\n')}\n`,
+    `${[`profile ${profile.profile}${profile.noFallback ? ' (no fallback)' : ''}, store ${profile.store}`, ...variables, ...rows].join('\n')}\n`,
   );
 };
 

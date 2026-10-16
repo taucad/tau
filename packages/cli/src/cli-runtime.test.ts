@@ -149,6 +149,14 @@ describe('createCliRuntime', () => {
     expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'slicer', 'assimp', 'image', 'svg-image']);
   });
 
+  it('composes the bundler under the locked acquisition profile only when asked', async () => {
+    const open = await composeCli();
+    const locked = await composeCli({ acquisition: 'locked' });
+
+    expect(open.bundlers.find(({ id }) => id === 'esbuild')).not.toHaveProperty('options.acquisition');
+    expect(locked.bundlers.find(({ id }) => id === 'esbuild')?.options).toMatchObject({ acquisition: 'locked' });
+  });
+
   it('registers the assimp import kernel through the pinned "all" preset', async () => {
     const runtime = await composeCli();
     const extensions = deriveImportExtensions(runtime);

@@ -26,6 +26,11 @@ const autoExportNames = ['main', 'defaultParams', 'getParameterDefinitions'];
 /** @public */
 export const esbuildOptionsSchema = z.object({
   extensions: z.array(z.string()).optional(),
+  /**
+   * `locked` (`TAU_ACQUISITION=locked`) makes no request: a bare import of a project without `package-lock.json` and
+   * a URL import are refused with `package-not-locked`. Default `open`.
+   */
+  acquisition: z.enum(['open', 'locked']).optional(),
 });
 
 /** Public esbuild plugin options. @public */
@@ -90,11 +95,12 @@ export const esbuildBundler = defineBundler({
   optionsSchema: esbuildOptionsSchema,
   extensions: (options) => options?.extensions ?? ['ts', 'js', 'tsx', 'jsx'],
 
-  async initialize(_options, { filesystem }) {
+  async initialize(options, { filesystem }) {
     const vm = await createEsbuildModuleVm({
       filesystem,
       autoExportNames,
       cacheExecution: true,
+      ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
     });
     return { vm };
   },

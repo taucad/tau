@@ -11,6 +11,7 @@ import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { StaticTypeDefinition } from '#lib/type-acquisition-service.js';
 import { TypeAcquisitionService } from '#lib/type-acquisition-service.js';
+import { ENV } from '#environment.config.js';
 
 /**
  * `ModuleResolutionKind.Bundler` from TypeScript 5.0+ (numeric value 100). Monaco's
@@ -195,6 +196,8 @@ export function ensureAtaBoot(monaco: typeof Monaco, fileManagerRef: FileManager
     ataInstance = new TypeAcquisitionService();
     ataInstance.initialize(monaco, {
       staticTypes,
+      // The locked profile acquires nothing: static types only, no request.
+      dynamicTypes: ENV.TAU_ACQUISITION !== 'locked',
       // The open project's files, read at acquisition time: the content service follows the project session.
       async readProjectFile(path) {
         const { contentService } = fileManagerRef.getSnapshot().context;

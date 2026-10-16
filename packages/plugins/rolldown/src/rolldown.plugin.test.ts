@@ -24,7 +24,12 @@ describe('@taucad/rolldown', () => {
 
   it('exports only the admitted public symbols', async () => {
     await expect(import('#index.js')).resolves.toMatchObject({ plugin, rolldown });
-    expect(Object.keys(await import('#index.js')).sort()).toEqual(['plugin', 'rolldown', 'rolldownBundler']);
+    expect(Object.keys(await import('#index.js')).sort()).toEqual([
+      'plugin',
+      'rolldown',
+      'rolldownBundler',
+      'rolldownOptionsSchema',
+    ]);
   });
 
   it('keeps native, Python, and Node-only payloads out of browser source', () => {

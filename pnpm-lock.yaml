@@ -3581,6 +3581,9 @@ importers:
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../core/bundler
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../camera
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild

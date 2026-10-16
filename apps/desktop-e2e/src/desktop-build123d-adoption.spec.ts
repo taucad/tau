@@ -283,7 +283,7 @@ test.skipIf(!enabled)(
       }
       const assemblyPoses = [assemblyReference, assemblyMoved, assemblyLeft, assemblyBoth];
       await page.keyboard.press('Control+a');
-      await page.getByRole('textbox', { name: 'Filter parts', exact: true }).fill('housing');
+      await page.getByRole('searchbox', { name: 'Filter parts', exact: true }).fill('housing');
       const row = page.locator(
         `[data-model-component-row][data-model-component-id="${assemblyComponents.leftHousing}"]`,
       );
@@ -356,7 +356,7 @@ test.skipIf(!enabled)(
         .toBe(true);
       await session.capture(`build123d-adoption-isolated-${runId}`);
       await row.getByRole('button', { name: /^Remove isolation for /u }).click();
-      await page.getByRole('textbox', { name: 'Filter parts', exact: true }).fill('');
+      await page.getByRole('searchbox', { name: 'Filter parts', exact: true }).fill('');
       await page.getByRole('button', { name: 'Fit view', exact: true }).first().click();
       await expectGeometryFramed(page);
       const directory = await session.capture(`build123d-adoption-${runId}`);

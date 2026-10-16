@@ -133,8 +133,8 @@ tau mcp --operation-timeout 120 --idle-release 300
 For Codex and Claude Code, install [`@taucad/agent-plugin`](https://www.npmjs.com/package/@taucad/agent-plugin): it starts `tau mcp` for the agent and adds Tau's CAD skills.
 
 ```bash
-claude plugin install tau --marketplace taucad/tau
-codex plugin marketplace add taucad/tau && codex plugin add tau@taucad
+claude plugin install tau --marketplace taucad/marketplace
+codex plugin marketplace add taucad/marketplace && codex plugin add tau@taucad
 ```
 
 ## TUI

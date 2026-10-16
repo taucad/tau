@@ -17,7 +17,6 @@ import { foldChatLog } from '#support/chat-admission-log.js';
 import {
   composerSelector,
   editComposerSelector,
-  dismissCookies,
   pdfModelName,
   prepareComposerPage,
   readHomeGlobText,
@@ -194,7 +193,6 @@ export const openChat = async (script: readonly GatewayScriptTurn[], query = '')
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate(`/__e2e/chat-attachments${query}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await selectModel(pdfModelName);
   const { chatIds } = await seededChatIds();

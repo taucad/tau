@@ -6,7 +6,6 @@ vi.mock('#routes/w.$workspace.$project/chat-editor-code-viewer.js', () => ({ Cha
 vi.mock('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js', () => ({
   ChatEditorMarkdownViewer: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-editor-plan-viewer.js', () => ({ ChatEditorPlanViewer: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-editor-binary-warning.js', () => ({
   ChatEditorBinaryWarning: () => null,
 }));
@@ -15,7 +14,6 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const probe = (options: {
   readonly path: string;
-  readonly planModeEnabled?: boolean;
   readonly content:
     | { readonly kind: 'text'; readonly bytes: Uint8Array<ArrayBuffer> }
     | {
@@ -29,7 +27,7 @@ const probe = (options: {
   path: options.path,
   name: options.path.split('/').pop() ?? options.path,
   content: options.content,
-  options: { planModeEnabled: options.planModeEnabled ?? false, readOnly: false },
+  options: { readOnly: false },
 });
 
 describe('fileViewerRouter', () => {
@@ -85,9 +83,7 @@ describe('fileViewerRouter', () => {
   it('preserves the specialized text viewers and code fallback', () => {
     const text = { kind: 'text', bytes: new TextEncoder().encode('# content') } satisfies FileViewerProbe['content'];
 
-    expect(fileViewerRouter.resolve(probe({ path: 'task.plan.md', planModeEnabled: true, content: text })).id).toBe(
-      'plan',
-    );
+    expect(fileViewerRouter.resolve(probe({ path: 'task.plan.md', content: text })).id).toBe('markdown');
     expect(fileViewerRouter.resolve(probe({ path: 'readme.md', content: text })).id).toBe('markdown');
     expect(fileViewerRouter.resolve(probe({ path: 'main.ts', content: text })).id).toBe('code');
   });

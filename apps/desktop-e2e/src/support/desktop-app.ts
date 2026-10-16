@@ -364,7 +364,7 @@ export const launchDesktopApp = async (options: {
       ([key, value]) =>
         key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
     );
-  const snapshots = configuredSnapshots !== 'false';
+  const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
@@ -437,6 +437,8 @@ export const launchDesktopApp = async (options: {
       args: [
         ...(packaged ? [] : [desktopRoot]),
         `--user-data-dir=${userData}`,
+        // Chromium cookies otherwise prompt for the user's Keychain when this test build is ad-hoc signed.
+        ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []),
         ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
         ...webGpuArguments(),
         ...(options.fakeMicrophonePath

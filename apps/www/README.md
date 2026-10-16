@@ -42,13 +42,19 @@ pyftsubset out/research/www-react-router/geist-mono-range.woff2 --output-file=ap
 
 Verified baseline: `faecc9ac8f456b7fa5639fc0eb146012e3e499c8` on remote `geospec`.
 
-- Product: `apps/ui/app/routes/_index/`, `apps/ui/app/routes/vision/vision-story.ts`, and `libs/tau-examples/src/kernels/replicad/planetary-gear-system/`. Distinguish current geometry checks from physical validation and future manufacturing workflows.
+- Product: `apps/ui/app/routes/_index/`, `apps/libs/planetary-gearbox/` and `libs/tau-examples/src/kernels/replicad/planetary-gear-system/`. Distinguish current geometry checks from physical validation and future manufacturing workflows.
 - Prices and customer terms: current `apps/libs/billing/src/tau-plan-catalog.ts`, cross-checked against founder-ratified private commercial authority. No supplier economics are included in public output.
-- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), `/legal/privacy`, `/legal/terms` verified in the app source.
+- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), verified in the app source; `/legal/*` is served by this site.
 - Downloads: release assets could not be verified; no platform installer or download event is invented.
 - Media: authored Tau example thumbnails and actual workspace screenshot. The live scene and stills derive from the committed 34-part Replicad model; motion does not imply a physical simulation. Verification shows one recorded GeoSpec run of the example spec, with inconclusive results labelled as such. Source license: Tau-authored Apache-2.0; preserve third-party terms.
 
+## Legal documents
+
+This site is the only owner of Tau's legal documents. `content/legal/*.md` holds the Terms, Privacy Policy, Storage and Cookie Policy, Acceptable Use Policy, Sub-processors and Open-Source Notices; `src/legal.ts` lists them and `app/legal.server.ts` renders them on the server at `/legal/<slug>/` with the heading anchors the app, desktop and emails link to (for example `/legal/privacy/#9.2.1-ai-service-improvement`). The Markdown processor never reaches the client bundle. `pnpm update-open-source-notices` regenerates `open-source.md` from the app and desktop dependency closure; the macOS package ships the same file.
+
 ## Privacy and measurement
+
+The consent panel offers the analytics choice on any page while no decision is recorded (DNT/GPC suppress it); **Cookie preferences** in the footer and on `/legal/cookies/` reopen it, and `/privacy/` withdraws it. The decision is the shared `tau-cookie-consent` cookie owned by `@taucad/consent` (`apps/libs/consent`); the app on the same hostname reads it to gate PostHog and offers the same choice under **Help → Cookie preferences**. The former site-only `localStorage` record is migrated once.
 
 Tracking is disabled by default. `WWW_ANALYTICS_ENDPOINT=/api/marketing-events` is the only accepted optional endpoint. Configure it only after an approved consent-aware first-party collector exists; the marketing deployment does not create that collector. No provider secret or PostHog SDK is bundled. The endpoint must discard transport IP/UA/referrer, validate this schema, rate-limit abuse and deduplicate `event_id` before forwarding to the authorized project. Do not enable it merely because the parent has connector access.
 
@@ -58,7 +64,7 @@ Marketing events: `marketing_page_view`, `marketing_cta_click`, `marketing_downl
 
 ## Same-domain integration
 
-`apps/ui/netlify/edge-functions/marketing.ts` owns the explicit marketing document and React Router data paths. The app retains project/share/auth/settings routes, its assets, `/sitemap.xml` and crawler exclusions. Marketing assets use `/_www/`; its sitemap is exposed at `/sitemap-marketing.xml`. The production robots response appends that sitemap only when marketing is configured. `/vision/` is marketing; `/vision` stays in the app.
+`apps/ui/netlify/edge-functions/marketing.ts` owns the explicit marketing document and React Router data paths. The app retains project/share/auth/settings routes, its assets, `/sitemap.xml` and crawler exclusions. Marketing assets use `/_www/`; its sitemap is exposed at `/sitemap-marketing.xml`. The production robots response appends that sitemap only when marketing is configured. `/vision` and `/legal` are marketing paths; the app has no marketing, legal or cookie-preference pages of its own.
 
 The proxy preserves only the router's `_routes` query on data requests and does not forward cookies or authorization. Root responses remain private/no-store, and existing settings/callback and returning-app behavior stays in the app. Initial route discovery avoids a shared `/__manifest` endpoint collision. The proxy's regression tests define these boundaries.
 
@@ -103,7 +109,7 @@ The default build copies committed assets and derives smaller AVIF/WebP delivery
 
 Start `node apps/www/scripts/serve.ts`, then run `node apps/www/scripts/browser-check.ts` and `node apps/www/scripts/check-story.ts`. `CHROME_CHANNEL=chrome` uses installed Chrome; otherwise set `CHROME_PATH`. `PORT`, `WWW_TEST_URL` and `WWW_REPORT_DIR` select the port, origin and evidence folder.
 
-`check-story.ts` covers hero keyboard and drag, all nine chapters at 1440 and 390 px with axe, the single-canvas invariant, zero idle/offscreen/hidden frames, the still-frames toggle, reduced-motion disposal and no-load, no-WebGL, download failure, context loss and a synthetic page exit during download. `browser-check.ts` covers all 13 routes at four viewport/theme configurations, the mobile menu, no-JavaScript navigation, 404 and privacy. Results and conditions are in `VALIDATION.md`.
+`check-story.ts` covers hero keyboard and drag, all nine chapters at 1440 and 390 px with axe, the single-canvas invariant, zero idle/offscreen/hidden frames, the still-frames toggle, reduced-motion disposal and no-load, no-WebGL, download failure, context loss and a synthetic page exit during download. `browser-check.ts` covers all 20 routes, including every legal document, at four viewport/theme configurations, the mobile menu, no-JavaScript navigation, 404 and privacy. Results and conditions are in `VALIDATION.md`.
 
 ## Claims
 

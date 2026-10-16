@@ -222,11 +222,6 @@ test('should share modern command search chrome across command, model, kernel, a
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-light.png');
   await target.press(kernelFilter, 'Escape');
 
-  const acceptCookies = selectors.getByRole('button', { name: 'Accept' });
-  if (await target.isVisible(acceptCookies)) {
-    await target.click(acceptCookies);
-  }
-
   await target.setViewport({ width: 390, height: 844 });
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
   const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });

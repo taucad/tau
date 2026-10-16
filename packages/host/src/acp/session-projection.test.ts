@@ -38,6 +38,76 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   signal: new AbortController().signal,
 });
 
+it.each(['grok', 'codex'])('should project every additional Tau MCP capability for %s', async (agentId) => {
+  const cases = [
+    ['get_parameters', { targetFile: 'main.py' }, { status: 'unresolved', diagnostics: [] }],
+    [
+      'apply_parameter_operation',
+      { action: 'cancel', targetFile: 'main.py', requestId: 'request-1' },
+      { outcome: { status: 'cancelled-before-apply', requestId: 'request-1' } },
+    ],
+    ['list_machines', {}, 'No machines bound.'],
+    ['get_machine', { machineId: 'fixture' }, 'Fixture simulator: idle.'],
+    [
+      'machine_action',
+      { machineId: 'fixture', componentId: 'switch', action: 'switch.set' },
+      { status: 'refused', message: 'Fixture only; no physical action.' },
+    ],
+    ['stop_machine', { machineId: 'fixture' }, { status: 'done', message: 'Fixture stopped.' }],
+    ['get_print_profiles', { machineId: 'fixture' }, { engine: 'reference' }],
+    [
+      'request_job',
+      { targetFile: 'main.py' },
+      {
+        job: { jobId: 'fixture-job', machineId: 'fixture', state: 'denied', program: { name: 'fixture' } },
+        approval: 'denied',
+        simulated: true,
+      },
+    ],
+    ['check_job', { targetFile: 'main.py' }, { status: 'blocked', message: 'Fixture only.', simulated: true }],
+  ] as const;
+  for (const [name, input, output] of cases) {
+    const carrier = typeof output === 'string' ? { value: output } : output;
+    // oxlint-disable-next-line no-await-in-loop -- Exercise each call's independent projection lifecycle.
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: name,
+          title: `tau__${name}`,
+          rawInput:
+            agentId === 'grok'
+              ? { tool_name: `tau__${name}`, tool_input: input }
+              : { server: 'tau', tool: name, arguments: input },
+          _meta:
+            agentId === 'grok'
+              ? { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } }
+              : { is_mcp_tool_call: true },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: name,
+          status: 'completed',
+          rawOutput:
+            agentId === 'grok'
+              ? { type: 'MCP', tool_name: name, server_name: 'tau', output: { OkayOutput: JSON.stringify(carrier) } }
+              : { result: { structuredContent: carrier, content: [] } },
+        },
+      ],
+      agentId,
+      undefined,
+      'tau',
+    );
+    expect(messages[0]).toMatchObject({
+      role: 'tool-input',
+      toolName: name,
+      content: input,
+      metadata: { tauInternal: { presentation: 'tau-mcp' } },
+    });
+    expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: name, content: output, isError: false });
+  }
+});
+
 it('should normalize a qualified Grok MCP call and its JSON output', async () => {
   const output = { status: 'ready' };
   const messages = await project(

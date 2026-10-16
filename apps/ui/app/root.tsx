@@ -10,7 +10,6 @@ import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 import { BuildSkewBanner } from '#components/build-skew-banner.js';
-import { CookieConsent } from '#components/cookie-consent.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
@@ -93,7 +92,6 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
         <>
           <BuildSkewBanner />
           <OfflineShell />
-          <CookieConsent />
         </>
       }
     >

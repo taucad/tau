@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import * as Cookies from 'es-cookie';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
-import { consentCookieName } from '#constants/cookie.constants.js';
+import { consentCookieName } from '@taucad/consent';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { readConsentStatus, readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { resetRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
@@ -54,56 +54,41 @@ describe('cookie consent', () => {
     expect(readConsentStatusFromHeader(`${consentCookieName}=%22granted%22`, true)).toBe('declined');
   });
 
-  it('should persist accepted and withdrawn decisions in the versioned shape', () => {
-    const { result } = renderHook(() => useCookieConsent());
-
-    act(() => {
-      result.current[1]('accepted');
-    });
-    expect(result.current[0]).toBe('accepted');
-    expect(JSON.parse(Cookies.get(consentCookieName) ?? '')).toStrictEqual({ status: 'accepted', version: 1 });
-
-    act(() => {
-      result.current[1]('declined');
-    });
-    expect(result.current[0]).toBe('declined');
-    expect(JSON.parse(Cookies.get(consentCookieName) ?? '')).toStrictEqual({ status: 'declined', version: 1 });
-  });
-
-  it('should migrate a valid legacy decision without changing its meaning', () => {
-    Cookies.set(consentCookieName, JSON.stringify('granted'));
-
-    const { result } = renderHook(() => useCookieConsent());
-
-    expect(result.current[0]).toBe('accepted');
-    expect(JSON.parse(Cookies.get(consentCookieName) ?? '')).toStrictEqual({ status: 'accepted', version: 1 });
-  });
-
   it('should keep a request-header-only GPC signal authoritative after hydration', () => {
     Cookies.set(consentCookieName, accepted);
     loader.data = { consentStatus: 'declined', globalPrivacyControl: true };
 
     const { result } = renderHook(() => useCookieConsent());
 
-    expect(result.current[0]).toBe('declined');
+    expect(result.current).toBe('declined');
     expect(readConsentStatus()).toBe('declined');
-    act(() => {
-      result.current[1]('accepted');
+  });
+
+  it('should notice a decision the marketing site broadcasts', async () => {
+    const { result } = renderHook(() => useCookieConsent());
+    expect(result.current).toBe('unknown');
+
+    Cookies.set(consentCookieName, accepted);
+    const channel = new BroadcastChannel('tau-cookie-consent');
+    channel.postMessage('accepted');
+    channel.close();
+
+    await waitFor(() => {
+      expect(result.current).toBe('accepted');
     });
-    expect(JSON.parse(Cookies.get(consentCookieName) ?? '')).toStrictEqual({ status: 'declined', version: 1 });
   });
 
   it('should notice a withdrawal made in another tab when this tab regains focus', () => {
     Cookies.set(consentCookieName, accepted);
     const { result } = renderHook(() => useCookieConsent());
-    expect(result.current[0]).toBe('accepted');
+    expect(result.current).toBe('accepted');
 
     act(() => {
       Cookies.set(consentCookieName, declined);
       globalThis.dispatchEvent(new Event('focus'));
     });
 
-    expect(result.current[0]).toBe('declined');
+    expect(result.current).toBe('declined');
   });
 
   it('should return to unknown when the decision expires while the tab is hidden', () => {
@@ -115,7 +100,7 @@ describe('cookie consent', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(result.current[0]).toBe('unknown');
+    expect(result.current).toBe('unknown');
   });
 
   it('should notice expiry while focused through Cookie Store change events', () => {
@@ -124,14 +109,14 @@ describe('cookie consent', () => {
     Cookies.set(consentCookieName, accepted);
     const removeListener = vi.spyOn(store, 'removeEventListener');
     const { result, unmount } = renderHook(() => useCookieConsent());
-    expect(result.current[0]).toBe('accepted');
+    expect(result.current).toBe('accepted');
 
     act(() => {
       Cookies.remove(consentCookieName);
       store.dispatchEvent(Object.assign(new Event('change'), { deleted: [{ name: consentCookieName }] }));
     });
 
-    expect(result.current[0]).toBe('unknown');
+    expect(result.current).toBe('unknown');
     unmount();
     expect(removeListener).toHaveBeenCalledWith('change', expect.any(Function));
   });

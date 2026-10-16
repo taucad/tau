@@ -81,7 +81,6 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
       enableOverflowY: state.enableOverflowY ? [{ handle: { enableOverflowY: true } }] : [],
       providers: state.providers,
-      enablePageFooter: [],
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({
@@ -135,11 +134,9 @@ vi.mock('@taucad/ui/components/breadcrumb', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => <span /> }));
-vi.mock('#components/layout/page-footer.js', () => ({ PageFooter: () => <footer /> }));
 vi.mock('#components/icons/tau-wordmark.js', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
-vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
 vi.mock('#components/settings/settings-dialog.js', () => ({
   /* `ComputeReuseSettings` inside the real dialog reads the project context the
    * matched route contributes, so the dialog is probed the same way. */

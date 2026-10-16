@@ -150,7 +150,6 @@ describe('draftPersistenceFor', () => {
   });
 
   it("should root each pre-project surface's attachments in a directory of its own", () => {
-    expect(composerRecordPaths.surfaceAttachments('marketing')).toBe('/.tau/composers/marketing/attachments');
     expect(composerRecordPaths.surfaceAttachments('library')).toBe('/.tau/composers/library/attachments');
   });
 });

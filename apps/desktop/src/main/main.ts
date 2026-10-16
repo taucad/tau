@@ -554,6 +554,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   if (!isDevelopment) {
     const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    /* Product analytics post straight to PostHog; never an authenticated origin, so no bearer reaches it. */
+    const analyticsOrigin = environment['POSTHOG_CLIENT_KEY'] ? originOf(environment['POSTHOG_API_HOST']) : undefined;
+    const connectOrigins = [storageOrigin, analyticsOrigin].filter((origin): origin is string => origin !== undefined);
     registerAppProtocol({
       clientRoot,
       protocol,
@@ -561,9 +564,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* OQ-P11: development and staging only. Unpackaged is exactly that here — a packaged app
        * has no developer to take the profile. */
       jsProfiling: !app.isPackaged,
-      contentSecurityPolicy: contentSecurityPolicy(
-        storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
-      ),
+      contentSecurityPolicy: contentSecurityPolicy([...authenticatedOrigins, ...connectOrigins]),
     });
     log.log('info', 'main.app-protocol-registered', { clientRoot });
   }

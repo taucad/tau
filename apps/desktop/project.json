@@ -63,6 +63,9 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "POSTHOG_CLIENT_KEY"
         }
       ],
       "dependsOn": [
@@ -243,6 +246,13 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-package.test.mts"
+      }
+    },
+    "test-publish-desktop": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-desktop.test.mts"
       }
     },
     "verify-macos-package": {

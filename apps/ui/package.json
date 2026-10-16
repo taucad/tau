@@ -30,6 +30,7 @@
     "@taucad/bundler-core": "workspace:*",
     "@taucad/camera": "workspace:*",
     "@taucad/chat": "workspace:*",
+    "@taucad/consent": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",

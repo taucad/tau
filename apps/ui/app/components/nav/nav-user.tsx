@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BookOpen, Bug, CircleHelp, Files, FileText, Scale, Settings, Shield, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -18,6 +19,8 @@ import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { setEntryPreference } from '#lib/entry-preference.js';
+import { websiteOrigin } from '#lib/website-origin.js';
+import { CookiePreferencesDialog, CookiePreferencesMenuItem } from '#components/cookie-preferences.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 
 /**
@@ -31,15 +34,22 @@ import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 export function NavUser(): React.JSX.Element {
   const isOnline = useNetworkConnectivity();
   const { open: openSettings } = useSettingsDialog();
+  const [isCookiePreferencesOpen, setIsCookiePreferencesOpen] = useState(false);
+  const website = websiteOrigin();
+  // The edge serves the website on this hostname, so the entry preference selects it at `/`.
+  const isWebsiteHere = !isDesktopTarget() && website === globalThis.location.origin;
   const helpItems = [
     ...(isDesktopTarget()
       ? []
       : [
           <DropdownMenuItem key='website' asChild>
             <a
-              href='/?website=1'
+              href={isWebsiteHere ? '/?website=1' : `${website}/`}
+              target={isWebsiteHere ? undefined : '_blank'}
+              rel={isWebsiteHere ? undefined : 'noopener noreferrer'}
               onClick={(event) => {
                 if (
+                  isWebsiteHere &&
                   event.button === 0 &&
                   !event.metaKey &&
                   !event.ctrlKey &&
@@ -81,6 +91,12 @@ export function NavUser(): React.JSX.Element {
         Open-source notices
       </a>
     </DropdownMenuItem>,
+    <CookiePreferencesMenuItem
+      key='cookies'
+      onSelect={() => {
+        setIsCookiePreferencesOpen(true);
+      }}
+    />,
     <DropdownMenuItem key='bug' asChild>
       <a href={`${metaConfig.githubUrl}/issues/new?labels=bug`} target='_blank' rel='noopener noreferrer'>
         <Bug />
@@ -168,6 +184,7 @@ export function NavUser(): React.JSX.Element {
             </DropdownMenuLabel>
           </DropdownMenuContent>
         </DropdownMenu>
+        <CookiePreferencesDialog isOpen={isCookiePreferencesOpen} onOpenChange={setIsCookiePreferencesOpen} />
       </div>
     </ClientOnly>
   );

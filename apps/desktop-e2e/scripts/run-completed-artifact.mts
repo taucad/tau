@@ -7,6 +7,7 @@
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
  * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only); TAU_E2E_PROJECTION_IMPORT_ROOT,
  * TAU_E2E_PROJECTION_ARTIFACT_ROOT, and the explicitly validated projection manual selectors below.
+ * TAU_E2E_GROK=true additionally selects the live Grok composer spec and uses the operator's cached login/quota.
  * DEBUG=pw:protocol enables redacted test-child protocol diagnostics; other DEBUG values are not forwarded.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
@@ -417,6 +418,7 @@ const main = async (): Promise<void> => {
       ...projectionInputs,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
       TAU_E2E_ACP_PACKAGED: 'true',
+      ...(process.env['TAU_E2E_GROK'] === 'true' ? { TAU_E2E_GROK: 'true', TAU_E2E_GROK_PACKAGED: 'true' } : {}),
       TAU_E2E_COMPOSE_PROJECT: project,
       ...(isolatedCloudGateway
         ? {
@@ -521,6 +523,7 @@ const main = async (): Promise<void> => {
       'src/desktop-chat-replay.spec.ts',
       'src/desktop-chat-in-project.spec.ts',
       'src/desktop-chat-acp.spec.ts',
+      ...(process.env['TAU_E2E_GROK'] === 'true' ? ['src/desktop-chat-grok.spec.ts'] : []),
       'src/desktop-measurement-exact.spec.ts',
       'src/desktop-thumbnail-lifecycle.spec.ts',
       'src/desktop-native-payload.spec.ts',

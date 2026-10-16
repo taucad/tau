@@ -2,6 +2,7 @@ import '#styles/global.css';
 import 'dockview-react/dist/styles/dockview.css';
 import 'allotment/dist/style.css';
 import { cleanup, render } from '@testing-library/react';
+import axe from 'axe-core';
 import { StrictMode, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { DockviewApi, IDockviewHeaderActionsProps } from 'dockview-react';
@@ -10,6 +11,7 @@ import { page, userEvent } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Allotment } from '#components/panes/allotment.js';
 import { Dockview } from '#components/panes/dockview.js';
+import { DockviewTab } from '#components/panes/dockview-tab.js';
 import { useIsTopLeftGroup, useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 
 const Content = (): React.JSX.Element => <textarea aria-label='Persistent editor' defaultValue='Keep this draft' />;
@@ -96,6 +98,54 @@ const afterLayout = async (change: () => void): Promise<void> => {
 };
 
 afterEach(cleanup);
+
+describe('Dockview tab close action in Chromium', () => {
+  it('should close each tab from its own glyph, without a group-level close or nested interactive', async () => {
+    let api: DockviewApi | undefined;
+    const view = render(
+      <TooltipProvider>
+        <div data-testid='tab-frame' style={{ width: 900, height: 300 }}>
+          <Dockview
+            components={components}
+            defaultTabComponent={DockviewTab}
+            rightHeaderActionsComponent={CornerActions}
+            onReady={(event) => {
+              api = event.api;
+              createPanels(event.api);
+            }}
+          />
+        </div>
+      </TooltipProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(api?.panels).toHaveLength(6);
+    });
+    const root = view.getByTestId('tab-frame');
+    const tabFor = (title: string): HTMLElement => root.querySelector<HTMLElement>(`.dv-tab[aria-label="${title}"]`)!;
+    await vi.waitFor(() => {
+      expect(tabFor('File 1.tsx')).not.toBeNull();
+    });
+    const rightActions = root.querySelector<HTMLElement>('.dv-right-actions-container')!;
+    expect(rightActions.querySelector('[aria-label^="Close"]')).toBeNull();
+
+    const inactiveTab = tabFor('File 1.tsx');
+    const close = inactiveTab.querySelector<HTMLElement>('.dv-default-tab-action')!;
+    const tabBox = inactiveTab.getBoundingClientRect();
+    const closeBox = close.getBoundingClientRect();
+    expect(closeBox.left).toBeGreaterThanOrEqual(tabBox.left);
+    expect(closeBox.right).toBeLessThanOrEqual(tabBox.right);
+    expect(closeBox.top).toBeGreaterThanOrEqual(tabBox.top);
+    expect(closeBox.bottom).toBeLessThanOrEqual(tabBox.bottom);
+
+    const results = await axe.run(root, { runOnly: { type: 'rule', values: ['nested-interactive'] } });
+    expect(results.violations).toEqual([]);
+
+    await userEvent.hover(inactiveTab);
+    await userEvent.click(close);
+    expect(api!.panels.map((panel) => panel.title)).not.toContain('File 1.tsx');
+    expect(api!.activePanel?.title).toBe('File 5.tsx');
+  });
+});
 
 describe('editor chrome layout stability in Chromium', () => {
   it('should settle nested pane bounds before the next frame during toggles and continuous resize', async () => {

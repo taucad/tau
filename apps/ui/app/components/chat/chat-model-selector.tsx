@@ -8,7 +8,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { groupModelsByTier } from '#utils/model-tier.js';
+import { groupModels } from '#utils/model-groups.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -52,7 +52,7 @@ export const ChatModelSelector = memo(function ({
   const {
     model: { model: selectedModel, setActiveModel },
   } = useChatComposer();
-  const { data: allModels = [], availableModels } = useModels();
+  const { data: allModels = [], availableModels, pinnedIds } = useModels();
 
   const visibleModels = useMemo(() => {
     const currentInCatalog = allModels.find((entry) => entry.id === selectedModel.id);
@@ -68,9 +68,8 @@ export const ChatModelSelector = memo(function ({
     [visibleModels, selectedModel.id],
   );
 
-  // Grouped by what the reader is actually choosing between: how much a turn
-  // costs. Provider identity stays on the row icon and the hover card.
-  const groupedModels = useMemo(() => groupModelsByTier<Model>(visibleModels), [visibleModels]);
+  // Grouped as the agent sheet's model list: pinned, by maker, this computer.
+  const groupedModels = useMemo(() => groupModels<Model>(visibleModels, pinnedIds), [visibleModels, pinnedIds]);
 
   const handleSelectModel = useCallback(
     (item: string) => {

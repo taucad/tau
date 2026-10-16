@@ -268,7 +268,7 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'branchMerged'; branch: string; into: string; revisionId: string }>
   /* `remote.machine` says the remote came or went; `sync` is a sibling and hears
    * it through the root (A38, W18 review DEF-6b, P53). */
-  | Readonly<{ type: 'remoteConnected'; kind: RemoteKind; url: string; name: string }>
+  | Readonly<{ type: 'remoteConnected'; kind: RemoteKind; url: string; name: string; automaticPush?: boolean }>
   | Readonly<{ type: 'remoteDisconnected' }>
   | Readonly<{ type: 'conflictResolved'; revisionId: string; branch: string | undefined }>
   | Readonly<{ type: 'resolutionChanged'; revisionId: string }>
@@ -1456,7 +1456,7 @@ const projectRevisionsMachineDefinition = setup({
         },
         resolutionChanged: {},
         remoteConnected: ({ event }: RootArgs<'remoteConnected'>, enq: ProjectRevisionsEnqueue): RootTransition => {
-          enq.sendTo('sync', { type: 'remoteConnected', remote: event.name });
+          enq.sendTo('sync', { type: 'remoteConnected', remote: event.name, automaticPush: event.automaticPush });
           return {};
         },
         remoteDisconnected: (_, enq) => {

@@ -19,6 +19,7 @@ import { Topic } from '@taucad/events';
 import {
   awaitCheckoutCuts,
   awaitSyncSettled,
+  pushExplicitly,
   createProjectRevisionsActor,
   releaseUnplacedTurns,
   describeTurnRelease,
@@ -404,6 +405,8 @@ export const createCheckoutRoutes = (options: {
 
 /** One project's revision root, as the worker's port protocol drives it. @public */
 export type WorkerProjectRevisions = Readonly<{
+  /** Request one explicit repository push through the scheduler. */
+  pushGithub: (repositoryUrl: string) => Promise<void>;
   /** Private candidate artifact operations; each rereads device-local consent. */
   fetchGeoSpecCandidates: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
   publishGeoSpecCandidate: (candidate: Uint8Array<ArrayBuffer>) => Promise<'updated' | 'upToDate' | 'rejected'>;
@@ -655,6 +658,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     return state?.syncGeoSpecCandidates === true;
   };
   const candidateRemote = async (publishing: boolean): Promise<string> => {
+    if (publishing && published.remote.provider === 'github') {
+      throw new Error(
+        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau Cloud for candidate sharing.',
+      );
+    }
     if (isDesktopTarget()) {
       throw new Error('GeoSpec candidate sharing is available in the browser only.');
     }
@@ -1196,10 +1204,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     if (status.headRevisionId !== undefined && basis === undefined) {
       throw new Error('The checkout head tree is unavailable.');
     }
-    return { filesystem, mode: (path: string): FileMode => basis?.mode(path) ?? '100644' };
+    return {
+      filesystem,
+      mode: (path: string): FileMode => basis?.mode(path) ?? '100644',
+    };
   };
 
   return {
+    pushGithub: async (repositoryUrl) => pushExplicitly({ actor, repositoryUrl }),
     fetchGeoSpecCandidates: async () => {
       if (options.candidatePort === undefined) {
         throw new Error('This host has no bounded candidate transport.');
@@ -1645,6 +1657,7 @@ export type WorkerRevisionRequest =
    * memory for as long as the project is open and never writes it anywhere.
    */
   | (GitRemoteCredential & Readonly<{ command: 'remoteCredential'; id?: number }>)
+  | (GitRemoteCredential & Readonly<{ command: 'pushGithub'; id?: number }>)
   /* Whether this project is the page's focused one (RV-W5b F12): a port frame,
    * because focus is the page's fact about its projects, not the tree's. */
   | Readonly<{ command: 'focus'; focused: boolean; id?: number }>;
@@ -1659,6 +1672,7 @@ export type WorkerRevisionRequest =
  * @public
  */
 export type WorkerRevisionResult =
+  | Readonly<{ kind: 'githubPushed' }>
   | Readonly<{ kind: 'log'; rows: readonly RevisionRow[] }>
   | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
@@ -1820,6 +1834,7 @@ type ProjectEntry = {
   readonly placements: Set<PlacementSessionHandle>;
   /** Record what the page last said about reaching a third-party remote (S34, I8). */
   readonly setCredential: (credential: GitRemoteCredential) => void;
+  readonly pushGithub: (credential: GitRemoteCredential) => Promise<void>;
   /** Record the API origin alone, which Publish carries and a credential also names. */
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
   /** Whether this project is the page's focused one, which alone holds the long poll (F12). */
@@ -1942,6 +1957,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     /* Memory only, for as long as the project is open: a credential is never
      * written under a project or a workspace (I8). */
     let credential: GitRemoteCredential | undefined;
+    let writeCredential: GitRemoteCredential | undefined;
     /* Held apart from the credential: the origin outlives any one remote, and
      * Publish names it without minting anything (review R4). */
     let apiBaseUrl: string | undefined;
@@ -1950,7 +1966,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       createWorkerProjectRevisions({
         projectId,
         attention,
-        port: await options.createPort(projectId, () => credential),
+        port: await options.createPort(projectId, () => writeCredential ?? credential),
         ...(options.createCandidatePort === undefined
           ? {}
           : {
@@ -2008,6 +2024,26 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       ports,
       readers,
       placements: new Set(),
+      pushGithub: async (held) => {
+        if (
+          writeCredential !== undefined ||
+          held.repositoryUrl === undefined ||
+          held.authorization === undefined ||
+          held.expiresAt === undefined ||
+          !Number.isFinite(Date.parse(held.expiresAt)) ||
+          Date.parse(held.expiresAt) <= Date.now() ||
+          held.origin !== 'https://github.com'
+        ) {
+          throw new Error('This GitHub push has no valid repository credential, or another push is running.');
+        }
+        writeCredential = held;
+        try {
+          const project = await revisions;
+          await project.pushGithub(held.repositoryUrl);
+        } finally {
+          writeCredential = undefined;
+        }
+      },
       setCredential: (held) => {
         credential = held;
         apiBaseUrl = held.apiBaseUrl;
@@ -2140,7 +2176,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           port.close();
           return;
         }
-        if (reader && (data.command === 'remoteCredential' || data.command === 'publishProject')) {
+        if (
+          reader &&
+          (data.command === 'remoteCredential' || data.command === 'publishProject' || data.command === 'pushGithub')
+        ) {
           /* The page's routing and credential frames are the page's (RV9-F1); a reader cannot set or use them. */
           if (data.id !== undefined) {
             port.postMessage({
@@ -2153,6 +2192,24 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         }
         if (data.command === 'publishProject' && data.apiBaseUrl !== undefined) {
           entry.setApiBaseUrl(data.apiBaseUrl);
+        }
+        if (data.command === 'pushGithub') {
+          const { command: _verb, id, ...held } = data;
+          try {
+            await entry.pushGithub(held);
+            if (id !== undefined) {
+              port.postMessage({ type: 'result', id, result: { kind: 'githubPushed' } });
+            }
+          } catch (error) {
+            if (id !== undefined) {
+              port.postMessage({
+                type: 'error',
+                id,
+                message: error instanceof Error ? error.message : 'GitHub push failed.',
+              });
+            }
+          }
+          return;
         }
         if (data.command === 'remoteCredential') {
           const { command: _verb, id: _id, ...held } = data;

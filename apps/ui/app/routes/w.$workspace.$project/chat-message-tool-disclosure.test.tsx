@@ -12,7 +12,6 @@ import { ChatMessageToolGetKernelResult } from '#routes/w.$workspace.$project/ch
 import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-message-tool-screenshot.js';
 import { ChatMessageToolTestModel } from '#routes/w.$workspace.$project/chat-message-tool-test-model.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
-import { ChatMessagePlanCard } from '#routes/w.$workspace.$project/chat-message-plan-card.js';
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn()] }));
 vi.mock('#hooks/use-chat.js', () => ({
@@ -45,7 +44,6 @@ describe('tool disclosure content parity', () => {
     ['screenshot', <ChatMessageToolScreenshot key='screenshot' part={loading} />],
     ['test', <ChatMessageToolTestModel key='test' part={loading} />],
     ['export', <ChatMessageToolExportGeometry key='export' part={loading} />],
-    ['plan', <ChatMessagePlanCard key='plan' targetFile='model.plan.md' content='' status='loading' />],
   ])('does not expose an empty loading disclosure for %s', (_name, row) => {
     render(row);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

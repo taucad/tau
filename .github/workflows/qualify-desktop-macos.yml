@@ -1,7 +1,7 @@
 # Qualify first-use download of the native kernels under a published, notarised desktop build.
 #
 # Charter W12 (native dependency resolution) and go-live DSK-6: before the desktop stops
-# bundling its Python and .NET runtimes, a clean macos-15 and macos-26 runner downloads the
+# bundling its Python and .NET runtimes, a clean macos-26 runner downloads the
 # signed archive a desktop release published (Tau-macos-arm64.zip, checked against the
 # release's SHA256SUMS.txt), and runs apps/desktop/scripts/qualify-first-use-download.sh
 # against it. The desktop does not prepare into the payload store yet (W6), so the script runs
@@ -50,7 +50,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        # macOS 26 is Tau's only macOS image (ruling X39); the older-host cell is retired.
+        runner: [macos-26]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

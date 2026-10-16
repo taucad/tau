@@ -7,7 +7,7 @@
 # the registry bytes from their origins and saves the seed; `s14 (hit)` restores it; `s14 (miss)`
 # fetches everything from the origins again and saves afterwards.
 #
-# S15 qualifies the D6/D10/W12 launch facts on clean macos-15 and macos-26 runners: Node-downloaded
+# S15 qualifies the D6/D10/W12 launch facts on a clean macos-26 runner (ruling X39): Node-downloaded
 # payloads, launches wrapped by Tau's own sandbox profile with the notarised Tau.app (from a
 # desktop-staging release build) as the parent, a deliberately quarantined copy, APFS clones, the
 # runtime tarball muxer's entitlements, hostfxr's install_location handling and codesign without
@@ -884,7 +884,7 @@ jobs:
       fail-fast: false
       matrix:
         # Keep macOS 15 deliberately: S15 compares older-host compatibility with the default build host.
-        runner: [macos-15, macos-26]
+        runner: [macos-26]
     env:
       BOGUS_ROOT: /Users/runner/s15-bogus-dotnet-root
     steps:

@@ -331,6 +331,7 @@ const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): v
       kind: context.remote.kind,
       url: context.remote.url,
       name: context.remote.name,
+      automaticPush: context.remote.provider !== 'github' && context.remote.fetchOnly !== true,
     });
   }
 };

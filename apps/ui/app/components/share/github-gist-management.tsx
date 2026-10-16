@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { EllipsisVertical, Loader2, RefreshCw, Trash2 } from 'lucide-react';
@@ -31,7 +33,7 @@ import {
   shareProviderRegistry,
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
-import type { GithubGistAuthorizationSurface, GithubGistConnectionStatus } from '#lib/share-providers.js';
+import type { GithubGistAuthorizationSurface } from '#lib/share-providers.js';
 import { toast } from '#components/ui/sonner.js';
 
 type GithubGistManagementProps = {
@@ -59,7 +61,14 @@ export function GithubGistManagement({
   const { signIn } = useAuthLinks({
     redirectTo: `${location.pathname}${authorizationReturn?.remainingSearch ?? location.search}`,
   });
-  const [status, setStatus] = useState<GithubGistConnectionStatus>();
+  const settings = useSettingsDialog();
+  const capability = useQuery({
+    queryKey: ['github', 'gist-status'],
+    queryFn: getGithubGistConnectionStatus,
+    retry: false,
+    staleTime: 0,
+  });
+  const status = capability.error ? 'reconnect-required' : capability.data;
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   /* D16c: desktop runs the Gist grant in the system browser and waits here for it. */
@@ -76,36 +85,27 @@ export function GithubGistManagement({
   );
 
   useEffect(() => {
-    let cancelled = false;
-    const loadStatus = async (): Promise<void> => {
-      const next = await getGithubGistConnectionStatus();
-      if (!cancelled) {
-        setStatus(next);
-      }
-    };
-    // async-iife: bootstrap
-    void loadStatus();
-    if (authorizationReturn) {
-      if (authorizationReturn.outcome === 'cancelled') {
-        toast.info('GitHub Gist access was not granted.');
-      } else if (authorizationReturn.outcome === 'failed') {
-        toast.error(authorizationReturn.failure ?? 'GitHub authorization could not be completed.');
-      } else {
-        toast.success('GitHub Gist access updated.');
-      }
-      void navigate(`${location.pathname}${authorizationReturn.remainingSearch}${location.hash}`, { replace: true });
+    if (!authorizationReturn || status === undefined) {
+      return;
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [authorizationReturn, location.hash, location.pathname, navigate]);
+    if (authorizationReturn.outcome === 'cancelled') {
+      toast.info('GitHub Gist access was not granted.');
+    } else if (authorizationReturn.outcome === 'failed') {
+      toast.error(authorizationReturn.failure ?? 'GitHub authorization could not be completed.');
+    } else if (status === 'connected') {
+      toast.success('GitHub Gist access verified. Nothing has been published.');
+    } else {
+      toast.info('Gist access still needs attention. Check Security settings before sharing.');
+    }
+    void navigate(`${location.pathname}${authorizationReturn.remainingSearch}${location.hash}`, { replace: true });
+  }, [authorizationReturn, status, location.hash, location.pathname, navigate]);
 
   const handleFailure = (error: unknown): void => {
     if (isShareError(error) && error.code === 'SHARE_AUTH_REQUIRED') {
-      setStatus('not-connected');
+      void capability.refetch();
     }
     if (isShareError(error) && error.code === 'SHARE_PERMISSION_REQUIRED') {
-      setStatus('permission-required');
+      void capability.refetch();
     }
     toast.error(error instanceof Error ? error.message : 'GitHub Gist management failed.');
   };
@@ -176,7 +176,7 @@ export function GithubGistManagement({
       setAwaitingBrowser(false);
       setBusy(false);
       if (connected) {
-        setStatus('connected');
+        await capability.refetch();
         toast.success('GitHub Gist access granted.');
       } else {
         toast.info('Gist access did not arrive within 10 minutes. Try again.');
@@ -218,7 +218,21 @@ export function GithubGistManagement({
     );
   }
 
-  if (status === 'not-connected' || status === 'permission-required') {
+  if (status === 'disabled') {
+    return (
+      <Button
+        size='sm'
+        variant='ghost'
+        onClick={() => {
+          settings.open('security', 'github-permissions');
+        }}
+      >
+        Manage Gist sharing
+      </Button>
+    );
+  }
+
+  if (status === 'not-connected' || status === 'permission-required' || status === 'reconnect-required') {
     return (
       <Button
         type='button'
@@ -231,7 +245,11 @@ export function GithubGistManagement({
           void connect();
         }}
       >
-        {status === 'permission-required' ? 'Allow Gist access' : 'Connect GitHub'}
+        {status === 'permission-required'
+          ? 'Allow Gist access'
+          : status === 'reconnect-required'
+            ? 'Reconnect GitHub'
+            : 'Connect GitHub'}
       </Button>
     );
   }

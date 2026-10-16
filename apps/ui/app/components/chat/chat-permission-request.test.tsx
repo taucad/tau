@@ -27,6 +27,23 @@ beforeEach(() => {
   machinesEnabled = true;
 });
 describe('compact permission requests', () => {
+  it.each([
+    ['tau__evaluate_model', 'Render model'],
+    ['tau__test_model', 'Run tests'],
+    ['mcp__tau__screenshot', 'Capture screenshots'],
+    ['tau__unknown_tool', 'tau__unknown_tool'],
+    ['Review the proposed model', 'Review the proposed model'],
+  ])('presents %s without losing the requested file', async (title, expected) => {
+    const request = { ...approval, request: { title, input: { targetFile: 'main.py' } } };
+    const { rerender } = render(<ChatPermissionRequest approval={request} name='Grok Build' />);
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'View request' }));
+    expect(screen.getByText('main.py')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Hide request' }));
+    rerender(<ChatPermissionRequest approval={request} name='Grok Build' outcome='approved' />);
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByText('Request allowed')).toBeInTheDocument();
+  });
   it('offers only denial for a stored machine approval while disabled', async () => {
     machinesEnabled = false;
     const onRespond = vi.fn(async () => undefined);

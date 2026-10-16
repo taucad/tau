@@ -387,9 +387,10 @@ describe('the external tool-call renderer', () => {
     expect(screen.queryByRole('button', { name: /Read Read/u })).not.toBeInTheDocument();
   });
 
-  it('renders an edit call as a file diff, from a refinement the agent only sent once', async () => {
+  it.each([false, true])('should render a file diff once when completion adds metadata (%s)', async (withMetadata) => {
     const user = userEvent.setup();
     const diff = [{ type: 'diff', path: 'main.scad', oldText: 'cube(10);\n', newText: 'cube(12);\n' }];
+    const content = withMetadata ? [...diff, { ...diff[0]!, _meta: { 'x.ai/tool': { version: 1 } } }] : diff;
     /* Codex's `applyPatch` sends its diff at `in_progress` and its completion
      * carries nothing, so the ACP projection folds it into the result row. */
     const part = await partFromLog([
@@ -413,8 +414,8 @@ describe('the external tool-call renderer', () => {
         role: 'tool-output',
         toolCallId: 'call-2',
         toolName: 'applyPatch',
-        call: { toolCallId: 'edit-1', kind: 'edit', status: 'completed', nativeName: 'applyPatch', content: diff },
-        content: diff,
+        call: { toolCallId: 'edit-1', kind: 'edit', status: 'completed', nativeName: 'applyPatch', content },
+        content,
         isError: false,
         metadata: externalMetadata,
       },
@@ -479,7 +480,7 @@ describe('the external tool-call renderer', () => {
     });
   });
 
-  it("renders an execute call's captured output, never the terminal id it cannot resolve", async () => {
+  it.each([false, true])('should render captured shell output exactly once (%s)', async (grok) => {
     const user = userEvent.setup();
     const part = await partFromLog([
       {
@@ -503,9 +504,18 @@ describe('the external tool-call renderer', () => {
         role: 'tool-output',
         toolCallId: 'call-3',
         toolName: 'shell',
-        call: { toolCallId: 'shell-1', kind: 'execute', status: 'completed', nativeName: 'shell' },
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
-        content: { formatted_output: 'ERROR: Parser error', exit_code: 1 },
+        call: {
+          toolCallId: 'shell-1',
+          kind: 'execute',
+          status: 'completed',
+          nativeName: 'shell',
+          ...(grok ? { content: [{ type: 'content', content: { type: 'text', text: 'ERROR: Parser error' } }] } : {}),
+        },
+        content: grok
+          ? // eslint-disable-next-line @typescript-eslint/naming-convention -- Grok wire output keys.
+            { type: 'Bash', output: [...new TextEncoder().encode('ERROR: Parser error')], exit_code: 1 }
+          : // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex wire output keys.
+            { formatted_output: 'ERROR: Parser error', exit_code: 1 },
         isError: false,
         metadata: externalMetadata,
       },

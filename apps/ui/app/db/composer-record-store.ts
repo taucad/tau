@@ -38,7 +38,7 @@ export const composerRecordPaths = {
    * directory per surface, so releasing one surface's copies never touches
    * another's open draft.
    */
-  surfaceAttachments: (surface: 'marketing' | 'library'): string => `${composersRoot}/${surface}/attachments`,
+  surfaceAttachments: (surface: 'library'): string => `${composersRoot}/${surface}/attachments`,
 } as const;
 
 /** The draft-stage attachment directory beside a composer record: `<record>/attachments`. */

@@ -99,6 +99,15 @@ const state = vi.hoisted(() => ({
   installedUpdateMenuItems: [] as UpdateMenuItem[],
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
+  nativeStoreOptions: undefined as unknown,
+  runtimePost: vi.fn(),
+}));
+
+vi.mock('#tau/native-store.js', () => ({
+  startNativeStore: vi.fn(async (options: unknown) => {
+    state.nativeStoreOptions = options;
+    return undefined;
+  }),
 }));
 
 vi.mock('#main/updater.js', () => ({
@@ -260,7 +269,7 @@ vi.mock('@taucad/runtime/electron/main', () => ({
       state.resolveFork = options.resolveFork;
       state.runtimeMaxUtilities = options.maxUtilities;
       state.kernelUtilityEntry = options.utilityEntry;
-      return { connect: vi.fn(), dispose: vi.fn(), post: vi.fn(), prewarm: state.runtimePrewarm };
+      return { connect: vi.fn(), dispose: vi.fn(), post: state.runtimePost, prewarm: state.runtimePrewarm };
     },
   ),
 }));
@@ -270,6 +279,7 @@ vi.mock('@taucad/host', async (importOriginal) => {
     await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
+    defaultPayloadStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
@@ -1489,13 +1499,40 @@ describe('desktop main machine store', () => {
     'passes the staged esbuild binary to the geometry utility that bundles GeoSpec files',
     async () => {
       await boot();
-      const geometryEnvironment = state.utilityEnvironmentAdditions.find(
-        (additions) =>
-          'TAU_DESKTOP_LOG_DIR' in additions &&
-          !('TAU_DESKTOP_MACHINES_DIR' in additions) &&
-          !('TAU_BUILD123D_RESOURCE_ROOT' in additions),
+      // The kernel and geometry utilities; the services utility is the one that receives the config directory.
+      const runtimeEnvironments = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_DESKTOP_LOG_DIR' in additions && !('TAU_CONFIG_DIR' in additions),
       );
-      expect(geometryEnvironment?.['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
+      expect(runtimeEnvironments).toHaveLength(2);
+      for (const environment of runtimeEnvironments) {
+        expect(environment['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'seeds the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    async () => {
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.nativeStoreOptions).toBeDefined();
+      });
+      const options = state.nativeStoreOptions as {
+        readonly store: string;
+        readonly bundle: string | undefined;
+        readonly hostPath: string;
+        readonly post: (frame: unknown) => void;
+      };
+      // Unpackaged there is no bundle to seed from; the store is the one every Tau host on the machine shares.
+      expect(options).toMatchObject({ store: join(state.userData, 'store'), bundle: undefined });
+      expect(options.hostPath).toBe(join(state.userData, 'exe'));
+      const frame = { type: 'tau:native-kernels', kernels: [] };
+      options.post(frame);
+      expect(state.runtimePost).toHaveBeenCalledWith(frame);
+      for (const additions of state.utilityEnvironmentAdditions) {
+        expect(Object.keys(additions).filter((name) => name.endsWith('_RESOURCE_ROOT'))).toEqual([]);
+      }
     },
     bootMilliseconds,
   );

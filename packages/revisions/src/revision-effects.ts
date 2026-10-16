@@ -172,6 +172,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
+  RevisionPushResult,
   RevisionRemoteAddress,
   RevisionReceipt,
   RevisionRecord,
@@ -1544,6 +1545,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       name: string;
       outcome: SyncRefOutcome;
       remote: string;
+      repositoryUrl?: string;
       leases: Readonly<Record<string, string>>;
     }>,
   ): Promise<SyncRefOutcome | undefined> => {
@@ -1563,6 +1565,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const { outcome } = await pushRecordRef({
       name,
       remote: input.remote,
+      repositoryUrl: input.repositoryUrl,
       leases: input.leases,
       offered: new Map([[name, String(head)]]),
     });
@@ -1583,7 +1586,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     try {
       /* The remote `readRemote` answers with: the first, unless it only fetches. */
       const [first] = await port.listRemotes();
-      const remote = first?.fetchOnly === true ? undefined : first?.name;
+      const remote = first?.fetchOnly === true || first?.provider === 'github' ? undefined : first?.name;
       if (remote === undefined) {
         return record;
       }
@@ -3757,7 +3760,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           await port.fetch({ remote: input.remote });
           const remotes = await port.listRemotes();
           const configured = remotes.find((remote) => remote.name === input.remote);
-          if (configured?.fetchOnly === true) {
+          if (configured?.fetchOnly === true || configured?.provider === 'github') {
             return {};
           }
           const active = await port.readHead();
@@ -3924,7 +3927,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         await ensureStore();
         const [[remote], head] = await Promise.all([port.listRemotes(), port.readHead()]);
         return {
-          remote: remote?.fetchOnly === true ? undefined : remote?.name,
+          remote: remote?.fetchOnly === true && remote.provider !== 'github' ? undefined : remote?.name,
+          automaticPush: remote?.provider !== 'github',
           ...(head?.branch === undefined ? {} : { branch: head.branch }),
         };
       }),
@@ -3948,6 +3952,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       push: fromAuthorityPromise<SyncPushActorOutput, SyncPushActorInput>(async ({ input, signal }) => {
         await ensureStore();
         signal.throwIfAborted();
+        const remotes = await port.listRemotes();
+        const configured = remotes.find((remote) => remote.name === input.remote);
+        if (
+          (input.explicit === true && configured?.url !== input.repositoryUrl) ||
+          (configured?.provider === 'github' && input.explicit !== true)
+        ) {
+          throw new RevisionPortError('INVALID_TRANSPORT', 'GitHub requires an explicit Push request.');
+        }
         const { syncChats, syncLargeExports } = await projectSyncPreferences();
         const wanted = input.refs === undefined ? undefined : new Set(input.refs);
         const offered = (name: string): boolean => wanted === undefined || wanted.has(name);
@@ -4029,13 +4041,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
              * R3): the host's recorder is armed for exactly this call. */
-            const pushed = await recordHistoryPush(async () =>
+            const offerHistory = async (): Promise<RevisionPushResult> =>
               port.push({
                 remote: input.remote,
+                repositoryUrl: input.repositoryUrl,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
-              }),
-            );
+              });
+            // An explicit GitHub gesture must never arm a pagehide resend.
+            const pushed = await (input.explicit === true ? offerHistory() : recordHistoryPush(offerHistory));
             results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
             /* A refusal of the whole push — a credential, a plan, a missing
@@ -4061,7 +4075,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         signal.throwIfAborted();
         const together =
           records.length > 1
-            ? await pushRecordSet({ names: records, remote: input.remote, leases: input.leases, offered: localHeads })
+            ? await pushRecordSet({
+                names: records,
+                retryRejected: input.explicit !== true,
+                remote: input.remote,
+                repositoryUrl: input.repositoryUrl,
+                leases: input.leases,
+                offered: localHeads,
+              })
             : undefined;
         for (const name of records) {
           signal.throwIfAborted();
@@ -4073,6 +4094,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 await pushRecordRef({
                   name,
                   remote: input.remote,
+                  repositoryUrl: input.repositoryUrl,
                   leases: input.leases,
                   offered: localHeads,
                 })
@@ -4083,10 +4105,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             quotaMessage = offered_.quotaMessage;
             quotaStorage = offered_.quotaStorage ?? quotaStorage;
           }
+          if (input.explicit === true) {
+            results.push(outcome);
+            continue;
+          }
           if (chatId === undefined) {
             results.push(
               // oxlint-disable-next-line no-await-in-loop -- serial by design: each re-offer is a push to one rate-budgeted remote, and its result is recorded before the next ref's.
-              (await reofferRefusedLog({ name, outcome, remote: input.remote, leases: input.leases })) ?? outcome,
+              (await reofferRefusedLog({
+                name,
+                outcome,
+                remote: input.remote,
+                repositoryUrl: input.repositoryUrl,
+                leases: input.leases,
+              })) ?? outcome,
             );
             continue;
           }
@@ -4104,6 +4136,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               chatId,
               name,
               remote: input.remote,
+              repositoryUrl: input.repositoryUrl,
               syncChats,
               refusal: outcome.reason,
             });
@@ -4898,7 +4931,78 @@ const nestedBoundMarginMilliseconds = 2000;
 export const syncQuiesceMilliseconds = syncPullDeadlineMilliseconds + nestedBoundMarginMilliseconds;
 
 /* What the scheduler looks like when it owes this host nothing more. */
-const settledSyncStates = new Set<SyncFacet['state']>(['noRemote', 'backedUp', 'queued', 'conflicted']);
+const settledSyncStates = new Set<SyncFacet['state']>(['manual', 'noRemote', 'backedUp', 'queued', 'conflicted']);
+
+/** The resident root and immutable destination approved by one push gesture. @public */
+export type ExplicitPushInput = Readonly<{ actor: ProjectRevisionsActor; repositoryUrl: string }>;
+
+/**
+ * Request one manual push and wait for its correlated scheduler answer.
+ *
+ * @param input - The resident root and the exact remote this gesture approved.
+ * @returns Resolves only after a successful push; failures require another gesture.
+ * @public
+ */
+export const pushExplicitly = async (input: ExplicitPushInput): Promise<void> => {
+  const snapshot = input.actor.getSnapshot();
+  const scheduler = snapshot.children.sync;
+  const remote = snapshot.children.remote?.getSnapshot().context.remote;
+  if (
+    scheduler === undefined ||
+    remote?.provider !== 'github' ||
+    remote.url !== input.repositoryUrl ||
+    scheduler.getSnapshot().context.automaticPush ||
+    !scheduler.getSnapshot().matches('manual')
+  ) {
+    throw new RevisionPortError('INVALID_TRANSPORT', 'Wait for repository access to finish checking, then push again.');
+  }
+  const pushId = randomUuid();
+  let releaseAnswer: (() => void) | undefined;
+  let releaseState: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const cancelled = (): void => {
+        reject(
+          new RevisionPortError('INVALID_TRANSPORT', 'This push was cancelled. Review the repository and push again.'),
+        );
+      };
+      const answer = scheduler.on('pushSettled', (event) => {
+        if (event.pushId !== pushId) {
+          return;
+        }
+        if (event.outcome === 'backedUp') {
+          resolve();
+        } else {
+          reject(
+            new RevisionPortError(
+              'INVALID_TRANSPORT',
+              'GitHub did not accept this push. Check repository access and changes, then try again.',
+            ),
+          );
+        }
+      });
+      releaseAnswer = () => {
+        answer.unsubscribe();
+      };
+      const state = scheduler.subscribe({
+        next: (current) => {
+          if (current.matches('opening') || current.matches('reading') || current.matches('noRemote')) {
+            cancelled();
+          }
+        },
+        complete: cancelled,
+        error: cancelled,
+      });
+      releaseState = () => {
+        state.unsubscribe();
+      };
+      input.actor.send({ type: 'sync', event: { type: 'pushNow', pushId, repositoryUrl: input.repositoryUrl } });
+    });
+  } finally {
+    releaseAnswer?.();
+    releaseState?.();
+  }
+};
 
 /**
  * Wait for the scheduler to finish pushing or to record what it could not push.

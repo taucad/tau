@@ -6,7 +6,6 @@ import type { RecordFile } from '#support/chat-attachments.js';
 import {
   chooseAttachment,
   composerSelector,
-  dismissCookies,
   expectRail,
   fixtureFile,
   homeFileNames,
@@ -26,9 +25,8 @@ test('should hydrate the normal app route beyond the Home storage bootstrap shel
   await target.expectHidden(selectors.getByRole('status', { name: 'Opening Home' }));
 });
 
-test('should retain the app home after a confirmed anonymous session with the old marketing flag enabled', async () => {
+test('should retain the app home after a confirmed anonymous session', async () => {
   await target.addInitScript(() => {
-    localStorage.setItem('tau:flags', JSON.stringify({ marketingLanding: true }));
     const fetchFromNetwork = globalThis.fetch.bind(globalThis);
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const requestUrl = input instanceof Request ? input.url : input.toString();
@@ -40,7 +38,7 @@ test('should retain the app home after a confirmed anonymous session with the ol
   });
   await target.navigate('/');
   await target.expectVisible(selectors.getByRole('heading', { name: 'What can I help you build?' }), 30_000);
-  await target.expectHidden(selectors.getByRole('region', { name: 'Live CAD demo' }));
+  await target.expectVisible(selectors.getByRole('heading', { name: 'Projects', level: 2 }));
 });
 
 test('keeps a Home draft with an image and a PDF across a reload and hands both to the new project', async () => {
@@ -50,7 +48,6 @@ test('keeps a Home draft with an image and a PDF across a reload and hands both 
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/');
   await target.expectVisible(selectors.getByRole('main'), 30_000);
-  await dismissCookies();
   const composer = selectors.getByCss(composerSelector).first();
   await target.expectVisible(composer, 60_000);
   await selectModel(pdfModelName);

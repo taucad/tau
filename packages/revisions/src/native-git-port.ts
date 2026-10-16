@@ -416,6 +416,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   const remoteEnvironment = async (
     remote: string,
     known?: readonly Remote[],
+    writing = false,
   ): Promise<Record<string, string | undefined>> => {
     const env = gitEnvironment();
     const held = options.tauCredential?.();
@@ -443,15 +444,45 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       held !== undefined && url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
         ? held.authorization
         : remoteRecord?.authorization;
+    const github = remotes.find((entry) => entry.name === remote)?.provider === 'github';
+    if (github) {
+      env['GIT_ALLOW_PROTOCOL'] = 'http:https';
+    }
+    if (github && (url === undefined || !/^https?:\/\//u.test(url))) {
+      throw new RevisionPortError(
+        'INVALID_TRANSPORT',
+        'Reconnect this GitHub repository through Tau using HTTPS. SSH credentials are not used.',
+      );
+    }
+    if (remoteHeld !== undefined && remoteRecord === undefined) {
+      throw new RevisionPortError(
+        'INVALID_TRANSPORT',
+        'The repository destination changed. Review it before continuing.',
+      );
+    }
+    if (writing && github && authorization === undefined) {
+      throw new RevisionPortError(
+        'REMOTE_REAUTHORIZATION_REQUIRED',
+        'Reconnect this GitHub repository in Tau before using it.',
+      );
+    }
     const normalizedUrl = url === undefined ? undefined : normalized(url);
     if (authorization !== undefined && normalizedUrl !== undefined) {
-      env['GIT_CONFIG_COUNT'] = '3';
+      env['GIT_CONFIG_COUNT'] = '4';
       env['GIT_CONFIG_KEY_0'] = `http.${normalizedUrl}.extraHeader`;
       env['GIT_CONFIG_VALUE_0'] = `Authorization: ${authorization}`;
       env['GIT_CONFIG_KEY_1'] = 'lfs.url';
       env['GIT_CONFIG_VALUE_1'] = `${normalizedUrl}/info/lfs`;
       env['GIT_CONFIG_KEY_2'] = 'credential.helper';
       env['GIT_CONFIG_VALUE_2'] = '';
+      env['GIT_CONFIG_KEY_3'] = `http.${normalizedUrl}.followRedirects`;
+      env['GIT_CONFIG_VALUE_3'] = 'false';
+      env['GIT_ASKPASS'] = '';
+    }
+    if (github && authorization === undefined) {
+      env['GIT_CONFIG_COUNT'] = '1';
+      env['GIT_CONFIG_KEY_0'] = 'credential.helper';
+      env['GIT_CONFIG_VALUE_0'] = '';
       env['GIT_ASKPASS'] = '';
     }
     return env;
@@ -1716,13 +1747,47 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        */
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
+      // Pin the destination before any asynchronous preparation; never honor a different pushurl.
+      const destination = configuredRemote?.url ?? input.remote;
+      if (input.repositoryUrl !== undefined && destination !== input.repositoryUrl) {
+        throw new RevisionPortError(
+          'INVALID_TRANSPORT',
+          'The repository destination changed. Review it before pushing.',
+        );
+      }
+      const env = await remoteEnvironment(input.remote, configuredRemotes, true);
+      const rewrites = await run(['config', '--get-regexp', String.raw`^url\..*\.(insteadof|pushinsteadof)$`]);
+      if (
+        (input.repositoryUrl !== undefined ||
+          configuredRemote?.provider === 'github' ||
+          options.remoteCredential?.() !== undefined) &&
+        rewrites.exitCode === 0
+      ) {
+        const changesDestination = textDecoder
+          .decode(rewrites.stdout)
+          .split('\n')
+          .some((line) => {
+            const match = /^url\.(.+)\.(?:insteadof|pushinsteadof) (.*)$/iu.exec(line);
+            return (
+              match !== null &&
+              destination.startsWith(match[2]!) &&
+              `${match[1]}${destination.slice(match[2]!.length)}` !== destination
+            );
+          });
+        if (changesDestination) {
+          throw new RevisionPortError(
+            'INVALID_TRANSPORT',
+            'A Git URL rewrite changes this repository destination. Remove it before pushing.',
+          );
+        }
+      }
       const large = await largeObjectPaths(input.refs);
       /* An unconfigured name has no provider to ask, and no URL to push to either. */
       if ((configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) && large.length > 0) {
         throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
       } else if (large.length > 0) {
-        const transfer = await run(['lfs', 'push', '--', input.remote, ...input.refs.map((ref) => ref.name)], {
-          env: await remoteEnvironment(input.remote, configuredRemotes),
+        const transfer = await run(['lfs', 'push', '--', destination, ...input.refs.map((ref) => ref.name)], {
+          env,
           remote: input.remote,
         });
         if (transfer.exitCode !== 0) {
@@ -1766,10 +1831,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           ...(input.atomic === true ? ['--atomic'] : []),
           ...leases,
           '--',
-          input.remote,
+          destination,
           ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
         ],
-        { env: await remoteEnvironment(input.remote, configuredRemotes), remote: input.remote },
+        { env, remote: input.remote },
       );
       const stdout = textDecoder.decode(result.stdout);
       const stderr = textDecoder.decode(result.stderr);
@@ -1797,14 +1862,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         refused?.code === 'REMOTE_REJECTED' || refused?.code === 'REMOTE_QUOTA_EXCEEDED' ? refused.message : undefined,
       );
       /* Where `fetch` would have put every accepted ref, as the browser leg does:
-       * `git push` itself tracks only `refs/heads/*`, so a pushed chat ref or tag
-       * kept a stale tracking ref and the next fetch could not tell it was
-       * already there (W13e). Branches stay git's own; the rest get the oid
-       * resolved before the push, never the local ref as it is now. */
+       * The destination is a pinned URL, so Git does not associate this push
+       * with the configured remote name. Track every accepted ref ourselves,
+       * using the oid offered before the push, never a newer local revision. */
       const tracked = input.refs.flatMap((ref, index) => {
         const destination = ref.remoteName ?? ref.name;
         const oid = offered[index]?.oid;
-        return results[index]?.status === 'rejected' || oid === undefined || destination.startsWith('refs/heads/')
+        return results[index]?.status === 'rejected' || oid === undefined
           ? []
           : [`update ${remoteTrackingRef(input.remote, destination)} ${oid}\n`];
       });

@@ -51,6 +51,9 @@ describe('explicit manual desktop visibility', () => {
         await expect(launchDesktopApp(options)).rejects.toBe(stopped);
         const environment = launch.mock.calls[0]![0]!.env!;
         expect(environment['TAU_E2E_HIDE_WINDOW']).toBe(visible === true ? '0' : '1');
+        const args = launch.mock.calls[0]![0]!.args!;
+        expect(args).toContain(`--user-data-dir=${profileRoot}`);
+        expect(args.includes('--use-mock-keychain')).toBe(process.platform === 'darwin');
       } finally {
         const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
         launch.mockRestore();

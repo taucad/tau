@@ -203,7 +203,7 @@ describe('the GitHub credential frame (D2)', () => {
       expect.objectContaining({ repositoryUrl, authorization: basic('first'), expiresAt: soon }),
       expect.objectContaining({ repositoryUrl, authorization: basic('second'), expiresAt: later }),
     ]);
-    expect(githubToken).toHaveBeenCalledWith(connectionId);
+    expect(githubToken).toHaveBeenCalledWith(connectionId, { repositoryId: 99, operation: 'read' });
   });
 
   it('should keep the held credential when a renewal fails', async () => {
@@ -632,7 +632,7 @@ describe('replacing a backup with another remote (R2)', () => {
     await vi.waitFor(() => {
       expect(scripted.frames().at(-1)).toMatchObject({ repositoryUrl, authorization: basic('kept') });
     });
-    expect(githubToken).toHaveBeenLastCalledWith(connectionId);
+    expect(githubToken).toHaveBeenLastCalledWith(connectionId, { repositoryId: 99, operation: 'read' });
     expect(githubProjectBinding.get(projectId)).toMatchObject({ repositoryId: 99, repositoryUrl, generation: 3 });
     expect(scripted.sent().at(-1)).toStrictEqual({ command: 'syncNow' });
   });

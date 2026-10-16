@@ -1,31 +1,43 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { legalUrl } from '#lib/legal-url.js';
+import { websiteOrigin } from '#lib/website-origin.js';
 
 const clientEnvironment = globalThis.window.ENV;
 
+const bind = (environment: { TAU_FRONTEND_URL?: string }): void => {
+  globalThis.window.ENV = { ...clientEnvironment, ...environment };
+};
+
 afterEach(() => {
-  vi.unstubAllEnvs();
   globalThis.window.ENV = clientEnvironment;
 });
 
-describe('legalUrl', () => {
-  it('should link a root-relative path on the web so each deployment opens its own legal pages', () => {
-    expect(legalUrl('terms')).toBe('/legal/terms');
-    expect(legalUrl('privacy#9.2.1')).toBe('/legal/privacy#9.2.1');
+describe('websiteOrigin', () => {
+  it.each([
+    ['https://tau.new', 'https://tau.new'],
+    ['https://taucad.dev/', 'https://taucad.dev'],
+  ])('should keep a hosted deployment bound to %s on its own website', (frontendUrl, expected) => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+    bind({ TAU_FRONTEND_URL: frontendUrl });
+    expect(websiteOrigin()).toBe(expected);
   });
 
-  it.each([
-    ['https://taucad.dev/', 'https://taucad.dev/legal/privacy#9.2.1'],
-    ['https://tau.new', 'https://tau.new/legal/privacy#9.2.1'],
-  ])('should link the web deployment a desktop shell bound to %s belongs to', (frontendUrl, expected) => {
-    vi.stubEnv('TAU_TARGET', 'desktop');
-    globalThis.window.ENV = {
-      ...clientEnvironment,
+  it.each(['http://localhost:3000', 'https://deploy-preview-42--taucad.netlify.app', 'https://cad.example.com'])(
+    'should send %s, which runs no website, to the public site instead of a missing page',
+    (frontendUrl) => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
-      TAU_FRONTEND_URL: frontendUrl,
-    };
+      bind({ TAU_FRONTEND_URL: frontendUrl });
+      expect(websiteOrigin()).toBe('https://tau.new');
+    },
+  );
+});
 
-    /* The desktop build ships no `/legal/*` routes, so a relative link would open a missing `app://tau` page. */
-    expect(legalUrl('privacy#9.2.1')).toBe(expected);
+describe('legalUrl', () => {
+  it('should link the page and anchor on the website origin', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+    bind({ TAU_FRONTEND_URL: 'https://taucad.dev' });
+    expect(legalUrl('privacy#9.2.1-ai-service-improvement')).toBe(
+      'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement',
+    );
   });
 });

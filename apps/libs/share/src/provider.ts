@@ -36,20 +36,18 @@ export type ShareProtection =
 /** Provider visibility independent from artifact encryption. @public */
 export type ShareVisibility = 'unlisted' | 'public';
 
-/** Short-lived OAuth access-token lease returned to a provider. @public */
-export type ShareAccessTokenLease = {
-  readonly accessToken: string;
-  readonly grantedScopes: readonly string[];
-  readonly expiresAt?: Date;
-};
-
-/** Credential authority injected by the application shell. @public */
-export type ShareCredentialBroker = {
-  readonly getAccessToken: (request: {
-    readonly connectionId: string;
-    readonly scopes: readonly string[];
-    readonly audience: string;
-  }) => Promise<ShareAccessTokenLease>;
+/** Narrow server-side Gist mutation port; OAuth credentials never cross this boundary. @public */
+export type GithubGistTransport = {
+  readonly mutate: (input: {
+    readonly action: 'create' | 'update' | 'delete';
+    readonly id?: string;
+    readonly revision?: string;
+    readonly payload?: {
+      readonly public?: boolean;
+      readonly files: Readonly<Record<string, { readonly content: string }>>;
+    };
+    readonly signal?: AbortSignal;
+  }) => Promise<Record<string, unknown>>;
 };
 
 /** Existing Tau publication transport injected without coupling providers to app APIs. @public */
@@ -69,7 +67,7 @@ export type ShareProviderContext = {
   readonly origin: string;
   readonly artifactCodec: ShareArtifactCodec;
   readonly fetch: typeof globalThis.fetch;
-  readonly credentialBroker?: ShareCredentialBroker;
+  readonly githubGist?: GithubGistTransport;
   readonly tau?: TauShareTransport;
 };
 

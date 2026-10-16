@@ -26,145 +26,75 @@ const artifactCodec = {
   openWithPassword: vi.fn(async (_input: { readonly compactJwe: string; readonly password: string }) => opened),
 } satisfies ShareArtifactCodec;
 
-const context = (
-  fetch: typeof globalThis.fetch,
-  grantedScopes: readonly string[] = ['gist'],
-): ShareProviderContext => ({
+const context = (fetch: typeof globalThis.fetch): ShareProviderContext => ({
   origin: 'https://tau.new',
   fetch,
   artifactCodec,
-  credentialBroker: {
-    getAccessToken: vi.fn(async () => ({ accessToken: 'oauth-token', grantedScopes })),
-  },
 });
-
-const createdGist = () => {
-  const body: Record<string, unknown> = { id: 'abc123', history: [{ version: 'a'.repeat(40) }] };
-  body['html_url'] = 'https://gist.github.com/abc123';
-  return Response.json(body);
-};
+const publication = { id: 'abc123', history: [{ version: 'a'.repeat(40) }] };
 
 describe('GitHub Gist share provider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('publishes an unencrypted secret Gist by default and pins the revision', async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
-      const requestBody = typeof init?.body === 'string' ? init.body : '';
-      expect(JSON.parse(requestBody)).toEqual({
-        public: false,
-        files: { 'tau-project.zip.base64url': { content: plainArtifact.encodedArchive } },
-      });
-      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer oauth-token');
-      return createdGist();
+  it('should publish through the API transport without fetching or exposing credentials', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const mutate = vi.fn(async () => publication);
+    const result = await githubGistShareProvider.publish!({ snapshot }, { ...context(fetch), githubGist: { mutate } });
+    expect(result.locator.reference).toBe(`abc123.${'a'.repeat(40)}`);
+    expect(mutate).toHaveBeenCalledWith({
+      action: 'create',
+      signal: undefined,
+      payload: { public: false, files: { 'tau-project.zip.base64url': { content: plainArtifact.encodedArchive } } },
     });
-    await expect(githubGistShareProvider.publish!({ snapshot }, context(fetch))).resolves.toMatchObject({
-      locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
-      secrets: {},
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('should encrypt locally and never send the password to the server', async () => {
+    const mutate = vi.fn(async () => publication);
+    const result = await githubGistShareProvider.publish!(
+      { snapshot, visibility: 'public', protection: { kind: 'password', password, includePassword: true } },
+      { ...context(vi.fn()), githubGist: { mutate } },
+    );
+    expect(result.secrets).toEqual({ p: password });
+    expect(mutate).toHaveBeenCalledWith({
+      action: 'create',
+      signal: undefined,
+      payload: { public: true, files: { 'tau-project.jwe': { content: protectedArtifact.compactJwe } } },
     });
+    expect(JSON.stringify(mutate.mock.calls)).not.toContain(password);
   });
 
   it.each(['publish', 'republish', 'unpublish'] as const)(
-    'rejects %s before GitHub when the granted scopes omit gist',
+    'should refuse %s without the API transport',
     async (operation) => {
-      const fetch = vi.fn<typeof globalThis.fetch>();
-      const withoutGist = context(fetch, ['read:user']);
-      const action =
-        operation === 'publish'
-          ? githubGistShareProvider.publish!({ snapshot }, withoutGist)
-          : operation === 'republish'
-            ? githubGistShareProvider.republish!(
-                { locator: { providerId: 'github-gist', reference: 'abc123' }, snapshot },
-                withoutGist,
-              )
-            : githubGistShareProvider.unpublish!(
-                { locator: { providerId: 'github-gist', reference: 'abc123' } },
-                withoutGist,
-              );
-
-      await expect(action).rejects.toMatchObject({
-        name: 'ShareError',
-        code: 'SHARE_PERMISSION_REQUIRED',
-        message: 'Allow Gist access before managing a GitHub Gist.',
+      const input = { snapshot, locator: { providerId: 'github-gist', reference: 'abc123' } };
+      await expect(githubGistShareProvider[operation]!(input, context(vi.fn()))).rejects.toMatchObject({
+        code: 'SHARE_AUTH_REQUIRED',
       });
-      expect(fetch).not.toHaveBeenCalled();
     },
   );
 
-  it('publishes a public password-protected Gist without storing its password', async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
-      const requestBody = typeof init?.body === 'string' ? init.body : '';
-      expect(JSON.parse(requestBody)).toEqual({
-        public: true,
-        files: { 'tau-project.jwe': { content: protectedArtifact.compactJwe } },
-      });
-      expect(requestBody).not.toContain(password);
-      return createdGist();
+  it('should send the publication identity and expected revision for update and deletion', async () => {
+    const mutate = vi.fn(async () => publication);
+    const context_ = { ...context(vi.fn()), githubGist: { mutate } };
+    const locator = { providerId: 'github-gist', reference: `abc123.${'b'.repeat(40)}` };
+    await githubGistShareProvider.republish!({ locator, snapshot }, context_);
+    expect(mutate).toHaveBeenLastCalledWith({
+      action: 'update',
+      id: 'abc123',
+      revision: 'b'.repeat(40),
+      signal: undefined,
+      payload: { files: { 'tau-project.zip.base64url': { content: plainArtifact.encodedArchive } } },
     });
-    await expect(
-      githubGistShareProvider.publish!(
-        { snapshot, visibility: 'public', protection: { kind: 'password', password, includePassword: true } },
-        context(fetch),
-      ),
-    ).resolves.toMatchObject({ secrets: { p: password } });
-  });
-
-  it('republishes a Tau Gist in place and returns its new pinned revision', async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
-      if (init?.method === 'GET') {
-        expect(url).toBe('https://api.github.com/gists/abc123');
-        return Response.json({ files: { 'tau-project.zip.base64url': { content: 'old' } } });
-      }
-      expect(init?.method).toBe('PATCH');
-      expect(url).toBe('https://api.github.com/gists/abc123');
-      const requestBody = typeof init?.body === 'string' ? init.body : '';
-      expect(JSON.parse(requestBody)).toEqual({
-        files: {
-          'tau-project.jwe': { content: protectedArtifact.compactJwe },
-          'tau-project.zip.base64url': null,
-        },
-      });
-      return createdGist();
+    await githubGistShareProvider.unpublish!({ locator }, context_);
+    expect(mutate).toHaveBeenLastCalledWith({
+      action: 'delete',
+      id: 'abc123',
+      revision: 'b'.repeat(40),
+      signal: undefined,
     });
-    await expect(
-      githubGistShareProvider.republish!(
-        {
-          locator: { providerId: 'github-gist', reference: `abc123.${'b'.repeat(40)}` },
-          snapshot,
-          protection: { kind: 'password', password, includePassword: false },
-        },
-        context(fetch),
-      ),
-    ).resolves.toMatchObject({
-      locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
-      secrets: {},
-    });
-  });
-
-  it('unpublishes a Gist and refuses to republish an ordinary Gist', async () => {
-    const deleteFetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
-      expect(url).toBe('https://api.github.com/gists/abc123');
-      expect(init?.method).toBe('DELETE');
-      return new Response(undefined, { status: 204 });
-    });
-    await expect(
-      githubGistShareProvider.unpublish!(
-        { locator: { providerId: 'github-gist', reference: 'abc123' } },
-        context(deleteFetch),
-      ),
-    ).resolves.toBeUndefined();
-
-    const ordinaryFetch = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ files: { 'main.scad': { content: 'cube(1);' } } }),
-    );
-    await expect(
-      githubGistShareProvider.republish!(
-        { locator: { providerId: 'github-gist', reference: 'abc123' }, snapshot },
-        context(ordinaryFetch),
-      ),
-    ).rejects.toMatchObject({ code: 'SHARE_PROVIDER_INVALID_RESPONSE' });
-    expect(ordinaryFetch).toHaveBeenCalledOnce();
   });
 
   it('resolves latest plain and pinned password-protected Tau artifacts anonymously', async () => {

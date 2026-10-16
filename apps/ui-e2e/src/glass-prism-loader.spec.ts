@@ -117,16 +117,6 @@ const waitForReady = async (): Promise<LoaderState> => {
 };
 
 /**
- * The consent banner floats over the stage's bottom-right corner until it is answered. Forced, because a
- * software adapter keeps the page too busy for Playwright's stability checks to pass in time.
- */
-const dismissCookieBanner = async (): Promise<void> => {
-  await target
-    .click(selectors.getByRole('button', { name: /^decline$/iu }), { force: true, timeout: 5000 })
-    .catch(() => undefined);
-};
-
-/**
  * Downsample the stage out of a page screenshot and describe its tonal signature. A page screenshot is used
  * because an element screenshot waits for the animating stage to hold still, which a software adapter never
  * manages inside the action budget.
@@ -307,7 +297,6 @@ test.describe('glass prism loader', () => {
       ).toBeLessThan(0.05);
       if (backend === 'webgl') {
         // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
-        await dismissCookieBanner();
         await target.delay(300);
         const { png, region } = await screenshotStage(`glass-prism-page-corners-${backend}.png`);
         const stage = await analyseStage(png, region);

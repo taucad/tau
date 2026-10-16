@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { composerSelector, dismissCookies, prepareComposerPage } from '#support/chat-attachments.js';
+import { composerSelector, prepareComposerPage } from '#support/chat-attachments.js';
 
 /**
  * The chat header one-row blueprint's browser pin (W6): the pane opens with one
@@ -21,7 +21,6 @@ const openSeededChat = async (): Promise<void> => {
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/chat-attachments?chats=2');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
 };
 

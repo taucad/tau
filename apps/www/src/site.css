@@ -1461,6 +1461,68 @@ main > .band:first-child::before {
 .prose p a {
   color: var(--foreground);
 }
+.legal {
+  max-width: 52rem;
+  overflow-wrap: break-word;
+}
+.legal h3 {
+  font-size: 1.125rem;
+  margin: 2rem 0 0.5rem;
+}
+.legal h4 {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+.legal :is(h2, h3, h4) {
+  scroll-margin-top: 5rem;
+}
+.legal :is(p, ul, ol, pre, .table-scroll) {
+  margin-block: 0.75rem;
+}
+.legal :is(ul, ol) {
+  padding-left: 1.5rem;
+}
+.legal ul {
+  list-style: disc;
+}
+.legal ol {
+  list-style: decimal;
+}
+.legal li + li {
+  margin-top: 0.25rem;
+}
+.legal :is(li, td) a {
+  color: var(--foreground);
+}
+.legal pre {
+  white-space: pre-wrap;
+  font-size: var(--fine);
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.table-scroll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.legal table {
+  border-collapse: collapse;
+  font-size: var(--fine);
+  min-width: 100%;
+}
+.legal :is(th, td) {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+.legal-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  border-top: 1px solid var(--line);
+}
 
 /* ── Footer and consent ───────────────────────────────────────────────────────────────── */
 .site-footer {

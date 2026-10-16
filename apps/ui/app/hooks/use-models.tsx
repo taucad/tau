@@ -90,12 +90,26 @@ const parseStoredExecution = (value: unknown): CadAgentExecution | undefined => 
   return parsed.success ? parsed.data : undefined;
 };
 
+/** No overrides: every model follows its `recommended` flag. */
+const noOverrides: Readonly<Record<string, boolean>> = {};
+
+/** Nothing pinned. */
+const noPinned: readonly string[] = [];
+
+/** A stored pin list is untrusted: anything but a list of ids reads as nothing pinned. */
+const parsePinned = (value: unknown): readonly string[] =>
+  Array.isArray(value) && value.every((id) => typeof id === 'string') ? value : noPinned;
+
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- intentionally allowing inference
 export const useModels = () => {
   const queryClient = useQueryClient();
   const [storedExecution, setStoredExecution] = useCookie<unknown>(cookieName.chatExecution, undefined);
   const [selectedModelId, setSelectedModelId] = useCookie(cookieName.chatModel, defaultChatModel);
-  const [overrides, setOverrides] = useCookie<Record<string, boolean>>(cookieName.chatModelOverrides, {});
+  const [overrides, setOverrides, resetOverrides] = useCookie<Readonly<Record<string, boolean>>>(
+    cookieName.chatModelOverrides,
+    noOverrides,
+  );
+  const [storedPinned, setStoredPinned] = useCookie<unknown>(cookieName.chatModelPinned, noPinned);
   const [storedEffort, setStoredEffort] = useCookie<string | undefined>(cookieName.chatEffort, undefined);
   // Stored preferences are untrusted: a level outside the vocabulary would fail the turn wire.
   const selectedEffort = reasoningLevels.find((level) => level === storedEffort);
@@ -165,24 +179,58 @@ export const useModels = () => {
     }
   }, [queryClient]);
 
+  /*
+   * Whether the loaded catalog offers a model id. While the catalog is loading or unavailable every id counts as
+   * offered, so an offline session prunes nothing (R3).
+   */
+  const isOffered = useCallback((id: string): boolean => data?.some((model) => model.id === id) ?? true, [data]);
+
+  /** Pinned model ids in pin order, without ids the loaded catalog no longer offers. */
+  const pinnedIds = useMemo(() => parsePinned(storedPinned).filter((id) => isOffered(id)), [storedPinned, isOffered]);
+
+  const isPinned = useCallback((model: Model): boolean => pinnedIds.includes(model.id), [pinnedIds]);
+
+  /* An explicit toggle wins; otherwise a pinned or recommended model is available, so a pin keeps a model in the picker. */
   const isAvailable = useCallback(
-    (model: Model): boolean => overrides[model.id] ?? model.recommended ?? false,
-    [overrides],
+    (model: Model): boolean => overrides[model.id] ?? (pinnedIds.includes(model.id) || (model.recommended ?? false)),
+    [overrides, pinnedIds],
   );
 
+  /* Every explicit toggle is stored, even one that agrees with `recommended`, so a later catalog change cannot undo it (R2). */
   const setAvailable = useCallback(
     (model: Model, enabled: boolean): void => {
-      const recommendedDefault = model.recommended ?? false;
-      setOverrides((previous) => {
-        const entries = Object.entries(previous).filter(([key]) => key !== model.id);
-        if (enabled !== recommendedDefault) {
-          entries.push([model.id, enabled]);
-        }
-
-        return Object.fromEntries(entries);
-      });
+      setOverrides((previous) => ({
+        ...Object.fromEntries(Object.entries(previous).filter(([id]) => id !== model.id && isOffered(id))),
+        [model.id]: enabled,
+      }));
     },
-    [setOverrides],
+    [setOverrides, isOffered],
+  );
+
+  /** Forget every toggle, so each model follows Tau's recommendation again. */
+  const resetAvailability = useCallback((): void => {
+    resetOverrides();
+  }, [resetOverrides]);
+
+  /**
+   * Pin a model at the end of the list, or unpin it. A pin keeps a model in the picker, so pinning one switched off
+   * switches it back on (Q11); an unpinned model follows its toggle or recommendation again.
+   */
+  const setPinned = useCallback(
+    (model: Model, isOn: boolean): void => {
+      setStoredPinned((previous: unknown) => {
+        const ids = parsePinned(previous).filter((id) => isOffered(id));
+        if (!isOn) {
+          return ids.filter((id) => id !== model.id);
+        }
+        /* An already-pinned model keeps its place. */
+        return ids.includes(model.id) ? ids : [...ids, model.id];
+      });
+      if (isOn && overrides[model.id] === false) {
+        setAvailable(model, true);
+      }
+    },
+    [setStoredPinned, isOffered, overrides, setAvailable],
   );
 
   const availableModels = useMemo(() => (data ?? []).filter((model) => isAvailable(model)), [data, isAvailable]);
@@ -221,6 +269,10 @@ export const useModels = () => {
     overrides,
     isAvailable,
     setAvailable,
+    resetAvailability,
+    pinnedIds,
+    isPinned,
+    setPinned,
     availableModels,
     recommendedModels,
   };

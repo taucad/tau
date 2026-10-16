@@ -3137,6 +3137,56 @@ describe('the host run ledger', () => {
     }
   });
 
+  it('should wait for an evicted writer to close before reopening its ledger', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const closing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let opens = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          opens++;
+          const log = await file.open();
+          return {
+            ...log,
+            close: async () => {
+              closing.resolve();
+              await release.promise;
+              await log.close();
+            },
+          };
+        },
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'ledger-close',
+      }),
+    );
+    const before = await host.ledger('chat-ledger');
+    const evicted = host.evictChat('chat-ledger');
+    try {
+      await closing.promise;
+      const reading = host.ledger('chat-ledger');
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect(opens).toBe(1);
+      release.resolve();
+      await evicted;
+      expect(await reading).toEqual(before);
+      expect(opens).toBe(2);
+    } finally {
+      release.resolve();
+      await evicted;
+      await host.close();
+    }
+  });
+
   // CL-S10 (L2a D18): eviction closes the chat's log and drops its ledger; the next use reopens and refolds.
   it('should reopen an evicted chat with an equal ledger', async () => {
     const file = createMemoryLogFile();

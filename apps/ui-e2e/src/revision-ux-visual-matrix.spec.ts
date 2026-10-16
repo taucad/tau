@@ -96,9 +96,6 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate('/__e2e/project-file-tree');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 180_000);
-  const declineCookies = selectors.getByRole('button', { name: 'Decline' }).last();
-  await target.expectVisible(declineCookies, 15_000);
-  await target.click(declineCookies);
 
   const openRevisions = selectors.getByRole('button', { name: /^Open Revisions\./u });
   await target.expectVisible(openRevisions, 120_000);

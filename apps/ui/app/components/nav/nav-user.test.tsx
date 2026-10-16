@@ -117,9 +117,14 @@ describe('NavUser', () => {
 
     expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
-    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/legal/privacy');
-    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/legal/terms');
-    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute('href', '/legal/open-source');
+    // A local build runs no website, so the legal pages open on the public site rather than 404.
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://tau.new/legal/privacy');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://tau.new/legal/terms');
+    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute(
+      'href',
+      'https://tau.new/legal/open-source',
+    );
+    expect(screen.getByRole('menuitem', { name: 'Cookie preferences' })).toBeInTheDocument();
     expect(screen.getByText('Report a bug')).toBeInTheDocument();
     expect(screen.getByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('Community Discord')).toBeInTheDocument();
@@ -156,7 +161,15 @@ describe('NavUser', () => {
 });
 
 describe('Website preference navigation', () => {
+  beforeEach(() => {
+    globalThis.window.ENV = {
+      ...clientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: 'https://tau.new',
+    };
+  });
   afterEach(() => {
+    globalThis.window.ENV = clientEnvironment;
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -164,7 +177,8 @@ describe('Website preference navigation', () => {
   });
   it('should select the website and navigate to the bare URL', () => {
     const assign = vi.fn();
-    vi.stubGlobal('location', { protocol: 'http:', assign });
+    // The test document is plain http, where a Secure cookie would not stick; only the origin matters here.
+    vi.stubGlobal('location', { protocol: 'http:', origin: 'https://tau.new', assign });
     render(<NavUser />, { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole('link', { name: 'Visit website' }));
     expect(Cookies.get('tau-entry')).toBe('website');
@@ -172,13 +186,21 @@ describe('Website preference navigation', () => {
   });
   it('should keep the explicit website link usable when cookies are blocked', () => {
     const assign = vi.fn();
-    vi.stubGlobal('location', { protocol: 'http:', assign });
+    // The test document is plain http, where a Secure cookie would not stick; only the origin matters here.
+    vi.stubGlobal('location', { protocol: 'http:', origin: 'https://tau.new', assign });
     vi.spyOn(document, 'cookie', 'set').mockImplementation(() => undefined);
     render(<NavUser />, { wrapper: MemoryRouter });
     const link = screen.getByRole('link', { name: 'Visit website' });
     expect(link).toHaveAttribute('href', '/?website=1');
     fireEvent.click(link);
     expect(assign).not.toHaveBeenCalled();
+  });
+  it('should open the public website from a build that runs none', () => {
+    globalThis.window.ENV = clientEnvironment;
+    render(<NavUser />, { wrapper: MemoryRouter });
+    const link = screen.getByRole('link', { name: 'Visit website' });
+    expect(link).toHaveAttribute('href', 'https://tau.new/');
+    expect(link).toHaveAttribute('target', '_blank');
   });
   it('should omit the web-only switch in desktop', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');

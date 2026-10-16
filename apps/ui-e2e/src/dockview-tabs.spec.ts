@@ -288,7 +288,8 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
 
   await target.scrollIntoView(longTab);
   await target.hover(longTab);
-  await target.click(selectors.getByRole('button', { name: 'Close public/models/nested/strainer.js' }));
+  // The close glyph is pointer-only (`aria-hidden`); keyboard users close with Delete on the tab.
+  await target.click(longTab.getByCss('.dv-default-tab-action'));
   await target.expectCount(longTab, 0);
 
   await target.setViewport({ width: 1000, height: 900 });

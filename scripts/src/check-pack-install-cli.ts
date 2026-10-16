@@ -13,8 +13,8 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join, relative } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
@@ -319,6 +319,19 @@ process.stdout.write(JSON.stringify(results));
 `;
 
 /**
+ * Whether `path` lies inside `root`, comparing real paths: on macOS the OS temporary directory
+ * `/var/folders/…` resolves to `/private/var/folders/…`, and Node reports modules by real path.
+ *
+ * @param root - An existing directory.
+ * @param path - An existing file or directory.
+ * @returns True when `path` is `root` or below it.
+ */
+export const isWithinRealPath = (root: string, path: string): boolean => {
+  const fromRoot = relative(realpathSync(root), realpathSync(path));
+  return fromRoot === '' || (!fromRoot.startsWith('..') && !isAbsolute(fromRoot));
+};
+
+/**
  * Check the ACP adapters the CLI stages in `dist-acp`.
  *
  * @param temporaryRoot - Scratch directory for the stub `claude` and the probe's own home.
@@ -392,7 +405,7 @@ export const checkStagedAcpAdapters = (temporaryRoot: string, appRoot: string): 
     throw new Error(`The installed host refused staged adapters: ${JSON.stringify(probed.refused)}`);
   }
   for (const agent of probed.agents) {
-    if (!agent.modulePath.startsWith(join(cliRoot, 'dist-acp'))) {
+    if (!isWithinRealPath(join(cliRoot, 'dist-acp'), agent.modulePath)) {
       throw new Error(`${agent.id} resolved outside dist-acp: ${agent.modulePath}`);
     }
     if (agent.skipped === true) {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   expectedCliGaps,
   geoSpecSessionFailure,
   isNotPreparedRefusal,
+  isWithinRealPath,
   mcpInitializeRequest,
   vendorPayloads,
 } from '#check-pack-install-cli.js';
@@ -104,6 +105,35 @@ describe('vendorPayloads', () => {
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('isWithinRealPath', () => {
+  it('should place a module reached through a symlinked root inside that root', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'tau-within-'));
+    try {
+      const real = join(scratch, 'real');
+      mkdirSync(join(real, 'dist-acp/node_modules'), { recursive: true });
+      writeFileSync(join(real, 'dist-acp/node_modules/index.js'), '');
+      symlinkSync(real, join(scratch, 'link'));
+
+      expect(isWithinRealPath(join(scratch, 'link/dist-acp'), join(real, 'dist-acp/node_modules/index.js'))).toBe(true);
+      expect(isWithinRealPath(join(scratch, 'link/dist-acp'), join(scratch, 'link/dist-acp'))).toBe(true);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('should reject a sibling whose name merely shares the prefix', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'tau-within-'));
+    try {
+      mkdirSync(join(scratch, 'dist-acp'));
+      mkdirSync(join(scratch, 'dist-acp-other'));
+
+      expect(isWithinRealPath(join(scratch, 'dist-acp'), join(scratch, 'dist-acp-other'))).toBe(false);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
     }
   });
 });

@@ -9,12 +9,9 @@ export type { MultiThreadSupport } from '#oc-threading.js';
 // Schemas
 export {
   occtExplicitTessellationSchema,
-  occtGltfExportSchema,
   occtQualityGltfExportSchema,
   occtQualityRenderOptionSchema,
   occtQualityStlExportSchema,
-  occtRenderOptionSchema,
-  occtStlExportSchema,
   occtTessellationQualities,
   occtTessellationSchema,
 } from '#occt-schemas.js';

@@ -8,51 +8,6 @@ const angularTolerance = () =>
   quantity({ unit: 'deg', quantityKind: quantityKinds.planeAngle, space: 'linear' }).positive();
 
 /**
- * Explicit-only OCCT render tessellation schema with preview defaults.
- *
- * Kernels that resolve quality presets use {@link occtQualityRenderOptionSchema} instead.
- * @public
- */
-export const occtRenderOptionSchema = z.object({
-  tessellation: z
-    .object({
-      linearTolerance: linearTolerance().default(0.02).describe('Linear tolerance (distance) for tessellation'),
-      angularTolerance: angularTolerance().default(20).describe('Angular tolerance (degrees) for tessellation'),
-    })
-    .default({ linearTolerance: 0.02, angularTolerance: 20 })
-    .describe('Tessellation quality for preview rendering'),
-});
-
-/**
- * Explicit-only OCCT STL export schema with fine tessellation defaults.
- *
- * Kernels that resolve quality presets use {@link occtQualityStlExportSchema} instead.
- * @public
- */
-export const occtStlExportSchema = z
-  .object({ binary: z.boolean().default(true).describe('Binary STL format') })
-  .extend({
-    tessellation: z
-      .object({
-        linearTolerance: linearTolerance().default(0.01).describe('Linear tolerance (distance) for tessellation'),
-        angularTolerance: angularTolerance().default(20).describe('Angular tolerance (degrees) for tessellation'),
-      })
-      .default({ linearTolerance: 0.01, angularTolerance: 20 })
-      .describe('Tessellation quality for mesh-based exports'),
-  })
-  .extend(coordinateSystemSchema.shape);
-
-/**
- * Explicit-only OCCT glTF export schema with fine tessellation defaults.
- *
- * Kernels that resolve quality presets use {@link occtQualityGltfExportSchema} instead.
- * @public
- */
-export const occtGltfExportSchema = occtStlExportSchema
-  .omit({ binary: true, coordinateSystem: true })
-  .extend(gltfExportConventionSchema.shape);
-
-/**
  * Tessellation quality presets, coarsest first. Each derives absolute tolerances from the shape's size.
  * @public
  */

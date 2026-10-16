@@ -9,20 +9,23 @@ describe('OpenRSCAD tessellation schema', () => {
     ['GLB export', openrscadExportSchemas.glb],
     ['3MF export', openrscadExportSchemas['3mf']],
   ] as const)('declares %s $fs in millimetres, $fa in degrees and $fn as a plain count', (_name, schema) => {
-    const tessellation = (
+    const { oneOf } = (
       toJSONSchema(schema, { target: 'draft-7', io: 'input' }) as unknown as {
-        properties: { tessellation: { properties: Record<string, Record<string, unknown>> } };
+        properties: { tessellation: { oneOf: Array<{ properties?: Record<string, Record<string, unknown>> }> } };
       }
-    ).properties.tessellation.properties;
+    ).properties.tessellation;
+    const tessellation = oneOf.find((branch) => branch.properties)?.properties ?? {};
 
-    expect(tessellation['minimumSize']).toMatchObject({
-      'x-tau-unit': 'mm',
-      'x-tau-quantity-kind': quantityKinds.length,
-    });
-    expect(tessellation['minimumAngle']).toMatchObject({
-      'x-tau-unit': 'deg',
-      'x-tau-quantity-kind': quantityKinds.planeAngle,
-    });
+    for (const name of ['linearTolerance', 'minimumSize']) {
+      expect(tessellation[name]).toMatchObject({ 'x-tau-unit': 'mm', 'x-tau-quantity-kind': quantityKinds.length });
+    }
+    for (const name of ['angularTolerance', 'minimumAngle']) {
+      expect(tessellation[name]).toMatchObject({
+        'x-tau-unit': 'deg',
+        'x-tau-quantity-kind': quantityKinds.planeAngle,
+      });
+    }
+    expect(tessellation['minimumSize']).toMatchObject({ deprecated: true });
     expect(tessellation['segments']).not.toHaveProperty('x-tau-unit');
   });
 });

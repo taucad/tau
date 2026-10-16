@@ -16,7 +16,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { dismissCookies, pdfModelName, selectModel } from '#support/chat-attachments.js';
+import { pdfModelName, selectModel } from '#support/chat-attachments.js';
 import {
   gatewayRequestCount,
   gatewayRequestModels,
@@ -37,7 +37,6 @@ test('shows the paused-route card on a first turn and recovers on another model 
   await target.installAgentHostGatewayFixture([reply(answer)]);
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate('/');
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composer).first(), 60_000);
   await selectModel(pdfModelName);
   await pauseModelRoute();

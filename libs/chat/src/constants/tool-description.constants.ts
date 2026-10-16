@@ -9,6 +9,10 @@ const parameterUnitRule =
 const sourceRevisionRule =
   'Computed from the bytes on disk at call time; `sourceRevision` names the digests it read. Compare it with the `revision.digest` of your last write; a result answering for superseded bytes returns as a `STALE_EVALUATION` error naming both digests, never as a result.';
 
+/** C-2: per-call parameter values never touch the person's parameter record. */
+const parameterOverrideRule =
+  "Pass `parameters` to use other parameter values for this call only (e.g. a print variant at a finer `voxelSize`): they merge over the active parameter group, are checked against the model's parameter schema, and are never saved. Use apply_parameter_operation only to change what the person sees.";
+
 /** R8/I5: what every write promises about the bytes it left behind. */
 const writeRevisionRule =
   'Returns `revision`: the path and the digest now at it (`"missing"` once deleted), comparable with the `sourceRevision` of any later kernel result.';
@@ -32,21 +36,21 @@ When NOT to use:
 - NOT as a substitute for \`evaluate_model\` when you only need build status; \`test_model\` measures geometry against requirements.`,
   [toolName.evaluateModel]: `Evaluate one CAD source file (\`targetFile\`) and its default view, then list what this build can show and export.
 
-Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\`, \`kernelIssues\`, offered \`views\`, per-view \`instances\`, and an export-id-to-extension map. A ready build may still report error-severity design issues; inspect them. A default-view render failure is an error, and a valid export-only build can offer zero views. Set \`includeCapabilities: true\` to inspect view/export option schemas, defaults and reachable export targets. ${sourceRevisionRule}
+Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. ${parameterOverrideRule} Returns \`status\`, \`kernelIssues\`, offered \`views\`, per-view \`instances\`, and an export-id-to-extension map. A ready build may still report error-severity design issues; inspect them. A default-view render failure is an error, and a valid export-only build can offer zero views. Set \`includeCapabilities: true\` to inspect view/export option schemas, defaults and reachable export targets. ${sourceRevisionRule}
 
 Once 'ready', use \`test_model\` to measure the geometry against requirements.`,
   [toolName.exportModel]: `Export one model artifact set and write its files under \`.tau/artifacts/\` in the active project workspace.
 
-Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. Use \`evaluate_model({ targetFile, includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
+Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. ${parameterOverrideRule} Use \`evaluate_model({ targetFile, includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
 
 For a design question, text/JSON exports may be used as evidence only when both the declaration and every actual output file are text/JSON: call \`export_model\`, then \`read_file\` on the returned artifact path, and compare \`sourceRevision\` with the current source. A binary or mixed deliverable requires the person's export request.
 
 Returns the resolved \`exportId\`, pinned \`sourceRevision\`, and ordered \`files\` with producer names, persisted paths, MIME types and byte lengths. The first file is primary; later files are required companions. Report \`warnings\` about limits of the written result.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
-  [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
+  [toolName.getParameters]: `Read the parameters of one geometry source file and the person's checked parameter record.
 
-Use resolutionMode "declared-only" when inferred semantics are not acceptable. The result includes stored values, semantic bindings, provenance, diagnostics, and the exact identity required by apply_parameter_operation. ${sourceRevisionRule} ${parameterUnitRule} Reading in the same mode never disturbs a pending source-unit plan; reading in a different mode rejects it. An "unresolved" result carries a diagnostic code: INVALID_RECORD means the saved values cannot be read and are preserved untouched, and RESOLUTION_SUPERSEDED means a concurrent read changed the mode.`,
+By default (detail "values") the result lists \`parameters\` keyed by pointer, each with its effective \`value\` in the active group, \`default\`, \`unit\`, constraints and description, plus \`current\`: the stored record and the identity apply_parameter_operation requires as expected. A field marked \`unitInferred\` has a unit Tau guessed from its name. Request detail "full" for the whole admitted manifest with bindings and unit provenance: before trusting or changing an inferred unit, and to build a source-unit operation. Use resolutionMode "declared-only" when inferred semantics are not acceptable. To evaluate, capture or export other values without saving them, pass \`parameters\` to that tool instead. ${sourceRevisionRule} ${parameterUnitRule} Reading in the same mode never disturbs a pending source-unit plan; reading in a different mode rejects it. An "unresolved" result carries a diagnostic code: INVALID_RECORD means the saved values cannot be read and are preserved untouched, and RESOLUTION_SUPERSEDED means a concurrent read changed the mode.`,
   [toolName.applyParameterOperation]: `Propose one checked parameter operation, or confirm/cancel a plan a previous propose returned.
 
 Every call names an action:
@@ -60,7 +64,7 @@ Call get_parameters first and pass its exact identity as expected. ${parameterUn
 
 A value operation names its field by group and pointer, exactly as get_parameters lists them: native-value carries the number, unit-value carries text plus the inputUnit it was typed in. Nothing else identifies a field. Rejections: UNKNOWN_FIELD — fix the pointer, the manifest did not change; REPRESENTATION_UNSUPPORTED — address a scalar member, or send native-value for a field with no unit; STALE_MANIFEST — call get_parameters again.
 
-A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
+A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters with detail "full", with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
   [toolName.screenshot]: `Capture a declared model view for visual inspection.
 
 Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
@@ -68,6 +72,10 @@ Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing
 Modes (\`mode\`, default \`single\`):
 - single: one deterministic perspective isometric image for a 3D view
 - multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
+
+Section (\`section\`, 3D views only) cuts the model with one axis plane to show its inside, e.g. { plane: 'xy', offsetMm: 6 } for a horizontal cut 6 mm above the origin. The kept half defaults to the one whose cut face looks at the single-mode camera; \`keep\` names the side to retain instead, and the result \`message\` states what was kept. Cuts are capped.
+
+${parameterOverrideRule}
 
 Annotated 3D images include:
 - an in-image view label; canonical axis-aligned labels name the camera position as View From ±axis

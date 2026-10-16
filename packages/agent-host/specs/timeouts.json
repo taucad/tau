@@ -843,6 +843,14 @@
       "token": "Projects are still settling. Retry recovery when saving finishes.",
       "class": "External edge",
       "owner": "machines"
+    },
+    {
+      "id": "ACP-PERMISSION-READBACK",
+      "bound": "Optional native Grok version/repository probes and settings snapshot, 2 s; expiry reports unverified state and never decides approval",
+      "site": "packages/host/src/acp/grok-permission-readback.ts",
+      "token": "probeTimeout",
+      "class": "External edge",
+      "owner": "Provider permission readback"
     }
   ]
 }

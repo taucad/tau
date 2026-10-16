@@ -93,6 +93,7 @@ describe('buildSitemapXml', () => {
 
     expect(listSitemapPaths()).not.toContain('/usage');
     expect(xml).not.toContain('/usage');
-    expect(xml).toContain(`<loc>${productionOrigin}/legal/terms</loc>`);
+    // The marketing site's sitemap advertises the legal documents it now serves.
+    expect(xml).not.toContain('/legal/');
   });
 });

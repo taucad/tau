@@ -4,6 +4,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
+import { DesktopAnalyticsProvider } from '#providers/desktop-analytics-provider.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
@@ -22,7 +23,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  return <RootLayout>{children}</RootLayout>;
+  return <RootLayout analyticsBoundary={DesktopAnalyticsProvider}>{children}</RootLayout>;
 }
 
 export default function App(): React.JSX.Element {

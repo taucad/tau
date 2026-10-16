@@ -29,6 +29,7 @@ const { ChatQuestionQueue, waitingByUrgency } = await import('#components/chat/c
 const askOf = (id: string, header: string, deadlineSeconds: number | undefined): Ask => ({
   id,
   askedAt: new Date(askedAt).toISOString(),
+  answerVersion: 2,
   deadline: deadlineSeconds === undefined ? null : new Date(askedAt + deadlineSeconds * 1000).toISOString(),
   source: 'tau',
   questions: [

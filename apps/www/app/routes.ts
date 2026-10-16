@@ -15,5 +15,7 @@ export default [
   route('download', 'routes/download.tsx', { id: 'www-download' }),
   route('blog', 'routes/blog.tsx', { id: 'www-blog' }),
   route('privacy', 'routes/privacy.tsx', { id: 'www-privacy' }),
+  route('legal', 'routes/legal.tsx', { id: 'www-legal' }),
+  route('legal/:document', 'routes/legal-document.tsx', { id: 'www-legal-document' }),
   route('*', 'routes/page.tsx', { id: 'www-page' }),
 ] satisfies RouteConfig;

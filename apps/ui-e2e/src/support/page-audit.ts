@@ -58,14 +58,6 @@ export const seriousAxeViolations = async (
     { axeSource: axe.source, tags: sweepTags, rules: options.rules, selector: options.selector },
   );
 
-/** Declines analytics so the consent banner neither covers the page nor joins its tab order. */
-export const declineCookies = async (): Promise<void> => {
-  const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
-  await target.expectVisible(decline, 15_000);
-  await target.click(decline);
-  await target.expectHidden(decline);
-};
-
 export type HorizontalOverflow = {
   /** Width the document scrolls past the viewport. */
   readonly document: number;

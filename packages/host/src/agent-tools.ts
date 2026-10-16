@@ -106,7 +106,7 @@ export type HostExportFile = ExportFile;
  * @public
  */
 export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> & {
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'watch' | 'signal'>) => Pick<
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'watch' | 'signal'>) => Pick<
     ReturnType<RuntimeClient['open']>,
     'evaluation' | 'export' | 'close'
   > & {

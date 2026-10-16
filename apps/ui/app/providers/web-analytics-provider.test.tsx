@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
   user: undefined as TestUser | undefined,
 }));
 
-vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => [state.consent, vi.fn()] }));
+vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => state.consent }));
 vi.mock('#environment.config.js', () => ({
   ENV: { POSTHOG_CLIENT_KEY: 'phc_test_key', POSTHOG_UI_HOST: 'https://posthog.example.invalid' },
 }));

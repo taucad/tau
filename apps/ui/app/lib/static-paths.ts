@@ -2,18 +2,7 @@
  * Public, crawlable paths. These are the only entries `sitemap.xml` advertises.
  */
 function listPublicStaticPaths(): string[] {
-  return [
-    '/manifest.webmanifest',
-    '/robots.txt',
-    '/sitemap.xml',
-    '/legal',
-    '/legal/terms',
-    '/legal/privacy',
-    '/legal/cookies',
-    '/legal/subprocessors',
-    '/legal/acceptable-use',
-    '/legal/open-source',
-  ];
+  return ['/manifest.webmanifest', '/robots.txt', '/sitemap.xml'];
 }
 
 /**

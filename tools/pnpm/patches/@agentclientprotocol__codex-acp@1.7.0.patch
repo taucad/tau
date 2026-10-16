@@ -1,8 +1,7 @@
 diff --git a/dist/index.js b/dist/index.js
-index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393fcafa9a0 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -24532,7 +24532,9 @@ ${event.details}` : event.summary;
+@@ -24532,7 +24532,9 @@
    }
    createReasoningDeltaEvent(event) {
      this.seenReasoningDeltaItemIds.add(event.itemId);
@@ -13,7 +12,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
    }
    createPlanDeltaEvent(event) {
      if (event.delta.length === 0) {
-@@ -24666,7 +24668,10 @@ ${event.details}` : event.summary;
+@@ -24666,7 +24668,10 @@
      if (text.length === 0) {
        return null;
      }
@@ -25,7 +24,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
    }
    async createCompletedPlanEvent(item, deltaText) {
      const text = item.text.length > 0 ? item.text : deltaText;
-@@ -24929,6 +24934,7 @@ ${event.stdin}
+@@ -24929,6 +24934,7 @@
        actions: actionsOverride ?? policy.actions
      };
      this.failuresById.set(id, failure);
@@ -33,7 +32,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
      this.failureTurnIdById.set(id, attributeToTurn ? turnId : void 0);
      this.activeFailureIdByScope.set(scope, id);
      this.sessionState.sessionFailure = failure;
-@@ -24991,8 +24997,24 @@ ${event.stdin}
+@@ -24991,8 +24997,24 @@
      const combinedTitle = `${summary} \u2014 ${details}`;
      return combinedTitle.length <= MAX_SESSION_FAILURE_TITLE_LENGTH ? [combinedTitle] : [summary, details];
    }
@@ -58,16 +57,215 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
        [JETBRAINS_META_KEY]: {
          [AIR_META_KEY]: {
            [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-@@ -28255,7 +28277,7 @@ var CodexAcpClient = class {
+@@ -25916,6 +25938,151 @@
+   return { action: "cancel", content: null, _meta: null };
+ }
+
++// src/permissions/tau-persistence.ts
++// Private Tau extension: observations of native settings, never a save receipt or permission authority.
++var TAU_PERMISSION_PERSISTENCE = "tau/permissionPersistence";
++function tauPermissionPersistenceCapability(capabilities) {
++  const requested = capabilities?._meta?.[TAU_PERMISSION_PERSISTENCE];
++  return requested?.version === 1 && requested.readback === "config-layers" && Array.isArray(requested.families) && requested.families.includes("mcp-tool")
++    ? { version: 1, readback: "config-layers", families: ["mcp-tool"] }
++    : void 0;
++}
++// Compare the relevant native server configuration in memory; never transmit its contents.
++function tauMcpServerIdentity(server, tool) {
++  if (!isRecord2(server)) return void 0;
++  const normalized = { ...server };
++  if (isRecord2(server.tools)) {
++    normalized.tools = { ...server.tools };
++    if (isRecord2(server.tools[tool])) {
++      const selected = { ...server.tools[tool] };
++      delete selected.approval_mode;
++      if (Object.keys(selected).length) normalized.tools[tool] = selected;
++      else delete normalized.tools[tool];
++    }
++    if (!Object.keys(normalized.tools).length) delete normalized.tools;
++  }
++  const ordered = (value) => Array.isArray(value) ? value.map(ordered) : isRecord2(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
++  return JSON.stringify(ordered(normalized));
++}
++function tauMcpConfigObservation(snapshot, identity) {
++  if (!isRecord2(snapshot?.config) || !Array.isArray(snapshot.layers) || snapshot.layers.some((layer) => !isRecord2(layer?.name) || !isRecord2(layer.config))) return void 0;
++  const layers = snapshot.layers.filter((layer) => layer.disabledReason == null && (layer.name.type === "user" || layer.name.type === "project"));
++  const configured = layers.some((layer) => isRecord2(layer.config.mcp_servers?.[identity.server]));
++  const storedLayer = layers.find((layer) => layer.config.mcp_servers?.[identity.server]?.tools?.[identity.tool]?.approval_mode === "approve");
++  const effectiveServer = snapshot.config.mcp_servers?.[identity.server];
++  const effectiveTool = effectiveServer?.tools?.[identity.tool];
++  const allowed = effectiveTool?.approval_mode === "approve" && effectiveServer?.enabled !== false && effectiveTool?.enabled !== false && !effectiveServer?.disabled_tools?.includes(identity.tool) && (!Array.isArray(effectiveServer?.enabled_tools) || effectiveServer.enabled_tools.includes(identity.tool));
++  return {
++    configured,
++    identity: tauMcpServerIdentity(effectiveServer, identity.tool),
++    mode: effectiveTool?.approval_mode ?? effectiveServer?.default_tools_approval_mode ?? "auto",
++    stored: storedLayer ? "present" : "absent",
++    effective: allowed ? "allowed" : storedLayer ? "overridden" : "unknown",
++    ...storedLayer ? { layerKind: storedLayer.name.type } : {}
++  };
++}
++var TauMcpPermissionPersistence = class {
++  closed = false;
++  identities = /* @__PURE__ */ new Map();
++  ambiguous = /* @__PURE__ */ new Set();
++  pending = /* @__PURE__ */ new Map();
++  constructor(connection, capabilities, cancellationSignal, options) {
++    this.connection = connection;
++    this.cancellationSignal = cancellationSignal;
++    this.options = tauPermissionPersistenceCapability(capabilities) ? options : void 0;
++  }
++  identity(threadId, callId) {
++    if (!this.options || this.closed || threadId !== this.options.threadId || this.cancellationSignal?.aborted) return void 0;
++    return this.identities.get(callId);
++  }
++  async read(identity) {
++    let timeout;
++    let removeAbortListener;
++    if (this.cancellationSignal?.aborted || this.closed) return void 0;
++    try {
++      const snapshot = await Promise.race([
++        Promise.resolve().then(() => this.options.readConfig()),
++        new Promise((resolve) => {
++          const finish = () => resolve(void 0);
++          timeout = setTimeout(finish, 5000);
++          this.cancellationSignal?.addEventListener("abort", finish, { once: true });
++          removeAbortListener = () => this.cancellationSignal?.removeEventListener("abort", finish);
++        })
++      ]);
++      return tauMcpConfigObservation(snapshot, identity);
++    } catch {
++      return void 0;
++    } finally {
++      clearTimeout(timeout);
++      removeAbortListener?.();
++    }
++  }
++  async prepare(params, context) {
++    if (!context.isToolApproval || !context.persistOptions.has("always")) return void 0;
++    const identity = this.identity(params.threadId, context.correlatedCallId);
++    if (!identity || identity.server !== params.serverName) return void 0;
++    const before = await this.read(identity);
++    if (before && !before.configured) {
++      context.persistOptions.delete("always");
++      return { unsupported: true };
++    }
++    return { identity, before, qualified: params._meta?.codex_strict_auto_review !== true && before && (before.mode === "auto" || before.mode === "approve") };
++  }
++  selected(prepared, result) {
++    if (!prepared?.identity || result.action !== "accept" || result._meta?.persist !== "always" || this.cancellationSignal?.aborted) return;
++    this.pending.set(prepared.identity.id, prepared);
++  }
++  async handleNotification(notification) {
++    if (!this.options || this.closed || notification.params.threadId !== this.options.threadId || this.cancellationSignal?.aborted) return;
++    if (notification.method === "turn/completed") {
++      this.closed = true;
++      this.identities.clear();
++      this.pending.clear();
++      this.ambiguous.clear();
++      return;
++    }
++    const item = notification.params.item;
++    if (item?.type !== "mcpToolCall" || typeof item.id !== "string" || typeof item.server !== "string" || !item.server || typeof item.tool !== "string" || !item.tool || item.pluginId !== null || item.appContext !== null) return;
++    if (notification.method === "item/started") {
++      if (this.identities.has(item.id) || this.pending.has(item.id) || this.ambiguous.has(item.id)) {
++        this.identities.delete(item.id);
++        this.pending.delete(item.id);
++        this.ambiguous.add(item.id);
++        return;
++      }
++      this.identities.set(item.id, { id: item.id, server: item.server, tool: item.tool });
++      return;
++    }
++    if (notification.method !== "item/completed" || item.status !== "completed" && item.status !== "failed") return;
++    const prepared = this.pending.get(item.id);
++    const identity = prepared?.identity;
++    if (!identity || identity.server !== item.server || identity.tool !== item.tool) return;
++    this.pending.delete(item.id);
++    this.identities.delete(item.id);
++    const after = await this.read(identity);
++    if (this.closed || this.cancellationSignal?.aborted) return;
++    const changed = prepared.before && after && prepared.before.identity !== after.identity;
++    const effective = after && !changed && prepared.qualified ? after.effective : "unknown";
++    const observation = {
++      version: 1,
++      provider: "codex",
++      optionId: "allow_always",
++      toolCallId: item.id,
++      requestedScope: "persistent",
++      stored: changed ? "unknown" : after?.stored ?? "unknown",
++      effective,
++      preexisting: prepared.before ? prepared.before.stored === "present" : "unknown",
++      observation: "config-readback",
++      ...!changed && after?.layerKind ? { layerKind: after.layerKind } : {},
++      reason: changed ? "config-changed" : !after ? "config-read-failed" : !prepared.qualified ? "policy-unqualified" : after.stored === "absent" ? "policy-absent" : effective === "allowed" ? "policy-observed" : "policy-overridden"
++    };
++    await this.connection.notify(methods.client.session.update, {
++      sessionId: notification.params.threadId,
++      update: { sessionUpdate: "tool_call_update", toolCallId: item.id, status: item.status, _meta: { [TAU_PERMISSION_PERSISTENCE]: observation } }
++    });
++  }
++};
++
+ // src/CodexElicitationHandler.ts
+ var USER_INPUT_OTHER_FIELD_SUFFIX = "__other";
+ function normalizeElicitationSchema(value) {
+@@ -26015,13 +26182,15 @@
+   // The app-server handler exposes URL elicitationId, while serverRequest/resolved only exposes
+   // threadId here, so accepted URL elicitations are completed at thread scope.
+   pendingUrlElicitations = /* @__PURE__ */ new Map();
+-  constructor(connection, permissionContext, clientCapabilities = null, cancellationSignal) {
++  constructor(connection, permissionContext, clientCapabilities = null, cancellationSignal, persistenceOptions) {
++    this.tauPermissionPersistence = new TauMcpPermissionPersistence(connection, clientCapabilities, cancellationSignal, persistenceOptions);
+     this.connection = connection;
+     this.permissionContext = permissionContext;
+     this.clientCapabilities = clientCapabilities;
+     this.cancellationSignal = cancellationSignal;
+   }
+   async handleNotification(notification) {
++    await this.tauPermissionPersistence.handleNotification(notification);
+     switch (notification.method) {
+       case "serverRequest/resolved":
+         await this.completeUrlElicitations(notification.params.threadId);
+@@ -26033,6 +26202,7 @@
+   async handleElicitation(params) {
+     try {
+       const context = this.createMcpElicitationContext(params);
++      const persistence = await this.tauPermissionPersistence.prepare(params, context);
+       if (this.shouldUseAcpElicitation(params)) {
+         const response2 = await this.connection.request(
+           methods.client.elicitation.create,
+@@ -26055,6 +26225,9 @@
+         context,
+         () => this.permissionContext.nextStandaloneMcpToolCallId(params.serverName)
+       );
++      if (persistence?.unsupported) {
++        request.toolCall._meta = { ...request.toolCall._meta, [TAU_PERMISSION_PERSISTENCE]: { version: 1, support: "unsupported", reason: "unconfigured-mcp-server" } };
++      }
+       const response = await this.connection.request(
+         methods.client.session.requestPermission,
+         request,
+@@ -26065,6 +26238,7 @@
+         context.isToolApproval,
+         context.persistOptions
+       );
++      this.tauPermissionPersistence.selected(persistence, result);
+       if (correlatedCallId !== void 0 && result.action === "accept") {
+         await this.connection.notify(methods.client.session.update, {
+           sessionId: params.threadId,
+@@ -28254,8 +28428,11 @@
+   getMcpServerStartupVersion() {
      return this.codexClient.getMcpServerStartupVersion();
    }
++  async tauReadPermissionConfig(cwd) {
++    return this.codexClient.configRead({ includeLayers: true, cwd });
++  }
    async createSessionConfig(projectPath, additionalDirectories, mcpServers) {
 -    const sessionRoots = [projectPath, ...additionalDirectories];
 +    const sessionRoots = [projectPath];
      const activeProvider = this.gatewayConfig ? {
        apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
        baseUrl: this.gatewayConfig.config.base_url
-@@ -28273,7 +28295,7 @@ var CodexAcpClient = class {
+@@ -28273,7 +28450,7 @@
          trust_level: "trusted"
        }]))
      };
@@ -76,7 +274,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
      if (mcpServers.length === 0) {
        return configWithWorkspaceRoots;
      }
-@@ -28421,7 +28443,7 @@ var CodexAcpClient = class {
+@@ -28421,7 +28598,7 @@
        input,
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
@@ -85,7 +283,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
-@@ -29769,6 +29791,7 @@ var CodexCommands = class {
+@@ -29769,6 +29946,7 @@
      }
      for (const entry of skillsEntries) {
        for (const skill of entry.skills) {
@@ -93,7 +291,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
          const name = `$${skill.name}`;
          if (commands.has(name)) continue;
          const description = skill.shortDescription ?? skill.description ?? skill.name;
-@@ -29933,7 +29956,7 @@ var CodexCommands = class {
+@@ -29933,7 +30111,7 @@
        }
        case "skills": {
          const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
@@ -102,3 +300,21 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393
          const lines = skills.map((skill) => {
            const description = skill.shortDescription ?? skill.description ?? "";
            return description ? `- ${skill.name}: ${description}` : `- ${skill.name}`;
+@@ -31359,6 +31537,7 @@
+       },
+       authMethods: getCodexAuthMethods(_params.clientCapabilities),
+       _meta: {
++        ...tauPermissionPersistenceCapability(_params.clientCapabilities) ? { [TAU_PERMISSION_PERSISTENCE]: tauPermissionPersistenceCapability(_params.clientCapabilities) } : {},
+         steering: {
+           supported: true
+         },
+@@ -33137,7 +33316,8 @@
+         this.connection,
+         permissionContext,
+         this.clientCapabilities,
+-        activePrompt.signal
++        activePrompt.signal,
++        { threadId: sessionState.sessionId, readConfig: () => this.codexAcpClient.tauReadPermissionConfig(sessionState.cwd) }
+       );
+       const observeInteraction = async (event) => {
+         permissionContext.handleNotification(event);

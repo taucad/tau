@@ -1,0 +1,271 @@
+# Privacy Policy - TauCAD Limited
+
+*Effective date: October 9, 2026*
+
+## 1. Introduction
+
+This Privacy Policy describes how TauCAD Limited ("we," "us," or "our") collects, uses, and discloses your personal information when you use our software as a service (the "Service"). TauCAD Limited is the data controller responsible for your personal data.
+
+We are committed to protecting your personal information and your right to privacy. This Privacy Policy applies to all information collected through our Service, as well as any related services, sales, marketing, or events. This Privacy Policy also describes your rights under applicable privacy laws, including the GDPR, UK GDPR, CCPA, LGPD, and other regional privacy laws.
+
+## 2. Definitions
+
+- **Cookie**: a small file placed on your device to enable certain features and functionality.
+- **Company**: when this policy mentions "Company," "we," "us," or "our," it refers to TauCAD Limited.
+- **Country**: where TauCAD Limited is incorporated, in this case New Zealand.
+- **Personal Data**: any information that directly, indirectly, or in connection with other information allows for the identification of a natural person.
+- **Service**: refers to the software as a service provided by TauCAD Limited.
+- **Third-party service**: refers to companies and individuals that provide services on our behalf, such as hosting, analytics, payment processing, and AI processing.
+- **You**: a person or entity that accesses or uses the Service.
+
+## 3. Information We Collect
+
+### 3.1 Personal Data
+
+While using our Service, we may collect personally identifiable information including:
+
+- Email address
+- First name and last name
+- Profile information from authentication providers (GitHub, Google): email address, display name, and profile picture URL
+- Cookies and Usage Data
+
+### 3.2 Financial Data
+
+Financial information such as payment method details is collected and stored by Stripe, Inc., our payment processor. We do not store your full payment card details on our servers. We may receive limited information from Stripe (such as the last four digits of your card). For more information, visit [Stripe's Privacy Policy](https://stripe.com/privacy).
+
+### 3.3 Usage Data
+
+On the web, we collect product analytics such as browser type, pages visited, interaction and feature-use events, and session replay only after analytics consent. The desktop app always collects the same kinds of product analytics, apart from session replay, and identifies them with your account when you are signed in. Operational security and service logs may still process network information when you use online features.
+
+When you are signed in, the web and desktop apps also report two kinds of metrics to Tau's own API. Neither includes prompts, messages, code, file contents, file or project names, or error message text, and neither is labelled by account, workspace, project or chat:
+
+- **Operational telemetry**: performance and outcome metrics such as kernel execution timing, sync outcomes, agent turn counts and durations, tool-call counts by kind, token counts, and error codes. We use these to keep the Service healthy, and they are sent regardless of the setting below.
+- **Anonymous usage metrics** (Optional): counts describing how the AI agent works during a turn, such as the CAD kernel, which built-in skills were used, how many calls and reference lookups happened before the first model change, lookup outcomes, evaluation outcome classes, and GeoSpec test pass and fail counts. We use these to improve Tau. They are on by default; switch them off under **Settings → General → Privacy** by disabling "Share anonymous usage metrics." On the web, an active Global Privacy Control signal also switches them off.
+
+### 3.4 Location Data
+
+We collect general location information based on your IP address (city or regional level only). We do not collect precise geolocation data.
+
+### 3.5 Tracking Technologies and Cookies
+
+We use cookies and browser storage for distinct purposes:
+
+- **Necessary web cookies**: Authentication, optional server-rendered theme, and your analytics consent decision.
+- **Functional local storage**: Interface preferences and local project data. Ordinary preferences are not request cookies.
+- **Analytics storage** (Optional on the web): After consent, PostHog uses first-party cookies and local storage for approved product analytics and session replay. The desktop app keeps its PostHog analytics identity in local app storage.
+
+On the web, you can manage analytics through the consent form, the **Cookie preferences** control in the website footer, or **Help → Cookie preferences** in the app. Withdrawing consent stops capture and replay, resets the analytics identity, and clears PostHog persistence through its supported lifecycle. For the complete inventory, see our [Storage and Cookie Policy](/legal/cookies).
+
+**Global Privacy Control (GPC)**: An active GPC signal is a hard decline of web analytics and cannot be overridden by a stored acceptance while the signal remains active.
+
+### 3.6 Prompts, Designs, and CAD Files
+
+When you use our Service, we collect the content you create and submit, including text prompts, CAD designs, models, code, and project files. This content is processed to provide the Service and, if you have not opted out, to improve our AI features (see Section 9.2.1).
+
+### 3.7 Sensitive Data
+
+We do not intentionally collect sensitive personal information such as health data, biometric data, or information about political opinions, religious beliefs, or sexual orientation. If you inadvertently submit sensitive data, please contact us at privacy@tau.new to request its deletion.
+
+## 4. How We Use Your Information
+
+TauCAD Limited uses the collected data for:
+
+- Providing and maintaining our Service
+- Notifying you about changes to our Service
+- Providing customer support
+- Improving our Service through analysis
+- Monitoring usage and detecting technical issues
+- Sending marketing communications (see Section 4.1)
+- Any other purpose with your consent
+
+### 4.1 Marketing Communications
+
+We may send you marketing communications about our Service, including product updates, tips, special offers, newsletters, and event invitations.
+
+**Your Choices:**
+
+- **Opt-in (where required by law)**: In jurisdictions requiring prior consent (EEA, UK), we will only send marketing if you have opted in.
+- **Soft opt-in (where permitted)**: For existing customers where permitted by law (UK PECR), we may send marketing about similar products without prior consent.
+- **Opt-out at any time**: Unsubscribe via the link in any marketing email, your account settings, or by contacting privacy@tau.new.
+
+Opting out of marketing will not affect transactional or service-related communications.
+
+## 5. Legal Basis for Processing
+
+Under data protection laws, we rely on the following legal bases:
+
+- **Contractual Necessity**: To perform our contract with you (providing the Service, account registration, subscription management).
+- **Legitimate Interests**: For improving our Service, security, communication, and AI improvement (you may opt out).
+- **Consent**: For analytics cookies and marketing communications (where required). You may withdraw consent at any time.
+- **Legal Obligations**: To comply with applicable laws.
+- **Vital Interests**: In rare circumstances, to protect vital interests.
+
+## 6. Retention of Your Personal Data
+
+| Data Category | Retention Period |
+|---------------|------------------|
+| **Account Data** | While account is active, plus 90 days after deletion request |
+| **Usage & Analytics Data** | According to the current service-side retention configuration; contact privacy@tau.new for the current schedule |
+| **AI Prompts & Designs** | 12 months for service improvement; deleted upon opt-out |
+| **Support Communications** | 3 years from communication |
+| **Financial Records** | 7 years (as required by law) |
+| **Security Logs** | 12 months |
+
+After these periods, your data will be securely deleted or anonymized.
+
+## 7. Transfer of Your Personal Data
+
+Your information is processed and stored in the **United States**. For transfers from the EEA, UK, or Switzerland to the United States, we rely on:
+
+- **Standard Contractual Clauses (SCCs)**: European Commission-approved clauses with our service providers.
+- **EU-US Data Privacy Framework**: Where applicable.
+- **UK International Data Transfer Agreement (IDTA)**: For UK transfers.
+- **New Zealand Privacy Act 2020 (IPP 12)**: Ensuring comparable safeguards for NZ transfers.
+
+You may request information about our transfer safeguards by contacting privacy@tau.new.
+
+## 8. Disclosure of Your Personal Data
+
+We may disclose your Personal Data:
+
+- **Business Transactions**: In a merger, acquisition, or asset sale, with notice.
+- **Law Enforcement**: If required by law or in response to valid requests.
+- **Legal Requirements**: To comply with legal obligations, protect our rights, prevent wrongdoing, protect user safety, or protect against legal liability.
+
+## 9. Third-Party Services
+
+We use the following third-party service providers. A complete list is available on our [Sub-processors page](/legal/subprocessors).
+
+### 9.1 Infrastructure and Hosting
+
+- **Fly.io**: API hosting (USA). [Privacy Policy](https://fly.io/legal/privacy-policy/)
+- **Netlify**: Frontend hosting (USA). [Privacy Policy](https://www.netlify.com/privacy/)
+- **Supabase**: Database and backend services (USA). [Privacy Policy](https://supabase.com/privacy)
+
+### 9.2 AI and Machine Learning Services
+
+When you use AI features, your prompts may be processed by: **OpenAI**, **Anthropic**, **Google (Vertex AI)**, **SambaNova**, **Cerebras**, **Tavily** (web search), and **Zoo.dev** (KCL kernel). Your data is not used by these providers to train their models.
+
+#### 9.2.1 AI Service Improvement
+
+We may use your prompts and generated designs to improve our AI features. This is based on our legitimate interest in improving the Service.
+
+**What we use:** Your text prompts and generated CAD designs.
+**What we do NOT do:** Share your designs with third parties for training, use your data to train external AI models, or associate training data with your identity.
+
+**Your Right to Opt Out:** Navigate to **Settings** and disable "Contribute to AI Improvement." Opting out will not affect your access to AI features.
+
+### 9.3 Analytics and Observability
+
+- **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
+- **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
+
+### 9.4 Payment Processing
+
+- **Stripe**: Payment processing. [Privacy Policy](https://stripe.com/privacy)
+
+### 9.5 Authentication Services
+
+- **GitHub**: OAuth authentication. [Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement)
+- **Google**: OAuth authentication. [Privacy Policy](https://policies.google.com/privacy)
+
+## 10. Security of Your Personal Data
+
+We implement security measures including:
+
+- Encryption of data in transit (TLS 1.2+) and at rest
+- Access controls and authentication requirements
+- Regular security assessments and monitoring
+- Employee training on data protection
+
+### 10.1 Data Breach Notification
+
+In the event of a data breach likely to result in harm, we will notify relevant supervisory authorities (within 72 hours for GDPR jurisdictions) and affected individuals without undue delay.
+
+## 11. Children's Privacy
+
+Our Service does not address anyone under 13 (or 16 in the EEA). We do not knowingly collect data from children. If you are aware that a child has provided us with data, please contact us.
+
+## 12. Your Privacy Rights
+
+Depending on your location, you have rights regarding your personal information. All users can exercise core rights by contacting privacy@tau.new.
+
+### 12.1 Core Rights (All Users)
+
+| Right | Description |
+|-------|-------------|
+| **Access** | Request a copy of your personal data |
+| **Correction** | Fix inaccurate or incomplete data |
+| **Deletion** | Request deletion of your data |
+| **Portability** | Export your data in standard formats (JSON, STL, STEP, GLTF) |
+| **Opt-out** | Unsubscribe from marketing; disable AI improvement |
+
+### 12.2 Regional Rights
+
+| Region | Key Additional Rights | Response Time | Supervisory Authority |
+|--------|----------------------|---------------|----------------------|
+| **EU/EEA** | Object to processing, restrict processing, withdraw consent, no automated decisions, lodge complaint | 30 days | Your local Data Protection Authority |
+| **UK** | Same as EU | 30 days | ICO ([ico.org.uk](https://ico.org.uk)) |
+| **California (CCPA/CPRA)** | Know categories collected, non-discrimination, no sale of data (we do not sell data) | 45 days | CA Attorney General |
+| **Other US States** | Similar to California (VA, CO, CT, UT, TX, OR) | 45 days | State Attorney General |
+| **Brazil (LGPD)** | Anonymization, revoke consent, portability, know shared entities | 15 days | ANPD ([gov.br/anpd](https://www.gov.br/anpd)) |
+| **New Zealand** | Access, correction, know overseas disclosure | 20 working days | Privacy Commissioner ([privacy.org.nz](https://www.privacy.org.nz)) |
+| **Australia** | Access, correction, anonymity option, direct marketing opt-out | 30 days | OAIC ([oaic.gov.au](https://www.oaic.gov.au)) |
+| **Canada (PIPEDA)** | Access, correction, withdraw consent, challenge compliance | 30 days | OPC ([priv.gc.ca](https://www.priv.gc.ca)) |
+| **Switzerland** | Information, access, rectification, erasure, portability, object | 30 days | FDPIC ([edoeb.admin.ch](https://www.edoeb.admin.ch)) |
+
+### 12.3 Exercising Your Rights
+
+To exercise any right, email privacy@tau.new with:
+- Your request type (access, deletion, etc.)
+- Information to verify your identity
+- Any specific data or time period involved
+
+We will respond within the timeframe required by your jurisdiction.
+
+### 12.4 Appeals
+
+If we decline your request, you may:
+1. Appeal to us at privacy@tau.new with "Privacy Appeal" in the subject
+2. Lodge a complaint with your local supervisory authority (see table above)
+
+### 12.5 Account Deletion
+
+To delete your account, use the account deletion feature in your settings or contact privacy@tau.new. Upon deletion request:
+
+- We will initiate deletion within 30 days
+- Your data remains recoverable for an additional 60-day grace period
+- You may export your data during this 90-day period
+- After 90 days, your data will be permanently deleted (except where retention is required by law)
+
+## 13. Automated Decision-Making
+
+TauCAD Limited does **not** use automated decision-making or profiling that produces legal effects concerning you. All significant decisions affecting your account or access are made with human involvement.
+
+## 14. Links to Other Sites
+
+Our Service may contain links to other sites. We have no control over and assume no responsibility for third-party sites or services.
+
+## 15. Changes to This Privacy Policy
+
+We may update this Privacy Policy from time to time. For material changes, we will notify you via email and/or a prominent notice on our Service at least 30 days before the new policy takes effect.
+
+## 16. Contact Us
+
+If you have any questions about this Privacy Policy, please contact us:
+
+- By email: privacy@tau.new
+- By website: https://tau.new/legal/privacy
+- By mail: 205A Esplanade Drive, Whangamata 3620, New Zealand
+
+### 16.1 EU Representative (Article 27 GDPR)
+
+For users in the European Economic Area: We are in the process of appointing an EU Representative in accordance with Article 27 of the GDPR. This section will be updated with their contact details once the appointment is finalized. In the meantime, please direct inquiries to privacy@tau.new.
+
+### 16.2 UK Representative
+
+For users in the United Kingdom: We are in the process of appointing a UK Representative in accordance with Article 27 of the UK GDPR. This section will be updated with their contact details once the appointment is finalized. In the meantime, please direct inquiries to privacy@tau.new.
+
+### 16.3 Data Protection Officer
+
+As an organization that does not engage in large-scale systematic monitoring of individuals or large-scale processing of special categories of data, TauCAD Limited is not required to appoint a Data Protection Officer under GDPR Article 37. For all data protection inquiries, please contact privacy@tau.new.

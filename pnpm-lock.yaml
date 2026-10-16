@@ -750,6 +750,9 @@ catalogs:
     size-limit:
       specifier: ^12.1.0
       version: 12.1.0
+    smol-toml:
+      specifier: 1.9.1
+      version: 1.9.1
     sonner:
       specifier: ^2.0.7
       version: 2.0.8
@@ -923,7 +926,7 @@ overrides:
 pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@1.7.0': f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830
+  '@agentclientprotocol/codex-acp@1.7.0': 81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@react-three/fiber@9.6.1': db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1
@@ -1851,7 +1854,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.122.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)
+        version: 1.7.0(patch_hash=81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
@@ -2158,6 +2161,15 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  apps/libs/consent:
+    devDependencies:
+      jsdom:
+        specifier: 'catalog:'
+        version: 26.0.0(canvas@3.2.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   apps/libs/converter:
     dependencies:
@@ -2586,6 +2598,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/consent':
+        specifier: workspace:*
+        version: link:../libs/consent
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
@@ -2839,6 +2854,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/consent':
+        specifier: workspace:*
+        version: link:../libs/consent
       '@taucad/planetary-gearbox':
         specifier: workspace:*
         version: link:../libs/planetary-gearbox
@@ -2857,9 +2875,24 @@ importers:
       react-router:
         specifier: 'catalog:'
         version: 7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      rehype-stringify:
+        specifier: 'catalog:'
+        version: 10.0.1
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-rehype:
+        specifier: 'catalog:'
+        version: 11.1.2
       three:
         specifier: 'catalog:'
         version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
     devDependencies:
       '@netlify/vite-plugin-react-router':
         specifier: ^3.1.1
@@ -3517,7 +3550,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.122.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)
+        version: 1.7.0(patch_hash=81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f)
       '@parcel/watcher':
         specifier: 'catalog:'
         version: 2.6.0
@@ -3934,6 +3967,9 @@ importers:
       safe-regex:
         specifier: ^2.1.1
         version: 2.1.1
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
       ws:
         specifier: 'catalog:'
         version: 8.22.0
@@ -25166,7 +25202,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)':
+  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f)':
     dependencies:
       '@agentclientprotocol/sdk': 1.8.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@openai/codex': 0.148.0

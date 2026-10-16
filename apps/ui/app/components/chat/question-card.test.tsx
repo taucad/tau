@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { captureDictation, DictationCapture } from '#components/dictation/dictation-capture.js';
@@ -386,4 +386,68 @@ describe('question dictation', () => {
     expect(dictationDependencies.transcribe.mock.calls[0]![1].signal.aborted).toBe(true);
     expect(onAnswer).not.toHaveBeenCalled();
   });
+});
+
+it.each([false, true])('should clear declined action identity before a subsequent typed=%s answer', (isTyped) => {
+  const props: QuestionCardProperties = {
+    ask: {
+      ...formAsk,
+      deadline: null,
+      questions: [
+        {
+          id: 'retry',
+          question: 'Retry?',
+          options: [{ label: 'Retry', value: 'retry' }],
+          allowsText: false,
+          ...(isTyped ? { field: { type: 'string', required: true } } : {}),
+        },
+      ],
+    },
+    now: askedAt,
+    answers: undefined,
+    onAnswer: vi.fn(),
+    onHold: vi.fn(),
+    onDecline: vi.fn(),
+  };
+  const view = render(<QuestionCard {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+  view.rerender(<QuestionCard {...props} isPending />);
+  expect(screen.getByRole('button', { name: 'Decline' })).toHaveAttribute('aria-busy', 'true');
+  view.rerender(<QuestionCard {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: isTyped ? 'Retry' : 'A, Retry' }));
+  view.rerender(<QuestionCard {...props} isPending />);
+  expect(screen.getByRole('button', { name: 'Decline' })).toHaveAttribute('aria-busy', 'false');
+});
+
+it.each([false, true])('should clear typed=%s answer progress when a later decline is pending', (isTyped) => {
+  const props: QuestionCardProperties = {
+    ask: {
+      ...formAsk,
+      deadline: null,
+      questions: [
+        {
+          id: 'retry',
+          question: 'Retry?',
+          options: [{ label: 'Retry', value: 'retry' }],
+          allowsText: false,
+          ...(isTyped ? { field: { type: 'string', required: true } } : {}),
+        },
+      ],
+    },
+    now: askedAt,
+    answers: undefined,
+    onAnswer: vi.fn(),
+    onHold: vi.fn(),
+    onDecline: vi.fn(),
+  };
+  const view = render(<QuestionCard {...props} />);
+  const answerName = isTyped ? 'Retry' : 'A, Retry';
+  fireEvent.click(screen.getByRole('button', { name: answerName }));
+  view.rerender(<QuestionCard {...props} isPending />);
+  expect(screen.getByRole('button', { name: answerName })).toHaveAttribute('aria-busy', 'true');
+  view.rerender(<QuestionCard {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+  view.rerender(<QuestionCard {...props} isPending />);
+  expect(screen.getByRole('button', { name: 'Decline' })).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('button', { name: answerName })).toHaveAttribute('aria-busy', 'false');
 });

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.js';
 
 /** @public */
 export const evaluateModelInputSchema = z
@@ -10,6 +11,7 @@ export const evaluateModelInputSchema = z
       'The project-relative CAD source file to evaluate; the project entry is `assets.main.entryPath` in tau.json.',
     ),
     includeCapabilities: z.boolean().optional().describe('Include view/export option schemas and reachable targets.'),
+    parameters: parameterOverridesSchema.optional(),
   })
   .strict();
 

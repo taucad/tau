@@ -1,9 +1,12 @@
 import { machinesDisabledMessage } from '@taucad/types/constants';
 import { useRef, useState } from 'react';
-import { Check, ChevronDown, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
 import { isRecord } from '@taucad/utils/schema';
 import { Button } from '@taucad/ui/components/button';
+import { Loader } from '@taucad/ui/components/loader';
+import { cn } from '@taucad/ui/utils/cn';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import type { ProviderPermissionResolution } from '@taucad/agent-host/wire';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 import { useFeature } from '#flags/use-feature.js';
 
@@ -72,24 +75,135 @@ export function permissionContent(approval: AgentHostApproval): {
   };
 }
 
-/** Compact permission surface; acknowledgement never claims that the operation completed. */
-export function ChatPermissionRequest({
+/** Keep exact approval content inspectable without letting provider prose fill the transcript. */
+function PermissionContent({
+  title,
+  facts,
+}: Pick<ReturnType<typeof permissionContent>, 'title' | 'facts'>): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const hasDetails = facts.length > 0 || title.length > 160 || /[\r\n]/u.test(title);
+  const firstLine = title.split(/[\r\n]/u)[0] ?? title;
+  const preview = firstLine.slice(0, 160);
+  const visibleFacts = facts.filter(([label, value]) => label !== 'Command' || !title.includes(value));
+  return (
+    <div className='min-w-0'>
+      <p className={cn('text-sm/5 font-medium [overflow-wrap:anywhere]', hasDetails && 'line-clamp-2')}>
+        {hasDetails && preview !== title ? `${preview}…` : title}
+      </p>
+      {hasDetails ? (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button size='xs' variant='ghost' className='group/request mt-1 -ml-1 gap-1 text-muted-foreground'>
+              <ChevronRight aria-hidden className='size-3 shrink-0 group-data-[state=open]/request:rotate-90' />
+              {isOpen ? 'Hide request' : 'View request'}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div
+              role='region'
+              aria-label='Request content'
+              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the scrollable request must be keyboard reachable (WCAG 2.1.1)
+              tabIndex={0}
+              className='mt-2 max-h-48 overflow-auto overscroll-contain rounded-md border bg-muted/30 p-2 text-xs/5 outline-none focus-visible:focus-outline'
+            >
+              <p className='font-mono [overflow-wrap:anywhere] whitespace-pre-wrap'>{title}</p>
+              {visibleFacts.length > 0 ? (
+                <dl className='mt-2 space-y-2'>
+                  {visibleFacts.map(([label, value]) => (
+                    <div key={label} className='min-w-0'>
+                      <dt className='text-muted-foreground'>{label}</dt>
+                      <dd className='font-mono [overflow-wrap:anywhere] whitespace-pre-wrap'>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
+  );
+}
+
+/** Read-back describes observed provider settings, not proof of a newly durable write. */
+const permissionStatus = ({
   approval,
-  name,
   outcome,
-  onRespond,
-  onReview,
+  resolution,
+  name,
 }: {
+  readonly approval: AgentHostApproval;
+  readonly outcome: string | undefined;
+  readonly resolution: ProviderPermissionResolution | undefined;
+  readonly name: string;
+}): string => {
+  if (approval.providerPermission && (outcome === 'approved' || outcome === 'denied')) {
+    const selected = approval.providerPermission.options.find((option) => option.optionId === resolution?.optionId);
+    if (outcome === 'approved') {
+      const observation = resolution?.observation;
+      if (selected?.requestedScope === 'persistent' && observation?.optionId === selected.optionId) {
+        if (observation.stored === 'present' && observation.effective === 'allowed') {
+          return `Allowed in ${name} settings when checked`;
+        }
+        if (observation.stored === 'present' && observation.effective === 'overridden') {
+          return `Preference found · overridden when checked`;
+        }
+        if (observation.stored === 'present') {
+          return 'Preference found · approval unverified';
+        }
+        if (observation.stored === 'absent') {
+          return `Preference not found in ${name} settings`;
+        }
+        return `Response recorded · saving unverified`;
+      }
+      if (selected?.requestedScope === 'once') {
+        return 'Allowed once · response recorded';
+      }
+      if (selected?.requestedScope === 'session') {
+        return 'Session approval requested';
+      }
+    } else if (selected?.requestedScope === 'once') {
+      return 'Denied · response recorded';
+    }
+    return 'Response recorded · saving unverified';
+  }
+  return outcome === 'approved'
+    ? 'Request allowed'
+    : outcome === 'denied'
+      ? 'Request denied'
+      : outcome === 'cancelled'
+        ? 'Request cancelled'
+        : 'Request closed';
+};
+
+type ChatPermissionRequestProps = {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
+  readonly resolution?: ProviderPermissionResolution | undefined;
   readonly onReview?: (() => void) | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
-}): React.JSX.Element {
+};
+
+/** Compact permission surface; acknowledgement never claims that the operation completed. */
+export function ChatPermissionRequest(props: ChatPermissionRequestProps): React.JSX.Element {
+  return <PermissionRequest key={props.approval.interruptId} {...props} />;
+}
+
+function PermissionRequest({
+  approval,
+  name,
+  outcome: legacyOutcome,
+  resolution,
+  onRespond,
+  onReview,
+}: ChatPermissionRequestProps): React.JSX.Element {
+  const outcome = resolution?.outcome ?? legacyOutcome;
   const isDebug = useFeature('tauDebug');
   const machinesEnabled = useFeature('machines');
   const machineDisabled = !machinesEnabled && approval.context?.machineId !== undefined;
-  const [isSending, setIsSending] = useState(false);
+  const [pendingResponse, setPendingResponse] = useState<string | boolean>();
+  const isSending = outcome === undefined && pendingResponse !== undefined;
   const [failure, setFailure] = useState<string>();
   const sending = useRef(false);
   const content = permissionContent(approval);
@@ -99,26 +213,19 @@ export function ChatPermissionRequest({
       return;
     }
     sending.current = true;
-    setIsSending(true);
+    setPendingResponse(optionId ?? approved);
     setFailure(undefined);
     try {
       await onRespond(approved, optionId);
       // Keep actions disabled until the durable resolution removes this request.
     } catch (error) {
       sending.current = false;
-      setIsSending(false);
+      setPendingResponse(undefined);
       setFailure(error instanceof Error ? error.message : 'The host did not accept that decision.');
     }
   };
   const isSettled = outcome !== undefined;
-  const status =
-    outcome === 'approved'
-      ? 'Request allowed'
-      : outcome === 'denied'
-        ? 'Request denied'
-        : outcome === 'cancelled'
-          ? 'Request cancelled'
-          : 'Request closed';
+  const status = permissionStatus({ approval, outcome, resolution, name });
   const StatusIcon = outcome === 'approved' ? Check : CircleX;
   return (
     <section
@@ -135,22 +242,17 @@ export function ChatPermissionRequest({
           {status}
         </p>
       ) : null}
-      <p className='text-sm/5 font-medium [overflow-wrap:anywhere] wrap-break-word'>{content.title}</p>
+      <PermissionContent title={content.title} facts={content.facts} />
+      {!isSettled && approval.providerPermission?.unsupportedReason === 'unconfigured-mcp-server' ? (
+        <p className='text-xs/5 text-muted-foreground'>
+          This temporary connection supports approval for this request or session.
+        </p>
+      ) : null}
       {!isSettled && (machineDisabled || content.consequence) ? (
         <p className='flex items-start gap-2 text-xs/5'>
           <TriangleAlert aria-hidden className='size-4 shrink-0 text-warning' />
           {machineDisabled ? machinesDisabledMessage : content.consequence}
         </p>
-      ) : null}
-      {!isSettled && content.facts.length > 0 ? (
-        <dl className='space-y-1 text-xs/5'>
-          {content.facts.map(([label, value]) => (
-            <div key={label} className='min-w-0'>
-              <dt className='text-muted-foreground'>{label}</dt>
-              <dd className='[overflow-wrap:anywhere] wrap-break-word whitespace-pre-wrap'>{value}</dd>
-            </div>
-          ))}
-        </dl>
       ) : null}
       {isDebug ? (
         <Collapsible>
@@ -176,14 +278,14 @@ export function ChatPermissionRequest({
           </CollapsibleContent>
         </Collapsible>
       ) : null}
-      {failure ? (
+      {failure && !isSettled ? (
         <p role='alert' className='text-xs/5'>
-          Your response was not saved. Try again.{isDebug ? ` ${failure}` : ''}
+          Couldn&apos;t send your response. Try again.{isDebug ? ` ${failure}` : ''}
         </p>
       ) : null}
       {isSending ? (
         <p role='status' className='text-xs/5 text-muted-foreground'>
-          Saving response · waiting for confirmation
+          Sending response…
         </p>
       ) : null}
       {!isSettled && onRespond ? (
@@ -193,26 +295,30 @@ export function ChatPermissionRequest({
               size='xs'
               variant='outline'
               disabled={isSending}
+              aria-busy={isSending && pendingResponse === false}
               onClick={() => {
                 void respond(false);
               }}
             >
               Deny
+              {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
             </Button>
           ) : onReview ? (
             <>
-              <Button size='xs' onClick={onReview}>
+              <Button size='xs' disabled={isSending} onClick={onReview}>
                 Review in the Print pane
               </Button>
               <Button
                 size='xs'
                 variant='outline'
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === false}
                 onClick={() => {
                   void respond(false);
                 }}
               >
                 Deny
+                {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
             </>
           ) : approval.options.length > 0 ? (
@@ -224,11 +330,15 @@ export function ChatPermissionRequest({
                 variant={option.optionId === focused?.optionId ? 'default' : 'outline'}
                 autoFocus={option.optionId === focused?.optionId}
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === option.optionId}
                 onClick={() => {
                   void respond(option.kind?.startsWith('allow') ?? true, option.optionId);
                 }}
               >
                 {option.name}
+                {isSending && pendingResponse === option.optionId ? (
+                  <Loader className='motion-reduce:animate-none' />
+                ) : null}
               </Button>
             ))
           ) : (
@@ -237,21 +347,25 @@ export function ChatPermissionRequest({
                 size='xs'
                 autoFocus
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === true}
                 onClick={() => {
                   void respond(true);
                 }}
               >
                 Approve
+                {isSending && pendingResponse === true ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
               <Button
                 size='xs'
                 variant='outline'
                 disabled={isSending}
+                aria-busy={isSending && pendingResponse === false}
                 onClick={() => {
                   void respond(false);
                 }}
               >
                 Deny
+                {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
             </>
           )}

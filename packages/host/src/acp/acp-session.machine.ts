@@ -23,6 +23,7 @@
  * `turnEnded` and, from the final state, `closed`.
  */
 
+import { permissionReadbackCapability, supportsPermissionReadback } from '#acp/provider-permission.js';
 import type { GrokQuestionRequest, GrokQuestionResponse } from '#acp/grok-questions.js';
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
@@ -232,6 +233,7 @@ export type AcpConnectionCommand =
 
 /** Input of the `lentTurn` actor. */
 export type AcpLentTurnInput = {
+  readonly permissionReadback?: boolean | undefined;
   readonly requestId: string;
   readonly key: string;
   readonly adapter: AcpAdapter;
@@ -1010,6 +1012,9 @@ const skillsPublished = (
               ? { ...clientCapabilities, fs: { readTextFile: false, writeTextFile: false } }
               : clientCapabilities,
           clientInfo: { name: 'tau-host', version: '1' },
+          ...(context.adapter.id === 'codex'
+            ? { _meta: { 'tau/permissionPersistence': permissionReadbackCapability } }
+            : {}),
         },
       }),
     },
@@ -1220,6 +1225,10 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                     agentCapabilities: initialized.agentCapabilities,
                     authMethods: initialized.authMethods ?? [],
                     agentInfo: initialized.agentInfo ?? undefined,
+                    permissionReadback: supportsPermissionReadback(
+                      context.adapter,
+                      initialized._meta?.['tau/permissionPersistence'],
+                    ),
                   };
                   const pluginDirectories = initialized._meta?.['x.ai/pluginDirs'] === true;
                   const next = { ...context, facts, pluginDirectories };
@@ -1296,6 +1305,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
           requestId: context.lent.requestId,
           key: context.key,
           adapter: context.adapter,
+          permissionReadback: context.facts.permissionReadback,
           cwd: context.cwd,
           skillDirectories: context.directories.map((directory) => `${directory}/.agents/skills`),
           sessionMessageId: context.sessionMessageId,

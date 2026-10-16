@@ -7,7 +7,7 @@ import { workbenchRecords } from '@taucad/workbench';
 import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { adoptViewerRecordNode } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { viewTabTitle } from '#workbench-records/projection.js';
+import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 describe('live viewer record binding', () => {

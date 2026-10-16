@@ -8,9 +8,22 @@ import { useModels } from '#hooks/use-models.js';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Loader } from '@taucad/ui/components/loader';
+import { cn } from '@taucad/ui/utils/cn';
+import { ModelPinButton } from '#components/chat/model-pin-button.js';
 
 export function ModelSettings(): React.JSX.Element {
-  const { data = [], isLoading, recommendedModels, isAvailable, setAvailable } = useModels();
+  const {
+    data = [],
+    isLoading,
+    recommendedModels,
+    overrides,
+    isAvailable,
+    setAvailable,
+    resetAvailability,
+    isPinned,
+    setPinned,
+  } = useModels();
+  const hasOverrides = Object.keys(overrides).length > 0;
   const [search, setSearch] = useState('');
   const [showAll, setShowAll] = useState(false);
 
@@ -41,7 +54,14 @@ export function ModelSettings(): React.JSX.Element {
       />
 
       <div className='flex flex-col gap-2'>
-        <h2>Available models</h2>
+        <div className='flex items-center justify-between gap-2'>
+          <h2>Available models</h2>
+          {hasOverrides ? (
+            <Button variant='link' size='sm' className='h-auto px-0' onClick={resetAvailability}>
+              Reset to recommended
+            </Button>
+          ) : null}
+        </div>
         {visibleModels.length === 0 ? (
           <ModelsEmptyState
             search={search.trim()}
@@ -57,17 +77,31 @@ export function ModelSettings(): React.JSX.Element {
         ) : (
           <div className='flex flex-col gap-0.5 rounded-xl border bg-card p-1'>
             {visibleModels.map((model) => (
-              <SwitchRow
-                key={model.id}
-                icon={<SvgIcon id={model.details.family} className='size-4' />}
-                description={model.description}
-                isChecked={isAvailable(model)}
-                onIsCheckedChange={(isChecked) => {
-                  setAvailable(model, isChecked);
-                }}
-              >
-                <span className='truncate'>{model.name}</span>
-              </SwitchRow>
+              /* The pin sits beside the switch's label, not inside it, so a click on it never flips the switch. */
+              <div key={model.id} className='group/row flex items-center gap-1 pr-1'>
+                <SwitchRow
+                  className='min-w-0 flex-1'
+                  icon={<SvgIcon id={model.details.family} className='size-4' />}
+                  description={model.description}
+                  isChecked={isAvailable(model)}
+                  onIsCheckedChange={(isChecked) => {
+                    setAvailable(model, isChecked);
+                  }}
+                >
+                  <span className='truncate'>{model.name}</span>
+                </SwitchRow>
+                <ModelPinButton
+                  name={model.name}
+                  isOn={isPinned(model)}
+                  className={cn(
+                    !isPinned(model) &&
+                      'opacity-0 group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100 pointer-coarse:opacity-100',
+                  )}
+                  onToggle={() => {
+                    setPinned(model, !isPinned(model));
+                  }}
+                />
+              </div>
             ))}
           </div>
         )}

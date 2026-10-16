@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
+import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 /** @public */
@@ -13,6 +14,7 @@ export const exportModelInputSchema = z
       .describe('JSON object of options for the chosen export or route.')
       .pipe(z.record(z.string(), z.json()))
       .optional(),
+    parameters: parameterOverridesSchema.optional(),
   })
   .strict();
 

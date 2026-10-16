@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,6 +45,39 @@ describe('standalone-project oracle', () => {
     expect(ecosystemKernels('npm')).toEqual(
       expect.arrayContaining(['replicad', 'manifold', 'jscad', 'opencascadejs', 'picovoxel', 'tscircuit']),
     );
+  });
+
+  it('should declare native CAD runtimes and the exact circuit peers in created npm projects', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-standalone-dependencies-'));
+    try {
+      const expected = {
+        replicad: {
+          replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0',
+          'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0',
+        },
+        opencascadejs: { libcascade: '3.1.0' },
+        tscircuit: {
+          '@tscircuit/core': '0.0.1844',
+          '@tscircuit/capacity-autorouter': '0.0.879',
+          typescript: '5.9.3',
+          '@tscircuit/soup-util': '0.0.41',
+          'connectivity-map': '1.0.0',
+        },
+      };
+      for (const [kernel, dependencies] of Object.entries(expected)) {
+        const project = join(directory, kernel);
+        createProject(kernel, project);
+        const manifest = JSON.parse(readFileSync(join(project, 'package.json'), 'utf8')) as {
+          dependencies: Record<string, string>;
+        };
+        expect(manifest.dependencies).toMatchObject(dependencies);
+        for (const spec of Object.values(manifest.dependencies)) {
+          expect(spec).toMatch(/^(?:npm:@[^@]+@)?\d+\.\d+\.\d+(?:-[\w.]+)?$/);
+        }
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('should create the project with its ecosystem files, tau.json and the fixture model', () => {

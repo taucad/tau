@@ -560,7 +560,12 @@ describe('the ACP turn projection', () => {
       title: 'mcp.cua_repl.js',
       kind: 'execute',
       status: 'pending',
-      rawInput: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()' } },
+      rawInput: {
+        server: 'cua_repl',
+        tool: 'js',
+        arguments: { code: 'await inspect()', apiKey: 'merge-secret' },
+        _meta: { token: 'hidden-metadata' },
+      },
     });
     await projection.approve({
       prompt: 'Allow call-opaque?',
@@ -572,7 +577,8 @@ describe('the ACP turn projection', () => {
 
     expect(approvals).toEqual([
       {
-        prompt: 'Allow mcp.cua_repl.js with {"server":"cua_repl","tool":"js","arguments":{"code":"await inspect()"}}?',
+        prompt:
+          'Allow mcp.cua_repl.js with {"server":"cua_repl","tool":"js","arguments":{"code":"await inspect()","apiKey":"[redacted]"}}?',
         payload: {
           toolCall: {
             toolCallId: 'call-opaque',
@@ -581,7 +587,7 @@ describe('the ACP turn projection', () => {
             title: 'mcp.cua_repl.js',
             nativeName: 'js',
           },
-          input: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()' } },
+          input: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()', apiKey: '[redacted]' } },
           options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
         },
       },
@@ -1852,3 +1858,391 @@ it('should retain a completed-only summary without losing earlier transcript sec
     { type: 'thinking', thinking: 'Preparing supplemental CAD details\n\nChecking plot quality' },
   ]);
 });
+
+const permissionObservation = {
+  version: 1,
+  provider: 'codex',
+  optionId: 'allow_always',
+  toolCallId: 'permission-call',
+  requestedScope: 'persistent',
+  stored: 'present',
+  effective: 'allowed',
+  preexisting: false,
+  observation: 'config-readback',
+  layerKind: 'user',
+  reason: 'policy-observed',
+} as const;
+
+it('should bind a provider settings observation to the exact resolved permission once', async () => {
+  const rows: ExternalAgentLogEvent[] = [];
+  let id = 0;
+  const projection = createTurnProjection({
+    turn: {
+      ...stubTurn(rows),
+      approve: async () => ({ interruptId: 'permission-interrupt', outcome: 'approved', optionId: 'allow_always' }),
+    },
+    createId: () => `readback-${String(id++)}`,
+    agentId: 'codex',
+    permissionReadback: true,
+  });
+  await projection.approve({
+    prompt: 'Allow?',
+    payload: {
+      toolCall: { toolCallId: 'permission-call' },
+      providerPermission: {
+        owner: 'provider',
+        persistence: 'unverified',
+        readback: 'config-layers',
+        options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+      },
+    },
+  });
+  const update: SessionUpdate = {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'permission-call',
+    status: 'completed',
+    _meta: { 'tau/permissionPersistence': permissionObservation },
+  };
+  projection.update(update);
+  projection.update(update);
+  await projection.flush();
+  const observations = rows.filter(
+    (row) =>
+      row.type === 'message.appended' &&
+      row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+  );
+  expect(observations).toHaveLength(1);
+  expect(observations[0]).toMatchObject({
+    message: {
+      content: [
+        {
+          type: 'provider-permission-observation',
+          interruptId: 'permission-interrupt',
+          resolution: { outcome: 'approved', optionId: 'allow_always', observation: permissionObservation },
+        },
+      ],
+    },
+  });
+});
+
+it.each(['wrong-call', 'wrong-option', 'denied', 'unnegotiated', 'before-decision', 'aborted'])(
+  'should reject %s permission readback',
+  async (scenario) => {
+    const rows: ExternalAgentLogEvent[] = [];
+    const controller = new AbortController();
+    const projection = createTurnProjection({
+      turn: {
+        ...stubTurn(rows),
+        signal: controller.signal,
+        approve: async () => ({
+          interruptId: 'permission-interrupt',
+          outcome: scenario === 'denied' ? 'denied' : 'approved',
+          optionId: scenario === 'wrong-option' ? 'allow_once' : 'allow_always',
+        }),
+      },
+      createId: () => randomUUID(),
+      agentId: 'codex',
+      permissionReadback: scenario !== 'unnegotiated',
+    });
+    if (scenario !== 'before-decision') {
+      await projection.approve({
+        prompt: 'Allow?',
+        payload: {
+          toolCall: { toolCallId: 'permission-call' },
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'config-layers',
+            options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+          },
+        },
+      });
+    }
+    if (scenario === 'aborted') {
+      controller.abort();
+    }
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'permission-call',
+      status: 'completed',
+      _meta: {
+        'tau/permissionPersistence': {
+          ...permissionObservation,
+          toolCallId: scenario === 'wrong-call' ? 'someone-else' : 'permission-call',
+        },
+      },
+    });
+    await projection.flush();
+    expect(
+      rows.filter(
+        (row) =>
+          row.type === 'message.appended' &&
+          row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+      ),
+    ).toEqual([]);
+  },
+);
+
+it('should stop correlating readback when a provider reuses a permission call identity', async () => {
+  const rows: ExternalAgentLogEvent[] = [];
+  let decisions = 0;
+  const projection = createTurnProjection({
+    turn: {
+      ...stubTurn(rows),
+      approve: async () => ({
+        interruptId: `decision-${String(decisions++)}`,
+        outcome: 'approved',
+        optionId: 'allow_always',
+      }),
+    },
+    createId: randomUUID,
+    agentId: 'codex',
+    permissionReadback: true,
+  });
+  const request = {
+    prompt: 'Allow?',
+    payload: {
+      toolCall: { toolCallId: 'permission-call' },
+      providerPermission: {
+        owner: 'provider',
+        persistence: 'unverified',
+        readback: 'config-layers',
+        options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+      },
+    },
+  };
+  await projection.approve(request);
+  await projection.approve(request);
+  projection.update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'permission-call',
+    status: 'completed',
+    _meta: { 'tau/permissionPersistence': permissionObservation },
+  });
+  await projection.flush();
+  expect(
+    rows.filter(
+      (row) =>
+        row.type === 'message.appended' &&
+        row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+    ),
+  ).toEqual([]);
+});
+
+it('should preserve the actual tool result when settings readback arrives before its ordinary completion', async () => {
+  const rows: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({
+    turn: {
+      ...stubTurn(rows),
+      approve: async () => ({ interruptId: 'decision', outcome: 'approved', optionId: 'allow_always' }),
+    },
+    createId: randomUUID,
+    agentId: 'codex',
+    permissionReadback: true,
+  });
+  projection.update({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'permission-call',
+    title: 'MCP tool',
+    status: 'pending',
+  });
+  await projection.approve({
+    prompt: 'Allow?',
+    payload: {
+      toolCall: { toolCallId: 'permission-call' },
+      providerPermission: {
+        owner: 'provider',
+        persistence: 'unverified',
+        readback: 'config-layers',
+        options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+      },
+    },
+  });
+  projection.update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'permission-call',
+    status: 'completed',
+    _meta: { 'tau/permissionPersistence': permissionObservation },
+  });
+  projection.update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'permission-call',
+    status: 'completed',
+    rawOutput: { actual: 'result' },
+  });
+  await projection.flush();
+  expect(
+    rows.flatMap((row) =>
+      row.type === 'message.appended' && row.message.role === 'tool-output' ? [row.message.content] : [],
+    ),
+  ).toEqual([{ actual: 'result' }]);
+});
+
+it('should observe Grok settings only after the selected matching request completes', async () => {
+  const rows: ExternalAgentLogEvent[] = [];
+  let reads = 0;
+  const projection = createTurnProjection({
+    turn: {
+      ...stubTurn(rows),
+      approve: async () => ({ interruptId: 'grok-decision', outcome: 'approved', optionId: 'always-allow' }),
+    },
+    createId: randomUUID,
+    agentId: 'grok',
+  });
+  await projection.approve(
+    {
+      prompt: 'Allow?',
+      payload: {
+        toolCall: { toolCallId: 'grok-call' },
+        providerPermission: {
+          owner: 'provider',
+          persistence: 'unverified',
+          readback: 'permission-file',
+          options: [{ optionId: 'always-allow', requestedScope: 'persistent' }],
+        },
+      },
+    },
+    {
+      observe: async () => {
+        reads++;
+        return {
+          version: 1,
+          provider: 'grok',
+          optionId: 'always-allow',
+          toolCallId: 'grok-call',
+          requestedScope: 'persistent',
+          stored: 'present',
+          effective: 'unknown',
+          preexisting: false,
+          observation: 'permission-file-readback',
+          layerKind: 'project',
+          reason: 'policy-observed',
+        };
+      },
+    },
+  );
+  projection.update({ sessionUpdate: 'tool_call_update', toolCallId: 'grok-call', status: 'in_progress' });
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+  expect(reads).toBe(0);
+  projection.update({ sessionUpdate: 'tool_call_update', toolCallId: 'another-call', status: 'completed' });
+  projection.update({ sessionUpdate: 'tool_call_update', toolCallId: 'grok-call', status: 'completed' });
+  projection.update({ sessionUpdate: 'tool_call_update', toolCallId: 'grok-call', status: 'completed' });
+  await projection.flush();
+  expect(reads).toBe(1);
+  const observed = rows.flatMap((row) =>
+    row.type === 'message.appended' && row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation'
+      ? [row.message.content]
+      : [],
+  );
+  expect(observed).toHaveLength(1);
+  expect(observed[0]).toEqual([
+    {
+      type: 'provider-permission-observation',
+      interruptId: 'grok-decision',
+      resolution: {
+        outcome: 'approved',
+        optionId: 'always-allow',
+        observation: {
+          version: 1,
+          provider: 'grok',
+          optionId: 'always-allow',
+          toolCallId: 'grok-call',
+          requestedScope: 'persistent',
+          stored: 'present',
+          effective: 'unknown',
+          preexisting: false,
+          observation: 'permission-file-readback',
+          layerKind: 'project',
+          reason: 'policy-observed',
+        },
+      },
+    },
+  ]);
+});
+
+it.each(['denied', 'once', 'aborted', 'cancel-during-read', 'wrong-call', 'throw'] as const)(
+  'should not publish Grok settings for %s and preserve the real tool result',
+  async (scenario) => {
+    const rows: ExternalAgentLogEvent[] = [];
+    const controller = new AbortController();
+    let reads = 0;
+    const projection = createTurnProjection({
+      turn: {
+        ...stubTurn(rows),
+        signal: controller.signal,
+        approve: async () => ({
+          interruptId: 'grok-decision',
+          outcome: scenario === 'denied' ? 'denied' : 'approved',
+          optionId: scenario === 'once' ? 'allow-once' : 'always-allow',
+        }),
+      },
+      createId: randomUUID,
+      agentId: 'grok',
+    });
+    projection.update({ sessionUpdate: 'tool_call', toolCallId: 'grok-call', title: 'MCP tool', status: 'pending' });
+    await projection.approve(
+      {
+        prompt: 'Allow?',
+        payload: {
+          toolCall: { toolCallId: 'grok-call' },
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'permission-file',
+            options: [{ optionId: 'always-allow', requestedScope: 'persistent' }],
+          },
+        },
+      },
+      {
+        observe: async () => {
+          reads++;
+          if (scenario === 'throw') {
+            throw new Error('read unavailable');
+          }
+          if (scenario === 'cancel-during-read') {
+            controller.abort();
+          }
+          return {
+            version: 1,
+            provider: 'grok',
+            optionId: 'always-allow',
+            toolCallId: scenario === 'wrong-call' ? 'different' : 'grok-call',
+            requestedScope: 'persistent',
+            stored: 'present',
+            effective: 'unknown',
+            preexisting: false,
+            observation: 'permission-file-readback',
+            layerKind: 'project',
+            reason: 'policy-observed',
+          };
+        },
+      },
+    );
+    if (scenario === 'aborted') {
+      controller.abort();
+    }
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'grok-call',
+      status: 'completed',
+      rawOutput: { actual: 'result' },
+    });
+    projection.update({ sessionUpdate: 'tool_call_update', toolCallId: 'grok-call', status: 'completed' });
+    await projection.flush();
+    expect(reads).toBe(['denied', 'once', 'aborted'].includes(scenario) ? 0 : 1);
+    expect(
+      rows.filter(
+        (row) =>
+          row.type === 'message.appended' &&
+          row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+      ),
+    ).toEqual([]);
+    expect(
+      rows.flatMap((row) =>
+        row.type === 'message.appended' && row.message.role === 'tool-output' ? [row.message.content] : [],
+      ),
+    ).toEqual([{ actual: 'result' }]);
+  },
+);

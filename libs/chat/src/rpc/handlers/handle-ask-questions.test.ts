@@ -7,6 +7,7 @@ import {
   parseAnswersFile,
   parseQuestionsFile,
   questionsPath,
+  legacyQuestionsPath,
   serializeAnswersFile,
 } from '#schemas/questions.schema.js';
 import type { AnswersFile, AskAnswers } from '#schemas/questions.schema.js';
@@ -168,4 +169,24 @@ describe('handleAskQuestions', () => {
       kind: 'cancelled',
     });
   });
+});
+
+it('should migrate old questions into the distinct v2 path without changing the original', async () => {
+  const fileSystem = memoryFileSystem();
+  const original = 'version: 1\nasks: []\n';
+  fileSystem.files.set(legacyQuestionsPath(chatId), original);
+  const result = await handleAskQuestions(input(0), fileSystem);
+  expect(result.success).toBe(true);
+  expect(fileSystem.files.get(legacyQuestionsPath(chatId))).toBe(original);
+  expect(fileSystem.files.get(questionsPath(chatId))).toContain('version: 2');
+  expect(questionsPath(chatId)).not.toBe(legacyQuestionsPath(chatId));
+});
+
+it('should leave an unsupported future record untouched and refuse the new ask', async () => {
+  const fileSystem = memoryFileSystem();
+  const original = 'version: 99\nasks: []\n';
+  fileSystem.files.set(questionsPath(chatId), original);
+  const result = await handleAskQuestions(input(0), fileSystem);
+  expect(result.success).toBe(false);
+  expect(fileSystem.files.get(questionsPath(chatId))).toBe(original);
 });

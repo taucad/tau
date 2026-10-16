@@ -39,11 +39,6 @@ const ensureChatOpen = async (): Promise<void> => {
   await target.expectVisible(selectors.getByCss(composer), 60_000);
 };
 
-/** The cookie banner is fixed to the bottom edge, over the page controls. */
-const dismissCookieBanner = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
-};
-
 /**
  * Create a project through the real UI.
  *
@@ -54,7 +49,6 @@ const dismissCookieBanner = async (): Promise<void> => {
 const createProject = async (origin: string): Promise<void> => {
   await target.navigate(`${origin}/projects/new`);
   await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 90_000);
-  await dismissCookieBanner();
   await target.fill(selectors.getByLabelText('Project Name *'), 'Tau Host Project');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/home\/[^/]+$/u, 60_000);
@@ -320,7 +314,6 @@ describe('daemon agent host (AV-4, rung 1)', () => {
      * page creates its project with no API at all — which is the claim. */
     await target.navigate(`${origin}/`);
     await target.expectVisible(selectors.getByCss(composer).first(), 90_000);
-    await dismissCookieBanner();
     await selectTauHost(workspace);
     await sendFirstPrompt('Create the Tau Host proof file.');
 
@@ -344,7 +337,6 @@ describe('daemon agent host (AV-4, rung 1)', () => {
       throw error;
     }
     await ensureChatOpen();
-    await dismissCookieBanner();
 
     // The seed carried the chip's promise into the chat that now owns the turn.
     const tauHostSegment = await openRunsOn(workspace);

@@ -33,6 +33,75 @@ const base = {
   runId: 'run-1',
 } as const;
 
+it('should preserve unverified provider scope without turning a recorded response into a saved permission', () => {
+  const providerPermission = {
+    owner: 'provider',
+    persistence: 'unverified',
+    options: [
+      { optionId: 'allow_session', requestedScope: 'session' },
+      { optionId: 'allow_always', requestedScope: 'persistent' },
+    ],
+  };
+  const [part] = projectAgentHostEvent({
+    ...base,
+    type: 'interrupt.recorded',
+    interruptId: 'provider-permission',
+    phase: 'requested',
+    reason: 'Allow tool?',
+    payload: {
+      agentId: 'codex',
+      context: {
+        providerPermission,
+        options: [
+          { optionId: 'allow_session', name: 'Session', kind: 'allow_always' },
+          { optionId: 'allow_always', name: 'Always', kind: 'allow_always' },
+        ],
+      },
+    },
+  });
+  expect(part).toMatchObject({ type: 'tool-input-available', input: { providerPermission } });
+  if (part?.type !== 'tool-input-available') {
+    throw new Error('Expected the permission presentation input.');
+  }
+  expect(parseAgentHostApproval(part.input)).toMatchObject({ providerPermission });
+  expect(
+    projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'provider-permission',
+      phase: 'resolved',
+      reason: 'approved',
+      payload: { outcome: 'approved', optionId: 'allow_always' },
+    }),
+  ).toEqual([
+    {
+      type: 'tool-output-available',
+      toolCallId: 'provider-permission',
+      output: { outcome: 'approved', optionId: 'allow_always' },
+    },
+  ]);
+});
+
+it('should retain offered choices when unsupported provider status claims are omitted', () => {
+  const options = [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }];
+  const [part] = projectAgentHostEvent({
+    ...base,
+    type: 'interrupt.recorded',
+    interruptId: 'unverified',
+    phase: 'requested',
+    reason: 'Allow tool?',
+    payload: {
+      agentId: 'codex',
+      context: { options, providerPermission: { owner: 'provider', persistence: 'saved', options: [] } },
+    },
+  });
+  expect(part).toMatchObject({ type: 'tool-input-available', input: { agentId: 'codex', options } });
+  if (part?.type !== 'tool-input-available') {
+    throw new Error('Expected the permission presentation input.');
+  }
+  expect(parseAgentHostApproval(part.input)?.providerPermission).toBeUndefined();
+});
+
 it('should keep external reasoning open across an interleaved tool result', async () => {
   const blocks = new Map();
   const live = { chatId: 'chat', runId: base.runId, messageId: 'thought', contentIndex: 0 };
@@ -2429,4 +2498,108 @@ it('should keep the latest structured summary through live, checkpoint, duplicat
       );
     }),
   );
+});
+
+it('should preserve the selected provider option when replaying a resolved permission', () => {
+  expect(
+    projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'saved-choice',
+      phase: 'resolved',
+      reason: 'approved',
+      payload: { outcome: 'approved', optionId: 'allow_session' },
+    }),
+  ).toEqual([
+    {
+      type: 'tool-output-available',
+      toolCallId: 'saved-choice',
+      output: {
+        outcome: 'approved',
+        optionId: 'allow_session',
+      },
+    },
+  ]);
+});
+
+it('should replay a host-bound settings readback into the original permission output', async () => {
+  const resolution = {
+    outcome: 'approved',
+    optionId: 'allow_always',
+    observation: {
+      version: 1,
+      provider: 'codex',
+      optionId: 'allow_always',
+      toolCallId: 'native-call',
+      requestedScope: 'persistent',
+      stored: 'present',
+      effective: 'allowed',
+      preexisting: false,
+      observation: 'config-readback',
+      reason: 'policy-observed',
+    },
+  };
+  const observed: AgentLogEvent = {
+    ...base,
+    type: 'message.appended',
+    message: {
+      id: 'readback-observation',
+      role: 'assistant',
+      content: [{ type: 'provider-permission-observation', interruptId: 'saved-choice', resolution }],
+      metadata: { tauInternal: { kind: 'provider-permission-observation', origin: 'external', agentId: 'codex' } },
+    },
+  };
+  const events: AgentLogEvent[] = [
+    {
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'saved-choice',
+      phase: 'requested',
+      reason: 'Allow?',
+      payload: { kind: 'approval' },
+    },
+    {
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'saved-choice',
+      phase: 'resolved',
+      reason: 'approved',
+      payload: { outcome: 'approved', optionId: 'allow_always' },
+    },
+    observed,
+  ];
+  const chunks = events.flatMap((event) => projectAgentHostEvent(event));
+  let result: MyUIMessage | undefined;
+  const errors: unknown[] = [];
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  for await (const message of readUIMessageStream<MyUIMessage>({ stream, onError: (error) => errors.push(error) })) {
+    result = message;
+  }
+  expect(errors).toEqual([]);
+  expect(result?.parts).toContainEqual(
+    expect.objectContaining({ type: 'dynamic-tool', toolCallId: 'saved-choice', output: resolution }),
+  );
+  expect(projectAgentHostEvent({ ...observed, message: { ...observed.message, metadata: {} } })).toEqual([]);
+  expect(
+    projectAgentHostEvent({
+      ...observed,
+      message: {
+        ...observed.message,
+        content: [
+          {
+            type: 'provider-permission-observation',
+            interruptId: 'saved-choice',
+            resolution: { ...resolution, optionId: 'allow_once' },
+          },
+        ],
+      },
+    }),
+  ).toEqual([]);
 });

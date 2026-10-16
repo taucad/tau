@@ -1,0 +1,34 @@
+/*
+ * Application shell geometry before Allotment's first layout.
+ *
+ * Allotment positions each pane with inline `left`/`width` only once a
+ * ResizeObserver has measured the shell, a frame after the panes first paint.
+ * Until then a pane is an unsized absolute box, so the content pane painted at
+ * the left edge and then jumped right of the sidebar: most of the home page's
+ * desktop layout shift. These rules give the panes their laid-out geometry
+ * from the same `--sidebar-panel-width` the shell already publishes, and stop
+ * applying (`:not([style])`) as soon as Allotment writes its own.
+ */
+#application-allotment > .split-view-container > :first-child:not([style]) {
+  left: 0;
+  width: var(--sidebar-panel-width);
+}
+
+#application-allotment > .split-view-container > :last-child:not([style]) {
+  right: 0;
+  left: 0;
+}
+
+[data-slot='application-shell'][data-sidebar-open='true']
+  #application-allotment
+  > .split-view-container
+  > :last-child:not([style]) {
+  left: var(--sidebar-panel-width);
+}
+
+[data-slot='application-shell'][data-sidebar-open='false']
+  #application-allotment
+  > .split-view-container
+  > :first-child:not(:last-child, [style]) {
+  display: none;
+}

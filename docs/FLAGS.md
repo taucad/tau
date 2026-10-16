@@ -75,12 +75,11 @@ Automatic reload, promotions and model rates remain policy/capability controls b
 
 Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](../apps/ui/app/flags/flag.constants.ts). These change local UI, never server permissions.
 
-| Name               | Default             | Purpose                                                                                |
-| ------------------ | ------------------- | -------------------------------------------------------------------------------------- |
-| `planMode`         | false               | Planning selector and plan viewer.                                                     |
-| `pluginsStore`     | false               | Developing plugin/skill store.                                                         |
-| `tauDebug`         | `TAU_DEBUG` default | Diagnostic panels; local override supported.                                           |
-| `marketingLanding` | false               | Marketing home for signed-out visitors. Billing must still be absent when cloud=false. |
+| Name           | Default             | Purpose                                      |
+| -------------- | ------------------- | -------------------------------------------- |
+| `planMode`     | false               | Planning selector and plan viewer.           |
+| `pluginsStore` | false               | Developing plugin/skill store.               |
+| `tauDebug`     | `TAU_DEBUG` default | Diagnostic panels; local override supported. |
 
 ## CLI and desktop host controls
 

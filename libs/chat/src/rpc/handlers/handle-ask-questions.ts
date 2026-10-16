@@ -9,7 +9,10 @@ import {
   parseAnswersFile,
   parseQuestionsFile,
   questionsPath,
+  legacyQuestionsPath,
   resolveAnswers,
+  isQuestionAnswerValid,
+  askSchema,
   serializeQuestionsFile,
 } from '#schemas/questions.schema.js';
 import type { Ask, AskAnswers, AskOutcome } from '#schemas/questions.schema.js';
@@ -51,7 +54,7 @@ const readOptional = async (fileSystem: QuestionRecordFileSystem, path: string):
 export const createAskId = (): string => `ask_${randomUuid().replaceAll('-', '').slice(0, 16)}`;
 
 /**
- * Append one ask to the chat's `questions.yaml`.
+ * Append one ask to the chat's `questions.v2.yaml`.
  *
  * @param fileSystem - The record filesystem (the host is the record's only writer).
  * @param chatId - The owning chat.
@@ -60,10 +63,17 @@ export const createAskId = (): string => `ask_${randomUuid().replaceAll('-', '')
  * @public
  */
 export const recordAsk = async (fileSystem: QuestionRecordFileSystem, chatId: string, ask: Ask): Promise<string> => {
+  askSchema.parse(ask);
   const path = assertRootedPath(questionsPath(chatId));
   await withRecordLock(path, async () => {
-    const file = parseQuestionsFile(await readOptional(fileSystem, path));
-    await fileSystem.writeFile(path, serializeQuestionsFile({ ...file, asks: [...file.asks, ask] }));
+    const file = parseQuestionsFile(
+      (await readOptional(fileSystem, path)) ??
+        (await readOptional(fileSystem, assertRootedPath(legacyQuestionsPath(chatId)))),
+    );
+    await fileSystem.writeFile(
+      path,
+      serializeQuestionsFile({ ...file, asks: [...file.asks, { ...ask, answerVersion: 2 }] }),
+    );
   });
   return path;
 };
@@ -81,7 +91,10 @@ export const settleAsk = async (
 ): Promise<void> => {
   const path = assertRootedPath(questionsPath(chatId));
   await withRecordLock(path, async () => {
-    const file = parseQuestionsFile(await readOptional(fileSystem, path));
+    const file = parseQuestionsFile(
+      (await readOptional(fileSystem, path)) ??
+        (await readOptional(fileSystem, assertRootedPath(legacyQuestionsPath(chatId)))),
+    );
     const at = new Date().toISOString();
     const asks = file.asks.map((ask) => (ask.id === askId ? { ...ask, resolution: { at, outcome } } : ask));
     await fileSystem.writeFile(path, serializeQuestionsFile({ ...file, asks }));
@@ -121,7 +134,7 @@ const sleep = async (ms: number, signal: AbortSignal | undefined): Promise<void>
 /**
  * Wait until the person answers every question or declines, or the ask's deadline passes.
  *
- * Polls `answers.yaml`, which only the person's client writes. A person who has
+ * Polls `answers.v2.yaml`, which only the person's client writes. A person who has
  * started answering holds the deadline to the cap ({@link effectiveDeadline}).
  *
  * @param fileSystem - Any view that can read the chat directory.
@@ -138,7 +151,8 @@ export const waitForAnswers = async (
     // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
     const answers = await readAskAnswers(fileSystem, chatId, ask.id);
     const complete =
-      answers?.declined === true || ask.questions.every((question) => answers?.questions[question.id] !== undefined);
+      answers?.declined === true ||
+      ask.questions.every((question) => isQuestionAnswerValid(question, answers?.questions[question.id]));
     const deadline = effectiveDeadline(ask, answers);
     if (complete || (deadline !== undefined && Date.now() >= deadline)) {
       return answers;
@@ -154,9 +168,8 @@ export const waitForAnswers = async (
 /**
  * Ask the person 1–3 questions, wait a bounded time, and answer with their choices or the recommended defaults.
  *
- * The questions go to `.tau/chats/<chatId>/questions.yaml`; the person's client
- * writes `answers.yaml`. Each file has one writer, so neither can lose the
- * other's update. A cancelled turn records `cancelled` and rethrows; the ask
+ * The questions go to `.tau/chats/<chatId>/questions.v2.yaml`; the person's client
+ * coordinates writes to `answers.v2.yaml`. Host and UI own separate records. A cancelled turn records `cancelled` and rethrows; the ask
  * stays answerable and a later answer travels as a message.
  *
  * @param input - The chat, its questions and the wait.

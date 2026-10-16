@@ -451,9 +451,6 @@ jobs:
   # when the native projects are affected and on every push to `main`, as the native-darwin row does.
   standalone:
     name: Standalone projects (${{ matrix.ecosystem }})${{ matrix.ecosystem == 'kcl' && ' [quarantined]' || '' }}
-    # Quarantine only Zoo/KCL until CI has renewable Tau Pro authentication and a Zoo token.
-    # Restore failure gating after provisioning both credentials and a successful live KCL run.
-    continue-on-error: ${{ matrix.ecosystem == 'kcl' }}
     strategy:
       fail-fast: false
       matrix:
@@ -488,20 +485,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
           openscad --version
 
-      # Zoo's CLI, pinned by release and by the sha256 GitHub records for the asset.
-      - name: Install the Zoo CLI
+      # Restore the Zoo CLI setup and KCL execution once renewable CI credentials are provisioned.
+      - name: Report Zoo KCL quarantine
         if: matrix.ecosystem == 'kcl'
-        env:
-          ZOO_CLI_URL: https://github.com/KittyCAD/cli/releases/download/v0.2.203/zoo-x86_64-unknown-linux-musl
-          ZOO_CLI_SHA256: 86a72e94136cf0fc0acaaef309bab79f9c940d89c278689b69dfcc44231df43c
         run: |
-          mkdir -p "$RUNNER_TEMP/zoo"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/zoo/zoo" "$ZOO_CLI_URL"
-          echo "$ZOO_CLI_SHA256  $RUNNER_TEMP/zoo/zoo" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/zoo/zoo"
-          echo "$RUNNER_TEMP/zoo" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/zoo/zoo" --version
-          echo "::notice title=Zoo CLI::$("$RUNNER_TEMP/zoo/zoo" --version) / $("$RUNNER_TEMP/zoo/zoo" kcl export --help 2>&1 | tr '\n' ' ' | cut -c1-900)"
+          echo '::notice title=Zoo/KCL quarantined::Skipped pending Zoo credentials and renewable Tau Pro CI authentication.'
+          echo 'Zoo/KCL standalone comparison is quarantined, not qualified. Restore execution after CI authentication is provisioned.' >> "$GITHUB_STEP_SUMMARY"
 
       # `tau prepare build123d` seals the closure inside the native sandbox, as on a user's machine.
       - name: Setup Linux sandbox prerequisites
@@ -509,6 +498,7 @@ jobs:
         uses: ./.github/actions/setup-linux-sandbox
 
       - name: Check every template outside Tau
+        if: matrix.ecosystem != 'kcl'
         env:
           ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
           TAU_API_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
@@ -562,6 +552,7 @@ jobs:
           echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
 
       - name: Check every template outside Tau
+        if: matrix.ecosystem != 'kcl'
         run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
 
   # The required check. It passes only when the plan and every affected lane passed, and the

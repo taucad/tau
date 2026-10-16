@@ -51,9 +51,12 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # fetch <path> <body-file>: GET one path, headers to <body-file>.headers; prints the status code.
+# A transport failure prints curl's reason on stderr and status 000, so it is reported rather than ending the run.
 fetch() {
+  : >"$2"
+  : >"$2.headers"
   curl --silent --show-error --location --max-time 60 --compressed \
-    --dump-header "$2.headers" --output "$2" --write-out '%{http_code}' "$base$1"
+    --dump-header "$2.headers" --output "$2" --write-out '%{http_code}' "$base$1" || true
 }
 
 # header <headers-file> <name>: value of the last response's header, lower-cased name, trimmed.
@@ -83,9 +86,9 @@ document_code="$(fetch "$document_path" "$work/document")"
 if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]] &&
   [[ "$(fetch /tau-asset-receipt.json "$work/receipt")" == 200 ]]; then
   listed="$(grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]+"' "$work/receipt" | sed -E 's/.*"([^"]+)"$/\1/' || true)"
-  [[ -n "$chunk_path" ]] || chunk_path="$(grep -E '\.m?js$' <<<"$listed" | grep -viE 'worker' | head -1 | sed 's|^|/|')"
-  [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' <<<"$listed" | head -1 | sed 's|^|/|')"
-  [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' <<<"$listed" | head -1 | sed 's|^|/|')"
+  [[ -n "$chunk_path" ]] || chunk_path="$(grep -E '\.m?js$' <<<"$listed" | grep -viE 'worker' | sed -n 1p | sed 's|^|/|')"
+  [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' <<<"$listed" | sed -n 1p | sed 's|^|/|')"
+  [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' <<<"$listed" | sed -n 1p | sed 's|^|/|')"
 fi
 
 # Discovery 2: the document's script references, then the chunks they reference.
@@ -99,19 +102,19 @@ references() {
 }
 if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]]; then
   references "$work/document" >"$work/queue"
-  [[ -n "$chunk_path" ]] || chunk_path="$(grep -E '\.m?js$' "$work/queue" | grep -viE 'worker' | head -1 || true)"
+  [[ -n "$chunk_path" ]] || chunk_path="$(grep -E '\.m?js$' "$work/queue" | grep -viE 'worker' | sed -n 1p || true)"
   : >"$work/seen"
   scanned=0
   while [[ (-z "$wasm_path" || -z "$worker_path") && "$scanned" -lt "$scan_limit" ]]; do
-    next="$(grep -E '\.m?js$' "$work/queue" | grep -vxFf "$work/seen" | head -1 || true)"
+    next="$(grep -E '\.m?js$' "$work/queue" | grep -vxFf "$work/seen" | sed -n 1p || true)"
     [[ -n "$next" ]] || break
     echo "$next" >>"$work/seen"
     scanned=$((scanned + 1))
     [[ "$(fetch "$next" "$work/scan")" == 200 ]] || continue
     references "$work/scan" >>"$work/queue"
     sort -u -o "$work/queue" "$work/queue"
-    [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' "$work/queue" | head -1 || true)"
-    [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' "$work/queue" | head -1 || true)"
+    [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' "$work/queue" | sed -n 1p || true)"
+    [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' "$work/queue" | sed -n 1p || true)"
   done
 fi
 

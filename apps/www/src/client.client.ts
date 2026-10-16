@@ -4,6 +4,8 @@ import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
 import { environmentHref, stagingDesktopNote } from '#www/environment.js';
+import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
+import type { ConsentDecision } from '@taucad/consent';
 
 export function initializePage(signal: AbortSignal): () => void {
   const cleanups: Array<() => void> = [];
@@ -51,7 +53,6 @@ export function initializePage(signal: AbortSignal): () => void {
     { signal },
   );
 
-  const consentKey = 'tau-www-analytics-consent-v1';
   const visitKey = 'tau-www-visited-v1';
   /**
    * @param key - Optional local storage key.
@@ -87,11 +88,25 @@ export function initializePage(signal: AbortSignal): () => void {
   const endpoint = document.body.dataset['analyticsEndpoint'];
   const permittedEndpoint = endpoint === '/api/marketing-events' ? endpoint : undefined;
   const panel = document.querySelector('.consent');
-  const preferenceButton = document.querySelector('[data-consent-open]');
+  const preferenceButtons = [...document.querySelectorAll('[data-consent-open]')].filter(
+    (button): button is HTMLButtonElement => button instanceof HTMLButtonElement,
+  );
   const privacyReset = document.querySelector('[data-consent-reset]');
   const privacySignal =
     ('globalPrivacyControl' in navigator && navigator.globalPrivacyControl === true) || navigator.doNotTrack === '1';
-  let consent = safeRead(consentKey);
+  /** The shared cookie is authoritative; the former site-only record is migrated once. */
+  const legacyConsentKey = 'tau-www-analytics-consent-v1';
+  const readConsent = (): ConsentDecision | undefined => {
+    const status = readConsentCookie(document.cookie);
+    return status === 'unknown' ? undefined : status;
+  };
+  let consent = readConsent();
+  const legacy = safeRead(legacyConsentKey);
+  if (consent === undefined && !privacySignal && (legacy === 'accepted' || legacy === 'denied')) {
+    consent = legacy === 'accepted' ? 'accepted' : 'declined';
+    writeConsent(consent);
+  }
+  safeRemove(legacyConsentKey);
   let pageSent = false;
 
   const controllerSet = new Set<AbortController>();
@@ -156,21 +171,27 @@ export function initializePage(signal: AbortSignal): () => void {
     void send({ name: 'marketing_page_view' });
     safeWrite(visitKey, 'yes');
   };
-  if (permittedEndpoint && !privacySignal && preferenceButton instanceof HTMLElement && panel instanceof HTMLElement) {
-    preferenceButton.hidden = false;
-    panel.hidden = consent === 'accepted' || consent === 'denied';
+  // The choice also governs the Tau app's analytics, so it is offered whether or not this site measures anything.
+  if (!privacySignal && panel instanceof HTMLElement) {
+    panel.hidden = consent !== undefined;
+    for (const button of preferenceButtons) {
+      button.hidden = false;
+      button.disabled = false;
+    }
     pageView();
   }
-  preferenceButton?.addEventListener(
-    'click',
-    () => {
-      if (panel instanceof HTMLElement) {
-        panel.hidden = false;
-        panel.querySelector('button')?.focus();
-      }
-    },
-    { signal },
-  );
+  for (const button of preferenceButtons) {
+    button.addEventListener(
+      'click',
+      () => {
+        if (panel instanceof HTMLElement) {
+          panel.hidden = false;
+          panel.querySelector('button')?.focus();
+        }
+      },
+      { signal },
+    );
+  }
   panel?.addEventListener(
     'click',
     (event) => {
@@ -179,12 +200,12 @@ export function initializePage(signal: AbortSignal): () => void {
         return;
       }
       const selectedConsent = button.dataset['consent'];
-      if (selectedConsent !== 'accepted' && selectedConsent !== 'denied') {
+      if (selectedConsent !== 'accepted' && selectedConsent !== 'declined') {
         return;
       }
       consent = selectedConsent;
-      safeWrite(consentKey, consent);
-      if (consent === 'denied') {
+      writeConsent(consent);
+      if (consent === 'declined') {
         for (const controller of controllerSet) {
           controller.abort();
         }
@@ -202,13 +223,13 @@ export function initializePage(signal: AbortSignal): () => void {
       for (const controller of controllerSet) {
         controller.abort();
       }
-      safeRemove(consentKey);
+      writeConsent(undefined);
       safeRemove(visitKey);
       const status = document.querySelector('#privacy-status');
       if (status) {
         status.textContent = 'Your analytics preference and local visit marker have been cleared. Analytics is off.';
       }
-      if (permittedEndpoint && !privacySignal && panel instanceof HTMLElement) {
+      if (!privacySignal && panel instanceof HTMLElement) {
         panel.hidden = false;
       }
     },
@@ -217,20 +238,21 @@ export function initializePage(signal: AbortSignal): () => void {
   if (privacyReset instanceof HTMLButtonElement) {
     privacyReset.disabled = false;
   }
-  globalThis.addEventListener(
-    'storage',
-    (event) => {
-      if (event.key !== consentKey) {
-        return;
+  const consentChannel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(consentChannelName);
+  consentChannel?.addEventListener('message', () => {
+    consent = readConsent();
+    if (consent !== 'accepted') {
+      for (const controller of controllerSet) {
+        controller.abort();
       }
-      consent = event.newValue ?? undefined;
-      if (consent !== 'accepted') {
-        for (const controller of controllerSet) {
-          controller.abort();
-        }
-      }
+    }
+  });
+  signal.addEventListener(
+    'abort',
+    () => {
+      consentChannel?.close();
     },
-    { signal },
+    { once: true },
   );
   document.addEventListener(
     'click',

@@ -1,3 +1,5 @@
+import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
+import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { browserChannels } from '@taucad/types/browser';
 import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
 /**
@@ -113,7 +115,30 @@ contextBridge.exposeInMainWorld('tauAuth', {
   },
 });
 
+const updates: DesktopUpdateBridge = {
+  snapshot: async () => ipcRenderer.invoke(desktopUpdateChannels.snapshot) as Promise<DesktopUpdateSnapshot>,
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopUpdateSnapshot): void => {
+      listener(snapshot);
+    };
+    ipcRenderer.on(desktopUpdateChannels.changed, handler);
+    return () => {
+      ipcRenderer.off(desktopUpdateChannels.changed, handler);
+    };
+  },
+  check: async () => {
+    await ipcRenderer.invoke(desktopUpdateChannels.check);
+  },
+  install: async () => {
+    await ipcRenderer.invoke(desktopUpdateChannels.install);
+  },
+  download: async () => {
+    await ipcRenderer.invoke(desktopUpdateChannels.download);
+  },
+};
+
 contextBridge.exposeInMainWorld('tau', {
+  updates,
   /* The page matches relays on this tag rather than repeating the literal:
    * a duplicated string across a process boundary is how relays go quiet. */
   relayTag: servicesPortRelayTag,

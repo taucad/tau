@@ -296,7 +296,7 @@ function createComposerWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ChatComposerProvider surface='marketing'>{children}</ChatComposerProvider>
+        <ChatComposerProvider surface='library'>{children}</ChatComposerProvider>
       </ChatSessionStoreProvider>
     );
   };
@@ -872,12 +872,12 @@ describe('HomeNewProjectComposerProvider', () => {
 
   // New (W6, P39): each pre-project surface releases only its own directory.
   it("leaves every other surface's attachment bytes in place when one surface consumes its draft", async () => {
-    const marketing = renderHook(() => useChatComposer(), { wrapper: createComposerWrapper() });
+    const library = renderHook(() => useChatComposer(), { wrapper: createComposerWrapper() });
     const home = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
-    const libraryBytes = '/.tau/composers/library/attachments/' + 'c'.repeat(64) + '.png';
-    harness.homeFiles.set(libraryBytes, new Uint8Array([1]));
+    const otherBytes = '/.tau/composers/retired/attachments/' + 'c'.repeat(64) + '.png';
+    harness.homeFiles.set(otherBytes, new Uint8Array([1]));
     act(() => {
-      marketing.result.current.draftActorRef.send({
+      library.result.current.draftActorRef.send({
         type: 'addDraftAttachment',
         dataUrl: pngDataUrl,
         model: testModel,
@@ -886,20 +886,20 @@ describe('HomeNewProjectComposerProvider', () => {
     });
     await waitFor(() => {
       expect(homeAttachmentNames()).toHaveLength(1);
-      expect(marketing.result.current.draftActorRef.getSnapshot().context.draftAttachments).toHaveLength(1);
+      expect(library.result.current.draftActorRef.getSnapshot().context.draftAttachments).toHaveLength(1);
     });
-    const marketingBytes = [...harness.homeFiles.keys()].find((path) =>
-      path.startsWith('/.tau/composers/marketing/attachments/'),
+    const libraryBytes = [...harness.homeFiles.keys()].find((path) =>
+      path.startsWith('/.tau/composers/library/attachments/'),
     );
-    expect(marketing.result.current.attachmentSource).toBe('/.tau/composers/marketing/attachments');
+    expect(library.result.current.attachmentSource).toBe('/.tau/composers/library/attachments');
     expect(home.result.current.attachmentSource).toBeUndefined();
 
-    await act(async () => marketing.result.current.consumeDraft());
+    await act(async () => library.result.current.consumeDraft());
 
-    expect(marketingBytes).toBeDefined();
-    expect(harness.homeFiles.has(marketingBytes!)).toBe(false);
+    expect(libraryBytes).toBeDefined();
+    expect(harness.homeFiles.has(libraryBytes!)).toBe(false);
     expect(homeAttachmentNames()).toHaveLength(1);
-    expect(harness.homeFiles.has(libraryBytes)).toBe(true);
+    expect(harness.homeFiles.has(otherBytes)).toBe(true);
   });
 
   // New (W6): once a project has been created from the draft, consuming it releases the draft-stage copies.

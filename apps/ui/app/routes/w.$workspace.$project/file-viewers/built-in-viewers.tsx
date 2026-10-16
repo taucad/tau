@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { ChatEditorCodeViewer } from '#routes/w.$workspace.$project/chat-editor-code-viewer.js';
 import { ChatEditorMarkdownViewer } from '#routes/w.$workspace.$project/chat-editor-markdown-viewer.js';
-import { ChatEditorPlanViewer } from '#routes/w.$workspace.$project/chat-editor-plan-viewer.js';
 import { ChatEditorBinaryWarning } from '#routes/w.$workspace.$project/chat-editor-binary-warning.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { createViewer } from '#routes/w.$workspace.$project/file-viewers/create-viewer.js';
@@ -28,17 +27,6 @@ const textViewerProperties = (request: FileViewerRenderRequest): ChatEditorViewe
     readOnly: request.readOnly,
   };
 };
-
-const planViewer = createViewer({
-  id: 'plan',
-  requestsFiles: true,
-  match: (probe) =>
-    probe.content.kind === 'text' && probe.options.planModeEnabled && probe.path.endsWith('.plan.md')
-      ? true
-      : undefined,
-  render: (request): ReactNode =>
-    request.renderPane({ body: <ChatEditorPlanViewer {...textViewerProperties(request)} /> }),
-});
 
 const markdownViewer = createViewer({
   id: 'markdown',
@@ -111,7 +99,6 @@ const binaryViewer = createViewer({
 });
 
 export const fileViewerRouter = createViewerRouter([
-  planViewer,
   markdownViewer,
   nativeImageViewer,
   printerViewer,

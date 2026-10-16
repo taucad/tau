@@ -16,6 +16,7 @@ import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { Commands } from '#components/layout/command-palette.js';
+import { DesktopUpdate } from '#components/nav/desktop-update.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -86,6 +87,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           </div>
         </div>
       </SidebarContent>
+      {desktopTarget ? <DesktopUpdate /> : undefined}
       <SidebarFooter className='border-t p-1'>
         <NavUser />
       </SidebarFooter>

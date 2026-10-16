@@ -219,7 +219,7 @@ export function GeneralSettings(): React.JSX.Element {
                       Your plan never trains on your data — prompts and designs are excluded from AI training as part of
                       your subscription.{' '}
                       <a
-                        href={legalUrl('privacy#9.2.1')}
+                        href={legalUrl('privacy#9.2.1-ai-service-improvement')}
                         target='_blank'
                         rel='noopener noreferrer'
                         className='underline hover:text-foreground'
@@ -249,7 +249,7 @@ export function GeneralSettings(): React.JSX.Element {
                           <>
                             Your prompts and generated designs will be stored and used to improve our AI features.{' '}
                             <a
-                              href={legalUrl('privacy#9.2.1')}
+                              href={legalUrl('privacy#9.2.1-ai-service-improvement')}
                               target='_blank'
                               rel='noopener noreferrer'
                               className='underline hover:text-foreground'
@@ -261,7 +261,7 @@ export function GeneralSettings(): React.JSX.Element {
                           <>
                             No training. Your data is not used to improve AI features.{' '}
                             <a
-                              href={legalUrl('privacy#9.2.1')}
+                              href={legalUrl('privacy#9.2.1-ai-service-improvement')}
                               target='_blank'
                               rel='noopener noreferrer'
                               className='underline hover:text-foreground'

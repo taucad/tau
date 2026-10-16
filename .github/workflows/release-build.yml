@@ -298,6 +298,8 @@ jobs:
       name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
     env:
       GEOSPEC_WORKERS: 1
+      # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
+      POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos-${{ matrix.arch }}
@@ -644,6 +646,8 @@ jobs:
       contents: read
       actions: read
     env:
+      # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
+      POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}

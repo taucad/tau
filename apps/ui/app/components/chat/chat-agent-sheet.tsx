@@ -5,36 +5,26 @@
  * The trigger reads as the configuration — the model's glyph (an external
  * agent's own), the model, the level a step lighter, Fast mode, a 12 px
  * chevron. It opens a settings sheet: the agent as a row when there is a
- * choice (Q18) and the chosen model as a row, then Reasoning, a notice when
- * something would stop the next turn, and one Settings disclosure holding the
- * agent's own switches and choices and where Tau runs. The agent row drills
- * into the agents, grouped by host; the model row into that agent's models,
- * in the same card. Choosing a model returns to the sheet with that model's
- * settings, so a level is only ever set on the model in use.
+ * choice (Q18), the chosen model as a row and its effort as a row (E1), a
+ * notice when something would stop the next turn, and a Settings row for the
+ * agent's own switches and choices and where Tau runs (E7). Each row drills
+ * into its own page in the same card: the agents, grouped by host; that
+ * agent's models; that model's effort levels (E2); the settings (E7). Choosing a model returns to
+ * the sheet with that model's settings, so a level is only ever set on the
+ * model in use.
  *
  * Tau's level is `TauAgentExecution.effort`; an external agent's is its own
  * `thought_level` option, written verbatim and never translated (VI3).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  Bot,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CircleAlert,
-  Copy,
-  Plus,
-  Settings2,
-  Zap,
-} from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
+import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
   Command,
   CommandEmpty,
@@ -54,14 +44,11 @@ import { cn } from '@taucad/ui/utils/cn';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
 import { Tau } from '#components/icons/tau.js';
-import { ThoughtBubble } from '#components/icons/thought-bubble.js';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
@@ -72,7 +59,8 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/external-agent.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { groupModelsByTier } from '#utils/model-tier.js';
+import { groupModels } from '#utils/model-groups.js';
+import { ModelPinButton } from '#components/chat/model-pin-button.js';
 import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
 
@@ -377,14 +365,18 @@ const useSheetAgents = (
 
 type SelectOption = Extract<AgentConfigOption, { readonly type: 'select' }>;
 
+/** E3: a level carries the agent's own words for it, drawn under its name on the effort page. */
+type Level = Option & { readonly description?: string | undefined };
+
 type SheetModel = {
   readonly glyph: React.ReactNode;
   readonly name: string;
-  readonly levels: readonly Option[];
-  readonly level: Option | undefined;
+  readonly levels: readonly Level[];
+  readonly level: Level | undefined;
   /** An agent's own "Default" effort means the agent decides, so the trigger does not print it. */
   readonly isLevelShown: boolean;
-  readonly note: string | undefined;
+  /** E4: the level the model runs at by default, badged Recommended; external agents name none. */
+  readonly recommended: string | undefined;
   readonly setLevel: (id: string) => void;
   /** The agent's own switches and choices, one list, drawn under Settings. */
   readonly settings: readonly Setting[];
@@ -503,12 +495,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
       levels,
       level,
       isLevelShown: level !== undefined,
-      note:
-        level === undefined || defaultLevel === undefined
-          ? undefined
-          : level.id === defaultLevel
-            ? 'The default for this model'
-            : `${reasoningLevelNames[defaultLevel]} is the default`,
+      recommended: defaultLevel,
       setLevel: (id) => {
         setActiveEffort(id as ReasoningLevel);
       },
@@ -521,7 +508,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   const thought = configOptionOf(agentConfig, 'thought_level');
   const levels = thought
     ? configValues(thought)
-        .map((value) => ({ id: value.value, name: value.name }))
+        .map((value) => ({ id: value.value, name: value.name, description: value.description ?? undefined }))
         .toSorted((left, right) => acpReasoningOrder.indexOf(left.id) - acpReasoningOrder.indexOf(right.id))
     : [];
   const thoughtValue = thought ? agentConfig.valueOf(thought) : undefined;
@@ -534,9 +521,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
     levels,
     level,
     isLevelShown: level !== undefined && !isDefaultValue(level),
-    note: thought
-      ? (configValues(thought).find((value) => value.value === thoughtValue)?.description ?? undefined)
-      : undefined,
+    recommended: undefined,
     setLevel: (id) => {
       if (thought) {
         agentConfig.select(thought.id, id);
@@ -552,7 +537,7 @@ const triggerName = (current: SheetAgent, model: SheetModel): string =>
   [
     current.kind === 'acp' ? current.name : undefined,
     model.name,
-    model.isLevelShown && model.level ? `reasoning ${model.level.name}` : undefined,
+    model.isLevelShown && model.level ? `effort ${model.level.name}` : undefined, // E9: one name, Effort
     model.isFast ? 'Fast mode' : undefined,
   ]
     .filter(Boolean)
@@ -562,27 +547,89 @@ const triggerName = (current: SheetAgent, model: SheetModel): string =>
 // The sheet's sections
 // ---------------------------------------------------------------------------
 
-function ReasoningSection({ label, model }: { readonly label: string; readonly model: SheetModel }): React.JSX.Element {
+/** E6: what a level trades, at the foot of the effort page. Tau bills credits; an external agent spends its own plan. */
+const effortLede = (agent: SheetAgent): string =>
+  `Higher effort means more thorough responses, but takes longer and uses ${
+    agent.kind === 'tau' ? 'your credits' : `your ${agent.displayName} limits`
+  } faster.`;
+
+/**
+ * E2: the effort page — one row per level, ascending, in the model list's
+ * rows: the level's name, Recommended on the model's default (E4), the
+ * agent's own description under it (E3), a check on the level in use. The
+ * lede follows the last level (E6). It opens on the level in use; choosing
+ * one returns to the sheet.
+ */
+function EffortList({
+  agent,
+  model,
+  onChoose,
+  onBack,
+}: {
+  readonly agent: SheetAgent;
+  readonly model: SheetModel;
+  readonly onChoose: (id: string) => void;
+  readonly onBack: () => void;
+}): React.JSX.Element {
+  const rootRef = useRef<HTMLDivElement>(null);
+  /* No search field to take focus, so the list itself does; ↑↓ and Enter work at once. */
+  useEffect(() => {
+    rootRef.current?.focus();
+  }, []);
   return (
-    <section aria-label={label} data-slot='reasoning-section' className='space-y-2 border-t px-4 pt-3 pb-3.5'>
-      <div className='flex items-center justify-between gap-2'>
-        <h5 className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
-          <ThoughtBubble aria-hidden='true' className='size-3.5' />
-          Reasoning
-        </h5>
-        <KeyShortcut variant='ghost'>← →</KeyShortcut>
-      </div>
-      <SegmentedControl
-        key={model.levels.map((level) => level.id).join(',')}
-        label={label}
-        value={model.level?.id}
-        options={model.levels}
-        onChange={model.setLevel}
-      />
-      <p data-slot='reasoning-note' className='h-4 truncate text-xs text-muted-foreground'>
-        {model.note}
+    <Command
+      ref={rootRef}
+      label={`Effort for ${model.name}`}
+      data-slot='effort-list'
+      className='min-h-0 flex-1 bg-transparent outline-hidden'
+      defaultValue={model.level?.id}
+      onKeyDown={backOnEmpty('', onBack)}
+    >
+      <CommandList className='max-h-none min-h-0 flex-1'>
+        <CommandGroup>
+          {model.levels.map((level) => {
+            const isInUse = level.id === model.level?.id;
+            const isRecommended = level.id === model.recommended;
+            return (
+              <CommandItem
+                key={level.id}
+                value={level.id}
+                keywords={[level.name]}
+                disabled={level.isDisabled}
+                aria-label={[level.name, isRecommended ? 'recommended' : undefined, level.description]
+                  .filter(Boolean)
+                  .join(', ')}
+                onSelect={() => {
+                  onChoose(level.id);
+                }}
+              >
+                <span className='flex w-full min-w-0 items-center justify-between gap-2'>
+                  <span className='flex min-w-0 flex-col'>
+                    <span className='flex min-w-0 items-center gap-2'>
+                      <span className='truncate'>{level.name}</span>
+                      {isRecommended ? (
+                        <Badge variant='secondary' data-slot='effort-recommended' className='py-0 font-normal'>
+                          Recommended
+                        </Badge>
+                      ) : null}
+                    </span>
+                    {/* Agent-authored text: rendered as text, never translated (VI3). */}
+                    {level.description ? (
+                      <span className='truncate text-xs text-muted-foreground'>{level.description}</span>
+                    ) : null}
+                  </span>
+                  {isInUse ? <Check aria-hidden='true' /> : null}
+                </span>
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+      </CommandList>
+      {/* E6: the lede sits under the last level, as the model list's footer does, so the levels open right under Back. */}
+      <p data-slot='effort-lede' className='border-t px-4 py-2 text-xs text-muted-foreground'>
+        {effortLede(agent)}
       </p>
-    </section>
+    </Command>
   );
 }
 
@@ -619,18 +666,7 @@ function SettingRow({ setting }: { readonly setting: Setting }): React.JSX.Eleme
       {setting.note}
     </p>
   ) : null;
-  /* Two values fit beside the name; more take the row's width. The note always takes the full width. */
-  if (setting.options.length <= 2) {
-    return (
-      <section aria-label={setting.name} className='px-4 py-2'>
-        <span className='flex items-center justify-between gap-3'>
-          <span className='min-w-0 truncate text-xs font-medium'>{setting.name}</span>
-          <span className='w-32 shrink-0'>{control}</span>
-        </span>
-        {note}
-      </section>
-    );
-  }
+  /* E8: every choice takes the page's width, so no value is cut off beside its name. */
   return (
     <section aria-label={setting.name} className='space-y-1.5 px-4 py-2'>
       <span className='block text-xs font-medium'>{setting.name}</span>
@@ -640,7 +676,7 @@ function SettingRow({ setting }: { readonly setting: Setting }): React.JSX.Eleme
   );
 }
 
-/** What the closed row names — every setting not at its default, so a hidden Plan or Fast mode still shows. */
+/** What the Settings row names — every setting not at its default, so a hidden Plan or Fast mode still shows. */
 const changedSettings = (settings: readonly Setting[]): string =>
   settings
     .flatMap((setting) => {
@@ -655,39 +691,25 @@ const changedSettings = (settings: readonly Setting[]): string =>
     .join(' · ');
 
 /**
- * The agent's switches and choices behind one thin row at the foot of the
- * sheet. Its open state is a remembered preference. The sheet draws no row
- * when there are no settings.
+ * E7: the agent's switches and choices on a page of their own, opened from
+ * the Settings row like every other row. Focus lands on the first control.
  */
-function SettingsDisclosure({
-  settings,
-  isOpen,
-  onOpenChange,
-}: {
-  readonly settings: readonly Setting[];
-  readonly isOpen: boolean;
-  readonly onOpenChange: (isOpen: boolean) => void;
-}): React.JSX.Element {
-  const summary = isOpen ? '' : changedSettings(settings);
+function SettingsPage({ settings }: { readonly settings: readonly Setting[] }): React.JSX.Element {
+  const pageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    /* The first setting's own control: its switch or its chosen value, not the first segment in it. */
+    const page = pageRef.current;
+    (
+      page?.querySelector<HTMLElement>('[role=switch], [role=tab][data-state=active]:not([disabled])') ??
+      page?.querySelector<HTMLElement>('button')
+    )?.focus();
+  }, []);
   return (
-    <Collapsible open={isOpen} data-slot='settings-disclosure' className='border-t' onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className={cn(sheetRowClass, 'group/settings m-1 gap-2')}>
-        <Settings2 aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
-        <span className='shrink-0 text-muted-foreground'>Settings</span>
-        <span data-slot='sheet-settings-summary' className='ml-auto min-w-0 truncate text-xs'>
-          {summary}
-        </span>
-        <ChevronDown
-          aria-hidden='true'
-          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/settings:rotate-180 motion-reduce:transition-none'
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className='pb-1'>
-        {settings.map((setting) => (
-          <SettingRow key={setting.id} setting={setting} />
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
+    <div ref={pageRef} data-slot='settings-page' className='min-h-0 flex-1 overflow-y-auto py-1'>
+      {settings.map((setting) => (
+        <SettingRow key={setting.id} setting={setting} />
+      ))}
+    </div>
   );
 }
 
@@ -824,17 +846,17 @@ function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly ref
 // The model list
 // ---------------------------------------------------------------------------
 
-/** Tau's catalog grouped as shipped — Fast, Balanced, Frontier — including the chat's model when the user hid it. */
-const useTauModelGroups = (selectedId: string): ReadonlyArray<{ readonly name: string; readonly items: Model[] }> => {
-  const { data: allModels = [], availableModels } = useModels();
+/** Tau's catalog grouped as approach A — pinned, by maker, this computer — including the chat's model when the user hid it. */
+const useTauModelGroups = (selectedId: string): ReturnType<typeof groupModels<Model>> => {
+  const { data: allModels = [], availableModels, pinnedIds } = useModels();
   return useMemo(() => {
     const current = allModels.find((entry) => entry.id === selectedId);
     const visible =
       current && !availableModels.some((entry) => entry.id === current.id)
         ? [...availableModels, current]
         : availableModels;
-    return groupModelsByTier(visible);
-  }, [allModels, availableModels, selectedId]);
+    return groupModels(visible, pinnedIds);
+  }, [allModels, availableModels, selectedId, pinnedIds]);
 };
 
 function ModelRow({
@@ -842,11 +864,14 @@ function ModelRow({
   name,
   isInUse,
   level,
+  pinned,
 }: {
   readonly glyph: React.ReactNode;
   readonly name: string;
   readonly isInUse: boolean;
   readonly level: string | undefined;
+  /** F1: the row's pin button, when the list is pinnable. */
+  readonly pinned?: { readonly isOn: boolean; readonly toggle: () => void } | undefined;
 }): React.JSX.Element {
   return (
     <span className='flex w-full min-w-0 items-center justify-between gap-2'>
@@ -854,12 +879,27 @@ function ModelRow({
         {glyph}
         <span className='truncate'>{name}</span>
       </span>
-      {isInUse ? (
-        <span className='flex shrink-0 items-center gap-2'>
-          {level ? <span className='text-xs text-muted-foreground'>{level}</span> : null}
-          <Check aria-hidden='true' />
-        </span>
-      ) : null}
+      <span className='flex shrink-0 items-center gap-2'>
+        {isInUse ? (
+          <>
+            {level ? <span className='text-xs text-muted-foreground'>{level}</span> : null}
+            <Check aria-hidden='true' />
+          </>
+        ) : null}
+        {/* F1: pulled into the row's padding so the row stays as tall; shown on a pinned row, else while highlighted. */}
+        {pinned ? (
+          <ModelPinButton
+            name={name}
+            isOn={pinned.isOn}
+            tabIndex={-1}
+            className={cn(
+              '-my-1 -mr-1',
+              !pinned.isOn && 'opacity-0 group-data-[selected=true]/row:opacity-100 pointer-coarse:opacity-100',
+            )}
+            onToggle={pinned.toggle}
+          />
+        ) : null}
+      </span>
     </span>
   );
 }
@@ -911,6 +951,29 @@ function ModelList({
     setQuery(next);
   };
   const tauGroups = useTauModelGroups(modelId);
+  /* F1: pinned models, read and written where the model overrides live (F2). */
+  const { pinnedIds, setPinned } = useModels();
+  const pinOf = (entry: Model): { readonly isOn: boolean; readonly toggle: () => void } => ({
+    isOn: pinnedIds.includes(entry.id),
+    toggle: () => {
+      setPinned(entry, !pinnedIds.includes(entry.id));
+    },
+  });
+  /* F1: Shift+Enter toggles the highlighted model's pin; Enter alone still chooses it (cmdk defers to a prevented key). */
+  const onKeyDown = (event: React.KeyboardEvent): void => {
+    if (event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
+      const highlighted = event.currentTarget.querySelector<HTMLElement>('[cmdk-item][data-selected=true]');
+      const entry = tauGroups
+        .flatMap((group) => group.items)
+        .find((model) => model.id === highlighted?.dataset['value']);
+      if (entry) {
+        event.preventDefault();
+        setPinned(entry, !pinnedIds.includes(entry.id));
+      }
+      return;
+    }
+    backOnEmpty(query, onBack)(event);
+  };
   const selectedAcpModel = execution.kind === 'acp' ? execution.model : undefined;
   const inUseValue =
     current.key === agent.key
@@ -929,7 +992,7 @@ function ModelList({
       className='min-h-0 flex-1 bg-transparent'
       /* Open on the model in use, as the agent list opens on the agent in use. */
       defaultValue={inUseValue}
-      onKeyDown={backOnEmpty(query, onBack)}
+      onKeyDown={onKeyDown}
     >
       <CommandInput
         autoFocus
@@ -952,6 +1015,8 @@ function ModelList({
                   <CommandItem
                     key={entry.id}
                     value={entry.id}
+                    data-value={entry.id}
+                    className='group/row'
                     keywords={[entry.name, entry.provider.name, group.name]}
                     onSelect={() => {
                       onChoose(agent, entry.id);
@@ -962,6 +1027,7 @@ function ModelList({
                       name={entry.name}
                       isInUse={isInUse}
                       level={isInUse ? sheetModel.level?.name : undefined}
+                      pinned={pinOf(entry)}
                     />
                   </CommandItem>
                 );
@@ -1117,15 +1183,13 @@ function AgentList({
 // The sheet and its trigger
 // ---------------------------------------------------------------------------
 
-/** Where the sheet takes focus when it opens: the chosen level, so ← → change it at once; else the model row. */
+/** E5: where the sheet takes focus when it opens — the Model row, now that no control there answers ← →. */
 const focusOnOpen = (surface: HTMLElement | undefined): void => {
-  const level = surface?.querySelector<HTMLElement>(
-    '[data-slot=reasoning-section] [role=tab][data-state=active]:not([disabled])',
-  );
-  (level ?? surface?.querySelector<HTMLElement>('[data-slot=sheet-model]'))?.focus();
+  surface?.querySelector<HTMLElement>('[data-slot=sheet-model]')?.focus();
 };
 
-type SheetView = 'settings' | 'agents' | 'models';
+/** E2: effort is a page of its own, as the agents and the models are. */
+type SheetView = 'settings' | 'agents' | 'models' | 'effort' | 'options'; // E7: 'options' is the Settings page
 
 function Sheet({
   agents,
@@ -1134,8 +1198,6 @@ function Sheet({
   placements,
   agentConfig,
   backRef,
-  isSettingsOpen,
-  onSettingsOpenChange,
 }: {
   readonly agents: readonly SheetAgent[];
   readonly current: SheetAgent;
@@ -1144,9 +1206,6 @@ function Sheet({
   readonly agentConfig: AgentConfig;
   /** Set while a sub-view is open, so Escape steps back instead of closing the sheet. */
   readonly backRef: React.RefObject<(() => void) | undefined>;
-  /** Held by the trigger as a preference, so the disclosure stays as the person left it. */
-  readonly isSettingsOpen: boolean;
-  readonly onSettingsOpenChange: (isOpen: boolean) => void;
 }): React.JSX.Element {
   const {
     model: { setActiveModel },
@@ -1161,22 +1220,22 @@ function Sheet({
   const [browseKey, setBrowseKey] = useState(current.key);
   const [isFromAgents, setIsFromAgents] = useState(false);
   const [hasNavigated, setHasNavigated] = useState(false);
-  /* Back returns focus to the row the person left from; a choice, to the chosen level. */
-  const returnTo = useRef<'agent' | 'model' | 'level'>('level');
+  /* Back, or a choice, returns focus to the row the person left from (E5). */
+  const returnTo = useRef<'agent' | 'model' | 'effort' | 'options'>('model');
   const surfaceRef = useRef<HTMLDivElement>(null);
   const agentRowRef = useRef<HTMLButtonElement>(null);
   const modelRowRef = useRef<HTMLButtonElement>(null);
+  const effortRowRef = useRef<HTMLButtonElement>(null);
+  const optionsRowRef = useRef<HTMLButtonElement>(null);
   const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {
       return;
     }
-    if (returnTo.current === 'level') {
-      focusOnOpen(surfaceRef.current ?? undefined);
-    } else {
-      (returnTo.current === 'agent' ? agentRowRef : modelRowRef).current?.focus();
-    }
+    (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
+      returnTo.current
+    ].current?.focus();
   }, [hasNavigated, view]);
   const go = (next: SheetView): void => {
     setHasNavigated(true);
@@ -1223,12 +1282,11 @@ function Sheet({
       }
       setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });
     }
-    returnTo.current = 'level';
+    returnTo.current = 'model';
     setIsFromAgents(false);
     go('settings');
   };
 
-  const reasoningLabel = `Reasoning for ${current.kind === 'acp' ? `${current.name} ` : ''}${sheetModel.name}`;
   const rowClass = sheetRowClass;
   return (
     <div ref={surfaceRef} data-slot='agent-sheet' className='w-full overflow-hidden'>
@@ -1283,16 +1341,54 @@ function Sheet({
               </span>
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
+            {/* E1: Effort is a row like Model — label left, the level right — and drills into its page. */}
+            {sheetModel.levels.length > 1 ? (
+              <button
+                ref={effortRowRef}
+                type='button'
+                data-slot='sheet-effort'
+                aria-label={`Effort for ${current.kind === 'acp' ? `${current.name} ` : ''}${sheetModel.name}: ${sheetModel.level?.name ?? 'not set'}. Change`}
+                className={cn(rowClass, 'w-full gap-2')}
+                onClick={() => {
+                  returnTo.current = 'effort';
+                  go('effort');
+                }}
+              >
+                <span className='shrink-0 text-muted-foreground'>Effort</span>
+                <span data-slot='sheet-effort-value' className='ml-auto min-w-0 truncate'>
+                  {sheetModel.level?.name}
+                </span>
+                <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
+              </button>
+            ) : null}
           </div>
-          {sheetModel.levels.length > 1 ? <ReasoningSection label={reasoningLabel} model={sheetModel} /> : null}
           {runsOn.notice ? <Notice text={runsOn.notice} /> : null}
+          {/* E7: Settings is a row like the others, naming what is not at its default, and opens its page. */}
           {settings.length > 0 ? (
-            <SettingsDisclosure settings={settings} isOpen={isSettingsOpen} onOpenChange={onSettingsOpenChange} />
+            <div className='flex flex-col border-t p-1'>
+              <button
+                ref={optionsRowRef}
+                type='button'
+                data-slot='sheet-options'
+                aria-label={['Settings', changedSettings(settings)].filter(Boolean).join(': ') + '. Change'}
+                className={cn(rowClass, 'w-full gap-2')}
+                onClick={() => {
+                  returnTo.current = 'options';
+                  go('options');
+                }}
+              >
+                <span className='shrink-0 text-muted-foreground'>Settings</span>
+                <span data-slot='sheet-settings-summary' className='ml-auto min-w-0 truncate'>
+                  {changedSettings(settings)}
+                </span>
+                <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
+              </button>
+            </div>
           ) : null}
         </div>
       ) : (
         <div
-          data-slot={view === 'agents' ? 'sheet-agents' : 'sheet-models'}
+          data-slot={`sheet-${view}`}
           /* Both lists are as tall as their rows, up to the cap, then scroll. */
           className='flex max-h-[min(25rem,70vh)] flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
         >
@@ -1305,10 +1401,30 @@ function Sheet({
               onClick={back}
             >
               <ChevronLeft aria-hidden='true' className='size-4 shrink-0' />
-              <span className='truncate'>{view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}</span>
+              <span className='truncate'>
+                {view === 'models' && isFromAgents
+                  ? 'Agents'
+                  : view === 'effort'
+                    ? 'Effort'
+                    : view === 'options'
+                      ? 'Settings'
+                      : sheetModel.name}
+              </span>
             </button>
           </div>
-          {view === 'agents' ? (
+          {view === 'options' ? (
+            <SettingsPage settings={settings} />
+          ) : view === 'effort' ? (
+            <EffortList
+              agent={current}
+              model={sheetModel}
+              onChoose={(id) => {
+                sheetModel.setLevel(id);
+                go('settings');
+              }}
+              onBack={back}
+            />
+          ) : view === 'agents' ? (
             <AgentList
               agents={agents}
               current={current}
@@ -1356,8 +1472,6 @@ export function ChatAgentSheet({
   readonly enableShortcut?: boolean | (() => boolean);
 }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
-  /* Open or closed, Settings is a preference: it survives closing the sheet and reloading the page. */
-  const [isSettingsOpen, setIsSettingsOpen] = useCookie(cookieName.chatOpAgentSettings, false);
   const isMobile = useIsMobile();
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
@@ -1404,8 +1518,6 @@ export function ChatAgentSheet({
       placements={placements}
       agentConfig={agentConfig}
       backRef={backRef}
-      isSettingsOpen={isSettingsOpen}
-      onSettingsOpenChange={setIsSettingsOpen}
     />
   );
   const onEscapeKeyDown = (event: KeyboardEvent): void => {

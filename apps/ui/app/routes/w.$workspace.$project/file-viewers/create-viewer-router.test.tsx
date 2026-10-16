@@ -9,7 +9,7 @@ const probe = (kind: 'text' | 'binary'): FileViewerProbe => ({
   name: 'asset',
   content:
     kind === 'text' ? { kind, bytes: new Uint8Array([65]) } : { kind, size: 1, head: new Uint8Array([0]), revision: 1 },
-  options: { planModeEnabled: false, readOnly: false },
+  options: { readOnly: false },
 });
 
 const textFallback = createViewer({

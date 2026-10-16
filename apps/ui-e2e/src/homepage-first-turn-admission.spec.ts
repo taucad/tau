@@ -32,7 +32,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { dismissCookies, pdfModelName, selectModel } from '#support/chat-attachments.js';
+import { pdfModelName, selectModel } from '#support/chat-attachments.js';
 import { continueAction, gatewayRequestCount, reply } from '#support/chat-admission.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
 
@@ -68,7 +68,6 @@ test('starts the homepage seed once across a reload before the provider answers'
   await target.installAgentHostGatewayFixture([reply(answer, { gated: true })]);
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate('/');
-  await dismissCookies();
   await target.expectVisible(selectors.getByCss(composer).first(), 60_000);
   await selectModel(pdfModelName);
   await target.holdNextAgentHostGatewayRequest();

@@ -256,15 +256,15 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
-  it('should link Terms to the terms page of the deployment serving the app', async () => {
+  it('should link Terms to the public website from a build that runs none', async () => {
     renderModal();
 
     const terms = await screen.findByRole('link', { name: 'Terms' });
-    expect(terms).toHaveAttribute('href', '/legal/terms');
+    expect(terms).toHaveAttribute('href', 'https://tau.new/legal/terms');
     expect(terms).toHaveAttribute('target', '_blank');
   });
 
-  it('should link Terms to the bound web deployment on desktop, which ships no legal pages', async () => {
+  it('should link Terms to the website of the deployment the app is bound to', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     globalThis.window.ENV = {
       ...clientEnvironment,

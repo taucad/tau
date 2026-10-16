@@ -19,11 +19,22 @@ describe('resolveMarketingUrl', () => {
     expect(resolve('/')).toBe(`${origin}/`);
     expect(resolve('/pricing')).toBe(`${origin}/pricing`);
     expect(resolve('/use-cases/engineering/')).toBe(`${origin}/use-cases/engineering/`);
+    expect(resolve('/vision')).toBe(`${origin}/vision`);
+    expect(resolve('/vision/')).toBe(`${origin}/vision/`);
     expect(resolve('/_www/assets/site.css')).toBe(`${origin}/_www/assets/site.css`);
   });
 
+  it('should serve the legal documents the app and email link to from the marketing origin', () => {
+    expect(resolve('/legal')).toBe(`${origin}/legal`);
+    expect(resolve('/legal/privacy')).toBe(`${origin}/legal/privacy`);
+    expect(resolve('/legal/open-source/')).toBe(`${origin}/legal/open-source/`);
+    expect(resolve('/legal/privacy.data?_routes=www-legal-privacy')).toBe(
+      `${origin}/legal/privacy.data?_routes=www-legal-privacy`,
+    );
+  });
+
   it('should keep app routes, including look-alike prefixes, on the app', () => {
-    for (const path of ['/projects', '/vision', '/legal/privacy', '/settings/billing', '/pricingx', '/assets/a.js']) {
+    for (const path of ['/projects', '/visionary', '/legalese', '/settings/billing', '/pricingx', '/assets/a.js']) {
       expect(resolve(path)).toBeUndefined();
     }
   });
@@ -40,8 +51,6 @@ describe('resolveMarketingUrl', () => {
     expect(resolve('/_root.data')).toBeUndefined();
     expect(resolve('/_root.data?_routes=root,routes/home')).toBeUndefined();
     expect(resolve('/vision.data?_routes=www-vision')).toBe(`${origin}/vision.data?_routes=www-vision`);
-    expect(resolve('/vision.data')).toBeUndefined();
-    expect(resolve('/vision/')).toBe(`${origin}/vision/`);
     expect(resolve('/sitemap-marketing.xml')).toBe(`${origin}/sitemap.xml`);
   });
 
@@ -74,7 +83,9 @@ describe('config', () => {
     expect(config.path).toContain('/');
     expect(config.path).toContain('/blog');
     expect(config.path).toContain('/blog/*');
-    expect(config.path).not.toContain('/vision');
+    expect(config.path).toContain('/legal');
+    expect(config.path).toContain('/legal/*');
+    expect(config.path).toContain('/vision');
   });
 });
 

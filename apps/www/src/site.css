@@ -520,14 +520,22 @@ main > .band:first-child::before {
   place-items: center;
   min-height: 0;
 }
-.hero-model .poster,
+/* The picture is the grid item, sized like the drafting and the live canvas so the poster
+   registers with both; the poster fills it. */
+.hero-model picture,
 .hero-stage .stage-canvas {
   width: min(86%, 37rem);
   aspect-ratio: 1;
+}
+.hero-model .poster,
+.hero-stage .stage-canvas {
   transition: opacity var(--medium) var(--ease);
 }
 .hero-model .poster {
   position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .hero-stage .stage-canvas {
   position: absolute;

@@ -117,7 +117,11 @@ describe('ManifoldWorker', () => {
       context,
     );
     const render = async (value: typeof handle) => {
-      const projected = await definition.render!({ handle: value, view: 'model', options: {} }, runtime, context);
+      const projected = await definition.render!(
+        { handle: value, view: 'model', options: { tessellation: 'medium' } },
+        runtime,
+        context,
+      );
       return projected.content;
     };
     const exportModel = async (value: typeof handle, coordinateSystem: 'y-up' | 'z-up') => {
@@ -128,6 +132,7 @@ describe('ManifoldWorker', () => {
           options: {
             coordinateSystem,
             unit: { length: coordinateSystem === 'y-up' ? 'meter' : 'millimeter' },
+            tessellation: 'high',
           },
         },
         runtime,

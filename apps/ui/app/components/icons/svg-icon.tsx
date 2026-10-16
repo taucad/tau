@@ -44,8 +44,8 @@ export function SvgIcon({
   const aliasTarget = (iconAliases as Record<string, SvgIcons | undefined>)[id];
   const resolvedIconId: SvgIcons = aliasTarget ?? (id as SvgIcons);
 
-  // Same-document `<use>` reference: the sprite is inlined once at the app
-  // shell via `<SvgSpriteMount />` (mounted in `root.tsx`), so every browser
+  // Same-document `<use>` reference: the sprite is injected once per document
+  // by `<SvgSpriteMount />` (mounted in `root-layout.tsx`), so every browser
   // (including Safari) materialises the symbol's `<defs>` correctly.
   return (
     <svg {...properties} className={className} viewBox='0 0 56 56'>

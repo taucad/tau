@@ -1,8 +1,8 @@
 # SVG Icons
 
-SVG icons are packed into a single sprite (`generated/sprite.svg`) and inlined once
-at the app shell via `<SvgSpriteMount />` (mounted in
-[`apps/ui/app/root.tsx`](../../root.tsx)). Every `<SvgIcon id="...">` then renders
+SVG icons are packed into a single sprite (`generated/sprite.svg`), served as a
+hashed asset and injected once per document by `<SvgSpriteMount />` (mounted in
+[`apps/ui/app/root-layout.tsx`](../../root-layout.tsx)). Every `<SvgIcon id="...">` then renders
 a same-document `<use href="#id">` reference, so all browsers — including Safari —
 correctly materialise the symbol's `<filter>`, `<mask>`, and `<linearGradient>`
 definitions.

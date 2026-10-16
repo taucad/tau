@@ -58,6 +58,7 @@ describe('remotes', () => {
     expect(remoteOf('tau', 'https://github.com/acme/parts.git')).toStrictEqual({
       name: 'tau',
       url: 'https://github.com/acme/parts.git',
+      provider: 'github',
       kind: 'tau',
     });
     expect(remoteOf('origin', 'https://api.tau.new/v1/git/p1.git').kind).toBe('git');

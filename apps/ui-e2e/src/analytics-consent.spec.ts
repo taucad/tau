@@ -48,22 +48,54 @@ const postHogRequestCount = async (): Promise<number> => {
   return summary.requests.length;
 };
 
-test('requires a reversible web analytics choice and remembers it', async () => {
+/**
+ * Record a decision as the marketing site does: it owns the consent UI and writes the shared cookie on this
+ * hostname. Focus prompts the app to re-read it, as returning from a website tab would.
+ */
+const decide = async (status: 'accepted' | 'declined'): Promise<void> => {
+  await target.addCookies([
+    {
+      name: consentCookieName,
+      value: encodeURIComponent(JSON.stringify({ status, version: 1 })),
+      url: new URL('/', await target.currentUrl()).toString(),
+    },
+  ]);
+  await target.evaluate(() => {
+    globalThis.dispatchEvent(new Event('focus'));
+  });
+};
+
+test('has no consent UI and applies only the decision recorded by the website', async () => {
+  await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.expectVisible(selectors.getByRole('heading', { name: 'Cookies', exact: true }));
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
+  expect(await hasCookiePrompt()).toBe(false);
   expect(await posthogState()).toEqual({ cookies: [], storage: [], requests: [] });
 
-  await target.click(selectors.getByRole('button', { name: 'Decline', exact: true }));
-  await expect.poll(consentStatus).toBe('declined');
+  await decide('declined');
+  await target.reload();
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
+  expect(await hasCookiePrompt()).toBe(false);
   expect(await posthogState()).toEqual({ cookies: [], storage: [], requests: [] });
 
-  await target.navigate('/legal/cookies#preferences');
+  await decide('accepted');
+  await expect.poll(storedIdentifiers).toBeGreaterThan(0);
+});
+
+test('changes the shared decision from Help → Cookie preferences', async () => {
+  await target.navigate('/');
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
+  await target.click(selectors.getByRole('button', { name: 'Help', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Cookie preferences' }));
   await target.click(selectors.getByRole('checkbox', { name: 'Product analytics' }));
-  await target.click(selectors.getByRole('button', { name: 'Save settings' }));
+  await target.click(selectors.getByRole('button', { name: 'Save', exact: true }));
   await expect.poll(consentStatus).toBe('accepted');
 
-  await target.reload();
-  await expect.poll(hasCookiePrompt).toBe(false);
+  await target.click(selectors.getByRole('button', { name: 'Help', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Cookie preferences' }));
+  await target.click(selectors.getByRole('checkbox', { name: 'Product analytics' }));
+  await target.click(selectors.getByRole('button', { name: 'Save', exact: true }));
+  await expect.poll(consentStatus).toBe('declined');
 });
 
 test('treats Global Privacy Control as a hard analytics decline', async () => {
@@ -84,9 +116,6 @@ test('treats Global Privacy Control as a hard analytics decline', async () => {
     await target.evaluate(() => (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl),
   ).toBe(true);
   expect(await hasCookiePrompt()).toBe(false);
-  await target.navigate('/legal/cookies#preferences');
-  await target.expectVisible(selectors.getByRole('checkbox', { name: 'Product analytics' }));
-  expect(await target.evaluate(() => document.querySelector<HTMLButtonElement>('#analytics')?.disabled)).toBe(true);
   expect(await posthogState()).toEqual({ cookies: [], storage: [], requests: [] });
 });
 
@@ -99,7 +128,7 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
       () => (globalThis as typeof globalThis & { ENV?: { POSTHOG_CLIENT_KEY?: string } }).ENV?.POSTHOG_CLIENT_KEY,
     ),
   ).toBe('phc_test_key');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(consentStatus).toBe('accepted');
   await target.evaluate((invitationToken: string) => {
     const publicControl = document.createElement('span');
@@ -151,7 +180,7 @@ test.each(['/invitations/Replay-Bearer-123', '/auth/sign-in?redirectTo=%2Finvita
 test('blocks replay from mounted editor, chat and file surfaces', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await target.navigate('/projects/new');
   await target.fill(selectors.getByCss('input#project-name'), 'Private workspace');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
@@ -218,30 +247,25 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
   }
 });
 
-test('withdraws an accepted first tab when a second tab saves preferences', async () => {
+test('withdraws an accepted tab when the website announces a decline', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(storedIdentifiers).toBeGreaterThan(0);
+  await target.addCookies([
+    {
+      name: consentCookieName,
+      value: encodeURIComponent(JSON.stringify({ status: 'declined', version: 1 })),
+      url: new URL('/', await target.currentUrl()).toString(),
+    },
+  ]);
+  // The website posts on this channel after writing the cookie; no focus change is needed.
   await target.evaluate(() => {
-    const messages: unknown[] = [];
-    (globalThis as typeof globalThis & { tauConsentMessages?: unknown[] }).tauConsentMessages = messages;
     const channel = new BroadcastChannel('tau-cookie-consent');
-    channel.addEventListener('message', ({ data }) => messages.push(data));
+    channel.postMessage('declined');
+    channel.close();
   });
-  await target.openSecondary('/legal/cookies#preferences');
-  await target.click(selectors.getByRole('checkbox', { name: 'Product analytics' }), undefined, 'secondary');
-  await target.click(selectors.getByRole('button', { name: 'Save settings' }), undefined, 'secondary');
-  await expect.poll(consentStatus).toBe('declined');
-  await expect
-    .poll(async () =>
-      target.evaluate(() =>
-        (globalThis as typeof globalThis & { tauConsentMessages?: unknown[] }).tauConsentMessages?.includes('declined'),
-      ),
-    )
-    .toBe(true);
   await expect.poll(storedIdentifiers).toBe(0);
-  await target.closeSecondary();
 });
 
 test('uses focus when an external cookie change has no channel message', async () => {
@@ -250,7 +274,7 @@ test('uses focus when an external cookie change has no channel message', async (
   });
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(storedIdentifiers).toBeGreaterThan(0);
   await target.addCookies([
     {
@@ -268,7 +292,7 @@ test('uses focus when an external cookie change has no channel message', async (
 test('stops the recorder on foreground consent-cookie removal without focus', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(storedIdentifiers).toBeGreaterThan(0);
   const before = await postHogRequestCount();
   await target.evaluate(async () => {
@@ -277,7 +301,7 @@ test('stops the recorder on foreground consent-cookie removal without focus', as
   await expect.poll(consentStatus).toBeUndefined();
   await expect.poll(storedIdentifiers).toBe(0);
   await target.evaluate(() => {
-    history.pushState({}, '', '/legal/cookies');
+    history.pushState({}, '', '/projects');
   });
   expect(await postHogRequestCount()).toBe(before);
 });
@@ -285,7 +309,7 @@ test('stops the recorder on foreground consent-cookie removal without focus', as
 test('delivers pageleave on an accepted document exit signal', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(async () => hasEvent('$pageview')).toBe(true);
   await target.evaluate(() => {
     globalThis.dispatchEvent(new Event('pagehide'));
@@ -303,7 +327,7 @@ test('delivers pageleave on an accepted document exit signal', async () => {
 test('keeps the application mounted through acceptance, withdrawal and re-acceptance', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
-  await target.expectVisible(selectors.getByRole('heading', { name: 'Cookies', exact: true }));
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
   const editor = selectors
     .getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]')
     .first();
@@ -329,38 +353,25 @@ test('keeps the application mounted through acceptance, withdrawal and re-accept
         draft.includes('unsaved design')
       );
     });
-  const writeDecision = async (status: 'accepted' | 'declined'): Promise<void> => {
-    await target.addCookies([
-      {
-        name: consentCookieName,
-        value: encodeURIComponent(JSON.stringify({ status, version: 1 })),
-        url: new URL('/', await target.currentUrl()).toString(),
-      },
-    ]);
-    await target.evaluate(() => {
-      globalThis.dispatchEvent(new Event('focus'));
-    });
-  };
-
-  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await decide('accepted');
   await expect.poll(consentStatus).toBe('accepted');
   expect(await stillMounted()).toBe(true);
   await expect.poll(async () => eventCount('$pageview')).toBe(1);
 
-  await writeDecision('declined');
+  await decide('declined');
   await expect.poll(hasCookiePrompt).toBe(false);
   expect(await stillMounted()).toBe(true);
 
-  await writeDecision('accepted');
+  await decide('accepted');
   expect(await stillMounted()).toBe(true);
   expect(await eventCount('$pageview')).toBe(1);
   await target.evaluate(() => {
-    history.pushState({}, '', '/legal/cookies');
+    history.pushState({}, '', '/projects');
   });
   await expect.poll(async () => eventCount('$pageview')).toBe(2);
   await expect.poll(storedIdentifiers, { timeout: 15_000 }).toBeGreaterThan(0);
 
-  await writeDecision('declined');
+  await decide('declined');
   await expect.poll(consentStatus).toBe('declined');
   await expect.poll(storedIdentifiers, { timeout: 15_000 }).toBe(0);
   expect(await stillMounted()).toBe(true);

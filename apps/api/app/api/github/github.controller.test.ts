@@ -9,6 +9,8 @@ import type { Auth } from 'better-auth';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { GithubController } from '#api/github/github.controller.js';
+import { GithubGistController } from '#api/github/github-gist.controller.js';
+import { GithubGistService } from '#api/github/github-gist.service.js';
 import { GithubService } from '#api/github/github.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import type { Environment } from '#config/environment.config.js';
@@ -57,6 +59,7 @@ const withApp = async (
     app: NestFastifyApplication;
     auth: ReturnType<typeof mockDeep<Auth>>;
     github: GithubService;
+    gists: ReturnType<typeof mock<GithubGistService>>;
   }) => Promise<void>,
 ): Promise<void> => {
   const config = mock<ConfigService<Environment, true>>();
@@ -65,16 +68,18 @@ const withApp = async (
   redis.client.set.mockResolvedValue('OK');
   redis.client.getdel.mockResolvedValue(null);
   const github = new GithubService(config, mockDeep<DatabaseService>(), redis);
+  const gists = mock<GithubGistService>();
   const auth = mockDeep<Auth>();
   auth.api.getSession.mockResolvedValue(null);
   const module = await Test.createTestingModule({
-    controllers: [GithubController],
+    controllers: [GithubController, GithubGistController],
     providers: [
       Reflector,
       AuthGuard,
       { provide: authInstanceKey, useValue: auth },
       { provide: ConfigService, useValue: config },
       { provide: GithubService, useValue: github },
+      { provide: GithubGistService, useValue: gists },
     ],
   }).compile();
   const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -83,7 +88,7 @@ const withApp = async (
   app.enableVersioning({ type: VersioningType.URI });
   try {
     await app.init();
-    await run({ app, auth, github });
+    await run({ app, auth, github, gists });
   } finally {
     await app.close();
   }
@@ -117,7 +122,7 @@ describe('GithubController over HTTP', () => {
     });
   });
 
-  it('should pass a signed-in bodiless token request to the service', async () => {
+  it('should refuse a token request without a repository and operation', async () => {
     await withApp(configured, async ({ app, auth, github }) => {
       auth.api.getSession.mockResolvedValue(signedIn);
       const token = vi
@@ -126,9 +131,8 @@ describe('GithubController over HTTP', () => {
 
       const response = await app.inject({ method: 'POST', url: '/v1/github/connections/connection-1/token' });
 
-      expect(response.statusCode).toBe(201);
-      expect(response.headers['cache-control']).toBe('no-store');
-      expect(token).toHaveBeenCalledWith('tau-user', 'connection-1');
+      expect(response.statusCode).toBe(400);
+      expect(token).not.toHaveBeenCalled();
     });
   });
 
@@ -302,4 +306,75 @@ describe('GithubController over HTTP', () => {
       expect(String(response.headers['access-control-expose-headers']).split(/,\s*/u)).toContain('retry-after');
     });
   });
+});
+
+describe('GitHub Gist HTTP capability boundary', () => {
+  it('should require a session for every Gist endpoint', async () => {
+    await withApp(configured, async ({ app, gists }) => {
+      for (const [method, path] of [
+        ['GET', 'capability'],
+        ['POST', 'use'],
+        ['POST', 'mutate'],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- each route must independently enforce authentication.
+        const response = await app.inject({ method, url: `/v1/github/gists/${path}` });
+        expect(response.statusCode).toBe(401);
+      }
+      expect(gists.capability).not.toHaveBeenCalled();
+      expect(gists.setEnabled).not.toHaveBeenCalled();
+      expect(gists.mutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([undefined, 'https://untrusted.test'])('should refuse Gist mutations from origin %s', async (origin) => {
+    await withApp(configured, async ({ app, auth, gists }) => {
+      auth.api.getSession.mockResolvedValue(signedIn);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/github/gists/mutate',
+        headers: origin === undefined ? {} : { origin },
+        payload: { action: 'delete', id: 'abc' },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('ORIGIN_INVALID');
+      expect(gists.mutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('should reject caller credentials and arbitrary provider paths', async () => {
+    await withApp(configured, async ({ app, auth, gists }) => {
+      auth.api.getSession.mockResolvedValue(signedIn);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/github/gists/mutate',
+        headers: { origin: frontend },
+        payload: { action: 'delete', id: '../other', accessToken: 'caller-token' },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(gists.mutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([frontend, 'app://tau'])(
+    'should route a valid gesture from %s with the authenticated user and no-store',
+    async (origin) => {
+      await withApp(configured, async ({ app, auth, gists }) => {
+        auth.api.getSession.mockResolvedValue(signedIn);
+        gists.mutate.mockResolvedValue({ id: 'abc', history: [], html_url: 'https://gist.github.com/abc' });
+        const response = await app.inject({
+          method: 'POST',
+          url: '/v1/github/gists/mutate',
+          headers: { origin },
+          payload: { action: 'delete', id: 'abc', revision: 'a'.repeat(40) },
+        });
+        expect(response.statusCode).toBe(201);
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect(gists.mutate).toHaveBeenCalledWith('tau-user', expect.any(Headers), {
+          action: 'delete',
+          id: 'abc',
+          revision: 'a'.repeat(40),
+        });
+      });
+    },
+  );
 });

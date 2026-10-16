@@ -1,7 +1,6 @@
 import * as Cookies from 'es-cookie';
 import type { PostHogConfig } from 'posthog-js';
 import { ENV } from '#environment.config.js';
-import { readConsentStatus } from '#lib/cookie-consent.lib.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 
 /** One captured event, as much of it as this redaction reads. */
@@ -40,8 +39,9 @@ export const redactEventProperties = <Event extends AnalyticsEvent>(event: Event
 };
 
 /**
- * PostHog options for accepted web analytics. The SDK is initialised only after
- * acceptance, so these are the plain BAU options with no opt-out defaults.
+ * PostHog options shared by the web and desktop hosts. The SDK is initialised only once
+ * the host allows analytics, so these are the plain BAU options with no opt-out defaults.
+ * This module stays free of web consent code so the desktop renderer can load it.
  */
 export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } = {
   options: {
@@ -65,10 +65,9 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // already-captured events after a later withdrawal.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     request_batching: false,
-    // Drop events processed after a withdrawal in this or another tab, before React reacts,
-    // and strip invitation tokens from whatever is left (charter W5, D27).
+    // Strip invitation tokens (charter W5, D27); the web host also gates on consent (`#lib/web-posthog.lib`).
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-    before_send: (event) => (readConsentStatus() === 'accepted' ? redactEventProperties(event) : null),
+    before_send: (event) => redactEventProperties(event),
     // Defer extension initialization (session recording, autocapture, dead-click detection, etc.)
     // to off-main-thread tasks with 30ms time-sliced budgets, reducing startup blocking.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
@@ -107,6 +106,26 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     return ENV.POSTHOG_CLIENT_KEY ?? '';
   },
 };
+
+/**
+ * PostHog options for the desktop renderer, where analytics always run. Built on the web options with the
+ * differences an `app://` document needs: events post straight to the PostHog host (the renderer has no
+ * `/api/ph` route) and persist in local storage, no consent gate applies, and the SDK loads no remote
+ * extension scripts, which the desktop Content-Security-Policy refuses — so dead-click capture is off and
+ * session replay never starts. Invitation tokens are redacted as on the web.
+ *
+ * @returns Fresh options for one `posthog.init`.
+ */
+export const desktopPosthogOptions = (): Partial<PostHogConfig> => ({
+  ...posthogConfig.options,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+  api_host: ENV.POSTHOG_API_HOST,
+  persistence: 'localStorage',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+  capture_dead_clicks: false,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+  disable_external_dependency_loading: true,
+});
 
 /**
  * Removes PostHog identifiers left by an earlier accepted session without

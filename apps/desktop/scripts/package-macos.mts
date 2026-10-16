@@ -312,9 +312,9 @@ await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
-  /* The legal routes stay web-only; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
+  /* The legal pages live on the website; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
   cp(
-    resolve(workspaceRoot, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt'),
+    resolve(workspaceRoot, 'apps/www/content/legal/open-source.md'),
     resolve(resources, 'legal/OPEN-SOURCE-NOTICES.md'),
   ),
   ...(geospecSourceRelinkArchive === undefined || geospecSourceRelinkReceipt === undefined

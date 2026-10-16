@@ -16,6 +16,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { z } from 'zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { GithubService } from '#api/github/github.service.js';
@@ -111,10 +112,50 @@ export class GithubController {
   public async token(
     @User('id') userId: string,
     @Param('id') id: string,
+    @Body() body: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): ReturnType<GithubService['token']> {
+  ): ReturnType<GithubService['repositoryToken']> {
     void reply.header('cache-control', 'no-store');
-    return this.github.token(userId, id);
+    const input = z
+      .object({ repositoryId: z.number().int().positive(), operation: z.enum(['read', 'write']) })
+      .strict()
+      .safeParse(body);
+    if (!input.success) {
+      throw new BadRequestException({ code: 'GITHUB_TOKEN_TARGET_REQUIRED' });
+    }
+    return this.github.repositoryToken(userId, id, input.data);
+  }
+
+  @Get('connections/:id/repositories/:repositoryId/access')
+  @Header('Cache-Control', 'no-store')
+  public async access(
+    @User('id') userId: string,
+    @Param('id') id: string,
+    @Param('repositoryId') repositoryId: string,
+  ): ReturnType<GithubService['repositoryAccess']> {
+    return this.github.repositoryAccess(userId, id, idOf(repositoryId));
+  }
+
+  @Post('connections/:id/repositories/:repositoryId/write')
+  @Header('Cache-Control', 'no-store')
+  public async writeAccess(
+    @User('id') userId: string,
+    @Param('id') id: string,
+    @Param('repositoryId') repositoryId: string,
+    @Req() request: FastifyRequest,
+    @Body() body: unknown,
+  ): ReturnType<GithubService['setRepositoryWrite']> {
+    if (request.headers.origin !== this.frontendOrigin && request.headers.origin !== 'app://tau') {
+      throw new BadRequestException({ code: 'ORIGIN_INVALID' });
+    }
+    const input = z.object({ enabled: z.boolean() }).strict().safeParse(body);
+    if (!input.success) {
+      throw new BadRequestException({ code: 'GITHUB_WRITE_SETTING_INVALID' });
+    }
+    return this.github.setRepositoryWrite(userId, id, {
+      repositoryId: idOf(repositoryId),
+      enabled: input.data.enabled,
+    });
   }
 
   @Delete('connections/:id')

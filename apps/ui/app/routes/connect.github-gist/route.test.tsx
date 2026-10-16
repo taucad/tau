@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -10,6 +11,7 @@ import type * as ShareProvidersModule from '#lib/share-providers.js';
 
 const mocks = vi.hoisted(() => ({
   session: { user: { id: 'usr_1', email: 'ada@example.com' } } as unknown,
+  status: vi.fn(async () => 'connected'),
   connect: vi.fn(async (): Promise<'redirect' | 'system-browser'> => 'redirect'),
 }));
 
@@ -22,13 +24,16 @@ vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('#lib/share-providers.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ShareProvidersModule>()),
   connectGithubGist: mocks.connect,
+  getGithubGistConnectionStatus: mocks.status,
 }));
 
 const renderAt = (url: string): void => {
   render(
-    <MemoryRouter initialEntries={[url]}>
-      <ConnectGithubGistRoute />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={[url]}>
+        <ConnectGithubGistRoute />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 };
 
@@ -37,6 +42,7 @@ describe('ConnectGithubGistRoute', () => {
     vi.clearAllMocks();
     mocks.session = { user: { id: 'usr_1', email: 'ada@example.com' } };
     mocks.connect.mockResolvedValue('redirect');
+    mocks.status.mockResolvedValue('connected');
   });
 
   it('should name the Tau account and start the grant only from the button', async () => {
@@ -57,12 +63,31 @@ describe('ConnectGithubGistRoute', () => {
     });
   });
 
-  it('should confirm a granted return and send the person back to Tau', () => {
+  it('should confirm a verified return and send the person back to Tau', async () => {
     renderAt('/connect/github-gist?shareAuth=github-gist');
 
-    expect(screen.getByRole('status')).toHaveTextContent('Gist access granted');
-    expect(screen.getByText('You can return to Tau.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Checking Gist access');
+    expect(await screen.findByText('Gist access granted')).toBeVisible();
+    expect(screen.getByText('You can return to Tau. Nothing has been published.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Allow Gist access' })).not.toBeInTheDocument();
+  });
+
+  it('should route a disabled grant to Security instead of requesting OAuth again', async () => {
+    mocks.status.mockResolvedValue('disabled');
+    renderAt('/connect/github-gist?shareAuth=github-gist');
+    expect(await screen.findByRole('link', { name: 'Manage Gist sharing' })).toHaveAttribute(
+      'href',
+      '/?settings=security',
+    );
+    expect(screen.queryByRole('button', { name: 'Allow Gist access' })).not.toBeInTheDocument();
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it('should never treat a callback marker as proof when verification fails', async () => {
+    mocks.status.mockRejectedValue(new Error('unavailable'));
+    renderAt('/connect/github-gist?shareAuth=github-gist');
+    expect(await screen.findByText('GitHub access could not be verified. Try again before sharing.')).toBeVisible();
+    expect(screen.queryByText('Gist access granted')).not.toBeInTheDocument();
   });
 
   it('should report a cancelled return and offer the grant again', async () => {

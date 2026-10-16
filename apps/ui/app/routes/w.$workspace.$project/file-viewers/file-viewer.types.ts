@@ -14,7 +14,7 @@ export type FileViewerProbe = {
         readonly head: Uint8Array<ArrayBuffer>;
         readonly revision: number;
       };
-  readonly options: { readonly planModeEnabled: boolean; readonly readOnly: boolean };
+  readonly options: { readonly readOnly: boolean };
 };
 
 export type FileViewerPaneContent = {

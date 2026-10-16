@@ -1,5 +1,4 @@
 import type { ConstantRecord } from '@taucad/types';
-import { metaConfig } from '#constants/meta.constants.js';
 
 /**
  * Cookie names.
@@ -43,8 +42,10 @@ export const cookieName = {
   chatModel: 'chat-model',
   // The last chosen Tau reasoning level.
   chatEffort: 'chat-effort',
-  // Per-user model availability overrides (sparse; values differ from model.recommended).
+  // Per-user model availability overrides: every explicit toggle; absence follows model.recommended.
   chatModelOverrides: 'chat-model-overrides',
+  // Pinned Tau model ids, in pin order.
+  chatModelPinned: 'chat-model-pinned',
   // Whether to show the model cost in the chat-history.
   chatModelCost: 'chat-model-cost',
 
@@ -62,8 +63,6 @@ export const cookieName = {
   /* Chat Tools */
   // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
-  // Whether the agent sheet's Settings disclosure is open.
-  chatOpAgentSettings: 'chat-op-agent-settings',
 
   /* Projects */
   // The last selected project view mode.
@@ -97,9 +96,6 @@ export const cookieName = {
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',
 } as const;
-
-/** Web-only consent cookie, intentionally outside the ordinary preference API. */
-export const consentCookieName = `${metaConfig.cookiePrefix}cookie-consent`;
 
 /**
  * Union of all cookie names.

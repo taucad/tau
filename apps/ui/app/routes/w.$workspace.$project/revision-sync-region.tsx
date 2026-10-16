@@ -1,3 +1,4 @@
+import { GithubRepositoryWriteSettings } from '#components/github/github-repository-write-settings.js';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -99,6 +100,7 @@ export type RevisionSyncRegionProps = {
   readonly onDisconnect: () => void;
   readonly onCancel: () => void;
   readonly onSync: () => void;
+  readonly onPushGithub?: () => Promise<void>;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncChats`.
   readonly syncChats: boolean;
   readonly onSyncChatsChange: (enabled: boolean) => void;
@@ -511,6 +513,7 @@ export function RevisionSyncRegion({
   onDisconnect,
   onCancel,
   onSync,
+  onPushGithub,
   syncChats,
   onSyncChatsChange,
   canSyncFiles = true,
@@ -524,6 +527,7 @@ export function RevisionSyncRegion({
   branch,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
+  const githubBinding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
   /*
    * A `read` collaborator is fetch-only for exactly the reason a read-only
@@ -559,7 +563,11 @@ export function RevisionSyncRegion({
   /* A fetch-only link can still be changed for a writable one; a view-only or removed collaborator cannot. */
   const canManage = role !== 'read' && role !== 'revoked' && isLineKnown;
   /* Sync now while something waits to go, and never beside a failure's own verb (A1 item 6). */
-  const canSyncNow = !readOnly && role !== 'revoked' && (sync.state === 'pending' || sync.state === 'queued');
+  const canSyncNow =
+    role !== 'revoked' &&
+    (remote.provider === 'github'
+      ? ['manual', 'failed', 'queued'].includes(sync.state)
+      : !readOnly && (sync.state === 'pending' || sync.state === 'queued'));
   /*
    * One renderer for rule 19's action, because there are now two surfaces that
    * must offer exactly one: the Sync row's refused push, and a refused connect.
@@ -673,7 +681,7 @@ export function RevisionSyncRegion({
         await onConnect('git', pending.url);
       } else {
         const { connectionId, repository } = pending;
-        const token = await githubConnections.token(connectionId);
+        const token = await githubConnections.token(connectionId, { repositoryId: repository.id, operation: 'read' });
         const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
         await onConnect('git', repository.cloneUrl, {
           authorization,
@@ -828,7 +836,9 @@ export function RevisionSyncRegion({
           ? 'View only'
           : remote.fetchOnly
             ? 'Read-only link · Tau will not push'
-            : 'Read and write',
+            : remote.provider === 'github'
+              ? 'Read access · writes require approval in Tau'
+              : 'Read and write',
     ],
     ['Includes', `${includes.slice(0, -1).join(', ')} and ${includes.at(-1) ?? ''}`],
   ];
@@ -908,12 +918,29 @@ export function RevisionSyncRegion({
         canSyncNow ? (
           <Button size='xs' variant='ghost' className='gap-1 text-muted-foreground' onClick={onSync}>
             <RefreshCw aria-hidden className='size-3' />
-            Sync now
+            {remote.provider === 'github' ? 'Fetch latest' : 'Sync now'}
           </Button>
         ) : null
       }
       bodyClassName='flex flex-col gap-3 p-1.5'
     >
+      {remote.provider === 'github' &&
+      remote.phase === 'connected' &&
+      githubBinding !== undefined &&
+      !changingBackup ? (
+        <GithubRepositoryWriteSettings
+          connectionId={githubBinding.connectionId}
+          repositoryId={githubBinding.repositoryId}
+          onPush={onPushGithub}
+          pushUnavailable={
+            sync.online
+              ? sync.state === 'manual'
+                ? undefined
+                : 'Finish fetching or resolving changes before pushing.'
+              : 'Connect to the internet before pushing.'
+          }
+        />
+      ) : null}
       {remote.phase === 'connected' && !changingBackup ? (
         /* Laid out as a History row (round 8): the glyph in the markers'
            column, the remote in the titles' column; the backup line ends in

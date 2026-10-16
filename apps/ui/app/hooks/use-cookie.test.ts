@@ -13,6 +13,8 @@ const names = [
   'tau-test-corrupt-local',
   'tau-test-blocked',
   'tau-test-unset',
+  'tau-test-other-tab',
+  'tau-test-cleared',
 ];
 
 beforeEach(() => {
@@ -132,4 +134,30 @@ it('reads the request cookies once for an unset preference', () => {
   store.update('tau-test-unset', 'set');
   expect(store.get('tau-test-unset')).toBe('set');
   cookieGet.mockRestore();
+});
+
+it('reads another tab’s write and tells subscribers', () => {
+  store.update('tau-test-other-tab', 'here');
+  const listener = vi.fn();
+  const unsubscribe = store.subscribe('tau-test-other-tab', listener);
+
+  globalThis.localStorage.setItem('tau-test-other-tab', '"there"');
+  globalThis.dispatchEvent(new StorageEvent('storage', { key: 'tau-test-other-tab' }));
+
+  expect(listener).toHaveBeenCalledOnce();
+  expect(store.get('tau-test-other-tab')).toBe('there');
+  unsubscribe();
+});
+
+it('rereads every preference when another tab clears storage', () => {
+  store.update('tau-test-cleared', 'here');
+  const listener = vi.fn();
+  const unsubscribe = store.subscribe('tau-test-cleared', listener);
+
+  globalThis.localStorage.removeItem('tau-test-cleared');
+  globalThis.dispatchEvent(new StorageEvent('storage', { key: null }));
+
+  expect(listener).toHaveBeenCalledOnce();
+  expect(store.get('tau-test-cleared')).toBeUndefined();
+  unsubscribe();
 });

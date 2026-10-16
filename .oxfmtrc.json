@@ -17,6 +17,8 @@
     "**/__shader-snapshots__/**",
     // Generated license inventory preserves the dependency-license source text.
     "/docs/licensing/third-party-licenses.md",
+    // Legal documents keep their reviewed bytes; open-source.md must equal its generator's output.
+    "/apps/www/content/legal/**",
     "**/dist/**",
     "/out",
     "**/out/**",

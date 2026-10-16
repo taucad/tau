@@ -50,6 +50,8 @@ export type GitHttpBackendFixture = Readonly<{
 export type GitHttpBackendOptions = Readonly<{
   /** A `mktemp` directory this fixture may create its repository in. */
   root: string;
+  /** Reuse a closed fixture’s address when testing reconnects. Defaults to an ephemeral port. */
+  listenPort?: number;
   /** Repository name without `.git`. Defaults to `project`. */
   name?: string;
   /**
@@ -384,7 +386,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     })();
   });
   await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(options.listenPort ?? 0, '127.0.0.1', resolve);
   });
   const { port } = server.address() as AddressInfo;
   origin = `http://127.0.0.1:${String(port)}`;

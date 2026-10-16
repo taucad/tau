@@ -23,12 +23,12 @@ const {
   connectGithubGist,
   createGithubGistAuthorizationReturnUrl,
   getGithubGistConnectionStatus,
-  githubShareCredentialBroker,
+  githubGistTransport,
   parseGithubGistAuthorizationReturn,
   withBrowserShareProviderContext,
 } = await import('#lib/share-providers.js');
 
-describe('GitHub share credential broker', () => {
+describe('GitHub Gist API transport', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     globalThis.window.ENV = {
@@ -36,17 +36,21 @@ describe('GitHub share credential broker', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- browser environment keys are uppercase by contract.
       TAU_API_URL: 'https://api.tau.test/',
     };
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'account_1', scopes: ['read:user', 'gist'] }],
-      error: null,
-    });
-    authClient.getAccessToken.mockResolvedValue({
-      data: { accessToken: 'one-operation-token', scopes: ['gist'] },
-      error: null,
-    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          status: 'connected',
+          enabled: true,
+          grantedScopes: ['gist'],
+          authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
+        }),
+      ),
+    );
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     globalThis.window.ENV = originalClientEnvironment;
   });
 
@@ -67,87 +71,34 @@ describe('GitHub share credential broker', () => {
     expect(artifactCodec.dispose).toHaveBeenCalledTimes(2);
   });
 
-  it('leases one gist-scoped token only for the GitHub API audience', async () => {
-    await expect(
-      githubShareCredentialBroker.getAccessToken({
-        connectionId: 'github',
-        audience: 'https://api.github.com',
-        scopes: ['gist'],
-      }),
-    ).resolves.toEqual({ accessToken: 'one-operation-token', grantedScopes: ['gist'] });
-    expect(authClient.getAccessToken).toHaveBeenCalledOnce();
-    expect(authClient.getAccessToken).toHaveBeenCalledWith({
-      accountId: 'account-row-1',
-    });
-  });
-
-  it('selects the GitHub row rather than a different provider with the same subject', async () => {
-    authClient.listAccounts.mockResolvedValueOnce({
-      data: [
-        { id: 'google-row', providerId: 'google', accountId: 'shared-subject', scopes: ['gist'] },
-        { id: 'github-row', providerId: 'github', accountId: 'shared-subject', scopes: ['gist'] },
-      ],
-      error: null,
-    });
-    await githubShareCredentialBroker.getAccessToken({
-      connectionId: 'github',
-      audience: 'https://api.github.com',
-      scopes: ['gist'],
-    });
-    expect(authClient.getAccessToken).toHaveBeenCalledExactlyOnceWith({ accountId: 'github-row' });
-  });
-
-  it('does not lease a token when only another provider is linked', async () => {
-    authClient.listAccounts.mockResolvedValueOnce({
-      data: [{ id: 'google-row', providerId: 'google', accountId: 'account_1', scopes: ['gist'] }],
-      error: null,
-    });
-    await expect(
-      githubShareCredentialBroker.getAccessToken({
-        connectionId: 'github',
-        audience: 'https://api.github.com',
-        scopes: ['gist'],
-      }),
-    ).rejects.toThrow();
+  it('should send only the mutation intent to Tau with no OAuth token getter', async () => {
+    const input: Parameters<typeof githubGistTransport.mutate>[0] = {
+      action: 'create',
+      payload: { public: false, files: { 'tau-project.zip.base64url': { content: 'archive' } } },
+    };
+    await githubGistTransport.mutate(input);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.tau.test/v1/github/gists/mutate',
+      expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify(input) }),
+    );
     expect(authClient.getAccessToken).not.toHaveBeenCalled();
-  });
-
-  it('rejects broader authorities before requesting a token', async () => {
-    await expect(
-      githubShareCredentialBroker.getAccessToken({
-        connectionId: 'github',
-        audience: 'https://example.com',
-        scopes: ['gist'],
-      }),
-    ).rejects.toMatchObject({ code: 'SHARE_PERMISSION_REQUIRED' });
     expect(authClient.listAccounts).not.toHaveBeenCalled();
-    expect(authClient.getAccessToken).not.toHaveBeenCalled();
   });
 
-  it('should refuse repository scopes, which only the GitHub App connection grants', async () => {
-    for (const scope of ['public_repo', 'repo', 'delete_repo']) {
-      // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.
-      await expect(
-        githubShareCredentialBroker.getAccessToken({
-          connectionId: 'github',
-          audience: 'https://api.github.com',
-          scopes: [scope],
+  it('should derive Gist status from the API’s verified capability', async () => {
+    for (const status of ['connected', 'permission-required', 'not-connected', 'disabled', 'reconnect-required']) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json({
+          status,
+          enabled: true,
+          grantedScopes: [],
+          authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
         }),
-      ).rejects.toThrow('The requested GitHub authority is not allowed.');
+      );
+      // oxlint-disable-next-line no-await-in-loop -- verify each independent state.
+      await expect(getGithubGistConnectionStatus()).resolves.toBe(status);
     }
-    expect(authClient.getAccessToken).not.toHaveBeenCalled();
-  });
-
-  it('requires the actual gist scope on a linked GitHub account', async () => {
-    await expect(getGithubGistConnectionStatus()).resolves.toBe('connected');
-    authClient.listAccounts.mockResolvedValueOnce({
-      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'account_1', scopes: ['read:user'] }],
-      error: null,
-    });
-    await expect(getGithubGistConnectionStatus()).resolves.toBe('permission-required');
-    authClient.listAccounts.mockResolvedValueOnce({ data: [], error: null });
-    await expect(getGithubGistConnectionStatus()).resolves.toBe('not-connected');
-    authClient.listAccounts.mockResolvedValueOnce({ data: null, error: { message: 'unauthorized' } });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 401 }));
     await expect(getGithubGistConnectionStatus()).resolves.toBe('signed-out');
   });
 
@@ -244,16 +195,21 @@ describe('desktop GitHub Gist consent', () => {
 
   it('should poll every two seconds until the account carries the gist scope', async () => {
     vi.useFakeTimers();
-    authClient.listAccounts
-      .mockResolvedValueOnce({
-        data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
-        error: null,
-      })
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValue({
-        data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['gist'] }],
-        error: null,
+    const capability = (status: string) =>
+      Response.json({
+        status,
+        enabled: true,
+        grantedScopes: [],
+        authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
       });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(capability('permission-required'))
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockImplementation(async () => capability('connected')),
+    );
 
     const connected = awaitGithubGistConnection(new AbortController().signal);
     await vi.advanceTimersByTimeAsync(1999);
@@ -261,25 +217,33 @@ describe('desktop GitHub Gist consent', () => {
     await vi.advanceTimersByTimeAsync(4001);
 
     await expect(connected).resolves.toBe(true);
-    expect(authClient.listAccounts).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it('should give up after ten minutes without the gist scope', async () => {
     vi.useFakeTimers();
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
-      error: null,
-    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          status: 'permission-required',
+          enabled: true,
+          grantedScopes: [],
+          authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
+        }),
+      ),
+    );
 
     const connected = awaitGithubGistConnection(new AbortController().signal);
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
 
     await expect(connected).resolves.toBe(false);
-    expect(authClient.listAccounts).toHaveBeenCalledTimes(300);
+    expect(fetch).toHaveBeenCalledTimes(300);
   });
 
   it('should stop polling once the wait is cancelled', async () => {
     vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn());
     const controller = new AbortController();
 
     const connected = awaitGithubGistConnection(controller.signal);

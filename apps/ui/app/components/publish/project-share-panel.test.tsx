@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // @vitest-environment jsdom
 
 // oxlint-disable-next-line import/no-unassigned-import -- installs Vitest DOM matchers.
@@ -181,9 +182,11 @@ const mockJsonResponse = (body: unknown): Response =>
 
 const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<typeof render> =>
   render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <TooltipProvider>{ui}</TooltipProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 
 describe('ProjectSharePanel', () => {
@@ -443,6 +446,7 @@ describe('ProjectSharePanel', () => {
 
       expect(await screen.findByRole('status')).toHaveTextContent('Finish in your browser.');
       expect(allow).toBeDisabled();
+      getGithubGistConnectionStatus.mockResolvedValue('connected');
       grant(true);
       expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
       expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
@@ -585,6 +589,7 @@ describe('ProjectSharePanel', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Create Gist and copy link' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
+    getGithubGistConnectionStatus.mockResolvedValue('not-connected');
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
 

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
@@ -70,16 +71,18 @@ const renderManagement = (
   path = '/s/github-gist~abc123',
 ) =>
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <LocationProbe />
-      <GithubGistManagement
-        locator={{ providerId: 'github-gist', reference: 'abc123' }}
-        protection={{ kind: 'none' }}
-        collectSnapshot={async () => snapshot}
-        onRepublished={properties?.onRepublished ?? vi.fn()}
-        onUnpublished={properties?.onUnpublished ?? vi.fn()}
-      />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={[path]}>
+        <LocationProbe />
+        <GithubGistManagement
+          locator={{ providerId: 'github-gist', reference: 'abc123' }}
+          protection={{ kind: 'none' }}
+          collectSnapshot={async () => snapshot}
+          onRepublished={properties?.onRepublished ?? vi.fn()}
+          onUnpublished={properties?.onUnpublished ?? vi.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 
 describe('GithubGistManagement', () => {

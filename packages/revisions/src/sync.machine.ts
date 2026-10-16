@@ -76,6 +76,10 @@ type SyncMachineContextFields = Readonly<{
   parentRef: AnyActorRef | undefined;
   /** The remote's name in git's config, or `undefined` while there is none. */
   remote: string | undefined;
+  /** False for remotes requiring a fresh explicit push gesture. */
+  automaticPush: boolean;
+  explicitPush: boolean;
+  explicitTarget: string | undefined;
   online: boolean;
   /** The durable queue, exactly as the record holds it. */
   pending: readonly SyncQueueEntry[];
@@ -236,11 +240,13 @@ export type SyncMachineEvent =
   | Readonly<{ type: 'recordsChanged' }>
   /** Push now, and — with a `pushId` — tell the requester how it ended. */
   | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
+  /** One explicit push; never retried without another request. */
+  | Readonly<{ type: 'pushNow'; pushId: string; repositoryUrl: string }>
   /** A client reopened a retained project root; fetch before it reads. */
   | Readonly<{ type: 'open' }>
   /** The host is going away: flush while there is still a `then` to run. */
   | Readonly<{ type: 'close' }>
-  | Readonly<{ type: 'remoteConnected'; remote: string }>
+  | Readonly<{ type: 'remoteConnected'; remote: string; automaticPush?: boolean }>
   | Readonly<{ type: 'remoteDisconnected' }>
   | Readonly<{ type: 'online' }>
   | Readonly<{ type: 'offline' }>
@@ -306,10 +312,18 @@ export type SyncReadPendingActorInput = Readonly<{ projectId: string }>;
 export type SyncWritePendingActorInput = Readonly<{ projectId: string; record: SyncQueueRecord }>;
 
 /** What `readRemote` answers: the remote git's own config already holds. @public */
-export type SyncReadRemoteActorOutput = Readonly<{ remote: string | undefined; branch?: string }>;
+export type SyncReadRemoteActorOutput = Readonly<{
+  remote: string | undefined;
+  branch?: string;
+  automaticPush?: boolean;
+}>;
 
 /** What one scheduled push offers, and under which leases. @public */
 export type SyncPushActorInput = Readonly<{
+  /** A one-operation request, never carried into retries. */
+  explicit?: boolean;
+  /** The exact destination approved for this operation. */
+  repositoryUrl?: string;
   remote: string;
   branch: string;
   /** Ref → the lease this push is made under (P18). Absent = the remote's own rule. */
@@ -1121,12 +1135,15 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '2',
+  version: '3',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
     parentRef: input.parentRef,
     remote: undefined,
+    automaticPush: true,
+    explicitPush: false,
+    explicitTarget: undefined,
     online: input.online ?? true,
     pending: [],
     leases: {},
@@ -1218,11 +1235,16 @@ const syncMachineDefinition = setup({
      * failure edges make), `noRemote` at once. `pushing` and `recording`
      * defer it to the next push instead (W15 F1). */
     syncNow: { context: ({ context, event }) => carry(context, event) },
+    pushNow: ({ context, event }, enq) => {
+      answerPushes(context, enq, { pushIds: [event.pushId], outcome: 'failed' });
+      return {};
+    },
     /* A busy push/queue write keeps ownership until it settles; the next cycle
      * pulls the new remote. Opening overrides this to discard its old answer. */
     remoteConnected: {
       context: ({ event }) => ({
         remote: event.remote,
+        automaticPush: event.automaticPush !== false,
         hasAppliedRemote: false,
         chats: 'unknown',
         pendingFetch: true,
@@ -1344,6 +1366,7 @@ const syncMachineDefinition = setup({
               target: 'done',
               context: ({ context, event }) => ({
                 remote: event.output.remote,
+                automaticPush: event.output.automaticPush !== false,
                 branch: event.output.branch ?? context.branch,
               }),
             },
@@ -1377,6 +1400,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -1399,7 +1423,12 @@ const syncMachineDefinition = setup({
         remoteConnected: {
           target: '#sync.opening',
           reenter: true,
-          context: ({ event }) => ({ remote: event.remote, hasAppliedRemote: false, chats: 'unknown' }),
+          context: ({ event }) => ({
+            remote: event.remote,
+            automaticPush: event.automaticPush !== false,
+            hasAppliedRemote: false,
+            chats: 'unknown',
+          }),
         },
       },
       always: ({ context }, enq) => {
@@ -1581,6 +1610,9 @@ const syncMachineDefinition = setup({
         done: { type: 'final' },
       },
       onDone: ({ context, guards }) => {
+        if (!context.automaticPush) {
+          return { target: 'manual' };
+        }
         /* The queue first, before anything else this open does (D28). */
         if (guards.hasPushPending(context)) {
           return { target: 'pushing' };
@@ -1609,6 +1641,40 @@ const syncMachineDefinition = setup({
       },
     },
 
+    /** Readable remote whose writes require an explicit request every time. */
+    manual: {
+      entry: ({ context }, enq) => ({
+        context: {
+          ...settleEveryPush(context, enq, context.failure === 'none' ? 'queued' : 'failed'),
+          explicitPush: false,
+          pendingFlush: false,
+        },
+      }),
+      on: {
+        pushNow: ({ context, event }) =>
+          context.online
+            ? {
+                target: 'pushing',
+                context: { pushIds: [event.pushId], explicitPush: true, explicitTarget: event.repositoryUrl },
+              }
+            : {
+                target: 'failed',
+                context: {
+                  pushIds: [event.pushId],
+                  error: 'Connect to the internet before pushing.',
+                  reason: 'offline',
+                },
+              },
+        syncNow: ({ context, event }, enq) => {
+          answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
+          return { target: 'opening' };
+        },
+        remoteMoved: { target: 'opening' },
+        remoteConnected: { target: 'reading' },
+        close: () => ({}),
+      },
+    },
+
     backedUp: {
       entry: ({ context }, enq) => ({
         context: {
@@ -1630,6 +1696,9 @@ const syncMachineDefinition = setup({
        * Unless it was a `close` or `hidden` cut, which is the one trigger that
        * cannot afford a window: the document is unloading (C17). */
       always: ({ context }) => {
+        if (!context.automaticPush) {
+          return { target: 'manual' };
+        }
         /* A `syncNow` that arrived during the push that just settled asks for the next one now (RM-R11). */
         if (context.pendingFlush || context.pushIds.length > 0) {
           return { target: 'pushing' };
@@ -1653,6 +1722,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -1695,6 +1765,7 @@ const syncMachineDefinition = setup({
         context: {
           pendingMint: false,
           pendingFlush: false,
+          explicitPush: false,
           ahead: false,
           pushIds: [...context.pushIds, ...context.nextPushIds],
           nextPushIds: [],
@@ -1713,6 +1784,7 @@ const syncMachineDefinition = setup({
             remote: context.remote ?? '',
             branch: context.branch,
             leases: context.leases,
+            ...(context.explicitPush ? { explicit: true, repositoryUrl: context.explicitTarget } : {}),
             ...(narrowed === undefined ? {} : { refs: narrowed }),
           };
         },
@@ -1906,8 +1978,11 @@ const syncMachineDefinition = setup({
        * preceded it. Any other remembered mint waits out the backoff like the
        * work already queued (policy rule 19, L2-F6): the backoff's `opening`
        * pushes it once the pull lands. */
-      always: ({ context }) =>
-        context.pendingFlush
+      always: ({ context }) => {
+        if (!context.automaticPush) {
+          return { target: 'manual' };
+        }
+        return context.pendingFlush
           ? { target: 'pushing' }
           : /* A request that waited behind the push that just failed asks for the
              * retry now, as one arriving here would (RV-W15); it is answered by
@@ -1918,7 +1993,8 @@ const syncMachineDefinition = setup({
                * the remote itself asked for the wait (W13d). */
               context.pendingFetch && context.online && context.retryAfterMilliseconds === undefined
               ? { target: 'opening' }
-              : undefined,
+              : undefined;
+      },
       after: {
         /* Offline, the backoff waits for `online` instead: answered, and nothing changes (MC-R16). */
         syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: 'opening' } : {}),
@@ -1944,6 +2020,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -2044,6 +2121,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -2078,6 +2156,7 @@ const syncMachineDefinition = setup({
       initial: 'offering',
       states: {
         offering: {
+          always: ({ context }) => (context.automaticPush ? undefined : { target: 'offered' }),
           invoke: {
             src: 'push',
             input: ({ context }) => ({
@@ -2132,6 +2211,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -2174,6 +2254,7 @@ const syncMachineDefinition = setup({
           target: 'opening',
           context: ({ event }) => ({
             remote: event.remote,
+            automaticPush: event.automaticPush !== false,
             hasAppliedRemote: false,
             chats: 'unknown',
           }),
@@ -2324,9 +2405,13 @@ export const selectSyncFacet = (
   return {
     /* Parked behind a lease, what this device owes is still owed (C12). */
     state:
-      value === 'awaitingLease' && owedPushes(snapshot.context).length > 0
-        ? 'queued'
-        : facetStateOf(value, snapshot.context.withinPullWindow),
+      value === 'manual'
+        ? snapshot.context.error === undefined
+          ? 'manual'
+          : 'failed'
+        : value === 'awaitingLease' && owedPushes(snapshot.context).length > 0
+          ? 'queued'
+          : facetStateOf(value, snapshot.context.withinPullWindow),
     /* `n` is what this device owes *this* remote (C12, C19). A `projection`
      * entry is a record the fetch could not restore **locally** — inbound work,
      * not work the remote is missing — and counting it made *Not backed up · 3*

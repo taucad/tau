@@ -1,8 +1,22 @@
+# Staging desktop candidates. Each green `ci.yml` push run on `main` that affects `desktop`
+# creates a candidate that release-build.yml packages for Apple silicon only; the nightly
+# schedule (and a dispatch that asks for it) creates one that also packages Intel, so the x64
+# archive and its OTA replacement are still exercised once a day while `main` pushes cost one
+# macOS packaging job each. The tag records which: an annotated tag whose message carries a
+# `Mac architectures: arm64 x64` line is a full candidate, a lightweight tag is arm64 only.
+# Production `desktop@*` tags always package both.
 name: Release desktop to staging
 run-name: Release desktop to staging
 
 on:
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      intel:
+        description: 'Also package and qualify the Intel (x64) archive'
+        type: boolean
+        default: true
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -19,7 +33,7 @@ jobs:
     name: Create the staging desktop prerelease
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
        (github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository))
@@ -98,9 +112,28 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TARGET: ${{ steps.target.outputs.sha }}
           EVENT: ${{ github.event_name }}
+          DISPATCH_INTEL: ${{ inputs.intel }}
         run: |
           set -euo pipefail
-          previous=$(gh release list --limit 100 --json tagName --jq '[.[] | select(.tagName | startswith("desktop-staging@"))][0].tagName // empty')
+          intel=false
+          if [ "$EVENT" = schedule ] || { [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_INTEL" = true ]; }; then intel=true; fi
+          echo "intel=$intel" >> "$GITHUB_OUTPUT"
+          releases=$(gh release list --limit 100 --json tagName --jq '.[] | select(.tagName | startswith("desktop-staging@")) | .tagName')
+          previous=$(head -n 1 <<< "$releases")
+          # The nightly compares with the newest full candidate, so it skips only when Intel already
+          # shipped this desktop.
+          if [ "$EVENT" = schedule ]; then
+            previous=''
+            for tag in $(head -n 30 <<< "$releases"); do
+              object=$(gh api "repos/${GH_REPO}/git/ref/tags/${tag}" --jq '.object | "\(.type) \(.sha)"')
+              [ "${object%% *}" = tag ] || continue
+              message=$(gh api "repos/${GH_REPO}/git/tags/${object#* }" --jq .message)
+              if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then
+                previous=$tag
+                break
+              fi
+            done
+          fi
           if [ "$EVENT" != workflow_dispatch ] && [ -n "$previous" ]; then
             base=$(git rev-parse "$previous^{commit}")
             if [ "$base" = "$TARGET" ] || ! git merge-base --is-ancestor "$base" "$TARGET"; then
@@ -126,6 +159,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TARGET: ${{ steps.target.outputs.sha }}
           RUN_NUMBER: ${{ github.run_number }}
+          INTEL: ${{ steps.selected.outputs.intel }}
         run: |
           set -euo pipefail
           version=$(jq -r .version apps/desktop/package.json)
@@ -145,15 +179,23 @@ jobs:
           # push, not the draft, starts release-build.yml.
           gh release create "$tag" --draft --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
             --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
-          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$TARGET" --silent
+          # release-build.yml reads the architectures from the tag: a full candidate's tag is
+          # annotated with the line it looks for, an arm64-only candidate's is lightweight.
+          ref_sha=$TARGET
+          if [ "$INTEL" = true ]; then
+            ref_sha=$(gh api "repos/$GH_REPO/git/tags" -f tag="$tag" -f object="$TARGET" -f type=commit \
+              -f message="Mac architectures: arm64 x64" --jq .sha)
+          fi
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$ref_sha" --silent
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
+          ARCHES: ${{ steps.selected.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
         run: |
           {
-            echo "Created the draft prerelease $TAG and its tag."
+            echo "Created the draft prerelease $TAG and its tag ($ARCHES)."
             echo "**Release build** packages it, attaches the archives and publishes it once main CI is green on this commit."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -329,10 +329,6 @@ const expectAnnotated = (evidence: CaptureEvidence, mimeType: string, size: read
   expect(evidence.bottomRightPixels).toBeGreaterThan(20);
 };
 
-const dismissCookies = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
-};
-
 const openCommandPalette = async (query: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), query);
@@ -383,7 +379,6 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
   expect(hasWebGpu, 'Chromium E2E must expose WebGPU for headless GLTF capture').toBe(true);
-  await dismissCookies();
   await target.expectVisible(selectors.getByRole('button', { name: 'Capture view to chat' }), 60_000);
   await waitForRenderedGeometry('gltf');
 
@@ -686,7 +681,6 @@ test('section captures preserve complete caps and positive-area overlap evidence
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/headless-chat-image-capture?kind=section-overlap');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  await dismissCookies();
   await waitForRenderedGeometry('gltf');
   await setViewerCamera({ position: [0.14, -0.1, 0.075], target: [0, 0.006, 0.012], fov: 42, zoom: 1 });
   await withPresentationBridge('setPresentation', { surfaces: true, lines: true });
@@ -757,7 +751,6 @@ test('capture edges retain the shared 800-pixel reference through the attachment
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/headless-chat-image-capture?kind=edge');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  await dismissCookies();
   await waitForRenderedGeometry('gltf');
   await setViewerCamera({ position: [-0.00002, 0, 0.3], target: [-0.00002, 0, 0.002], fov: 35, zoom: 1 });
 
@@ -825,7 +818,6 @@ test('SVG toolbar, desktop, and mobile actions use real resvg', async () => {
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/headless-chat-image-capture?kind=svg');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  await dismissCookies();
   await target.expectVisible(selectors.getByRole('button', { name: 'Capture view to chat' }), 60_000);
   await waitForRenderedGeometry('svg');
 
@@ -867,7 +859,6 @@ test('capture retains one image worker and warm GPU resources beyond the former 
   await installWorkerTracking();
   await target.navigate('/__e2e/headless-chat-image-capture');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  await dismissCookies();
   await waitForRenderedGeometry('gltf');
 
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));

@@ -138,6 +138,9 @@ export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefi
     case 'noRemote': {
       return undefined;
     }
+    case 'manual': {
+      return 'Saved locally · Push to GitHub when ready';
+    }
     case 'checking': {
       return 'Checking…';
     }

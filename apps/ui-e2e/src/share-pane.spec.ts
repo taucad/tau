@@ -139,7 +139,7 @@ test('uses the same Share body in the mobile drawer without clipping its navigat
   expect(navigationBounds.x + navigationBounds.width).toBeLessThanOrEqual(390);
 
   await target.click(shareRegion().getByRole('tab', { name: 'GitHub Gist' }));
-  await target.expectVisible(shareRegion().getByText(/GitHub stores the compressed project/u));
+  await target.expectVisible(shareRegion().getByText(/Tau sends the compressed project to GitHub/u));
   await target.click(selectors.getByRole('tab', { name: 'Model', exact: true }));
   await target.expectHidden(shareRegion());
   await target.screenshot(selectors.getByCss('body'), 'share-pane-mobile.png');

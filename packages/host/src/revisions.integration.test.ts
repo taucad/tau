@@ -1975,3 +1975,32 @@ describe.runIf(gitToolchainOnPath)('a Tau-managed remote credential over the hos
     }
   }, 60_000);
 });
+
+describe('explicit GitHub credential custody over the host channel', () => {
+  it('rejects absent or expired credentials and releases a valid credential after a refused push', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-explicit-credential-'));
+    roots.push(workspaceRoot);
+    const port = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) });
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const request = {
+      command: 'pushGithub',
+      repositoryUrl: 'https://github.com/owner/repository.git',
+      authorization: 'Bearer scoped-test',
+    };
+    try {
+      await expect(revisions.channel.request(request)).rejects.toThrow('no valid repository credential');
+      await expect(revisions.channel.request({ ...request, expiresAt: 'not-a-date' })).rejects.toThrow(
+        'no valid repository credential',
+      );
+      await expect(revisions.channel.request({ ...request, expiresAt: new Date(0).toISOString() })).rejects.toThrow(
+        'no valid repository credential',
+      );
+      const valid = { ...request, expiresAt: new Date(Date.now() + 60_000).toISOString() };
+      await expect(revisions.channel.request(valid)).rejects.toThrow('finish checking');
+      // A second gesture must reach readiness validation again, not retain the first write lease.
+      await expect(revisions.channel.request(valid)).rejects.toThrow('finish checking');
+    } finally {
+      await revisions.release();
+    }
+  });
+});

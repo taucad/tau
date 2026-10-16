@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
@@ -40,7 +40,16 @@ describe('DockviewTab', () => {
     expect(title).toHaveClass('dockview-tab-title', 'fade-label', 'flex-1');
     expect(title).not.toHaveClass('truncate');
     expect(title.className).not.toMatch(/scroll-shadow-right|--scroll-fade-size|whitespace-nowrap|overflow-hidden/);
-    expect(close).toBeNull();
+    expect(close).toHaveClass(
+      'fade-action',
+      'absolute',
+      'right-1',
+      'z-10',
+      'size-4.5!',
+      'opacity-0',
+      'group-hover/default-tab:opacity-100',
+      'pointer-coarse:opacity-100',
+    );
   });
 
   it('keeps its leading icon compact and non-shrinking', () => {
@@ -90,15 +99,33 @@ describe('DockviewTab', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent(expectedTitle);
   });
 
-  it('leaves closing to the group action and Dockview keyboard handler, without nesting a button in a tab', () => {
-    render(
+  it('closes from a pointer-only glyph without nesting an interactive control in the tab', () => {
+    const properties = createProperties();
+    const tabPointerDown = vi.fn((event: PointerEvent) => event.defaultPrevented);
+    const { container } = render(
       <TooltipProvider>
         <div className='dv-tab' role='tab' tabIndex={0}>
-          <DockviewTab {...createProperties()} />
+          <DockviewTab {...properties} />
         </div>
       </TooltipProvider>,
     );
+    const tab = screen.getByRole('tab');
+    const close = container.querySelector<HTMLElement>('.dv-default-tab-action')!;
+    tab.addEventListener('pointerdown', tabPointerDown);
+
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab')).toHaveAccessibleName('models/main.scad');
+    expect(close).toHaveAttribute('aria-hidden', 'true');
+    expect(close).not.toHaveAttribute('tabindex');
+    expect(tab).toHaveAccessibleName('models/main.scad');
+    expect(tab).toHaveAttribute('aria-keyshortcuts', 'Delete');
+
+    // Dockview listens natively on `.dv-tab`; a cancelled pointerdown keeps it from activating or dragging.
+    const pointerDown = createEvent.pointerDown(close, { button: 0 });
+    fireEvent(close, pointerDown);
+    expect(tabPointerDown).toHaveReturnedWith(true);
+    expect(properties.api.close).not.toHaveBeenCalled();
+
+    fireEvent.click(close);
+    expect(properties.api.close).toHaveBeenCalledOnce();
   });
 });

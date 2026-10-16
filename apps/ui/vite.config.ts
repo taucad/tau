@@ -108,12 +108,11 @@ const desktopSourceOverrides = new Map([
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
-  ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
-  ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
+  ['#components/cookie-preferences.js', '#components/cookie-preferences.desktop.js'],
 ]);
 
 const selfHostSourceOverrides = new Map([
@@ -121,7 +120,6 @@ const selfHostSourceOverrides = new Map([
   ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
   ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
   ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
-  ['#utils/model-tier.js', '#utils/model-tier.self-host.js'],
   ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
   [
     '#routes/w.$workspace.$project/chat-details-usage.js',

@@ -354,6 +354,8 @@ export type RevisionPushRef = Readonly<{
  */
 export type RevisionPushInput = Readonly<{
   remote: string;
+  /** Refuse a changed destination; pin every transfer to this approved URL. */
+  repositoryUrl?: string;
   refs: readonly RevisionPushRef[];
   /** All-or-nothing across the listed refs. Default `false`. */
   atomic?: boolean;

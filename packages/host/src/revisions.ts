@@ -30,6 +30,7 @@ import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';
 import {
+  pushExplicitly,
   awaitCheckoutCuts,
   awaitSyncSettled,
   closeCutMilliseconds,
@@ -514,6 +515,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
   const { apiBaseUrl } = options;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
+  let channelWriteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
   const port =
     options.port ??
@@ -524,11 +526,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       ...toolchain,
       ...(options.checkoutMutation === undefined ? {} : { checkoutMutation: options.checkoutMutation }),
       ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
-      ...(options.remoteCredential === undefined
-        ? { remoteCredential: () => channelRemoteCredential }
-        : {
-            remoteCredential: () => channelRemoteCredential ?? options.remoteCredential?.(),
-          }),
+      remoteCredential: () => channelWriteCredential ?? channelRemoteCredential ?? options.remoteCredential?.(),
     });
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
   const emitChannel = (event: AgentChannelRevisionEvent): void => {
@@ -1325,6 +1323,25 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'open':
         actor.send({ type: 'sync', event: { type: 'open' } });
         return null;
+      case 'pushGithub': {
+        const held = channelCredential(request);
+        const credentialExpiry = Date.parse(optionalText(request, 'expiresAt') ?? '');
+        if (
+          channelWriteCredential !== undefined ||
+          held === undefined ||
+          !('authorization' in held) ||
+          !(credentialExpiry > Date.now())
+        ) {
+          throw new Error('This GitHub push has no valid repository credential, or another push is running.');
+        }
+        channelWriteCredential = held;
+        try {
+          await pushExplicitly({ actor, repositoryUrl: held.repositoryUrl });
+        } finally {
+          channelWriteCredential = undefined;
+        }
+        return null;
+      }
       case 'remoteCredential': {
         channelRemoteCredential = channelCredential(request);
         return null;

@@ -61,6 +61,8 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     }
   }, 300_000);
 
+  // A cold first import of OCP loads hundreds of MB of native libraries; with the PicoGK row alongside it, this
+  // overruns vitest's 5 s default on macos-26 runners.
   it('should import OCP and build123d inside the sandbox', async () => {
     const options = build123dOptionsSchema.parse(build123dOptionsFromClosure(sealed));
     const scratch = mkdtempSync(join(realpathSync(tmpdir()), 'tau-build123d-self-test-'));
@@ -77,7 +79,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('should install only wheels the host target lock pins', () => {
     const lock = readFileSync(join(packageRoot, 'python', `pylock.${hostKey!}.toml`), 'utf8');

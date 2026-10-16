@@ -8,7 +8,7 @@ name: E2E nightly
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate.
 # `workflow_dispatch` takes an optional commit to run against instead, and `only` selects one
-# suite family (`packaged`: only the packaged desktop suite) so a long lane runs on its own.
+# suite family (`packaged`: only the packaged desktop suite, which runs only when selected).
 
 on:
   schedule:
@@ -84,6 +84,9 @@ jobs:
           if [ "$ONLY" = packaged ]; then
             suites='[]'
             webgpu='[]'
+          else
+            # Selected only: the packaged suite is not yet green on a runner without Docker (W15 hand-back).
+            packaged='[]'
           fi
           echo "End-to-end suites: $suites"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
@@ -230,10 +233,11 @@ jobs:
           retention-days: 14
 
   # The packaged desktop suite (charter D30, W15): the ad-hoc signed darwin-arm64 package and every
-  # spec `test:e2e:packaged` lists, nightly because packaging and the suite take long. Projects
-  # join by declaring the target. GitHub's macOS runners have no Docker, so PostgreSQL, Redis and
+  # spec `test:e2e:packaged` lists. It runs only when dispatched with `only: packaged` until the
+  # suite is green on a Docker-less runner; a scheduled night skips it. Projects join by declaring
+  # the target. GitHub's macOS runners have no Docker, so PostgreSQL, Redis and
   # MinIO run as host processes (start-macos-services.sh) and TAU_E2E_SERVICES=host tells
-  # ensure-services.sh to migrate only. Dispatch with `only: packaged` to run this lane alone.
+  # ensure-services.sh to migrate only.
   desktop-packaged:
     name: Packaged desktop end-to-end (darwin-arm64)
     runs-on: macos-26

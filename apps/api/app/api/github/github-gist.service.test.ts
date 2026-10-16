@@ -36,11 +36,16 @@ const fixture = () => {
     scopes: 'read:user, user:email, gist',
     identity: 42,
     status: 200,
+    creation: {
+      id: 'abc123',
+      owner: { id: 42 },
+      files: { 'tau-project.zip.base64url': { content: 'YXJjaGl2ZQ' } },
+    },
     gist: {
       id: 'abc123',
       owner: { id: 42 },
       history: [{ version: revision }],
-      files: { 'tau-project.zip.base64url': { content: 'old' } },
+      files: { 'tau-project.zip.base64url': { content: 'YXJjaGl2ZQ' } },
     },
   };
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -49,6 +54,9 @@ const fixture = () => {
     }
     if (init?.method === 'DELETE') {
       return new Response(null, { status: 204 });
+    }
+    if (init?.method === 'POST') {
+      return Response.json(state.creation, { status: 201 });
     }
     return Response.json(state.gist, { status: state.status });
   });
@@ -99,7 +107,7 @@ describe('server-side Gist authority', () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
-  it('should publish only the bounded canonical artifact and return a token-free locator', async () => {
+  it('should read back a created Gist without history and return a pinned token-free locator', async () => {
     const { service, fetch } = fixture();
     expect(await service.mutate('user', headers, { action: 'create', payload })).toEqual({
       id: 'abc123',
@@ -112,6 +120,49 @@ describe('server-side Gist authority', () => {
       body: JSON.stringify(payload),
       headers: { authorization: 'Bearer server-only-token' },
     });
+    expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['https://api.github.com/user', 'GET'],
+      ['https://api.github.com/gists', 'POST'],
+      ['https://api.github.com/gists/abc123', 'GET'],
+    ]);
+  });
+  it('should reject a foreign create acknowledgement before reading it back', async () => {
+    const { service, state, fetch } = fixture();
+    state.creation.owner.id = 99;
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      name: 'BadGatewayException',
+      response: { code: 'GITHUB_GIST_RESPONSE_INVALID' },
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    { 'tau-project.zip.base64url': { content: 'stale' } },
+    { 'tau-project.zip.base64url': { content: 'YXJjaGl2ZQ', truncated: true } },
+    { 'tau-project.jwe': { content: 'YXJjaGl2ZQ' } },
+  ])('should refuse to pin a different or truncated artifact after upload: %j', async (files) => {
+    const { service, state, fetch } = fixture();
+    Object.assign(state.gist, { files });
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      name: 'ConflictException',
+      response: { code: 'GITHUB_GIST_CHANGED' },
+    });
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+  it.each([
+    { id: 'def456' },
+    { owner: { id: 99 } },
+    { files: { 'unrelated.txt': { content: 'private' } } },
+    { history: [] },
+    { history: [{ version: 'invalid' }] },
+    { history: undefined },
+  ])('should reject an invalid created Gist read-back without repeating the upload: %j', async (invalid) => {
+    const { service, state, fetch } = fixture();
+    Object.assign(state.gist, invalid);
+    await expect(service.mutate('user', headers, { action: 'create', payload })).rejects.toMatchObject({
+      name: 'ForbiddenException',
+      response: { code: 'GITHUB_GIST_NOT_OWNED_PUBLICATION' },
+    });
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
   it.each([
     { public: false, files: { 'other.txt': { content: 'data' } } },

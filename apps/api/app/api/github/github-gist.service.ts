@@ -29,8 +29,9 @@ const gistSchema = z.object({
   id: z.string().regex(/^[0-9a-f]+$/u),
   owner: z.object({ id: z.number().int().positive() }),
   files: z.record(z.string(), z.object({ content: z.string().optional(), truncated: z.boolean().optional() })),
-  history: z.array(z.object({ version: z.string().regex(/^[0-9a-f]{40}$/u) })),
+  history: z.array(z.object({ version: z.string().regex(/^[0-9a-f]{40}$/u) })).min(1),
 });
+const mutationResponseSchema = gistSchema.extend({ history: gistSchema.shape.history.optional() });
 type GistCredential = { accessToken: string; accountId: number; login: string; scopes: string[] };
 
 type GistCapability = Readonly<{
@@ -141,11 +142,22 @@ export class GithubGistService {
     if (input.action === 'delete') {
       return undefined;
     }
-    const body = gistSchema.safeParse(await this.json(response));
+    const body = mutationResponseSchema.safeParse(await this.json(response));
     if (!body.success || body.data.owner.id !== credential.accountId) {
       throw new BadGatewayException({ code: 'GITHUB_GIST_RESPONSE_INVALID' });
     }
-    return { id: body.data.id, history: body.data.history, html_url: `https://gist.github.com/${body.data.id}` };
+    // GitHub can omit history from a mutation response. Read the same owned publication to pin its revision.
+    let { history } = body.data;
+    if (history === undefined) {
+      const current = await this.ownedGist(credential, body.data.id);
+      const uploaded = Object.entries(payload?.data.files ?? {}).find(([, file]) => file !== null);
+      const readBack = current.files[uploaded?.[0] ?? ''];
+      if (uploaded === undefined || readBack?.truncated === true || readBack?.content !== uploaded[1]?.content) {
+        throw new ConflictException({ code: 'GITHUB_GIST_CHANGED' });
+      }
+      history = current.history;
+    }
+    return { id: body.data.id, history, html_url: `https://gist.github.com/${body.data.id}` };
   }
   private authorizationUrl(): string {
     return `https://github.com/settings/connections/applications/${encodeURIComponent(this.config.get('GITHUB_CLIENT_ID', { infer: true }))}`;

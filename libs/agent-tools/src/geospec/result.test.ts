@@ -573,19 +573,20 @@ describe('failure categories and suggestions', () => {
     return failure;
   };
   const weakening = /update the model or expected geometry assertion|weaken|relax the tolerance/iu;
+  const reducing = /\b(?:coarsen|coarser export|shrink|crop the|smaller part)\b/iu;
 
   it.each([
     {
       code: 'GEOSPEC_ANALYSIS_LIMIT',
       message: 'Connectivity scratch 6.1 GB exceeds the 256 MiB analysis limit.',
       category: 'analysis-limit',
-      next: /coarser export/u,
+      next: /Provision more resources[^]*not decided at this capacity/u,
     },
     {
       code: 'GEOSPEC_RESOURCE_LIMIT',
       message: 'Primary geometry 54 MB exceeds the 64 MiB subject limit.',
       category: 'resource-limit',
-      next: /coarser export/u,
+      next: /Provision more resources[^]*not decided at this capacity/u,
     },
     {
       code: 'MATCHER_TIMEOUT',
@@ -612,8 +613,37 @@ describe('failure categories and suggestions', () => {
       expect(failure.category).toBe(category);
       expect(failure.suggestion).toMatch(next);
       expect(failure.suggestion).not.toMatch(weakening);
+      expect(failure.suggestion).not.toMatch(reducing);
     },
   );
+
+  it('should drop an engine suggestion that reduces the model to fit a limit', () => {
+    const failure = failureOf(
+      refused({
+        code: 'GEOSPEC_ANALYSIS_LIMIT',
+        severity: 'error',
+        message: 'Connectivity scratch exceeds the analysis limit.',
+        suggestion: 'Load a coarser export or crop the subject.',
+      }),
+    );
+    expect(failure.suggestion).not.toMatch(reducing);
+    expect(failure.suggestion).toContain('Provision more resources');
+  });
+
+  it('should answer a whole-model claim on a region crop with its scope refusal, not a BRep or limit hint', () => {
+    const failure = failureOf(
+      refused({
+        code: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM',
+        severity: 'error',
+        message: "A 'connectedComponents' claim is about the whole model.",
+        suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
+      }),
+    );
+    expect(failure).toMatchObject({
+      category: 'unsupported-evidence',
+      suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
+    });
+  });
 
   it('should read a byte-limit refusal under the shared evidence code as an analysis limit', () => {
     const failure = failureOf(

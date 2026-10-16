@@ -1,4 +1,4 @@
-import { geoSpecMaxWorkUnitLimit } from '@taucad/chat/constants';
+import { geoSpecDefaultMaxWorkUnitLimit } from '@taucad/chat/constants';
 import { geoSpecMaximumWorkUnitLimit } from 'geospec/assertion-client';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -147,8 +147,8 @@ describe('runGeoSpecTests', () => {
     });
   });
 
-  it('caps the run work-unit budget at the engine bound', () => {
-    expect(geoSpecMaxWorkUnitLimit).toBe(geoSpecMaximumWorkUnitLimit);
+  it("defaults the run work-unit maximum to GeoSpec's default authored maximum", () => {
+    expect(geoSpecDefaultMaxWorkUnitLimit).toBe(geoSpecMaximumWorkUnitLimit);
   });
 });
 

@@ -13,7 +13,7 @@ import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import { geoSpecRunAccountingSchema, geoSpecRunLineageSchema } from '@taucad/chat/schemas/tools/test-model';
 import { isRecord } from '@taucad/utils/schema';
 import type { GeometryDiagnostic } from 'geospec/mesh';
-import { geoSpecMeshEvidenceMatchers } from 'geospec/model';
+import { geoSpecMeshEvidenceMatchers, geoSpecRegionWholeModelClaimCode } from 'geospec/model';
 import { isGeoSpecTimeoutCode } from 'geospec/runner';
 import type { GeoSpecTestCase } from 'geospec/runner';
 import type { GeoSpecRunnerFileResult, GeoSpecRunnerResult } from 'geospec/runner/worker';
@@ -174,6 +174,7 @@ const evidenceCodes = new Set([
   'GEOSPEC_EVIDENCE_UNSUPPORTED',
   'GEOSPEC_KERNEL_BREP_UNSUPPORTED',
   'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
+  geoSpecRegionWholeModelClaimCode,
 ]);
 /*
  * Engine pins before the distinct limit codes (geospec-engine 0.1.0-next.51)
@@ -185,6 +186,11 @@ const limitMessage = /\bexceeds?\b[^.]*\blimit\b/iu;
 const admissionLimitMessage = /\b(?:subject|admission|retained|binary)\b[^.]*\blimit\b/iu;
 const weakeningSuggestion =
   /\b(?:update|weaken|relax|loosen|remove|delete|drop|change)\b[^.]{0,60}\b(?:assertion|expectation|expected|tolerance|test)\b/iu;
+/** Advice to reduce the design to fit a limit; a limit is met with resources, never less geometry. */
+const reducingSuggestion =
+  /\b(?:coarsen|coarser|shrink|crop|simplify|decimate)\b|\bsmaller (?:part|model|subject|export)\b|\blower (?:the )?resolution\b/iu;
+const capacityAdvice =
+  'Provision more resources (raise the host limit or the work budget the diagnostic names, for example test_model workUnitLimit) and re-run; if this host cannot provide them, report the claim as not decided at this capacity. Keep the model as designed, at its full geometry and resolution, and never let a region load stand in for a whole-model claim.';
 
 const meshMatchers = geoSpecMeshEvidenceMatchers.join(', ');
 
@@ -256,7 +262,10 @@ const failureCategory = (test: GeoSpecTestCase, diagnostics: readonly GeometryDi
 };
 
 const keepsAssertion = (suggestion: string | undefined): suggestion is string =>
-  suggestion !== undefined && suggestion.trim() !== '' && !weakeningSuggestion.test(suggestion);
+  suggestion !== undefined &&
+  suggestion.trim() !== '' &&
+  !weakeningSuggestion.test(suggestion) &&
+  !reducingSuggestion.test(suggestion);
 
 const evidenceSuggestion = (
   kernels: readonly GeoSpecKernelEvidence[],
@@ -288,6 +297,10 @@ const categorySuggestion = (options: {
     (diagnostic) => diagnosticCategory(diagnostic) === category && keepsAssertion(diagnostic.suggestion),
   )?.suggestion;
   const any = diagnostics.find((diagnostic) => keepsAssertion(diagnostic.suggestion))?.suggestion;
+  const regionScope = diagnostics.find((diagnostic) => diagnostic.code === geoSpecRegionWholeModelClaimCode);
+  if (regionScope?.suggestion !== undefined) {
+    return regionScope.suggestion;
+  }
   switch (category) {
     case 'geometry': {
       return (
@@ -298,14 +311,14 @@ const categorySuggestion = (options: {
     case 'timeout': {
       return (
         own ??
-        'Keep the assertion. Re-run only this requirement with testNamePattern, raise testTimeout, or make the load it waits on cheaper (a coarser mesh export or a smaller part).'
+        `Keep the assertion. Raise testTimeout so the requirement can finish, or re-run only it with testNamePattern. ${capacityAdvice}`
       );
     }
     case 'analysis-limit': {
-      return 'Keep the assertion: the subject is larger than this analysis can hold within the engine limit named in the diagnostic. Load a coarser export (a larger mesh tolerance or voxel size in the export, not the printed model) or crop the subject to the region the requirement is about, for example a per-part file, then re-run.';
+      return `Keep the assertion: the analysis needs more than the engine limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
     }
     case 'resource-limit': {
-      return 'Keep the assertion: the model exceeds the engine admission limit named in the diagnostic. Load a coarser export or a smaller part of the model (a per-part or cropped file), then re-run.';
+      return `Keep the assertion: the model exceeds the host admission limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
     }
     case 'work-budget': {
       return 'Keep the assertion: the claim exhausted its deterministic work-unit budget (the diagnostic details give limit and used). Raise workUnitLimit for this claim (expectGeo or loadModel option, or test_model workUnitLimit for the whole run) or narrow its selection, then re-run.';
@@ -437,8 +450,7 @@ const issueRow = (issue: RunnerIssue, targetFile: string): RunGeoSpecTestFailure
       id: issue.code,
       requirement: 'Every selected GeoSpec file must finish within its wall-clock bound',
       reason: issue.message,
-      suggestion:
-        'Keep the assertions. Re-run the timed-out file on its own, raise its timeout, or make its model loads cheaper (a coarser mesh export or a smaller part).',
+      suggestion: `Keep the assertions. Re-run the timed-out file on its own or raise its timeout. ${capacityAdvice}`,
       category: 'timeout',
       targetFile,
     };

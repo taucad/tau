@@ -12,7 +12,6 @@
  */
 
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
-import { geoSpecMaxRunBudget } from '@taucad/chat/constants';
 import type { GeoSpecRunTimeout } from '@taucad/chat/schemas/tools/test-model';
 import { geoSpecTimeoutCode } from 'geospec/runner';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -192,7 +191,7 @@ const timeoutRow = (options: {
     suggestion:
       runTimeout.phase === 'queued'
         ? 'Re-run it once the earlier test_model call has returned; run test_model calls one at a time.'
-        : `Keep the assertions.${rerun} Pass testTimeout to raise the run budget (up to ${geoSpecMaxRunBudget} ms), or make the slow load cheaper with a coarser mesh export or a smaller part.`,
+        : `Keep the assertions.${rerun} Pass a larger testTimeout to raise the run budget up to this host's maximum, which the host can raise. If the run still cannot finish here, report the unfinished requirements as not decided at this capacity, keeping the model at its full geometry and resolution.`,
     category: 'timeout',
     targetFile: runTimeout.file ?? options.fallbackFile,
     diagnostics: [

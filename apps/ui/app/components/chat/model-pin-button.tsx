@@ -66,7 +66,7 @@ export function ModelPinButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side='left'>{isOn ? 'Unpin' : 'Pin'}</TooltipContent>
+      <TooltipContent side='right'>{isOn ? 'Unpin' : 'Pin'}</TooltipContent>
     </Tooltip>
   );
 }

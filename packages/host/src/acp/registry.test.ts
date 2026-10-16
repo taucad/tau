@@ -54,7 +54,7 @@ describe('resolveAcpAdapters', () => {
     for (const agent of agents) {
       if (agent.modulePath === undefined) {
         expect(agent.cli).toBe('grok');
-        expect(agent.args).toEqual(['--no-auto-update', 'agent', 'stdio']);
+        expect(agent.args).toEqual(['--no-auto-update', 'agent', '--no-leader', 'stdio']);
         continue;
       }
       expect(agent.modulePath.endsWith('.js')).toBe(true);
@@ -162,6 +162,7 @@ describe('probeAcpAgentModels', () => {
     ]);
     expect(probed.agents[0]?.models?.[1]?.thoughtLevel?.currentValue).toBe('medium');
     expect(probed.agents[0]?.defaultModel).toBe('gpt-5.3-codex-spark');
+    expect(probed.agents[0]?.configOptions?.map((option) => option.id)).toEqual(['mode', 'web_search']);
     expect(probed.agents[0]?.thoughtLevel).toMatchObject({
       id: 'thought_level',
       currentValue: 'medium',
@@ -250,6 +251,7 @@ describe('externalAgentDescriptors', () => {
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ]);
     expect(descriptors[0]?.thoughtLevel?.currentValue).toBe('medium');
+    expect(descriptors[0]?.configOptions?.map((option) => option.id)).toEqual(['mode', 'web_search']);
     /* VSC1: every tier parses exactly this — no string element, no extra key. */
     for (const descriptor of descriptors) {
       expect(externalAgentDescriptorSchema.parse(descriptor)).toEqual(descriptor);

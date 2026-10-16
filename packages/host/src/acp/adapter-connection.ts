@@ -10,6 +10,8 @@
  */
 
 import { grokPlanSchema, permissionOfGrokPlan, grokPlanResponseOf } from '#acp/grok-plan.js';
+import { z } from 'zod';
+import { grokNotificationOf } from '#acp/grok-notifications.js';
 import { grokQuestionSchema } from '#acp/grok-questions.js';
 import { elicitationRequestSchema } from '#acp/elicitation-request.js';
 
@@ -75,6 +77,28 @@ export const createAdapterConnection = (
       .onNotification('session/update', ({ params }) => {
         send({ type: 'sessionUpdate', sessionId: params.sessionId, update: params.update });
       })
+      .onNotification('_x.ai/session_notification', z.unknown(), ({ params }) => {
+        const notification = input.adapter.id === 'grok' ? grokNotificationOf(params) : undefined;
+        if (notification) {
+          send({ type: 'grokNotification', notification });
+        }
+      })
+      .onNotification('_x.ai/session/update', z.unknown(), ({ params }) => {
+        const notification = input.adapter.id === 'grok' ? grokNotificationOf(params) : undefined;
+        if (notification) {
+          send({ type: 'grokNotification', notification });
+        }
+      })
+      .onNotification(
+        '_x.ai/settings/update',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Grok's external settings field uses its wire spelling.
+        z.object({ auto_permission_mode_enabled: z.boolean().nullish() }),
+        ({ params }) => {
+          if (input.adapter.id === 'grok') {
+            send({ type: 'grokSettings', params });
+          }
+        },
+      )
       .onRequest('session/request_permission', async ({ params }) => ask('session/request_permission', params))
       .onRequest('_x.ai/exit_plan_mode', grokPlanSchema, async ({ params }) => {
         if (input.adapter.id !== 'grok') {
@@ -134,6 +158,16 @@ export const createAdapterConnection = (
       }
     };
 
+    const notify = async (command: Extract<AcpConnectionCommand, { readonly type: 'notify' }>): Promise<void> => {
+      try {
+        await connection.agent.notify(command.method, command.params);
+      } catch {
+        /* A failed policy/cancel write cannot leave the vendor executing unobserved. */
+        adapter.signal('SIGKILL');
+        onExit();
+      }
+    };
+
     receive((command) => {
       switch (command.type) {
         case 'call': {
@@ -142,7 +176,7 @@ export const createAdapterConnection = (
           return;
         }
         case 'notify': {
-          void connection.agent.notify(command.method, command.params);
+          void notify(command);
           return;
         }
         case 'respond': {

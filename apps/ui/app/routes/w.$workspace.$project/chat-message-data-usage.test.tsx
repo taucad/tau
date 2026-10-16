@@ -218,3 +218,19 @@ describe('ChatMessageDataUsage', () => {
     expect(screen.queryByText('Not billed')).not.toBeInTheDocument();
   });
 });
+
+it.each([
+  [{ costUsdTicks: 2_000_000_000, costIsPartial: false, usageIsIncomplete: false }, '$0.20'],
+  [{ costUsdTicks: 1, costIsPartial: false, usageIsIncomplete: false }, '$0.0000000001'],
+  [{ costUsdTicks: 0, costIsPartial: false, usageIsIncomplete: false }, '$0.00'],
+  [{ costIsPartial: true, usageIsIncomplete: true }, 'Unavailable or partial'],
+])('shows vendor cost separately from Tau receipts: %j', async (vendorReport, expected) => {
+  stubReceipts({});
+  renderUsage([usagePart({ agent: 'grok', model: 'Actual Grok', vendorReport })]);
+  act(() => {
+    screen.getByRole('button', { name: /Usage: grok/ }).focus();
+  });
+  expect(await screen.findByText('Grok-reported cost')).toBeInTheDocument();
+  expect(screen.getByText(expected)).toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});

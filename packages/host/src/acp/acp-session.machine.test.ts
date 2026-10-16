@@ -25,6 +25,7 @@ import type { AcpLend, AcpSessionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { protocolVersion } from '#acp/session.js';
+import { grokPermissionConfigId, grokPlanningConfigId } from '#acp/grok-controls.js';
 
 const adapter: AcpAdapter = {
   id: 'fake',
@@ -101,6 +102,137 @@ const openAndLend = async (harness: Harness): Promise<void> => {
 };
 
 describe('acpSession', () => {
+  it('should apply isolated Grok controls, acknowledge planning, and downgrade permissions on the next turn', async () => {
+    const harness = start({
+      opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
+      lend: { ...lent, configuration: { [grokPermissionConfigId]: 'always-approve', [grokPlanningConfigId]: 'plan' } },
+    });
+    try {
+      await flush();
+      expect(harness.lastCall()).toMatchObject({
+        method: 'initialize',
+        params: { _meta: { clientIdentifier: 'tau-host', clientVersion: '1' } },
+      });
+      harness.answer({ protocolVersion, agentCapabilities: {}, _meta: { grokShell: true, agentVersion: '1.0.52' } });
+      expect(harness.lastCall()).toMatchObject({
+        method: 'session/new',
+        params: { _meta: { yoloMode: true, autoMode: false } },
+      });
+      harness.answer({ sessionId: 'acp-1', configOptions: [] });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      expect(harness.lastCall()).toMatchObject({
+        method: 'session/set_mode',
+        params: { sessionId: 'acp-1', modeId: 'plan' },
+      });
+      expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
+      harness.answer({});
+      expect(harness.lastCall()).toMatchObject({
+        method: 'session/prompt',
+        params: { _meta: { promptId: 'run-1:0' } },
+      });
+      expect(harness.commands('connection')).toContainEqual(
+        expect.objectContaining({
+          type: 'notify',
+          method: '_x.ai/yolo_mode_changed',
+          params: {
+            clientIdentifier: 'tau-host',
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+            yolo_mode: true,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+            auto_mode: false,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+            permission_mode: 'always-approve',
+          },
+        }),
+      );
+      harness.answer({ stopReason: 'end_turn' });
+      harness.fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+      harness.fakes.sendBack('lentTurn', { type: 'recorded', failure: undefined });
+      harness.actor.send({
+        type: 'lend',
+        lend: { ...lent, requestId: 'run-2:0', configuration: { [grokPermissionConfigId]: 'ask' } },
+      });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      harness.answer({});
+      expect(harness.commands('connection').findLast((event) => event.type === 'notify')).toMatchObject({
+        method: '_x.ai/yolo_mode_changed',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+        params: { yolo_mode: false, auto_mode: false, permission_mode: 'ask' },
+      });
+      expect(harness.actor.getSnapshot().context.configOptions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: grokPermissionConfigId, currentValue: 'ask' }),
+          expect.objectContaining({ id: grokPlanningConfigId, currentValue: 'plan' }),
+        ]),
+      );
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
+  it('should refuse unverified Grok Auto without starting a model prompt', async () => {
+    const harness = start({
+      opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
+      lend: { ...lent, configuration: { [grokPermissionConfigId]: 'auto' } },
+    });
+    try {
+      await flush();
+      harness.answer({ protocolVersion, agentCapabilities: {}, _meta: { grokShell: true, agentVersion: '1.0.52' } });
+      harness.answer({ sessionId: 'acp-1' });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
+      expect(harness.actor.getSnapshot().context['outcome']).toMatchObject({
+        ok: false,
+        failure: { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
+      });
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
+  it('should fence Grok notifications to the live prompt and use terminal hints only when that prompt fails', async () => {
+    const harness = start({ opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } } });
+    const notification = {
+      sessionId: 'acp-1',
+      update: {
+        sessionUpdate: 'retry_state',
+        type: 'exhausted',
+        attempts: 2,
+        reason: 'Quota reached',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+        is_rate_limited: true,
+      },
+      _meta: { promptId: lent.requestId },
+    } as const;
+    try {
+      harness.actor.send({ type: 'grokNotification', notification });
+      await openAndLend(harness);
+      harness.actor.send({ type: 'grokNotification', notification: { ...notification, sessionId: 'another-chat' } });
+      harness.actor.send({
+        type: 'grokNotification',
+        notification: { ...notification, _meta: { promptId: 'old-prompt' } },
+      });
+      harness.actor.send({ type: 'grokNotification', notification: { ...notification, _meta: { isReplay: true } } });
+      expect(harness.commands('lentTurn').filter((event) => event.type === 'grokNotification')).toEqual([]);
+      harness.actor.send({ type: 'grokNotification', notification });
+      expect(harness.commands('lentTurn').filter((event) => event.type === 'grokNotification')).toHaveLength(1);
+      expect(harness.actor.getSnapshot().matches({ busy: 'prompting' })).toBe(true);
+      const call = harness.lastCall();
+      harness.fakes.sendBack('connection', {
+        type: 'callSettled',
+        id: String(call?.['id']),
+        at: harness.clock.now(),
+        answer: { method: 'session/prompt', error: { message: 'Request failed', stderr: '' } },
+      });
+      expect(harness.actor.getSnapshot().context['outcome']).toMatchObject({
+        ok: false,
+        failure: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: 'Quota reached' },
+      });
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
   it('should retain Grok per-turn usage against the prior durable session total', async () => {
     const harness = start({
       opening: {
@@ -143,7 +275,7 @@ describe('acpSession', () => {
         type: 'flush',
         report: {
           usage: {
-            inputTokens: 150,
+            inputTokens: 28, // Input excludes the separately reported 120 cached reads and 2 cache writes.
             outputTokens: 30,
             totalTokens: 180,
             cachedReadTokens: 120,

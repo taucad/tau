@@ -257,12 +257,13 @@ export const hostAdmission = (input: {
   readonly references?: readonly CadReference[] | undefined;
 }): ((runId: string) => BrowserHostAdmission) | undefined => {
   if (input.agent.execution.kind === 'acp') {
-    const { agentId, model, config } = input.agent.execution;
+    const { agentId, hostId, model, config } = input.agent.execution;
     return () => ({
       ...input.trigger,
       agent: {
         kind: 'acp',
         id: agentId,
+        hostId,
         ...(model === undefined ? {} : { model }),
         ...(config === undefined ? {} : { config }),
       },

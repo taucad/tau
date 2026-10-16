@@ -24,6 +24,7 @@ export function ChatMessageDataUsage({
   return (
     <ChatMessageUsage
       model={resolveModel(lastUsage.model)}
+      vendorReports={usageParts.flatMap((part) => (part.vendorReport === undefined ? [] : [part.vendorReport]))}
       agent={lastUsage.agent === undefined ? undefined : externalAgentDisplayName(lastUsage.agent)}
       totals={sumUsageTokens(usageParts)}
       turns={usageParts.length}

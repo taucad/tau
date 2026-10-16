@@ -475,6 +475,7 @@ function serializePart(part: MyMessagePart): string {
       return '';
     }
 
+    case 'data-acp-activity':
     case 'data-acp-session': {
       return '';
     }

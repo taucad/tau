@@ -34,6 +34,8 @@
     "acpSession.closing.terminating.xstate.timeout": "AdapterExited",
     "acpSession.elicitationComplete": "Stutter",
     "acpSession.flushed": "Stutter",
+    "acpSession.grokNotification": "Stutter",
+    "acpSession.grokSettings": "Stutter",
     "acpSession.idle.persisting.lend": "Acquire",
     "acpSession.idle.persisting.sessionUpdate": "Stutter",
     "acpSession.idle.persisting.xstate.done.actor": "Dequeued",
@@ -69,6 +71,8 @@
     "acpSessions.ready.turnEnded": "TurnEnded",
     "acpSessions.xstate.error.*": "Unmodelled",
     "busy.elicitationComplete": "Stutter",
+    "busy.grokNotification": "Stutter",
+    "busy.grokSettings": "Stutter",
     "busy.sessionUpdate": "Stutter",
     "busy.vendorAnswered": "Stutter",
     "closing.adapterExited": "AdapterExited",
@@ -89,6 +93,8 @@
     "closed",
     "elicitationComplete",
     "flushed",
+    "grokNotification",
+    "grokSettings",
     "idleExpired",
     "killDue",
     "lend",
@@ -103,11 +109,11 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "ff2ef9dfd7df47941c8961c1e51cbf4ffb6fb2afb9470257b6f8ac3ae489a8c2"
+    "AcpSessions.tla": "a9376f40d521bda6c19005379528a12422f612170002167a6bfe3a30430ab561"
   },
   "tables": {},
   "versions": {
-    "acpSession": "2",
+    "acpSession": "3",
     "acpSessions": "1"
   }
 }

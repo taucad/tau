@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 181.36 kB brotli on 2026-10-16 (the MCP viewer page, its parameter actors, workbench keeper, this computer's machines on contract revision 3 with keep-awake and the binding ceremony, the install_packages handler, and test_model failure categories, capacity guidance, run timeouts and host limits; @taucad/bundler-core stays external)",
+    "name": "total (ESM JS) — measured 186.18 kB brotli on 2026-10-16; includes Grok ACP controls, bounded activity and usage, typed questions and provider-permission readback alongside the MCP viewer, machines, install_packages, test_model failure categories, GeoSpec capacity guidance, run timeouts and host limits; @taucad/bundler-core stays external",
     "path": "dist/**/*.mjs",
-    "limit": "184 kB"
+    "limit": "188 kB"
   }
 ]

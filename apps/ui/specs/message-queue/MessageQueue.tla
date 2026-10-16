@@ -10,6 +10,8 @@
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
+\* Grok config discovery and host-owned session selection affect composer controls;
+\* queued admission, FIFO delivery and durable cancellation retain these owners.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

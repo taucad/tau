@@ -238,6 +238,28 @@ describe('selectVariant', () => {
     }
   });
 
+  // Total over the declared native targets: the host each target describes, standing on its floor, selects it.
+  it.each(all.filter(({ target }) => target.runtime === 'native').map((declared) => [declared] as const))(
+    'should select every declared native target on its own host (%#)',
+    (declared) => {
+      const target = declared.target as Extract<DependencyTarget, { runtime: 'native' }>;
+      const indicators =
+        target.os === 'linux'
+          ? host({
+              arch: target.arch,
+              libc: target.libc,
+              ...(target.minimumLibcVersion === undefined ? {} : { libcVersion: target.minimumLibcVersion }),
+            })
+          : host({
+              os: target.os,
+              arch: target.arch,
+              ...(target.minimumOsVersion === undefined ? {} : { osVersion: target.minimumOsVersion }),
+            });
+
+      expect(selectVariant(all, indicators)).toMatchObject({ status: 'selected', variant: declared, emulated: false });
+    },
+  );
+
   it('should list every considered target so two runs can be diffed', () => {
     const selection = selectVariant(all, macArm('11.7'));
 

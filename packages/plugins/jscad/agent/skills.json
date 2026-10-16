@@ -4,7 +4,7 @@
       "slug": "cad-jscad",
       "name": "JSCAD authoring",
       "description": "Guides JSCAD modeling in main.ts with 2D-first CSG and deliberate tessellation. Use when creating or editing @jscad/modeling geometry.",
-      "version": "0.1.0-beta.3",
+      "version": "0.1.0-beta.4",
       "whenToUse": "Use when creating or editing @jscad/modeling geometry.",
       "directory": "cad-jscad",
       "files": [

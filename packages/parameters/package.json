@@ -1,6 +1,6 @@
 {
   "name": "@taucad/parameters",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Portable parameter semantics and checked change planning",
   "type": "module",
   "sideEffects": false,

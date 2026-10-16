@@ -4,7 +4,7 @@
       "slug": "cad-picogk",
       "name": "PicoGK C# authoring",
       "description": "Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.",
-      "version": "0.1.0-beta.3",
+      "version": "0.1.0-beta.4",
       "whenToUse": "Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.",
       "directory": "cad-picogk",
       "files": [

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/image",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Image import and export toolkit for @taucad/runtime",
   "type": "module",
   "sideEffects": false,

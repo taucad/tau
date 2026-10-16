@@ -1,6 +1,7 @@
 /**
  * The installed `tau` bin's surface, checked by `check-pack-install.ts` once `@taucad/cli` is in the
- * consumer application: `export` to a GLB, `check`, `mcp` answering `initialize`, and the typed
+ * consumer application: `export` to a GLB, `check`, `mcp` answering `initialize` and listing and passing
+ * `test_model` on a GeoSpec suite with the GeoSpec engine the CLI installs (audit H-01), and the typed
  * not-prepared refusal for a `.py` model (charter S24). The bin runs from a project folder outside
  * the application with an empty config directory and home, so nothing a developer machine holds is
  * visible to it.
@@ -72,18 +73,74 @@ export const mcpInitializeRequest = `${JSON.stringify({
 
 type InitializeResult = { serverInfo?: { name?: string; version?: string }; protocolVersion?: string };
 
+/** What `tools/call` answers: text blocks, the error bit, and any structured content. */
+type ToolCallResult = {
+  content?: ReadonlyArray<{ type: string; text?: string }>;
+  isError?: boolean;
+  structuredContent?: { passed?: number; total?: number };
+};
+
+/** What one `tau mcp` session answered: `initialize`, the listed tool names, and `test_model` when listed. */
+export type McpSessionAnswers = {
+  readonly initialized: InitializeResult;
+  readonly tools: readonly string[];
+  readonly testModel: ToolCallResult | undefined;
+};
+
+/**
+ * A GeoSpec suite that passes on a 20 x 10 x 4 mm replicad block, and the block, for `test_model` to run
+ * through the installed CLI's own GeoSpec engine.
+ */
+export const geoSpecProjectFiles: Readonly<Record<string, string>> = {
+  'block.ts': `import { drawRectangle } from 'replicad';
+
+export default function main() {
+  return drawRectangle(20, 10).sketchOnPlane('XY').extrude(4);
+}
+`,
+  'block.geospec.ts': `import { describe, it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
+
+describe('20 x 10 x 4 mm block', () => {
+  it('has the specified size', async () => {
+    const model = await loadModel({ file: 'block.ts', format: 'step' });
+    expectGeo(model).toHaveBoundingBox({ size: { x: 20, y: 10, z: 4 }, tolerance: 0.001 });
+  });
+});
+`,
+};
+
+/**
+ * Why a `tau mcp` session falls short of a global install's promise, or `undefined` when it keeps it:
+ * `test_model` is listed (the CLI brings the GeoSpec engine its host peers) and passes the suite.
+ */
+export const geoSpecSessionFailure = ({ tools, testModel }: McpSessionAnswers): string | undefined => {
+  if (!tools.includes('test_model')) {
+    return `tau mcp listed no test_model, so the installed CLI did not resolve the GeoSpec engine; it listed ${tools.join(', ')}.`;
+  }
+  const { passed, total } = testModel?.structuredContent ?? {};
+  if (testModel?.isError === true || passed !== 1 || total !== 1) {
+    const text = (testModel?.content ?? []).map((block) => block.text ?? '').join('\n');
+    return `tau mcp test_model did not pass the one-requirement suite:\n${text.slice(-4000)}`;
+  }
+  return undefined;
+};
+
 /** Milliseconds `tau mcp` has to answer `initialize`. */
 const initializeTimeout = 60_000;
+
+/** Milliseconds `tau mcp` has to answer `test_model`, which loads the GeoSpec engine and a kernel first. */
+const testModelTimeout = 180_000;
 
 /** Milliseconds `tau mcp` has to exit once stdin closes, before it is terminated. */
 const exitGrace = 10_000;
 
-/** Send `initialize` to `tau mcp` over stdio and return the server's answer. */
-const mcpInitialize = async (options: {
+/** Speak one MCP session to `tau mcp` over stdio: `initialize`, `tools/list`, then `test_model` when listed. */
+const mcpSession = async (options: {
   readonly bin: string;
   readonly project: string;
   readonly environment: NodeJS.ProcessEnv;
-}): Promise<InitializeResult> => {
+}): Promise<McpSessionAnswers> => {
   const child = spawn(options.bin, ['mcp', `--project=${options.project}`], {
     cwd: options.project,
     env: options.environment,
@@ -98,31 +155,71 @@ const mcpInitialize = async (options: {
   child.once('exit', () => {
     exited.resolve();
   });
-  const answer = Promise.withResolvers<string>();
-  const timer = setTimeout(() => {
-    answer.reject(new Error(`tau mcp did not answer initialize in ${String(initializeTimeout)} ms.\n${stderr}`));
-  }, initializeTimeout);
+  const pending = new Map<number, PromiseWithResolvers<string>>();
+  const failAll = (error: Error): void => {
+    for (const waiting of pending.values()) {
+      waiting.reject(error);
+    }
+    pending.clear();
+  };
   child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
     stdout += chunk;
-    const line = stdout.split('\n').find((candidate) => candidate.includes('"id":1'));
-    if (line !== undefined) {
-      answer.resolve(line);
+    const lines = stdout.split('\n');
+    stdout = lines.pop() ?? '';
+    for (const line of lines) {
+      let id: unknown;
+      try {
+        ({ id } = JSON.parse(line) as { id?: unknown });
+      } catch {
+        // ponytail: the protocol owns stdout; a line that is not JSON answers no request.
+        continue;
+      }
+      if (typeof id === 'number') {
+        pending.get(id)?.resolve(line);
+        pending.delete(id);
+      }
     }
   });
-  child.once('error', answer.reject);
+  child.once('error', failAll);
   child.once('exit', (status) => {
-    answer.reject(new Error(`tau mcp exited ${String(status)} before answering initialize.\n${stderr}`));
+    failAll(new Error(`tau mcp exited ${String(status)} mid-session.\n${stderr}`));
   });
-  child.stdin.write(mcpInitializeRequest);
-  try {
-    const line = await answer.promise;
-    const message = JSON.parse(line) as { result?: InitializeResult };
-    if (message.result === undefined) {
-      throw new Error(`tau mcp answered initialize with an error: ${line}`);
+  const request = async <Result>(id: number, line: string, answerTimeout: number): Promise<Result> => {
+    const answered = Promise.withResolvers<string>();
+    pending.set(id, answered);
+    const timer = setTimeout(() => {
+      answered.reject(
+        new Error(`tau mcp did not answer request ${String(id)} in ${String(answerTimeout)} ms.\n${stderr}`),
+      );
+    }, answerTimeout);
+    child.stdin.write(line);
+    try {
+      const answer = await answered.promise;
+      const message = JSON.parse(answer) as { result?: Result };
+      if (message.result === undefined) {
+        throw new Error(`tau mcp answered request ${String(id)} with an error: ${answer}`);
+      }
+      return message.result;
+    } finally {
+      clearTimeout(timer);
     }
-    return message.result;
+  };
+  const call = (id: number, method: string, params: Record<string, unknown>): string =>
+    `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
+  try {
+    const initialized = await request<InitializeResult>(1, mcpInitializeRequest, initializeTimeout);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const listed = await request<{ tools: ReadonlyArray<{ name: string }> }>(
+      2,
+      call(2, 'tools/list', {}),
+      initializeTimeout,
+    );
+    const tools = listed.tools.map(({ name }) => name);
+    const testModel = tools.includes('test_model')
+      ? await request<ToolCallResult>(3, call(3, 'tools/call', { name: 'test_model', arguments: {} }), testModelTimeout)
+      : undefined;
+    return { initialized, tools, testModel };
   } finally {
-    clearTimeout(timer);
     child.stdin.end();
     const grace = setTimeout(() => {
       child.kill('SIGTERM');
@@ -195,11 +292,19 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
 
   settle('check', tau('tau check main.ts', ['check', 'main.ts']), ({ status }) => status === 0);
 
+  for (const [name, text] of Object.entries(geoSpecProjectFiles)) {
+    writeFileSync(join(project, name), text);
+  }
   const started = performance.now();
-  const initialized = await mcpInitialize({ bin, project, environment });
+  const session = await mcpSession({ bin, project, environment });
+  const { initialized } = session;
   console.log(
-    `tau mcp: initialize answered by ${initialized.serverInfo?.name ?? 'an unnamed server'} ${initialized.serverInfo?.version ?? ''} (protocol ${initialized.protocolVersion ?? 'unknown'}) in ${String(Math.round(performance.now() - started))} ms.`,
+    `tau mcp: initialize answered by ${initialized.serverInfo?.name ?? 'an unnamed server'} ${initialized.serverInfo?.version ?? ''} (protocol ${initialized.protocolVersion ?? 'unknown'}); listed ${String(session.tools.length)} tools; test_model ran in ${String(Math.round(performance.now() - started))} ms.`,
   );
+  const geoSpecFailure = geoSpecSessionFailure(session);
+  if (geoSpecFailure !== undefined) {
+    throw new Error(geoSpecFailure);
+  }
 
   writeFileSync(join(project, 'main.py'), 'from build123d import Box\n\nresult = Box(10, 20, 30)\n');
   const pythonOutput = join(project, 'python.glb');

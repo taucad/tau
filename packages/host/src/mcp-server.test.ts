@@ -145,9 +145,16 @@ const stubLauncher = (): AgentLauncher =>
     close: async () => undefined,
   }) as unknown as AgentLauncher;
 
+/** What a registry with a GeoSpec runner lists for `test_model`; the endpoint lists the tool only then. */
+const testModelTool: HostToolDefinition = {
+  name: 'test_model',
+  description: 'Run the GeoSpec suite.',
+  inputSchema: { type: 'object' },
+};
+
 const invocations: HostToolInvocation[] = [];
 const registry: ToolRegistry = {
-  list: () => [],
+  list: () => [testModelTool],
   invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
     invocations.push(invocation);
     if (invocation.toolName === 'screenshot') {
@@ -194,7 +201,7 @@ describe('createHostMcpEndpoint capability', () => {
       secret,
       workspaceRoot,
       registry: {
-        list: () => [],
+        list: () => [testModelTool],
         invoke: async (input) => {
           entered.resolve();
           await unblock.promise;
@@ -429,7 +436,7 @@ describe('the mounted /mcp route', () => {
       secret,
       workspaceRoot,
       registry: {
-        list: () => [],
+        list: () => [testModelTool],
         invoke: async (invocation) => {
           expect(invocation.runId).toBeDefined();
           if (invocation.runId === undefined) {
@@ -579,7 +586,7 @@ describe('the mounted /mcp route', () => {
         secret,
         workspaceRoot,
         registry: {
-          list: () => [],
+          list: () => [testModelTool],
           invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
             if (invocation.toolName === 'screenshot') {
               return {
@@ -687,7 +694,7 @@ describe('the mounted /mcp route', () => {
       secret,
       workspaceRoot,
       registry: {
-        list: () => [],
+        list: () => [testModelTool],
         invoke: async (): ReturnType<ToolRegistry['invoke']> => ({
           isError: false,
           // A capture Tau cannot save: the renderer answered, the host post-processing throws.
@@ -906,6 +913,7 @@ describe('the mounted /mcp route', () => {
       registry: {
         list: (): HostToolDefinition[] => [
           ...machineRegistry.list(),
+          testModelTool,
           {
             name: 'arrange_workbench',
             description: 'Arrange the workbench.',

@@ -13,8 +13,8 @@ name: Preview packages
 # (--peerDeps), which no registry range would admit.
 # --no-compact keeps every URL in its long form: the npm name @taucad/replicad
 # still belongs to the retired replicad fork, whose repository field compact URLs
-# would follow. The GeoSpec engine packages are left out: they publish from
-# taucad/geospec (charter D36). Needs the pkg.pr.new GitHub App
+# would follow. @taucad/geospec-engine is published too: @taucad/cli depends on
+# it (audit H-01). Needs the pkg.pr.new GitHub App
 # (https://github.com/apps/pkg-pr-new) installed on this repository.
 on:
   workflow_dispatch:
@@ -79,14 +79,11 @@ jobs:
           node --input-type=module -e '
             import { appendFileSync, readFileSync, existsSync } from "node:fs";
             import { execFileSync } from "node:child_process";
-            // Published from taucad/geospec, not from this train (charter D36); `geospec` stays in.
-            const geospecEngine = new Set(["@taucad/geospec-engine"]);
             const projects = JSON.parse(execFileSync("pnpm", ["-r", "--depth", "-1", "ls", "--json"], { encoding: "utf8" }));
             const folders = projects
               .filter(({ path }) => existsSync(`${path}/project.json`))
               .filter(({ path }) => (JSON.parse(readFileSync(`${path}/project.json`, "utf8")).tags ?? []).includes("type:package"))
               .filter(({ path }) => JSON.parse(readFileSync(`${path}/package.json`, "utf8")).private !== true)
-              .filter(({ name }) => !geospecEngine.has(name))
               .map(({ path }) => path.slice(process.cwd().length + 1))
               .sort();
             console.log(`Publishing ${folders.length} packages:\n${folders.join("\n")}`);

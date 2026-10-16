@@ -79,8 +79,9 @@ const geospecEvidence = {
   total: 1,
 };
 
+/* A registry with a GeoSpec runner lists `test_model`; the MCP endpoint lists the tool only then. */
 const registry: ToolRegistry = {
-  list: () => [],
+  list: () => [{ name: 'test_model', description: 'Run the GeoSpec suite.', inputSchema: { type: 'object' } }],
   invoke: async () => ({ content: geospecEvidence, isError: false }),
 };
 

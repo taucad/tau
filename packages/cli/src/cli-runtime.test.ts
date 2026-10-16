@@ -98,6 +98,8 @@ describe('createCliRuntime', () => {
           // Package install support used by `tau install`, not runtime plugins.
           '@taucad/bundler-core',
           '@taucad/filesystem',
+          // The GeoSpec Node host `@taucad/host` peers, installed so `test_model` resolves (audit H-01).
+          '@taucad/geospec-engine',
           '@taucad/host',
           '@taucad/jobs-solvers',
           // The worker launcher `tau serve` brokers native kernels with, not a runtime plugin.

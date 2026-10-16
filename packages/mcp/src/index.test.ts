@@ -345,6 +345,26 @@ describe('@taucad/mcp', () => {
     }
   });
 
+  it('should list only the CAD tools the host names, with their canonical descriptions', async () => {
+    const client = await connect({
+      dispatch: async () => ({ success: true }),
+      cadTools: tauMcpToolNames.filter((name) => name !== toolName.testModel),
+    });
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name)).toEqual([
+        toolName.evaluateModel,
+        toolName.screenshot,
+        toolName.exportModel,
+      ]);
+      expect(tools.find(({ name }) => name === toolName.evaluateModel)?.description).toBe(
+        tauMcpToolDefinitions[toolName.evaluateModel].description,
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
   it('should report its own package name and version as server info', async () => {
     const client = await connect({ dispatch: async () => ({ success: true }) });
     try {

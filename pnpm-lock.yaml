@@ -3575,6 +3575,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
+      '@taucad/geospec-engine':
+        specifier: workspace:*
+        version: link:../geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../plugins/gltf
@@ -3638,6 +3641,12 @@ importers:
       consola:
         specifier: 'catalog:'
         version: 3.4.2
+      geospec:
+        specifier: workspace:*
+        version: link:../geospec
+      geospec-engine:
+        specifier: 'catalog:'
+        version: 0.1.0
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.2.7)

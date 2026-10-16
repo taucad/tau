@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyCliOutcome,
   expectedCliGaps,
+  geoSpecSessionFailure,
   isNotPreparedRefusal,
   mcpInitializeRequest,
 } from '#check-pack-install-cli.js';
@@ -46,5 +47,32 @@ describe('mcpInitializeRequest', () => {
   it('should be one newline-terminated JSON-RPC initialize request', () => {
     expect(mcpInitializeRequest.endsWith('\n')).toBe(true);
     expect(JSON.parse(mcpInitializeRequest)).toMatchObject({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+  });
+});
+
+describe('geoSpecSessionFailure', () => {
+  const initialized = {};
+  const tools = ['evaluate_model', 'test_model', 'screenshot', 'export_model'];
+
+  it('should accept a session that lists test_model and passes the suite', () => {
+    expect(
+      geoSpecSessionFailure({ initialized, tools, testModel: { structuredContent: { passed: 1, total: 1 } } }),
+    ).toBeUndefined();
+  });
+
+  it('should name a server that does not list test_model (audit H-01)', () => {
+    expect(
+      geoSpecSessionFailure({ initialized, tools: ['evaluate_model', 'screenshot'], testModel: undefined }),
+    ).toContain('listed no test_model');
+  });
+
+  it('should carry the text of a test_model that failed', () => {
+    expect(
+      geoSpecSessionFailure({
+        initialized,
+        tools,
+        testModel: { isError: true, content: [{ type: 'text', text: 'TOOL_NOT_FOUND: Unknown tool: test_model' }] },
+      }),
+    ).toContain('TOOL_NOT_FOUND');
   });
 });

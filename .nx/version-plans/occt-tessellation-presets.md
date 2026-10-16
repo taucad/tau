@@ -2,6 +2,7 @@
 occt-core: minor
 replicad: minor
 runtime: minor
+viewer: minor
 ---
 
 Let a replicad render or mesh export ask for a tessellation quality preset (`low`, `medium`, `high`, `extra-high`) instead of tolerances in millimetres. A preset scales with the model's bounding-box diagonal, so a 5 mm part and an 18 m assembly get about the same triangle count.
@@ -11,3 +12,5 @@ Let a replicad render or mesh export ask for a tessellation quality preset (`low
 `@taucad/replicad` renders and exports with the new schemas. Explicit tolerances mesh exactly as before, in OCCT's absolute mode. A field left out takes the old default (0.02 mm or 0.01 mm, 20°), never a preset value. A render whose mesh exceeds 2,000,000 triangles is re-meshed one step coarser (twice the linear tolerance, 4° more angular), at most three times, and reports a `TESSELLATION_DOWNGRADED` warning. A mesh export over 20,000,000 triangles fails with `RESOURCE_LIMIT` and a suggested tolerance; it is never coarsened. Renders without options now default to `medium` instead of 0.02 mm, and mesh exports to `high` instead of 0.01 mm.
 
 `@taucad/runtime` adds the `TESSELLATION_DOWNGRADED` issue code. `TessellationReport` gains optional `requested`, `linearTolerance`, `angularTolerance` and `downgraded` fields, and replicad fills them on every model render.
+
+`@taucad/viewer` renders a preset-or-explicit setting in the kernel settings menu as one choice: the four presets, plus an Explicit option that shows the linear (mm) and angular (°) tolerance rows. Choosing Explicit starts from the schema's example tolerances; choosing a preset replaces the value whole, so the two forms are never merged.

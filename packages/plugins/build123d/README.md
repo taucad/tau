@@ -41,7 +41,7 @@ Hand the definition to a trusted Node host that supplies the resources described
 
 The package's `tau-plugin.json` declares a digest-pinned native engine closure for macOS arm64/x64 and Linux glibc arm64/x64. Prepare it through the host (`tau prepare build123d --verify` in the CLI), seal it with `sealBuild123dClosure`, and pass `build123dOptionsFromClosure(receipt)` under `kernels.default`. The host owns the separately revocable project trust grant.
 
-Hosts may also supply an equivalent packaged interpreter and wheel tree with a verified resource manifest. The worker requires four support modules: `analyzer.py`, `glb.py`, `native_materials.py`, and `mechanisms.py`. Tau Desktop's resource integration is in `apps/desktop/src/tau/build123d-resources.ts` and `desktop-runtime.definition.ts`. Windows has a separate desktop resource preparation route; the registry closure and native sandbox do not claim Windows support.
+Hosts may also supply an equivalent packaged interpreter and wheel tree with a verified resource manifest. The worker ships `analyzer.py`, `glb.py`, `native_materials.py`, `mechanisms.py` and the public authoring module `tau_assembly.py`. Tau Desktop stages and seals bundled closures in `apps/desktop/scripts/runtime-stage.mts`, seeds its payload store and reads launch indexes in `apps/desktop/src/tau/native-store.ts`, and maps those closures to kernel options in `apps/desktop/src/tau/native-kernels.ts`. Windows packages ship no native kernel closure; native Build123D execution is unsupported there.
 
 Do not point production at `python`, a virtual environment, or a user-writable worker. The kernel never searches `PATH`, installs packages, or downloads dependencies.
 
@@ -76,33 +76,37 @@ limits still apply. Workspace mirroring has no fixed byte, file-count or directo
 
 `tau-plugin.json` pins one closure per target: python-build-standalone's `install_only_stripped`
 CPython plus the wheels the target's `pylock.<target>.toml` chose. The generator computes each floor
-as the highest of the interpreter's and the wheels' floors; on Linux that is OCP's `manylinux_2_31`.
+as the highest of the interpreter's and the wheels' floors; on Linux that is OCP's `manylinux_2_28`.
 
 | Target              | Floor      | Checked in CI on   |
 | ------------------- | ---------- | ------------------ |
 | `darwin-arm64`      | macOS 12   | `macos-26`         |
 | `darwin-x64`        | macOS 11   | `macos-26-intel`   |
-| `linux-x64-glibc`   | glibc 2.31 | `ubuntu-24.04`     |
-| `linux-arm64-glibc` | glibc 2.31 | `ubuntu-24.04-arm` |
+| `linux-x64-glibc`   | glibc 2.28 | `ubuntu-24.04`     |
+| `linux-arm64-glibc` | glibc 2.28 | `ubuntu-24.04-arm` |
 
 `tau prepare build123d` refuses every other host before it downloads anything, with
-`blocked: unsupported-target` and the failing axis: `minimumLibcVersion` below glibc 2.31, `libc` on
+`blocked: unsupported-target` and the failing axis: `minimumLibcVersion` below glibc 2.28, `libc` on
 musl Linux, and `os` on Windows. On a Linux host without the system `libGL.so.1` or `libX11.so.6`
 that OCP links, it refuses with `missing-system-library` naming the library.
 
 ## Model contract
 
-A `.py` entry defines a top-level `@dataclass(frozen=True) class Params` and synchronous `main(params)`. Supported parameter types are `bool`, `int`, `float`, `str`, and scalar `Literal`. Return a native Shape/Compound, a list or tuple of shapes, or `None`/an empty sequence for an empty scene. Labels are presentation; repeated instances need distinct native shape objects. Occurrence identity defaults to structural paths and can be explicitly assigned in `motion(model)`.
+A `.py` entry defines a top-level `@dataclass(frozen=True) class Params` and synchronous `main(params)`. Supported parameter types are `bool`, `int`, `float`, `str`, and scalar `Literal`. Return a native Shape/Compound, a list or tuple of shapes, or `None`/an empty sequence for an empty scene. Labels are presentation; repeated instances need distinct native shape objects. Assembly child mapping keys provide stable local occurrence identity; plain native trees use structural paths.
 
-Author reusable assemblies with native `Compound(children=...)`, joints and `connect_to`. Optional `motion(model)` supplies assembly ground, stable occurrence IDs, retained connections, couplings and clips. The GLB carries local joint interfaces and physical connection intent; supported graphs also carry validated playback. Unsupported graphs remain inspectable with diagnostics, while malformed motion declarations are rejected.
+Author reusable articulated assemblies with `from tau_assembly import Assembly`, native joints and named `assembly.connect(...)` records. `assembly.couple(...)` retains internal coordinate relationships. `assembly.expose_joint(...)` publishes safe descendant endpoints in `.interfaces`; never alias by assigning into native `.joints`. Use `base=housing` to assign otherwise unjointed passive parts to a local body; this does not ground the module to world. Copies rebind their own parts, base, connections and interfaces. Optional `motion(model)` supplies only root ground and the existing clip structure, using absolute native degree/millimetre coordinates selected by connection handles. The GLB carries local joint interfaces and physical connection intent; supported graphs also carry validated playback. Unsupported graphs remain inspectable with diagnostics, while malformed motion declarations are rejected.
 
 Use native `Shape.material` for finished materials and `Shape.color` for simple color. Custom file-backed PBR maps require `maps_dir` and project-root-relative `__tau__ = {"dependencies": [...]}` declarations; imported modules may declare their own resources. GLB embeds images with native face-local UVs. STEP export carries geometry, hierarchy and supported native appearance; it does not carry playback mechanisms or editable source.
 
 See the package's [`cad-build123d` agent skill](./agent/cad-build123d/SKILL.md) and the [Build123d runtime reference](https://docs.tau.new/runtime/reference/build123d) for the complete authoring and trust contract.
 
+`tau_assembly` is supplied by Tau and is not a released upstream Build123D module. Native `connect_to` remains a placement operation. The adapter lowers authored absolute values into the existing metre/degree delta wire profile. Older unreleased motion-hook models require migration; do not reuse old delta keyframes unchanged.
+
 ## Project files
 
 `@taucad/build123d/project/*` holds the files a new Build123d project carries, so it runs outside Tau with uv (`uv sync --locked`, then `uv run main.py`): a `pyproject.toml` that pins `build123d` and `cadquery-ocp-novtk` at the versions this kernel runs, a PEP 751 `pylock.toml` of the kernel's own wheels for every supported target, and a `uv.lock` of the same versions. `pnpm nx run build123d:generate-project-template` regenerates them from `python/pylock.<target>.toml`. When a project's `pyproject.toml` pins one of those libraries at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the pin.
+
+Standalone projects that import `tau_assembly` also need the shipped `python/tau_assembly.py` made importable alongside Build123D 0.13. The project lockfiles do not install an invented `tau_assembly` PyPI package.
 
 ## Versioning and stability
 

@@ -7,68 +7,78 @@ description: Guides native Build123d BRep authoring in main.py. Use when creatin
 
 ## Contract
 
-1. Author `main.py` with a top-level `@dataclass(frozen=True) class Params` whose fields have scalar or `Literal` annotations and defaults. Use the bundled Build123d 0.13 native API.
-2. Define `main(params: Params)` returning a native `Shape`, a list/tuple of shapes, or `None`/an empty list for an empty scene.
-3. Use native `Part`/`Solid` values and `Compound(children=[...])` for assemblies. Each occurrence must be a distinct native object; copy before placing a reused part. Labels are display names and may repeat; they do not define occurrence identity.
-4. Use static project-relative Python imports. Declare non-Python assets in `__tau__ = {"dependencies": [...]}` using paths from the project root. Imported part modules may declare their own assets. Project texture files must be declared so image-only edits invalidate the model.
-5. Keep render tessellation out of `Params`; Tau owns display tolerance, native UV generation and exact BRep edge rendering. UVs use native face-local [0, 1] charts; this does not promise a whole-part texture atlas.
+1. Author `main.py` with a top-level `@dataclass(frozen=True) class Params` whose fields have scalar or `Literal` annotations and defaults. Use bundled Build123D 0.13 native geometry and joints.
+2. Define synchronous `main(params: Params)` returning a native `Shape` (including `tau_assembly.Assembly`), list/tuple of shapes, or `None`/an empty list.
+3. For articulated reusable modules, import `Assembly` from `tau_assembly`. It is Tau's native `Compound` subclass, not upstream Build123D. Name distinct child occurrences with `children={"name": shape}`; use `.parts` to retrieve them. Native `Compound` remains suitable for static grouping. Labels are display text.
+4. Use static project-relative Python imports. Declare non-Python assets in `__tau__ = {"dependencies": [...]}` using paths from the project root. Imported modules may declare resources; texture-only edits must invalidate the model.
+5. Tau owns tessellation and exact BRep edges. UVs are native face-local charts, not a whole-part atlas. No render tolerance in `Params`.
 
-## Native parts, materials and joints
+## Reusable native mechanisms
 
 ```python
+from copy import copy
 from dataclasses import dataclass
-from bd_materials import metals, wood
-from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
-
+from build123d import Axis, Box, Location, RevoluteJoint, RigidJoint
+from tau_assembly import Assembly
 @dataclass(frozen=True)
 class Params:
-    angle: float = 22.5
-
+    angle: float = 30
+def gearbox(*, angle=30):
+    housing, rotor, follower = Box(60, 40, 6), Box(20, 8, 4), Box(16, 8, 4)
+    cover = Box(60, 40, 1).locate(Location((0, 0, 3.5)))
+    RevoluteJoint("input", housing, axis=Axis.Z, angular_range=(-2000, 2000))
+    RevoluteJoint("output", housing, axis=Axis((30, 0, 0), (0, 0, 1)), angular_range=(-4000, 4000))
+    RigidJoint("shaft", rotor)
+    RigidJoint("shaft", follower)
+    RigidJoint("mount", housing)
+    RigidJoint("tool", follower)
+    module = Assembly(children={"housing": housing, "rotor": rotor, "follower": follower, "cover": cover}, base=housing, label="Gearbox")
+    drive = module.connect("input", housing.joints["input"], rotor.joints["shaft"], angle=angle)
+    output = module.connect("output", housing.joints["output"], follower.joints["shaft"], angle=-2 * angle + 15)
+    module.couple(driver=(drive, "angle"), follower=(output, "angle"), ratio=-2, offset=15)
+    module.expose_joint("mount", housing.joints["mount"])
+    module.expose_joint("output", follower.joints["tool"])
+    return module
 def main(params: Params):
-    base = Box(40, 40, 6)
-    base.label = "Base"
-    base.material = metals.aluminum()
-    arm = Box(60, 12, 4)
-    arm.label = "Arm"
-    arm.material = wood.walnut()
-    RevoluteJoint("shaft", base, axis=Axis.Z, angle_reference=(1, 1, 0))
-    RigidJoint("mount", arm)
-    base.joints["shaft"].connect_to(arm.joints["mount"], angle=params.angle)
-    return Compound(label="Pivot", children=[base, arm])
-
+    prototype = gearbox(angle=params.angle)
+    left, right = copy(prototype), copy(prototype)
+    base = Box(200, 80, 6)
+    RigidJoint("left", base, Location((-60, 0, 0)))
+    RigidJoint("right", base, Location((60, 0, 0)))
+    machine = Assembly(children={"base": base, "left": left, "right": right})
+    machine.connect("left_mount", base.joints["left"], left.interfaces["mount"])
+    machine.connect("right_mount", base.joints["right"], right.interfaces["mount"])
+    return machine
 def motion(model):
-    base, arm = model.children
-    shaft = base.joints["shaft"]
-    return {
-        "ground": base,
-        "occurrence_ids": {"base": base, "arm": arm},
+    drive = model.parts["left"].connections["input"]
+    start = drive.coordinates["angle"]
+    return {"ground": model.parts["base"],
         "animations": [{
-            "id": "turn",
-            "name": "Turn",
-            "duration": 2,
+            "id": "turn", "duration": 4,
             "keyframes": [
-                {"time": 0, "coordinates": {shaft: 0}},
-                {"time": 2, "coordinates": {shaft: 90}},
+                {"time": 0, "coordinates": {(drive, "angle"): start}},
+                {"time": 4, "coordinates": {(drive, "angle"): start + 360}},
             ],
-        }],
-    }
+        }]}
 ```
+
+`Assembly.connect(name, source, target, **coordinates)` retains the relationship and performs native placement. Native `connect_to` itself remains one-time placement. Use native `RigidJoint`, `RevoluteJoint`, `LinearJoint`, `CylindricalJoint` and `BallJoint`; do not invent replacement joint classes. Native connection keywords are `angle`, `position` and `angles` as appropriate to the pair.
+
+`Assembly.couple` owns `follower = ratio * driver + offset`; initial native placement must already satisfy this equation. References are `(connection, "angle")`, `(connection, "distance")`, or `(connection, "x"/"y"/"z")` for Ball's final composed intrinsic XYZ chart. A mixed-dimensional ratio carries the corresponding native unit quotient. The assembly validates finite values, phase consistency and competing/cyclic drivers. It does not solve a closed mechanism loop.
+
+`expose_joint` publishes a descendant endpoint in read-only `.interfaces`. Connect through that interface to move the whole target module coherently. Never assign a descendant joint into another native `.joints` dictionary: assignment can transfer its native ownership. `.parts`, `.connections` and `.interfaces` are read-only named registries. Copies rebind their own internal references; retrieve a copied connection from the copy. Fresh factories and `copy`/`deepcopy` produce independent instances. Do not insert one shape object twice or reference a prototype's endpoint from its copy.
+
+Use `Assembly(children={...}, base=housing)` when otherwise unjointed passive parts (for example a cover) belong to the housing body. This local base is not global ground and moves with its parent. Do not infer it from connection direction or the interface used for mounting: a module may be mounted through its moving output. Without a unique passive owner, supply `base` or group passive parts under a connected native `Compound`. Copies rebind the base to their copied occurrence. The worker discovers nested Assembly relationships automatically. Parent code connects public interfaces and does not repeat a child's internal ratios. Keep root `ground` and optional `animations` in `motion(model)`; do not add `connections`, `couplings` or `occurrence_ids` to that hook. A nested housing is not independently grounded to world. Ground is inferable for an unambiguous native graph; otherwise name the actual root occurrence.
+
+Author placement, coupling offsets and keyframes use **absolute native degrees and millimetres**. Use `connection.coordinates` for the authored reference. Export converts once to metre/degree deltas; do not subtract phase yourself. Migrating an older Tau hook requires replacing delta keyframes with absolute native coordinates and metre distances with millimetres. The clip structure is unchanged; no extra Motion/Track/decorator API is needed.
+
+On `ValueError` for an external/stale endpoint, reconnect actual returned children. For a duplicate interface/connection name, choose a distinct name. For phase mismatch, correct the initial native placement to satisfy the declared ratio and offset. Valid unsupported graphs retain intent with diagnostics; inspect them rather than claiming executable playback. The helper is bundled in Tau. Outside Tau, make the shipped `tau_assembly.py` module importable alongside Build123D 0.13; do not invent a pip dependency or `build123d.Assembly` import.
+
+## Native materials
 
 `Shape.material` uses native `bd_materials` finished materials. Built-in textured materials carry their packaged images. Use `Shape.color` for a simple color without a material. Engineering physical-property publication is separate from appearance.
 
 For a custom image, use native `threejs_materials.PbrProperties`, `PbrValues`, `PbrMaps(color="finish.png")` with `maps_dir=Path(__file__).parent`, then `bd_materials.FinishedMaterial(metals.aluminum().material, pbr=pbr)`. Add `finish.png` to `__tau__.dependencies` (project-relative, even when the Python module lives in a subdirectory). Native image data URIs are also supported. Exported GLB embeds its images; remote URLs and paths outside the project are rejected.
-
-Attach named interfaces with native `RigidJoint`, `RevoluteJoint`, `LinearJoint`, `CylindricalJoint` or `BallJoint`; connect them with native `connect_to`. Unconnected interfaces remain portable. Native angle references, local placement and joint limits are retained; do not subtract a reference angle to compensate for older Build123d behavior.
-
-Connect the final child instances before constructing their `Compound`. If a connection moves a child after containment, refresh the native aggregate with `assembly.children = assembly.children` before placing it in a parent or exporting it; otherwise the Compound's cached BRep can retain the old child geometry. Expose a moving descendant's named joint through the ordinary mapping, for example `module.joints["output"] = rotor.joints["output"]`. Consumers can connect through that public name without indexing private children, and the interface stays owned by the moving rotor.
-
-`motion(model)` is Tau's optional declaration hook, not a released Build123d API. Use it only for facts native placement does not retain: `ground`, stable `occurrence_ids`, explicit `connections`, coupled motion and animation. Return a dictionary referencing the actual objects returned by `main`; no imports from an invented `build123d.mechanisms` module.
-
-- `connections`: list of `(source_joint, target_joint)` pairs, useful when native `connected_to` has been overwritten by another connection.
-- `couplings`: list of `{"driver": joint, "follower": other_joint, "ratio": -2.0}`; optional `offset`. For a joint with multiple coordinates, use `(joint, "angle")` or `(joint, "distance")`.
-- Animation keyframe coordinates are **deltas from the exported assembled pose** in degrees and meters. Native `connect_to` uses Build123d degrees and millimeters. For a ball joint, use `(joint, "x")`, `(joint, "y")`, `(joint, "z")`; these deltas apply to the final composed intrinsic XYZ chart native Build123d range-checks, including its reference frame.
-- Each reusable subassembly's occurrences need separate objects and identifiers. Set one assembly ground; an embedded module must not introduce another global ground.
-- Tau preserves valid mechanical intent even when its viewer cannot execute that graph; inspect mechanism diagnostics. Native `connect_to` is placement, not a general closed-loop or dynamics solver.
 
 ## Native modeling
 
@@ -156,6 +166,10 @@ class CounterBoreHole(_BaseHole)
 # Part Object
 class Sphere(BasePartObject)
   Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
+
+# Part Object
+class Torus(BasePartObject)
+  Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 ```
 
 ### objects_sketch
@@ -277,21 +291,6 @@ class Extrinsic(Enum)
   YXY
   ZXZ
   ZYZ
-
-# Order to apply intrinsic rotations by axis
-class Intrinsic(Enum)
-  XYZ
-  XZY
-  YZX
-  YXZ
-  ZXY
-  ZYX
-  XYX
-  XZX
-  YZY
-  YXY
-  ZXZ
-  ZYZ
 ```
 
 ### build_common
@@ -300,6 +299,9 @@ class Intrinsic(Enum)
 # Location Context
 class Locations(LocationList)
   Locations(*pts: VectorLike | Vertex | Location | Face | Plane | Axis | Iterable[VectorLike | Vertex | Location | Face | Plane | Axis])
+
+# Return Edges
+edges(select: Select = Select.ALL) -> ShapeList[Edge]
 ```
 
 ### operations_part

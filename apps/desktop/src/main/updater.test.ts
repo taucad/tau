@@ -135,8 +135,8 @@ describe('managed update source', () => {
   it('should check, validate and download only from the mirror', async () => {
     const autoUpdater = squirrel();
     const fetchJson = vi.fn(async () => mirrored('0.3.0'));
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     const updater = startDesktopUpdater(
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
       options({ autoUpdater, fetchJson, environment: { TAU_DESKTOP_UPDATE_FEED: mirror } }),
     );
 
@@ -151,10 +151,10 @@ describe('managed update source', () => {
   it('should refuse a mirrored feed that still names the public archive', async () => {
     const autoUpdater = squirrel();
     const updater = startDesktopUpdater(
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
       options({
         autoUpdater,
         fetchJson: vi.fn(async () => feed('0.3.0')),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
         environment: { TAU_DESKTOP_UPDATE_FEED: mirror },
       }),
     );

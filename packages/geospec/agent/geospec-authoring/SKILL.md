@@ -40,7 +40,8 @@ Every matcher takes one expectation object:
 
 - GeoSpec has no `beforeAll`. Write each `loadModel` inside its own `it`: within one run, identical loads (same file or code, parameters, format, tolerances and region) share one export and one admission. Each load keeps its own `loadId` and records `reused: true`, and a file is reused only while its source closure is unchanged.
 - `loadModel({ file, workUnitLimit })` sets the default claim budget for that subject, and `expectGeo(model, { workUnitLimit })` overrides it for one chain. The budget is a positive integer no greater than 512000000. A `MATCHER_TIMEOUT` refusal reports `details.limit` and, when measured, `details.used`; raise the budget within the bound or simplify the model, and never treat the refusal as a pass.
-- `loadModel({ file, region: { min: [x, y, z], max: [x, y, z] } })` checks one millimetre box of a large mesh model. The kernel crops before export (PicoVoxel trims Voxels parts), and other kernels, STEP loads and unconfirmed crops refuse with a typed diagnostic. A cropped subject only stands for its region: name the region in the test and cover the whole model with other regions or whole-model claims.
+- `loadModel({ file, region: { min: [x, y, z], max: [x, y, z] } })` makes a separate claim about one millimetre box, never a stand-in for a whole-model claim. The kernel crops before export (PicoVoxel trims Voxels parts), and other kernels, STEP loads and unconfirmed crops refuse with a typed diagnostic. A cropped subject answers only bounding box, volume, surface area, mass and center of mass of its region, and its assertions record the region. Every other matcher on it refuses with `GEOSPEC_REGION_WHOLE_MODEL_CLAIM`. Name the region in the test, and keep whole-model claims on whole-model loads.
+- A host or engine limit leaves a claim undecided, never false. Keep the model as designed: never coarsen, shrink or crop it to fit. Raise `workUnitLimit` or `testTimeout` within the host's maximum, which the host can raise, or report the claim as not decided at this capacity.
 - `toHaveCenterOfMass({ point, tolerance })` takes an exact point. Per-axis ranges such as `{ y: { greaterThan: 1 } }` are refused.
 
 ## Coverage
@@ -480,13 +481,11 @@ GeoSpecNumericExpectation: number | {
     lessThan?: number;
     lessThanOrEqual?: number;
 }
-
-RuntimeBackedModelFormat: Exclude<GeoSpecModelFormat, 'mesh-buffer'>
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 356 symbols by file.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 360 symbols by file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

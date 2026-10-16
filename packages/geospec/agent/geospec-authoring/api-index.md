@@ -1,6 +1,6 @@
 # geospec API index
 
-geospec 0.1.0-beta.2 · 356 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.2 · 360 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
@@ -20,13 +20,16 @@ resolveRuntimeExportIntent (function)
 ## Constants — `api-constants.md`
 
 geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGeo}, derived from the…
+geoSpecMeshEvidenceMatchers (constant) — The matchers mesh evidence answers, as the GeoSpec authoring skill…
+geoSpecRegionScopedKinds (constant) — The claims a region-cropped subject answers
+geoSpecRegionWholeModelClaimCode (constant) — Diagnostic code of a whole-model claim made on a region-cropped…
 
 ## Types — `api-types.md`
 
 GeoSpecSubject (type) [1 members] — A model admitted by one live GeoSpec host scope
   GeoSpecSubject.[subjectBrand] (property)
 GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries
-GeoSpecAssertion (type) [8 members] — Geometry assertion collected from a GeoSpec test module
+GeoSpecAssertion (type) [9 members] — Geometry assertion collected from a GeoSpec test module
   GeoSpecAssertion.kind (property) — Assertion kind
   GeoSpecAssertion.subject (property) — User-authored value passed to expectGeo()
   GeoSpecAssertion.expected (property) — Expected geometry condition
@@ -34,6 +37,7 @@ GeoSpecAssertion (type) [8 members] — Geometry assertion collected from a GeoS
   GeoSpecAssertion.diagnostics (property) — Structured diagnostics from matcher evaluation
   GeoSpecAssertion.report (property) — Exact compiled assertion report, including core-owned bytes and polarity
   GeoSpecAssertion.loadId (property) — The host load which admitted this assertion's subject
+  GeoSpecAssertion.region (property) — The crop this assertion's subject was loaded with
   GeoSpecAssertion.durationMs (property) — Wall-clock cost of matcher evaluation in milliseconds (R1
 GeoSpecAssemblyOccurrenceExpectation (type) [3 members] — Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
   GeoSpecAssemblyOccurrenceExpectation.name (property)

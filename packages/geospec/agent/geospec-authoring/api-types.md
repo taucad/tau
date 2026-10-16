@@ -29,6 +29,11 @@ GeoSpecAssertion: {
     report?: GeoSpecCanonicalClaimReport;
     /** The host load which admitted this assertion's subject; independent of equal geometry hashes. */
     loadId?: string;
+    /**
+     * The crop this assertion's subject was loaded with. Present only for a region load: the verdict
+     * holds for this millimetre box, never for the whole model.
+     */
+    region?: GeoSpecLoadRegion;
     /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
     durationMs?: number;
 }
@@ -53,6 +58,9 @@ GeoSpecAssertion: {
 
   // The host load which admitted this assertion's subject
   loadId?: string
+
+  // The crop this assertion's subject was loaded with
+  region?: GeoSpecLoadRegion
 
   // Wall-clock cost of matcher evaluation in milliseconds (R1
   durationMs?: number
@@ -185,7 +193,7 @@ GeoSpecCylindricalFaceExpectation: {
 GeoSpecExpectOptions: {
     /**
      * Deterministic work-unit budget for every claim in this chain: a positive integer no
-     * greater than `geoSpecMaximumWorkUnitLimit` (512 000 000). Omitted uses the subject's
+     * greater than the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). Omitted uses the subject's
      * `loadModel` budget, then the host's, then the engine default. Raise it to retry a
      * `MATCHER_TIMEOUT` refusal whose `details.used` exceeded `details.limit`.
      */
@@ -1479,7 +1487,7 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
 
 // Runtime client surface consumed by `geospec/model`
 // Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>> & {
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
@@ -1552,7 +1560,7 @@ LoadModelCodeOptions: {
     meshAngularToleranceDegrees?: number;
     /**
      * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
      * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
      */
     workUnitLimit?: number;
@@ -1630,7 +1638,7 @@ LoadModelFileOptions: {
     meshAngularToleranceDegrees?: number;
     /**
      * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
      * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
      */
     workUnitLimit?: number;
@@ -1734,7 +1742,7 @@ LoadModelSourceOptions: {
     meshAngularToleranceDegrees?: number;
     /**
      * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * `geoSpecMaximumWorkUnitLimit` (512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
      * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
      */
     workUnitLimit?: number;

@@ -47,4 +47,11 @@ export declare function resolveRuntimeExportIntent(options: {
     format: RuntimeBackedModelFormat;
     meshLinearTolerance?: number;
     meshAngularToleranceDegrees?: number;
+    /**
+     * The kernel that evaluates this source, when the host knows it. Routes are
+     * then chosen among that kernel's own, so a mesh-only kernel is told its
+     * BRep matchers are unsupported instead of being sent to another kernel's
+     * STEP route.
+     */
+    kernelId?: string;
 }): RuntimeExportIntent | RuntimeExportIntentFailure;

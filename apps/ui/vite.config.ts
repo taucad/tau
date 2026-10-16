@@ -121,7 +121,6 @@ const selfHostSourceOverrides = new Map([
   ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
   ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
   ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
-  ['#utils/model-tier.js', '#utils/model-tier.self-host.js'],
   ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
   [
     '#routes/w.$workspace.$project/chat-details-usage.js',

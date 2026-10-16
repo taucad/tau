@@ -58,6 +58,7 @@ const modelCatalogue: Model[] = [
     id: 'cookie-model',
     name: 'Cookie Model',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'openai', name: 'OpenAI' },
     details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
@@ -65,6 +66,7 @@ const modelCatalogue: Model[] = [
     id: 'next-model',
     name: 'Next Model',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'openai', name: 'OpenAI' },
     details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
@@ -72,6 +74,7 @@ const modelCatalogue: Model[] = [
     id: 'chat-local-model',
     name: 'Chat Local Model',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'openai', name: 'OpenAI' },
     details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
@@ -79,6 +82,7 @@ const modelCatalogue: Model[] = [
     id: 'xai-grok-4.6',
     name: 'Grok 4.6',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'xai', name: 'xAI' },
     details: { cost: stubCost, family: 'grok' },
   } as unknown as Model,
@@ -86,6 +90,7 @@ const modelCatalogue: Model[] = [
     id: 'openai-gpt-6-astra',
     name: 'Astra',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'openai', name: 'OpenAI' },
     details: { cost: { ...stubCost, outputTokens: 50 }, family: 'gpt' },
   } as unknown as Model,
@@ -93,6 +98,7 @@ const modelCatalogue: Model[] = [
     id: 'anthropic-claude-sonnet-5',
     name: 'Sonnet 5',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'anthropic', name: 'Anthropic' },
     details: { cost: { ...stubCost, outputTokens: 10 }, family: 'claude' },
   } as unknown as Model,
@@ -100,6 +106,7 @@ const modelCatalogue: Model[] = [
     id: 'together-kimi-k3',
     name: 'Kimi K3',
     description: '',
+    providerKind: 'tau-hosted',
     provider: { id: 'together', name: 'Together AI' },
     details: { cost: stubCost, family: 'kimi' },
   } as unknown as Model,
@@ -109,9 +116,10 @@ const modelCatalogue: Model[] = [
 // useModels anymore — only the catalogue. A getter-trap on those keys
 // makes any regression fail loudly with a clear message.
 const trappedKeys = new Set(['selectedModel', 'selectedModelId', 'setSelectedModelId']);
-const useModelsBacking: { data: Model[]; availableModels: Model[] } = {
+const useModelsBacking: { data: Model[]; availableModels: Model[]; pinnedIds: string[] } = {
   data: modelCatalogue,
   availableModels: modelCatalogue,
+  pinnedIds: ['anthropic-claude-sonnet-5'],
 };
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () =>
@@ -262,7 +270,7 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
   });
 });
 
-describe('ChatModelSelector — spend tiers', () => {
+describe('ChatModelSelector — groups', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chatModelState.current = stubModel;
@@ -281,15 +289,19 @@ describe('ChatModelSelector — spend tiers', () => {
     render(label);
   };
 
-  it('groups by spend tier, cheapest first, instead of by provider', () => {
+  it('groups as the agent sheet does: pinned models first, then by maker', () => {
     renderSelector();
 
-    expect(capturedComboBox.groupedItems?.map((group) => group.name)).toEqual(['Fast', 'Balanced', 'Frontier']);
-    const tierOf = (modelId: string): string | undefined =>
+    expect(capturedComboBox.groupedItems?.map((group) => group.name)).toEqual([
+      'Pinned',
+      'OpenAI',
+      'xAI',
+      'Moonshot AI',
+    ]);
+    const groupOf = (modelId: string): string | undefined =>
       capturedComboBox.groupedItems?.find((group) => group.items.some((item) => item.id === modelId))?.name;
-    expect(tierOf('openai-gpt-6-astra')).toBe('Frontier');
-    expect(tierOf('anthropic-claude-sonnet-5')).toBe('Balanced');
-    expect(tierOf('cookie-model')).toBe('Fast');
+    expect(groupOf('anthropic-claude-sonnet-5')).toBe('Pinned');
+    expect(groupOf('openai-gpt-6-astra')).toBe('OpenAI');
   });
 
   it('shows no credit estimate on any row (operator ruling, 2026-09-23)', () => {

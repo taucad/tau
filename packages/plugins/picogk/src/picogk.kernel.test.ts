@@ -313,6 +313,23 @@ describe('PicoGK kernel', () => {
     );
   });
 
+  it('renders a protocol-8 worker build without a voxel size, and raises no issue for it', async () => {
+    const value = context();
+    const { voxelSize: _voxelSize, ...withoutVoxelSize } = buildResult();
+    value.session.request.mockResolvedValueOnce(withoutVoxelSize);
+
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    const artifact = await definition.render!({ view: 'model', handle: built.handle, options: {} }, runtime, value);
+
+    expect(built.issues).toEqual([]);
+    expect(artifact.tessellation).toEqual({
+      triangles: 1,
+      vertices: 3,
+      elapsed: workerTimings.meshConstruction + workerTimings.meshExtraction + workerTimings.normalGeneration,
+    });
+    expect(artifact.tessellation).not.toHaveProperty('voxelSize');
+  });
+
   it('warns when a root .csproj references PicoGK at a version the kernel does not run', async () => {
     const value = context();
     value.mirror.sync.mockResolvedValueOnce(['Plate.csproj', 'main.cs', 'tools/Other.csproj']);

@@ -134,7 +134,7 @@ describe('private scene v8', () => {
         id: 'component:picogk-0',
       }).success,
     ).toBe(false);
-    expect(picogkProtocolVersion).toBe(9);
+    expect(picogkProtocolVersion).toBe(8);
   });
   it('accepts the build-level voxel size as an optional positive finite number', () => {
     const { result } = fixture();

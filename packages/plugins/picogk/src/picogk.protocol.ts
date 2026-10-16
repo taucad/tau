@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-export const picogkProtocolVersion = 9;
+export const picogkProtocolVersion = 8;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),

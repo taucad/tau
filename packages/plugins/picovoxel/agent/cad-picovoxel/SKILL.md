@@ -16,7 +16,8 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 
 ## Kernel rules
 
-- `voxelSize` is the voxel edge in millimetres. Cost grows roughly with 1/voxelSize³: start at 0.5–1 mm and refine only for final detail.
+- `voxelSize` is the voxel edge h in millimetres. Choose about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds.
+- Iterate with per-call `parameters`, e.g. `{ "voxelSize": 1.5 }` on `evaluate_model`, `screenshot` or `export_model`; they are never saved. Stay coarse while iterating and export at the author's value. Tau never changes `voxelSize` itself; edit the source value only when the author asks.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Dispose large intermediates after their last use.

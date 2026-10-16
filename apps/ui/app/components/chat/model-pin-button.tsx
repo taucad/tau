@@ -5,10 +5,12 @@ import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * The pin toggle on a model row (F1 of `docs/research/chat-model-list-pinned-blueprint.md`): a 20 px ghost icon
- * button with a tooltip, in the quiet `neutral` grey so a list of pins never shouts. Pinned, the pin is filled and
- * always drawn; pointing at it (or focusing it) turns it into “pin off”, the action a click takes. Unpinned, it is an
- * outline the caller shows only on the active row. Under the pointer either state darkens and gains the ghost
- * button's fill. A click never reaches the row, so pinning does not choose the model.
+ * button with a tooltip. Its colour steps up with attention, all from the theme's neutral greys: `border` at rest, so
+ * a column of pins stays quiet; `neutral` while its row is highlighted, hovered or keyboard-focused (the highlight is as light as
+ * `border`); the foreground under the pointer or focus, with the ghost button's fill. Pinned, the pin is filled and
+ * always drawn, and pointing at it turns it into “pin off”, the action a click takes. Unpinned, it is an outline the
+ * caller shows only on the active row. Both callers mark the row `group/row`. A click never reaches the row, so
+ * pinning does not choose the model.
  *
  * @returns The pin toggle.
  */
@@ -39,7 +41,7 @@ export function ModelPinButton({
           aria-label={`Pin ${name}`}
           aria-pressed={isOn}
           className={cn(
-            'group/pin size-5 rounded-sm text-neutral hover:bg-background hover:text-foreground hover:shadow-xs focus-visible:text-foreground',
+            'group/pin size-5 rounded-sm text-border group-hover/row:text-neutral group-data-[selected=true]/row:text-neutral group-has-focus-visible/row:text-neutral hover:bg-background hover:text-foreground! hover:shadow-xs focus-visible:text-foreground!',
             className,
           )}
           onClick={(event) => {

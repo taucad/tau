@@ -35,7 +35,7 @@ Financial information such as payment method details is collected and stored by 
 
 ### 3.3 Usage Data
 
-On the web, we collect product analytics such as browser type, pages visited, interaction and feature-use events, and session replay only after analytics consent. The desktop app does not run PostHog analytics. Operational security and service logs may still process network information when you use online features.
+On the web, we collect product analytics such as browser type, pages visited, interaction and feature-use events, and session replay only after analytics consent. The desktop app always collects the same kinds of product analytics, apart from session replay, and identifies them with your account when you are signed in. Operational security and service logs may still process network information when you use online features.
 
 When you are signed in, the web and desktop apps also report two kinds of metrics to Tau's own API. Neither includes prompts, messages, code, file contents, file or project names, or error message text, and neither is labelled by account, workspace, project or chat:
 
@@ -52,9 +52,9 @@ We use cookies and browser storage for distinct purposes:
 
 - **Necessary web cookies**: Authentication, optional server-rendered theme, and your analytics consent decision.
 - **Functional local storage**: Interface preferences and local project data. Ordinary preferences are not request cookies.
-- **Analytics storage** (Optional, web only): After consent, PostHog uses first-party cookies and local storage for approved product analytics and session replay.
+- **Analytics storage** (Optional on the web): After consent, PostHog uses first-party cookies and local storage for approved product analytics and session replay. The desktop app keeps its PostHog analytics identity in local app storage.
 
-You can manage analytics through the web consent form or the **Cookies** control in the web footer. Withdrawing consent stops capture and replay, resets the analytics identity, and clears PostHog persistence through its supported lifecycle. For the complete inventory, see our [Storage and Cookie Policy](/legal/cookies).
+On the web, you can manage analytics through the consent form, the **Cookie preferences** control in the website footer, or **Help → Cookie preferences** in the app. Withdrawing consent stops capture and replay, resets the analytics identity, and clears PostHog persistence through its supported lifecycle. For the complete inventory, see our [Storage and Cookie Policy](/legal/cookies).
 
 **Global Privacy Control (GPC)**: An active GPC signal is a hard decline of web analytics and cannot be overridden by a stored acceptance while the signal remains active.
 
@@ -157,7 +157,7 @@ We may use your prompts and generated designs to improve our AI features. This i
 
 ### 9.3 Analytics and Observability
 
-- **PostHog (Cloud)**: Web product analytics and session replay after consent (USA). It is not used by the desktop app. [Privacy Policy](https://posthog.com/privacy)
+- **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
 - **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
 
 ### 9.4 Payment Processing

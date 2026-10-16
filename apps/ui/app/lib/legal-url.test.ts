@@ -4,7 +4,7 @@ import { websiteOrigin } from '#lib/website-origin.js';
 
 const clientEnvironment = globalThis.window.ENV;
 
-const bind = (environment: { TAU_FRONTEND_URL?: string; TAU_WEBSITE_URL?: string }): void => {
+const bind = (environment: { TAU_FRONTEND_URL?: string }): void => {
   globalThis.window.ENV = { ...clientEnvironment, ...environment };
 };
 
@@ -30,12 +30,6 @@ describe('websiteOrigin', () => {
       expect(websiteOrigin()).toBe('https://tau.new');
     },
   );
-
-  it('should prefer an explicit TAU_WEBSITE_URL', () => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
-    bind({ TAU_FRONTEND_URL: 'https://cad.example.com', TAU_WEBSITE_URL: 'https://www.example.com/' });
-    expect(websiteOrigin()).toBe('https://www.example.com');
-  });
 });
 
 describe('legalUrl', () => {

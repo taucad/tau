@@ -37,7 +37,7 @@ When you use AI-assisted CAD features, your prompts and relevant context may be 
 
 | Sub-processor | Purpose | Data Processed | Location | Certifications |
 |---------------|---------|----------------|----------|----------------|
-| **PostHog** | Product analytics (with consent) | Usage data, device info, interaction patterns | USA | SOC 2 Type II |
+| **PostHog** | Product analytics (with consent on the web; always in the desktop app) | Usage data, device info, interaction patterns | USA | SOC 2 Type II |
 | **LangSmith** | AI feature observability | AI interaction logs, prompt/response metadata | USA | SOC 2 Type II |
 
 ## Payment Processing

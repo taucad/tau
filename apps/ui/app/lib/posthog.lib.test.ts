@@ -13,13 +13,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 const consent = vi.hoisted(() => ({ status: 'accepted' }));
 
+/* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({
-  /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
-  ENV: { POSTHOG_UI_HOST: 'https://us.posthog.com', POSTHOG_CLIENT_KEY: 'phc_test' },
+  ENV: {
+    POSTHOG_API_HOST: 'https://us.i.posthog.com',
+    POSTHOG_UI_HOST: 'https://us.posthog.com',
+    POSTHOG_CLIENT_KEY: 'phc_test',
+  },
 }));
+/* eslint-enable @typescript-eslint/naming-convention -- restore test naming rules. */
 vi.mock('#lib/cookie-consent.lib.js', () => ({ readConsentStatus: () => consent.status }));
 
-const { posthogConfig, redactEventProperties } = await import('#lib/posthog.lib.js');
+const { desktopPosthogOptions, posthogConfig, redactEventProperties } = await import('#lib/posthog.lib.js');
+const { webPosthogOptions } = await import('#lib/web-posthog.lib.js');
 
 /** One analytics event, narrowed to what these rows put in it. */
 type TestEvent = { event: string; properties?: Record<string, unknown> };
@@ -83,10 +89,10 @@ describe('redactEventProperties', () => {
   });
 });
 
-describe('posthogConfig.before_send', () => {
+describe('webPosthogOptions.before_send', () => {
   it.each(['unknown', 'declined'])('drops events when consent is %s', (status) => {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- This configuration installs one SDK hook.
-    const send = posthogConfig.options.before_send as (event: TestEvent) => TestEvent | null;
+    const send = webPosthogOptions().before_send as (event: TestEvent) => TestEvent | null;
     consent.status = status;
     expect(send({ event: 'product_event', properties: { location: '/projects' } })).toBeNull();
     consent.status = 'accepted';
@@ -94,7 +100,7 @@ describe('posthogConfig.before_send', () => {
 
   it('redacts the event it lets through, so nothing reaches the wire unredacted', () => {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- posthog-js allows an array of hooks and this build configures exactly one, and its own signature returns `null` to drop an event.
-    const send = posthogConfig.options.before_send as (event: TestEvent) => TestEvent | null;
+    const send = webPosthogOptions().before_send as (event: TestEvent) => TestEvent | null;
 
     const sent = send({
       event: '$pageview',
@@ -125,4 +131,29 @@ it('masks all replay text and inputs while still blocking invitation links', () 
   expect(recording?.maskTextSelector).toBe('*');
   expect(recording?.maskAllInputs).toBe(true);
   expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
+});
+
+describe('desktopPosthogOptions', () => {
+  it('sends without a web consent decision and still redacts invitation tokens', () => {
+    consent.status = 'unknown';
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- This configuration installs one SDK hook.
+    const send = desktopPosthogOptions().before_send as (event: TestEvent) => TestEvent | null;
+    const sent = send({ event: '$pageview', properties: { $pathname: '/invitations/AbC-123_xyz' } });
+    consent.status = 'accepted';
+
+    expect(sent?.properties).toStrictEqual({ $pathname: '/invitations/[redacted]' });
+  });
+
+  it('posts to the PostHog host and loads no remote extension scripts', () => {
+    const options = desktopPosthogOptions();
+    /* eslint-disable @typescript-eslint/naming-convention -- posthog-js option names. */
+    expect(options).toMatchObject({
+      api_host: 'https://us.i.posthog.com',
+      persistence: 'localStorage',
+      capture_dead_clicks: false,
+      disable_external_dependency_loading: true,
+      disable_session_recording: true,
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- restore test naming rules. */
+  });
 });

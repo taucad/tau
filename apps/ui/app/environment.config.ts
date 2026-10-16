@@ -66,8 +66,6 @@ const environmentSchema = z.preprocess(
     ...cloudEnvironmentShape,
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
-    /** Origin of the website that serves the legal documents (`#lib/website-origin`); unset uses the built-in default. */
-    TAU_WEBSITE_URL: z.url().optional(),
     /** Ordered build identity for the stale-tab skew guard (blueprint DF20); set by the build, never the host. */
     TAU_BUILD_ID: z.string().optional(),
     /** Deployment opt-in while machine qualification is incomplete. Never a localStorage override. */
@@ -144,7 +142,6 @@ const baseClientEnvironmentKeys = [
   'TAU_API_URL',
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
-  'TAU_WEBSITE_URL',
   'TAU_BUILD_ID',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',

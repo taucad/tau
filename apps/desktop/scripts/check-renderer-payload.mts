@@ -163,7 +163,7 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
   );
 };
 
-/** Web document, marketing, consent and analytics modules forbidden in Electron. */
+/** Web document, marketing, consent and session-replay modules forbidden in Electron. */
 export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
   const path = moduleId.replaceAll('\\', '/');
   return (
@@ -171,13 +171,14 @@ export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
     /apps\/ui\/app\/components\/(?:build-skew-banner|cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(
       path,
     ) ||
-    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
+    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
       path,
     ) ||
     /apps\/ui\/app\/(?:offline\/|routes\/legal(?:\.|\/)|routes\/_index\/(?:route|legacy-landing|marketing-landing)\.tsx(?:\?|$))/u.test(
       path,
     ) ||
-    /(?:node_modules\/|\.pnpm\/)(?:[^/]+\/node_modules\/)?(?:posthog-js|rrweb)(?:\/|$)/u.test(path)
+    /* Desktop runs PostHog analytics but never session replay, so its recorder must not ship. */
+    /(?:node_modules\/|\.pnpm\/)(?:[^/]+\/node_modules\/)?(?:rrweb|@rrweb\/[^/]+)(?:\/|$)/u.test(path)
   );
 };
 

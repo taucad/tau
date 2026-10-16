@@ -9,7 +9,7 @@ This notice explains how TauCAD Limited ("Tau", "we", "us", or "our") uses cooki
 The Tau website and Tau desktop app use different storage:
 
 - **Web:** uses necessary authentication, theme, and consent cookies. Optional PostHog analytics storage starts only after you accept analytics.
-- **Desktop:** does not initialize PostHog, set analytics cookies, or show a cookie-consent form. Product preferences and project data are stored locally on your device. Privacy and Terms links open this website in your system browser. Operational security and service logs may still process network information when you use online features.
+- **Desktop:** runs PostHog product analytics as part of the app, without a cookie-consent form, and keeps the analytics identity in the app's local storage rather than in cookies. It does not record sessions. Product preferences and project data are stored locally on your device. Privacy and Terms links open this website in your system browser. Operational security and service logs may still process network information when you use online features.
 
 ## Necessary Web Cookies
 
@@ -43,7 +43,7 @@ On your first eligible visit to the Tau website with no valid decision, the webs
 
 Withdrawing consent stops capture and session replay, resets the analytics identity, and asks the PostHog SDK to clear its analytics persistence. It does not delete functional project data or account cookies needed for a signed-in session.
 
-Tau treats an active Global Privacy Control signal as a hard analytics decline. It prevents acceptance while the signal is active and suppresses the consent prompt. See [Global Privacy Control](https://globalprivacycontrol.org).
+Tau treats an active Global Privacy Control signal as a hard analytics decline. It prevents acceptance while the signal is active and suppresses the consent prompt. See [Global Privacy Control](https://globalprivacycontrol.org). Consent choices and Global Privacy Control apply to the website and web app; the desktop app does not offer an analytics choice.
 
 ## Browser Controls
 

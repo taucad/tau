@@ -23,8 +23,19 @@ concurrency:
 
 jobs:
   integrity:
-    name: WASM integrity in three browsers
-    runs-on: ubuntu-latest
+    name: WASM integrity (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: three browsers
+            runner: ubuntu-latest
+            engines: chromium,firefox,webkit
+          # WebKit on macOS, the engine Safari ships, measured beside Linux WebKit for the X31 line.
+          - label: WebKit on macos-26
+            runner: macos-26
+            engines: webkit
     timeout-minutes: 60
     env:
       NX_DAEMON: 'false'
@@ -37,7 +48,9 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
       - name: Install the three browsers
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        env:
+          ENGINES: ${{ matrix.engines }}
+        run: pnpm exec playwright install --with-deps ${ENGINES//,/ }
       # Placeholder origins: the server build checks they are set; nothing here contacts them.
       - name: Build the web client
         env:
@@ -47,16 +60,18 @@ jobs:
         run: pnpm nx build ui --outputStyle=static
       - name: Re-hash the receipt, tamper and measure
         timeout-minutes: 40
+        env:
+          TAU_INTEGRITY_ENGINES: ${{ matrix.engines }}
         run: node apps/ui/scripts/check-asset-integrity.mts apps/ui/build/client "$RUNNER_TEMP/evidence" 5
       - name: Summarize
         if: always()
         run: |
           { echo '```'; cat "$RUNNER_TEMP/evidence/summary.txt" 2>/dev/null || echo '(no summary)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          scripts/spikes/native-deps/linux/annotate.sh 'UI asset integrity' "$RUNNER_TEMP/evidence/summary.txt"
+          scripts/spikes/native-deps/linux/annotate.sh "UI asset integrity (${{ matrix.label }})" "$RUNNER_TEMP/evidence/summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ui-asset-integrity-evidence
+          name: ui-asset-integrity-evidence-${{ matrix.runner }}
           path: ${{ runner.temp }}/evidence
           retention-days: 30

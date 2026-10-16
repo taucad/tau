@@ -12,6 +12,7 @@
  *    The X31 line is at most 200 ms added per module.
  * Chromium, Firefox and WebKit run when installed (`pnpm exec playwright install --with-deps chromium firefox webkit`).
  *
+ * Environment: TAU_INTEGRITY_ENGINES, a comma-separated subset of chromium,firefox,webkit (default: all three).
  * Usage: node apps/ui/scripts/check-asset-integrity.mts <client-dir> <evidence-dir> [iterations]
  * Exit codes: 0 pass, 1 an oracle line failed, 2 usage.
  */
@@ -279,11 +280,14 @@ const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
   );
 };
 
-const engines: ReadonlyArray<readonly [string, BrowserType]> = [
-  ['chromium', chromium],
-  ['firefox', firefox],
-  ['webkit', webkit],
-];
+const selectedEngines = process.env['TAU_INTEGRITY_ENGINES']?.split(',').filter(Boolean);
+const engines = (
+  [
+    ['chromium', chromium],
+    ['firefox', firefox],
+    ['webkit', webkit],
+  ] as ReadonlyArray<readonly [string, BrowserType]>
+).filter(([label]) => selectedEngines === undefined || selectedEngines.includes(label));
 const results: unknown[] = [];
 /* oxlint-disable no-await-in-loop -- one browser at a time keeps the timings independent */
 for (const [label, type] of engines) {

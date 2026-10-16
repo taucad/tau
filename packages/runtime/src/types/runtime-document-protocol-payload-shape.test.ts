@@ -231,4 +231,33 @@ describe('document protocol payload-shape coverage (C18)', () => {
         .success,
     ).toBe(false);
   });
+
+  it('preserves a rendered mesh tessellation report and rejects negative counts', () => {
+    const rendered = {
+      subscriptionId: 'view',
+      requestId: 'request',
+      evaluationId: 'evaluation-1',
+      intent: 0,
+      success: true,
+      view: 'model',
+      artifact: {
+        mimeType: 'model/gltf-binary',
+        content: 'glb',
+        tessellation: { triangles: 12, vertices: 8, elapsed: 1.5, voxelSize: 0.5, activeVoxels: 64, memoryBytes: 4096 },
+      },
+      hash: 'model-hash',
+      transient: false,
+      issues: [],
+    } as const;
+    const parsed = wire.notifies.rendered.safeParse(rendered);
+    expect(parsed.success && parsed.data.success ? parsed.data.artifact.tessellation : undefined).toEqual(
+      rendered.artifact.tessellation,
+    );
+    expect(
+      wire.notifies.rendered.safeParse({
+        ...rendered,
+        artifact: { ...rendered.artifact, tessellation: { triangles: -1, vertices: 8, elapsed: 1 } },
+      }).success,
+    ).toBe(false);
+  });
 });

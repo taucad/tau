@@ -25,25 +25,28 @@ export function DesktopUpdateControl({
   const revealedRequest = useRef(0);
   useEffect(() => {
     const subscriptionLifetime = new AbortController();
-    const receive = (next: DesktopUpdateSnapshot): void => {
+    const receive = (next: DesktopUpdateSnapshot, reveal: boolean): void => {
       if (!subscriptionLifetime.signal.aborted) {
-        if (next.requestId > revealedRequest.current) {
-          revealedRequest.current = next.requestId;
+        if (reveal && next.requestId > revealedRequest.current) {
           showSidebar(true);
           if (isMobile) {
             setOpenMobile(true);
           }
           setOpen(true);
         }
+        revealedRequest.current = Math.max(revealedRequest.current, next.requestId);
         setSnapshot((previous) => (previous && previous.revision >= next.revision ? previous : next));
       }
     };
     // Subscribe first; revisions prevent a slower initial read from replacing a newer event.
-    const unsubscribe = bridge.subscribe(receive);
+    const unsubscribe = bridge.subscribe((next) => {
+      receive(next, true);
+    });
     // async-iife: bootstrap — hydrate the external subscription; cleanup ignores late results.
     void (async () => {
       try {
-        receive(await bridge.snapshot());
+        // Hydration restores status, not a historical request to open the popover.
+        receive(await bridge.snapshot(), false);
       } catch {
         if (!subscriptionLifetime.signal.aborted) {
           setActionFailed(true);

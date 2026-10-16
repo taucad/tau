@@ -1,7 +1,13 @@
 import type { AnyShape, Drawing } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
-import type { GeometrySvg, RuntimeSpanTracer } from '@taucad/runtime/types';
+import type { GeometrySvg, KernelIssue, RuntimeSpanTracer, TessellationReport } from '@taucad/runtime/types';
+import {
+  createTessellationDowngradedIssue,
+  resolveOcctTessellation,
+  tessellateWithinOcctBudget,
+} from '@taucad/occt-core';
+import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 import type { ShapeConfig } from '#model.js';
 import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
@@ -736,6 +742,138 @@ export function render(
     ...meshConfigs.map((shapeConfig) => renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer })),
     ...renderSvgArtifacts(svgConfigs),
   ];
+}
+
+/** A tessellation request: a preset or explicit tolerances, and the field values an explicit request omits. */
+export type ReplicadTessellationRequest = Readonly<{
+  tessellation: OcctTessellation;
+  explicitDefaults: OcctTessellationTolerances;
+}>;
+
+/**
+ * Bounding-box diagonal of every meshable shape together, in model millimetres. Reads the
+ * B-rep geometry (not a triangulation), so it does not depend on any earlier meshing.
+ *
+ * @param shapes - Shapes about to be meshed; drawings are ignored.
+ * @returns The diagonal, or `NaN` when no meshable shape has extent.
+ */
+export function measureShapesDiagonal(shapes: readonly InputShape[]): number {
+  const boxes = shapes.filter((config) => hasMeshableShape(config)).map(({ shape }) => shape.boundingBox);
+  const [combined, ...rest] = boxes;
+  if (combined === undefined) {
+    return Number.NaN;
+  }
+  try {
+    for (const box of rest) {
+      combined.add(box);
+    }
+    const [min, max] = combined.bounds;
+    return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  } catch {
+    // A void box (an empty compound) has no corners.
+    return Number.NaN;
+  } finally {
+    for (const box of boxes) {
+      box.delete();
+    }
+  }
+}
+
+/**
+ * Resolve a request into absolute tolerances. Explicit tolerances never measure the shapes.
+ *
+ * @param shapes - Shapes about to be meshed.
+ * @param request - The preset or explicit tolerances.
+ * @returns Absolute tolerances and the requested form.
+ */
+export function resolveReplicadTessellation(
+  shapes: readonly InputShape[],
+  request: ReplicadTessellationRequest,
+): OcctResolvedTessellation {
+  return resolveOcctTessellation({ ...request, measureDiagonal: () => measureShapesDiagonal(shapes) });
+}
+
+/**
+ * Triangles and vertices of rendered geometries, summed over every delivered part.
+ *
+ * @param geometries - Rendered geometries; drawings count nothing.
+ * @returns Triangle and vertex counts.
+ */
+export function countMesh(geometries: ReadonlyArray<GeometrySvg | GeometryReplicad>): {
+  triangles: number;
+  vertices: number;
+} {
+  let triangles = 0;
+  let vertices = 0;
+  for (const geometry of geometries) {
+    if (geometry.format === 'replicad') {
+      triangles += geometry.faces.triangles.length / 3;
+      vertices += geometry.faces.vertices.length / 3;
+    }
+  }
+  return { triangles, vertices };
+}
+
+/** A rendering within a triangle budget, with its cost report and any downgrade warning. */
+export type BudgetedRender = {
+  geometries: Array<GeometrySvg | GeometryReplicad>;
+  tessellation: TessellationReport;
+  issues: KernelIssue[];
+};
+
+/**
+ * Render a preview within a triangle budget. The request resolves to absolute tolerances; while
+ * the mesh exceeds the budget it is re-tessellated one step coarser, at most three times, and a
+ * `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances.
+ *
+ * @param shapes - The shapes to render.
+ * @param options - Request, budget, and the {@link render} options other than tessellation.
+ * @returns Geometries, the tessellation report and the downgrade warning when one was taken.
+ */
+export function renderWithinBudget(
+  shapes: NamedInputShape[],
+  options: Omit<RenderOptions, 'tessellation'> & {
+    request: ReplicadTessellationRequest;
+    budget: number;
+  },
+): BudgetedRender {
+  const { request, budget, ...renderOptions } = options;
+  const started = performance.now();
+  const requested = resolveReplicadTessellation(shapes, request);
+  const { result, effective, downgraded } = tessellateWithinOcctBudget({
+    tolerances: requested,
+    budget,
+    tessellate(tolerances) {
+      const geometries = render(shapes, { ...renderOptions, tessellation: tolerances });
+      return { geometries, ...countMesh(geometries) };
+    },
+  });
+  const elapsed = performance.now() - started;
+  return {
+    geometries: result.geometries,
+    tessellation: {
+      triangles: result.triangles,
+      vertices: result.vertices,
+      elapsed,
+      requested: requested.requested,
+      linearTolerance: effective.linearTolerance,
+      angularTolerance: effective.angularTolerance,
+      downgraded,
+    },
+    issues:
+      downgraded === 0
+        ? []
+        : [
+            createTessellationDowngradedIssue({
+              producer: 'replicad',
+              requested,
+              effective,
+              downgraded,
+              triangles: result.triangles,
+              budget,
+            }),
+          ],
+  };
 }
 
 /**

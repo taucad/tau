@@ -82,13 +82,16 @@ worker_path="${WORKER_PATH:-}"
 
 document_code="$(fetch "$document_path" "$work/document")"
 
-# Discovery 1: the build's asset receipt lists every emitted file.
+# Discovery 1: the build's asset receipt lists every emitted file. A host that answers every path with the SPA shell
+# answers 200 here too, so the body must be the receipt.
+first() { grep -E "$1" | grep -viE "$2" | sed -n '1s|^/*|/|p' || true; }
 if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]] &&
-  [[ "$(fetch /tau-asset-receipt.json "$work/receipt")" == 200 ]]; then
+  [[ "$(fetch /tau-asset-receipt.json "$work/receipt")" == 200 ]] &&
+  grep -q 'tau-ui-asset-receipt-v1' "$work/receipt"; then
   listed="$(grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]+"' "$work/receipt" | sed -E 's/.*"([^"]+)"$/\1/' || true)"
-  [[ -n "$chunk_path" ]] || chunk_path="$(grep -E '\.m?js$' <<<"$listed" | grep -viE 'worker' | sed -n 1p | sed 's|^|/|')"
-  [[ -n "$wasm_path" ]] || wasm_path="$(grep -E '\.wasm$' <<<"$listed" | sed -n 1p | sed 's|^|/|')"
-  [[ -n "$worker_path" ]] || worker_path="$(grep -E 'worker[^/]*\.m?js$' <<<"$listed" | sed -n 1p | sed 's|^|/|')"
+  [[ -n "$chunk_path" ]] || chunk_path="$(first '\.m?js$' 'worker' <<<"$listed")"
+  [[ -n "$wasm_path" ]] || wasm_path="$(first '\.wasm$' '^$' <<<"$listed")"
+  [[ -n "$worker_path" ]] || worker_path="$(first 'worker[^/]*\.m?js$' '^$' <<<"$listed")"
 fi
 
 # Discovery 2: the document's script references, then the chunks they reference.

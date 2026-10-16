@@ -4,6 +4,7 @@ import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
   getParametersInputSchema,
+  getParametersOutputSchema,
   parameterSetOperationSchema,
 } from '#schemas/tools/parameter.tool.schema.js';
 
@@ -196,5 +197,40 @@ describe('parameter tool schemas', () => {
         },
       }),
     ).toMatchObject({ success: true });
+  });
+});
+
+describe('get_parameters detail', () => {
+  const current = {
+    entry: { activeGroup: 'default', groups: { default: { values: {} } } },
+    identity: { manifestRevision: 'm' },
+  };
+
+  it('accepts values and full and refuses other projections', () => {
+    expect(getParametersInputSchema.parse({ targetFile: 'main.ts' })).not.toHaveProperty('detail');
+    expect(getParametersInputSchema.parse({ targetFile: 'main.ts', detail: 'full' }).detail).toBe('full');
+    expect(getParametersInputSchema.safeParse({ targetFile: 'main.ts', detail: 'compact' }).success).toBe(false);
+  });
+
+  it('requires the projection a resolved read names', () => {
+    expect(
+      getParametersOutputSchema.safeParse({
+        status: 'resolved',
+        detail: 'values',
+        parameters: { '/voxelSize': { value: 0.5, default: 0.7, unit: 'mm', unitInferred: true } },
+        current,
+      }).success,
+    ).toBe(true);
+    expect(
+      getParametersOutputSchema.safeParse({ status: 'resolved', detail: 'values', manifest: {}, current }).success,
+    ).toBe(false);
+    expect(
+      getParametersOutputSchema.safeParse({ status: 'resolved', detail: 'full', manifest: {}, current }).success,
+    ).toBe(true);
+  });
+
+  it('teaches when the full manifest is needed', () => {
+    expect(toolDescriptions[toolName.getParameters]).toContain('Request detail "full"');
+    expect(toolDescriptions[toolName.applyParameterOperation]).toContain('get_parameters with detail "full"');
   });
 });

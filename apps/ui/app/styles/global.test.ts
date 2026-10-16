@@ -319,8 +319,9 @@ describe('action cursor contract', () => {
     expect(tokenStyles).toContain(`@source not inline('${legacyUtility}');`);
     expect(tokenStyles).toContain("svg[id^='mermaid-'] .clickable");
     expect(appStyles).not.toContain("@import 'dockview-react/dist/styles/dockview.css'");
-    expect(appStyleLinks.indexOf('href: dockviewStylesUrl')).toBeLessThan(
-      appStyleLinks.indexOf('href: globalStylesUrl'),
+    expect(appStyleLinks).not.toContain('dockview');
+    expect(appStyleLinks.indexOf('precedence: vendorStylesheetPrecedence')).toBeLessThan(
+      appStyleLinks.indexOf('precedence: appStylesheetPrecedence'),
     );
     expect(appStyles).toContain('.dockview-theme-tau');
     expect(appStyles).toContain('cursor: var(--cursor-action) !important;');

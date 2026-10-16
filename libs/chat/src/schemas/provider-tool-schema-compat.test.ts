@@ -358,6 +358,8 @@ describe('provider-facing tool schema compatibility', () => {
       'instance',
       'mode',
       'options',
+      'parameters',
+      'section',
       'targetFile',
       'view',
     ]);

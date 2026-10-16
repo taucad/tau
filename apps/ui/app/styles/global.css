@@ -7,6 +7,7 @@
 @import '@taucad/ui/styles/tokens.css';
 @import 'streamdown/styles.css';
 @import '../components/panes/pane-resize.css';
+@import '../components/layout/application-shell.css';
 @import './scroll-shadows.css';
 @import './shiny-text.css';
 

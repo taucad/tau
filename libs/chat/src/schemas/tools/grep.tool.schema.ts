@@ -2,15 +2,44 @@ import safeRegex from 'safe-regex';
 import { z } from 'zod';
 import { rootedFilePathSchema, rootedPathSchema } from '#schemas/rooted-path.schema.js';
 
+/** A Perl or PCRE inline modifier group such as `(?i)` or `(?im)`, which JavaScript does not accept. */
+const inlineModifierPattern = /\(\?[a-z-]+\)/u;
+
+/**
+ * Refuse a pattern for the reason that actually applies: invalid JavaScript syntax first, so an
+ * unsupported inline flag is never reported as a backtracking risk, then the backtracking check.
+ * `handle-grep` compiles the pattern with `new RegExp(pattern, 'g' | 'gi')`, so that is the syntax checked.
+ */
+const checkPattern = (pattern: string, context: z.RefinementCtx): void => {
+  try {
+    // oxlint-disable-next-line no-new -- compiling is the syntax check; the instance is discarded.
+    new RegExp(pattern, 'g');
+  } catch (error) {
+    context.addIssue({
+      code: 'custom',
+      message: inlineModifierPattern.test(pattern)
+        ? 'Inline flags such as (?i) are not JavaScript regex syntax. Remove them and pass caseSensitive: false for a case-insensitive search.'
+        : `The pattern is not a valid JavaScript regular expression: ${error instanceof Error ? error.message : String(error)}.`,
+    });
+    return;
+  }
+  if (!safeRegex(pattern)) {
+    context.addIssue({
+      code: 'custom',
+      message:
+        'The regex pattern may cause catastrophic backtracking. Remove nested quantifiers such as (a+)+ or reduce the number of repeated groups; plain alternation such as foo|bar is fine.',
+    });
+  }
+};
+
 /** @public */
 export const grepInputSchema = z.object({
   pattern: z
     .string()
-    .refine((pattern) => safeRegex(pattern), {
-      message:
-        'The regex pattern is potentially unsafe (may cause catastrophic backtracking). Please simplify the pattern by reducing nested quantifiers or alternations.',
-    })
-    .describe('The regular expression pattern to search for in file contents.'),
+    .superRefine(checkPattern)
+    .describe(
+      'A JavaScript regular expression searched in file contents. Inline flags such as (?i) are not supported; use caseSensitive.',
+    ),
   path: rootedPathSchema.optional().describe('The file or directory path to search in. Defaults to project root.'),
   glob: z
     .string()

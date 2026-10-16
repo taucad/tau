@@ -6,7 +6,7 @@ import type { Evaluation } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
-import { viewTabTitle } from '#workbench-records/projection.js';
+import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { mock } from 'vitest-mock-extended';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 

@@ -213,7 +213,8 @@ jobs:
             test -z "$(ls -A "$RUNNER_TEMP/tau-${image%%:*}/payloads/blobs" 2>/dev/null)"
           done
           # The checkout's pnpm install holds glibc binaries only; an npm install on Alpine would add
-          # sharp's musl build, which the CLI loads at start, so the row supplies it through NODE_PATH.
+          # sharp's musl build, which the CLI loads at start, so the row installs it inside Alpine and
+          # mounts it at `/node_modules`, the last directory Node's resolution walks.
           sharp=$(ls node_modules/.pnpm/sharp@*/node_modules/sharp/package.json | head -1)
           musl="$RUNNER_TEMP/musl-modules"
           mkdir -p "$musl"
@@ -224,7 +225,7 @@ jobs:
           ' "$sharp" | xargs docker run --rm -v "$musl:$musl" node:24-alpine \
             npm install --prefix "$musl" --no-save --no-package-lock --no-audit --no-fund
           refuse alpine "$before_download and .details.detail.axis == \"libc\"" \
-            "--network=none -e NODE_PATH=$musl/node_modules" node:24-alpine \
+            "--network=none -v $musl/node_modules:/node_modules:ro" node:24-alpine \
             node packages/cli/dist/bin/tau.mjs prepare build123d --json
           test -z "$(ls -A "$RUNNER_TEMP/tau-alpine/payloads/blobs" 2>/dev/null)"
           refuse nogl '.code == "MISSING_SYSTEM_LIBRARY" and .details.detail.library == "libGL.so.1"' \

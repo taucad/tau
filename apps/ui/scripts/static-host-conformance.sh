@@ -22,7 +22,7 @@
 #   CHUNK_PATH     Path of a JS chunk (default: discovered)
 #   WASM_PATH      Path of a WASM module (default: discovered)
 #   WORKER_PATH    Path of a worker script (default: discovered)
-#   SCAN_LIMIT     Chunks read while discovering WASM and worker paths (default: 40)
+#   SCAN_LIMIT     Chunks read while discovering WASM and worker paths (default: 400)
 #
 # Usage:
 #   apps/ui/scripts/static-host-conformance.sh https://taucad-prod-us.netlify.app
@@ -46,7 +46,7 @@ command -v curl >/dev/null || {
 }
 
 base="${1%/}"
-scan_limit="${SCAN_LIMIT:-40}"
+scan_limit="${SCAN_LIMIT:-400}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -89,8 +89,13 @@ if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]] &&
 fi
 
 # Discovery 2: the document's script references, then the chunks they reference.
+# references <file>: root-relative `/assets/…` paths the file names. A built chunk also names its siblings by bare
+# file name (`new URL("kernel-abc.wasm", import.meta.url)`, `import("./chunk-def.js")`), which resolve beside it.
 references() {
-  grep -oE '(/|\./|\.\./)?assets/[A-Za-z0-9._@~-]+\.(m?js|wasm)' "$1" | sed -E 's#^(\./|\.\./)?/?#/#' | sort -u || true
+  {
+    grep -oE '(/|\./|\.\./)?assets/[A-Za-z0-9._@~-]+\.(m?js|wasm)' "$1" | sed -E 's#^(\./|\.\./)?/?#/#' || true
+    grep -oE '["'"'"'`](\./)?[A-Za-z0-9._@~-]+\.(m?js|wasm)["'"'"'`]' "$1" | sed -E 's#^.(\./)?#/assets/#; s#.$##' || true
+  } | sort -u
 }
 if [[ -z "$chunk_path" || -z "$wasm_path" || -z "$worker_path" ]]; then
   references "$work/document" >"$work/queue"
@@ -116,7 +121,7 @@ for kind in chunk wasm worker; do
     echo "ERROR: no $kind found on $base; set $(tr '[:lower:]' '[:upper:]' <<<"$kind")_PATH" >&2
     echo "  document $document_path: status $document_code, content-type '$(header "$work/document.headers" content-type)'" >&2
     echo "  its script and link references:" >&2
-    grep -oE '(src|href)="[^"]+"' "$work/document" | head -20 | sed 's/^/    /' >&2 || true
+    grep -oE '(src|href)="[^"]+"' "$work/document" | sed -n '1,20s/^/    /p' >&2 || true
     exit 2
   fi
 done

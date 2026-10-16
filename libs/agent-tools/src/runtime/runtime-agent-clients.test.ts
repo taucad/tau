@@ -178,6 +178,33 @@ describe('createRuntimeAgentClients', () => {
     }
   });
 
+  it('reports the default view mesh cost the kernel delivered', async () => {
+    const tessellation = {
+      triangles: 1308,
+      vertices: 656,
+      elapsed: 42,
+      voxelSize: 0.5,
+      activeVoxels: 2846,
+      memoryBytes: 1_296_848,
+    };
+    const clients = clientsFor(
+      runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      tessellation,
+    });
+  });
+
+  it('omits the mesh cost when the kernel reports none', async () => {
+    const clients = clientsFor(runtimeFixture());
+
+    const result = await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    expect(result).not.toHaveProperty('tessellation');
+  });
+
   it('should open every request-scoped document unwatched', async () => {
     const fixture = runtimeFixture();
     const clients = clientsFor(fixture);

@@ -805,6 +805,22 @@
       "owner": "tau mcp"
     },
     {
+      "id": "E33",
+      "bound": "tau check evaluation deadline: one evaluation fails with EVALUATION_TIMEOUT (exit 1) after 600 s, the MCP operation budget",
+      "site": "packages/cli/src/commands/check.ts",
+      "token": "evaluationTimeout",
+      "class": "External edge (backstop)",
+      "owner": "W17"
+    },
+    {
+      "id": "E34",
+      "bound": "tau serve --smoke-test: the daemon's /.well-known/tau-host descriptor must answer within 30 s",
+      "site": "packages/cli/src/commands/serve.ts",
+      "token": "smokeTestTimeout",
+      "class": "Liveness",
+      "owner": "W17"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

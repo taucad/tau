@@ -360,6 +360,9 @@ export const serveNativeKernels = (): {
 /** The port `tau serve` asks for first, so a served project keeps one bookmarkable URL (charter Q53). */
 export const defaultServePort = 7180;
 
+/** How long `--smoke-test` waits for the served descriptor to answer, in milliseconds. */
+const smokeTestTimeout = 30_000;
+
 /** How many ports above the requested one `tau serve` tries before giving up. */
 const portSearchSpan = 20;
 
@@ -526,7 +529,7 @@ const announceServed = async (served: {
 const smokeTest = async (url: string): Promise<void> => {
   const descriptorUrl = new URL('/.well-known/tau-host', url);
   try {
-    const response = await fetch(descriptorUrl, { signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(descriptorUrl, { signal: AbortSignal.timeout(smokeTestTimeout) });
     const body: unknown = await response.json();
     if (!response.ok || typeof body !== 'object' || body === null) {
       throw new Error(`answered ${String(response.status)}`);

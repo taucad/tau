@@ -3014,6 +3014,55 @@ export const uiReadObservedDownloads: BrowserCommand<
   });
 };
 
+/** Every WASM transfer each target context started since `uiStartObservedWasm`, as absolute URLs. */
+const observedWasm = new WeakMap<ProviderContext, Set<string>>();
+
+/**
+ * Record every WebAssembly transfer the target starts from now on (T14). The context-level `request` and `response`
+ * events include the requests of the page's dedicated workers, where the kernels compile their modules; a request
+ * counts by its `.wasm` path and a response by its `application/wasm` type, so an extension-less module is caught too.
+ */
+export const uiStartObservedWasm: BrowserCommand = (commandContext) => {
+  const { context } = sessionFor(commandContext);
+  if (observedWasm.has(context)) {
+    return;
+  }
+  const urls = new Set<string>();
+  observedWasm.set(context, urls);
+  context.on('request', (request) => {
+    if (new URL(request.url()).pathname.endsWith('.wasm')) {
+      urls.add(request.url());
+    }
+  });
+  context.on('response', (response) => {
+    if ((response.headers()['content-type'] ?? '').startsWith('application/wasm')) {
+      urls.add(response.url());
+    }
+  });
+};
+
+/**
+ * Drain the WASM URLs observed so far. With `settle`, first wait until the primary page's network has been idle for
+ * Playwright's quiet window, so a module requested right after the last gesture is not missed; a page that keeps
+ * its workers busy (an open project) never settles, so its reads poll instead.
+ */
+export const uiReadObservedWasm: BrowserCommand<[settle?: boolean], readonly string[]> = async (
+  commandContext,
+  settle = true,
+) => {
+  const session = sessionFor(commandContext);
+  const urls = observedWasm.get(session.context);
+  if (!urls) {
+    throw new Error('WASM transfers are not observed; call uiStartObservedWasm first.');
+  }
+  if (settle) {
+    await session.primary.waitForLoadState('networkidle');
+  }
+  const drained = [...urls].toSorted();
+  urls.clear();
+  return drained;
+};
+
 export const uiReadTargetEvents: BrowserCommand<
   [],
   {
@@ -3057,6 +3106,8 @@ export const uiBrowserCommands = {
   uiValidateProjectionDirectory,
   uiStartObservedDownloads,
   uiReadObservedDownloads,
+  uiStartObservedWasm,
+  uiReadObservedWasm,
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,

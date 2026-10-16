@@ -273,6 +273,8 @@ export type UiBrowserCommands = {
   uiReadFixtureChunk(path: string, offset: number): Promise<{ readonly base64: string; readonly eof: boolean }>;
   uiStartObservedDownloads(): Promise<void>;
   uiReadObservedDownloads(): Promise<readonly TargetDownload[]>;
+  uiStartObservedWasm(): Promise<void>;
+  uiReadObservedWasm(settle?: boolean): Promise<readonly string[]>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
@@ -851,3 +853,8 @@ export const startObservedDownloads = (): Promise<void> => server.commands.uiSta
 /** Read exact bytes of actual operator-triggered downloads without a product click. */
 export const readObservedDownloads = (): Promise<readonly TargetDownload[]> =>
   server.commands.uiReadObservedDownloads();
+/** Start recording every WASM transfer of the target, its frames and their workers. */
+export const startObservedWasm = (): Promise<void> => server.commands.uiStartObservedWasm();
+/** Drain the WASM URLs the target transferred since the last read, by default after its network settles. */
+export const readObservedWasm = (settle?: boolean): Promise<readonly string[]> =>
+  server.commands.uiReadObservedWasm(settle);

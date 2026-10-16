@@ -21,7 +21,10 @@ For multiple files, import helpers with explicit ESM paths such as `./lib/widget
 - Prefer `fuseAll`, `cutAll`, and `intersectAll` over long pairwise boolean chains.
 - Build one prototype, then `clone()` before transforming repeated parts.
 - Use the `draw()` pen (`.threePointsArcTo`, `.bezierCurveTo`, `.smoothSplineTo`), `drawCircle`, or `drawPointsInterpolation` instead of polyline approximations.
-- Do not expose export tessellation in `defaultParams`; the runtime owns linear and angular deflection.
+
+## Tessellation
+
+Views and exports take `options.tessellation` as a preset or an explicit object, never both. Presets scale with the shape's bounding-box diagonal D: `low` (D/500, 30°) for a first look or a large assembly; `medium` (D/2000, 20°), the default for `evaluate_model`, `screenshot` and the viewer; `high` (D/8000, 12°), the export default; `extra-high` (D/32000, 6°) only when asked. The explicit `{ linearTolerance, angularTolerance }` is absolute, in millimetres and degrees, and does not scale with size; an omitted field keeps the kernel default (0.02 mm and 20° to view, 0.01 mm and 20° to export). Both forms together, such as `{ quality: 'high', linearTolerance: 0.01 }`, fail with `VALIDATION_ERROR`. A model cannot declare a tessellation hint yet, so keep it out of model parameters. Results report the effective `tessellation` (requested form, tolerances, triangles, vertices, elapsed); a view over 2 M triangles is re-meshed up to three steps coarser with a `TESSELLATION_DOWNGRADED` warning, and an export over 20 M fails with suggested tolerances.
 
 ## Canonical pattern
 

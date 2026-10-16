@@ -11,7 +11,11 @@ description: Guides native Build123d BRep authoring in main.py. Use when creatin
 2. Define `main(params: Params)` returning one `build123d.Shape` or a finite non-empty list or tuple of shapes.
 3. Set each root shape's `label` and `color`; labels must be unique. Tau preserves them in the viewer topology and STEP export.
 4. Use static project-relative Python imports. Declare non-Python assets in `__tau__ = {"dependencies": [...]}`.
-5. Keep render tessellation out of `Params`; Tau owns display tolerance.
+5. Keep tessellation out of `Params`; see Tessellation.
+
+## Tessellation
+
+Views and exports take `options.tessellation` as a preset or an explicit object, never both. Presets scale with the shape's bounding-box diagonal D: `low` (D/500, 30°) for a first look or a large assembly; `medium` (D/2000, 20°), the default for `evaluate_model`, `screenshot` and the viewer; `high` (D/8000, 12°), the export default; `extra-high` (D/32000, 6°) only when asked. The explicit `{ linearTolerance, angularTolerance }` is absolute, in millimetres and degrees, and does not scale with size; an omitted field keeps the kernel default (0.02 mm and 20° to view, 0.01 mm and 20° to export). Both forms together, such as `{ quality: 'high', linearTolerance: 0.01 }`, fail with `VALIDATION_ERROR`. A model cannot declare a tessellation hint yet, so keep it out of model parameters. Results report the effective `tessellation` (requested form, tolerances, triangles, vertices, elapsed); a view over 2 M triangles is re-meshed up to three steps coarser with a `TESSELLATION_DOWNGRADED` warning, and an export over 20 M fails with suggested tolerances.
 
 ## Canonical pattern
 
@@ -127,10 +131,6 @@ class CounterBoreHole(BasePartObject)
 # Part Object
 class Sphere(BasePartObject)
   Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
-
-# Part Object
-class Torus(BasePartObject)
-  Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 ```
 
 ### objects_sketch

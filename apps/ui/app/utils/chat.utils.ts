@@ -254,6 +254,17 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `targetFile: ${input.targetFile}`,
     output(output) {
       const lines = [`Status: ${output.status}`];
+      if (output.tessellation) {
+        const { triangles, vertices, elapsed, voxelSize, activeVoxels, memoryBytes } = output.tessellation;
+        const grid = [
+          voxelSize === undefined ? undefined : `voxelSize ${voxelSize} mm`,
+          activeVoxels === undefined ? undefined : `${activeVoxels} active voxels`,
+          memoryBytes === undefined ? undefined : `${memoryBytes} bytes`,
+        ].filter(Boolean);
+        lines.push(
+          `Mesh: ${triangles} triangles, ${vertices} vertices, ${Math.round(elapsed)} ms${grid.length > 0 ? ` (${grid.join(', ')})` : ''}`,
+        );
+      }
       if (output.kernelIssues && output.kernelIssues.length > 0) {
         const issues = output.kernelIssues.map((issue) => `  - ${issue.message}`).join('\n');
         lines.push('Issues:', issues);

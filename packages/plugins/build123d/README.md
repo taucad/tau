@@ -72,6 +72,24 @@ limits still apply. Workspace mirroring has no fixed byte, file-count or directo
 | Tau Desktop    | Yes        | Pinned CPython/Build123d/OCP resource tree and project trust       |
 | Custom Node.js | Host-owned | `>=24`; the host must provide the same resource and trust contract |
 
+## Native targets
+
+`tau-plugin.json` pins one closure per target: python-build-standalone's `install_only_stripped`
+CPython plus the wheels the target's `pylock.<target>.toml` chose. The generator computes each floor
+as the highest of the interpreter's and the wheels' floors; on Linux that is OCP's `manylinux_2_31`.
+
+| Target              | Floor      | Checked in CI on   |
+| ------------------- | ---------- | ------------------ |
+| `darwin-arm64`      | macOS 12   | `macos-26`         |
+| `darwin-x64`        | macOS 11   | `macos-26-intel`   |
+| `linux-x64-glibc`   | glibc 2.31 | `ubuntu-24.04`     |
+| `linux-arm64-glibc` | glibc 2.31 | `ubuntu-24.04-arm` |
+
+`tau prepare build123d` refuses every other host before it downloads anything, with
+`blocked: unsupported-target` and the failing axis: `minimumLibcVersion` below glibc 2.31, `libc` on
+musl Linux, and `os` on Windows. On a Linux host without the system `libGL.so.1` or `libX11.so.6`
+that OCP links, it refuses with `missing-system-library` naming the library.
+
 ## Model contract
 
 A `.py` entry defines a top-level `@dataclass(frozen=True) class Params` and synchronous `main(params)`. Supported parameter types are `bool`, `int`, `float`, `str`, and scalar `Literal`. Return a native Shape/Compound, a list or tuple of shapes, or `None`/an empty sequence for an empty scene. Labels are presentation; repeated instances need distinct native shape objects. Occurrence identity defaults to structural paths and can be explicitly assigned in `motion(model)`.

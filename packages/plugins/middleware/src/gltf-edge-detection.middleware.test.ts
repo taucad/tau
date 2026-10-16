@@ -11,7 +11,7 @@ import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import type { Artifact, RenderResult, KernelExportResult } from '@taucad/runtime/types';
 import type { KernelMiddlewareServices } from '@taucad/runtime/middleware';
 
-import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
+import { gltfEdgeDetection, gltfEdgeDetectionMaxTriangles } from '#gltf-edge-detection.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockRuntime, createErrorResult } from '@taucad/runtime-testing';
 
@@ -354,6 +354,50 @@ async function createImplicitIndexInputsGltf(): Promise<Uint8Array<ArrayBuffer>>
           .setArray(new Uint8Array([0, 1, 2])),
       ),
   );
+  document.createScene().addChild(document.createNode().setMesh(mesh));
+  return io.writeBinary(document);
+}
+
+/**
+ * Create a GLB with one cube primitive and one indexed primitive whose index
+ * count sits just above the fallback triangle budget. The large primitive
+ * references three vertices only, so the fixture stays a few megabytes.
+ */
+async function createOverBudgetGltf(): Promise<Uint8Array<ArrayBuffer>> {
+  const io = new NodeIO();
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const cubePositions = new Float32Array([0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+  const cubeIndices = new Uint16Array([
+    0, 1, 2, 2, 3, 0, 5, 4, 7, 7, 6, 5, 3, 2, 6, 6, 7, 3, 4, 5, 1, 1, 0, 4, 1, 5, 6, 6, 2, 1, 4, 0, 3, 3, 7, 4,
+  ]);
+  const cube = document
+    .createPrimitive()
+    .setMode(primitiveModeTriangles)
+    .setAttribute(
+      'POSITION',
+      document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(cubePositions),
+    )
+    .setIndices(document.createAccessor().setBuffer(buffer).setType(Accessor.Type['SCALAR']!).setArray(cubeIndices));
+  const large = document
+    .createPrimitive()
+    .setMode(primitiveModeTriangles)
+    .setAttribute(
+      'POSITION',
+      document
+        .createAccessor()
+        .setBuffer(buffer)
+        .setType(Accessor.Type['VEC3']!)
+        .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])),
+    )
+    .setIndices(
+      document
+        .createAccessor()
+        .setBuffer(buffer)
+        .setType(Accessor.Type['SCALAR']!)
+        .setArray(new Uint32Array((gltfEdgeDetectionMaxTriangles + 1) * 3)),
+    );
+  const mesh = document.createMesh().addPrimitive(cube).addPrimitive(large);
   document.createScene().addChild(document.createNode().setMesh(mesh));
   return io.writeBinary(document);
 }
@@ -912,6 +956,79 @@ describe('gltfEdgeDetection', () => {
       const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
       expect(primitives[0]!.lineCount).toBe(1);
     }
+  });
+
+  describe('triangle budget', () => {
+    it('adds render edges without a skip warning when every primitive is within the budget', async () => {
+      const content = await createCubeGltfWithoutLines();
+      const { input, runtime } = createEdgeDetectionContext();
+
+      const result = await gltfEdgeDetectionDefinition.wrapRender!(
+        input,
+        createMockRenderHandler(createRenderSuccess({ mimeType: 'model/gltf-binary', content })),
+        runtime,
+      );
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
+        expect(primitives[0]).toMatchObject({ triangleCount: 1, lineCount: 1, linePrimitiveVertexCounts: [24] });
+      }
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('skips render edges for a primitive above the budget and logs the count once', async () => {
+      const content = await createOverBudgetGltf();
+      const { input, runtime } = createEdgeDetectionContext();
+
+      const result = await gltfEdgeDetectionDefinition.wrapRender!(
+        input,
+        createMockRenderHandler(createRenderSuccess({ mimeType: 'model/gltf-binary', content })),
+        runtime,
+      );
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
+        // Only the in-budget cube gains a line primitive.
+        expect(primitives[0]).toMatchObject({ triangleCount: 2, lineCount: 1, linePrimitiveVertexCounts: [24] });
+      }
+      expect(runtime.logger.warn).toHaveBeenCalledTimes(1);
+      expect(runtime.logger.warn).toHaveBeenCalledWith(
+        `Skipping fallback edge detection for a primitive with ${gltfEdgeDetectionMaxTriangles + 1} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
+      );
+    });
+
+    it('keeps export edge detection unbudgeted so requested export bytes are unchanged', async () => {
+      const content = await createOverBudgetGltf();
+      const { runtime } = createEdgeDetectionContext();
+
+      const result = await gltfEdgeDetectionDefinition.wrapExport!(
+        {
+          exportId: 'glb',
+          extension: 'glb',
+          mimeType: 'model/gltf-binary',
+          options: {},
+          content: { includeEdges: true },
+        },
+        vi.fn(
+          async () =>
+            ({
+              success: true,
+              data: [{ name: 'model.glb', bytes: content, mimeType: 'model/gltf-binary' }],
+              issues: [],
+            }) satisfies KernelExportResult,
+        ),
+        runtime,
+      );
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const primitives = await analyzeGltfPrimitives(result.data[0].bytes);
+        expect(primitives[0]).toMatchObject({ triangleCount: 2, lineCount: 1 });
+      }
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
+    });
   });
 
   it('returns the original GLTF when triangle inputs cannot produce edges', async () => {

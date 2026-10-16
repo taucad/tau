@@ -38,7 +38,7 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   signal: new AbortController().signal,
 });
 
-it.each(['grok', 'codex'])('should project every additional Tau MCP capability for %s', async (agentId) => {
+it.each(['grok', 'codex', 'claude'])('should project every additional Tau MCP capability for %s', async (agentId) => {
   const cases = [
     ['get_parameters', { targetFile: 'main.py' }, { status: 'unresolved', diagnostics: [] }],
     [
@@ -78,11 +78,15 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
           rawInput:
             agentId === 'grok'
               ? { tool_name: `tau__${name}`, tool_input: input }
-              : { server: 'tau', tool: name, arguments: input },
+              : agentId === 'claude'
+                ? input
+                : { server: 'tau', tool: name, arguments: input },
           _meta:
             agentId === 'grok'
               ? { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } }
-              : { is_mcp_tool_call: true },
+              : agentId === 'claude'
+                ? { claudeCode: { toolName: `mcp__tau__${name}` } }
+                : { is_mcp_tool_call: true },
         },
         {
           sessionUpdate: 'tool_call_update',
@@ -91,7 +95,9 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
           rawOutput:
             agentId === 'grok'
               ? { type: 'MCP', tool_name: name, server_name: 'tau', output: { OkayOutput: JSON.stringify(carrier) } }
-              : { result: { structuredContent: carrier, content: [] } },
+              : agentId === 'claude'
+                ? JSON.stringify(carrier)
+                : { result: { structuredContent: carrier, content: [] } },
         },
       ],
       agentId,
@@ -106,6 +112,100 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
     });
     expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: name, content: output, isError: false });
   }
+});
+
+it('should name a streamed Claude MCP call as Tau’s tool before its arguments arrive', async () => {
+  /* Captured from claude-agent-acp 0.70.0 (W7 live run): the call is announced
+   * with `{}`, refined with its arguments, and its result is the
+   * `structuredContent` JSON Claude Code hands its model. */
+  const meta = { claudeCode: { toolName: 'mcp__tau__evaluate_model' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-mcp',
+        title: 'mcp__tau__evaluate_model',
+        rawInput: {},
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp',
+        status: 'pending',
+        rawInput: { targetFile: 'main.py' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp',
+        status: 'completed',
+        rawOutput: JSON.stringify({ status: 'ready' }),
+        _meta: meta,
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[0]).toMatchObject({
+    role: 'tool-input',
+    toolName: 'evaluate_model',
+    content: { targetFile: 'main.py' },
+    metadata: { tauInternal: { presentation: 'tau-mcp' } },
+  });
+  expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: 'evaluate_model', isError: false });
+});
+
+it('should keep a Claude MCP failure’s Tau error code', async () => {
+  const meta = { claudeCode: { toolName: 'mcp__tau__evaluate_model' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-mcp-failed',
+        title: 'mcp__tau__evaluate_model',
+        rawInput: { targetFile: 'main.py' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-mcp-failed',
+        status: 'failed',
+        rawOutput: [{ type: 'text', text: 'TOOL_NOT_ALLOWED: evaluate_model is not allowed in this run.' }],
+        _meta: meta,
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'evaluate_model',
+    content: { errorCode: 'TOOL_NOT_ALLOWED', message: 'evaluate_model is not allowed in this run.' },
+    isError: true,
+  });
+});
+
+it('should leave a Claude tool from another MCP server as Claude named it', async () => {
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-other',
+        title: 'mcp__other__evaluate_model',
+        rawInput: { targetFile: 'main.py' },
+        _meta: { claudeCode: { toolName: 'mcp__other__evaluate_model' } },
+      },
+    ],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[0]).toMatchObject({ role: 'tool-input', toolName: 'mcp__other__evaluate_model' });
 });
 
 it('should normalize a qualified Grok MCP call and its JSON output', async () => {

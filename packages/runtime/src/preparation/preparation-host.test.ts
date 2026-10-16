@@ -995,6 +995,42 @@ describe('createPreparationHost', () => {
       expect(darwin.registry.calls).toEqual([]);
       await expect(darwin.host.describe()).resolves.toMatchObject([{ state: 'unsupported' }]);
     });
+
+    it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {
+      const { host } = await scenario({
+        variants: (payloads) => [{ target: { ...linuxTarget, minimumLibcVersion: '2.31' }, payloads }],
+      });
+
+      const receipt = readyReceipt(await prepare(host));
+
+      expect(receipt.selection).toEqual({
+        host: linuxHost,
+        candidates: [{ ...linuxTarget, minimumLibcVersion: '2.31' }],
+        emulated: false,
+      });
+    });
+
+    // Charter W14 and spike S17: a glibc 2.28 host, a musl host and Windows on arm64 refuse with the failing axis
+    // before a single request, never with a late resolver error or an import crash.
+    it.each<[string, HostIndicators, Record<string, unknown>]>([
+      ['glibc 2.28', glibcHost('2.28'), { axis: 'minimumLibcVersion', nearest: { minimumLibcVersion: '2.31' } }],
+      ['musl', { ...linuxHost, libc: 'musl', libcVersion: undefined }, { axis: 'libc', nearest: linuxTarget }],
+      [
+        'win32-arm64',
+        { os: 'win32', arch: 'arm64', osVersion: '10.0.26100', translated: false, wasm: { threads: false } },
+        { axis: 'os' },
+      ],
+    ])('should refuse a %s host on its axis before any request', async (_name, indicators, detail) => {
+      const { host, registry } = await scenario({
+        variants: (payloads) => [{ target: { ...linuxTarget, minimumLibcVersion: '2.31' }, payloads }],
+        host: { indicators },
+      });
+
+      const outcome = await prepare(host);
+
+      expect(outcome).toMatchObject({ status: 'blocked', reason: 'unsupported-target', detail });
+      expect(registry.calls).toEqual([]);
+    });
   });
 
   describe('garbage collection', () => {

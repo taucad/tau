@@ -12,7 +12,8 @@
  * "drop every `CLAUDE`/`ANTHROPIC`/`CODEX`/`AI_AGENT`/`BAGGAGE`/`OPENAI`/
  * `TAU_HOST_AGENT_TOKEN` prefix" rule — it also drops `NODE_OPTIONS`, which
  * would otherwise inject this process's loader hooks into a vendor adapter.
- * The one carve-out is each adapter's own config-directory variable.
+ * The carve-outs are each adapter's own config-directory variables and the
+ * one variable naming the CLI it must run (`executableEnv`).
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -82,7 +83,7 @@ const stderrRetention = 8192;
  */
 export const acpAdapterEnvironment = (
   base: NodeJS.ProcessEnv,
-  adapter: Pick<AcpAdapter, 'configEnv'> & Partial<Pick<AcpAdapter, 'spawnEnv'>>,
+  adapter: Pick<AcpAdapter, 'configEnv'> & Partial<Pick<AcpAdapter, 'spawnEnv' | 'executableEnv' | 'executablePath'>>,
 ): NodeJS.ProcessEnv => {
   const allowed = new Set([...acpEnvironmentAllowlist, ...adapter.configEnv]);
   return {
@@ -97,6 +98,11 @@ export const acpAdapterEnvironment = (
      * when told so. Plain Node ignores the name. */
     // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable name is Electron's, not ours.
     ...('electron' in process.versions ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+    /* The executable the version probe checked, so the adapter runs that file
+     * and not a vendor copy of its own. */
+    ...(adapter.executableEnv === undefined || adapter.executablePath === undefined
+      ? {}
+      : { [adapter.executableEnv]: adapter.executablePath }),
     /* After the allowlist, so a pin's own requirement cannot be filtered away. */
     ...adapter.spawnEnv,
   };
@@ -150,7 +156,7 @@ export const spawnAcpAdapter = (options: {
     delete environment['ELECTRON_RUN_AS_NODE'];
   }
   const child = spawn(
-    adapter.modulePath === undefined ? adapter.cli : process.execPath,
+    adapter.modulePath === undefined ? (adapter.executablePath ?? adapter.cli) : process.execPath,
     adapter.modulePath === undefined ? [...adapter.args] : [adapter.modulePath],
     {
       cwd: options.cwd,

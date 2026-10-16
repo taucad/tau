@@ -1,5 +1,6 @@
 import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/kernel';
 import {
   formatComponentId,
   formatPrimitiveSelector,
@@ -55,6 +56,8 @@ export type PicovoxelNativeHandle = GlbResources & {
   readonly mechanism?: unknown;
   /** Reader warnings retained for exports whose runtime result omits create-phase issues. */
   readonly mechanismIssues?: readonly KernelIssue[];
+  /** What the delivered meshes cost to produce, reported with each rendered view. */
+  readonly tessellation?: TessellationReport;
 };
 
 type PicovoxelGltfOptions = GeometryOutputTransformOptions & {

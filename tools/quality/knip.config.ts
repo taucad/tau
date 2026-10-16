@@ -315,8 +315,10 @@ const config: KnipConfig = {
       entry: ['src/**/*.test-d.ts'],
     },
     'packages/cli': {
-      // `tau serve` resolves the pinned ACP adapters by name from the CLI's own location
-      // (`externalAgents: { resolveFrom: import.meta.url }`, packages/host/src/acp/registry.ts).
+      // The `stage-acp` target runs it from the workspace root.
+      entry: ['scripts/stage-acp-adapters.mts'],
+      // `stage-acp` copies the pinned ACP adapters into `dist-acp` by name, and `tau serve`
+      // resolves them there (`acpAdapterResolveFrom`, packages/host/src/acp/registry.ts).
       ignoreDependencies: ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'],
     },
     'packages/filesystem': {

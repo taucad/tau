@@ -6,25 +6,27 @@
  * do, three levels deep and with two names at conflicting versions.
  *
  * This is the packaging proof that does not need a signed 300 MB bundle: stage
- * the closure exactly as `package-macos.mts` does, then spawn the staged module
- * and complete one ACP `initialize`. A missing dependency anywhere in the
- * closure fails the handshake — nothing else in the suite would notice.
+ * the closure exactly as `package-macos.mts` does, resolve the adapters from
+ * the staged tree as `tau serve` does, then spawn the staged module and
+ * complete one ACP `initialize`. A missing dependency anywhere in the closure
+ * fails the handshake — nothing else in the suite would notice. Claude also
+ * opens a session against a stub `claude`, because the staged tree has no
+ * vendor binary of its own and a session is where the adapter first needs one.
  */
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { acpAgentProfiles, spawnAcpAdapter } from '@taucad/host';
-import type { AcpAgentProfile } from '@taucad/host';
-
-// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyRuntimeClosure } from '../scripts/runtime-closure.mjs';
+import { acpAgentProfiles, resolveAcpAdapters, spawnAcpAdapter } from '@taucad/host';
+import type { AcpAdapter } from '@taucad/host';
+import { copyRuntimeClosure } from '@taucad/nx/runtime-closure';
 
 const appRoot = join(import.meta.dirname, '..');
 const require = createRequire(join(appRoot, 'package.json'));
@@ -69,25 +71,28 @@ const installedCodexDirectory = async (): Promise<string> => {
   return directory;
 };
 
-/** Complete only ACP initialization with the real spawn contract and isolated, credential-free configuration. */
-const initialize = async (options: {
-  readonly modulePath: string;
+/**
+ * Complete ACP initialization, and optionally one `session/new`, with the real
+ * spawn contract and isolated, credential-free configuration.
+ */
+const handshake = async (options: {
+  readonly adapter: AcpAdapter;
   readonly cwd: string;
-  readonly profile: AcpAgentProfile & { readonly package: string };
-  readonly codexDirectory: string;
-}): Promise<unknown> => {
-  const { modulePath, cwd, profile, codexDirectory } = options;
-  const home = resolve(cwd, `${profile.id}-home`);
+  readonly path: string;
+  readonly openSession?: boolean;
+}): Promise<{ readonly initialized: unknown; readonly session: unknown; readonly stderr: string }> => {
+  const { adapter, cwd, path } = options;
+  const home = resolve(cwd, `${adapter.id}-home`);
   const codexHome = resolve(home, 'codex');
   const claudeConfig = resolve(home, 'claude');
   await Promise.all([mkdir(codexHome, { recursive: true }), mkdir(claudeConfig, { recursive: true })]);
   const running = spawnAcpAdapter({
-    adapter: { ...profile, modulePath },
+    adapter,
     cwd,
     // No inherited credentials, provider overrides, config or diagnostic logging.
     /* eslint-disable @typescript-eslint/naming-convention -- Child process environment names are external protocol keys. */
     environment: {
-      PATH: [codexDirectory, dirname(process.execPath)].join(delimiter),
+      PATH: path,
       HOME: home,
       USERPROFILE: home,
       CODEX_HOME: codexHome,
@@ -99,36 +104,39 @@ const initialize = async (options: {
   const writer = running.stream.writable.getWriter();
   const reader = running.stream.readable.getReader();
   const status = { timedOut: false };
-  const initializeTimeout = setTimeout(() => {
+  const handshakeTimeout = setTimeout(() => {
     status.timedOut = true;
     running.signal('SIGKILL');
-  }, 15_000);
-  try {
-    await writer.write({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: { protocolVersion: 1, clientCapabilities: { fs: {}, terminal: false } },
-    });
+  }, 30_000);
+  const request = async (id: number, method: string, params: Record<string, unknown>): Promise<unknown> => {
+    await writer.write({ jsonrpc: '2.0', id, method, params });
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- Consume ordered ACP frames until this request completes.
       const { done, value: frame } = await reader.read();
       if (done) {
         throw new Error(
-          `${modulePath} ${status.timedOut ? 'timed out' : 'exited'} before initialization: ${running.stderr()}`,
+          `${adapter.id} ${status.timedOut ? 'timed out' : 'exited'} before answering ${method}: ${running.stderr()}`,
         );
       }
-      if ('id' in frame && frame.id === 1) {
+      if ('id' in frame && frame.id === id) {
         if ('error' in frame) {
-          throw new Error(`${modulePath} rejected initialization: ${JSON.stringify(frame.error)}`);
+          return { error: frame.error };
         }
         if ('result' in frame) {
           return frame.result;
         }
       }
     }
+  };
+  try {
+    const initialized = await request(1, 'initialize', {
+      protocolVersion: 1,
+      clientCapabilities: { fs: {}, terminal: false },
+    });
+    const session = options.openSession === true ? await request(2, 'session/new', { cwd, mcpServers: [] }) : undefined;
+    return { initialized, session, stderr: running.stderr() };
   } finally {
-    clearTimeout(initializeTimeout);
+    clearTimeout(handshakeTimeout);
     writer.releaseLock();
     reader.releaseLock();
     running.signal('SIGKILL');
@@ -138,17 +146,42 @@ const initialize = async (options: {
 describe('ACP adapter staging', () => {
   let stageRoot: string;
   let modulesRoot: string;
-  let codexDirectory: string;
+  let path: string;
+  let claudeCalls: string;
 
   beforeAll(async () => {
     stageRoot = await realpath(await mkdtemp(join(tmpdir(), 'tau-acp-stage-')));
     modulesRoot = resolve(stageRoot, 'node_modules');
-    codexDirectory = await installedCodexDirectory();
+    /* A stub `claude` that records how it was started; no vendor login is read. */
+    const stubDirectory = resolve(stageRoot, 'bin');
+    claudeCalls = resolve(stageRoot, 'claude-calls.log');
+    await mkdir(stubDirectory);
+    await writeFile(
+      resolve(stubDirectory, 'claude'),
+      `#!/bin/sh\necho "$@" >> '${claudeCalls}'\necho '2.1.301 (stub)'\n`,
+    );
+    await chmod(resolve(stubDirectory, 'claude'), 0o755);
+    path = [stubDirectory, await installedCodexDirectory(), dirname(process.execPath)].join(delimiter);
     for (const name of adapters) {
       // oxlint-disable-next-line no-await-in-loop -- The closure nests packages; staging is serial by construction.
       await copyRuntimeClosure({ name, source: dirname(require.resolve(`${name}/package.json`)), modulesRoot });
     }
   }, 120_000);
+
+  /** The adapter as `tau serve` resolves it from a staged root, executable included. */
+  const stagedAdapter = (name: string): AcpAdapter => {
+    const { agents } = resolveAcpAdapters({
+      resolveFrom: pathToFileURL(resolve(stageRoot, 'package.json')).href,
+      pins: acpAgentProfiles.filter((profile) => profile.package === name),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Child process environment names are external protocol keys.
+      environment: { PATH: path },
+    });
+    const [adapter] = agents;
+    if (adapter === undefined) {
+      throw new Error(`${name} does not resolve from the staged tree`);
+    }
+    return adapter;
+  };
 
   afterAll(async () => {
     await rm(stageRoot, { recursive: true, force: true });
@@ -200,12 +233,30 @@ describe('ACP adapter staging', () => {
       const entryStat = await stat(entry);
       expect(entryStat.isFile()).toBe(true);
 
-      const profile = acpAgentProfiles.find((candidate) => candidate.package === name);
-      if (profile?.package === undefined) {
-        throw new Error(`Missing ACP profile for ${name}`);
-      }
-      const result = await initialize({ modulePath: entry, cwd: stageRoot, profile, codexDirectory });
-      expect(result).toMatchObject({ protocolVersion: 1 });
+      const adapter = stagedAdapter(name);
+      expect(adapter.modulePath).toBe(entry);
+      const { initialized } = await handshake({ adapter, cwd: stageRoot, path });
+      expect(initialized).toMatchObject({ protocolVersion: 1 });
+    },
+    60_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'opens a Claude session from the staged tree on the user’s own claude',
+    async () => {
+      /* Staging follows no optional dependency, so the Agent SDK's platform
+       * binary is absent; without `CLAUDE_CODE_EXECUTABLE` this fails "native
+       * binary not found" (blueprint C2). */
+      const vendor = resolve(modulesRoot, '@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai');
+      expect(await readdir(vendor)).toEqual(['claude-agent-sdk']);
+      const adapter = stagedAdapter('@agentclientprotocol/claude-agent-acp');
+      expect(adapter.executablePath).toBe(resolve(stageRoot, 'bin', 'claude'));
+      const { stderr } = await handshake({ adapter, cwd: stageRoot, path, openSession: true });
+
+      await expect
+        .poll(async () => readFile(claudeCalls, 'utf8').catch(() => ''), { timeout: 20_000, interval: 100 })
+        .toContain('--output-format stream-json');
+      expect(stderr).not.toContain('native binary not found');
     },
     60_000,
   );

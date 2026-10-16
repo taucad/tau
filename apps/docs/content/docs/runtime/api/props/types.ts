@@ -33,6 +33,7 @@ export type {
   EvaluateResult,
   RenderInput,
   RenderOutput,
+  TessellationReport,
   RenderResult,
   ExportInput,
   ExportOutput,

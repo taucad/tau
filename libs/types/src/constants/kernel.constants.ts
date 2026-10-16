@@ -97,6 +97,9 @@ public static class Params
       "PicoGK's OpenVDB voxel engine compiled to WebAssembly. Author voxel, implicit and lattice models in TypeScript with ShapeKernel and LatticeLibrary, in the browser, the desktop app or the CLI. The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly.",
     emptyCode: `import type { Pico, Voxels } from 'picovoxel';
 
+// voxelSize: about one third of the thinnest wall or strut. For voxel size h, time scales with
+// 1/h³, memory and triangles with 1/h². To iterate, pass { "voxelSize": 1.5 } as parameters to
+// evaluate_model, screenshot or export_model rather than editing this value.
 export const defaultParams = { voxelSize: 0.5 };
 
 export default function main(pico: Pico, params = defaultParams): Voxels[] {

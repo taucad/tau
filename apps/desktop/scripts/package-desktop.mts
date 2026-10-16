@@ -37,7 +37,7 @@ import {
   desktopPackageOmissions,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
-import { copyTree } from './runtime-closure.mjs';
+import { copyTree } from '@taucad/nx/runtime-closure';
 import {
   desktopManifestFields,
   desktopPackageChannel,

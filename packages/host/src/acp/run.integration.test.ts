@@ -2619,6 +2619,34 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it('offers the CLI login for an agent that lists no auth method and refuses at prompt', async () => {
+    /* Claude's adapter (0.70.0) advertises no auth method and turns the CLI's
+     * "Please run /login" into `-32000` on `session/prompt`; the profile's own
+     * login command is then the only affordance to show. */
+    const claude: AcpAdapter = {
+      ...fakeAgent,
+      id: 'claude',
+      displayName: 'Claude Code',
+      loginCommand: 'claude auth login',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+      spawnEnv: { TAU_FAKE_AGENT_MODE: 'prompt-auth' },
+    };
+    const harness = await startHarness({ agents: [claude] });
+
+    await runTurn(harness, { chatId: 'chat-claude-auth', runId: 'run-claude-auth', text: 'noask', agentId: 'claude' });
+
+    const events = await readLog(harness.workspaceRoot, 'chat-claude-auth');
+    expect(eventsOfType(events, 'run.lifecycle').at(-1)).toMatchObject({
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_AUTH_REQUIRED' },
+    });
+    expect(eventsOfType(events, 'interrupt.recorded').at(0)?.payload).toMatchObject({
+      kind: 'external-agent-login',
+      agentId: 'claude',
+      authMethods: [{ id: 'cli-login', name: 'Sign in to Claude Code', terminalCommand: 'claude auth login' }],
+    });
+  }, 30_000);
+
   it('should refuse a raw secret form before SDK normalization can create a plaintext question record', async () => {
     const harness = await startHarness();
     await runTurn(harness, { chatId: 'chat-secret-ask', runId: 'run-secret-ask', text: 'ask-secret-form noask' });

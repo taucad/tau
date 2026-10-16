@@ -364,13 +364,30 @@ describe('PicoGK kernel', () => {
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
     expect(definition.cancellation).toBe('cooperative');
-    const handle = built.handle as { glb: Uint8Array<ArrayBuffer> };
+    const { handle } = built;
     const artifact = await definition.render!({ view: 'model', handle, options: {} }, runtime, value);
     expect(handle.glb).toEqual(artifact.content);
+    expect(artifact.tessellation).toEqual(handle.tessellation);
+    expect(artifact.tessellation).toEqual({
+      triangles: 1,
+      vertices: 3,
+      elapsed: workerTimings.meshConstruction + workerTimings.meshExtraction + workerTimings.normalGeneration,
+    });
     const serialized = definition.serializeHandle!({ handle }, runtime, value);
-    const restored = definition.deserializeHandle!({ serialized }, runtime, value);
-    expect(restored.glb).toEqual(handle.glb);
+    const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtime, value);
+    expect(restored).toEqual(handle);
     expect(restored.glb).not.toBe(handle.glb);
+    // A snapshot written before the report existed is its GLB bytes alone and restores without one.
+    expect(definition.deserializeHandle!({ serialized: new Uint8Array(handle.glb) }, runtime, value)).toEqual({
+      glb: handle.glb,
+    });
+    expect(() =>
+      definition.deserializeHandle!(
+        { serialized: { glb: handle.glb, tessellation: { ...handle.tessellation!, triangles: -1 } } },
+        runtime,
+        value,
+      ),
+    ).toThrow();
 
     const exported = await definition.export!(
       { exportId: 'glb', handle, options: picogkExportSchemas.glb.parse({}) },

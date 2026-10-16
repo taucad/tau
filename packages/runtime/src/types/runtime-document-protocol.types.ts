@@ -4,12 +4,14 @@ import type { runtimeDocumentProtocolSchemas } from '#types/runtime-document-pro
 import type { CadUnits } from '@taucad/types';
 import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
 import type { ExportResult, Rendering } from '#client/runtime-document.types.js';
+import type { TessellationReport } from '#types/runtime-kernel-v2.types.js';
 
 /** A public artifact encoded for transport-owned binary delivery. @public */
 export type WireArtifact = Readonly<{
   mimeType: string;
   content: BinaryContentDelivery | string;
   units?: Readonly<CadUnits>;
+  tessellation?: TessellationReport;
 }>;
 
 /** A rendering whose binary content has not yet been materialized. @public */

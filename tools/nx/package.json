@@ -1,7 +1,7 @@
 {
   "name": "@taucad/nx",
   "version": "0.0.1",
-  "description": "Nx-tag-driven workspace resolver: publishable set, bundled libraries, publish order",
+  "description": "Nx-tag-driven workspace resolver (publishable set, bundled libraries, publish order) and runtime-closure staging",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -13,6 +13,7 @@
     ".": "./src/resolver.ts",
     "./bundled-declarations": "./src/bundled-declarations.ts",
     "./tags": "./src/tags.ts",
+    "./runtime-closure": "./src/runtime-closure.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {

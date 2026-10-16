@@ -15,7 +15,7 @@ import {
 } from '@taucad/chat/schemas/tools/parameter';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
-import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue, TessellationReport } from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -384,6 +384,7 @@ export const createRuntimeAgentClients = (
         let issues = [...evaluation.issues];
         let { sourceRevision } = evaluation;
         let ready = evaluation.success;
+        let tessellation: TessellationReport | undefined;
         if (evaluation.success && evaluation.views.length > 0) {
           const view = document.view();
           try {
@@ -394,6 +395,7 @@ export const createRuntimeAgentClients = (
             issues = [...issues, ...projected.rendering.issues];
             sourceRevision = projected.rendering.sourceRevision ?? sourceRevision;
             ready = projected.rendering.success;
+            tessellation = projected.rendering.success ? projected.rendering.artifact.tessellation : undefined;
           } finally {
             view.close();
           }
@@ -438,6 +440,7 @@ export const createRuntimeAgentClients = (
           kernelIssues: issues,
           ...(sourceRevision === undefined ? {} : { sourceRevision }),
           ...offered,
+          ...(tessellation === undefined ? {} : { tessellation }),
           ...capabilities,
         };
       } catch (error) {

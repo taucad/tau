@@ -4,9 +4,11 @@
  * the way to not being offered.
  */
 
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   acpAdapterOverrideVariable,
@@ -17,6 +19,7 @@ import {
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
+import { acpAdapterEnvironment } from '#acp/spawn.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 const fakeAgentPath = new URL('fixtures/fake-agent.ts', import.meta.url).pathname;
@@ -91,6 +94,94 @@ describe('resolveAcpAdapters', () => {
     expect(production.agents.find((agent) => agent.id === id)?.modulePath).not.toBe(fakeAgentPath);
   });
 });
+
+const stubRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(stubRoots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+});
+
+/**
+ * A PATH directory holding one shell stub per CLI, each answering `--version`.
+ *
+ * @param versions - Version each stub reports, by CLI name.
+ * @returns The directory to put on PATH.
+ */
+const stubCliDirectory = async (versions: Readonly<Record<string, string>>): Promise<string> => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-acp-cli-'));
+  stubRoots.push(directory);
+  await Promise.all(
+    Object.entries(versions).map(async ([name, version]) => {
+      const path = join(directory, name);
+      await writeFile(path, `#!/bin/sh\necho '${version} (stub)'\n`);
+      await chmod(path, 0o755);
+    }),
+  );
+  return directory;
+};
+
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+describe.skipIf(process.platform === 'win32')('executable resolution', () => {
+  const resolveFrom = new URL('../../../cli/src/commands/serve.ts', import.meta.url).href;
+
+  it('finds each CLI once, and that file is what both module adapters are told to run', async () => {
+    /* D3: the probe checks one executable, so the adapter must run that same
+     * file rather than the vendor copy its own SDK would otherwise look for. */
+    const directory = await stubCliDirectory({ claude: '2.1.301', codex: '0.162.1' });
+    const environment = { PATH: `${directory}:/usr/bin:/bin` };
+    const { agents } = resolveAcpAdapters({
+      resolveFrom,
+      pins: acpAgentProfiles.filter((profile) => profile.package !== undefined),
+      environment,
+    });
+
+    expect(agents.map((agent) => [agent.id, agent.executablePath])).toEqual([
+      ['claude', join(directory, 'claude')],
+      ['codex', join(directory, 'codex')],
+    ]);
+    const [claude, codex] = agents.map((agent) => acpAdapterEnvironment(environment, agent));
+    expect(claude).toMatchObject({ CLAUDE_CODE_EXECUTABLE: join(directory, 'claude') });
+    expect(claude).not.toHaveProperty('CODEX_PATH');
+    expect(codex).toMatchObject({ CODEX_PATH: join(directory, 'codex') });
+    expect(codex).not.toHaveProperty('CLAUDE_CODE_EXECUTABLE');
+
+    const probed = await probeAcpAgents({ agents, refused: [] }, { environment });
+    expect(probed.refused).toEqual([]);
+  });
+
+  it('refuses a Claude CLI older than the Agent SDK its adapter drives', async () => {
+    const directory = await stubCliDirectory({ claude: '2.1.200' });
+    const environment = { PATH: `${directory}:/usr/bin:/bin` };
+    const discovery = resolveAcpAdapters({
+      resolveFrom,
+      pins: acpAgentProfiles.filter((profile) => profile.id === 'claude'),
+      environment,
+    });
+    const probed = await probeAcpAgents(discovery, { environment });
+
+    expect(probed.agents).toEqual([]);
+    expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_TOO_OLD' })]);
+    expect(probed.refused[0]?.message).toContain('2.1.232');
+  });
+
+  it('leaves the executable unset when PATH has no such CLI, so the probe refuses it', async () => {
+    const environment = { PATH: await stubCliDirectory({}) };
+    const discovery = resolveAcpAdapters({
+      resolveFrom,
+      pins: acpAgentProfiles.filter((profile) => profile.id === 'claude'),
+      environment,
+    });
+
+    expect(discovery.agents[0]?.executablePath).toBeUndefined();
+    expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).not.toHaveProperty(
+      'CLAUDE_CODE_EXECUTABLE',
+    );
+    const probed = await probeAcpAgents(discovery, { environment });
+    expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_NOT_FOUND' })]);
+  });
+});
+
+/* eslint-enable @typescript-eslint/naming-convention -- end of wire-named environments. */
 
 describe('probeAcpAgents', () => {
   it('checks the version floor for native CLIs before advertising them', async () => {

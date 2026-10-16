@@ -1,10 +1,11 @@
-import { Children, isValidElement, useImperativeHandle, useRef } from 'react';
+import { Children, cloneElement, isValidElement, Suspense, useImperativeHandle, useRef } from 'react';
 import type { ComponentProps } from 'react';
 import { Allotment as NativeAllotment } from 'allotment';
 import type { AllotmentHandle } from 'allotment';
 import { cn } from '@taucad/ui/utils/cn';
 import { adjacentResizeViews, resizePairBounds } from '#components/panes/resize-handle.js';
 import { useResizeHandles } from '#components/panes/use-resize-handles.js';
+import { Spinner } from '#components/ui/spinner.js';
 
 type PaneProps = ComponentProps<typeof NativeAllotment.Pane>;
 
@@ -70,7 +71,26 @@ function AllotmentLayout({
         className={cn('pane-resize pane-resize-allotment', className)}
         onDragEnd={onDragEnd}
       >
-        {children}
+        {Children.map(children, (child): React.ReactNode => {
+          if (!isValidElement<PaneProps>(child)) {
+            return child;
+          }
+          // Keep the splitter mounted when pane content suspends. Allotment cannot
+          // restore its disposed layout engine after an ancestor Suspense reveal.
+          const isPane = child.type === NativeAllotment.Pane;
+          const content = (
+            <Suspense
+              fallback={
+                <div className='flex size-full items-center justify-center'>
+                  <Spinner />
+                </div>
+              }
+            >
+              {isPane ? child.props.children : child}
+            </Suspense>
+          );
+          return isPane ? cloneElement(child, undefined, content) : content;
+        })}
       </NativeAllotment>
     </div>
   );

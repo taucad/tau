@@ -2,8 +2,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { parsePluginDeployment, targetKey } from '@taucad/runtime/preparation/node';
-import type { DependencyPayload } from '@taucad/runtime/preparation/node';
+import { parsePluginDeployment, selectVariant, targetKey } from '@taucad/runtime/preparation/node';
+import type {
+  DependencyPayload,
+  DependencyTarget,
+  HostIndicators,
+  SelectVariantOptions,
+} from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
@@ -71,5 +76,70 @@ describe('tau-plugin.json', () => {
       kind: 'url',
       urls: layerUrls({ sha256, asset: 'tau-picogk-layer-darwin-arm64.tar.gz' }),
     });
+  });
+});
+
+const nearestOf = (target: DependencyTarget | undefined): string => (target === undefined ? 'none' : targetKey(target));
+
+const answer = (host: Omit<HostIndicators, 'translated' | 'wasm'>, options?: SelectVariantOptions): string => {
+  const selection = selectVariant(variants, { translated: false, wasm: { threads: false }, ...host }, options);
+  return selection.status === 'selected'
+    ? `${targetKey(selection.variant.target)}${selection.emulated ? ' (emulated)' : ''}`
+    : `unsupported ${selection.axis}, nearest ${nearestOf(selection.nearest)}`;
+};
+
+// Total over the declared targets (charter W14): darwin-arm64 alone until a Tau engine builder exists for another
+// target (D13); every other host refuses before any download, naming the axis.
+describe('tau-plugin.json targets', () => {
+  it('should declare darwin-arm64 on macOS 14 alone', () => {
+    expect(variants.map(({ target }) => target)).toEqual([
+      { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
+    ]);
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly host: Omit<HostIndicators, 'translated' | 'wasm'>;
+    readonly options?: SelectVariantOptions;
+    readonly expected: string;
+  }>([
+    {
+      name: 'macOS 14 on Apple silicon',
+      host: { os: 'darwin', arch: 'arm64', osVersion: '14.0' },
+      expected: 'darwin-arm64',
+    },
+    {
+      name: 'macOS 13 on Apple silicon',
+      host: { os: 'darwin', arch: 'arm64', osVersion: '13.7' },
+      expected: 'unsupported minimumOsVersion, nearest darwin-arm64',
+    },
+    {
+      name: 'an Intel Mac',
+      host: { os: 'darwin', arch: 'x64', osVersion: '26.0' },
+      expected: 'unsupported arch, nearest darwin-arm64',
+    },
+    {
+      name: 'glibc Linux',
+      host: { os: 'linux', arch: 'x64', libc: 'glibc', libcVersion: '2.39' },
+      expected: 'unsupported os, nearest darwin-arm64',
+    },
+    {
+      name: 'musl Linux',
+      host: { os: 'linux', arch: 'arm64', libc: 'musl' },
+      expected: 'unsupported os, nearest darwin-arm64',
+    },
+    {
+      name: 'win32-arm64',
+      host: { os: 'win32', arch: 'arm64', osVersion: '10.0.26100' },
+      expected: 'unsupported os, nearest darwin-arm64',
+    },
+    {
+      name: 'macOS forced to linux-x64-glibc, which PicoGK does not declare',
+      host: { os: 'darwin', arch: 'arm64', osVersion: '26.0' },
+      options: { target: 'linux-x64-glibc' },
+      expected: 'unsupported os, nearest darwin-arm64',
+    },
+  ])('should answer $name as declared', ({ host, options, expected }) => {
+    expect(answer(host, options)).toBe(expected);
   });
 });

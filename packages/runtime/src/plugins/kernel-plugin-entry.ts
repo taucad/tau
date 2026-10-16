@@ -28,6 +28,7 @@ export type {
   RenderOutput,
   RenderResult,
   ResolveInput,
+  TessellationReport,
   ResolveOutput,
   ViewDeclaration,
   ViewInstance,

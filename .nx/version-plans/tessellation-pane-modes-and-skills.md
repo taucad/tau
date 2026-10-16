@@ -1,10 +1,10 @@
 ---
 viewer: minor
-replicad: patch
-opencascade: patch
-build123d: patch
-picovoxel: patch
-picogk: patch
+replicad: minor
+opencascade: minor
+build123d: minor
+picovoxel: minor
+picogk: minor
 ---
 
 Show a preset-or-explicit kernel setting, such as `tessellation`, as two modes in the kernel-settings pane, and teach the tessellation vocabulary in the kernel skills.

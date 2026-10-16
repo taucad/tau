@@ -1,12 +1,8 @@
 import { Cpu } from 'lucide-react';
-import {
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSwitchItem,
-} from '@taucad/ui/components/dropdown-menu';
+import { DropdownMenuItem, DropdownMenuSwitchItem } from '@taucad/ui/components/dropdown-menu';
 import { DropdownMenuDisclosureItem } from '@taucad/ui/components/menu-disclosure-item';
 import { DropdownMenuSliderItem } from '@taucad/ui/components/menu-slider-item';
+import { MenuSegmentedControl } from '#cad/menu-segmented-control.jsx';
 
 /** A JSON Schema node, as far as the kernel settings read one. */
 type SchemaNode = Readonly<{
@@ -46,20 +42,27 @@ type BooleanField = Readonly<{ kind: 'boolean'; path: readonly string[]; label: 
 
 /**
  * A setting that is one of a list of presets or an explicit object, never both: a `oneOf` of a string enum and an
- * object. Choosing the explicit form shows the object's number rows; choosing a preset replaces the whole value.
+ * object. It shows as two modes, Preset (the presets as one segmented control) and Custom (the object's number rows in
+ * their units). Switching modes replaces the whole value; nothing is carried across.
  */
 type ChoiceField = Readonly<{
   kind: 'choice';
   path: readonly string[];
   label: string;
   presets: readonly string[];
+  /** The preset a switch from Custom starts with: the view's default preset, else the schema's, else the first. */
+  presetSeed: string;
   explicitFields: readonly NumberField[];
   /** The explicit object a switch from a preset starts with: each field's example value. */
   explicitSeed: Readonly<Record<string, number>>;
 }>;
 
-/** The choice row's value for the explicit form; preset names are the enum's own strings. */
-const explicitChoice = 'explicit';
+type ChoiceMode = 'preset' | 'custom';
+
+const choiceModes = [
+  { value: 'preset', label: 'Preset' },
+  { value: 'custom', label: 'Custom' },
+] as const satisfies ReadonlyArray<{ value: ChoiceMode; label: string }>;
 
 /**
  * A run of settings under an optional heading: the schema's top-level leaves, or one object's leaves.
@@ -139,17 +142,21 @@ const toField = (
  *
  * @param key - The setting's property name.
  * @param node - The setting's schema.
+ * @param defaultValue - The view's default for the setting, which seeds the Preset mode when it is a preset.
  * @returns The choice field, or `undefined` when the schema is not that union.
  */
-const toChoiceField = (key: string, node: SchemaNode): ChoiceField | undefined => {
+const toChoiceField = (key: string, node: SchemaNode, defaultValue: unknown): ChoiceField | undefined => {
   if (!Array.isArray(node.oneOf) || node.oneOf.length !== 2) {
     return undefined;
   }
   const branches = node.oneOf as SchemaNode[];
   const presetBranch = branches.find((branch) => branch.type === 'string' && Array.isArray(branch.enum));
   const explicitBranch = branches.find((branch) => branch.type === 'object' && branch.properties);
-  const presets = (presetBranch?.enum as unknown[] | undefined)?.filter((value) => typeof value === 'string');
-  if (!presets || presets.length === 0 || presets.includes(explicitChoice) || !explicitBranch?.properties) {
+  const presets = (presetBranch?.enum as unknown[] | undefined)?.filter(
+    (value): value is string => typeof value === 'string',
+  );
+  const [firstPreset] = presets ?? [];
+  if (!presets || firstPreset === undefined || !explicitBranch?.properties) {
     return undefined;
   }
   const explicitFields: NumberField[] = [];
@@ -169,6 +176,10 @@ const toChoiceField = (key: string, node: SchemaNode): ChoiceField | undefined =
     path: [key],
     label: typeof node.title === 'string' ? node.title : humanize(key),
     presets,
+    presetSeed:
+      [defaultValue, node.default].find(
+        (value): value is string => typeof value === 'string' && presets.includes(value),
+      ) ?? firstPreset,
     explicitFields,
     explicitSeed,
   };
@@ -185,7 +196,7 @@ export const kernelSettingsGroups = (schema: unknown, defaults: Record<string, u
   const loose: Array<NumberField | BooleanField> = [];
   const groups: KernelSettingsGroup[] = [];
   for (const [key, node] of Object.entries(properties)) {
-    const choice = toChoiceField(key, node);
+    const choice = toChoiceField(key, node, defaults[key]);
     if (choice) {
       groups.push({ label: choice.label, fields: [choice] });
       continue;
@@ -284,10 +295,10 @@ export function KernelSettings({
 }: KernelSettingsProps): React.JSX.Element {
   const changedCount = countChangedSettings(groups, values, defaults);
   const valueAt = (path: readonly string[]): unknown => readPath(values, path) ?? readPath(defaults, path);
-  const renderNumber = (field: NumberField): React.JSX.Element => (
+  const renderNumber = (field: NumberField, value: unknown, onValue: (next: number) => void): React.JSX.Element => (
     <DropdownMenuSliderItem
       key={field.path.join('.')}
-      value={Number(valueAt(field.path) ?? field.min)}
+      value={Number(value ?? field.min)}
       min={field.min}
       max={field.max}
       hasMinimum={field.hasMinimum}
@@ -303,12 +314,48 @@ export function KernelSettings({
         ) {
           return;
         }
-        onChange(withSetting({ values, defaults }, field.path, next));
+        onValue(next);
       }}
     >
       {field.label}
     </DropdownMenuSliderItem>
   );
+  const renderChoice = (field: ChoiceField): React.JSX.Element => {
+    const current = valueAt(field.path);
+    const mode: ChoiceMode = typeof current === 'string' ? 'preset' : 'custom';
+    // The stored explicit object is the whole value: an edit changes one field of it and keeps the rest as they are.
+    const explicit = mode === 'custom' ? (asRecord(current) ?? {}) : {};
+    const replace = (next: unknown): void => {
+      onChange(withSetting({ values, defaults }, field.path, next));
+    };
+    return (
+      <div key={field.path.join('.')} className='flex flex-col gap-1'>
+        <MenuSegmentedControl
+          label={`${field.label} mode`}
+          value={mode}
+          segments={choiceModes}
+          onValueChange={(next) => {
+            replace(next === 'custom' ? { ...field.explicitSeed } : field.presetSeed);
+          }}
+        />
+        {mode === 'preset' ? (
+          <MenuSegmentedControl
+            label={`${field.label} preset`}
+            value={typeof current === 'string' ? current : ''}
+            segments={field.presets.map((preset) => ({ value: preset, label: humanize(preset) }))}
+            onValueChange={replace}
+          />
+        ) : (
+          field.explicitFields.map((explicitField) => {
+            const leaf = explicitField.path.at(-1) ?? '';
+            return renderNumber(explicitField, explicit[leaf] ?? field.explicitSeed[leaf], (next) => {
+              replace({ ...explicit, [leaf]: next });
+            });
+          })
+        )}
+      </div>
+    );
+  };
   return (
     <DropdownMenuDisclosureItem
       icon={<Cpu />}
@@ -343,44 +390,11 @@ export function KernelSettings({
                 );
               }
               if (field.kind === 'number') {
-                return renderNumber(field);
+                return renderNumber(field, valueAt(field.path), (next) => {
+                  onChange(withSetting({ values, defaults }, field.path, next));
+                });
               }
-              const current = valueAt(field.path);
-              const selected = typeof current === 'string' ? current : explicitChoice;
-              return (
-                <div key={field.path.join('.')} className='flex flex-col gap-1'>
-                  {/* The enclosing group carries the setting's name. */}
-                  <DropdownMenuRadioGroup
-                    value={selected}
-                    onValueChange={(next) => {
-                      if (next === selected) {
-                        return;
-                      }
-                      onChange(
-                        withSetting(
-                          { values, defaults },
-                          field.path,
-                          next === explicitChoice ? { ...field.explicitSeed } : next,
-                        ),
-                      );
-                    }}
-                  >
-                    {[...field.presets, explicitChoice].map((option) => (
-                      <DropdownMenuRadioItem
-                        key={option}
-                        value={option}
-                        onSelect={(event) => {
-                          // Keep the menu open so the explicit rows can be edited next.
-                          event.preventDefault();
-                        }}
-                      >
-                        {humanize(option)}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                  {selected === explicitChoice ? field.explicitFields.map((explicit) => renderNumber(explicit)) : null}
-                </div>
-              );
+              return renderChoice(field);
             })}
           </div>
         ))}

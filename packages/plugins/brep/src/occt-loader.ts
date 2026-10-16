@@ -9,6 +9,9 @@ type OcctOptions = {
   format: string;
 };
 
+/** The occt-import-js backend meshes in millimeters (its default `linearUnit`, and the BREP convention); glTF is meters. */
+const millimetersToMeters = 0.001;
+
 /** @internal */
 export type OcctImportResult = {
   success: boolean;
@@ -91,7 +94,7 @@ export class OcctLoader extends ImportLoader<OcctImportResult, OcctOptions> {
     // Process each mesh from the OCCT result
     for (const meshData of parseResult.meshes) {
       // Prepare geometry data
-      const positions = new Float32Array(meshData.attributes.position.array);
+      const positions = Float32Array.from(meshData.attributes.position.array, (value) => value * millimetersToMeters);
       const normals = meshData.attributes.normal ? new Float32Array(meshData.attributes.normal.array) : undefined;
       const indices = new Uint32Array(meshData.index.array);
 

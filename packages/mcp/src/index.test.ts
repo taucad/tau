@@ -360,6 +360,7 @@ describe('@taucad/mcp', () => {
       expect(tools.find(({ name }) => name === toolName.evaluateModel)?.description).toBe(
         tauMcpToolDefinitions[toolName.evaluateModel].description,
       );
+      expect(client.getInstructions()).not.toContain(toolName.testModel);
     } finally {
       await client.close();
     }

@@ -393,28 +393,16 @@ const cadToolsOf = (registry: ToolRegistry): readonly TauMcpToolName[] => {
   return tauMcpToolNames.filter((name) => testsOffered || name !== toolName.testModel);
 };
 
-/** What a `test_model` call answers on a host with no GeoSpec engine, instead of an unknown tool. */
-const geoSpecEngineMissing: TauMcpRpcFailure = {
-  errorCode: 'GEOSPEC_ENGINE_MISSING',
-  message:
-    'test_model needs the GeoSpec engine, which this Tau host cannot resolve. Reinstall the Tau CLI with `npm install -g @taucad/cli@beta`, or install `geospec-engine`, `geospec` and `@taucad/geospec-engine` beside `@taucad/host`, then restart the MCP server.',
-};
-
 /**
  * Which registry tool one adapter call names, and with what input.
  *
  * @param call - The adapter's validated call.
- * @param cadTools - The CAD tools this endpoint lists.
- * @returns The tool and its input, or a refusal for a name outside the grant or a tool this host cannot run.
+ * @returns The tool and its input, or a refusal for a name outside the grant.
  */
 const routeCall = (
   call: TauMcpHostCall,
-  cadTools: readonly TauMcpToolName[],
 ): { readonly tool: HostMcpAllowedTool; readonly args: Readonly<Record<string, unknown>> } | TauMcpRpcFailure => {
   if ('rpcName' in call) {
-    if (call.rpcName === rpcName.runGeoSpecTests && !cadTools.includes(toolName.testModel)) {
-      return geoSpecEngineMissing;
-    }
     // Export RPCs carry call identity in args; the tool registry takes it
     // from invocation metadata and adds it after strict input validation.
     if (call.rpcName === rpcName.exportModel) {
@@ -716,7 +704,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       }
     };
     return async (call, dispatchOptions) => {
-      const route = routeCall(call, cadTools);
+      const route = routeCall(call);
       return 'errorCode' in route ? route : invokeAllowed(route.tool, route.args, dispatchOptions);
     };
   };
@@ -996,7 +984,7 @@ export const serveLocalHostMcp = async (
         .map((definition) => hostToolOf(definition)),
       screenshotImages: 'inline',
       dispatch: async (call, dispatchOptions) => {
-        const route = routeCall(call, cadTools);
+        const route = routeCall(call);
         if ('errorCode' in route) {
           return route;
         }

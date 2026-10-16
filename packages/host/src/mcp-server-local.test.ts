@@ -24,6 +24,7 @@ import type { HostToolDefinition, HostToolInvocation, HostToolResult, ToolRegist
 
 import { serveLocalHostMcp } from '#mcp-server.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
+import { testModelTool } from '#test-model-tool.fixture.js';
 
 const served = vi.hoisted(() => ({ options: undefined as TauMcpServerOptions | undefined, closed: 0 }));
 
@@ -38,13 +39,6 @@ vi.mock('@taucad/mcp', async (importOriginal) => ({
     };
   },
 }));
-
-/** What a registry with a GeoSpec runner lists for `test_model`; the endpoint lists the tool only then. */
-const testModelTool: HostToolDefinition = {
-  name: 'test_model',
-  description: 'Run the GeoSpec suite.',
-  inputSchema: { type: 'object' },
-};
 
 /**
  * Serve over a registry that answers every call with `answer`.
@@ -104,7 +98,7 @@ const exists = async (path: string): Promise<boolean> => {
 };
 
 describe('serveLocalHostMcp', () => {
-  it('should list test_model only over a registry that offers it, and name the install otherwise', async () => {
+  it('should list test_model only over a registry that offers it', async () => {
     const withEngine = await serve(ready);
     try {
       expect(served.options?.cadTools).toEqual([
@@ -117,13 +111,9 @@ describe('serveLocalHostMcp', () => {
       await withEngine.local.close();
     }
 
-    const { dispatch, invocations, local } = await serve(ready, { listed: [] });
+    const { local } = await serve(ready, { listed: [] });
     try {
       expect(served.options?.cadTools).toEqual([toolName.evaluateModel, toolName.screenshot, toolName.exportModel]);
-      const result = await dispatch({ rpcName: rpcName.runGeoSpecTests, args: {} }, { toolCallId: 'tests' });
-      expect(result).toMatchObject({ errorCode: 'GEOSPEC_ENGINE_MISSING' });
-      expect('message' in result && result.message).toContain('npm install -g @taucad/cli@beta');
-      expect(invocations).toEqual([]);
     } finally {
       await local.close();
     }

@@ -121,7 +121,10 @@ export const geoSpecSessionFailure = ({ tools, testModel }: McpSessionAnswers): 
   const { passed, total } = testModel?.structuredContent ?? {};
   if (testModel?.isError === true || passed !== 1 || total !== 1) {
     const text = (testModel?.content ?? []).map((block) => block.text ?? '').join('\n');
-    return `tau mcp test_model did not pass the one-requirement suite:\n${text.slice(-4000)}`;
+    // The text names failing IDs only; the structured result carries each failure's reason.
+    const structured =
+      testModel?.structuredContent === undefined ? '' : `\n${JSON.stringify(testModel.structuredContent)}`;
+    return `tau mcp test_model did not pass the one-requirement suite:\n${`${text}${structured}`.slice(-4000)}`;
   }
   return undefined;
 };
@@ -152,9 +155,12 @@ const mcpSession = async (options: {
     stderr += chunk;
   });
   const exited = Promise.withResolvers<void>();
+  let exitFailure: Error | undefined;
   child.once('exit', () => {
     exited.resolve();
   });
+  // A write after the server exits fails with EPIPE; the exit itself is the failure reported.
+  child.stdin.on('error', () => undefined);
   const pending = new Map<number, PromiseWithResolvers<string>>();
   const failAll = (error: Error): void => {
     for (const waiting of pending.values()) {
@@ -180,11 +186,20 @@ const mcpSession = async (options: {
       }
     }
   });
-  child.once('error', failAll);
+  child.once('error', (error) => {
+    exitFailure = error;
+    failAll(error);
+    // A bin that never started emits no `exit`.
+    exited.resolve();
+  });
   child.once('exit', (status) => {
-    failAll(new Error(`tau mcp exited ${String(status)} mid-session.\n${stderr}`));
+    exitFailure = new Error(`tau mcp exited ${String(status)} mid-session.\n${stderr}`);
+    failAll(exitFailure);
   });
   const request = async <Result>(id: number, line: string, answerTimeout: number): Promise<Result> => {
+    if (exitFailure !== undefined) {
+      throw exitFailure;
+    }
     const answered = Promise.withResolvers<string>();
     pending.set(id, answered);
     const timer = setTimeout(() => {
@@ -202,6 +217,7 @@ const mcpSession = async (options: {
       return message.result;
     } finally {
       clearTimeout(timer);
+      pending.delete(id);
     }
   };
   const call = (id: number, method: string, params: Record<string, unknown>): string =>
@@ -299,7 +315,7 @@ export const runCliSurface = async (temporaryRoot: string, appRoot: string): Pro
   const session = await mcpSession({ bin, project, environment });
   const { initialized } = session;
   console.log(
-    `tau mcp: initialize answered by ${initialized.serverInfo?.name ?? 'an unnamed server'} ${initialized.serverInfo?.version ?? ''} (protocol ${initialized.protocolVersion ?? 'unknown'}); listed ${String(session.tools.length)} tools; test_model ran in ${String(Math.round(performance.now() - started))} ms.`,
+    `tau mcp: initialize answered by ${initialized.serverInfo?.name ?? 'an unnamed server'} ${initialized.serverInfo?.version ?? ''} (protocol ${initialized.protocolVersion ?? 'unknown'}); listed ${String(session.tools.length)} tools; the session, test_model included, took ${String(Math.round(performance.now() - started))} ms.`,
   );
   const geoSpecFailure = geoSpecSessionFailure(session);
   if (geoSpecFailure !== undefined) {

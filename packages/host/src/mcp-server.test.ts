@@ -54,6 +54,7 @@ import {
   hostMcpLeaseCeiling,
 } from '#mcp-server.js';
 import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
+import { testModelTool } from '#test-model-tool.fixture.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
 const secret = randomBytes(32).toString('base64url');
@@ -144,13 +145,6 @@ const stubLauncher = (): AgentLauncher =>
     host: undefined,
     close: async () => undefined,
   }) as unknown as AgentLauncher;
-
-/** What a registry with a GeoSpec runner lists for `test_model`; the endpoint lists the tool only then. */
-const testModelTool: HostToolDefinition = {
-  name: 'test_model',
-  description: 'Run the GeoSpec suite.',
-  inputSchema: { type: 'object' },
-};
 
 const invocations: HostToolInvocation[] = [];
 const registry: ToolRegistry = {

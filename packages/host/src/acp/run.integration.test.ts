@@ -49,6 +49,7 @@ import { createHostMcpEndpoint, hostMcpCapabilityLifetime } from '#mcp-server.js
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
 import { createNodeLauncher } from '#node-launcher.fixture.js';
+import { testModelTool } from '#test-model-tool.fixture.js';
 
 /* The model is not decoration: the `codex` pin carries one (`registry.ts`), an
  * adapter override spreads the whole pin, and a fixture that offered no
@@ -79,9 +80,8 @@ const geospecEvidence = {
   total: 1,
 };
 
-/* A registry with a GeoSpec runner lists `test_model`; the MCP endpoint lists the tool only then. */
 const registry: ToolRegistry = {
-  list: () => [{ name: 'test_model', description: 'Run the GeoSpec suite.', inputSchema: { type: 'object' } }],
+  list: () => [testModelTool],
   invoke: async () => ({ content: geospecEvidence, isError: false }),
 };
 

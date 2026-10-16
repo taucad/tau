@@ -8,6 +8,7 @@ import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
+import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
 
 export const streamTimeout = 5000;
 
@@ -27,6 +28,12 @@ export default function handleRequest(
    * browser a profiler it has no use for. */
   if (!isCanonicalProductionUrl(request.url)) {
     responseHeaders.set('Document-Policy', 'js-profiling');
+  }
+
+  /* The catch-all page has no loader, because the desktop and `tau serve` SPA builds share it, so
+   * an unknown path is marked here rather than by a thrown response. */
+  if (responseStatusCode === 200 && isNotFoundRender(routerContext)) {
+    responseStatusCode = 404;
   }
 
   if (request.method.toUpperCase() === 'HEAD') {
@@ -50,7 +57,8 @@ export default function handleRequest(
     const { pipe, abort } = renderToPipeableStream(<ServerRouter context={routerContext} url={request.url} />, {
       [readyOption]() {
         shellRendered = true;
-        const body = new PassThrough({
+        const body = createModulePreloadCap(criticalModuleHrefs(routerContext));
+        const rendered = new PassThrough({
           final(callback) {
             clearTimeout(timeoutId);
             timeoutId = undefined;
@@ -61,7 +69,8 @@ export default function handleRequest(
 
         responseHeaders.set('Content-Type', 'text/html');
 
-        pipe(body);
+        rendered.pipe(body);
+        pipe(rendered);
 
         resolve(
           new Response(stream, {

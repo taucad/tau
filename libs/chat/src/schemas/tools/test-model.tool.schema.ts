@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { geoSpecMaxRunBudget, geoSpecMaxWorkUnitLimit } from '#constants/rpc.constants.js';
+import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '#constants/rpc.constants.js';
 import { jsonValueSchema } from '#schemas/message-provider.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
@@ -63,6 +63,16 @@ export const geoSpecRunLineageSchema = z
               ingestOptions: z.record(z.string(), jsonValueSchema),
               sourceRevision: sourceRevisionSchema.optional(),
               sourcePath: z.string().optional(),
+              workUnitLimit: z.number().int().positive().optional(),
+              reused: z.literal(true).optional(),
+              region: z
+                .object({
+                  min: z.tuple([z.number(), z.number(), z.number()]),
+                  max: z.tuple([z.number(), z.number(), z.number()]),
+                })
+                .strict()
+                .optional()
+                .describe('The crop this load applied: claims on it hold for this millimetre box only.'),
               artifacts: z.array(
                 z
                   .object({
@@ -151,19 +161,19 @@ export const geoSpecRunFilterInputSchema = z
       .number()
       .int()
       .min(1)
-      .max(geoSpecMaxRunBudget)
+      .max(Number.MAX_SAFE_INTEGER)
       .optional()
       .describe(
-        'Per-test async timeout in milliseconds on every host (CLI --test-timeout). A test still running then fails with GEOSPEC_TEST_TIMEOUT; the run still waits for it to settle, so this does not shorten the run. Omit for none. The browser run budget is raised to cover it; a run that outlives that budget returns `timeout` plus the requirements completed so far.',
+        `Per-test async timeout in milliseconds on every host (CLI --test-timeout). A test still running then fails with GEOSPEC_TEST_TIMEOUT; the run still waits for it to settle, so this does not shorten the run. Omit for none. The browser run budget is raised to cover it, up to the host's maximum (${geoSpecDefaultMaxRunBudget} ms unless the host raised it); a larger value is refused, and a run that outlives its budget returns \`timeout\` plus the requirements completed so far.`,
       ),
     workUnitLimit: z
       .number()
       .int()
       .positive()
-      .max(geoSpecMaxWorkUnitLimit)
+      .max(Number.MAX_SAFE_INTEGER)
       .optional()
       .describe(
-        'Engine work-unit budget for each claim in this run, replacing the host default. A budget in loadModel or expectGeo still wins for its own claims. Raise it when a row has category work-budget; omit for the host default.',
+        `Engine work-unit budget for each claim in this run, replacing the host default. A budget in loadModel or expectGeo still wins for its own claims. Raise it when a row has category work-budget, up to the host's maximum (${geoSpecDefaultMaxWorkUnitLimit} unless the host raised it); a larger value is refused. Omit for the host default.`,
       ),
   })
   .strict();

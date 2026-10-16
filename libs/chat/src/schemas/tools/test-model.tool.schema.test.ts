@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { geoSpecMaxRunBudget, geoSpecMaxWorkUnitLimit } from '#constants/rpc.constants.js';
+import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '#constants/rpc.constants.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
 import {
   geoSpecFailureCategorySchema,
+  geoSpecRunLineageSchema,
   geoSpecRunFilterInputSchema,
   testModelOutputSchema,
 } from '#schemas/tools/test-model.tool.schema.js';
@@ -60,9 +61,12 @@ describe('testModelOutputSchema', () => {
 });
 
 describe('geoSpecRunFilterInputSchema testTimeout', () => {
-  it('should accept the longest run budget and refuse anything above it', () => {
-    expect(geoSpecRunFilterInputSchema.safeParse({ testTimeout: geoSpecMaxRunBudget }).success).toBe(true);
-    expect(geoSpecRunFilterInputSchema.safeParse({ testTimeout: geoSpecMaxRunBudget + 1 }).success).toBe(false);
+  it('should leave the maximum to host policy and keep only finite positive integers', () => {
+    expect(geoSpecRunFilterInputSchema.safeParse({ testTimeout: geoSpecDefaultMaxRunBudget + 1 }).success).toBe(true);
+    for (const testTimeout of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(geoSpecRunFilterInputSchema.safeParse({ testTimeout }).success).toBe(false);
+    }
+    expect(geoSpecRunFilterInputSchema.shape.testTimeout.description).toContain(String(geoSpecDefaultMaxRunBudget));
   });
 
   it('should describe the per-test timeout separately from the run budget', () => {
@@ -74,11 +78,13 @@ describe('geoSpecRunFilterInputSchema testTimeout', () => {
 });
 
 describe('geoSpecRunFilterInputSchema workUnitLimit', () => {
-  it('should accept a positive integer budget up to the engine bound and refuse anything else', () => {
-    expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit: geoSpecMaxWorkUnitLimit }).success).toBe(true);
-    expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit: geoSpecMaxWorkUnitLimit + 1 }).success).toBe(false);
-    expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit: 0 }).success).toBe(false);
-    expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit: 1.5 }).success).toBe(false);
+  it('should accept budgets above the default maximum for the host to judge, and refuse non-integers', () => {
+    expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit: geoSpecDefaultMaxWorkUnitLimit + 1 }).success).toBe(
+      true,
+    );
+    for (const workUnitLimit of [0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(geoSpecRunFilterInputSchema.safeParse({ workUnitLimit }).success).toBe(false);
+    }
   });
 
   it('should point a work-budget refusal at this option', () => {
@@ -90,5 +96,32 @@ describe('test_model description', () => {
   it('should tell the agent that only geometry failures are decided claims and how a timeout reads', () => {
     expect(toolDescriptions.test_model).toContain("category: 'geometry'");
     expect(toolDescriptions.test_model).toContain('OPERATION_TIMEOUT');
+  });
+});
+
+describe('geoSpecRunLineageSchema load evidence', () => {
+  it('should carry a load budget, reuse and region crop', () => {
+    const lineage = {
+      status: 'complete',
+      modules: [],
+      loads: [
+        {
+          loadId: 'run:load:1',
+          status: 'complete',
+          evidence: {
+            loadId: 'run:load:1',
+            status: 'complete',
+            format: 'glb',
+            parameters: {},
+            ingestOptions: {},
+            workUnitLimit: 16_000_000,
+            reused: true,
+            region: { min: [0, 0, 0], max: [1, 2, 3] },
+            artifacts: [],
+          },
+        },
+      ],
+    };
+    expect(geoSpecRunLineageSchema.parse(lineage)).toEqual(lineage);
   });
 });

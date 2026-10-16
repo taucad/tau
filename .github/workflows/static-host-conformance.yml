@@ -43,10 +43,17 @@ jobs:
         continue-on-error: ${{ !matrix.required }}
         env:
           HOST_URL: ${{ matrix.host }}
+          # A bare `/` with no app preference is the marketing site on the Tau hosts
+          # (apps/ui/netlify/edge-functions/marketing.ts); any other query parameter keeps the app's own document.
+          DOCUMENT_PATH: /?conformance=1
         run: |
           set -o pipefail
-          apps/ui/scripts/static-host-conformance.sh "$HOST_URL" | tee "$RUNNER_TEMP/conformance.txt"
+          apps/ui/scripts/static-host-conformance.sh "$HOST_URL" 2>&1 | tee "$RUNNER_TEMP/conformance.txt"
       - name: Summarize
         if: always()
         run: |
           { echo '```'; cat "$RUNNER_TEMP/conformance.txt" 2>/dev/null || echo '(no output)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # One annotation carries the result to the check run, where it reads without the job log.
+          result="$(cat "$RUNNER_TEMP/conformance.txt" 2>/dev/null || echo '(no output)')"
+          result="${result//'%'/'%25'}"
+          echo "::notice title=Static host conformance::${result//$'\n'/'%0A'}"

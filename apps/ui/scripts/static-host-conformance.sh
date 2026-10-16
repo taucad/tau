@@ -114,6 +114,9 @@ for kind in chunk wasm worker; do
   variable="${kind}_path"
   if [[ -z "${!variable}" ]]; then
     echo "ERROR: no $kind found on $base; set $(tr '[:lower:]' '[:upper:]' <<<"$kind")_PATH" >&2
+    echo "  document $document_path: status $document_code, content-type '$(header "$work/document.headers" content-type)'" >&2
+    echo "  its script and link references:" >&2
+    grep -oE '(src|href)="[^"]+"' "$work/document" | head -20 | sed 's/^/    /' >&2 || true
     exit 2
   fi
 done

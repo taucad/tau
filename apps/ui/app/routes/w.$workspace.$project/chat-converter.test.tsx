@@ -186,6 +186,8 @@ vi.mock('#hooks/use-project.js', () => ({
     },
     geometryUnits: mockGeometryUnits,
     viewRecords: new Map(Object.entries(mockViewSettings)),
+    viewGraphics: new Map(),
+    viewEntryPaths: new Map(),
     mainEntryPath: 'main.ts',
     parameterService: mockParameterService,
   }),
@@ -362,7 +364,8 @@ vi.mock('@taucad/viewer/parameters/rjsf-theme', () => ({
   templates: {},
 }));
 
-const { ChatConverter, ExportSchemaForm, resolveActiveSchema } = await import('./chat-converter.js');
+const { ChatConverter, ExportSchemaForm } = await import('./chat-converter.js');
+const { resolveActiveSchema } = await import('@taucad/workbench-panes/export/export-source');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {

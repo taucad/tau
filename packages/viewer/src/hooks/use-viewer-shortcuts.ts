@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { RefObject } from 'react';
-import { useCameraRig, useGraphics } from '@taucad/viewer/hooks/use-graphics';
+import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 
@@ -21,6 +21,10 @@ const backspaceKey: KeyCombination = { key: 'Backspace' };
  * Whether a key belongs to the viewer holding `element`: the viewer under the pointer, else the one holding focus,
  * and never while focus is in a menu, list, tree, grid or dialog. Read when the key goes down, so neither the pointer
  * nor focus is tracked. Without a `[data-viewer-frame]` ancestor, `element` stands in for its viewer.
+ *
+ * @param element - The element a key reached.
+ * @returns Whether the viewer owns the key.
+ * @public
  */
 export const isViewerKeyTarget = (element: Element | undefined): boolean => {
   const frame = element?.closest('[data-viewer-frame]') ?? element;
@@ -32,7 +36,11 @@ export const isViewerKeyTarget = (element: Element | undefined): boolean => {
   return hovered ? hovered === frame : frame.contains(focused);
 };
 
-/** The formatted keys of the shortcuts that tooltips show. */
+/**
+ * The formatted keys of the shortcuts that tooltips show.
+ *
+ * @public
+ */
 export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; measure: string }>;
 
 /**
@@ -43,6 +51,11 @@ export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; me
  *
  * Keys typed into a field never reach these bindings, and every viewer registers its own set, gated by
  * {@link isViewerKeyTarget} on `barRef`. The bindings keep the default priority, below a drag's Escape.
+ *
+ * @param barRef - The bar the shortcuts belong to.
+ * @param announce - Speaks each shortcut's result.
+ * @returns The formatted keys tooltips show.
+ * @public
  */
 export const useViewerShortcuts = (
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React

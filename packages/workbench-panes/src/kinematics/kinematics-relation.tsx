@@ -5,7 +5,7 @@
 import type { DegreeOfFreedom, Mechanism } from '@taucad/kinematics';
 import { Badge } from '@taucad/ui/components/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { CurveSparkline, curveRange } from '#routes/w.$workspace.$project/kinematics-instruments.js';
+import { CurveSparkline, curveRange } from '#kinematics/kinematics-instruments.jsx';
 import {
   capitalize,
   describeCoupling,
@@ -16,7 +16,7 @@ import {
   linkLabel,
   plural,
   withSymbol,
-} from '#routes/w.$workspace.$project/kinematics-format.js';
+} from '#kinematics/kinematics-format.js';
 
 type RelationProps = Readonly<{
   dof: DegreeOfFreedom;

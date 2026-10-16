@@ -1,16 +1,7 @@
-import { useCallback } from 'react';
-import type { CSSProperties } from 'react';
-import { ModelComponentViewerMenuItems } from '#components/geometry/cad/model-component-action-menu.js';
+import { ViewerModelComponentActionMenu as PackageViewerModelComponentActionMenu } from '@taucad/workbench-panes/component-menu/viewer-component-action-menu';
+import type { ViewerModelComponentActionMenuPoint } from '@taucad/workbench-panes/component-menu/viewer-component-action-menu';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
-import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
-import { menuContentVariants } from '@taucad/ui/components/menu.variants';
-import { preventMenuSliderEscapeDismissal } from '@taucad/ui/components/menu-slider-item';
-import { cn } from '@taucad/ui/utils/cn';
-
-export type ViewerModelComponentActionMenuPoint = {
-  readonly clientX: number;
-  readonly clientY: number;
-};
+import { useModelComponentMenuActions } from '#components/geometry/cad/model-component-action-menu.js';
 
 type ViewerModelComponentActionMenuProperties = {
   readonly data: ModelComponentActionMenuData | undefined;
@@ -19,62 +10,11 @@ type ViewerModelComponentActionMenuProperties = {
   readonly onOpenChange: (isOpen: boolean) => void;
 };
 
+/** The viewer's coordinate-anchored part menu, with the app's verbs. */
 export function ViewerModelComponentActionMenu({
   data,
-  point,
-  isOpen: shouldOpen,
-  onOpenChange,
+  ...properties
 }: ViewerModelComponentActionMenuProperties): React.JSX.Element {
-  const isOpen = shouldOpen && Boolean(data && point);
-  const handleRequestClose = useCallback(() => {
-    onOpenChange(false);
-  }, [onOpenChange]);
-
-  return (
-    <Popover open={isOpen} modal={false} onOpenChange={onOpenChange}>
-      {point ? (
-        <PopoverAnchor asChild>
-          <span aria-hidden='true' style={getViewerMenuAnchorStyle(point)} />
-        </PopoverAnchor>
-      ) : null}
-      {isOpen && data ? (
-        <PopoverContent
-          role='menu'
-          side='right'
-          align='start'
-          sideOffset={2}
-          collisionPadding={8}
-          className={cn(
-            menuContentVariants(),
-            'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto [&>*]:shrink-0',
-          )}
-          onOpenAutoFocus={(event) => {
-            // Only a pointer opens this menu, so it takes focus itself, as Radix menus do, instead of
-            // the popover focusing and highlighting its first row.
-            event.preventDefault();
-            if (event.currentTarget instanceof HTMLElement) {
-              event.currentTarget.focus({ preventScroll: true });
-            }
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-          }}
-          onEscapeKeyDown={preventMenuSliderEscapeDismissal}
-        >
-          <ModelComponentViewerMenuItems {...data} onRequestClose={handleRequestClose} />
-        </PopoverContent>
-      ) : null}
-    </Popover>
-  );
-}
-
-function getViewerMenuAnchorStyle(point: ViewerModelComponentActionMenuPoint): CSSProperties {
-  return {
-    position: 'fixed',
-    left: point.clientX,
-    top: point.clientY,
-    width: 0,
-    height: 0,
-    pointerEvents: 'none',
-  };
+  const actions = useModelComponentMenuActions();
+  return <PackageViewerModelComponentActionMenu {...properties} data={data ? { ...data, actions } : undefined} />;
 }

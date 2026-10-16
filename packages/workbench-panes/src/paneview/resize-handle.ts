@@ -1,7 +1,11 @@
 import type { DockviewApi, PaneviewApi } from 'dockview-react';
 import type { ResizeHandle } from '#paneview/use-resize-handles.js';
 
-/** Locate the two views adjacent to a native sash, including nested split branches. */
+/**
+ * Locate the two views adjacent to a native sash, including nested split branches.
+ *
+ * @public
+ */
 export function adjacentResizeViews(
   sash: HTMLElement,
 ): { before: HTMLElement; after: HTMLElement; isVertical: boolean; index: number; all: HTMLElement[] } | undefined {
@@ -22,7 +26,11 @@ export function adjacentResizeViews(
   };
 }
 
-/** Keep the adjacent pair's total allocation while respecting both views' constraints. */
+/**
+ * Keep the adjacent pair's total allocation while respecting both views' constraints.
+ *
+ * @public
+ */
 export function resizePairBounds(
   value: number,
   total: number,
@@ -76,7 +84,11 @@ function resizeNativeSash(sash: HTMLElement, delta: number, isVertical: boolean)
   }
 }
 
-/** Named section separators use current native panel constraints, including collapsed allocations. */
+/**
+ * Named section separators use current native panel constraints, including collapsed allocations.
+ *
+ * @public
+ */
 export function paneviewResizeHandle(api: PaneviewApi | undefined, sash: HTMLElement): ResizeHandle | undefined {
   const views = adjacentResizeViews(sash);
   if (!api || !views || api.panels.length !== views.all.length) {
@@ -123,7 +135,11 @@ function branchBounds(api: DockviewApi, view: HTMLElement, isVertical: boolean):
   };
 }
 
-/** Resize the selected native grid sash, including branches deeper than a group's setSize can reach. */
+/**
+ * Resize the selected native grid sash, including branches deeper than a group's setSize can reach.
+ *
+ * @public
+ */
 export function dockviewResizeHandle(api: DockviewApi | undefined, sash: HTMLElement): ResizeHandle | undefined {
   const views = adjacentResizeViews(sash);
   if (!api || !views) {

@@ -6,7 +6,7 @@ import {
   completeViewerSecondaryGesture,
   idleViewerSecondaryGestureState,
   moveViewerSecondaryGesture,
-} from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
+} from '#component-menu/viewer-secondary-gesture.js';
 
 const target = {
   unitId: 'file:main.ts',

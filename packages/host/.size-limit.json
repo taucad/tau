@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) \u2014 measured 182.66 kB brotli on 2026-10-16; includes Grok ACP controls, bounded activity and usage, typed questions and provider-permission readback alongside the MCP viewer, machines and install_packages; @taucad/bundler-core stays external; the PATH-resolved Claude Code and Codex executables, Claude's login fallback and its Tau MCP tool names 0.41 kB (183.07 kB on 2026-10-16)",
+    "name": "total (ESM JS) — measured 183.07 kB brotli on 2026-10-16 before the viewer page's loopback host tools, Export pane tools and direct share link (provisional, re-baselined with the viewer page); includes Grok ACP controls, bounded activity and usage, typed questions and provider-permission readback alongside the MCP viewer, machines and install_packages; @taucad/bundler-core stays external; the PATH-resolved Claude Code and Codex executables, Claude's login fallback and its Tau MCP tool names",
     "path": "dist/**/*.mjs",
-    "limit": "183.5 kB"
+    "limit": "195 kB"
   }
 ]

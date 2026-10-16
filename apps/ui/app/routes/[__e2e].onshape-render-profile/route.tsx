@@ -8,7 +8,7 @@ import type { Scene } from 'three';
 import { applyCanonicalGltfBounds } from '@taucad/viewer/graphics/three/gltf-world';
 import { z } from 'zod';
 import type { Geometry } from '@taucad/types';
-import { ModelComponentMaterialSummary } from '#components/geometry/cad/model-component-action-menu.js';
+import { ModelComponentMaterialSummary } from '@taucad/workbench-panes/component-menu/component-action-menu';
 import { buildGltfComponentManifest } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
 import { GltfMesh } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { ThreeProvider } from '@taucad/viewer/graphics/three/three-context';

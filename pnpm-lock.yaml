@@ -2310,6 +2310,9 @@ importers:
 
   apps/libs/share:
     dependencies:
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../../../packages/core/project
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -3491,6 +3494,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -3774,6 +3780,13 @@ importers:
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   packages/core/project:
+    dependencies:
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.12
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
     devDependencies:
       zod:
         specifier: 'catalog:'
@@ -5491,6 +5504,24 @@ importers:
 
   packages/workbench-panes:
     dependencies:
+      '@rjsf/core':
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
+      '@rjsf/utils':
+        specifier: 6.11.0
+        version: 6.11.0(react@19.2.7)
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -5507,9 +5538,18 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
       '@taucad/ui':
         specifier: workspace:*
         version: link:../ui
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       '@taucad/viewer':
         specifier: workspace:*
         version: link:../viewer
@@ -5540,6 +5580,9 @@ importers:
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   scripts:
     dependencies:

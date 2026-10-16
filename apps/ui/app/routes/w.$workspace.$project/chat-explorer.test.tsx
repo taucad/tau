@@ -16,12 +16,7 @@ import {
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import * as partThumbnailVisual from '#services/part-thumbnail-visual.js';
-import {
-  ChatExplorerTree,
-  ComponentRow,
-  getComponentRowPaddingLeft,
-  getVisibleModelComponents,
-} from '#routes/w.$workspace.$project/chat-explorer.js';
+import { ChatExplorerTree } from '#routes/w.$workspace.$project/chat-explorer.js';
 
 const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
@@ -155,25 +150,6 @@ const capabilities: GeometryComponentManifest['capabilities'] = {
   hasPreciseTopology: false,
   exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
 };
-
-describe('Model component projection', () => {
-  it('should retain traversal order and matching ancestors without unrelated descendants', () => {
-    const parent = createNode('assembly', 'Nozzle');
-    const child = createNode('tube', 'Cooling tube');
-    const sibling = createNode('wall', 'Hot wall');
-    parent.childIds = [child.id, sibling.id];
-    child.parentId = parent.id;
-    child.depth = 2;
-    sibling.parentId = parent.id;
-    sibling.depth = 2;
-    const manifest = createManifest([parent, child, sibling]);
-    manifest.nodesById['root']!.childIds = [parent.id];
-    expect(getVisibleModelComponents(manifest, '').map((node) => node.id)).toEqual(['assembly', 'tube', 'wall']);
-    expect(getVisibleModelComponents(manifest, 'cooling').map((node) => node.id)).toEqual(['assembly', 'tube']);
-    expect(getVisibleModelComponents(manifest, 'nozzle').map((node) => node.id)).toEqual(['assembly']);
-    expect(getVisibleModelComponents(manifest, 'absent')).toEqual([]);
-  });
-});
 
 function createNode(id: string, name: string, appearance?: GeometryComponentAppearance): GeometryComponentNode {
   return {
@@ -340,14 +316,6 @@ function renderExplorerTree({
     </TooltipProvider>
   );
   return render(strictMode ? <StrictMode>{tree}</StrictMode> : tree);
-}
-
-function renderComponentRow(properties: Parameters<typeof ComponentRow>[0]): ReturnType<typeof render> {
-  return render(
-    <TooltipProvider>
-      <ComponentRow {...properties} />
-    </TooltipProvider>,
-  );
 }
 
 beforeEach(() => {
@@ -771,55 +739,6 @@ describe('ChatExplorerTree', () => {
     expect(screen.getByText('No model components available').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
   });
 
-  it('should render default-open Paneview units and filter every unit from one permanent input', async () => {
-    const user = userEvent.setup();
-    const mainNode = createNode(firstComponentId, 'main_part');
-    const helperNode = createNode(secondComponentId, 'helper_part');
-    const mainGraphicsRef = createGraphicsRefForUnit('src/main.ts', [mainNode]);
-    const helperGraphicsRef = createGraphicsRefForUnit('src/helper.ts', [helperNode]);
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/helper.ts', 'src/main.ts'],
-      viewSettings: {
-        mainView: { entryPath: 'src/main.ts' },
-        helperView: { entryPath: 'src/helper.ts' },
-      },
-      viewGraphics: new Map([
-        ['mainView', mainGraphicsRef],
-        ['helperView', helperGraphicsRef],
-      ]),
-    });
-
-    renderExplorerTree();
-
-    const unitHeaders = screen.getAllByRole('button', { name: /src\/.+\.ts/ });
-    expect(unitHeaders[0]).toHaveAccessibleName('src/main.ts');
-    expect(unitHeaders[1]).toHaveAccessibleName('src/helper.ts');
-    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-expanded', 'true');
-    expect(screen.getByTestId('model-pane-src/helper.ts')).toHaveAttribute('data-expanded', 'true');
-    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-size', '200');
-    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '144');
-    expect(screen.getByTestId('model-pane-properties')).toHaveAttribute('data-size', '392');
-    expect(screen.getByText('No part selected')).toBeVisible();
-    expect(screen.getByText('main_part')).toBeInTheDocument();
-    expect(screen.getByText('helper_part')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show search' })).not.toBeInTheDocument();
-
-    const filterInput = screen.getByRole('searchbox', { name: 'Filter parts' });
-    await user.type(filterInput, 'helper');
-
-    expect(screen.queryByText('main_part')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'helper_part' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'helper_part' }).tabIndex).toBe(0);
-    expect(screen.getByText('helper')).toHaveAttribute('data-slot', 'highlight');
-    expect(screen.getByText('No matching parts').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
-
-    await user.click(screen.getByRole('button', { name: 'Clear search' }));
-
-    expect(filterInput).toHaveValue('');
-    expect(screen.getByText('main_part')).toBeInTheDocument();
-  });
-
   it('should reveal requested model component rows', async () => {
     const user = userEvent.setup();
     const setIsExpanded = vi.fn();
@@ -890,116 +809,6 @@ describe('ChatExplorerTree', () => {
     }
   });
 
-  it('should keep one visible part Tab stop when filtering out the selected row', async () => {
-    const user = userEvent.setup();
-    const first = createNode(firstComponentId, 'planetary_housing');
-    const second = createNode(secondComponentId, 'sun_gear_assembly');
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts'],
-      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
-      viewGraphics: new Map([
-        [
-          'mainView',
-          createGraphicsRefForUnit('src/main.ts', [first, second], { selectedComponentIds: [firstComponentId] }),
-        ],
-      ]),
-    });
-
-    renderExplorerTree();
-    expect(screen.getByRole('button', { name: 'planetary_housing' }).tabIndex).toBe(0);
-    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'sun');
-    const visible = screen.getByRole('button', { name: 'sun_gear_assembly' });
-    expect(visible.tabIndex).toBe(0);
-    act(() => {
-      visible.focus();
-    });
-    expect(visible).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Actions for sun_gear_assembly' }).tabIndex).toBe(-1);
-  });
-
-  it('should move the single part Tab stop with arrows, Home, and End', async () => {
-    const user = userEvent.setup();
-    const first = createNode(firstComponentId, 'planetary_housing');
-    const second = createNode(secondComponentId, 'sun_gear_assembly');
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts'],
-      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
-      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [first, second])]]),
-    });
-
-    renderExplorerTree();
-    const firstButton = screen.getByRole('button', { name: 'planetary_housing' });
-    const secondButton = screen.getByRole('button', { name: 'sun_gear_assembly' });
-    act(() => {
-      firstButton.focus();
-    });
-    expect(firstButton.tabIndex).toBe(0);
-    await user.keyboard('{ArrowDown}');
-    expect(secondButton).toHaveFocus();
-    expect(secondButton.tabIndex).toBe(0);
-    expect(firstButton.tabIndex).toBe(-1);
-    await user.keyboard('{Home}');
-    expect(firstButton).toHaveFocus();
-    await user.keyboard('{End}');
-    expect(secondButton).toHaveFocus();
-    await user.keyboard('{ArrowUp}');
-    expect(firstButton).toHaveFocus();
-  });
-
-  it('should find a part by its indexed source material name', async () => {
-    const user = userEvent.setup();
-    const namedMaterial = createNode(firstComponentId, 'housing', {
-      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- GLB material color is source fixture data.
-      materials: [{ materialIndex: 3, name: 'Brushed steel', color: '#aabbcc' }],
-    });
-    const other = createNode(secondComponentId, 'sun_gear');
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts'],
-      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
-      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [namedMaterial, other])]]),
-    });
-
-    renderExplorerTree();
-    await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'brushed');
-    expect(screen.getByRole('button', { name: 'housing' })).toBeInTheDocument();
-    expect(screen.getByText('· Brushed steel')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'sun_gear' })).not.toBeInTheDocument();
-  });
-
-  it('should clear Properties when its selected model unit closes', async () => {
-    const selected = createNode(firstComponentId, 'housing');
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts'],
-      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
-      viewGraphics: new Map([
-        ['mainView', createGraphicsRefForUnit('src/main.ts', [selected], { selectedComponentIds: [firstComponentId] })],
-      ]),
-    });
-    const view = renderExplorerTree();
-    await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Physical facts' })).toBeVisible();
-    });
-
-    mockProjectForExplorer({
-      mainEntryPath: 'src/other.ts',
-      geometryUnitFiles: ['src/other.ts'],
-      viewSettings: { otherView: { entryPath: 'src/other.ts' } },
-      viewGraphics: new Map([
-        ['otherView', createGraphicsRefForUnit('src/other.ts', [createNode(secondComponentId, 'gear')])],
-      ]),
-    });
-    view.rerender(
-      <TooltipProvider>
-        <ChatExplorerTree isExpanded />
-      </TooltipProvider>,
-    );
-    expect(screen.getByText('No part selected')).toBeVisible();
-  });
-
   it('should open requested unavailable renderer sections', async () => {
     const setIsExpanded = vi.fn();
     const mainNode = createNode(firstComponentId, 'main_part');
@@ -1038,124 +847,47 @@ describe('ChatExplorerTree', () => {
     expect(setIsExpanded).toHaveBeenCalledWith(true);
     expect(mocks.paneApis.get('src/unopened.ts')?.setExpanded).toHaveBeenCalledWith(true);
   });
+});
 
-  it('should surface compilation units without an active renderer as unavailable', () => {
-    const mainNode = createNode(firstComponentId, 'main_part');
-    const mainGraphicsRef = createGraphicsRefForUnit('src/main.ts', [mainNode]);
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts', 'src/unopened.ts'],
-      viewSettings: {
-        mainView: { entryPath: 'src/main.ts' },
-      },
-      viewGraphics: new Map([['mainView', mainGraphicsRef]]),
-    });
-
-    renderExplorerTree();
-
-    expect(screen.getByText('src/main.ts')).toBeInTheDocument();
-    expect(screen.getByText('src/unopened.ts')).toBeInTheDocument();
-    expect(
-      screen.getByText('Open renderer to inspect components').closest('[data-slot="panel-empty-state"]'),
-    ).toBeTruthy();
-  });
-
-  it('should expose a unit header control to show hidden components', async () => {
-    const user = userEvent.setup();
-    const mainNode = createNode(firstComponentId, 'main_part');
-    const mainGraphicsRef = createGraphicsRefForUnit('src/main.ts', [mainNode], {
-      hiddenComponentIds: [firstComponentId],
-    });
+describe('Model pane adapter capabilities', () => {
+  function mockSinglePartProject(node: GeometryComponentNode): ActorRefFrom<typeof graphicsMachine> {
+    const graphicsRef = createGraphicsRefForUnit('src/main.ts', [node]);
     mockProjectForExplorer({
       mainEntryPath: 'src/main.ts',
       geometryUnitFiles: ['src/main.ts'],
-      viewSettings: {
-        mainView: { entryPath: 'src/main.ts' },
-      },
-      viewGraphics: new Map([['mainView', mainGraphicsRef]]),
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', graphicsRef]]),
     });
+    return graphicsRef;
+  }
 
-    renderExplorerTree();
-
-    const showHiddenButton = screen.getByRole('button', { name: 'Show hidden components in src/main.ts' });
-    expect(showHiddenButton).not.toHaveClass('opacity-0');
-    expect(showHiddenButton.className).not.toContain('group-hover');
-
-    await user.click(showHiddenButton);
-
-    expect(mainGraphicsRef.send).toHaveBeenCalledWith({
-      type: 'showHiddenModelComponents',
-      unitId: 'file:src/main.ts',
-      source: 'explorer',
-    });
-  });
-});
-
-describe('Chat explorer component rows', () => {
-  it('should use compact panel row density', () => {
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId: internalUnitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    const rowButton = screen.getByRole('button', { name: 'planetary_housing' });
-    const row = rowButton.parentElement;
-
-    expect(getComponentRowPaddingLeft({ depth: node.depth, rootDepth: 0 })).toBe(8);
-    expect(row).toHaveClass('h-7');
-    expect(row).toHaveClass('rounded-md');
-    expect(row).toHaveClass('text-sm');
-    expect(row).toHaveClass('leading-5');
-    expect(row).toHaveStyle({ paddingLeft: '8px' });
-  });
-
-  it('leads a renderable part row with an 80 px preview that opens the gallery', async () => {
+  it('leads a renderable part row with an 80 px preview that opens the part gallery', async () => {
     mocks.openPartGallery = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:housing') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    mocks.imageService = {
+      export: vi
+        .fn()
+        .mockResolvedValue([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1]) }]),
+    };
     const node = {
       ...createNode(firstComponentId, 'planetary_housing'),
       primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
     };
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-    renderComponentRow({
-      manifest: createManifest([node]),
-      node,
-      graphicsRef,
-      unitId: internalUnitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-      preview: { status: 'pending', bytes: new Uint8Array([1]) },
+    const graphicsRef = createGraphicsRefForUnit('src/main.ts', [node], {
+      selectedComponentIds: [firstComponentId],
+      previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
     });
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([['mainView', graphicsRef]]),
+    });
+    renderExplorerTree();
 
-    const preview = screen.getByRole('button', { name: 'Preview planetary_housing' });
-    const row = preview.parentElement;
-    expect(row).toHaveClass('h-22');
-    expect(preview).toHaveClass('size-20', 'rounded-xs');
-    expect(preview).toHaveAttribute('tabindex', '-1');
-    // A refreshing preview keeps its last image, dimmed.
-    expect(preview.querySelector('img')).toHaveClass('opacity-50');
-    // The frame is a sibling of the selection button, never nested in it.
-    expect(screen.getByRole('button', { name: 'planetary_housing' }).querySelector('button')).toBeNull();
-
+    const preview = await screen.findByRole('button', { name: 'Preview planetary_housing' });
+    expect(preview.parentElement).toHaveClass('h-22');
     await userEvent.setup().click(preview);
     expect(mocks.openPartGallery).toHaveBeenCalledWith({
       graphicsRef,
@@ -1164,129 +896,13 @@ describe('Chat explorer component rows', () => {
       source: 'explorer',
       origin: preview,
     });
-    expect(graphicsRef.send).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'toggleModelComponentSelection' }),
-    );
     mocks.openPartGallery = undefined;
-  });
-
-  it('should toggle selection from the label row instead of adding the part to chat', async () => {
-    const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    await user.click(screen.getByRole('button', { name: 'planetary_housing' }));
-
-    expect(graphicsRef.send).toHaveBeenCalledWith({
-      type: 'toggleModelComponentSelection',
-      unitId,
-      componentId: firstComponentId,
-      source: 'explorer',
-    });
-    expect(mocks.addContextReferences).not.toHaveBeenCalled();
-  });
-
-  it('should reserve selected row styling for selected rows only', () => {
-    const selectedNode = createNode(firstComponentId, 'planetary_housing');
-    const focusedNode = createNode(secondComponentId, 'sun_gear_assembly');
-    const isolatedNode = createNode('component:ring', 'ring_gear');
-    const manifest = createManifest([selectedNode, focusedNode, isolatedNode]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    render(
-      <TooltipProvider>
-        <ComponentRow
-          manifest={manifest}
-          node={selectedNode}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={0}
-          hoveredComponentId={undefined}
-          isSelected
-          isHidden={false}
-          isIsolated={false}
-          isFocused={false}
-          opacity={1}
-        />
-        <ComponentRow
-          manifest={manifest}
-          node={focusedNode}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={0}
-          hoveredComponentId={undefined}
-          isSelected={false}
-          isHidden={false}
-          isIsolated={false}
-          isFocused
-          opacity={1}
-        />
-        <ComponentRow
-          manifest={manifest}
-          node={isolatedNode}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={0}
-          hoveredComponentId={undefined}
-          isSelected={false}
-          isHidden={false}
-          isIsolated
-          isFocused={false}
-          opacity={1}
-        />
-      </TooltipProvider>,
-    );
-
-    const selectedRow = screen.getByRole('button', { name: 'planetary_housing' }).parentElement;
-    const focusedRow = screen.getByRole('button', { name: 'sun_gear_assembly' }).parentElement;
-    const isolatedRow = screen.getByRole('button', { name: 'ring_gear' }).parentElement;
-
-    expect(screen.getByRole('button', { name: 'planetary_housing' })).toHaveAttribute('aria-pressed', 'true');
-    expect(selectedRow).toHaveClass('bg-primary/10');
-    expect(selectedRow).toHaveClass('text-foreground');
-    expect(focusedRow).not.toHaveClass('bg-primary/10');
-    expect(focusedRow).toHaveClass('bg-sidebar-accent/70');
-    expect(isolatedRow).not.toHaveClass('bg-primary/10');
-    expect(screen.getByRole('button', { name: 'Remove isolation for ring_gear' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
   });
 
   it('should keep the shared model actions while removing reference drawing and export actions', async () => {
     const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: firstComponentId,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
+    const graphicsRef = mockSinglePartProject(createNode(firstComponentId, 'planetary_housing'));
+    renderExplorerTree();
 
     await user.click(screen.getByRole('button', { name: 'Actions for planetary_housing' }));
 
@@ -1302,7 +918,7 @@ describe('Chat explorer component rows', () => {
     await user.keyboard('{Enter}');
     expect(graphicsRef.send).toHaveBeenLastCalledWith({
       type: 'setModelComponentOpacity',
-      unitId,
+      unitId: internalUnitId,
       componentId: firstComponentId,
       opacity: 0.42,
       source: 'explorer',
@@ -1326,23 +942,8 @@ describe('Chat explorer component rows', () => {
 
   it('should expose the same component actions from a row right-click', async () => {
     const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
+    const graphicsRef = mockSinglePartProject(createNode(firstComponentId, 'planetary_housing'));
+    renderExplorerTree();
 
     const row = screen.getByRole('button', { name: 'planetary_housing' }).parentElement;
     fireEvent.contextMenu(row!);
@@ -1359,7 +960,7 @@ describe('Chat explorer component rows', () => {
     await user.keyboard('{Enter}');
     expect(graphicsRef.send).toHaveBeenLastCalledWith({
       type: 'setModelComponentOpacity',
-      unitId,
+      unitId: internalUnitId,
       componentId: firstComponentId,
       opacity: 0.37,
       source: 'explorer',
@@ -1369,224 +970,11 @@ describe('Chat explorer component rows', () => {
 
     expect(graphicsRef.send).toHaveBeenCalledWith({
       type: 'hideModelComponent',
-      unitId,
+      unitId: internalUnitId,
       componentId: firstComponentId,
       source: 'explorer',
     });
     expect(mocks.addContextReferences).not.toHaveBeenCalled();
-  });
-
-  it('should show stateful tooltips for visible and non-isolated row action icons', async () => {
-    const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: firstComponentId,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    await user.hover(screen.getByRole('button', { name: 'Hide planetary_housing' }));
-    expect(await screen.findByRole('tooltip', { name: 'Hide part' })).toBeInTheDocument();
-    await user.hover(screen.getByRole('button', { name: 'Isolate planetary_housing' }));
-    expect(await screen.findByRole('tooltip', { name: 'Isolate part' })).toBeInTheDocument();
-  });
-
-  it('should show stateful tooltips for hidden and isolated row action icons', async () => {
-    const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: true,
-      isIsolated: true,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    await user.hover(screen.getByRole('button', { name: 'Show planetary_housing' }));
-    expect(await screen.findByRole('tooltip', { name: 'Show part' })).toBeInTheDocument();
-    await user.hover(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }));
-    expect(await screen.findByRole('tooltip', { name: 'Remove isolation' })).toBeInTheDocument();
-  });
-
-  it('should render the material color as the component icon fill', () => {
-    const iconColor = 'var(--primary)';
-    const node = createNode(firstComponentId, 'sun_gear', { color: iconColor, colors: [iconColor] });
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId: internalUnitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    const rowButton = screen.getByRole('button', { name: 'sun_gear' });
-    const icon = screen.getByTestId('component-color-icon');
-
-    expect(icon).toHaveAttribute('aria-hidden', 'true');
-    expect(icon).toHaveStyle({ fill: iconColor });
-    expect(screen.queryByTestId('component-color-swatch')).not.toBeInTheDocument();
-    expect(rowButton.children[0]).toBe(icon);
-    expect(rowButton.children[1]).toHaveTextContent('sun_gear');
-  });
-
-  it('should keep isolate controls active for isolated rows while another row is hovered', () => {
-    const firstNode = createNode(firstComponentId, 'planetary_housing');
-    const secondNode = createNode(secondComponentId, 'sun_gear_assembly');
-    const manifest = createManifest([firstNode, secondNode]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    render(
-      <TooltipProvider>
-        <ComponentRow
-          manifest={manifest}
-          node={firstNode}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={0}
-          hoveredComponentId={secondComponentId}
-          isSelected={false}
-          isHidden={false}
-          isIsolated
-          isFocused={false}
-          opacity={1}
-        />
-        <ComponentRow
-          manifest={manifest}
-          node={secondNode}
-          graphicsRef={graphicsRef}
-          unitId={unitId}
-          rootDepth={0}
-          hoveredComponentId={secondComponentId}
-          isSelected={false}
-          isHidden={false}
-          isIsolated={false}
-          isFocused={false}
-          opacity={1}
-        />
-      </TooltipProvider>,
-    );
-
-    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(-1);
-    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(-1);
-  });
-
-  it('should place the keyboard context menu beside its focused part', () => {
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-    const button = screen.getByRole('button', { name: 'planetary_housing' });
-    const row = button.closest('[data-model-component-row]');
-    if (!row) {
-      throw new Error('Part row missing');
-    }
-    const contextMenu = vi.fn();
-    row.addEventListener('contextmenu', contextMenu);
-    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 40, width: 120, bottom: 72 } as DOMRect);
-
-    fireEvent.keyDown(button, { key: 'F10', shiftKey: true });
-    expect(contextMenu).toHaveBeenCalledOnce();
-    expect(contextMenu.mock.calls[0]?.[0]).toMatchObject({ clientX: 100, clientY: 72 });
-  });
-
-  it('should toggle isolation from the first-class target button', async () => {
-    const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: false,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Isolate planetary_housing' }));
-
-    expect(graphicsRef.send).toHaveBeenCalledWith({
-      type: 'isolateModelComponent',
-      unitId,
-      componentId: firstComponentId,
-      source: 'explorer',
-    });
-  });
-
-  it('should clear isolation from an already isolated row target button', async () => {
-    const user = userEvent.setup();
-    const node = createNode(firstComponentId, 'planetary_housing');
-    const manifest = createManifest([node]);
-    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
-
-    renderComponentRow({
-      manifest,
-      node,
-      graphicsRef,
-      unitId,
-      rootDepth: 0,
-      hoveredComponentId: undefined,
-      isSelected: false,
-      isHidden: false,
-      isIsolated: true,
-      isFocused: false,
-      opacity: 1,
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }));
-
-    expect(graphicsRef.send).toHaveBeenCalledWith({
-      type: 'clearModelComponentIsolation',
-      unitId,
-      source: 'explorer',
-    });
   });
 });
 

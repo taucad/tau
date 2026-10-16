@@ -5,7 +5,7 @@ import {
   findKinematicsJointByComponent,
   getKinematicsRootDriver,
   getKinematicsStructure,
-} from '#utils/kinematics-structure.utils.js';
+} from '#kinematics/kinematics-structure.js';
 
 // A ring drives a second ring, which drives a vane (a chain); a sleeve drives a door on a welded bracket.
 const mechanism: Mechanism = {

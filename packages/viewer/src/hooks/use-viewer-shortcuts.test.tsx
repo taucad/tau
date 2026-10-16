@@ -5,10 +5,10 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
-import { GraphicsProvider, useCameraSelector } from '@taucad/viewer/hooks/use-graphics';
+import { GraphicsProvider, useCameraSelector } from '#hooks/use-graphics.jsx';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 
 type GraphicsActor = Actor<typeof graphicsMachine>;
 

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { bundlePattern, workspace } from '@taucad/nx';
+import { assembleBundledDeclarations } from '@taucad/nx/bundled-declarations';
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
@@ -15,7 +16,15 @@ const baseConfig: UserConfig = {
   clean: true,
   dts: { eager: true },
   minify: true,
-  copy: [{ from: 'src/styles', to: 'dist/styles' }],
+  copy: ({ outDir }) => [
+    { from: 'src/styles/panes.css', to: `${outDir}/styles` },
+    { from: 'src/styles/panes.css.d.ts', to: `${outDir}/styles` },
+    { from: 'src/styles/pane-resize.css', to: `${outDir}/styles` },
+  ],
+  hooks: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- tsdown's hook API uses colon-delimited names.
+    'build:done': async ({ options }) => assembleBundledDeclarations(process.cwd(), options.outDir, 'workbench-panes'),
+  },
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };

@@ -16,6 +16,9 @@ import type {
   TauViewerPresentation,
   TauViewerReadInput,
   TauViewerReadResult,
+  TauViewerDirectShare,
+  TauViewerShareKind,
+  TauViewerShareLink,
   TauViewerShowResult,
   TauViewerSyncInput,
   TauViewerSyncResult,
@@ -46,9 +49,34 @@ export type TauMcpViewerCallOptions = Readonly<{
  *
  * @public
  */
+/**
+ * One extra app-only tool the viewer page's panes call, supplied by the host (the Export pane's format list, for
+ * example). It is registered beside the page's own tools with `visibility: ['app']`, and only while the host shows a
+ * page.
+ *
+ * @public
+ */
+export type TauMcpViewerPageTool = Readonly<{
+  name: string;
+  description: string;
+  /** Checked by the SDK before `call` runs, and by a loopback server before it answers. */
+  inputSchema: z.ZodObject;
+  call(
+    args: Readonly<Record<string, unknown>>,
+    options: TauMcpViewerCallOptions,
+  ): Promise<Readonly<Record<string, unknown>> | TauMcpViewerFailure>;
+}>;
+
+/**
+ * The viewer the MCP server registers: its page and its tools.
+ *
+ * @public
+ */
 export type TauMcpViewer = Readonly<{
   /** The single-file page and the digest that names its `ui://` URI. */
   page: Readonly<{ html: string; sha256: string }>;
+  /** App-only tools the host adds for the page's panes. */
+  pageTools?: readonly TauMcpViewerPageTool[];
   /**
    * Render or locate a model to show; without a target, the model shown last or the project's main file. `select`
    * names components for the page to select once the model is drawn.
@@ -80,11 +108,16 @@ export type TauMcpViewer = Readonly<{
     input: TauViewerCaptureReplyInput,
     options: TauMcpViewerCallOptions,
   ): Promise<Readonly<{ accepted: boolean }> | TauMcpViewerFailure>;
+  /** A Tau link to a shown model's project, for the page's Share pane; a host without one leaves the tool out. */
+  shareLink?(
+    input: Readonly<{ modelId: string; kind?: TauViewerShareKind | undefined }>,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerDirectShare | TauViewerShareLink | TauMcpViewerFailure>;
 }>;
 
 const descriptions = {
   showModel:
-    'Show a CAD source file (targetFile), a STEP, STL, 3MF or OBJ file (converted to GLB), or a GLB or SVG file, in the Tau viewer the person sees; omit targetFile to show the model shown last or the project main file. Call it after evaluate_model succeeds when the person should look at the result.',
+    'Show a CAD source file (targetFile), a STEP, STL, 3MF or OBJ file (converted to GLB), or a GLB or SVG file, in the Tau viewer the person sees; omit targetFile to show the model shown last or the project main file. Call it after evaluate_model succeeds when the person should look at the result. Pass the CAD source, not a GLB exported from it: the viewer shows a source with its parameters, kinematics and exports.',
   openModelFile:
     'Open one project model file in the Tau viewer. The host calls this when the person opens a file with Tau.',
   browseModels: "List the project's renderable model files for the Tau viewer's file list.",
@@ -93,6 +126,8 @@ const descriptions = {
     'Report what the person sees in the Tau viewer: the model, the selected components (ids as @cad references and arrange_workbench take them), hidden and isolated components, and the camera. Set capture to also get an image of the live view.',
   appSync: "The Tau viewer page's sync with the server. Only the viewer page calls this.",
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
+  appShareLink:
+    "A Tau link to the shown model's project, for the Tau viewer page's Share pane: kind 'direct' (the default) packs the project for a self-contained link, kind 'github' imports it from GitHub. Only the viewer page calls this.",
 } as const;
 
 const showModelInputSchema = z
@@ -163,6 +198,10 @@ const appSyncInputSchema = z
   })
   .strict();
 
+const appShareLinkInputSchema = z
+  .object({ modelId: z.string().min(1), kind: z.enum(['direct', 'github']).optional() })
+  .strict();
+
 /** A capture travels base64 in one reply; 8 MiB of base64 is a 6 MiB image, far above a 1280 px frame. */
 const captureDataLimit = 8 * 1024 * 1024;
 
@@ -213,6 +252,7 @@ export const tauViewerPageInputSchemas = {
   appRead: appReadInputSchema,
   appSync: appSyncInputSchema,
   appCaptureReply: appCaptureReplyInputSchema,
+  appShareLink: appShareLinkInputSchema,
 } as const;
 
 /** The file extensions the file entrypoint claims: the page's own formats and those the server converts to GLB (W7). */
@@ -480,6 +520,47 @@ export const registerTauMcpViewer = (
           };
     },
   );
+  const appShareLink = server.registerTool(
+    tauViewerToolName.appShareLink,
+    {
+      description: descriptions.appShareLink,
+      inputSchema: appShareLinkInputSchema,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.shareLink === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server cannot make share links.' }
+          : await viewer.shareLink(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
+            /* A direct answer carries the packed project; its text stays short. */
+            content: [
+              { type: 'text', text: 'kind' in result ? 'The project is packed for a direct link.' : result.url },
+            ],
+            structuredContent: result,
+          };
+    },
+  );
+  const pageTools = (viewer.pageTools ?? []).map((tool) =>
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        _meta: alwaysLoad,
+      },
+      async (args: Readonly<Record<string, unknown>>, extra) => {
+        const result = await tool.call(args, callOptions(extra));
+        return isFailure(result)
+          ? failure(result)
+          : { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: { ...result } };
+      },
+    ),
+  );
 
   const pageMeta = (entrypoint?: Readonly<Record<string, unknown>>): Record<string, unknown> => ({
     ...alwaysLoad,
@@ -505,6 +586,13 @@ export const registerTauMcpViewer = (
     present(viewState, true, { ...alwaysLoad });
     present(appSync, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     present(appCaptureReply, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
+    for (const tool of pageTools) {
+      present(tool, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
+    }
+    present(appShareLink, hasPage && viewer.shareLink !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
   };
   applyPresentation();
 

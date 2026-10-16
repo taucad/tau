@@ -8,6 +8,11 @@ import { nestedActionVariants } from '@taucad/ui/components/nested-action.varian
 
 const defaultExpandedHeight = 200;
 
+/**
+ * A paneview header's height, in CSS pixels.
+ *
+ * @public
+ */
 export const paneviewHeaderSize = 40;
 
 /**
@@ -15,6 +20,7 @@ export const paneviewHeaderSize = 40;
  *
  * Removes Paneview's header separator; the shared resize owner paints centered
  * neutral pills independently of the engine's pointer target.
+ * @public
  */
 export const paneviewStyleOverrides = cn(
   'h-full',
@@ -27,7 +33,11 @@ export const paneviewStyleOverrides = cn(
   '[&_.dv-split-view-container.dv-vertical_>_.dv-sash-container_>_.dv-sash.dv-minimum]:!cursor-row-resize',
 );
 
-/** Paneview layout overrides for headers visually attached to bordered panel bodies. */
+/**
+ * Paneview layout overrides for headers visually attached to bordered panel bodies.
+ *
+ * @public
+ */
 export const paneviewAttachedSurfaceStyleOverrides = cn(
   paneviewStyleOverrides,
   paneSpacingClassName,
@@ -40,7 +50,11 @@ export const paneviewAttachedSurfaceStyleOverrides = cn(
   '[&_[data-slot=paneview-header][data-state=open]]:border-b-0!',
 );
 
-/** The bordered card a panel body draws under an attached header, in every state (loading, empty, error, loaded). */
+/**
+ * The bordered card a panel body draws under an attached header, in every state (loading, empty, error, loaded).
+ *
+ * @public
+ */
 export const paneviewAttachedBodyClassName = 'overflow-hidden rounded-b-xl border border-border bg-card';
 
 type PaneviewHeaderContextValue = { expanded: boolean };
@@ -69,6 +83,7 @@ function usePaneviewHeaderContext(): PaneviewHeaderContextValue {
  * right after it (a status mark) sits beside the name rather than at the
  * trailing edge. Blank header space still toggles through the root's click,
  * which ignores bubbled clicks from children.
+ * @public
  */
 export function PaneviewHeader({
   api,
@@ -175,6 +190,7 @@ export function PaneviewHeader({
  *
  * Truncates with ellipsis on the left so the filename tail (the most
  * distinguishing part of a path) stays visible when space is tight.
+ * @public
  */
 export function PaneviewHeaderTitle({
   children,
@@ -198,6 +214,7 @@ export function PaneviewHeaderTitle({
  * attributes (e.g. `data-testid`) — internal event handlers are not
  * overridable since they own the propagation contract. It sets no tone on
  * the buttons inside: each control owns its own through `nestedActionVariants`.
+ * @public
  */
 export function PaneviewHeaderControls({
   children,
@@ -229,6 +246,7 @@ export function PaneviewHeaderControls({
  *
  * These are actions that operate on the panel's content — when there
  * is no content (collapsed), there are no content actions.
+ * @public
  */
 export function PaneviewHeaderContentActions({
   children,
@@ -252,6 +270,7 @@ export function PaneviewHeaderContentActions({
  * Sized at 24px (`size-6`) for a compact WCAG 2.2 target, toned by
  * `nestedActionVariants` — the sidebar row's action, so it reads as a surface
  * on the lit header. Wraps in a `Tooltip` when the `tooltip` prop is provided.
+ * @public
  */
 export function PaneviewHeaderAction({
   tooltip,
@@ -298,6 +317,7 @@ export function PaneviewHeaderAction({
 /**
  * Flex container for grouping trailing items (selectors, action buttons)
  * inside a `PaneviewHeader` children slot.
+ * @public
  */
 export function PaneviewHeaderActionGroup({
   children,

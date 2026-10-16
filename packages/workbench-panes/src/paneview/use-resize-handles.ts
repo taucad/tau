@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
-/** A native layout engine's current, bounded resize operation. Sizes are CSS pixels. */
+/**
+ * A native layout engine's current, bounded resize operation. Sizes are CSS pixels.
+ *
+ * @public
+ */
 export type ResizeHandle = {
   readonly label: string;
   readonly orientation: 'vertical' | 'horizontal';
@@ -11,7 +15,11 @@ export type ResizeHandle = {
   readonly resize: (size: number) => void;
 };
 
-/** Adds separator semantics and pressed feedback without replacing native drag or size persistence. */
+/**
+ * Adds separator semantics and pressed feedback without replacing native drag or size persistence.
+ *
+ * @public
+ */
 export function useResizeHandles(
   // DOM refs use React’s nullable ref contract.
   // oxlint-disable-next-line typescript/no-restricted-types -- React DOM ref contract is nullable.

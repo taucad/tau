@@ -461,7 +461,25 @@ export const mcpCommand = defineCommand({
     };
     const viewerPage = await readViewerPage(args['viewer-page'] ?? process.env['TAU_VIEWER_PAGE']);
     const local = await serveLocalHostMcp(
-      { workspaceRoot, pinned: args.project !== undefined, registry, checkouts, viewerPage },
+      {
+        workspaceRoot,
+        pinned: args.project !== undefined,
+        registry,
+        checkouts,
+        viewerPage,
+        runtimeClient: clientFor,
+        /* The direct share link packs the shown entry's source closure, as the Tau app does. */
+        snapshotSource: async ({ root, entryPath, additionalPaths, signal }) => {
+          const client = await clientFor(root);
+          const snapshot = await client.snapshotSource({ source: { path: entryPath }, additionalPaths, signal });
+          return snapshot.success
+            ? snapshot.data
+            : {
+                errorCode: 'SNAPSHOT_FAILED',
+                message: snapshot.issues[0]?.message ?? 'The project source snapshot could not be collected.',
+              };
+        },
+      },
       { stdout },
     );
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK server exposes an onclose callback, not EventTarget.

@@ -35,6 +35,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./revision-id": "./src/revision-id.ts",
+    "./share-artifact": "./src/share-artifact.ts",
+    "./share-direct": "./src/share-direct.ts",
+    "./share-error": "./src/share-error.ts",
+    "./share-locator": "./src/share-locator.ts",
+    "./share-snapshot": "./src/share-snapshot.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -50,6 +55,31 @@
         "import": "./dist/revision-id.mjs",
         "default": "./dist/revision-id.mjs"
       },
+      "./share-artifact": {
+        "types": "./dist/share-artifact.d.mts",
+        "import": "./dist/share-artifact.mjs",
+        "default": "./dist/share-artifact.mjs"
+      },
+      "./share-direct": {
+        "types": "./dist/share-direct.d.mts",
+        "import": "./dist/share-direct.mjs",
+        "default": "./dist/share-direct.mjs"
+      },
+      "./share-error": {
+        "types": "./dist/share-error.d.mts",
+        "import": "./dist/share-error.mjs",
+        "default": "./dist/share-error.mjs"
+      },
+      "./share-locator": {
+        "types": "./dist/share-locator.d.mts",
+        "import": "./dist/share-locator.mjs",
+        "default": "./dist/share-locator.mjs"
+      },
+      "./share-snapshot": {
+        "types": "./dist/share-snapshot.d.mts",
+        "import": "./dist/share-snapshot.mjs",
+        "default": "./dist/share-snapshot.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -60,6 +90,10 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "dependencies": {
+    "jose": "^6.2.3",
+    "jszip": "^3.10.1"
   },
   "devDependencies": {
     "zod": "catalog:"

@@ -1,6 +1,7 @@
 /**
  * Sort geometry unit entries so that the main entry path appears first,
  * with remaining entries sorted alphabetically.
+ * @public
  */
 export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntryPath: string): Array<[string, T]> =>
   [...entries].sort(([a], [b]) => {
@@ -16,7 +17,11 @@ export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntr
 // oxlint-disable-next-line typescript/no-restricted-types -- Workbench records use null for no selected entry.
 type GeometryEntryView = { readonly entryPath?: string | null };
 
-/** Restored viewer paths remain discoverable before their CAD units are admitted. */
+/**
+ * Restored viewer paths remain discoverable before their CAD units are admitted.
+ *
+ * @public
+ */
 export const listGeometryEntryPaths = (
   units: ReadonlyMap<string, unknown>,
   views: ReadonlyMap<string, GeometryEntryView> | Readonly<Record<string, GeometryEntryView>>,
@@ -41,7 +46,11 @@ export const listGeometryEntryPaths = (
   ).map(([path]) => path);
 };
 
-/** Resolve the displayed entry from live panel bindings, independent of editor persistence. */
+/**
+ * Resolve the displayed entry from live panel bindings, independent of editor persistence.
+ *
+ * @public
+ */
 export const findEntryGraphics = <T>(
   graphics: ReadonlyMap<string, T>,
   // oxlint-disable-next-line typescript/no-restricted-types -- A live empty viewer has a null entry.

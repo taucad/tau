@@ -76,6 +76,30 @@ describe('createLocalMcpViewer', () => {
     expect(renderGlb).not.toHaveBeenCalled();
   });
 
+  it('should show a GLB exported from a source with that source, so its panes have parameters', async () => {
+    await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+    await writeFile(join(root, '.tau', 'artifacts', 'tc-7__bracket.glb'), glb);
+    await writeFile(join(root, 'src', 'bracket.glb'), glb);
+
+    const exported = shownModel(await viewer.show({ targetFile: '.tau/artifacts/tc-7__bracket.glb' }, inline));
+    const beside = shownModel(await viewer.show({ targetFile: 'src/bracket.glb' }, inline));
+    const unmatched = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+
+    expect(exported.model).toMatchObject({ path: '.tau/artifacts/tc-7__bracket.glb', sourceFile: 'src/bracket.ts' });
+    expect(beside.model).toMatchObject({ path: 'src/bracket.glb', sourceFile: 'src/bracket.ts' });
+    expect(unmatched.model.sourceFile).toBeUndefined();
+    expect(renderGlb).not.toHaveBeenCalled();
+  });
+
+  it('should show a GLB this server rendered with the source it rendered', async () => {
+    await viewer.show({ targetFile: 'src/bracket.ts' }, inline);
+    await writeFile(join(root, 'models', 'bracket.ts'), 'export default () => null;');
+
+    const { model } = shownModel(await viewer.show({ targetFile: '.tau/artifacts/bracket.glb' }, inline));
+
+    expect(model.sourceFile).toBe('src/bracket.ts');
+  });
+
   it('should render a CAD source to GLB through export_model', async () => {
     const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
 
@@ -259,6 +283,48 @@ describe('createLocalMcpViewer', () => {
       } finally {
         await perCall.close();
         await rm(elsewhere, { recursive: true, force: true });
+      }
+    });
+
+    it("should run the panes' host tools and re-render a source in the linked model's project", async () => {
+      const hostCall = vi.fn<NonNullable<LocalMcpViewerOptions['hostCall']>>(async () => ({
+        success: true,
+        parameters: {},
+      }));
+      const withHost = createLocalMcpViewer({ page, rootOf: () => root, renderGlb, hostCall });
+      try {
+        const { viewerUrl, model } = shownModel(await withHost.show({ targetFile: 'src/bracket.ts' }, text));
+        const { origin, token, modelId } = loopbackOf(viewerUrl);
+        const call = async (name: string, args: unknown, linked = true) =>
+          fetch(`${origin}/api/tools/call`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-tau-viewer-token': token,
+              ...(linked ? { 'x-tau-viewer-model': modelId } : {}),
+            },
+            body: JSON.stringify({ name, arguments: args }),
+          });
+
+        const parameters = await call('get_parameters', { targetFile: 'src/bracket.ts' });
+        expect(parameters.status).toBe(200);
+        expect(await parameters.json()).toEqual({ success: true, parameters: {} });
+        expect(hostCall).toHaveBeenCalledWith(
+          expect.objectContaining({
+            root,
+            call: { toolName: 'get_parameters', args: { targetFile: 'src/bracket.ts' } },
+          }),
+        );
+        const unlinked = await call('get_parameters', { targetFile: 'src/bracket.ts' }, false);
+        expect(unlinked.status).toBe(422);
+        expect(hostCall).toHaveBeenCalledTimes(1);
+
+        const rendered = await call('show_model', { targetFile: 'src/bracket.ts' });
+        expect(rendered.status).toBe(200);
+        expect(shownModel(await rendered.json()).model).toMatchObject({ sourceFile: model.sourceFile });
+        expect(renderGlb).toHaveBeenCalledTimes(2);
+      } finally {
+        await withHost.close();
       }
     });
 

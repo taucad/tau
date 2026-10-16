@@ -27,6 +27,11 @@ const paneButtonVariants = cva(
   },
 );
 
+/**
+ * Props for {@link PaneButton}.
+ *
+ * @public
+ */
 type PaneButtonProps = React.ComponentProps<'button'> &
   VariantProps<typeof paneButtonVariants> & {
     readonly asChild?: boolean;
@@ -44,6 +49,7 @@ type PaneButtonProps = React.ComponentProps<'button'> &
  * triggers (DropdownMenuTrigger, PopoverTrigger, etc.).
  *
  * An optional `tooltip` prop wraps the button in a Tooltip automatically.
+ * @public
  */
 function PaneButton({
   asChild = false,

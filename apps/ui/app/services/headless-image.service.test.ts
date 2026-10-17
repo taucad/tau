@@ -727,27 +727,27 @@ describe('HeadlessImageService', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
-    { pointer: 'coarse', admitted: false },
-    { pointer: 'fine', admitted: true },
-  ])('should admit automatic GPU previews on a $pointer-pointer device: $admitted', async ({ pointer, admitted }) => {
-    // A phone keeps a second WebGPU device and its 1536x1152 targets alive next to the viewer.
-    vi.stubGlobal('navigator', {
-      gpu: {
-        requestAdapter: async () => ({
-          isFallbackAdapter: false,
-          info: { vendor: 'apple', architecture: 'gpu' },
-        }),
-      },
-    });
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: pointer === 'coarse' && query === '(pointer: coarse)',
-    }));
-    try {
-      const { headlessImageBackend } = await import('#services/headless-image-backend.js');
-      await expect(headlessImageBackend.isAutomaticGpuAvailable?.()).resolves.toBe(admitted);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+  it.each([{ pointer: 'coarse' }, { pointer: 'fine' }])(
+    'should admit automatic GPU previews on a $pointer-pointer device',
+    async ({ pointer }) => {
+      // Phones capture thumbnails too; the idle-terminated image worker bounds what they hold.
+      vi.stubGlobal('navigator', {
+        gpu: {
+          requestAdapter: async () => ({
+            isFallbackAdapter: false,
+            info: { vendor: 'apple', architecture: 'gpu' },
+          }),
+        },
+      });
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: pointer === 'coarse' && query === '(pointer: coarse)',
+      }));
+      try {
+        const { headlessImageBackend } = await import('#services/headless-image-backend.js');
+        await expect(headlessImageBackend.isAutomaticGpuAvailable?.()).resolves.toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 });

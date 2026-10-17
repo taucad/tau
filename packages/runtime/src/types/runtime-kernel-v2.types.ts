@@ -270,6 +270,12 @@ export type KernelDefinitionV2<
     context: Context,
   ): boolean | Promise<boolean>;
   releaseHandle?(input: Readonly<{ handle: Handle }>, services: KernelServices, context: Context): void;
+  /**
+   * Bytes of WebAssembly linear memory the kernel's instance has committed, read when a rendering is delivered and
+   * reported on it as `heapBytes`. Linear memory never shrinks, so a host may recycle the worker above its device's
+   * threshold. Omit it for a kernel without a WebAssembly heap.
+   */
+  heapBytes?(context: Context): number | undefined;
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
   RenderRequirement<Views> &

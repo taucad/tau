@@ -12,6 +12,8 @@
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;
 \* queued admission, FIFO delivery and durable cancellation retain these owners.
+\* Relabelling Steer as Send now changes only presentation; Steer keeps its targeted
+\* durable cancel, and the next message's run waits on the stopped attempt in the host.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

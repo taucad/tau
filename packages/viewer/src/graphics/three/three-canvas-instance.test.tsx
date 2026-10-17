@@ -12,6 +12,7 @@ import {
   WebGPUCoordinateSystem,
 } from 'three';
 import type { Camera } from 'three';
+import { mock } from 'vitest-mock-extended';
 
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebglErrorFallback } from '#cad/webgl-fallback.jsx';
@@ -31,6 +32,7 @@ let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefi
 let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefined;
 let latestCanvasCamera: ReactThreeFiber.CanvasProps['camera'] | undefined;
 let latestCanvasGl: ReactThreeFiber.CanvasProps['gl'] | undefined;
+let latestCanvasDpr: ReactThreeFiber.CanvasProps['dpr'] | undefined;
 let exposureAfterCreated: number | undefined;
 let latestCanvasState: StubRootState | undefined;
 /** The camera the stub root rays from; a test replaces it. */
@@ -87,6 +89,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     readonly children?: React.ReactNode;
     readonly camera?: ReactThreeFiber.CanvasProps['camera'];
     readonly gl?: ReactThreeFiber.CanvasProps['gl'];
+    readonly dpr?: ReactThreeFiber.CanvasProps['dpr'];
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: StubRootState) => void;
@@ -95,6 +98,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
   function StubCanvas({
     camera,
     children,
+    dpr,
     eventPrefix,
     eventSource,
     gl: glFactory,
@@ -102,6 +106,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
   }: StubCanvasProps): JSX.Element {
     latestCanvasCamera = camera;
     latestCanvasGl = glFactory;
+    latestCanvasDpr = dpr;
     latestCanvasEventPrefix = eventPrefix;
     latestCanvasEventSource = eventSource;
 
@@ -234,6 +239,7 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasEventSource = undefined;
     latestCanvasCamera = undefined;
     latestCanvasGl = undefined;
+    latestCanvasDpr = undefined;
     exposureAfterCreated = undefined;
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
@@ -243,6 +249,34 @@ describe('ThreeCanvasInstance', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('drawing-buffer pixel ratio', () => {
+    const renderAt = (devicePixelRatio: number, coarsePointer: boolean): void => {
+      vi.spyOn(globalThis, 'devicePixelRatio', 'get').mockReturnValue(devicePixelRatio);
+      vi.spyOn(globalThis, 'matchMedia').mockImplementation((query: string) =>
+        mock<MediaQueryList>({
+          matches: coarsePointer && query === '(pointer: coarse)',
+          media: query,
+        }),
+      );
+      render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
+    };
+
+    it('should cap a coarse-pointer phone at 1.5 so every render target holds 44% fewer pixels', () => {
+      renderAt(3, true);
+      expect(latestCanvasDpr).toBe(1.5);
+    });
+
+    it('should keep the 2x cap on a fine-pointer display', () => {
+      renderAt(3, false);
+      expect(latestCanvasDpr).toBe(2);
+    });
+
+    it('should never raise the pixel ratio above the device ratio', () => {
+      renderAt(1, true);
+      expect(latestCanvasDpr).toBe(1);
+    });
   });
 
   it.each(['webgl', 'webgpu'] as const)(

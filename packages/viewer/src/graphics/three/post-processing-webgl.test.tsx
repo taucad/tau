@@ -1,6 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { useLayoutEffect } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { AlwaysDepth, HalfFloatType } from 'three';
 
 const mocks = vi.hoisted(() => {
@@ -30,7 +31,14 @@ const mocks = vi.hoisted(() => {
   const rig = { perspectiveCamera, orthographicCamera, activeCamera: perspectiveCamera };
 
   let frame:
-    | ((state: { gl: typeof gl; scene: typeof scene; camera: typeof perspectiveCamera }, delta: number) => void)
+    | ((
+        state: {
+          gl: typeof gl;
+          scene: typeof scene;
+          camera: typeof perspectiveCamera;
+        },
+        delta: number,
+      ) => void)
     | undefined;
   let retarget: ((camera: typeof perspectiveCamera) => void) | undefined;
   let restoreDepth: ((target?: unknown) => void) | undefined;
@@ -42,6 +50,7 @@ const mocks = vi.hoisted(() => {
     outputBuffer: { samples: number };
     options: unknown;
     addPass: ReturnType<typeof vi.fn>;
+    removePass: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     render: ReturnType<typeof vi.fn>;
     setSize: ReturnType<typeof vi.fn>;
@@ -50,7 +59,10 @@ const mocks = vi.hoisted(() => {
     renderedCameras: unknown[];
     renderedAoCameras: unknown[][];
   }> = [];
-  const renderPasses: Array<{ camera: unknown; dispose: ReturnType<typeof vi.fn> }> = [];
+  const renderPasses: Array<{
+    camera: unknown;
+    dispose: ReturnType<typeof vi.fn>;
+  }> = [];
   const aoPasses: Array<{
     camera: unknown;
     enabled: boolean;
@@ -59,8 +71,10 @@ const mocks = vi.hoisted(() => {
     configurationWrites: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
   }> = [];
-  const toneMappingEffects: Array<{ mode: string; blendMode: { blendFunction: string; opacity: { value: number } } }> =
-    [];
+  const toneMappingEffects: Array<{
+    mode: string;
+    blendMode: { blendFunction: string; opacity: { value: number } };
+  }> = [];
 
   return {
     aoPasses,
@@ -171,6 +185,12 @@ vi.mock('postprocessing', () => {
         }
       },
     );
+    public readonly removePass = vi.fn((pass: Record<string, unknown>) => {
+      const index = this.passes.indexOf(pass);
+      if (index !== -1) {
+        this.passes.splice(index, 1);
+      }
+    });
     public readonly dispose = vi.fn(() => {
       for (const pass of this.passes) {
         pass.dispose?.();
@@ -655,5 +675,50 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     }
     expect(mocks.renderPasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
     expect(mocks.aoPasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
+  });
+});
+
+describe('PostProcessingWebGL on a coarse-pointer device', () => {
+  beforeEach(() => {
+    mocks.aoPasses.length = 0;
+    mocks.composers.length = 0;
+    mocks.renderPasses.length = 0;
+    mocks.toneMappingEffects.length = 0;
+    mocks.rig.activeCamera = mocks.perspectiveCamera;
+    mocks.setFailCamera(undefined);
+    mocks.setFailWarmupCamera(undefined);
+    mocks.setFrame(undefined);
+    mocks.setRetarget(undefined);
+    vi.spyOn(globalThis, 'matchMedia').mockImplementation((query: string) =>
+      mock<MediaQueryList>({
+        matches: query === '(pointer: coarse)',
+        media: query,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.mocked(globalThis.matchMedia).mockRestore();
+  });
+
+  it('should keep one AO pass, releasing the other projection when the camera switches', async () => {
+    await mount();
+    expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera]);
+    const [perspectivePass] = mocks.aoPasses;
+
+    act(() => {
+      mocks.getRetarget()?.(mocks.orthographicCamera);
+    });
+
+    expect(perspectivePass!.dispose).toHaveBeenCalledOnce();
+    expect(mocks.composers[0]!.passes).not.toContain(perspectivePass);
+    const live = mocks.composers[0]!.passes.filter((pass) => pass['configuration'] !== undefined);
+    expect(live.map((pass) => pass['camera'])).toEqual([mocks.orthographicCamera]);
+  });
+
+  it('should render AO at half resolution into a single-sample composer that relies on FXAA', async () => {
+    await mount();
+    expect(mocks.composers[0]!.options).toMatchObject({ multisampling: 0 });
+    expect(mocks.aoPasses[0]!.configuration).toMatchObject({ halfRes: true });
   });
 });

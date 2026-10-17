@@ -1,6 +1,8 @@
 import { useLayoutEffect } from 'react';
 import type { RenderFrame } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
@@ -39,7 +41,10 @@ const mocks = vi.hoisted(() => {
         },
       }),
     },
-    gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
+    gl: Object.create(null) as {
+      compileAsync?: ReturnType<typeof vi.fn>;
+      coordinateSystem?: number;
+    },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
     size: { height: 768, width: 1024 },
@@ -446,6 +451,79 @@ describe('GltfMesh in-place updates', () => {
   });
 });
 
+/**
+ * Node's collector, reached without a CLI flag so the leak checks run in the ordinary suite. A
+ * WeakRef target stays alive until its job ends, so collect from a later task, twice.
+ */
+const collectGarbage = async (): Promise<void> => {
+  setFlagsFromString('--expose_gc');
+  const gc = runInNewContext('gc') as () => void;
+  for (let pass = 0; pass < 2; pass += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each collection runs in a fresh task.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    gc();
+  }
+};
+
+/**
+ * Present `revisions` successive GLBs and report which earlier ones can still be reached. Only
+ * weak references to the bytes stay here, so anything that survives is held by the viewer.
+ */
+async function liveGlbsAfter(
+  revisions: number,
+  build: (revision: number) => Uint8Array<ArrayBuffer>,
+): Promise<number[]> {
+  const sources: Array<WeakRef<Uint8Array<ArrayBuffer>>> = [];
+  const element = (revision: number): React.JSX.Element => {
+    const glb = build(revision);
+    sources.push(new WeakRef(glb));
+    return (
+      <GltfMesh gltfFile={glb} geometryHash={`r${revision}`} presentationRevision={revision} enableMatcap={false} />
+    );
+  };
+  // Testing Library's `debug` keeps the element first rendered, so mount empty and present by rerender.
+  const view = render(<group />);
+  for (let revision = 1; revision <= revisions; revision += 1) {
+    view.rerender(element(revision));
+    // oxlint-disable-next-line no-await-in-loop -- each revision must commit before the next arrives.
+    await waitForCommits(Array.from({ length: revision }, (_, index) => index + 1));
+  }
+  mocks.graphicsActor.send.mockClear();
+  await act(async () => undefined);
+  await collectGarbage();
+  return sources.flatMap((source, index) => (source.deref() ? [index + 1] : []));
+}
+
+describe('GltfMesh superseded presentations', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    mocks.graphicsActor.send.mockClear();
+    mocks.invalidate.mockClear();
+    mocks.frameCallback = undefined;
+  });
+
+  it('should release every superseded GLB after full re-presentations', async () => {
+    // Each revision flips the winding, so every one is parsed and presented in full.
+    const live = await liveGlbsAfter(5, (revision) =>
+      buildGlb({
+        lift: revision,
+        indices: revision % 2 ? [0, 1, 2] : [0, 2, 1],
+      }),
+    );
+    // The presented revision, and the one React keeps as the previous props, may remain.
+    expect(live.filter((revision) => revision < 4)).toEqual([]);
+  });
+
+  it('should release every superseded GLB after in-place updates', async () => {
+    const live = await liveGlbsAfter(5, (revision) => buildGlb({ lift: revision }));
+    // The first revision's bytes back the in-place targets captured from its parse.
+    expect(live.filter((revision) => revision > 1 && revision < 4)).toEqual([]);
+  });
+});
+
 describe('GltfMesh model raycast', () => {
   afterEach(() => {
     mocks.size = { height: 768, width: 1024 };
@@ -476,5 +554,29 @@ describe('GltfMesh model raycast', () => {
 
     expect(query).not.toHaveBeenCalled();
     expect(intersections).toEqual([]);
+  });
+
+  it('should not keep a second copy of the GLB binary chunk once the presentation is committed', async () => {
+    // GLTFLoader slices the BIN chunk into its own ArrayBuffer and the presentation keeps the parser
+    // for section topology, so that copy of the model file used to live as long as the model.
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const source = buildGlb();
+    render(<GltfMesh gltfFile={source} geometryHash='bin' presentationRevision={1} enableMatcap={false} />);
+    await waitForCommits([1]);
+    const parsed = parseAsync.mock.results[0]?.value as Promise<GLTF> | undefined;
+    const { parser } = await parsed!;
+    const binary = (parser.extensions as Record<string, { body: unknown } | undefined>)['KHR_binary_glTF'];
+
+    expect(binary?.body).toBeNull();
+    // Section topology still decodes accessors it never loaded, now straight from the source bytes.
+    const view = (
+      parser.json as {
+        bufferViews: Array<{ byteOffset?: number; byteLength: number }>;
+      }
+    ).bufferViews[0]!;
+    const jsonLength = new DataView(source.buffer, source.byteOffset).getUint32(12, true);
+    const binStart = source.byteOffset + 28 + jsonLength + (view.byteOffset ?? 0);
+    const loaded = await parser.loadBufferView(0);
+    expect([...new Uint8Array(loaded)]).toEqual([...new Uint8Array(source.buffer, binStart, view.byteLength)]);
   });
 });

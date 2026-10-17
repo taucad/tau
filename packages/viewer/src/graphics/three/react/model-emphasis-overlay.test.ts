@@ -221,6 +221,30 @@ describe('model emphasis overlay resources', () => {
     expect(modelEmphasisOverlayPriority).toBeLessThan(2);
   });
 
+  it('should release the device-resolution mask once nothing is emphasised', () => {
+    // 4x MSAA colour + depth at a full-screen phone's drawing buffer is ~51 MiB; it must not
+    // outlive the hover or selection that needed it.
+    const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
+    syncModelEmphasisProxies(resources, {
+      hover: [makeSource()],
+      selected: [],
+    });
+    resources.setMaskSize({ width: 786, height: 1704, pixelRatio: 2 });
+    const disposeTarget = vi.spyOn(resources.maskTarget, 'dispose');
+
+    syncModelEmphasisProxies(resources, emptyModelEmphasisSet);
+
+    expect({
+      width: resources.maskTarget.width,
+      height: resources.maskTarget.height,
+    }).toEqual({
+      width: 1,
+      height: 1,
+    });
+    expect(disposeTarget).toHaveBeenCalledOnce();
+    resources.dispose();
+  });
+
   it('disposes the mask target, composite and shared materials once', () => {
     const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const disposeTarget = vi.spyOn(resources.maskTarget, 'dispose');

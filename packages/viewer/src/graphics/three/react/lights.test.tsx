@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   webglPrefilter: vi.fn(),
   webgpuPrefilter: vi.fn(),
   generatorDispose: vi.fn(),
+  environmentResolution: vi.fn(),
   useTheme: vi.fn((): { theme: 'light' | 'dark' } => ({ theme: 'light' })),
 }));
 
@@ -59,7 +60,8 @@ vi.mock('@react-three/fiber', () => ({
 }));
 
 vi.mock('@react-three/drei', () => ({
-  Environment({ children }: { readonly children: React.ReactNode }) {
+  Environment({ children, resolution }: { readonly children: React.ReactNode; readonly resolution?: number }) {
+    mocks.environmentResolution(resolution);
     const source = useMemo(() => new CubeTexture(), []);
     // Mirrors installed Drei 10.7.7's children-dependent capture and scene assignment.
     useLayoutEffect(() => {
@@ -203,11 +205,44 @@ describe('Lights', () => {
       view.unmount();
       expect(scene.environment).toBe(previous);
       expect(targets[1]?.dispose).toHaveBeenCalledTimes(1);
-      expect(mocks.generatorDispose).toHaveBeenCalledTimes(1);
+      expect(mocks.generatorDispose).toHaveBeenCalledTimes(2);
       expect(sourceDispose).not.toHaveBeenCalled();
       expect(previousDispose).not.toHaveBeenCalled();
     },
   );
+
+  it('should release the PMREM working target as soon as each environment is filtered', () => {
+    // The generator's ping-pong target is as large as the filtered output (24 MiB at 512 px) and
+    // is only needed while filtering.
+    const view = render(<Lights settings={{ environment: 'studio' }} />);
+    expect(mocks.webglPrefilter).toHaveBeenCalledTimes(1);
+    expect(mocks.generatorDispose).toHaveBeenCalledTimes(1);
+    expect(scene.environment).toBe(targets[0]?.texture);
+    expect(targets[0]?.dispose).not.toHaveBeenCalled();
+
+    view.rerender(<Lights settings={{ environment: 'studio', keyIntensity: 32 }} />);
+    expect(mocks.webglPrefilter).toHaveBeenCalledTimes(2);
+    expect(mocks.generatorDispose).toHaveBeenCalledTimes(2);
+    expect(scene.environment).toBe(targets[1]?.texture);
+  });
+
+  it.each([
+    { pointer: 'coarse', resolution: 256 },
+    { pointer: 'fine', resolution: 512 },
+  ] as const)('should capture a $resolution px environment on a $pointer-pointer device', ({ pointer, resolution }) => {
+    vi.spyOn(globalThis, 'matchMedia').mockImplementation((query: string) =>
+      mock<MediaQueryList>({
+        matches: pointer === 'coarse' && query === '(pointer: coarse)',
+        media: query,
+      }),
+    );
+    try {
+      render(<Lights settings={{ environment: 'studio' }} />);
+      expect(mocks.environmentResolution).toHaveBeenLastCalledWith(resolution);
+    } finally {
+      vi.mocked(globalThis.matchMedia).mockRestore();
+    }
+  });
 
   it('should restore the previous environment when switching to none', () => {
     const previous = new Texture();

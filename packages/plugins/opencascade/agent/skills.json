@@ -4,7 +4,7 @@
       "slug": "cad-opencascadejs",
       "name": "OpenCascade.js authoring",
       "description": "Guides direct OpenCascade.js BRep authoring in main.ts. Use when creating or editing libcascade geometry.",
-      "version": "0.1.0-beta.5",
+      "version": "0.1.0-beta.6",
       "whenToUse": "Use when creating or editing libcascade geometry.",
       "directory": "cad-opencascadejs",
       "files": [

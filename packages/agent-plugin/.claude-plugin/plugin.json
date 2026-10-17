@@ -1,7 +1,7 @@
 {
   "name": "tau",
   "displayName": "Tau",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Evaluate, test, screenshot and export code-CAD models with Tau.",
   "author": {
     "name": "Tau",

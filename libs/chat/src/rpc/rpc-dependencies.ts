@@ -194,12 +194,15 @@ export type RpcGraphicsExportModelResult =
  *
  * Every method takes an explicit `targetFile` so the agent must name the
  * geometry unit it is acting on; there is no project-level fallback. Export
- * options, when present, are the host's and go to the runtime export as given.
+ * options, when present, are the host's and go to the runtime export as
+ * given. Of the content, only a key set to `true` is a request: an export
+ * carries no edges or topology by default, so `false` means the same as
+ * leaving the key out.
  * @public
  */
 export type RpcGraphicsClient = {
   exportModel(
-    args: Pick<ExportModelRpcInput, 'targetFile' | 'to' | 'options' | 'parameters'>,
+    args: Pick<ExportModelRpcInput, 'targetFile' | 'to' | 'options' | 'content' | 'parameters'>,
     context?: RpcInvocationContext,
   ): Promise<RpcGraphicsExportModelResult>;
 };

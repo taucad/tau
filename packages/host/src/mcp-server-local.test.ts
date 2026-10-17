@@ -284,6 +284,60 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
+  it("should ask export_model for a shown source's topology only when its GLB route carries it", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-viewer-topology-'));
+    await writeFile(join(root, 'main.ts'), '');
+    await writeFile(join(root, 'main.scad'), '');
+    const invocations: HostToolInvocation[] = [];
+    const registry: ToolRegistry = {
+      list: () => [testModelTool],
+      invoke: async (invocation) => {
+        invocations.push(invocation);
+        await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+        await writeFile(join(root, '.tau', 'artifacts', 'model.glb'), 'glb');
+        return {
+          content: {
+            success: true,
+            files: [{ artifactPath: '.tau/artifacts/model.glb', mimeType: 'model/gltf-binary' }],
+          },
+          isError: false,
+        };
+      },
+    };
+    const glb = { targetFormat: 'glb', fidelity: 'mesh', exportOptions: { schema: {}, defaults: {} } } as const;
+    const local = await serveLocalHostMcp({
+      workspaceRoot: root,
+      registry,
+      checkouts: new Map(),
+      viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
+      runtimeClient: async () => ({
+        capabilities: {
+          routes: [
+            {
+              ...glb,
+              kernelId: 'replicad',
+              content: { schema: { type: 'object', properties: { includeTopology: { type: 'boolean' } } } },
+            },
+            { ...glb, kernelId: 'openscad' },
+          ],
+        },
+        connect: async () => undefined,
+        describe: async ({ source }) => ({ kernelId: source.path.endsWith('.scad') ? 'openscad' : 'replicad' }),
+      }),
+    });
+    try {
+      await served.options?.viewer?.show({ targetFile: 'main.ts' }, { toolCallId: 'show-1', presentation: 'inline' });
+      await served.options?.viewer?.show({ targetFile: 'main.scad' }, { toolCallId: 'show-2', presentation: 'inline' });
+      expect(invocations.map(({ toolName: name, input }) => ({ name, input }))).toEqual([
+        { name: 'export_model', input: { targetFile: 'main.ts', to: 'glb', content: { includeTopology: true } } },
+        { name: 'export_model', input: { targetFile: 'main.scad', to: 'glb' } },
+      ]);
+    } finally {
+      await local.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('should offer prepare_kernel as open-world and idempotent, and forward its progress reports to the client', async () => {
     const registry: ToolRegistry = {
       list: () => [

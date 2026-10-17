@@ -23,6 +23,7 @@ export async function handleExportModel(
       targetFile: input.targetFile,
       to: input.to,
       ...(input.options === undefined ? {} : { options: input.options }),
+      ...(input.content === undefined ? {} : { content: input.content }),
       ...(input.parameters === undefined ? {} : { parameters: input.parameters }),
     },
     context,

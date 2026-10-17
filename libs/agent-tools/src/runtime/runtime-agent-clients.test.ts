@@ -14,7 +14,7 @@ import type {
   ViewUpdateOutcome,
   WideViewRequest,
 } from '@taucad/runtime';
-import type { TessellationReport } from '@taucad/runtime/types';
+import type { ExportRoute, RuntimeCapabilities, RuntimeContentKey, TessellationReport } from '@taucad/runtime/types';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
@@ -59,11 +59,26 @@ const defaultExport: ExportResult = {
   files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: Uint8Array.of(1) }],
   issues: [],
 };
+/** The runtime's refusal of a content key the selected route lacks. */
+const contentRefusal = (key: string): ExportResult => ({
+  success: false,
+  issues: [
+    {
+      code: 'RUNTIME_CONTENT_UNSUPPORTED',
+      message: `Content property "${key}" is not supported by this route.`,
+      type: 'runtime',
+      severity: 'error',
+    },
+  ],
+});
 
+type ExportRequest = Parameters<RuntimeDocument['export']>[1];
 type RuntimeFixtureOptions = Readonly<{
   evaluate?: (path: string) => Promise<Evaluation> | Evaluation;
   render?: (path: string, view: string | undefined) => Promise<Rendering> | Rendering;
-  export?: (path: string, to: string) => Promise<ExportResult> | ExportResult;
+  export?: (path: string, to: string, request: ExportRequest) => Promise<ExportResult> | ExportResult;
+  kernelId?: string;
+  capabilities?: RuntimeAgentClient['capabilities'];
 }>;
 
 const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
@@ -102,7 +117,9 @@ const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
     const document: RuntimeDocument = {
       id: `document:${path}`,
       view: documentView,
-      export: vi.fn(async (to: string) => options.export?.(path, to) ?? defaultExport),
+      export: vi.fn(
+        async (to: string, request?: ExportRequest) => options.export?.(path, to, request) ?? defaultExport,
+      ),
       evaluation: vi.fn(
         async (): Promise<UpdateOutcome> => ({
           superseded: false,
@@ -129,8 +146,8 @@ const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
   });
   const runtime: RuntimeAgentClient = {
     open,
-    describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
-    capabilities: undefined,
+    describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: options.kernelId, issues: [] })),
+    capabilities: options.capabilities,
   };
   return { runtime, open, documents, viewRequests };
 };
@@ -638,6 +655,132 @@ describe('createRuntimeAgentClients default view options', () => {
       clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', view: 'drawing', includeEdges: true }),
     ).resolves.toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message });
     expect(clients.exporter).not.toHaveBeenCalled();
+  });
+
+  it('should ask the export only for the content keys set to true', async () => {
+    const fixture = runtimeFixture({
+      /* As the runtime does: a route refuses a content key it lacks, even one set to false. */
+      export: (_path, to, request) =>
+        to === 'stl' && request?.content !== undefined ? contentRefusal('includeTopology') : defaultExport,
+    });
+    const clients = clientsFor(fixture);
+
+    await clients.graphics.exportModel({ targetFile: 'main.ts', to: 'glb', content: { includeTopology: true } });
+    await clients.graphics.exportModel({
+      targetFile: 'main.ts',
+      to: 'glb',
+      content: { includeEdges: false, includeTopology: true },
+    });
+    await clients.graphics.exportModel({ targetFile: 'main.ts', to: 'glb' });
+    await expect(
+      clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl', content: { includeTopology: false } }),
+    ).resolves.toMatchObject({ success: true, exportId: 'mesh' });
+    await expect(
+      clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl', content: { includeEdges: false } }),
+    ).resolves.toMatchObject({ success: true, exportId: 'mesh' });
+
+    const [topology, topologyWithoutEdges, plain, falseTopology, falseEdges] = fixture.documents;
+    expect(topology?.export).toHaveBeenCalledWith('glb', { content: { includeTopology: true }, signal: undefined });
+    expect(topologyWithoutEdges?.export).toHaveBeenCalledWith('glb', {
+      content: { includeTopology: true },
+      signal: undefined,
+    });
+    expect(plain?.export).toHaveBeenCalledWith('glb', { signal: undefined });
+    expect(falseTopology?.export).toHaveBeenCalledWith('stl', { signal: undefined });
+    expect(falseEdges?.export).toHaveBeenCalledWith('stl', { signal: undefined });
+  });
+
+  const route = (
+    kernelId: string,
+    targetFormat: ExportRoute['targetFormat'],
+    keys: readonly RuntimeContentKey[] = [],
+  ): ExportRoute => ({
+    targetFormat,
+    kernelId,
+    sourceFormat: targetFormat,
+    fidelity: 'mesh',
+    exportOptions: { schema: {}, defaults: {} },
+    ...(keys.length === 0
+      ? {}
+      : {
+          content: {
+            schema: { properties: Object.fromEntries(keys.map((key) => [key, { type: 'boolean' }])) },
+            defaults: {},
+          },
+        }),
+  });
+  const contentCapabilities: RuntimeCapabilities = {
+    transport: {
+      descriptor: {
+        id: 'in-process',
+        wire: 'in-process',
+        memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
+        fileSystem: 'inline',
+      },
+    },
+    registrations: [],
+    renderCapabilities: {},
+    routes: [
+      route('replicad', 'glb', ['includeEdges', 'includeTopology']),
+      route('replicad', 'gltf', ['includeTopology']),
+      route('replicad', 'stl'),
+      route('picovoxel', 'glb', ['includeTopology']),
+      route('picovoxel', 'stl'),
+      route('openscad', 'glb'),
+      route('openscad', 'stl'),
+    ],
+  };
+
+  it.each([
+    { source: 'replicad', kernelId: 'replicad', remedy: 'Export to glb or gltf to keep includeTopology, or omit it.' },
+    { source: 'picovoxel', kernelId: 'picovoxel', remedy: 'Export to glb to keep includeTopology, or omit it.' },
+    {
+      source: 'openscad',
+      kernelId: 'openscad',
+      remedy: 'No other export of this source carries includeTopology; omit it.',
+    },
+    { source: 'a kernel without routes', kernelId: 'build123d', remedy: 'Omit includeTopology for this export.' },
+    { source: 'an unknown kernel', kernelId: undefined, remedy: 'Omit includeTopology for this export.' },
+  ])('should name the exports that carry refused topology for $source', async ({ kernelId, remedy }) => {
+    const fixture = runtimeFixture({
+      export: (_path, to, request) =>
+        to === 'stl' && request?.content?.includeTopology === true ? contentRefusal('includeTopology') : defaultExport,
+      ...(kernelId === undefined ? {} : { kernelId, capabilities: contentCapabilities }),
+    });
+
+    await expect(
+      clientsFor(fixture).graphics.exportModel({
+        targetFile: 'main.ts',
+        to: 'stl',
+        content: { includeTopology: true },
+      }),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: `Content property "includeTopology" is not supported by this route. ${remedy}`,
+    });
+  });
+
+  it('should add no remedy when the route carries the refused content, whose cause the runtime states', async () => {
+    /* The glTF transcoder's refusal: the route carries topology, but Draco compression cannot keep it. */
+    const message = 'Draco compression cannot preserve Tau CAD topology metadata. Export without topology.';
+    const fixture = runtimeFixture({
+      export: () => ({
+        success: false,
+        issues: [{ code: 'RUNTIME_CONTENT_UNSUPPORTED', message, type: 'runtime', severity: 'error' }],
+      }),
+      kernelId: 'replicad',
+      capabilities: contentCapabilities,
+    });
+
+    await expect(
+      clientsFor(fixture).graphics.exportModel({
+        targetFile: 'main.ts',
+        to: 'glb',
+        options: { compression: 'draco' },
+        content: { includeTopology: true },
+      }),
+    ).resolves.toEqual({ success: false, errorCode: 'VALIDATION_ERROR', message });
   });
 
   it('refuses export options the kernel rejects with VALIDATION_ERROR', async () => {

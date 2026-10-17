@@ -51,7 +51,7 @@ Plugin factories and instances carry the exact `runtimePluginAbiVersion` so dupl
 
 Executable definitions stay worker-owned. Heavy backends load in `defineKernel` or `defineTranscoder` `initialize()` and live in the returned context; module-level backend caches are not part of the capability model.
 
-Root-importing a toolkit exposes descriptors without fetching its WASM payload; kernels and transcoders initialize when their selected route first executes, once per worker. `@taucad/smlib`, for example, imports `@classcad/smlibwasm` and its 6.5 MB kernel only from `initialize()`.
+Root-importing a toolkit exposes descriptors without fetching its WASM payload; kernels and transcoders initialize when their selected route first executes, once per worker.
 
 Native-language kernels keep the same public lifecycle: [`@taucad/build123d`](../reference/build123d) starts its private Python child from `initialize()` and terminates the descendant tree from `onDispose()`. This is not a public runner plugin role -- the language protocol, process supervision, and artifact channel stay package-owned.
 

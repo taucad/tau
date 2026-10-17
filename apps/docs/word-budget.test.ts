@@ -34,14 +34,16 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/concepts/render-lifecycle.mdx': 1400,
   'runtime/concepts/worker-model.mdx': 2000,
   // Raised 450 -> 500 on 2026-09-27 for the tscircuit kernel (charter D11).
-  'runtime/getting-started/installation.mdx': 500,
+  // Raised 500 -> 550 on 2026-10-17 for the SMLib install section (SMLib kernel).
+  'runtime/getting-started/installation.mdx': 550,
   'runtime/getting-started/llms-txt.mdx': 250,
   'runtime/getting-started/quick-start.mdx': 450,
   'runtime/getting-started/your-first-kernel.mdx': 900,
-  'runtime/guides/bundler-configuration.mdx': 700,
+  // Raised 700 -> 750 on 2026-10-17 for the SMLib Vite variation (SMLib kernel).
+  'runtime/guides/bundler-configuration.mdx': 750,
   'runtime/guides/bundling.mdx': 800,
-  // Raised 400 -> 500 on 2026-09-27 for the tscircuit kernel (charter D11).
-  'runtime/guides/choosing-a-kernel.mdx': 500,
+  // Raised 400 -> 500 on 2026-09-27 for the tscircuit kernel (charter D11), and 500 -> 550 on 2026-10-17 for the SMLib kernel.
+  'runtime/guides/choosing-a-kernel.mdx': 550,
   'runtime/guides/cooperate-with-cancellation.mdx': 650,
   'runtime/guides/cross-origin-isolation.mdx': 750,
   'runtime/guides/custom-kernel.mdx': 800,
@@ -61,7 +63,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // Agent Workbench Control T20 adds two reviewed editor pages, each with a 500-word budget.
 // T21 baseline repair documents configuration, jobs, machines, host, compute, Electron and protocol APIs in eight references.
 // Raised 33,500 -> 34,700 on 2026-10-15 for machines contract revision 3 (machines, machine-providers and host references).
-const siteCeiling = 34_700;
+// Raised 34,700 -> 34,850 on 2026-10-17 for the SMLib kernel pages.
+const siteCeiling = 34_850;
 
 const documentTypeCaps = {
   tutorial: 1500,

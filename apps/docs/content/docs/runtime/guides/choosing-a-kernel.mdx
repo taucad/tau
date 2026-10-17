@@ -59,7 +59,7 @@ Build123d needs a packaged CPython payload and a project trust grant, so only a 
 
 ## Choose SMLib for NURBS BRep in TypeScript
 
-SMLib claims a `.ts` or `.js` file only when it imports `@classcad/smlibwasm`, so it composes beside Replicad without taking its files. The library loads a 6.5 MB WebAssembly kernel on first use. With Vite's dev server, exclude `@classcad/smlibwasm` from dependency optimization (see [Bundler Configuration](./bundler-configuration)). It exports STEP, STL, GLB and glTF, and the model view carries standard glTF materials.
+SMLib claims a `.ts` or `.js` file only when it imports `@classcad/smlibwasm`, so it composes beside Replicad. Its 6.5 MB WebAssembly kernel loads on first use.
 
 ## Choose tscircuit for electronics
 

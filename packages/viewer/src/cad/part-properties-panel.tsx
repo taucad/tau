@@ -114,7 +114,7 @@ export function PartPropertiesPanel({
         >
           <span className='flex items-center gap-1.5'>
             {preview.status === 'pending' ? (
-              <LoaderCircle aria-hidden='true' className='size-3.5 motion-safe:animate-spin' />
+              <LoaderCircle aria-hidden='true' className='size-3.5 spin-glyph' />
             ) : (
               <CircleAlert aria-hidden='true' className='size-3.5' />
             )}

@@ -179,7 +179,21 @@ describe('editorMachine', () => {
       expect(context.openFiles).toEqual(stubEditorState.openFiles);
       expect(selectActivePath(context)).toBe('src/main.ts');
       expect(context.activePaneId).toBe(stubPaneIdMain);
-      expect(context.panelState).toEqual(defaultPanelState);
+      expect(context.panelState).toEqual({ ...defaultPanelState, threadViews: {} });
+      actor.stop();
+    });
+
+    it('should restore a root chat thread selection from loaded panel state', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          panelState: {
+            ...defaultPanelState,
+            threadViews: { 'chat-root': { selectedTaskId: 'task-grandchild' } },
+          },
+        },
+      });
+      expect(actor.getSnapshot().context.panelState.threadViews?.['chat-root']?.selectedTaskId).toBe('task-grandchild');
       actor.stop();
     });
 

@@ -133,7 +133,7 @@ export type WorkerRevisionCommand =
    * restore. Each one is `branch.machine`'s own event — the region drives a
    * machine, not a promise.
    */
-  | Readonly<{ command: 'createBranch'; name: string; from?: string }>
+  | Readonly<{ command: 'createBranch'; name: string; from?: string; requestId?: string }>
   | Readonly<{ command: 'discardBranch'; branch: string; checkoutId?: string }>
   | Readonly<{ command: 'mergeBranch'; branch: string }>
   | Readonly<{ command: 'renameBranch'; branch: string; name: string }>
@@ -420,7 +420,7 @@ export type WorkerProjectRevisions = Readonly<{
    * something to record (P3) — so this resolves on its settlement and rejects
    * on its refusal, with the port's `code` on the error (P4).
    */
-  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
+  createBranch: (name: string, from?: string, requestId?: string) => Promise<BranchCreated>;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
    *
@@ -1124,14 +1124,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    *
    * @param name - The branch to make.
    * @param from - The revision it starts at, when the caller has one.
+   * @param requestId - Stable task attempt identity when allocation can be retried.
    * @returns The checkout the registry made for it.
    */
-  const createBranch = async (name: string, from?: string): Promise<BranchCreated> => {
+  const createBranch = async (name: string, from?: string, requestId = randomUuid()): Promise<BranchCreated> => {
     if (branchChild === undefined) {
       throw Object.assign(new Error('This project has no branch verbs running.'), { code: 'REVISIONS_UNAVAILABLE' });
     }
     const created = Promise.withResolvers<BranchCreated>();
-    const requestId = randomUuid();
     const subscriptions = [
       branchChild.on('toast.branch', (toast) => {
         if (toast.requestId !== requestId) {
@@ -1818,6 +1818,8 @@ export type WorkerRevisionRegistry = Readonly<{
    * its credential frames are ignored (the page owns them), and it is closed when the project closes.
    */
   connectReader: (port: MessagePort, projectId: string) => void;
+  /** Serve explicit-source candidate allocation to this project's resident task owner. */
+  connectTask: (port: MessagePort, projectId: string) => void;
   /** Test and teardown seam: which projects hold a live root right now. */
   openProjectIds: () => readonly string[];
   /** The live roots themselves, for a caller that must inspect one. */
@@ -1830,6 +1832,8 @@ type ProjectEntry = {
   readonly ports: Set<MessagePort>;
   /** Reader ports: served, never counted, closed with the project (W6.r1 finding 9). */
   readonly readers: Set<MessagePort>;
+  /** Task allocation ports do not keep a revision root alive after its page and placements close. */
+  readonly taskPorts: Set<MessagePort>;
   /** Live placement sessions: the root stays open while one is (TS-S5). */
   readonly placements: Set<PlacementSessionHandle>;
   /** Record what the page last said about reaching a third-party remote (S34, I8). */
@@ -1920,7 +1924,9 @@ const answerOf = (
     /* A question now too: the page that made the branch places a chat on it, so
      * it needs the checkout rather than a projection diff to guess from. */
     case 'createBranch': {
-      return tree.createBranch(request.name, request.from).then((created) => ({ kind: 'branch', ...created }) as const);
+      return tree
+        .createBranch(request.name, request.from, request.requestId)
+        .then((created) => ({ kind: 'branch', ...created }) as const);
     }
     default: {
       return undefined;
@@ -1954,6 +1960,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     }
     const ports = new Set<MessagePort>();
     const readers = new Set<MessagePort>();
+    const taskPorts = new Set<MessagePort>();
     /* Memory only, for as long as the project is open: a credential is never
      * written under a project or a workspace (I8). */
     let credential: GitRemoteCredential | undefined;
@@ -2023,6 +2030,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     const entry: ProjectEntry = {
       ports,
       readers,
+      taskPorts,
       placements: new Set(),
       pushGithub: async (held) => {
         if (
@@ -2077,6 +2085,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         reader.close();
       }
       entry.readers.clear();
+      for (const taskPort of entry.taskPorts) {
+        taskPort.close();
+      }
+      entry.taskPorts.clear();
       options.released?.(projectId);
     })();
     closing.set(projectId, release);
@@ -2136,9 +2148,14 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     });
   };
 
-  type Served = Readonly<{ entry: ProjectEntry; projectId: string; port: MessagePort; reader: boolean }>;
+  type Served = Readonly<{
+    entry: ProjectEntry;
+    projectId: string;
+    port: MessagePort;
+    role: 'page' | 'reader' | 'task';
+  }>;
   /* One port's frames: a page port counts toward the root's lifetime and carries the credential; a reader does not. */
-  const serve = ({ entry, projectId, port, reader }: Served): void => {
+  const serve = ({ entry, projectId, port, role }: Served): void => {
     port.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionRequest>) => {
       // async-iife: bootstrap -- a port frame has no caller to return to; the
       // answer rides the port.
@@ -2146,8 +2163,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         const tree = await entry.revisions;
         if (data.command === 'close') {
           try {
-            if (reader) {
+            if (role === 'reader') {
               entry.readers.delete(port);
+            } else if (role === 'task') {
+              entry.taskPorts.delete(port);
             } else if (entry.ports.size === 1 && entry.ports.has(port) && entry.placements.size === 0) {
               await closeProject(projectId);
             } else {
@@ -2177,15 +2196,19 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           return;
         }
         if (
-          reader &&
-          (data.command === 'remoteCredential' || data.command === 'publishProject' || data.command === 'pushGithub')
+          (role === 'reader' &&
+            (data.command === 'remoteCredential' ||
+              data.command === 'publishProject' ||
+              data.command === 'pushGithub' ||
+              data.command === 'createBranch')) ||
+          (role === 'task' && (data.command !== 'createBranch' || !data.from || !data.requestId))
         ) {
-          /* The page's routing and credential frames are the page's (RV9-F1); a reader cannot set or use them. */
+          /* A task port allocates only from an explicit source; neither auxiliary port owns page credentials. */
           if (data.id !== undefined) {
             port.postMessage({
               type: 'error',
               id: data.id,
-              message: "A revisions reader cannot send the project's credential or publish it.",
+              message: 'This revision port cannot perform that command.',
             } satisfies WorkerRevisionResponse);
           }
           return;
@@ -2218,7 +2241,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         }
         if (data.command === 'focus') {
           /* Focus is the page's fact about its projects (F12); a reader has none to give. */
-          if (!reader) {
+          if (role === 'page') {
             entry.setFocused(data.focused);
           }
           return;
@@ -2280,7 +2303,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         void servePlacementOn(entry, projectId, waiting);
       }
       waitingPlacements.delete(projectId);
-      serve({ entry, projectId, port, reader: false });
+      serve({ entry, projectId, port, role: 'page' });
     },
     connectReader: (port, projectId) => {
       if (
@@ -2297,7 +2320,23 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         return;
       }
       entry.readers.add(port);
-      serve({ entry, projectId, port, reader: true });
+      serve({ entry, projectId, port, role: 'reader' });
+    },
+    connectTask: (port, projectId) => {
+      if (
+        afterClose(projectId, () => {
+          registry.connectTask(port, projectId);
+        })
+      ) {
+        return;
+      }
+      const entry = projects.get(projectId);
+      if (options.hostServesRevisions?.(projectId) === true || entry === undefined) {
+        port.close();
+        return;
+      }
+      entry.taskPorts.add(port);
+      serve({ entry, projectId, port, role: 'task' });
     },
     connectPlacement: (port, projectId) => {
       if (options.hostServesRevisions?.(projectId) === true || options.servePlacement === undefined) {

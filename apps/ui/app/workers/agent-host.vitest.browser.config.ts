@@ -6,12 +6,77 @@ import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
 import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
 
+const taskGatewaySteps = new Map<string, number>();
+const taskGatewayResponse = (name: string, step: number): string[] => {
+  const tool = (toolName: string, input: Record<string, unknown>): string[] => [
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI streaming wire fields use snake_case.
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `${name}-${step}`, function: { name: toolName, arguments: JSON.stringify(input) } }] }, finish_reason: 'tool_calls' }] })}\n\n`,
+    'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+    'data: [DONE]\n\n',
+  ];
+  if (name === 'root' && step === 0) {
+    return tool('task_spawn', {
+      requestId: 'browser-child',
+      title: 'Browser child',
+      prompt: 'BROWSER_CHILD_TASK',
+      provider: { id: 'tau' },
+    });
+  }
+  if (name === 'child' && step === 0) {
+    return tool('task_spawn', {
+      requestId: 'browser-grandchild',
+      title: 'Browser grandchild',
+      prompt: 'BROWSER_GRANDCHILD_TASK',
+      provider: { id: 'tau' },
+    });
+  }
+  if (name === 'grandchild' && step === 0) {
+    return tool('create_file', { targetFile: 'candidate.txt', content: 'grandchild-only\n' });
+  }
+  if (name === 'grandchild' && step === 1) {
+    return tool('read_file', { targetFile: 'main.scad' });
+  }
+  return [
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI streaming wire fields use snake_case.
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `${name} completed.` }, finish_reason: 'stop' }] })}\n\n`,
+    'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+    'data: [DONE]\n\n',
+  ];
+};
+
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
   plugins: [
     {
       name: 'agent-host-gateway-fixture',
       configureServer(server) {
+        server.middlewares.use('/task-fixture/v1/llm/openai/v1/chat/completions', (request, response) => {
+          const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+          request.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+            chunks.push(chunk);
+          });
+          request.on('end', () => {
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+              messages?: Array<{ role?: string; content?: unknown }>;
+            };
+            const currentUser = JSON.stringify(
+              body.messages?.findLast((message) => message.role === 'user')?.content ?? '',
+            );
+            const name = currentUser.includes('BROWSER_GRANDCHILD_TASK')
+              ? 'grandchild'
+              : currentUser.includes('BROWSER_CHILD_TASK')
+                ? 'child'
+                : 'root';
+            const key = `${String(request.headers['x-tau-project-id'] ?? '')}:${name}`;
+            const step = taskGatewaySteps.get(key) ?? 0;
+            taskGatewaySteps.set(key, step + 1);
+            response.writeHead(200, {
+              'content-type': 'text/event-stream',
+              'x-tau-operation-id': `operation-${name}-${step}`,
+            });
+            response.end(taskGatewayResponse(name, step).join(''));
+          });
+        });
         server.middlewares.use('/v1/llm/openai/v1/chat/completions', (_request, response) => {
           response.writeHead(200, {
             'content-type': 'text/event-stream',
@@ -53,22 +118,32 @@ export default defineConfig({
       'manifold-3d/lib/garbage-collector.js',
       'manifold-3d/lib/gltf-io.js',
       'manifold-3d/lib/gltf-node.js',
+      'manifold-3d/lib/material.js',
       'manifold-3d/lib/level-of-detail.js',
       'manifold-3d/lib/scene-builder.js',
       'manifold-3d/lib/wasm.js',
       'manifold-3d/manifoldCAD',
       '@taucad/image > nanoraster/options',
       '@taucad/brep > occt-import-js',
+      '@taucad/middleware > meshoptimizer/simplifier',
+      '@taucad/picovoxel > picovoxel',
+      '@taucad/picovoxel > picovoxel/latticelibrary',
+      '@taucad/picovoxel > picovoxel/multi',
+      '@taucad/picovoxel > picovoxel/numerics',
+      '@taucad/picovoxel > picovoxel/shapekernel',
+      '@taucad/picovoxel > picovoxel/slicing',
       'replicad',
       'replicad-opencascadejs/multi/init',
       'replicad-opencascadejs/single/init',
       '@taucad/rhino > rhino3dm',
       'vitest-mock-extended',
+      'vscode-uri',
     ],
   },
   test: {
     include: [
       'app/workers/agent-host.browser.test.ts',
+      'app/workers/agent-host-project-tasks.browser.test.ts',
       'app/workers/agent-host-resident.browser.test.ts',
       'app/workers/agent-host-recovery.browser.test.ts',
       'app/workers/agent-host-executor-view.browser.test.ts',
@@ -86,6 +161,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
+      screenshotDirectory: fileURLToPath(new URL('../../../../out/test-results/agent-host-browser', import.meta.url)),
       // `--enable-unsafe-webgpu` is what `apps/ui-e2e` launches with; the
       // headless capture probe needs a real adapter or its answer is vacuous.
       // CI's GPU-less lane uses SwiftShader as in apps/ui-e2e.

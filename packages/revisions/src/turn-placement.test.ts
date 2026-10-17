@@ -16,7 +16,7 @@ import type { CheckedFileWrite } from '@taucad/filesystem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from 'xstate';
 
-import { revisionId } from '#algorithms/index.js';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
@@ -413,12 +413,30 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(await turnCuts(project.port, key)).toEqual(['result', 'base']);
   });
 
-  it('should answer a replayed admission after a root restart from the adopted lease', async () => {
+  it('should adopt an admission after a root restart with its original source', async () => {
     const project = await createProject();
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const before = project.open();
     const first = await before.placement.admit({ requestId: 'admit:run-1:1', key });
+    if (first.status === 'refused' || first.placement.baseRevisionId === undefined) {
+      throw new Error('Expected a minted immutable base revision.');
+    }
+    const sourceRevisionId = first.placement.baseRevisionId;
     before.revisions.actor.stop();
     await before.revisions.settled();
+    const newer = await project.port.writeRevision({
+      parents: [revisionId(sourceRevisionId)],
+      tree: new ImmutableRevisionTree([['later.ts', new TextEncoder().encode('later\n')]]),
+      provenance: { source: 'user', actorId: 'another-turn', createdAt: Date.UTC(2026, 8, 26) },
+      summary: { generated: 'An independent later revision' },
+    });
+    await expect(
+      project.port.updateRef({
+        name: 'main',
+        expectedHead: revisionId(sourceRevisionId),
+        head: revisionId(newer.commitId),
+      }),
+    ).resolves.toMatchObject({ status: 'updated' });
     const after = project.open();
     await waitFor(after.revisions.actor, (snapshot) => snapshot.context.registrySettled);
     const placed: unknown[] = [];
@@ -426,15 +444,55 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       placed.push(event.key);
     });
 
-    after.revisions.actor.send({ type: 'admitTurn', key });
-
-    expect(placed).toEqual([key]);
     const again = await after.placement.admit({ requestId: 'admit:run-1:1', key });
+    expect(placed).toEqual([key]);
     expect(again).toMatchObject({
-      status: 'replayed',
-      placement: { checkoutId: first.status === 'refused' ? '' : first.placement.checkoutId },
+      status: 'applied',
+      placement: { checkoutId: first.placement.checkoutId, baseRevisionId: sourceRevisionId },
     });
     expect(await turnCuts(project.port, key)).toEqual(['base']);
+  });
+
+  it('should replay the original clean source after an independent first-parent revision', async () => {
+    const project = await createProject();
+    const setup = project.open();
+    const initial = await setup.placement.admit({ requestId: 'admit:run-1:1', key });
+    if (initial.status === 'refused' || initial.placement.baseRevisionId === undefined) {
+      throw new Error('Expected an initial immutable revision.');
+    }
+    await setup.placement.complete({ requestId: 'complete:run-1:1', key, cut: false });
+    await firstSettlement(setup.placement);
+    await setup.placement.acknowledge({ requestId: 'acknowledge:run-1:1', key });
+    const cleanKey: TurnAttemptKey = { chatId: 'chat-1', turnId: 'turn-2', runId: 'run-2', attempt: 1 };
+    const first = await setup.placement.admit({ requestId: 'admit:run-2:1', key: cleanKey });
+    if (first.status === 'refused') {
+      throw new Error(first.message);
+    }
+    expect(first.placement.baseRevisionId).toBe(initial.placement.baseRevisionId);
+    expect(await turnCuts(project.port, cleanKey)).toEqual([]);
+    setup.revisions.actor.stop();
+    await setup.revisions.settled();
+
+    const newer = await project.port.writeRevision({
+      parents: [revisionId(initial.placement.baseRevisionId)],
+      tree: new ImmutableRevisionTree([['later.ts', new TextEncoder().encode('later\n')]]),
+      provenance: { source: 'user', actorId: 'another-turn', createdAt: Date.UTC(2026, 8, 26) },
+      summary: { generated: 'An independent later revision' },
+    });
+    await expect(
+      project.port.updateRef({
+        name: 'main',
+        expectedHead: revisionId(initial.placement.baseRevisionId),
+        head: revisionId(newer.commitId),
+      }),
+    ).resolves.toMatchObject({ status: 'updated' });
+    const after = project.open();
+    const again = await after.placement.admit({ requestId: 'admit:run-2:1', key: cleanKey });
+    expect(again).toMatchObject({
+      status: 'applied',
+      placement: { checkoutId: first.placement.checkoutId, baseRevisionId: initial.placement.baseRevisionId },
+    });
+    expect(await turnCuts(project.port, cleanKey)).toEqual([]);
   });
 
   it("should hand the admitted tools a file's bytes as a stream, as the checkout's filesystem does", async () => {

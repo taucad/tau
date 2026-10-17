@@ -84,13 +84,22 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
   };
   /* W8 TS-S5: a port into this project's revision root for the resident agent host, as a placement session or a
    * `revisions` tool reader. The worker serves it only once the page's own revision port has opened the root. */
-  const openRevisionSessionPort = (kind: 'placement' | 'reader', projectId: string): MessagePort => {
+  const openRevisionSessionPort = (kind: 'placement' | 'reader' | 'task', projectId: string): MessagePort => {
     if (!admittedProjectId || projectId !== admittedProjectId) {
       throw new Error('Revision session project authority does not match the active project.');
     }
     const channel = new MessageChannel();
     worker.postMessage(
-      { type: kind === 'placement' ? 'placementConnect' : 'revisionsReaderConnect', projectId, port: channel.port1 },
+      {
+        type:
+          kind === 'placement'
+            ? 'placementConnect'
+            : kind === 'task'
+              ? 'revisionsTaskConnect'
+              : 'revisionsReaderConnect',
+        projectId,
+        port: channel.port1,
+      },
       [channel.port1],
     );
     return channel.port2;

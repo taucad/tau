@@ -31,6 +31,7 @@ import { agentWireCompatSchemas, helloWire, v1RequestFor } from '#channel/wire-v
 import type { AgentWireCompatProtocol, V1Response } from '#channel/wire-v1.js';
 import type { CommandAnswer, CommandInput, CommandVerb, HostCommand } from '#wire/commands.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
+import type { ProjectTaskChannelRequest, ProjectTaskChannelAnswer } from '#wire/project-task-channel.schema.js';
 
 /** Options for {@link createAgentChannelClient}. @public */
 export type AgentChannelClientOptions = Readonly<{
@@ -47,6 +48,8 @@ export type AgentChannelClientOptions = Readonly<{
 
 /** One connection to an agent owner, redialled while commands are unanswered. @public */
 export type AgentChannelClient = {
+  /** Project-scoped tasks; unsupported owners answer TASK_UNAVAILABLE. */
+  projectTasks(request: ProjectTaskChannelRequest, signal?: AbortSignal): Promise<ProjectTaskChannelAnswer>;
   /**
    * Send one keyed command and await its answer. A re-send of the same key joins the entry already outstanding.
    * `signal` only stops this wait (D17): the outbox keeps the entry and re-sends it after a redial. Rejects with
@@ -103,7 +106,11 @@ const aborted = async (signal: AbortSignal): Promise<never> =>
   });
 
 /** One open connection and the wire its owner's hello named (I32). */
-type Connection = Readonly<{ channel: Channel<AgentWireCompatProtocol>; wire: 1 | typeof agentWireVersion }>;
+type Connection = Readonly<{
+  channel: Channel<AgentWireCompatProtocol>;
+  wire: 1 | typeof agentWireVersion;
+  projectTasks: boolean;
+}>;
 
 const unexpected = (answer: V1Response): never => {
   throw Object.assign(new Error(`The v1 agent host answered with ${answer.type}.`), {
@@ -283,7 +290,10 @@ export const createAgentChannelClient = (options: AgentChannelClientOptions): Ag
       opened.close('wire version unsupported');
       throw fatal;
     }
-    return { channel: opened, wire };
+    const hello = opened.hello.payload;
+    const projectTasks =
+      typeof hello === 'object' && hello !== null && 'projectTasks' in hello && hello.projectTasks === true;
+    return { channel: opened, wire, projectTasks };
   };
 
   /** The live connection, dialled once for every caller at once. */
@@ -424,6 +434,24 @@ export const createAgentChannelClient = (options: AgentChannelClientOptions): Ag
           },
         );
       }),
+    projectTasks: async (request, signal) => {
+      const current = await connection();
+      if (current.wire !== agentWireVersion || !current.projectTasks) {
+        return {
+          kind: 'refused',
+          code: 'TASK_UNAVAILABLE',
+          message: 'This host does not support project tasks. Update Tau on the host to use this feature.',
+        };
+      }
+      try {
+        return await current.channel.call('projectTasks', request, signal);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'METHOD_NOT_FOUND') {
+          return { kind: 'refused', code: 'TASK_UNAVAILABLE', message: 'This host does not support project tasks.' };
+        }
+        throw error;
+      }
+    },
     revision: async (request, signal) => {
       const current = await connection();
       if (current.wire === agentWireVersion) {

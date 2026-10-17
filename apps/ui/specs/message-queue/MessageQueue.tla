@@ -1,5 +1,9 @@
 -------------------------- MODULE MessageQueue --------------------------
 \* Presentation changes preserve admission, cancellation and command identity.
+\* The shared textarea's taskMailbox mode sends through the project-task host's
+\* text mailbox callback. It hides root-run approvals and execution/attachment
+\* controls; it never enqueues a ChatMessageQueue item or prepares a root turn.
+\* The root composer still uses this module's Submit/Persist/Prepare path.
 \* Composer Stop and its shortcut retain Stop; removing the duplicate message
 \* button and its diagnostic origin does not change cancellation or queue delivery.
 \* Explicit reorder changes only the saved queue sequence under delivery exclusion.
@@ -10,6 +14,11 @@
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
+\* Project threads opt-out only narrows task_spawn in the captured Prepare
+\* command; queued/replayed commands keep that grant and the same identity.
+\* Replacing the project host connector rebinds observation. The prepared
+\* command stays in flight through host acknowledgement, and the durable queue
+\* item and successor run barrier still use the original command identity.
 \* Grok config discovery and host-owned session selection affect composer controls;
 \* queued admission, FIFO delivery and durable cancellation retain these owners.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
@@ -127,6 +136,10 @@ Deliver(t) == LET m == s.prepared
 \* Local actor-live, abort and in-lock session guards further restrict runtime
 \* sends; deletion and optional filesystem watch availability are outside this
 \* retained-session safety model. See README for the runtime conformance slice.
+\* Acknowledge is the atomic durable queue/barrier write. The runtime holds its
+\* local session while that write is pending, even if the host log reports a
+\* paused run and the last view closes. That local lifetime is outside s; the
+\* runtime regression exercises the await between acceptance and this action.
 Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                   /\ s' = [s EXCEPT !.queue = Remove(@, s.prepared),
                      !.saved = IF Durable THEN Remove(@, s.prepared) ELSE @,

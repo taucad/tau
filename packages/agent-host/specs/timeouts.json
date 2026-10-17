@@ -853,6 +853,152 @@
       "owner": "agent-plugin-ui-blueprint W10"
     },
     {
+      "id": "PT1",
+      "bound": "Not a timer: project task mailbox cursor named after",
+      "site": "packages/agent-host/src/wire/project-tasks.schema.ts",
+      "token": "after: z.number().int().nonnegative().optional()",
+      "class": "None",
+      "owner": "acp-projects W1"
+    },
+    {
+      "id": "PT2",
+      "bound": "Not a timer: validated task wait duration in milliseconds, at most 30 s",
+      "site": "packages/agent-host/src/wire/project-tasks.schema.ts",
+      "token": "timeout: z.number().int().min(0).max(30_000).optional()",
+      "class": "None",
+      "owner": "acp-projects W1"
+    },
+    {
+      "id": "PT3",
+      "bound": "Task cancellation observation, default 10 s through the injected scheduler; expiry answers TASK_BUSY and retains the cancelling attempt and reservation, never declares settlement",
+      "site": "packages/host/src/project-tasks/coordinator.ts",
+      "token": "setTimeout(callback, waitDelay)",
+      "class": "Peer",
+      "owner": "acp-projects W1",
+      "fixedBy": "ACP-P2-OWNER-ANSWERS: task settlement owner answers (host-integration/report.md)"
+    },
+    {
+      "id": "PT4",
+      "bound": "Task change long poll, requested duration at most 30 s; expiry returns the current unchanged snapshot and holds no admission reservation",
+      "site": "packages/host/src/project-tasks/coordinator.ts",
+      "token": "schedule(changed, input.timeout ?? 30_000)",
+      "class": "Liveness",
+      "owner": "acp-projects W1"
+    },
+    {
+      "id": "PT5",
+      "bound": "Not a timer: remove validated timeout from task mailbox read parameters",
+      "site": "packages/host/src/project-tasks/coordinator.ts",
+      "token": "const { timeout: _timeout, ...readInput } = input",
+      "class": "None",
+      "owner": "acp-projects W1"
+    },
+    {
+      "id": "PT6",
+      "bound": "Root task transcript observation backstop, 24 h; stops only the read follower, never cancels model work, declares terminal state or releases an unresolved reservation",
+      "site": "packages/host/src/project-tasks/core.ts",
+      "token": "AbortSignal.timeout(24 * 60 * 60_000)",
+      "class": "Liveness",
+      "owner": "acp-projects W2"
+    },
+    {
+      "id": "PT7",
+      "bound": "Canonical project context filesystem reads, 30 s, for native client context and new root admissions",
+      "site": "packages/host/src/project-host.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "acp-projects W3"
+    },
+    {
+      "id": "PT7B",
+      "bound": "Canonical project context filesystem reads, 30 s, for new task roots",
+      "site": "packages/host/src/project-tasks/core.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "acp-projects W3"
+    },
+    {
+      "id": "PT12",
+      "bound": "Owner close observes active project task reservations at most 30 s per pass",
+      "site": "packages/host/src/project-tasks/core.ts",
+      "token": "coordinator.wait({ kind: 'host', projectId }, { after: snapshot.cursor, timeout: 30_000 }, signal)",
+      "class": "Liveness",
+      "owner": "acp-projects W1"
+    },
+    {
+      "id": "PT13",
+      "bound": "Follower waits at most 10 s to discover a project owner before a request is forwarded; an established owner proves long-operation liveness by heartbeat",
+      "site": "packages/agent-host/src/browser/project-tasks.ts",
+      "token": "const timer = setTimeout(done, remaining)",
+      "class": "Liveness",
+      "owner": "acp-projects web platform"
+    },
+    {
+      "id": "PT14",
+      "bound": "Forwarded call checks project-owner heartbeat each second and rejects only after ownership loss",
+      "site": "packages/agent-host/src/browser/project-tasks.ts",
+      "token": "const liveness = setInterval(() => {",
+      "class": "Liveness",
+      "owner": "acp-projects web platform"
+    },
+    {
+      "id": "PT15",
+      "bound": "Project owner publishes a term heartbeat each second while holding its Web Lock",
+      "site": "packages/agent-host/src/browser/project-tasks.ts",
+      "token": "heartbeat = setInterval(() => {",
+      "class": "Liveness",
+      "owner": "acp-projects web platform"
+    },
+    {
+      "id": "PT16",
+      "bound": "Visible follower retries project lock acquisition after the old owner releases it",
+      "site": "packages/agent-host/src/browser/project-tasks.ts",
+      "token": "retry = setInterval(retryClaim, heartbeatTimeout)",
+      "class": "Backoff",
+      "owner": "acp-projects web platform"
+    },
+    {
+      "id": "PT17",
+      "bound": "A released legacy chat lock retries reconciliation after 250 ms when a native marker still blocks the writer",
+      "site": "packages/agent-host/src/browser/project-chat-store.ts",
+      "token": "const timer = setTimeout(done, 250)",
+      "class": "Backoff",
+      "owner": "acp-projects web platform"
+    },
+    {
+      "id": "PT8",
+      "bound": "Child task transcript observation backstop, 24 h; on observation ending it waits for the canonical owner close and settlement, never invents a terminal result",
+      "site": "packages/host/src/project-task-integration.ts",
+      "token": "AbortSignal.timeout(24 * 60 * 60_000)",
+      "class": "Liveness",
+      "owner": "acp-projects W2"
+    },
+    {
+      "id": "PT9",
+      "bound": "Native task reconciliation transcript observation, 30 s; an unconfirmed settlement refuses TASK_BUSY, retaining the attempt and reservation",
+      "site": "packages/host/src/project-task-integration.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "Peer",
+      "owner": "acp-projects W2",
+      "fixedBy": "ACP-P2-OWNER-ANSWERS: task settlement owner answers (host-integration/report.md)"
+    },
+    {
+      "id": "PT10",
+      "bound": "Placement lease acknowledgement retry spacing: answered applied/held queries retry serially every 25 ms. Refusal answers TASK_BUSY and retains uncertainty; synchronous backend operations also retain the 1 s bound. The autonomous root follower waits under its existing 24 h lifetime and host-close signal, retaining the reservation until acknowledgement",
+      "site": "packages/host/src/project-task-integration.ts",
+      "token": "setTimeout(resolve, 25)",
+      "class": "Backoff",
+      "owner": "acp-projects W2"
+    },
+    {
+      "id": "PT11",
+      "bound": "Desktop signed-in Tau catalog fetch for an explicit child model, 10 s; expiry fails the task attempt before candidate creation",
+      "site": "apps/desktop/src/tau/project-model-resolver.ts",
+      "token": "AbortSignal.timeout(10_000)",
+      "class": "External edge",
+      "owner": "acp-projects model admission"
+    },
+    {
       "id": "D29",
       "bound": "Viewer Share pane's direct link: each git call that lists the project's files, 10 s",
       "site": "packages/host/src/mcp-viewer-share.ts",

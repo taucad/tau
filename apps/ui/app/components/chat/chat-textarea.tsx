@@ -25,6 +25,8 @@ import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
+const noChatRecords: ReturnType<typeof useChatRecords>['chats'] = [];
+
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
  * same editor, menus, meter and bar, and its pickers open as drawers.
@@ -46,6 +48,8 @@ export const ChatTextarea = memo(function ({
   creationLocationControl,
   isSubmitDisabled = false,
   mode = 'main',
+  taskMailbox = false,
+  enableApprovals = true,
 }: ChatTextareaProperties): React.JSX.Element {
   // Mutable refs populated by ChatTextareaDesktop so that drops anywhere on the
   // outer container can route file/editor chips into Tiptap nodes.
@@ -82,6 +86,7 @@ export const ChatTextarea = memo(function ({
     onBlur,
     mode,
     isSubmitDisabled,
+    taskMailbox,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
@@ -311,7 +316,8 @@ export const ChatTextarea = memo(function ({
   /* A paused run is answered from the composer, not the transcript. Only the
    * main composer, and only under a real session: the new-project composer runs
    * on `ChatComposerProvider`, which has no chat to be paused. */
-  const approvalBanner = mode === 'main' && projectContext && session ? <ChatApprovalBanner /> : undefined;
+  const approvalBanner =
+    enableApprovals && mode === 'main' && projectContext && session ? <ChatApprovalBanner /> : undefined;
 
   return (
     <ClientOnly fallback={skeleton}>
@@ -324,6 +330,7 @@ export const ChatTextarea = memo(function ({
         creationLocationControl={creationLocationControl}
         isSubmitDisabled={logic.isSubmitDisabled}
         mode={mode}
+        taskMailbox={taskMailbox}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
@@ -338,12 +345,12 @@ export const ChatTextarea = memo(function ({
         status={logic.status}
         formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
         // Context data for Tiptap
-        treeService={treeService}
-        chats={chats}
-        actionItems={screenshotActionItems}
+        treeService={taskMailbox ? undefined : treeService}
+        chats={taskMailbox ? noChatRecords : chats}
+        actionItems={taskMailbox ? undefined : screenshotActionItems}
         setDraftText={setDraftText}
-        acpAgentId={acpAgentId}
-        acpSessionData={acpSessionData}
+        acpAgentId={taskMailbox ? undefined : acpAgentId}
+        acpSessionData={taskMailbox ? undefined : acpSessionData}
         // Refs
         fileInputReference={logic.fileInputReference}
         containerReference={logic.containerReference}

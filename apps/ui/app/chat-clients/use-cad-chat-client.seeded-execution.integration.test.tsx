@@ -25,6 +25,9 @@ import { resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
+const projectThreadsFlag = vi.hoisted(() => ({ enabled: true }));
+vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => projectThreadsFlag.enabled }));
+
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
 
@@ -126,7 +129,10 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({ useModels: () => harness.models }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: () => undefined }));
-vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: () => undefined }));
+vi.mock('#hooks/use-context-payload.js', () => ({
+  useContextPayload: () => undefined,
+  readCanonicalProjectMemory: async () => undefined,
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts' }),
 }));
@@ -256,6 +262,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
 };
 
 beforeEach(() => {
+  projectThreadsFlag.enabled = true;
   harness.chats.clear();
   harness.commands.length = 0;
   harness.projectSession?.stop();
@@ -265,6 +272,22 @@ beforeEach(() => {
 });
 
 describe('seeded first turn execution', () => {
+  it.each([
+    { kind: 'acp', hostId: 'desktop', agentId: 'codex' },
+    { kind: 'tau', hostId: 'origin', model: 'openai-gpt-5.5' },
+  ] as const)('should freeze the disabled delegation grant in the prepared $kind command', async (execution) => {
+    projectThreadsFlag.enabled = false;
+    const command = await dispatchSeededTurn(execution);
+    expect(command.type).toBe('start');
+    if (command.type !== 'start') {
+      throw new Error('Expected seeded Start');
+    }
+    expect(command.payload.config?.allowedTools).not.toContain('task_spawn');
+    expect(command.payload.config?.allowedTools).toContain('read_file');
+    projectThreadsFlag.enabled = true;
+    expect(command.payload.config?.allowedTools).not.toContain('task_spawn');
+  });
+
   it('runs the external agent the consumed row selected, not the cookie Tau fallback', async () => {
     const command = await dispatchSeededTurn({ kind: 'acp', hostId: 'desktop', agentId: 'codex' });
 

@@ -23,6 +23,44 @@ const row = (revisionNumber: number, revisionId: string): RevisionRow => ({
 });
 
 describe('createPortRevisionsClient', () => {
+  it('should allocate a candidate from the admitted source with a stable task request ID', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const seen: WorkerRevisionRequest[] = [];
+    port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionRequest>) => {
+      seen.push(data);
+      if (data.command === 'createBranch' && data.id !== undefined) {
+        port2.postMessage({
+          type: 'result',
+          id: data.id,
+          result: {
+            kind: 'branch',
+            branch: data.name,
+            checkoutId: 'checkout-1',
+            checkoutRoot: '/checkouts/checkout-1',
+          },
+        } satisfies WorkerRevisionResponse);
+      }
+    });
+    port2.start();
+    const client = createPortRevisionsClient(port1);
+    try {
+      await expect(client.createCandidate('task-1-1', 'source-revision', 'task-attempt-1')).resolves.toEqual({
+        branch: 'task-1-1',
+        checkoutId: 'checkout-1',
+        checkoutRoot: '/checkouts/checkout-1',
+      });
+      expect(seen[0]).toMatchObject({
+        command: 'createBranch',
+        name: 'task-1-1',
+        from: 'source-revision',
+        requestId: 'task-attempt-1',
+      });
+    } finally {
+      client.close();
+      port2.close();
+    }
+  });
+
   it('keeps candidate fetch and publication on correlated private revision frames', async () => {
     const { port1, port2 } = new MessageChannel();
     const seen: WorkerRevisionRequest[] = [];

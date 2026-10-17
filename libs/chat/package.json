@@ -108,6 +108,7 @@
     }
   },
   "dependencies": {
+    "@taucad/agent-host": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

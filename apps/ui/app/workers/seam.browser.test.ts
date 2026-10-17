@@ -4,18 +4,21 @@
  * browser leg: the real page client over its real resident-worker transport (RH-S8), against this module's real
  * project host over a real OPFS log. The "worker" is served in the page, so a case can arm a fault at the one point it
  * names: an owner that dies goes silent, the page replaces it past its liveness bound (RH-R14), and the next worker
- * opens a fresh project host over the same log, so only the durable log can answer a re-send. The leader a follower
- * forwards to is a project host in this page running a held run (`leader()`: a chat is led only while it needs a
- * writer, RH-R8), or one the row plays on the chat's lock and channel with M2's frames (RH-R7).
+ * opens a fresh project host over the same log, so only the durable log can answer a re-send. The owner a follower
+ * forwards to is a project host in this page running a held run (`leader()`), a real project task platform owner
+ * with a durable claim (S4), or a played project-channel owner for bounded liveness checks (W0.14).
  *
  * The daemon leg's rows are `packages/agent-host/src/test/seam/seam.daemon.test.ts`; these are the same rows, with
  * the page's own bounds (keepalive 1 s, liveness 3.5 s, T9 E3/E4).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mockDeep } from 'vitest-mock-extended';
 import { OPFSProvider } from '@taucad/filesystem/backend';
 import type { AgentLogEvent, ChannelServerHandle } from '@taucad/agent-host';
+import { browserProjectTasks } from '@taucad/agent-host/browser';
 import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentChannelSource } from '@taucad/agent-host/launcher';
 import { agentWireLimits, agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, ReadAnswer } from '@taucad/agent-host/wire';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
@@ -39,11 +42,11 @@ const livenessTimeout = 3500;
 
 const chatId = 'chat-seam';
 
-/** The chat's cross-tab names, as `chatLeadershipNames` derives them (RH-R6). */
-const namesOf = (projectId: string) => {
-  const key = [projectId, chatId].map((part) => encodeURIComponent(part)).join(':');
-  return { lock: `agent-host-log:${key}`, channel: `agent-host:${key}` };
-};
+/** One project's owner lock and channel, on which all browser chat commands now travel. */
+const projectNamesOf = (projectId: string) => ({
+  lock: `agent-host-project-log:${encodeURIComponent(projectId)}`,
+  channel: `agent-host-project:${encodeURIComponent(projectId)}`,
+});
 
 /** One rpc frame as it crosses a `MessagePort` (`@taucad/rpc` wire v1). */
 type WireFrame = Readonly<{ k?: string; i?: string; n?: string; a?: { commandId?: string }; d?: unknown }>;
@@ -60,6 +63,7 @@ type Harness = {
   fault: Fault;
   /** The project, and so the chat's lock and channel, every worker of this harness shares. */
   readonly projectId: string;
+  readonly projectFileSystem: ReturnType<typeof rootedProvider>;
   /** Workers the page booted, the first and every replacement. */
   readonly workers: SeamWorker[];
   /** `start` commands an owner's effect ran, across owners. */
@@ -87,6 +91,16 @@ const harness = async (): Promise<Harness> => {
   const storageRoot = await navigator.storage.getDirectory();
   await storageRoot.getDirectoryHandle(providerBasePath, { create: true });
   const project = rootedProvider(fileSystemProvider, providerBasePath);
+  /* This harness serves a "crashed" worker in the page. Real Worker termination releases its locks immediately;
+   * the simulated host must close to do that, so its bridge servers stay alive until that close finishes. */
+  const retainedBridges: Array<() => void> = [];
+  const retainBridge = (open: () => ReturnType<typeof createFileSystemBridgePort>) => {
+    const connection = open();
+    retainedBridges.push(() => {
+      connection.dispose();
+    });
+    return { ...connection, dispose: () => undefined };
+  };
   /** A worker's project host closes when it is terminated; the next one opens after it. */
   let succession: Promise<unknown> = Promise.resolve();
 
@@ -242,8 +256,8 @@ const harness = async (): Promise<Harness> => {
   };
 
   const clientOptions = {
-    openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
-    openProjectRootBridge: () => createFileSystemBridgePort(project),
+    openFileSystemBridge: () => retainBridge(() => createFileSystemBridgePort(fileSystemProvider)),
+    openProjectRootBridge: () => retainBridge(() => createFileSystemBridgePort(project)),
     openPlacementPort: () => livePlacementPort(project, providerBasePath, createFileSystemBridgePort),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
@@ -260,6 +274,7 @@ const harness = async (): Promise<Harness> => {
   const state: Harness = {
     fault: 'none',
     projectId: providerBasePath,
+    projectFileSystem: project,
     workers: [],
     effects: [],
     client: createBrowserAgentHostClient({ ...clientOptions, createWorker: () => bootWorker().worker }),
@@ -325,6 +340,9 @@ const harness = async (): Promise<Harness> => {
       worker.terminate();
     }
     await succession;
+    for (const dispose of retainedBridges) {
+      dispose();
+    }
     fileSystemProvider.dispose();
   });
   return state;
@@ -398,53 +416,48 @@ const holdModel = (): void => {
   });
 };
 
-/** One forwarded command on the chat's channel (M2's `cmd`, RH-R7). */
-type StartFrame = Readonly<{
+type ProjectCall = Readonly<{
   kind?: string;
-  sender?: string;
-  epoch?: number;
-  body?: Readonly<{ corr?: string; commandId?: string; type?: string }>;
+  id: string;
+  sender: string;
+  to: string;
+  term: number;
+  operation: string;
+  input?: Readonly<{ type?: string; commandId?: string }>;
 }>;
 
-/** Every forwarded command of one verb on the chat's channel, whoever sent or answers it. */
-const heardStarts = (projectId: string, type = 'start'): StartFrame[] => {
-  const channel = new BroadcastChannel(namesOf(projectId).channel);
-  const starts: StartFrame[] = [];
-  channel.addEventListener('message', (event: MessageEvent<StartFrame>) => {
-    if (event.data.kind === 'cmd' && event.data.body?.type === type) {
-      starts.push(event.data);
+/** Observe only calls actually forwarded to the authenticated project owner. */
+const heardProjectCalls = (projectId: string, type: string): ProjectCall[] => {
+  const channel = new BroadcastChannel(projectNamesOf(projectId).channel);
+  const calls: ProjectCall[] = [];
+  channel.addEventListener('message', (event: MessageEvent<ProjectCall>) => {
+    if (event.data.kind === 'call' && event.data.operation === 'execute' && event.data.input?.type === type) {
+      calls.push(event.data);
     }
   });
   disposers.push(() => {
     channel.close();
   });
-  return starts;
+  return calls;
 };
 
-/**
- * A leader this test plays on the chat's own lock and channel: it heartbeats at `epoch` while `beating`, and answers a
- * forwarded command only when asked, so a row can hold a follower's wait open or let the leader die.
- */
-/* Epoch 0: a played leader writes no term row, so a real successor claims epoch 1 from the empty log and is heard
- * above the follower's floor once epoch 0 falls silent. */
-const playLeader = async (projectId: string, epoch: number) => {
-  const names = namesOf(projectId);
+/** A played project owner holds the real project lock and emits term-scoped heartbeats. */
+const playProjectOwner = async (projectId: string, term: number) => {
+  const names = projectNamesOf(projectId);
   const channel = new BroadcastChannel(names.channel);
-  const sender = `tab-${String(epoch)}`;
-  const frame = (kind: string, body: unknown) => ({
-    wire: agentWireVersion,
-    build: agentHostWorkerBuild,
-    kind,
-    chatId,
-    sender,
-    epoch,
-    body,
-  });
-  const starts: StartFrame[] = [];
+  const sender = `played-owner-${String(term)}`;
+  const calls: ProjectCall[] = [];
   const heard = Promise.withResolvers<number>();
-  channel.addEventListener('message', (event: MessageEvent<StartFrame>) => {
-    if (event.data.kind === 'cmd' && event.data.body?.type === 'start' && event.data.epoch === epoch) {
-      starts.push(event.data);
+  const frame = (body: Readonly<Record<string, unknown>>) => ({
+    projectId,
+    sender,
+    build: agentHostWorkerBuild,
+    term,
+    ...body,
+  });
+  channel.addEventListener('message', (event: MessageEvent<ProjectCall>) => {
+    if (event.data.kind === 'call' && event.data.to === sender && event.data.operation === 'execute') {
+      calls.push(event.data);
       heard.resolve(performance.now());
     }
   });
@@ -455,46 +468,45 @@ const playLeader = async (projectId: string, epoch: number) => {
     await released.promise;
   });
   await leased.promise;
-  const leader = {
+  const owner = {
     beating: true,
-    starts,
-    /** When the first forwarded `start` reached this leader, on the page's monotonic clock. */
+    calls,
     heard: heard.promise,
-    /** Answer every `start` heard so far with a refusal, as a leader that ran nothing. */
     refuseAll(): void {
-      for (const start of starts) {
+      for (const call of calls) {
         channel.postMessage(
-          frame('ans', {
-            to: start.sender,
-            corr: start.body?.corr,
-            answer: {
-              commandId: start.body?.commandId,
-              generation: epoch,
+          frame({
+            kind: 'reply',
+            id: call.id,
+            to: call.sender,
+            value: {
+              commandId: call.input?.commandId,
+              generation: term,
               status: 'refused',
               effect: 'not-applied',
               code: 'RUN_ID_TAKEN',
-              message: 'The seam leader ran nothing.',
+              message: 'The played project owner ran nothing.',
             },
           }),
         );
       }
     },
-    /** Die: no more heartbeats, no answers, and the lock goes to whoever asks next. */
     async crash(): Promise<void> {
-      leader.beating = false;
-      globalThis.clearInterval(beat);
+      owner.beating = false;
+      clearInterval(beat);
       released.resolve();
       await lease;
       channel.close();
     },
   };
-  const beat = globalThis.setInterval(() => {
-    if (leader.beating) {
-      channel.postMessage(frame('hb', { state: 'leading' }));
+  const beat = setInterval(() => {
+    if (owner.beating) {
+      channel.postMessage(frame({ kind: 'heartbeat', state: 'leading' }));
     }
   }, 250);
-  disposers.push(async () => leader.crash());
-  return leader;
+  channel.postMessage(frame({ kind: 'heartbeat', state: 'leading' }));
+  disposers.push(async () => owner.crash());
+  return owner;
 };
 
 const within = async <Value>(promise: Promise<Value>, bound: number): Promise<Value | 'unanswered'> =>
@@ -610,13 +622,21 @@ describe('the seam on the browser leg', () => {
         maxBytes: agentWireLimits.batchBytes,
         ...input,
       } as Parameters<AgentChannelClient['read']>[0]);
-    await expect(read({ cursor: rows.length + 5 })).resolves.toEqual({
+    const initial = await read({ cursor: 0 });
+    expect(initial.status).toBe('batch');
+    if (initial.status !== 'batch') {
+      throw new Error('Expected the first read to establish the source generation.');
+    }
+    const { sourceGeneration } = initial;
+    await expect(read({ cursor: rows.length + 5, sourceGeneration })).resolves.toEqual({
       status: 'refused',
       chatId,
       reason: 'cursor-ahead',
       expected: { endCursor: rows.length },
     });
-    await expect(read({ cursor: 1, last: { leaderEpoch: 'not-this-term', sequence: 0 } })).resolves.toMatchObject({
+    await expect(
+      read({ cursor: 1, sourceGeneration, last: { leaderEpoch: 'not-this-term', sequence: 0 } }),
+    ).resolves.toMatchObject({
       status: 'refused',
       reason: 'identity-mismatch',
     });
@@ -624,7 +644,7 @@ describe('the seam on the browser leg', () => {
     const paged: unknown[] = [];
     for (let cursor = 0; cursor < rows.length; ) {
       // oxlint-disable-next-line no-await-in-loop -- each page starts at the last one's end.
-      const page = await read({ cursor, maxBytes: 1 });
+      const page = await read({ cursor, sourceGeneration, maxBytes: 1 });
       expect(page).toMatchObject({ status: 'batch', cursor, nextCursor: cursor + 1 });
       if (page.status !== 'batch') {
         throw new Error('Expected a batch.');
@@ -659,7 +679,7 @@ describe('the seam on the browser leg', () => {
    * the keyed command a follower forwards here is the leader's run's `cancel`. */
   it('SC-S7: should forward a keyed command to the leader, and answer its re-send replayed', async () => {
     const seam = await harness();
-    const cancels = heardStarts(seam.projectId, 'cancel');
+    const cancels = heardProjectCalls(seam.projectId, 'cancel');
     await seam.leader();
     await expect(
       seam.client.hostCommand({
@@ -684,34 +704,63 @@ describe('the seam on the browser leg', () => {
     expect(new Set(seam.effects).size).toBe(1);
     expect(seam.workers[1]?.answers).toMatchObject([{ commandId: seam.effects[0], status: 'replayed' }]);
     // The first send was forwarded to the leader, which ran it; the log holds one cancel.
-    expect(cancels[0]?.body?.commandId).toBe(seam.effects[0]);
+    expect(cancels[0]?.input?.commandId).toBe(seam.effects[0]);
     const rows = await seam.rows();
     expect(rows.filter((row) => row.type === 'run.lifecycle' && row.state === 'cancelled')).toHaveLength(1);
   });
 
-  /* S4 3.5, `LogLeadership.target-any-heartbeat-EveryCommandAnswered` (W0.14): the leader a command addressed dies
-   * unanswered and a successor heartbeats. Only the addressed generation's heartbeat is liveness, so the follower
-   * re-sends within the bound and the successor applies it once; any generation's kept the wait alive forever. */
-  it('S4: should re-send to the successor once the addressed leader dies, not wait on its heartbeat', async () => {
+  /* A real project owner claims a durable term and holds a forwarded start unanswered. After it closes, the
+   * project transport itself retries the identical keyed command against the successor, which admits it once. */
+  it('S4: should re-send the same key when the addressed project owner dies unanswered', async () => {
     const seam = await harness();
-    const starts = heardStarts(seam.projectId);
-    const addressed = await playLeader(seam.projectId, 0);
+    const calls = heardProjectCalls(seam.projectId, 'start');
+    const storageRoot = await navigator.storage.getDirectory();
+    let directory = await storageRoot.getDirectoryHandle(seam.projectId);
+    for (const segment of ['.tau', 'chats', '.project-tasks']) {
+      // oxlint-disable-next-line no-await-in-loop -- each directory is the parent for the next segment.
+      directory = await directory.getDirectoryHandle(segment, { create: true });
+    }
+    const source = mockDeep<AgentChannelSource>();
+    const unanswered = Promise.withResolvers<Awaited<ReturnType<AgentChannelSource['execute']>>>();
+    source.execute.mockReturnValue(unanswered.promise);
+    const addressed = await browserProjectTasks({
+      tabId: `addressed-${crypto.randomUUID()}`,
+      build: agentHostWorkerBuild,
+      log: { kind: 'provider', fileSystem: seam.projectFileSystem, durability: 'exclusive-append' },
+    }).open({
+      projectId: seam.projectId,
+      createOwner: async ({ storage }) => {
+        await storage.append(
+          new TextEncoder().encode(
+            `${JSON.stringify({ version: 1, projectId: seam.projectId, sequence: 1, tasks: [] })}\n`,
+          ),
+        );
+        return {
+          source,
+          projectTasks: { request: async () => ({ kind: 'refused', code: 'TASK_UNAVAILABLE', message: 'fixture' }) },
+          stoppability: () => 'stoppable',
+          drain: async () => undefined,
+          close: async () => storage.close(),
+        };
+      },
+    });
+    disposers.push(async () => {
+      await addressed.close();
+    });
 
-    const started = expect(start(seam)).rejects.toMatchObject({ code: 'RUN_ID_TAKEN' });
-    await addressed.heard;
-    // Alive past the follower's first liveness check, so its wait is bound to this generation.
-    await sleep(livenessTimeout + 1000);
-    await addressed.crash();
-    /* The successor takes the freed lock and heartbeats a newer epoch; `attach` alone leads nothing (RH-R1). */
-    const successor = await playLeader(seam.projectId, 1);
-
-    await expect(within(successor.heard, livenessTimeout * 3)).resolves.not.toBe('unanswered');
-    successor.refuseAll();
-    await started;
-    expect(addressed.starts).toHaveLength(1);
-    expect(successor.starts).toHaveLength(1);
-    expect(starts).toHaveLength(2);
-  }, 30_000);
+    const started = start(seam);
+    await vi.waitFor(
+      () => {
+        expect(calls).toHaveLength(1);
+      },
+      { timeout: 10_000 },
+    );
+    await addressed.close();
+    await expect(started).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    expect(admittedRows(await seam.rows())).toHaveLength(1);
+    expect(seam.effects).toEqual(['req_seam-first']);
+    expect(calls.map((call) => call.input?.commandId)).toEqual(['req_seam-first']);
+  }, 35_000);
 
   /* W0.14, L4 D-111: liveness reads the monotonic clock. A wall clock stepped +10 s between two heartbeats of a live
    * leader ended the follower's wait, and it re-sent a command the leader was still holding. */
@@ -720,10 +769,10 @@ describe('the seam on the browser leg', () => {
     const realNow = Date.now.bind(Date);
     let step = 0;
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + step);
-    const leader = await playLeader(seam.projectId, 0);
+    const leader = await playProjectOwner(seam.projectId, 1);
 
     try {
-      const started = expect(start(seam)).rejects.toMatchObject({ code: 'RUN_ID_TAKEN' });
+      const started = start(seam);
       const heardAt = await leader.heard;
       await sleep(heardAt + 2900 - performance.now());
       // A heartbeat gap well inside the bound, with the step in it and the follower's first check after it.
@@ -733,10 +782,11 @@ describe('the seam on the browser leg', () => {
       await sleep(1200);
       leader.beating = true;
       await sleep(heardAt + livenessTimeout * 2 - performance.now());
+      await expect(within(started, 200)).resolves.toBe('unanswered');
       leader.refuseAll();
 
-      await started;
-      expect(leader.starts).toHaveLength(1);
+      await expect(started).rejects.toMatchObject({ code: 'RUN_ID_TAKEN' });
+      expect(leader.calls).toHaveLength(1);
     } finally {
       clock.mockRestore();
     }

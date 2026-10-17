@@ -94,6 +94,27 @@ describe('ingestPayloadSchema', () => {
 });
 
 describe('agent usage entries', () => {
+  it.each([
+    ['task_spawn', 'execute'],
+    ['task_read', 'read'],
+    ['task_send', 'edit'],
+    ['task_wait', 'read'],
+    ['task_cancel', 'other'],
+    ['task_resume', 'execute'],
+  ])('should accept a Tau turn reporting the %s task tool', (tool, kind) => {
+    const entry = {
+      name: IngestEntryName.AGENT_TURN,
+      duration: 100,
+      detail: {
+        agentId: 'tau',
+        placement: 'desktop',
+        outcome: 'completed',
+        toolCalls: [{ kind, tool, status: 'completed', count: 1 }],
+      },
+    };
+    expect(ingestPayloadSchema.parse({ entries: [entry] })).toEqual({ entries: [entry] });
+  });
+
   it('should accept a Codex turn with tools and tokens', () => {
     const entry = {
       name: IngestEntryName.AGENT_TURN,

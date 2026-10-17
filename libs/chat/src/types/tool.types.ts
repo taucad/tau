@@ -1,3 +1,13 @@
+import type {
+  ProjectTask,
+  ProjectTaskMessage,
+  ProjectTaskSnapshot,
+  ProjectTaskSpawn,
+  ProjectTaskRead,
+  ProjectTaskSend,
+  ProjectTaskWait,
+  ProjectTaskAction,
+} from '@taucad/agent-host/wire';
 import type { z } from 'zod';
 import type { toolExecutionErrorSchema } from '#schemas/tool-error.schema.js';
 import type { ArrangeWorkbenchInput, ArrangeWorkbenchOutput } from '#schemas/tools/arrange-workbench.tool.schema.js';
@@ -154,6 +164,12 @@ export type ToolSelection = ToolMode | ToolName[];
 
 /** @public */
 export type MyTools = InferUITools<{
+  [toolName.taskSpawn]: AiTool<ProjectTaskSpawn, ProjectTask>;
+  [toolName.taskRead]: AiTool<ProjectTaskRead, ProjectTaskSnapshot>;
+  [toolName.taskSend]: AiTool<ProjectTaskSend, ProjectTaskMessage>;
+  [toolName.taskWait]: AiTool<ProjectTaskWait, ProjectTaskSnapshot>;
+  [toolName.taskCancel]: AiTool<ProjectTaskAction, ProjectTask>;
+  [toolName.taskResume]: AiTool<ProjectTaskAction, ProjectTask>;
   [toolName.editFile]: AiTool<EditFileInput, EditFileOutput>;
   [toolName.arrangeWorkbench]: AiTool<ArrangeWorkbenchInput, ArrangeWorkbenchOutput>;
   [toolName.testModel]: AiTool<TestModelInput, TestModelOutput>;

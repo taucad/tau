@@ -394,13 +394,15 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
         projectId: 'project-1',
         events: (event) => events.push(event),
       });
+      await expect(missing.opened()).rejects.toBeInstanceOf(RevisionPortError);
+      await expect(missing.opened()).rejects.toThrow('Native Git could not start rev-parse.');
       await expect
         .poll(() => events.filter((event) => event.type === 'revision.unavailable').length, { timeout: 10_000 })
         .toBe(1);
     } finally {
       process.env['PATH'] = previousPath;
       if (missing !== undefined) {
-        await expect(missing.release()).rejects.toThrow('no live checkout to record at close');
+        await expect(missing.release()).resolves.toBeUndefined();
       }
     }
     const unavailable = events.find((event) => event.type === 'revision.unavailable');

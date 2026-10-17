@@ -1054,6 +1054,23 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
     const textarea = screen.getByTestId('chat-textarea');
     expect(article.contains(textarea)).toBe(true);
   });
+
+  it('should preserve a task log message and copy control without exposing generic edit', () => {
+    setMessages([userMessage('msg-readonly', 'Parent task instruction')]);
+    mockStartEditingMessage.mockClear();
+    render(<ChatMessage messageId='msg-readonly' readOnly />);
+
+    const article = screen.getByRole('article');
+    expect(article).toHaveTextContent('Parent task instruction');
+    expect(screen.getByTestId('copy-button')).toBeInTheDocument();
+    expect(article.querySelector('[role="button"]')).toBeNull();
+    const bubble = article.querySelector<HTMLElement>('[class*="bg-background"]');
+    if (!bubble) {
+      throw new Error('Read-only message bubble not found');
+    }
+    fireEvent.click(bubble);
+    expect(mockStartEditingMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe('ChatMessage machine tools', () => {

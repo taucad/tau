@@ -74,6 +74,15 @@ export type PanelState = {
   };
   /** Mobile active tab ID */
   mobileActiveTab: MobilePanelId;
+  /** Per-root Threads selection; execution and drafts remain with their existing owners. */
+  threadViews?: Record<
+    string,
+    {
+      selectedTaskId?: string;
+      groups?: Record<string, boolean>;
+      views?: Record<string, { scrollTop?: number; detailsOpen?: boolean }>;
+    }
+  >;
   /** Kernel paneview panel states (keyed by entry path) */
   kernelPaneview: Record<string, PaneviewPanelState>;
   /** Model paneview panel states (keyed by entry path) */

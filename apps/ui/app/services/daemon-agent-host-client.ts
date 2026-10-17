@@ -53,6 +53,11 @@ export const createDaemonAgentHostTransport = (
       const next = await channel();
       return next.execute(signal === undefined ? command : { ...command, signal });
     },
+    projectTasks: async (request, signal) => {
+      const next = await channel();
+      signal?.throwIfAborted();
+      return next.projectTasks(request, signal);
+    },
     read: async (input) => {
       const next = await channel();
       return next.read(input);

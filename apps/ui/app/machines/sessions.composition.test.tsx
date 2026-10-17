@@ -33,6 +33,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
@@ -257,6 +258,8 @@ const parameterService = {
  * real provider is per project, and a fresh Map per snapshot read would hand React a new value on
  * every render. A test that needs a live view puts it in `viewGraphicsOf(projectId)`. */
 const projectContexts = new Map<string, unknown>();
+const chatRecordsByProject = new Map<string, ChatRecord[]>();
+let focusedChatResolved: ((chatId: string) => void) | undefined;
 const viewGraphicsByProject = new Map<string, Map<string, ActorRefFrom<typeof graphicsMachine>>>();
 const viewGraphicsOf = (projectId: string): Map<string, ActorRefFrom<typeof graphicsMachine>> => {
   const existing = viewGraphicsByProject.get(projectId);
@@ -345,8 +348,17 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId,
     requestedChatId,
     createdChatId,
-  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
+    onFocusedChatResolved,
+  }: React.PropsWithChildren<{
+    projectId: string;
+    requestedChatId?: string;
+    createdChatId?: string;
+    onFocusedChatResolved?: (chatId: string) => void;
+  }>) => {
     projectProviderInputs.push({ projectId, requestedChatId, createdChatId });
+    if (onFocusedChatResolved) {
+      focusedChatResolved = onFocusedChatResolved;
+    }
     return (
       <StubProjectContext.Provider value={projectId}>
         <div>{children}</div>
@@ -369,7 +381,14 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 
 /* One object for the life of the suite: a `useProjectManager()` that returns a
  * fresh object on every render re-runs the route's load effect forever. */
-const projectManager = { getProjectRouteAccess, restoreProject: vi.fn() };
+const projectManager = {
+  getProjectRouteAccess,
+  restoreProject: vi.fn(),
+  getChatRecordsForResource: async (projectId: string) => chatRecordsByProject.get(projectId) ?? [],
+  getMetadataObservationError: () => undefined,
+  refreshFilesystemObservations: () => undefined,
+  isLoading: false,
+};
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => projectManager }));
 vi.mock('#hooks/use-project-slug-route.js', () => ({
   useProjectIdBySlugs: (_workspace: string, project: string) =>
@@ -629,6 +648,9 @@ const renderRouteFamily = async (
 };
 
 beforeEach(() => {
+  queryClient.clear();
+  chatRecordsByProject.clear();
+  focusedChatResolved = undefined;
   runtimeShutdown.mockReset();
   runtimeShutdown.mockResolvedValue(undefined);
   workerFrames.length = 0;
@@ -1105,6 +1127,45 @@ describe('sessions composition', () => {
     expect(liveProjectIds()).not.toContain('route-family-a');
     expect(liveProjectIds()).toContain('route-family-ninth');
     expect(sessionsActor.getSnapshot().context.closed['route-family-a']?.reason).toBe('budget');
+    view.unmount();
+  });
+
+  it('resolves a descendant chat URL to its root and retains the selected thread in the route', async () => {
+    const projectId = 'route-lineage';
+    chatRecordsByProject.set(projectId, [
+      { id: 'chat-root', resourceId: projectId, name: 'Root', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'chat-child',
+        resourceId: projectId,
+        name: 'Child',
+        createdAt: 2,
+        updatedAt: 2,
+        taskLineage: {
+          taskId: 'task-child',
+          parentTaskId: 'task-root',
+          parentChatId: 'chat-root',
+          rootChatId: 'chat-root',
+        },
+      },
+    ]);
+    const view = await renderRouteFamily(projectId, '/w/workspace/route-lineage?chat=chat-child');
+    await vi.waitFor(() => {
+      expect(projectProviderInputs.at(-1)).toEqual({
+        projectId,
+        requestedChatId: 'chat-root',
+        createdChatId: undefined,
+      });
+      expect(focusedChatResolved).toBeTypeOf('function');
+    });
+    await act(async () => {
+      focusedChatResolved?.('chat-root');
+    });
+    await vi.waitFor(() => {
+      const query = new URLSearchParams(currentSearch);
+      expect(query.get('chat')).toBe('chat-root');
+      expect(query.get('thread')).toBe('task-child');
+      expect(query.get('workbench')).toBe('agents');
+    });
     view.unmount();
   });
 

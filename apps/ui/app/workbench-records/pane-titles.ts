@@ -9,7 +9,7 @@ const titles = {
   print: 'Print',
   kinematics: 'Kinematics',
   revisions: 'Revisions',
-  agents: 'Agents',
+  agents: 'Threads',
   jobs: 'Jobs',
   export: 'Export',
   share: 'Share',

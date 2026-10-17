@@ -11,12 +11,18 @@ import type { JsonValue } from '#log/event-types.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import { chatIdSchema, commandAnswerSchema, commandFrameSchema, commandVerbs } from '#wire/commands.schema.js';
 import type { CommandAnswer, CommandFrame, CommandVerb } from '#wire/commands.schema.js';
+import { projectTaskChannelRequestSchema, projectTaskChannelAnswerSchema } from '#wire/project-task-channel.schema.js';
+import type { ProjectTaskChannelRequest, ProjectTaskChannelAnswer } from '#wire/project-task-channel.schema.js';
 
 /** The agent protocol version the rpc hello carries as `wire`; today's unversioned protocol counts as 1. @public */
 export const agentWireVersion = 3;
 
 /** The owner's hello payload: its agent protocol version and build, compared for equality (I32). @public */
-export const agentWireHelloSchema = z.strictObject({ wire: z.literal(agentWireVersion), build: z.string().min(1) });
+export const agentWireHelloSchema = z.strictObject({
+  wire: z.literal(agentWireVersion),
+  build: z.string().min(1),
+  projectTasks: z.boolean().optional(),
+});
 
 /** The owner's hello. @public */
 export type AgentWireHello = z.infer<typeof agentWireHelloSchema>;
@@ -207,6 +213,7 @@ export type AgentWireProtocol = {
     };
   } & {
     readonly read: { args: ReadRequest; result: ReadAnswer };
+    readonly projectTasks: { args: ProjectTaskChannelRequest; result: ProjectTaskChannelAnswer };
     readonly revision: {
       args: Readonly<{ request: JsonValue }>;
       result: Readonly<{ result: JsonValue; status: JsonValue }>;
@@ -235,6 +242,7 @@ export const agentWireProtocolSchemas = {
   calls: {
     ...commandCalls,
     read: { args: readRequestSchema, result: readAnswerSchema },
+    projectTasks: { args: projectTaskChannelRequestSchema, result: projectTaskChannelAnswerSchema },
     revision: {
       args: z.strictObject({ request: jsonValueSchema }),
       result: z.strictObject({ result: jsonValueSchema, status: jsonValueSchema }),

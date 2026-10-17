@@ -33,6 +33,7 @@ import {
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { toast } from '#components/ui/sonner.js';
+import { rootChatRecords } from '#utils/root-chat-records.js';
 
 const chatsPerPage = 5;
 
@@ -96,7 +97,8 @@ export function ProjectChatList({
   const navigation = useNavigation();
   const [visibleCount, setVisibleCount] = useState(chatsPerPage);
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
-  const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
+  const roots = useMemo(() => rootChatRecords(chats), [chats]);
+  const sortedChats = useMemo(() => sortProjectChats(roots), [roots]);
   const visibleChats = sortedChats.slice(0, visibleCount);
   /* A29: the label appears only when both groups do — a list that is all from
    * today has nothing to disclose. */
@@ -128,7 +130,7 @@ export function ProjectChatList({
       return;
     }
 
-    const nextChatId = pickNextFocusedChatId(chats, chat.id, activeChatId);
+    const nextChatId = pickNextFocusedChatId(roots, chat.id, activeChatId);
     await navigate(nextChatId ? projectChatUrl(project.slugs, nextChatId) : projectUrl(project.slugs), {
       replace: true,
     });
@@ -159,7 +161,7 @@ export function ProjectChatList({
           />
         </SidebarMenuSubItem>
       ) : null}
-      {!isLoading && !isOpening && !isLoadingCloudChats && !error && chats.length === 0 ? (
+      {!isLoading && !isOpening && !isLoadingCloudChats && !error && roots.length === 0 ? (
         <SidebarMenuSubItem>
           <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>

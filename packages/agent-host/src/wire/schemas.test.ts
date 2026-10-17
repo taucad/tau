@@ -42,7 +42,7 @@ describe('the wire module (SC-R1, SC-R2)', () => {
 
   /* W6.r1 round 5: a chat's log lives under its id, so the wire refuses an id a launcher could not store. */
   it('should refuse a chat id that is not one storage path segment', () => {
-    for (const chatId of ['a/b', String.raw`a\b`, '.', '..', '']) {
+    for (const chatId of ['a/b', String.raw`a\b`, '.', '..', '', '.project-tasks', '.PROJECT-TASKS']) {
       expect(wire.commandPayloads.attach.safeParse({ chatId }).success).toBe(false);
     }
     for (const chatId of ['chat-1', '.chat', 'a..b']) {

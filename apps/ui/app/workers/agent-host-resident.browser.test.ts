@@ -484,6 +484,7 @@ it.each(['rebridge', 'isolated'] as const)(
               status: 'applied',
               placement: {
                 checkoutId: 'live',
+                baseRevisionId: 'fixture-revision',
                 mode: 'direct',
                 root: '/',
                 tools: { port: createFileSystemBridgePort(root).port },

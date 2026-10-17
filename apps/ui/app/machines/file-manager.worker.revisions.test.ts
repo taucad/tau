@@ -517,6 +517,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(root.status().headRevisionId).not.toBe(recorded);
   });
 
+  it('should allocate a task candidate from its recorded source without cutting later live edits', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'saveRevision', id: 95 });
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 95, result: { kind: 'saved' } });
+    });
+    const root = await fixture.root('alpha');
+    const source = root.status().headRevisionId;
+    expect(source).toBeDefined();
+
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    const candidate = await root.createBranch('task-first-1', source, 'task-attempt-1');
+    const checkout = fixture.service.createRootedFileSystem(candidate.checkoutRoot);
+
+    expect(await checkout.readFile('main.scad', 'utf8')).toBe('cube(10);');
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    expect(root.status().headRevisionId).toBe(source);
+  });
+
   /* B7 (W8 TS-S5): the branch child answers every `create` by its id, so no clock may refuse one that is still
    * working. The branch's ref write is held while the clock runs well past the deleted bound. */
   it('should answer a createBranch that outlasts the old bound, never refusing it on the clock', async () => {
@@ -1481,6 +1504,53 @@ describe('the revisions reader port (W6.r1 finding 9)', () => {
     expect(agent.frames).toContainEqual({ type: 'result', id: 4, result: { kind: 'closed' } });
     expect(root.inspect().status).toBe('active');
     expect(page.frames.some((frame) => frame.type === 'status')).toBe(true);
+  });
+
+  it('should allocate only explicit-source candidates over the task port', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const page = await fixture.open('alpha');
+    page.send({ command: 'saveRevision', id: 51 });
+    await vi.waitFor(() => {
+      expect(page.frames).toContainEqual({ type: 'result', id: 51, result: { kind: 'saved' } });
+    });
+    const revisions = await fixture.root('alpha');
+    const source = revisions.status().headRevisionId;
+    expect(source).toBeDefined();
+    const agent = reader(fixture, 'alpha');
+    const taskChannel = new MessageChannel();
+    const taskFrames: WorkerRevisionResponse[] = [];
+    taskChannel.port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
+      taskFrames.push(data);
+    });
+    taskChannel.port2.start();
+    fixture.registry.connectTask(taskChannel.port1, 'alpha');
+
+    agent.send({ command: 'createBranch', name: 'reader-branch', from: source, requestId: 'reader-1', id: 52 });
+    taskChannel.port2.postMessage({ command: 'createBranch', name: 'missing-source', id: 53 });
+    await vi.waitFor(() => {
+      expect(agent.frames).toContainEqual(expect.objectContaining({ type: 'error', id: 52 }));
+      expect(taskFrames).toContainEqual(expect.objectContaining({ type: 'error', id: 53 }));
+    });
+    const afterRefusal = await fixture.root('alpha');
+    expect(afterRefusal.status().branches.map((branch) => branch.name)).not.toContain('reader-branch');
+
+    taskChannel.port2.postMessage({
+      command: 'createBranch',
+      name: 'task-first-1',
+      from: source,
+      requestId: 'task-attempt-1',
+      id: 54,
+    });
+    await vi.waitFor(() => {
+      expect(taskFrames).toContainEqual(expect.objectContaining({ type: 'result', id: 54 }));
+    });
+    expect(taskFrames.find((frame) => frame.type === 'result' && frame.id === 54)).toMatchObject({
+      result: { kind: 'branch', branch: 'task-first-1' },
+    });
+    agent.send({ command: 'close' });
+    taskChannel.port2.postMessage({ command: 'close' });
   });
 
   /* D84: a chat asked to resolve a conflict runs on a checkout that holds only

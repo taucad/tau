@@ -60,7 +60,7 @@ const runUtilityProbe = async (
     options,
   );
 
-test('[completed-artifact] loads native esbuild and nanoraster inside an Electron utility process', async () => {
+test('[completed-artifact] opens the packaged desktop home and loads native utility payloads', async () => {
   const executable = desktopE2EPackagedExecutable();
   const sourceApp = resolvePath(dirname(executable), '../..');
   const runRoot = await mkdtemp(join(tmpdir(), 'tau-native-payload-'));
@@ -158,11 +158,16 @@ try {
 
   const application = await electron.launch({
     executablePath: join(app, 'Contents/MacOS/Tau'),
-    args: [`--user-data-dir=${join(runRoot, 'user-data')}`],
+    // Match the shared desktop harness: an ad-hoc signed build must not ask for the person's Chromium cookie Keychain.
+    args: [
+      `--user-data-dir=${join(runRoot, 'user-data')}`,
+      ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []),
+    ],
     env: {
       LANG: 'C.UTF-8',
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
       TAU_E2E_KEEP_PATH: '1',
+      TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1',
       TMPDIR: runRoot,
       /* Automated runs keep secrets and the machine store in the throwaway
        * profile, never the login keychain or the person's own config. */
@@ -171,6 +176,23 @@ try {
     },
   });
   try {
+    const profile = await application.evaluate(({ app }) => ({
+      userData: app.getPath('userData'),
+      sessionData: app.getPath('sessionData'),
+    }));
+    expect(profile).toEqual({
+      userData: join(runRoot, 'user-data'),
+      sessionData: join(runRoot, 'user-data'),
+    });
+
+    const window = await application.firstWindow();
+    await window.waitForURL('app://tau/', { waitUntil: 'load', timeout: 60_000 });
+    await expect
+      .poll(async () => window.getByRole('heading', { name: 'What can I help you build?', exact: true }).isVisible(), {
+        timeout: 60_000,
+      })
+      .toBe(true);
+
     const positive = await runUtilityProbe(application, { cwd: runRoot, entry: utilityEntry, esbuildExecutable });
     if (!positive.ok) {
       throw new Error(`Packaged native payload probe failed:\n${positive.error}`);

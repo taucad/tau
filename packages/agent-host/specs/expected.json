@@ -955,6 +955,24 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "W6.r1 finding 13 graph export (graphs.LogLeadershipGraph): M2 on two tabs of one build, the lock per run, one run, one queued reconciliation and one freeze, no steal or crash (191 states)"
+    },
+    "ChatRunSlot.target-close-settlement.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "P6 delayed native close: authoritative graceful close drains placement acknowledgement before closing its log; authority loss remains immediate"
+    },
+    "ChatRunSlot.today-close-settlement.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "P6 repaired: current authoritative graceful close drains placement acknowledgement; CUT_FAILED fault retains unresolved lease"
+    },
+    "ChatRunSlot.no-CloseSettlement.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "GracefulCloseSettled"
+      },
+      "ref": "P6 delayed native close: authoritative graceful close drains placement acknowledgement before closing its log; authority loss remains immediate",
+      "kind": "witness"
     }
   },
   "apalache": [

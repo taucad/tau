@@ -23,6 +23,12 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  */
 
 const decoder = new TextDecoder();
+const taskLineage = {
+  taskId: 'task_child',
+  parentTaskId: 'task_root',
+  parentChatId: 'chat_root',
+  rootChatId: 'chat_root',
+};
 
 let projectSequence = 0;
 const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(21, '0')}`;
@@ -950,6 +956,36 @@ describe('chat file store — log ownership boundary', () => {
     2,
   )}\n`;
 
+  it('excludes the reserved task sidecar while retaining valid record and log-only chats', async () => {
+    const { store, write, reads } = createStoreWithFiles();
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(`/projects/${projectId}/.tau/chats/chat_log_only/events.jsonl`, 'host log');
+    await write(`/projects/${projectId}/.tau/chats/.project-tasks/events.jsonl`, 'task journal');
+    await write(
+      `/projects/${projectId}/.tau/chats/.PROJECT-TASKS/chat.json`,
+      JSON.stringify({ id: '.PROJECT-TASKS', resourceId: projectId, name: 'Reserved', createdAt: 1, updatedAt: 1 }),
+    );
+    const chats = await store.getChatsForResource(projectId);
+    const records = await store.getChatRecordsForResource(projectId);
+    expect(chats.map((chat) => chat.id).sort()).toEqual([chatId, 'chat_log_only'].sort());
+    expect(records.map((chat) => chat.id).sort()).toEqual([chatId, 'chat_log_only'].sort());
+    expect(reads.some((path) => /\/\.project-tasks\//iu.test(path))).toBe(false);
+  });
+
+  it('refuses addressing, creating or tombstoning the reserved task sidecar through the chat API', async () => {
+    const { store, write, read, exists } = createStoreWithFiles();
+    const journalPath = `/projects/${projectId}/.tau/chats/.project-tasks/events.jsonl`;
+    await write(journalPath, 'preserved task journal');
+    await expect(store.getChat('.project-tasks')).rejects.toThrow();
+    await expect(
+      store.createChat(projectId, { id: '.project-tasks', name: 'Forbidden', messages: [] }),
+    ).rejects.toThrow();
+    await expect(store.deleteChat('.project-tasks')).rejects.toThrow();
+    await expect(store.purgeChat('.project-tasks')).rejects.toThrow();
+    expect(await read(journalPath)).toBe('preserved task journal');
+    expect(await exists(`/projects/${projectId}/.tau/chats/.project-tasks/chat.json`)).toBe(false);
+  });
+
   it('reads metadata only for a chat whose log contains turns', async () => {
     const { store, write, reads } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/${'chat.json'}`, record);
@@ -1015,6 +1051,146 @@ describe('chat file store — log ownership boundary', () => {
     expect(metadata.find((chat) => chat.id === chatId)?.recencyAt).toBe(1);
     expect(metadata.find((chat) => chat.id === logOnlyId)?.recencyAt).toBe(0);
     expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
+  });
+
+  it('enriches inactive local log-only descendants from the validated journal without writing metadata', async () => {
+    const { store, write, exists, reads } = createStoreWithFiles();
+    const rootTask = {
+      id: 'task_root',
+      projectId,
+      chatId: 'chat_root',
+      depth: 0,
+      title: 'Root',
+      prompt: 'Root',
+      provider: { id: 'tau' },
+      attempts: [
+        {
+          id: 'attempt_root',
+          number: 1,
+          status: 'completed',
+          source: { revisionId: 'rev_1', checkoutId: 'checkout_1' },
+          toolGrant: { toolChoice: 'auto' },
+          createdAt: 1,
+        },
+      ],
+      createdAt: 1,
+      closed: false,
+    };
+    const childTask = {
+      ...rootTask,
+      id: 'task_child',
+      chatId: 'chat_child',
+      parentTaskId: 'task_root',
+      depth: 1,
+      attempts: [{ ...rootTask.attempts[0], id: 'attempt_child' }],
+    };
+    const grandchildTask = {
+      ...childTask,
+      id: 'task_grandchild',
+      chatId: 'chat_grandchild',
+      parentTaskId: 'task_child',
+      depth: 2,
+      attempts: [{ ...rootTask.attempts[0], id: 'attempt_grandchild' }],
+    };
+    await write(
+      `/projects/${projectId}/.tau/chats/chat_root/chat.json`,
+      JSON.stringify({ id: 'chat_root', resourceId: projectId, name: 'Root', createdAt: 1, updatedAt: 1 }),
+    );
+    await write(`/projects/${projectId}/.tau/chats/chat_child/events.jsonl`, 'host log');
+    await write(`/projects/${projectId}/.tau/chats/chat_grandchild/events.jsonl`, 'host log');
+    const journalPath = `/projects/${projectId}/.tau/chats/.project-tasks/records.jsonl`;
+    await write(
+      journalPath,
+      `${JSON.stringify({ version: 1, projectId, sequence: 1, tasks: [rootTask, childTask, grandchildTask] })}\n`,
+    );
+    const records = await store.getChatRecordsForResource(projectId);
+    expect(records.find((record) => record.id === 'chat_child')?.taskLineage).toEqual(taskLineage);
+    expect(records.find((record) => record.id === 'chat_grandchild')?.taskLineage).toEqual({
+      ...taskLineage,
+      taskId: 'task_grandchild',
+      parentTaskId: 'task_child',
+      parentChatId: 'chat_child',
+    });
+    expect(records.find((record) => record.id === 'chat_root')?.taskLineage).toBeUndefined();
+    expect(reads).toContain(journalPath);
+    expect(await exists(`/projects/${projectId}/.tau/chats/chat_child/chat.json`)).toBe(false);
+    await write(journalPath, 'invalid complete row\n');
+    await expect(store.getChatRecordsForResource(projectId)).rejects.toThrow();
+  });
+
+  it('preserves immutable task lineage through stale full updates, patches and metadata replacement', async () => {
+    const files = createStoreWithFiles();
+    await files.write(
+      `/projects/${projectId}/.tau/chats/chat_child/chat.json`,
+      JSON.stringify({
+        id: 'chat_child',
+        resourceId: projectId,
+        name: 'Child',
+        createdAt: 1,
+        updatedAt: 1,
+        taskLineage,
+      }),
+    );
+    const chat = (await files.store.getChat('chat_child'))!;
+    await files.store.updateChat(chat.id, { ...chat, name: 'Renamed', taskLineage: undefined });
+    const afterRename = await files.store.getChat(chat.id);
+    expect(afterRename?.taskLineage).toEqual(taskLineage);
+    await expect(
+      files.store.patchChat(chat.id, 'taskLineage', { ...taskLineage, rootChatId: 'chat_wrong' }),
+    ).rejects.toThrow('immutable');
+    await expect(
+      files.store.updateChat(chat.id, { ...chat, taskLineage: { ...taskLineage, rootChatId: 'chat_wrong' } }),
+    ).rejects.toThrow('immutable');
+    await files.store.putChatRecord({ ...chat, name: 'From another device', taskLineage: undefined });
+    const afterReplacement = await files.store.getChat(chat.id);
+    expect(afterReplacement?.taskLineage).toEqual(taskLineage);
+    await expect(
+      files.store.putChatRecord({ ...chat, taskLineage: { ...taskLineage, rootChatId: 'chat_wrong' } }),
+    ).rejects.toThrow('immutable');
+    await expect(files.store.createChat(projectId, { id: chat.id, name: 'Recreated', messages: [] })).rejects.toThrow(
+      'immutable',
+    );
+    const afterRejectedCreate = await files.store.getChat(chat.id);
+    expect(afterRejectedCreate?.taskLineage).toEqual(taskLineage);
+  });
+
+  it('rejects invented lineage through ordinary chat mutations', async () => {
+    const files = createStoreWithFiles();
+    const root = await files.store.createChat(projectId, { name: 'Root', messages: [] });
+    await expect(files.store.updateChat(root.id, { taskLineage })).rejects.toThrow('journal');
+    await expect(files.store.patchChat(root.id, 'taskLineage', taskLineage)).rejects.toThrow('journal');
+    await expect(files.store.createChat(projectId, { name: 'Forged', messages: [], taskLineage })).rejects.toThrow(
+      'journal',
+    );
+  });
+
+  it('reads synced descendant metadata beside ordinary chats when no task journal is available', async () => {
+    const files = createStoreWithFiles();
+    await files.write(
+      `/projects/${projectId}/.tau/chats/chat_child/chat.json`,
+      JSON.stringify({
+        id: 'chat_child',
+        resourceId: projectId,
+        name: 'Child',
+        createdAt: 1,
+        updatedAt: 1,
+        taskLineage,
+      }),
+    );
+    await files.write(
+      `/projects/${projectId}/.tau/chats/chat_plain/chat.json`,
+      JSON.stringify({
+        id: 'chat_plain',
+        resourceId: projectId,
+        name: 'Plain',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    );
+    const records = await files.store.getChatRecordsForResource(projectId);
+    expect(records.find((record) => record.id === 'chat_child')?.taskLineage).toEqual(taskLineage);
+    expect(records.find((record) => record.id === 'chat_plain')?.taskLineage).toBeUndefined();
+    expect(files.reads).not.toContain(`/projects/${projectId}/.tau/chats/.project-tasks/records.jsonl`);
   });
 
   it('reads changed projected metadata on the next listing', async () => {

@@ -97,6 +97,8 @@ export type AgentServerOptions = {
     | undefined;
   /** The launcher workspace's single revision root. */
   readonly revisions?: ServeAgentChannelOptions['revisions'];
+  /** Project-authenticated task controls on the same channel. */
+  readonly projectTasks?: ServeAgentChannelOptions['projectTasks'];
   /**
    * Shared secret admitting an upgrade, as `Authorization: Bearer` (a Node
    * client, including the daemon's own relay splice) or as the
@@ -229,6 +231,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     const channel = serveAgentChannel(socket, options.launcher, {
       build: packageVersion,
       revisions: options.revisions,
+      projectTasks: options.projectTasks,
     });
     channels.add(channel);
     socket.on('close', () => {

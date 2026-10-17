@@ -1,0 +1,225 @@
+# Feature-branch test artifact only; production release guards and update feeds are untouched.
+name: Desktop ACP Projects preview
+run-name: Desktop preview for ACP Projects (${{ github.event.pull_request.head.sha }})
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: Package and verify Apple Silicon preview
+    if: github.event.pull_request.head.ref == 'codex/acp-projects' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-15
+    timeout-minutes: 240
+    env:
+      GEOSPEC_WORKERS: 1
+      TAU_DESKTOP_CHANNEL: staging
+      TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/preview
+      PREVIEW_EVIDENCE_ROOT: ${{ github.workspace }}/out/reports/desktop-preview
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact feature commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Prepare preview evidence
+        run: |
+          mkdir -p "$PREVIEW_EVIDENCE_ROOT"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git show --no-patch --format=fuller HEAD > "$PREVIEW_EVIDENCE_ROOT/source.txt"
+          sw_vers > "$PREVIEW_EVIDENCE_ROOT/host.txt"
+          uname -m >> "$PREVIEW_EVIDENCE_ROOT/host.txt"
+
+      # The GeoSpec native payload is produced on this host, as publish.yml does.
+      - name: Setup producer Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.14'
+
+      - name: Setup selected CPython 3.13 tooling
+        id: python313
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.14'
+          update-environment: false
+
+      - name: Setup selected CPython 3.14 tooling
+        id: python314
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.7'
+          update-environment: false
+
+      - name: Check host, capacity and installed tools
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("Desktop packaging capacity unavailable");'
+          cmake --version
+          ninja --version
+          xcrun --find clang++
+
+      # Build the renderer and Electron JavaScript first, so payload ownership
+      # failures stop the preview before the costly native packaging closure.
+      - name: Check desktop renderer payload before native packaging
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm nx run desktop:check-renderer-payload --parallel=1 --outputStyle=stream 2>&1 | tee "$PREVIEW_EVIDENCE_ROOT/payload.log"
+
+      - name: Provision pinned Python wrapper tooling
+        env:
+          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
+          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+
+          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
+          requirements = tomllib.loads(project.read_text())['build-system']['requires']
+          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
+          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
+              environment = Path('node_modules/.cache/geospec-engine-native') / name
+              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
+              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
+                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
+          PYTHON
+
+      - name: Install the selected native Rust toolchain
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup run 1.88 rustc --version
+
+      # prepare-build123d-python resolves its wheels with uv, as on the
+      # portable hosts.
+      - name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+
+      - name: Package ad-hoc signed preview
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm nx run desktop:package-macos --parallel=1 --args=--zip 2>&1 | tee "$PREVIEW_EVIDENCE_ROOT/package.log"
+
+      - name: Record archive provenance
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const archive = join(process.env.TAU_MACOS_PACKAGE_OUTPUT_ROOT, 'Tau-macos-arm64.zip');
+          const bytes = readFileSync(archive);
+          const sha256 = createHash('sha256').update(bytes).digest('hex');
+          const provenance = {
+            sourceSha: process.env.SOURCE_SHA,
+            repository: process.env.GITHUB_REPOSITORY,
+            runId: process.env.GITHUB_RUN_ID,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            architecture: 'darwin-arm64',
+            channel: 'staging',
+            signature: 'ad-hoc; not Developer ID signed or notarized',
+            automaticUpdates: false,
+            archive: 'Tau-macos-arm64.zip',
+            bytes: bytes.length,
+            sha256,
+          };
+          writeFileSync(join(process.env.PREVIEW_EVIDENCE_ROOT, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
+          writeFileSync(join(process.env.PREVIEW_EVIDENCE_ROOT, 'SHA256SUMS'), sha256 + '  Tau-macos-arm64.zip\n');
+          NODE
+
+      # Retain the archive even when the verifier fails; the run result remains authoritative.
+      - name: Upload preview archive and provenance
+        id: archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-preview-darwin-arm64-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
+            ${{ env.PREVIEW_EVIDENCE_ROOT }}/provenance.json
+            ${{ env.PREVIEW_EVIDENCE_ROOT }}/SHA256SUMS
+            ${{ env.PREVIEW_EVIDENCE_ROOT }}/source.txt
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Verify packaged runtime and macOS integration
+        id: verify
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm nx run desktop:verify-macos-package 2>&1 | tee "$PREVIEW_EVIDENCE_ROOT/verify.log"
+
+      - name: Launch packaged Tau and probe native payload
+        id: launch
+        timeout-minutes: 20
+        shell: bash
+        env:
+          TAU_E2E_DESKTOP_EXECUTABLE: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau
+        run: |
+          set -euo pipefail
+          {
+            test -x "$TAU_E2E_DESKTOP_EXECUTABLE" || { echo 'Packaged Tau executable is missing or not executable'; exit 1; }
+            pnpm nx run desktop-e2e:test:e2e:packaged-native --outputStyle=stream
+          } 2>&1 | tee "$PREVIEW_EVIDENCE_ROOT/launch.log"
+
+      - name: Upload build, verification and launch diagnostics
+        id: diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-preview-diagnostics-${{ github.event.pull_request.head.sha }}
+          path: ${{ env.PREVIEW_EVIDENCE_ROOT }}
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Describe preview outcome
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          ARCHIVE_STATUS: ${{ steps.archive.outcome }}
+          ARCHIVE_URL: ${{ steps.archive.outputs.artifact-url }}
+          VERIFY_STATUS: ${{ steps.verify.outcome }}
+          LAUNCH_STATUS: ${{ steps.launch.outcome }}
+          DIAGNOSTICS_STATUS: ${{ steps.diagnostics.outcome }}
+          DIAGNOSTICS_URL: ${{ steps.diagnostics.outputs.artifact-url }}
+        run: |
+          {
+            echo "Apple Silicon preview from commit $SOURCE_SHA. Job status: $JOB_STATUS."
+            if [ "$ARCHIVE_STATUS" = success ] && [ -n "$ARCHIVE_URL" ]; then
+              if [ "$JOB_STATUS" = success ] && [ "$VERIFY_STATUS" = success ] && [ "$LAUNCH_STATUS" = success ]; then
+                echo "Verified delivery: [download preview archive]($ARCHIVE_URL). SHA256SUMS and provenance.json accompany the ZIP."
+              else
+                echo "[Download unverified archive for diagnosis]($ARCHIVE_URL). SHA256SUMS and provenance.json accompany the ZIP."
+              fi
+              echo "Package verification: $VERIFY_STATUS. Packaged Electron launch and native payload probe: $LAUNCH_STATUS."
+              echo 'The launch probe exercises Electron main, the loaded desktop home renderer and native utility payloads; it does not qualify broader renderer workflows or a live account sign-in.'
+              echo 'This preview is ad-hoc signed, not Developer ID signed or notarized. macOS may require explicit approval to open it.'
+              echo 'It uses staging services and does not check for automatic updates.'
+            else
+              echo "No package archive is available from this run. Archive upload: $ARCHIVE_STATUS."
+            fi
+            if [ "$DIAGNOSTICS_STATUS" = success ] && [ -n "$DIAGNOSTICS_URL" ]; then
+              echo "[Download build, verification and launch diagnostics]($DIAGNOSTICS_URL)."
+            else
+              echo "No diagnostics artifact is available. Diagnostics upload: $DIAGNOSTICS_STATUS."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

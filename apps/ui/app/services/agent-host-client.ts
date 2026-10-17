@@ -11,6 +11,8 @@ import type {
   CatchUpInput,
   CommandAnswer,
   HostCommand,
+  ProjectTaskChannelRequest,
+  ProjectTaskChannelAnswer,
   ReadAnswer,
   ReadRequest,
 } from '@taucad/agent-host/wire';
@@ -129,6 +131,8 @@ export type AgentHostClientOptions = {
    * composition passes it only once that project's revision client has opened (RV9-F1); without it the tool is absent.
    */
   readonly openRevisionsPort?: (() => MessagePort | undefined) | undefined;
+  /** Explicit-source candidate creation, separate from read-only revision inspection. */
+  readonly openTaskRevisionsPort?: (() => MessagePort | undefined) | undefined;
   /**
    * This end of a placement session brokered into the file-manager worker's revision root (`connectPlacement`, W8
    * TS-S5), asked for at every provide, so a replaced host gets a new session. A provide it answers `undefined` for is
@@ -217,6 +221,8 @@ export type AgentHostReadInput = {
 export type AgentHostClient = {
   /** Execute one already-keyed command; the sender owns its id and any re-send decision. */
   hostCommand(command: HostCommand): Promise<CommandAnswer>;
+  /** Read or act on tasks at this same execution authority. */
+  projectTasks?(request: ProjectTaskChannelRequest, signal?: AbortSignal): Promise<ProjectTaskChannelAnswer>;
   /** One read of the chat's durable rows; a refusal means the reader resets to cursor 0, never a clamp. */
   read(input: AgentHostReadInput): Promise<ReadAnswer>;
   /** One immutable capture; pages remain provisional until its final validation marker. */
@@ -444,6 +450,17 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
 
   return {
     hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
+    projectTasks: async (request, signal) =>
+      guarded(async () => {
+        signal?.throwIfAborted();
+        return (
+          transport.projectTasks?.(request, signal) ?? {
+            kind: 'refused',
+            code: 'TASK_UNAVAILABLE',
+            message: 'This host does not support project threads.',
+          }
+        );
+      }, 'WORKER_PROTOCOL_FAILED'),
     read: async (input) => read(input),
     catchUp: async function* catchUp(input) {
       const operation = new AbortController();
@@ -501,7 +518,7 @@ type Incarnation = {
    * Host incarnations released or replaced and still draining their runs (T3), by `hostId`: they keep their bridges,
    * and take fresh ones on a rebridge, until their release answers.
    */
-  readonly retiring: Map<string, Readonly<{ projectId: string; options: AgentHostClientOptions }>>;
+  readonly retiring: Map<string, Readonly<{ projectId: string; options: AgentHostClientOptions; retry?: true }>>;
   /** This worker's session read, shared by its provides until the session changes (R21). */
   session?: Readonly<{ changes: number; read: Promise<SessionRead> }> | undefined;
   dead: boolean;
@@ -695,9 +712,11 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     let computeStorePort: MessagePort | undefined;
     let placementPort: MessagePort | undefined;
     let revisionsPort: MessagePort | undefined;
+    let taskRevisionsPort: MessagePort | undefined;
     try {
       computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
       revisionsPort = options.openRevisionsPort?.();
+      taskRevisionsPort = options.openTaskRevisionsPort?.();
       placementPort = renewPlacement ? options.openPlacementPort() : undefined;
       if (renewPlacement && placementPort === undefined) {
         throw Object.assign(new Error('The project revision root is not open.'), { code: 'REVISIONS_UNAVAILABLE' });
@@ -707,12 +726,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       computeStorePort?.close();
       placementPort?.close();
       revisionsPort?.close();
+      taskRevisionsPort?.close();
       throw error;
     }
     if (computeMode === 'durable' && !computeStorePort) {
       dispose();
       placementPort?.close();
       revisionsPort?.close();
+      taskRevisionsPort?.close();
       throw new AgentHostWorkerError(
         'COMPUTE_AUTHORITY_UNAVAILABLE',
         'Durable compute requires the project authority.',
@@ -725,12 +746,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       computeStorePort,
       placementPort,
       revisionsPort,
+      taskRevisionsPort,
       transferables: [
         bridge.port,
         projectRootBridge.port,
         ...(computeStorePort ? [computeStorePort] : []),
         ...(placementPort ? [placementPort] : []),
         ...(revisionsPort ? [revisionsPort] : []),
+        ...(taskRevisionsPort ? [taskRevisionsPort] : []),
       ],
       dispose,
     };
@@ -766,6 +789,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       computeStorePort,
       placementPort,
       revisionsPort,
+      taskRevisionsPort,
       transferables,
       dispose,
     } = openBridges(options);
@@ -784,6 +808,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           computeMode,
           computeStorePort,
           revisionsPort,
+          taskRevisionsPort,
           placementPort,
           projectStorage: options.projectStorage,
           authority: options.authority,
@@ -808,6 +833,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       live.bridges.delete(hostId);
       dispose();
       revisionsPort?.close();
+      taskRevisionsPort?.close();
       placementPort.close();
       throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
     }
@@ -846,8 +872,17 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     live.retiring.set(hostId, { projectId, options });
     try {
       await live.channel.call('release', { projectId, hostId });
-    } catch {
-      /* The worker is gone and was retired with every bridge. */
+    } catch (error) {
+      if (!live.dead) {
+        live.retiring.set(hostId, { projectId, options, retry: true });
+        console.warn('[agent-host] Project close failed; retaining its bridges for recovery', {
+          projectId,
+          hostId,
+          error,
+        });
+        return;
+      }
+      /* A dead worker was already retired with every bridge. */
     }
     live.retiring.delete(hostId);
     live.bridges.get(hostId)?.();
@@ -891,12 +926,22 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         computeStorePort,
         placementPort,
         revisionsPort,
+        taskRevisionsPort,
         transferables,
         dispose,
       } = bridges;
       try {
         const answer = await live.channel.call('rebridge', {
-          value: { projectId, hostId, fileSystemPort, projectRootPort, computeStorePort, placementPort, revisionsPort },
+          value: {
+            projectId,
+            hostId,
+            fileSystemPort,
+            projectRootPort,
+            computeStorePort,
+            placementPort,
+            revisionsPort,
+            taskRevisionsPort,
+          },
           transferables,
         });
         if (answer.status === 'rebridged') {
@@ -911,6 +956,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         computeStorePort?.close();
         placementPort?.close();
         revisionsPort?.close();
+        taskRevisionsPort?.close();
         throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
       }
       dispose();
@@ -1056,9 +1102,12 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         ...[...live.provided].map(async ([projectId, opening]) =>
           rebridgeIn(live, { projectId, hostId: await opening }, registrationOf(projectId)),
         ),
-        ...[...live.retiring].map(async ([hostId, { projectId, options }]) =>
-          rebridgeIn(live, { projectId, hostId }, options),
-        ),
+        ...[...live.retiring].map(async ([hostId, { projectId, options, retry }]) => {
+          await rebridgeIn(live, { projectId, hostId }, options);
+          if (retry && !live.dead && live.retiring.has(hostId)) {
+            await retireIn(live, { projectId, hostId }, options);
+          }
+        }),
       ]);
     },
   };

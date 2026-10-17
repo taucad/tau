@@ -102,6 +102,8 @@ export type AgentHostProjectProvide = {
   readonly computeStorePort?: MessagePort | undefined;
   /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
   readonly revisionsPort?: MessagePort | undefined;
+  /** A separate port authorized only for explicit-source task candidate allocation. */
+  readonly taskRevisionsPort?: MessagePort | undefined;
   /** The project's placement session in the file-manager worker (W8 TS-S5); required, so no turn runs unplaced (D13). */
   readonly placementPort: MessagePort;
   readonly projectStorage: ProjectFileSystemConfig;
@@ -140,6 +142,7 @@ export type AgentHostProjectRebridge = {
   /** Omitted for a retiring host with a successor, whose placement it must not fence. */
   readonly placementPort?: MessagePort | undefined;
   readonly revisionsPort?: MessagePort | undefined;
+  readonly taskRevisionsPort?: MessagePort | undefined;
   readonly computeStorePort?: MessagePort | undefined;
 };
 
@@ -374,6 +377,7 @@ const provideSchema = z.strictObject({
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
   revisionsPort: messagePortSchema.optional(),
+  taskRevisionsPort: messagePortSchema.optional(),
   placementPort: messagePortSchema,
   projectStorage: projectStorageSchema,
   authority: z.strictObject({ projectId: nonEmptyString, workspaceId: nonEmptyString }),
@@ -413,6 +417,7 @@ export const agentHostWorkerProtocolSchemas = {
         projectRootPort: messagePortSchema,
         placementPort: messagePortSchema.optional(),
         revisionsPort: messagePortSchema.optional(),
+        taskRevisionsPort: messagePortSchema.optional(),
         computeStorePort: messagePortSchema.optional(),
       }),
       result: z.strictObject({ status: z.enum(['rebridged', 'needs']) }),

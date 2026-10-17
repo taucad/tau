@@ -16,6 +16,7 @@ import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-i
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import type * as ContextPayloadModule from '#hooks/use-context-payload.js';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
 
 type CadAgentConfigModule = typeof CadAgentConfigModuleShape;
@@ -26,7 +27,39 @@ vi.mock('#hooks/use-chat.js', () => ({
 }));
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: vi.fn() }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: vi.fn() }));
-vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: vi.fn() }));
+vi.mock('#hooks/use-context-payload.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ContextPayloadModule>()),
+  useContextPayload: vi.fn(),
+}));
+const canonicalInstructions = vi.hoisted(() => ({
+  text: undefined as string | undefined,
+  error: undefined as Error | undefined,
+  projects: new Map<string, string>(),
+  paths: [] as string[],
+  projectId: 'proj_integration',
+}));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => undefined,
+  useFileManager: () => ({
+    recordFiles: {
+      exists: async (path: string) => {
+        if (canonicalInstructions.error) {
+          throw canonicalInstructions.error;
+        }
+        return canonicalInstructions.projects.has(path) || canonicalInstructions.text !== undefined;
+      },
+      stat: async () => ({
+        type: 'file',
+        contentKind: 'text',
+        size: new TextEncoder().encode(canonicalInstructions.text).byteLength,
+      }),
+      readFile: async (path: string) => {
+        canonicalInstructions.paths.push(path);
+        return new TextEncoder().encode(canonicalInstructions.projects.get(path) ?? canonicalInstructions.text);
+      },
+    },
+  }),
+}));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),
@@ -67,7 +100,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     setTurnPlacement: vi.fn(),
   }),
 }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_integration' }) }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: canonicalInstructions.projectId }) }));
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
@@ -137,6 +170,11 @@ const installActions = (actions: ActionsMock): void => {
 };
 
 beforeEach(() => {
+  canonicalInstructions.projectId = 'proj_integration';
+  canonicalInstructions.projects.clear();
+  canonicalInstructions.paths.length = 0;
+  canonicalInstructions.text = undefined;
+  canonicalInstructions.error = undefined;
   resetChatTurnServices();
   vi.clearAllMocks();
   vi.mocked(useChatComposer).mockReturnValue({
@@ -187,6 +225,57 @@ describe('useCadChatClient host admission integration', () => {
       model: { id: 'openai-gpt-5.5', providerKind: 'openai' },
     });
     expect(command.commandId).toBe(command.payload.runId);
+  });
+
+  it('retargets canonical new-turn instructions when the project changes despite old rendered memory', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
+    vi.mocked(useActiveChatInstance).mockReturnValue(chat);
+    installActions(buildActions());
+    contextPayloadMock.mockReturnValue({ memory: { '.tau/AGENTS.md': 'Old rendered memory' } });
+    canonicalInstructions.projects.set('/projects/proj_integration/.tau/AGENTS.md', 'Project A canonical');
+    canonicalInstructions.projects.set('/projects/proj_next/.tau/AGENTS.md', 'Project B canonical');
+    const view = renderClient();
+    const first = await admittedCommand();
+    expect(first.payload.config?.contextPayload?.memory?.['.tau/AGENTS.md']).toBe('Project A canonical');
+    canonicalInstructions.projectId = 'proj_next';
+    view.rerender();
+    const next = await admittedCommand();
+    expect(next.payload.config?.contextPayload?.memory?.['.tau/AGENTS.md']).toBe('Project B canonical');
+    expect(canonicalInstructions.paths).toEqual([
+      '/projects/proj_integration/.tau/AGENTS.md',
+      '/projects/proj_next/.tau/AGENTS.md',
+    ]);
+  });
+
+  it('reads current canonical instructions for a new browser turn while the rendered watch payload is stale', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
+    vi.mocked(useActiveChatInstance).mockReturnValue(chat);
+    installActions(buildActions());
+    contextPayloadMock.mockReturnValue({ memory: { '.tau/AGENTS.md': 'Stale candidate or watch data' } });
+    renderClient();
+    canonicalInstructions.text = 'Current canonical instructions';
+    const command = await admittedCommand();
+    expect(command.payload.config?.contextPayload?.memory).toEqual({
+      '.tau/AGENTS.md': 'Current canonical instructions',
+    });
+    canonicalInstructions.text = 'Edited without rerender';
+    const next = await admittedCommand();
+    expect(next.payload.config?.contextPayload?.memory).toEqual({ '.tau/AGENTS.md': 'Edited without rerender' });
+  });
+
+  it('clears stale instruction memory for a missing canonical file and refuses unavailable canonical authority', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
+    vi.mocked(useActiveChatInstance).mockReturnValue(chat);
+    installActions(buildActions());
+    contextPayloadMock.mockReturnValue({ memory: { '.tau/AGENTS.md': 'Old file' } });
+    renderClient();
+    const command = await admittedCommand();
+    expect(command.payload.config?.contextPayload?.memory).toBeUndefined();
+    canonicalInstructions.error = new Error('Canonical instruction authority unavailable');
+    await expect(admittedCommand()).rejects.toThrow('Canonical instruction authority unavailable');
   });
 
   it('should include snapshot and contextPayload in the host Start config', async () => {

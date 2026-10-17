@@ -1196,8 +1196,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const release = async (): Promise<void> => {
     if (!stopped) {
       /* A refused close keeps everything: the caller's next close re-attempts
-       * the cut, so nothing below runs until one succeeds. */
-      await flushClose();
+       * the cut, so nothing below runs until one succeeds. An open that was
+       * explicitly refused has no live checkout to cut; retire its actor and
+       * watches instead of keeping an owner that can never be served. */
+      if (openRefusal === undefined || actor.getSnapshot().context.liveCheckoutId !== undefined) {
+        await flushClose();
+      }
       stopWatchingCheckouts();
       for (const watcher of watchers.values()) {
         watcher?.close();

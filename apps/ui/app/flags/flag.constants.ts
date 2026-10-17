@@ -66,6 +66,18 @@ export const flagRegistry = {
     label: 'WebGPU inspector',
     description: 'Load the Three.js pipeline inspector for WebGPU diagnostics.',
   },
+  projectThreads: {
+    showInExperimental: true,
+    schema: z.boolean().default(true),
+    label: 'Project threads',
+    description: 'Let chats delegate work to child threads. Turning this off keeps existing threads and their history.',
+  },
+  planMode: {
+    showInExperimental: true,
+    schema: z.boolean().default(false),
+    label: 'Planning Mode',
+    description: 'Show mode selector and plan viewer in chat.',
+  },
   pluginsStore: {
     showInExperimental: false,
     schema: z.boolean().default(false),

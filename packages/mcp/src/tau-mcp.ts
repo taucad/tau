@@ -57,6 +57,7 @@ const descriptions = {
  */
 const instructionsFor = (tested: boolean): string =>
   [
+    'When project task tools are available, use task_spawn for isolated delegated work and task_read/task_send/task_wait for durable communication. Caller identity and source revision come from the host; reuse requestId for retries. Child results remain candidates until explicitly adopted.',
     'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
     'Use your native skill loader for the Tau skills available in this session.',
     "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",

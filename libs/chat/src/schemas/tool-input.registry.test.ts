@@ -1,6 +1,16 @@
+import {
+  projectTaskSpawnSchema,
+  projectTaskReadSchema,
+  projectTaskSendSchema,
+  projectTaskWaitSchema,
+  projectTaskActionSchema,
+  projectTaskSchema,
+  projectTaskMessageSchema,
+  projectTaskSnapshotSchema,
+} from '@taucad/agent-host/wire';
 import { describe, it, expect } from 'vitest';
 import { toolName, toolNames } from '#constants/tool.constants.js';
-import { toolInputSchemas, getToolInputSchema } from '#schemas/tool-input.registry.js';
+import { toolInputSchemas, getToolInputSchema, uiMessageTools } from '#schemas/tool-input.registry.js';
 import { geoSpecRunFilterInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 
 const requireSchema = (key: `tool-${string}`) => {
@@ -16,6 +26,48 @@ describe('toolInputSchemas registry', () => {
     for (const name of toolNames) {
       expect(getToolInputSchema(`tool-${name}`), `missing schema for tool-${name}`).toBeDefined();
     }
+  });
+
+  it.each(
+    (
+      [
+        [
+          toolName.taskSpawn,
+          projectTaskSpawnSchema,
+          projectTaskSchema,
+          { requestId: 'spawn', title: 'Inspect', prompt: 'Measure clearance', provider: { id: 'codex' } },
+        ],
+        [toolName.taskRead, projectTaskReadSchema, projectTaskSnapshotSchema, { taskId: 'child', after: 1, limit: 2 }],
+        [
+          toolName.taskSend,
+          projectTaskSendSchema,
+          projectTaskMessageSchema,
+          { requestId: 'send', taskId: 'child', text: 'Check clearance' },
+        ],
+        [toolName.taskWait, projectTaskWaitSchema, projectTaskSnapshotSchema, { after: 1, timeout: 30_000 }],
+        [toolName.taskCancel, projectTaskActionSchema, projectTaskSchema, { taskId: 'child', requestId: 'cancel' }],
+        [toolName.taskResume, projectTaskActionSchema, projectTaskSchema, { taskId: 'child', requestId: 'resume' }],
+      ] as const
+    ).map(([name, inputSchema, outputSchema, input]) => ({ name, inputSchema, outputSchema, input })),
+  )('should reuse canonical $name input/output validation', ({ name, inputSchema, outputSchema, input }) => {
+    expect(requireSchema(`tool-${name}`)).toBe(inputSchema);
+    expect(uiMessageTools[name].outputSchema).toBe(outputSchema);
+    expect(requireSchema(`tool-${name}`).safeParse(input).success).toBe(true);
+    expect(requireSchema(`tool-${name}`).safeParse({ ...input, stray: true }).success).toBe(false);
+    expect(uiMessageTools[name].outputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('should retain task message byte and wait timeout bounds', () => {
+    expect(
+      requireSchema('tool-task_send').safeParse({ requestId: 'send', taskId: 'child', text: '界'.repeat(6000) })
+        .success,
+    ).toBe(false);
+    expect(requireSchema('tool-task_wait').safeParse({ timeout: 30_001 }).success).toBe(false);
+    expect(requireSchema('tool-task_wait').safeParse({ timeout: 0 }).success).toBe(true);
+    expect(
+      requireSchema('tool-task_spawn').safeParse({ requestId: 'spawn', title: 'Inspect', provider: { id: 'codex' } })
+        .success,
+    ).toBe(false);
   });
 
   it('validates a workbench view and refuses an empty patch', () => {

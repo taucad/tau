@@ -1,0 +1,24 @@
+{
+  "configs": {
+    "ProjectTaskDispatch.target.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    },
+    "ProjectTaskDispatch.early-stop.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEarlyRelease"
+      },
+      "kind": "witness",
+      "ref": "Cancellation must wait for backend settlement and resource compensation."
+    },
+    "ProjectTaskAdmission.target.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    },
+    "ProjectTaskAdmission.model-refusal.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    }
+  }
+}

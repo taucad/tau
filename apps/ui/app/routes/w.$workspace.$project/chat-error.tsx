@@ -415,7 +415,15 @@ function codedErrorCard({
   return undefined;
 }
 
-export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
+export const ChatError = memo(function ({
+  className,
+  isClosedDelegatedTask = false,
+  onOpenAgents,
+}: {
+  readonly className?: string;
+  readonly isClosedDelegatedTask?: boolean;
+  readonly onOpenAgents?: () => void;
+}): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
   /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
@@ -432,6 +440,31 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
 
   if (!parsedError) {
     return null;
+  }
+
+  if (isClosedDelegatedTask) {
+    return (
+      <ChatErrorCard
+        className={cn('min-w-0', className)}
+        tone='warning'
+        icon={CircleAlert}
+        title='This task stopped'
+        description='Open Threads to review the task and available actions.'
+        actions={
+          <Button variant='outline' size='xs' onClick={onOpenAgents}>
+            Open Threads
+          </Button>
+        }
+      >
+        <ChatErrorDetails>
+          <CodeViewer
+            text={parsedError.raw ? tryFormatJson(parsedError.raw) : parsedError.message}
+            language='json'
+            className='mt-1 text-xs whitespace-pre-wrap'
+          />
+        </ChatErrorDetails>
+      </ChatErrorCard>
+    );
   }
 
   // Try again is an explicit replay. Specialized components own auth,

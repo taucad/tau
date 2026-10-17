@@ -23,6 +23,28 @@ import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-o
 import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 
+const threadReview = vi.hoisted(() => ({
+  value: undefined as
+    | undefined
+    | {
+        rootChatId: string;
+        taskId: string;
+        attemptId: string;
+        checkoutId: string;
+        sourceRevisionId: string;
+        title: string;
+      },
+  open: vi.fn(),
+  close: vi.fn(),
+}));
+vi.mock('#routes/w.$workspace.$project/thread-navigation-context.js', () => ({
+  useThreadNavigation: () => ({
+    candidateReview: threadReview.value,
+    openThreads: threadReview.open,
+    closeReview: threadReview.close,
+  }),
+}));
+
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
   getSnapshot: () => projectSnapshot,
@@ -121,11 +143,64 @@ const renderPane = (): void => {
 };
 
 beforeEach(() => {
+  threadReview.value = undefined;
+  threadReview.open.mockClear();
+  threadReview.close.mockClear();
   revisionStatusHarness.reset();
   turnOutcomes = [];
 });
 
 describe('Revisions pane', () => {
+  it('should review the exact thread candidate through existing branch actions without moving the root chat', async () => {
+    threadReview.value = {
+      rootChatId: 'chat-root',
+      taskId: 'child',
+      attemptId: 'attempt-1',
+      checkoutId: 'candidate',
+      sourceRevisionId: 'base',
+      title: 'Check bracket',
+    };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      branches: [
+        { name: 'main', head: 'base', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'task-child',
+          head: 'base',
+          checkoutId: 'candidate',
+          checkoutRoot: '/checkouts/candidate',
+          leaseChatIds: ['child-chat'],
+        },
+      ],
+    };
+    renderPane();
+    expect(await screen.findByText('No saved changes in this attempt.')).toBeInTheDocument();
+    const review = screen.getByText('Check bracket').closest('section');
+    expect(review).not.toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to thread' }));
+    expect(threadReview.open).toHaveBeenCalledWith('child');
+    expect(placeChat).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Close thread review' }));
+    expect(threadReview.close).toHaveBeenCalledOnce();
+  });
+
+  it('should report a removed candidate after the revision registry settles', async () => {
+    threadReview.value = {
+      rootChatId: 'chat-root',
+      taskId: 'child',
+      attemptId: 'attempt-1',
+      checkoutId: 'removed-candidate',
+      sourceRevisionId: 'base',
+      title: 'Check bracket',
+    };
+    renderPane();
+    expect(await screen.findByText('This thread’s revision is no longer available.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading thread changes…')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to thread' }));
+    expect(threadReview.open).toHaveBeenCalledWith('child');
+  });
+
   it('folds only consecutive unnamed autosaves', () => {
     const card = (
       revisionId: string,

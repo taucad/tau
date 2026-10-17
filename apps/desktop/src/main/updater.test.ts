@@ -168,6 +168,7 @@ describe('managed update source', () => {
 describe('startDesktopUpdater', () => {
   it.each([
     ['unpackaged', { packaged: false }],
+    ['ad-hoc package', { updatesEnabled: false }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     ['switched off', { environment: { TAU_DESKTOP_UPDATES: 'off' } }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.

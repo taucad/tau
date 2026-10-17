@@ -2637,6 +2637,9 @@ importers:
       '@taucad/grammars':
         specifier: workspace:*
         version: link:../../libs/grammars
+      '@taucad/host':
+        specifier: workspace:*
+        version: link:../../packages/host
       '@taucad/image':
         specifier: workspace:*
         version: link:../../packages/plugins/image
@@ -3202,6 +3205,9 @@ importers:
 
   libs/chat:
     dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../packages/agent-host
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../../packages/core/bundler

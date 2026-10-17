@@ -12,7 +12,7 @@ import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import type { ExternalAgentTurn, ExternalAgentPort } from '#host/external-agent.js';
-import type { TauAgentHost } from '#host/tau-agent-host.js';
+import type { TauAgentHost, TauClientContextInput } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { ScriptedParityResponse } from '#host/scripted-model.fixture.js';
@@ -1025,9 +1025,13 @@ the cancelled tools left the system unchanged.
     const file = createMemoryLogFile();
     const modelStarted = Promise.withResolvers<void>();
     let calls = 0;
+    let instructions = 'First candidate instructions.';
+    const contexts: TauClientContextInput[] = [];
+    const requests: ModelStreamRequest[] = [];
     const transport: ModelTransport = {
       funding: { type: 'unfunded' },
       async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
         calls++;
         if (calls === 1) {
           modelStarted.resolve();
@@ -1047,14 +1051,29 @@ the cancelled tools left the system unchanged.
         yield { type: 'completed', stopReason: 'stop' };
       },
     };
-    const host = createTauAgentHost(
-      hostOptions({
-        openEventLog: file.open,
-        transport,
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: 'interrupt',
-      }),
-    );
+    const options = hostOptions({
+      openEventLog: file.open,
+      transport,
+      toolRegistry: tools(async () => ({ content: null, isError: false })),
+      idPrefix: 'interrupt',
+    });
+    const placement = options.placement!;
+    const host = createTauAgentHost({
+      ...options,
+      placement: {
+        ...placement,
+        admit: async (input) => {
+          const result = await placement.admit(input);
+          return result.status === 'refused'
+            ? result
+            : { ...result, placement: { ...result.placement, root: '/private-candidate', mode: 'candidate' } };
+        },
+      },
+      clientContext: async (input) => {
+        contexts.push(input);
+        return { memory: { '.tau/AGENTS.md': instructions } };
+      },
+    });
     const admission = host.admit({
       chatId: 'chat-interrupt',
       runId: 'run-interrupt',
@@ -1078,7 +1097,14 @@ the cancelled tools left the system unchanged.
     await host.resolveInterrupt({ runId: 'run-interrupt', interruptId: 'interrupt-1', outcome: 'approved' });
     await expect(interruption).resolves.toEqual({ interruptId: 'interrupt-1', outcome: 'approved' });
 
+    instructions = 'Updated candidate instructions.';
     const final = await host.resume('chat-interrupt');
+    expect(contexts.filter(({ root }) => root !== undefined)).toEqual([
+      { chatId: 'chat-interrupt', runId: 'run-interrupt', root: '/private-candidate' },
+      { chatId: 'chat-interrupt', runId: 'run-interrupt', root: '/private-candidate' },
+    ]);
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain('First candidate instructions.');
+    expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('Updated candidate instructions.');
     const snapshot = await host.snapshot('chat-interrupt');
     const eventLog = await file.open();
     const events = await eventLog.read();

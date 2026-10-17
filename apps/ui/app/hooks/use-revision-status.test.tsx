@@ -41,6 +41,11 @@ type RevisionAnswer = Awaited<ReturnType<AgentChannelClient['revision']>>;
 const revisionChannel = (
   fields: Pick<AgentChannelClient, 'revision' | 'revisionEvents' | 'close'>,
 ): AgentChannelClient & typeof fields => ({
+  projectTasks: async () => ({
+    kind: 'refused',
+    code: 'TASK_UNAVAILABLE',
+    message: 'This revision-only test host does not provide tasks.',
+  }),
   execute: async () => {
     throw new Error('The revision hook sends no agent commands.');
   },

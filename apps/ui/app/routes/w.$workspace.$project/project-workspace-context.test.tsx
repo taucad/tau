@@ -6,6 +6,13 @@ import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
+vi.mock('#hooks/use-project-tasks.js', () => ({
+  ProjectTasksProvider: ({ children }: { readonly children: React.JSX.Element }) => children,
+}));
+vi.mock('#routes/w.$workspace.$project/thread-navigation-context.js', () => ({
+  ThreadNavigationProvider: ({ children }: { readonly children: React.JSX.Element }) => children,
+}));
+
 const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
 const route = vi.hoisted<{
   key: string;
@@ -43,8 +50,10 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
 vi.mock('react-router', () => ({ useLocation: () => route }));
 vi.mock('@xstate/react', () => ({
-  useSelector: (_actor: unknown, selector: (snapshot: { matches: () => boolean }) => unknown) =>
-    selector({ matches: () => state.isEditorReady }),
+  useSelector: (
+    _actor: unknown,
+    selector: (snapshot: { matches: () => boolean; context: { focusedChatId: string } }) => unknown,
+  ) => selector({ matches: () => state.isEditorReady, context: { focusedChatId: 'chat-1' } }),
 }));
 const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
 const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));

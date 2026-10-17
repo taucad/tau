@@ -100,6 +100,30 @@ const machineTextOf = (output: unknown): string =>
   typeof output === 'string' ? output : JSON.stringify(output, undefined, 2);
 
 const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
+  [toolName.taskSpawn]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.taskRead]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.taskSend]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.taskWait]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.taskCancel]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.taskResume]: {
+    input: (input) => JSON.stringify(input, null, 2),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
   [toolName.getParameters]: {
     input: (input) =>
       joinLines(

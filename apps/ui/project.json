@@ -307,6 +307,8 @@
           "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/project-tasks/project-tasks.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/project-tasks/threads-panel.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'",
           "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"

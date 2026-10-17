@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatFileTree } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
@@ -6,6 +7,8 @@ import { ChatEditorLayout } from '#routes/w.$workspace.$project/chat-editor-layo
 import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
 import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
+import { ThreadsPanelBody } from '#components/project-tasks/threads-panel.js';
+import { useThreadNavigation } from '#routes/w.$workspace.$project/thread-navigation-context.js';
 import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
@@ -22,6 +25,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
     useChatInterfaceState();
 
+  const threads = useThreadNavigation();
+  const workspace = useProjectWorkspace();
   const isViewerTab = activeTab === 'viewer';
 
   return (
@@ -97,6 +102,19 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                   <ChatHistoryGate>
                     <ChatHistory />
                   </ChatHistoryGate>
+                </TabsContent>
+                <TabsContent enableAnimation={false} value='agents' className='flex h-full flex-col'>
+                  <ThreadsPanelBody
+                    rootChatId={threads.rootChatId}
+                    selectedTaskId={threads.selectedTaskId}
+                    onSelectTask={threads.openThreads}
+                    onBack={threads.back}
+                    onOpenParent={threads.openParent}
+                    onReviewCandidate={threads.reviewCandidate}
+                    onReturnToChat={() => {
+                      workspace.setChatOpen(true);
+                    }}
+                  />
                 </TabsContent>
                 <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col'>
                   <ChatFileTree />

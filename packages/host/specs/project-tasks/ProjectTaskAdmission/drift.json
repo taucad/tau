@@ -1,0 +1,16 @@
+{
+  "alphabet": ["admitContinuation", "admitRoot", "cancel", "close", "finishRoot", "recover", "resume", "spawn"],
+  "sources": {
+    "../agent-host/src/wire/project-tasks.schema.ts": "da57807a562889ecb78c1c9465c631a0c2347af91e4274cf0f08387e116981b1",
+    "src/project-tasks/backend.ts": "e72799d3740327345b27dbbaea960d25309aa10a8263c3a9202df8d8729bc1d3",
+    "src/project-tasks/coordinator.ts": "296db1ef52043c06ed964f07c3226e068ef76d8b6b4de88ff61deee5cb0066f2",
+    "src/project-tasks/mailbox.ts": "d5f36d56b087f11d7398307c0fa1a77d5ae589f6fe148eac7ecb7d6d6188b2fb",
+    "src/project-tasks/projection.ts": "73a878275643dabcd0dead562df72720d87dbeade1ecfde16c522886571ea4af",
+    "src/project-tasks/store.ts": "363c9086f98e549d8ab8e6e69a697e481f08511e7e256626c5d7298a99e5c49d",
+    "src/project-tasks/types.ts": "a00b5fdf35d777718254af07619bd8e45d8c692cfa6b7ad6f630dbfa0c21f1bb"
+  },
+  "specs": {
+    "ProjectTaskAdmission.tla": "753561cd7e27f1698913a38acb6dec9eaeb3fc265fecac3c62aeb4c350db0096"
+  },
+  "tables": {}
+}

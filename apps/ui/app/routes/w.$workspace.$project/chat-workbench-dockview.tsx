@@ -22,7 +22,7 @@ import { useSelector } from '@xstate/react';
 import {
   Activity,
   Globe,
-  Bot,
+  MessagesSquare,
   Box,
   BriefcaseBusiness,
   Download,
@@ -99,7 +99,9 @@ import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
-import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
+import { useThreadNavigation } from '#routes/w.$workspace.$project/thread-navigation-context.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
+import { ThreadsPanelBody } from '#components/project-tasks/threads-panel.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
 import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
 import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
@@ -316,7 +318,29 @@ function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
 
 function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <AgentsPanelBody enableHistory={isShown} />;
+  const navigation = useThreadNavigation();
+  const workspace = useProjectWorkspace();
+  const { projectId } = useProject();
+  const { chats } = useChatRecords(projectId);
+  const title = chats.find((chat) => chat.id === navigation.rootChatId)?.name;
+  useEffect(() => {
+    api.setTitle(title ? `Threads · ${title}` : 'Threads');
+  }, [api, title]);
+  return (
+    <ThreadsPanelBody
+      rootChatId={navigation.rootChatId}
+      selectedTaskId={navigation.selectedTaskId}
+      onSelectTask={navigation.openThreads}
+      onBack={navigation.back}
+      onOpenParent={navigation.openParent}
+      onReviewCandidate={navigation.reviewCandidate}
+      onReturnToChat={() => {
+        api.close();
+        workspace.setChatOpen(true);
+      }}
+      enableHistory={isShown}
+    />
+  );
 }
 
 function JobsWorkbenchPanel(): React.JSX.Element {
@@ -426,7 +450,7 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
       {
         id: 'agents',
         label: paneTitle('agents'),
-        icon: Bot,
+        icon: MessagesSquare,
         panel: { id: 'workbench:agents', component: 'agents', title: paneTitle('agents') },
       },
       {
@@ -512,11 +536,15 @@ export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: Workben
 
 const visibleWorkbenchSurfaceGroups = (
   isTauDebugEnabled: boolean,
+  isProjectThreadsEnabled: boolean,
   profile: WorkbenchProfile = 'editor',
 ): readonly WorkbenchSurfaceGroup[] =>
   workbenchSurfaceGroups.flatMap((group) => {
     const surfaces = group.surfaces.filter(
-      (surface) => isWorkbenchSurfaceAllowed(surface.id, profile) && (!surface.debugOnly || isTauDebugEnabled),
+      (surface) =>
+        isWorkbenchSurfaceAllowed(surface.id, profile) &&
+        (surface.id !== 'agents' || isProjectThreadsEnabled) &&
+        (!surface.debugOnly || isTauDebugEnabled),
     );
     return surfaces.length === 0 ? [] : [{ ...group, surfaces }];
   });
@@ -629,7 +657,8 @@ function WorkbenchSurfaceSelector({
 }): React.JSX.Element {
   const isTauDebugEnabled = useFeature('tauDebug');
   const profile = useContext(WorkbenchProfileContext);
-  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, profile);
+  const isProjectThreadsEnabled = useFeature('projectThreads');
+  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, isProjectThreadsEnabled, profile);
 
   return (
     <div className='size-full scroll-shadows-y overflow-y-auto px-4 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
@@ -763,7 +792,8 @@ export function WorkbenchPlaceholderPanel(
 export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
   const isTauDebugEnabled = useFeature('tauDebug');
   const profile = useContext(WorkbenchProfileContext);
-  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, profile);
+  const isProjectThreadsEnabled = useFeature('projectThreads');
+  const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, isProjectThreadsEnabled, profile);
 
   return (
     <div className='flex h-full items-center gap-1'>

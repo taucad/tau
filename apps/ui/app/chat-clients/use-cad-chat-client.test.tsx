@@ -24,6 +24,7 @@ import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
 /* Whether the project's revision root is connected yet (W8 TS-S5): the host places turns through it. */
+const canonicalReader = vi.hoisted(() => ({ refuse: false, reads: 0 }));
 const revisionRoot = vi.hoisted(() => ({ connected: true }));
 const browserHostHarness = vi.hoisted(() => ({
   run: undefined as { runId: string; state?: 'paused'; eventCount?: number } | undefined,
@@ -163,6 +164,15 @@ vi.mock('#hooks/use-credit-preflight.js', () => ({
 }));
 vi.mock('#hooks/use-file-manager.js', () => {
   const fileManager = () => ({
+    recordFiles: {
+      exists: async () => {
+        canonicalReader.reads += 1;
+        if (canonicalReader.refuse) {
+          throw new Error('Canonical read unavailable');
+        }
+        return false;
+      },
+    },
     workspace: { syncProjectRoots: browserHostHarness.syncProjectRoots },
     fileManagerRef: {
       getSnapshot: () => ({
@@ -391,6 +401,8 @@ const installActiveSession = (activeChatId: string): void => {
 };
 
 beforeEach(() => {
+  canonicalReader.refuse = false;
+  canonicalReader.reads = 0;
   placementHarness.localHostId = undefined;
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
@@ -1181,11 +1193,13 @@ describe('useCadChatClient', () => {
     browserHostHarness.run = { runId: 'run_live' };
     browserHostHarness.projectedFailure = { code: 'RUN_ABANDONED', message: 'The host closed.' };
 
+    canonicalReader.refuse = true;
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',
       leaseTurnId: 'user_1',
       request: { kind: 'continue', command: { type: 'resume', payload: { runId: 'run_live' } } },
     });
+    expect(canonicalReader.reads).toBe(0);
   });
 
   it('sends the selected model in Start config without a page checkout or mode', async () => {

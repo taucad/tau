@@ -5,7 +5,7 @@ import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
  * the origin's tabs by M2 inside the browser chat store; nothing here elects, forwards or tails.
  */
 
-import { ResourceQueue } from '@taucad/filesystem';
+import { ResourceQueue, bufferToStream } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
@@ -31,14 +31,14 @@ import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
-import { followChat } from '@taucad/agent-host';
-import type { ChatLedger, StorageDurabilityClass, ToolRegistry } from '@taucad/agent-host';
+import type { StorageDurabilityClass, ToolRegistry } from '@taucad/agent-host';
 import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
-import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
-import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { TurnPlacementChannel, TurnPlacementToolContext } from '@taucad/agent-host/channel-client';
+import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
-import { createBrowserChatStore } from '@taucad/agent-host/browser';
+import { browserProjectTasks } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
+import { createProjectTaskHost } from '@taucad/host/project-tasks';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
@@ -97,24 +97,17 @@ export type BrowserProjectHost = Readonly<{
   rebridge: (ports: AgentHostProjectRebridge) => Promise<void>;
   /** Serve no stream, and settle once every run this host admitted has ended, or `signal` ends (T3). */
   drain: (signal: AbortSignal) => Promise<void>;
+  /** Release checkout-scoped executors after a task's placement lease retires. */
+  releaseCandidate: (checkoutId: string) => Promise<void>;
+  /** Allocate a child checkout from its immutable admitted source. */
+  createCandidate: (
+    name: string,
+    sourceRevisionId: string,
+    requestId: string,
+  ) => Promise<Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>>;
   /** Stop the launcher and every child, then dispose the bridges this host was given. */
   close: () => Promise<void>;
 }>;
-
-/**
- * T3: every run in `runIds` has ended; a paused run has too, since its pause survives a restart (RA-S7). A placed run
- * ends at its settlement row, which M1 appends after the terminal one (W8 TS-S6).
- */
-const runsEnded =
-  (runIds: ReadonlySet<string>) =>
-  (ledger: ChatLedger): boolean =>
-    [...runIds].every((runId) => {
-      const entry = ledger.runs[runId];
-      if (entry === undefined || entry.lifecycle === 'admitted' || entry.lifecycle === 'running') {
-        return false;
-      }
-      return entry.lifecycle === 'paused' || entry.settlements.some((row) => row.attempt === entry.attempt);
-    });
 
 /** How often the worker's agent channel sends `lk`, so the page's liveness bound can tell slow from dead (T9 E3). */
 const keepaliveInterval = 1000;
@@ -573,6 +566,12 @@ const composeProjectHost = async (
     provide.revisionsPort === undefined ? undefined : swappable(createPortRevisionsClient(provide.revisionsPort));
   const revisions = revisionsSlot?.view;
   opened(() => revisions?.close());
+  const taskRevisionsSlot =
+    provide.taskRevisionsPort === undefined
+      ? undefined
+      : swappable(createPortRevisionsClient(provide.taskRevisionsPort));
+  const taskRevisions = taskRevisionsSlot?.view;
+  opened(() => taskRevisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
@@ -591,44 +590,59 @@ const composeProjectHost = async (
   const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService });
   /* RH-S12: the one parameter-actor factory, over this project's root bridge. */
   const parameterActors = new Map<string, ParameterSetActor>();
-  const parameterActorFor = async (targetFile: string): Promise<ParameterSetActor> => {
-    const existing = parameterActors.get(targetFile);
-    if (existing) {
-      return existing;
-    }
-    const actor = createParameterSetActor({
-      target: {
-        authority: `browser:${provide.authority.workspaceId}:${provide.authority.projectId}`,
-        root: provide.authority.projectId,
-        entry: targetFile,
-      },
-      files: projectRoot,
-      resolve: async ({ entry }, signal, resolution) => {
-        const result = await runtimeClient.describe({
-          source: { path: entry },
-          ...(resolution === undefined ? {} : { resolution }),
-          signal,
-        });
-        if (!result.success) {
-          throw Object.assign(
-            new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
-            { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
-          );
-        }
-        return result.parameters;
-      },
-    });
-    parameterActors.set(targetFile, actor);
-    return actor;
-  };
+  const parameterActorFor =
+    ({
+      actors,
+      files,
+      runtime,
+      authority,
+    }: {
+      actors: Map<string, ParameterSetActor>;
+      files: ProjectFileSystemBridge;
+      runtime: AppRuntimeClient;
+      authority: string;
+    }) =>
+    async (targetFile: string): Promise<ParameterSetActor> => {
+      const existing = actors.get(targetFile);
+      if (existing) {
+        return existing;
+      }
+      const actor = createParameterSetActor({
+        target: { authority, root: provide.authority.projectId, entry: targetFile },
+        files,
+        resolve: async ({ entry }, signal, resolution) => {
+          const result = await runtime.describe({
+            source: { path: entry },
+            ...(resolution === undefined ? {} : { resolution }),
+            signal,
+          });
+          if (!result.success) {
+            throw Object.assign(
+              new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
+              { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
+            );
+          }
+          return result.parameters;
+        },
+      });
+      actors.set(targetFile, actor);
+      return actor;
+    };
   const parameters = createRuntimeParameterAgentClient({
     mapRuntimeError: (error) => toRpcError(error),
-    parameterActorFor,
+    parameterActorFor: parameterActorFor({
+      actors: parameterActors,
+      files: projectRoot,
+      runtime: runtimeClient,
+      authority: `browser:${provide.authority.workspaceId}:${provide.authority.projectId}`,
+    }),
   });
+  const baseServices = { runtimeClient, runtimeRpc, parameters, geoSpecClient };
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
     provider: FileSystemProvider,
     preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
+    services: typeof baseServices = baseServices,
   ): ToolRegistry => {
     const view = composeView(
       { filesystem: provider },
@@ -642,12 +656,12 @@ const composeProjectHost = async (
         createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
       workbenchFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
-      workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
+      workbench: createRuntimeWorkbenchClient(async () => services.runtimeClient),
       skillResolver,
-      ...runtimeRpc,
-      parameters,
-      geospec: geoSpecClient,
-      ...(provide.machinesEnabled === true ? { machines: runtimeClient.machines } : {}),
+      ...services.runtimeRpc,
+      parameters: services.parameters,
+      geospec: services.geoSpecClient,
+      ...(provide.machinesEnabled === true ? { machines: services.runtimeClient.machines } : {}),
       machineSettings: preferences,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
@@ -667,15 +681,111 @@ const composeProjectHost = async (
     });
   };
   const toolRegistry = toolRegistryOver(workspaceProvider, fileSystem);
-  /* ponytail: an attempt's file tools read its checkout; the kernel, GeoSpec and parameter clients stay on the project
-   * root until W8's candidate checkouts need them re-rooted. */
-  const placedTools = (tools: TurnPlacementToolPort): ToolRegistry => {
+  type PlacedServices = Readonly<{
+    checkoutId: string;
+    root: string;
+    services: typeof baseServices;
+    close: () => Promise<void>;
+  }>;
+  const placedServices = new Map<string, Promise<PlacedServices>>();
+  const attemptKey = ({ key }: TurnPlacementToolContext): string => `${key.runId}/${String(key.attempt)}`;
+  const placedServicesFor = async (
+    context: TurnPlacementToolContext,
+    proxy: ProjectFileSystemBridge,
+    provider: FileSystemProvider,
+  ): Promise<PlacedServices> => {
+    const id = attemptKey(context);
+    const existing = placedServices.get(id);
+    if (existing !== undefined) {
+      return existing.then((resource) => {
+        if (resource.checkoutId !== context.checkoutId || resource.root !== context.root) {
+          throw Object.assign(new Error('A placed task attempt changed checkout authority.'), {
+            code: 'PLACEMENT_MISMATCH',
+          });
+        }
+        return resource;
+      });
+    }
+    const created = (async (): Promise<PlacedServices> => {
+      const view = composeView(
+        { filesystem: provider },
+        { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
+      );
+      const candidateRuntime: AppRuntimeClient = createRuntimeClient<AnyRuntimeDefinition>(
+        createDefaultKernelOptions({
+          fileSystem: fromFsLike(createRuntimeFsLike(view)),
+          runtimeConfig,
+          compute,
+        }),
+      );
+      const candidateGeoSpec = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: () => createFileSystemBridgePort(view),
+        runtimeConfig,
+        runnerTimeout: geoSpecDefaultRunBudget,
+      });
+      const actors = new Map<string, ParameterSetActor>();
+      const candidateParameters = createRuntimeParameterAgentClient({
+        mapRuntimeError: (error) => toRpcError(error),
+        parameterActorFor: parameterActorFor({
+          actors,
+          files: proxy,
+          runtime: candidateRuntime,
+          authority: `browser:${provide.authority.workspaceId}:${provide.authority.projectId}:${context.checkoutId}`,
+        }),
+      });
+      return {
+        checkoutId: context.checkoutId,
+        root: context.root,
+        services: {
+          runtimeClient: candidateRuntime,
+          runtimeRpc: createRuntimeRpcClients({ runtimeClient: candidateRuntime, imageService }),
+          parameters: candidateParameters,
+          geoSpecClient: candidateGeoSpec,
+        },
+        close: async () => {
+          const failures = await closeParameterActors(actors);
+          await candidateGeoSpec.close().catch((error: unknown) => failures.push(error));
+          candidateRuntime.terminate();
+          if (failures.length > 0) {
+            throw new AggregateError(failures, `Candidate ${context.checkoutId} did not close cleanly.`);
+          }
+        },
+      };
+    })();
+    placedServices.set(id, created);
+    return created;
+  };
+  const releaseCandidate = async (checkoutId: string): Promise<void> => {
+    const entries = [...placedServices];
+    const failures: unknown[] = [];
+    for (const [id, pending] of entries) {
+      // oxlint-disable-next-line no-await-in-loop -- release each checkout's own resources in admission order.
+      const resource = await pending;
+      if (resource.checkoutId !== checkoutId) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each close waits for its accepted writes to finish.
+        await resource.close();
+        placedServices.delete(id);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `Candidate ${checkoutId} did not close cleanly.`);
+    }
+  };
+  const placedTools = (tools: TurnPlacementToolContext): ToolRegistry => {
     /* A tool port that never answers (D14) fails each invoke; an attempt that invokes nothing leaves no unhandled
      * rejection. */
     const opened = (async (): Promise<Readonly<{ registry: ToolRegistry } | { failure: unknown }>> => {
       try {
         const proxy = await createProjectFileSystemProxy(tools.port);
-        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy), proxy) };
+        const provider = createRelayedFileSystemProvider(proxy);
+        const placed = tools.mode === 'direct' ? undefined : await placedServicesFor(tools, proxy, provider);
+        const services = placed?.services ?? baseServices;
+        return { registry: toolRegistryOver(provider, proxy, services) };
       } catch (error) {
         return { failure: error };
       }
@@ -741,13 +851,14 @@ const composeProjectHost = async (
     /* The funded (cloud) build checks an attempt's account against it (W11 GI-Q6); self-host ignores it. */
     principal: () => provide.principal,
   };
-  /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
-   * host's release or a successor (M2, C11). */
-  let draining = false;
-  const launcher: AgentLauncher = createAgentLauncher({
-    admitting: () => !draining,
-    chats: createBrowserChatStore({
-      projectId: provide.authority.projectId,
+  function readProjectFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  function readProjectFile(path: string, encoding: 'utf8'): Promise<string>;
+  async function readProjectFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    return encoding === 'utf8' ? projectRoot.readFile(path, encoding) : projectRoot.readFile(path);
+  }
+  const projectTasks = await createProjectTaskHost({
+    projectId: provide.authority.projectId,
+    platform: browserProjectTasks({
       /* Per incarnation: a released host drains beside its successor in this worker, and M2 never hears its own
        * sender, so each needs its own to hear the other's heartbeats (T3). */
       tabId: `${worker.tabId}/${provide.hostId}`,
@@ -768,80 +879,138 @@ const composeProjectHost = async (
               durability,
             }
           : { kind: 'opfs', directory: opfs },
-      observeLog: async ({ path, signal, onChange, onError }) => {
-        let released = false;
-        const subscription = projectRoot.watchReady({ paths: [path] }, onChange);
-        const release = (): void => {
-          if (!released) {
-            released = true;
-            signal.removeEventListener('abort', release);
-            subscription.unsubscribe();
+      ...(bridges.projectRoot.hello.payload.watchable
+        ? {
+            observeLog: async ({
+              path,
+              signal,
+              onChange,
+              onError,
+            }: {
+              path: string;
+              signal: AbortSignal;
+              onChange: () => void;
+              onError: (error: unknown) => void;
+            }) => {
+              let released = false;
+              const subscription = projectRoot.watchReady({ paths: [path] }, onChange);
+              const release = (): void => {
+                if (!released) {
+                  released = true;
+                  signal.removeEventListener('abort', release);
+                  subscription.unsubscribe();
+                }
+              };
+              signal.addEventListener('abort', release, { once: true });
+              // async-iife: bootstrap
+              // The observation owns its closure monitor until release; stale callbacks are fenced.
+              void (async () => {
+                try {
+                  await subscription.closed;
+                  // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+                  if (!released && !signal.aborted) {
+                    onError(new Error(`Chat log observation closed for ${path}.`));
+                  }
+                } catch (error) {
+                  // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+                  if (!released && !signal.aborted) {
+                    onError(error);
+                  }
+                }
+              })();
+              try {
+                await subscription.ready;
+                signal.throwIfAborted();
+                return release;
+              } catch (error) {
+                release();
+                throw error;
+              }
+            },
           }
-        };
-        signal.addEventListener('abort', release, { once: true });
-        // async-iife: bootstrap
-        // The observation owns its closure monitor until release; stale callbacks are fenced.
-        void (async () => {
-          try {
-            await subscription.closed;
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(new Error(`Chat log observation closed for ${path}.`));
-            }
-          } catch (error) {
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(error);
-            }
-          }
-        })();
-        try {
-          await subscription.ready;
-          signal.throwIfAborted();
-          return release;
-        } catch (error) {
-          release();
-          throw error;
-        }
-      },
+        : {}),
       visibility: worker.visibility,
     }),
-    modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
-    /* The page's session cookie funds a browser turn; there is no pairing to lose. The page names its account. */
-    credential: () => ({ mode: 'session', principal: provide.principal }),
-    systemPrompt: provide.systemPrompt,
-    systemPromptBlocks: provide.systemPromptBlocks,
-    model: provide.model,
-    toolRegistry,
-    ...(worker.delays === undefined ? {} : { delays: worker.delays }),
-    turnPlacement,
-    clientContext: async () => {
-      const discovered = await skillResolver.getPromptSkillListing();
-      const fingerprint = JSON.stringify(
-        discovered.map((skill) => [skill.name, skill.description, skill.fingerprint ?? '']),
-      );
-      if (fingerprint !== cachedSkillFingerprint) {
-        cachedSkillFingerprint = fingerprint;
-        cachedSkills = discovered;
+    filesystem: {
+      exists: async (path) => projectRoot.exists(path),
+      readFile: readProjectFile,
+      readFileStream: (path, options) =>
+        new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async start(controller) {
+            try {
+              options?.signal?.throwIfAborted();
+              const reader = bufferToStream(await projectRoot.readFile(path), options).getReader();
+              for (;;) {
+                // oxlint-disable-next-line no-await-in-loop -- chunks are emitted in file order.
+                const item = await reader.read();
+                if (item.done) {
+                  break;
+                }
+                controller.enqueue(item.value);
+              }
+              controller.close();
+            } catch (error) {
+              controller.error(error);
+            }
+          },
+        }),
+      writeFileChecked: async (input) => projectRoot.writeFileChecked(input),
+    },
+    createCandidate: async ({ requestId, name, from, signal }) => {
+      signal.throwIfAborted();
+      if (taskRevisions === undefined) {
+        throw Object.assign(new Error('Task candidate revisions are unavailable.'), { code: 'TASK_UNAVAILABLE' });
       }
-      return {
-        skills: cachedSkills.map((skill) => ({
-          name: skill.name,
-          description: skill.description,
-          ...(skill.fingerprint ? { fingerprint: skill.fingerprint } : {}),
-        })),
-      };
+      const candidate = await taskRevisions.createCandidate(name, from, requestId);
+      return { checkoutId: candidate.checkoutId, checkoutRoot: candidate.checkoutRoot };
+    },
+    onCandidateReleased: async (_runId, checkoutId) => releaseCandidate(checkoutId),
+    launcher: {
+      modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
+      /* The page's session cookie funds a browser turn; there is no pairing to lose. The page names its account. */
+      credential: () => ({ mode: 'session', principal: provide.principal }),
+      systemPrompt: provide.systemPrompt,
+      systemPromptBlocks: provide.systemPromptBlocks,
+      model: provide.model,
+      toolRegistry,
+      ...(worker.delays === undefined ? {} : { delays: worker.delays }),
+      turnPlacement,
+      clientContext: async () => {
+        const discovered = await skillResolver.getPromptSkillListing();
+        const fingerprint = JSON.stringify(
+          discovered.map((skill) => [skill.name, skill.description, skill.fingerprint ?? '']),
+        );
+        if (fingerprint !== cachedSkillFingerprint) {
+          cachedSkillFingerprint = fingerprint;
+          cachedSkills = discovered;
+        }
+        return {
+          skills: cachedSkills.map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            ...(skill.fingerprint ? { fingerprint: skill.fingerprint } : {}),
+          })),
+        };
+      },
     },
   });
+  opened(async () => projectTasks.close());
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
 
   return {
     hostId: provide.hostId,
     needsRebridge: placement.needsRecovery,
-    stoppability: (chatId) => launcher.stoppability(chatId),
+    stoppability: (chatId) => projectTasks.stoppability(chatId),
+    createCandidate: async (name, sourceRevisionId, requestId) => {
+      if (taskRevisions === undefined) {
+        throw Object.assign(new Error('Task candidate revisions are unavailable.'), { code: 'TASK_UNAVAILABLE' });
+      }
+      return taskRevisions.createCandidate(name, sourceRevisionId, requestId);
+    },
     connect: (port) => {
-      const channel = serveAgentChannel(port, launcher, {
+      const channel = serveAgentChannel(port, projectTasks.source, {
         build: agentHostWorkerBuild,
+        projectTasks: projectTasks.projectTasks,
         keepaliveInterval,
         sessionKey: `agent-host:${provide.hostId}`,
       });
@@ -855,6 +1024,11 @@ const composeProjectHost = async (
       try {
         if (revisionsSlot !== undefined && ports.revisionsPort === undefined) {
           throw Object.assign(new Error('The replacement revision reader is not available.'), {
+            code: 'REVISIONS_UNAVAILABLE',
+          });
+        }
+        if (taskRevisionsSlot !== undefined && ports.taskRevisionsPort === undefined) {
+          throw Object.assign(new Error('The replacement task revision authority is not available.'), {
             code: 'REVISIONS_UNAVAILABLE',
           });
         }
@@ -874,6 +1048,11 @@ const composeProjectHost = async (
       } else {
         ports.revisionsPort?.close();
       }
+      if (ports.taskRevisionsPort !== undefined && taskRevisionsSlot !== undefined) {
+        taskRevisionsSlot.swap(createPortRevisionsClient(ports.taskRevisionsPort)).close();
+      } else {
+        ports.taskRevisionsPort?.close();
+      }
       if (ports.placementPort !== undefined) {
         placement.replace(placementConnection(ports.placementPort));
       }
@@ -892,48 +1071,14 @@ const composeProjectHost = async (
       }
     },
     drain: async (signal) => {
-      /* Nothing new is admitted here: no stream is served, the registry routes no connect to a released host, and the
-       * launcher refuses a new start, from any tab. */
       diagnose('host.released');
-      draining = true;
       for (const channel of channels) {
         channel.dispose('project host released');
       }
       channels.clear();
-      /* Every run the launcher admitted, whichever tab sent it, re-read until a pass adds none: one admitted while the
-       * last pass followed is followed too (W6.r1 round 4). */
-      const ended = new Promise<undefined>((resolve) => {
-        signal.addEventListener('abort', () => {
-          resolve(undefined);
-        });
-      });
-      let followed = '';
-      while (!signal.aborted) {
-        /* Only answered admissions: a refused or failed one is gone before its answer settles (W6.r1 round 5). */
-        // oxlint-disable-next-line no-await-in-loop -- each pass reads the runs the one before it could not see.
-        const runs = await Promise.race([launcher.admittedRuns(), ended]);
-        if (runs === undefined) {
-          return;
-        }
-        const pass = JSON.stringify([...runs].map(([chatId, runIds]) => [chatId, [...runIds]]));
-        if (pass === followed) {
-          return;
-        }
-        followed = pass;
-        // oxlint-disable-next-line no-await-in-loop -- each pass follows what the one before it could not see.
-        await Promise.all(
-          [...runs].map(async ([chatId, runIds]) => {
-            // oxlint-disable-next-line no-empty-pattern -- only the follow's end matters.
-            for await (const {} of followChat(launcher.read, chatId, {
-              signal,
-              until: runsEnded(runIds),
-            })) {
-              /* Each batch moves the ledger; `until` ends the follow once the runs have ended. */
-            }
-          }),
-        );
-      }
+      await projectTasks.drain({ signal });
     },
+    releaseCandidate,
     close: async () => {
       diagnose('host.closed');
       for (const channel of channels) {
@@ -941,15 +1086,21 @@ const composeProjectHost = async (
       }
       channels.clear();
       const failures: unknown[] = [];
-      await launcher.close().catch((error: unknown) => {
-        failures.push(error);
-      });
+      /* A failed task close retains its leases. Its candidate executors and placement bridge must remain valid for
+       * a later release retry, even after this incarnation stopped serving new channels. */
+      await projectTasks.close();
       failures.push(...(await closeParameterActors(parameterActors)));
+      for (const [id, pending] of placedServices) {
+        placedServices.delete(id);
+        // oxlint-disable-next-line no-await-in-loop -- close waits for each placed executor to settle before releasing bridges.
+        await pending.then(async (resource) => resource.close()).catch((error: unknown) => failures.push(error));
+      }
       await geoSpecClient.close().catch((error: unknown) => {
         failures.push(error);
       });
       imageService.dispose();
       revisions?.close();
+      taskRevisions?.close();
       placement.close();
       runtimeClient.terminate();
       computeConnection?.dispose();

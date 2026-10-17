@@ -129,12 +129,14 @@ const renderBar = (
     readonly sendRefusal?: string;
     readonly handleFileSelect?: () => void;
     readonly handleAtButtonClick?: () => void;
+    readonly taskMailbox?: boolean;
   } = {},
 ) =>
   render(
     <TooltipProvider>
       <ChatTextareaBar
         composerMode='main'
+        taskMailbox={options.taskMailbox}
         containerReference={{ current: null }}
         enableContextActions={options.enableContextActions ?? true}
         enableKernelSelector
@@ -163,6 +165,14 @@ describe('ChatTextareaBar', () => {
     keybindings.clear();
     execution.current = { kind: 'tau', model: 'm' };
     placements.current = [];
+  });
+
+  it('should keep the shipping Send control but hide execution and attachment choices for a task mailbox', () => {
+    renderBar({ taskMailbox: true });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Agent and model/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Select kernel/u })).toBeNull();
   });
 
   it('lays out +, the kernel, the agent trigger and Send — no branch, balance or Tau mode (D6, Q11, Q16)', () => {

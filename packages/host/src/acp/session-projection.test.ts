@@ -21,6 +21,8 @@ import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { ExternalAgentLogEvent } from '@taucad/agent-host/launcher';
 import { reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import { projectTaskRefusalCodes } from '@taucad/agent-host/wire';
+import type { ProjectTask } from '@taucad/agent-host/wire';
 
 import { openAcpSession } from '#acp/acp-session.js';
 import { chooseOption, createTurnProjection, promptUsageOf } from '#acp/session.js';
@@ -28,6 +30,48 @@ import type { AcpPromptTurn } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
 type MessageOf<Role extends ProviderMessage['role']> = Extract<ProviderMessage, { role: Role }>;
+
+const taskResult = {
+  id: 'child',
+  projectId: 'project',
+  chatId: 'child-chat',
+  depth: 1,
+  parentTaskId: 'parent',
+  title: 'Child',
+  prompt: 'Work',
+  provider: { id: 'codex' },
+  createdAt: 0,
+  closed: false,
+  attempts: [
+    {
+      id: 'attempt',
+      number: 1,
+      status: 'running',
+      source: { revisionId: 'revision', checkoutId: 'source' },
+      toolGrant: { toolChoice: 'auto' },
+      createdAt: 0,
+    },
+  ],
+} satisfies ProjectTask;
+const taskSnapshot = { tasks: [taskResult], messages: [], cursor: 0, nextCursor: 0, hasMore: false };
+const taskMessage = {
+  id: 'message',
+  sequence: 1,
+  projectId: 'project',
+  senderTaskId: 'parent',
+  recipientTaskId: 'child',
+  requestId: 'send',
+  text: 'Progress?',
+  createdAt: 0,
+};
+const taskCalls = [
+  ['task_spawn', { requestId: 'spawn', title: 'Child', prompt: 'Work', provider: { id: 'codex' } }, taskResult],
+  ['task_read', { taskId: 'child', after: 0 }, taskSnapshot],
+  ['task_send', { requestId: 'send', taskId: 'child', text: 'Progress?' }, taskMessage],
+  ['task_wait', { after: 0, timeout: 50 }, taskSnapshot],
+  ['task_cancel', { requestId: 'cancel', taskId: 'child' }, taskResult],
+  ['task_resume', { requestId: 'resume', taskId: 'child' }, taskResult],
+] as const;
 
 const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   append: async (events) => {
@@ -597,6 +641,93 @@ const listFilesResult = {
 } as const satisfies SessionUpdate;
 
 describe('the ACP turn projection', () => {
+  it.each(taskCalls)(
+    'normalizes actual Codex task MCP %s wrappers into canonical task rows',
+    async (tool, args, output) => {
+      const messages = await project(
+        [
+          {
+            sessionUpdate: 'tool_call',
+            toolCallId: tool,
+            title: `mcp.tau.${tool}`,
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { server: 'tau', tool, arguments: args },
+            _meta: { is_mcp_tool_call: true },
+          },
+          {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: tool,
+            status: 'completed',
+            rawOutput: {
+              result: { content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output },
+              error: null,
+            },
+          },
+        ] satisfies SessionUpdate[],
+        'codex',
+        undefined,
+        'tau',
+      );
+      expect(messages[0]).toMatchObject({
+        role: 'tool-input',
+        toolName: tool,
+        content: args,
+        call: { nativeName: tool },
+        metadata: { tauInternal: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
+      });
+      expect(messages[1]).toMatchObject({
+        role: 'tool-output',
+        toolName: tool,
+        content: output,
+        isError: false,
+        metadata: { tauInternal: { presentation: 'tau-mcp' } },
+      });
+      expect(messages[1]?.content).toEqual(output);
+    },
+  );
+
+  it.each(taskCalls)(
+    'preserves every canonical task refusal through text-only Codex %s failures',
+    async (tool, args) => {
+      await Promise.all(
+        projectTaskRefusalCodes.map(async (code) => {
+          const messages = await project(
+            [
+              {
+                sessionUpdate: 'tool_call',
+                toolCallId: tool,
+                title: `mcp.tau.${tool}`,
+                kind: 'execute',
+                status: 'pending',
+                rawInput: { server: 'tau', tool, arguments: args },
+                _meta: { is_mcp_tool_call: true },
+              },
+              {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: tool,
+                status: 'failed',
+                rawOutput: {
+                  result: { content: [{ type: 'text', text: `${code}: Task operation refused.` }], isError: true },
+                  error: null,
+                },
+              },
+            ] satisfies SessionUpdate[],
+            'codex',
+            undefined,
+            'tau',
+          );
+          expect(messages[1]).toMatchObject({
+            role: 'tool-output',
+            toolName: tool,
+            isError: true,
+            content: { errorCode: code, message: 'Task operation refused.' },
+            metadata: { tauInternal: { presentation: 'tau-mcp' } },
+          });
+        }),
+      );
+    },
+  );
   it('publishes text immediately with one stable block identity, then commits it once', async () => {
     const appended: ExternalAgentLogEvent[] = [];
     const live: Array<Record<string, unknown>> = [];

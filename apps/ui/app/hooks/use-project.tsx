@@ -58,6 +58,7 @@ import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { rootChatRecords } from '#utils/root-chat-records.js';
 import { isNotFound } from '#db/attachment-store.js';
 import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
@@ -162,7 +163,16 @@ export async function ensureFocusedChatForProject({
   { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
 > {
   const couldCreateBeforeRead = canCreateChat();
-  const chats = await worker.getChatRecordsForResource(projectId);
+  const allChats = await worker.getChatRecordsForResource(projectId);
+  const chats = rootChatRecords(allChats);
+
+  // A direct child URL still focuses its durable root. The route owns opening
+  // the selected thread in the workbench; editor focus remains a root identity.
+  const requested = allChats.find((chat) => chat.id === requestedChatId);
+  const rootForRequested = requested?.taskLineage?.rootChatId;
+  if (rootForRequested !== undefined) {
+    return { type: 'focusedChatEnsured', focusedChatId: rootForRequested };
+  }
 
   for (const candidateChatId of [requestedChatId, persistedChatId]) {
     const match = chats.find((chat) => chat.id === candidateChatId);
@@ -181,7 +191,7 @@ export async function ensureFocusedChatForProject({
     return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
   }
 
-  if (!couldCreateBeforeRead || !canCreateChat()) {
+  if (!couldCreateBeforeRead || !canCreateChat() || (allChats.length > 0 && chats.length === 0)) {
     return { type: 'focusedChatDeferred' };
   }
   const created = await worker.createNavigationRepairChat(projectId);
@@ -191,7 +201,7 @@ export async function ensureFocusedChatForProject({
 
 /**
  * Whether `chatId` is a chat the client already holds — freshly created here, or
- * present in a current non-deleted chat list. Such a chat needs no async
+ * present in a current non-deleted navigation metadata list. Such a chat needs no async
  * ensure round trip, so the editor can focus it synchronously. Deleted-inclusive
  * and invalidated lists cannot authorize a stale route.
  *
@@ -211,14 +221,17 @@ export function isKnownChatId({
   if (chatId === createdChatId) {
     return true;
   }
-  const visibleChatKeys = [
-    ['chats', projectId, { includeDeleted: false }],
-    ['chats', projectId, 'records', { includeDeleted: false }],
-  ];
-  return visibleChatKeys.some((queryKey) => {
-    const state = queryClient.getQueryState<Array<Pick<Chat, 'id'>>>(queryKey);
-    return state !== undefined && !state.isInvalidated && state.data?.some((chat) => chat.id === chatId) === true;
-  });
+  const state = queryClient.getQueryState<Array<Pick<Chat, 'id' | 'taskLineage'>>>([
+    'chats',
+    projectId,
+    'records',
+    { includeDeleted: false },
+  ]);
+  return (
+    state !== undefined &&
+    !state.isInvalidated &&
+    state.data?.some((chat) => chat.id === chatId && chat.taskLineage === undefined) === true
+  );
 }
 
 /** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */

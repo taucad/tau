@@ -18,6 +18,7 @@ import type { RefusalCode } from '#wire/refusals.js';
 import type {
   ToolRegistry,
   TurnAdmitInput,
+  TurnAttemptKey,
   TurnAttemptInput,
   TurnCompleteInput,
   TurnPlacementAnswer,
@@ -29,6 +30,11 @@ import type {
 
 /** An attempt's tools as they cross a port: the filesystem bridge the session minted over its checkout. @public */
 export type TurnPlacementToolPort = Readonly<{ port: MessagePort }>;
+
+/** The admitted checkout and attempt whose revocable tool port is being opened. @public */
+export type TurnPlacementToolContext = TurnPlacementToolPort &
+  Pick<TurnPlacementGrant, 'checkoutId' | 'mode' | 'root'> &
+  Readonly<{ key: TurnAttemptKey }>;
 
 type AdmitCode = Extract<Awaited<ReturnType<TurnPlacementPort['admit']>>, { status: 'refused' }>['code'];
 
@@ -234,8 +240,8 @@ export type ConnectTurnPlacementChannelOptions = Readonly<{
   /** This end of the port the page brokered into the project's file-manager worker. */
   port: MessagePort;
   projectId: string;
-  /** Turn an admitted attempt's tool port into the registry its turn runs on. */
-  toolsFor: (tools: TurnPlacementToolPort) => ToolRegistry;
+  /** Turn an admitted attempt's tool port into the registry rooted at its admitted checkout. */
+  toolsFor: (tools: TurnPlacementToolContext) => ToolRegistry;
 }>;
 
 /** The client half: a {@link TurnPlacementPort}, and its connection. @public */
@@ -283,7 +289,19 @@ export const connectTurnPlacementChannel = (options: ConnectTurnPlacementChannel
       if (answer.status === 'refused') {
         return answer;
       }
-      return { ...answer, placement: { ...answer.placement, tools: options.toolsFor(answer.placement.tools) } };
+      return {
+        ...answer,
+        placement: {
+          ...answer.placement,
+          tools: options.toolsFor({
+            ...answer.placement.tools,
+            checkoutId: answer.placement.checkoutId,
+            mode: answer.placement.mode,
+            root: answer.placement.root,
+            key: input.key,
+          }),
+        },
+      };
     },
     complete: async (input) => channel.call('complete', input),
     abandon: async (input) => channel.call('abandon', input),

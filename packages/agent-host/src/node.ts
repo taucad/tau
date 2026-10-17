@@ -199,7 +199,21 @@ const syncDirectory = async (directory: string): Promise<void> => {
   }
 };
 
-const openWriter = async (filePath: string): Promise<EventLogAppender> => {
+/** Raw protected-record storage shares the chat writer lock and append-and-sync authority. @public */
+export type NodeExclusiveRecordStorage = EventLogStorage;
+
+/**
+ * Open one host-owned sidecar with the same lock and durability as chat records.
+ * The caller owns record validation, serialization, fencing and operation ordering.
+ *
+ * @param options - Absolute protected record file path.
+ * @returns Exclusively owned append-and-sync storage; close releases the writer authority.
+ * @public
+ */
+export const createNodeExclusiveRecordStorage = async (
+  options: Readonly<{ filePath: string }>,
+): Promise<NodeExclusiveRecordStorage> => {
+  const { filePath } = options;
   await mkdir(dirname(filePath), { recursive: true });
   const kernelLock = await acquireKernelLock(filePath);
   const releaseKernelLock = async (): Promise<void> => kernelLock?.release();
@@ -277,14 +291,15 @@ const openWriter = async (filePath: string): Promise<EventLogAppender> => {
     },
   };
 
+  return storage;
+};
+
+const openWriter = async (filePath: string): Promise<EventLogAppender> => {
+  const storage = await createNodeExclusiveRecordStorage({ filePath });
   try {
     return await createEventLogAppender(storage);
   } catch (error) {
-    try {
-      await file.close();
-    } finally {
-      await releaseLocks();
-    }
+    await storage.close();
     throw error;
   }
 };

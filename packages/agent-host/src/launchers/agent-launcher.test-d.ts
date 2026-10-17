@@ -4,7 +4,13 @@ import { createAgentLauncher, serveAgentChannel } from '#launchers/index.js';
 import type * as Launcher from '#launchers/index.js';
 import type * as Node from '#node.js';
 import type * as Browser from '#browser.js';
-import type { AgentLauncher, AgentLauncherOptions, ChatStore, CredentialState } from '#launchers/index.js';
+import type {
+  AgentChannelSource,
+  AgentLauncher,
+  AgentLauncherOptions,
+  ChatStore,
+  CredentialState,
+} from '#launchers/index.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 
@@ -20,8 +26,9 @@ describe('the launcher exports', () => {
     expectTypeOf<AgentLauncher['read']>().toEqualTypeOf<(input: ReadInput) => Promise<ReadAnswer>>();
   });
 
-  it('should serve a connection with the launcher, not a project host', () => {
-    expectTypeOf(serveAgentChannel).parameter(1).toEqualTypeOf<AgentLauncher>();
+  it('should serve the channel projections without requiring local lifecycle access', () => {
+    expectTypeOf(serveAgentChannel).parameter(1).toEqualTypeOf<AgentChannelSource>();
+    expectTypeOf<AgentLauncher>().toExtend<AgentChannelSource>();
   });
 
   it('should make a store only from a platform module', () => {

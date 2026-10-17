@@ -516,6 +516,7 @@ describe('createBrowserAgentHostClient', () => {
       'catchUp',
       'close',
       'hostCommand',
+      'projectTasks',
       'read',
       'subscribe',
       'subscribeLive',
@@ -974,6 +975,39 @@ describe('re-brokering project hosts', () => {
     await vi.waitFor(() => {
       expect(bridges.counts()).toEqual([1, 1, 1, 1]);
     });
+  });
+
+  it('should retain bridges after a failed close and retry only after rebridging', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const bridges = trackedBridges();
+    const client = createTestClient(createWorker, {
+      openFileSystemBridge: bridges.open,
+      openProjectRootBridge: bridges.open,
+    });
+    await startRun(client, 'chat-close-retry', 'run-1', 'Build.');
+    const failed = Promise.withResolvers<void>();
+    worker.holdRelease = failed.promise;
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await client.close();
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'release')).toHaveLength(1);
+    });
+    failed.reject(Object.assign(new Error('Lease release failed'), { code: 'PROJECT_HOST_CLOSE_RETRY' }));
+    await vi.waitFor(() => {
+      expect(warning).toHaveBeenCalledWith(
+        '[agent-host] Project close failed; retaining its bridges for recovery',
+        expect.any(Object),
+      );
+    });
+    expect(bridges.counts()).toEqual([0, 0]);
+    worker.holdRelease = undefined;
+    await residentAgentWorker(createWorker).reprovide();
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    expect(requestsNamed(worker, 'rebridge')).toHaveLength(1);
+    expect(requestsNamed(worker, 'release')).toHaveLength(2);
+    expect(bridges.counts()).toEqual([1, 1, 1, 1]);
+    warning.mockRestore();
   });
 
   it('should renew only the successor placement when an older host is draining', async () => {

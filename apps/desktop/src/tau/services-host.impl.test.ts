@@ -46,9 +46,15 @@ const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof Runtim
 const transportCalls = vi.hoisted(
   () => [] as Array<Parameters<typeof AgentHost.createTauCloudGatewayModelTransport>[0]>,
 );
-/** One-shot hold on the next launcher close, so a test can act while that close is in flight. */
+/** Hold one served launcher's close; earlier tests may still be disposing another launcher. */
 const launcherCloseGate = vi.hoisted(() => ({
-  next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
+  next: undefined as
+    | undefined
+    | Readonly<{
+        target: ReturnType<typeof AgentLauncher.createAgentLauncher>['close'];
+        entered: () => void;
+        hold: Promise<void>;
+      }>,
 }));
 
 /* The same `git` + `git lfs` probe the host refuses on (OQ-B8): the row that
@@ -95,16 +101,17 @@ vi.mock('@taucad/agent-host/launcher', async (importOriginal) => {
     createAgentLauncher: (options: Parameters<typeof AgentLauncher.createAgentLauncher>[0]) => {
       const launcher = actual.createAgentLauncher(options);
       const { close } = launcher;
-      return Object.assign(launcher, {
-        close: async () => {
-          const gate = launcherCloseGate.next;
+      const closeWithGate = async (): Promise<void> => {
+        const gate = launcherCloseGate.next;
+        if (gate?.target === closeWithGate) {
           launcherCloseGate.next = undefined;
-          if (gate !== undefined) {
-            gate.entered();
-            await gate.hold;
-          }
-          return close();
-        },
+          gate.entered();
+          await gate.hold;
+        }
+        return close();
+      };
+      return Object.assign(launcher, {
+        close: closeWithGate,
       });
     },
   };
@@ -923,6 +930,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     }
     projectHostCalls.length = 0;
     servedHosts.length = 0;
+    launcherCloseGate.next = undefined;
     toolRegistryCalls.length = 0;
     toolRegistries.length = 0;
     runtimeClientCalls.length = 0;
@@ -1391,9 +1399,16 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       return client;
     };
     connectAt('1');
+    await vi.waitFor(() => {
+      expect(log.mock.calls.filter(([event]) => event === 'agent-host-served')).toHaveLength(1);
+    });
     const entered = Promise.withResolvers<void>();
     const hold = Promise.withResolvers<void>();
-    launcherCloseGate.next = { entered: entered.resolve, hold: hold.promise };
+    const target = servedHosts.at(-1)?.launcher.close;
+    if (target === undefined) {
+      throw new Error('Expected the first project host to be served.');
+    }
+    launcherCloseGate.next = { target, entered: entered.resolve, hold: hold.promise };
     host.handleMessage(
       frame({
         type: 'agent-host-release',

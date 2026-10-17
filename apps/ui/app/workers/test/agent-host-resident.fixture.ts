@@ -83,6 +83,7 @@ export const livePlacementPort = (
         status: 'applied',
         placement: {
           checkoutId: checkoutId ?? 'live',
+          baseRevisionId: 'fixture-revision',
           mode: 'direct',
           root: '/',
           tools: { port: createFileSystemBridgePort(projectRoot).port },

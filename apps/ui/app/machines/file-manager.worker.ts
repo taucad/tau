@@ -641,13 +641,17 @@ self.addEventListener(
 
     /* W8 TS-S5: the resident agent host's placement session and its `revisions` tool reader, brokered by the page. */
     if (
-      (data.type === 'placementConnect' || data.type === 'revisionsReaderConnect') &&
+      (data.type === 'placementConnect' ||
+        data.type === 'revisionsReaderConnect' ||
+        data.type === 'revisionsTaskConnect') &&
       data.port instanceof MessagePort
     ) {
       if (typeof data.projectId !== 'string' || data.projectId.length === 0) {
         data.port.close();
       } else if (data.type === 'placementConnect') {
         revisionRegistry.connectPlacement(data.port, data.projectId);
+      } else if (data.type === 'revisionsTaskConnect') {
+        revisionRegistry.connectTask(data.port, data.projectId);
       } else {
         revisionRegistry.connectReader(data.port, data.projectId);
       }

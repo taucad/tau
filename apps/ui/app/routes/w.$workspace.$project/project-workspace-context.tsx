@@ -9,6 +9,8 @@ import { useSelector } from '@xstate/react';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { ProjectTasksProvider } from '#hooks/use-project-tasks.js';
+import { ThreadNavigationProvider } from '#routes/w.$workspace.$project/thread-navigation-context.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 
 export const projectWorkspaceKeyCombinations = {
@@ -148,6 +150,7 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   share: 'share',
   details: 'details',
   revisions: 'revisions',
+  agents: 'agents',
 };
 
 export function ProjectWorkspaceProvider({
@@ -159,7 +162,7 @@ export function ProjectWorkspaceProvider({
   readonly workbenchMode?: 'responsive' | 'pane';
   readonly onWorkbenchOpen?: () => void;
 }): React.JSX.Element {
-  const { editorRef, mainEntryPath } = useProject();
+  const { editorRef, mainEntryPath, projectId } = useProject();
   const providerActiveRef = useRef(true);
   const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
   const pendingRecordRecoveryFocus = useRef(false);
@@ -205,6 +208,7 @@ export function ProjectWorkspaceProvider({
   const location = useLocation();
   const routeKey = location.key;
   const isMobile = useIsMobile();
+  const focusedChatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const pendingFilesRef = useRef<string | undefined>(undefined);
@@ -501,7 +505,11 @@ export function ProjectWorkspaceProvider({
   );
   return (
     <ProjectWorkspaceContext.Provider value={value}>
-      <FileReturnContext.Provider value={fileReturn}>{children}</FileReturnContext.Provider>
+      <FileReturnContext.Provider value={fileReturn}>
+        <ProjectTasksProvider rootChatId={focusedChatId} projectId={projectId} enabled={workbenchMode !== 'pane'}>
+          <ThreadNavigationProvider openPanel={openPanel}>{children}</ThreadNavigationProvider>
+        </ProjectTasksProvider>
+      </FileReturnContext.Provider>
     </ProjectWorkspaceContext.Provider>
   );
 }

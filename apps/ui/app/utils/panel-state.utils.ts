@@ -12,6 +12,7 @@ export const mergePanelState = (current: PanelState, update?: PartialDeep<PanelS
       compactAuxiliary: desktopLayout?.compactAuxiliary ?? current.desktopLayout.compactAuxiliary,
     },
     mobileActiveTab: update?.mobileActiveTab ?? current.mobileActiveTab,
+    threadViews: { ...current.threadViews, ...(update?.threadViews as PanelState['threadViews'] | undefined) },
     kernelPaneview: {
       ...current.kernelPaneview,
       ...(update?.kernelPaneview as PanelState['kernelPaneview'] | undefined),

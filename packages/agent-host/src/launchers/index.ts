@@ -12,7 +12,14 @@ export { createAgentLauncher, credentialPrincipal } from '#launchers/agent-launc
 export type { AgentLauncher, AgentLauncherOptions, CredentialState } from '#launchers/agent-launcher.js';
 export type { ChatStore } from '#launchers/chat-store.js';
 export { serveAgentChannel } from '#launchers/agent-channel.js';
-export type { ServeAgentChannelOptions } from '#launchers/agent-channel.js';
+export type { AgentChannelSource, ServeAgentChannelOptions } from '#launchers/agent-channel.js';
+export type {
+  OpenProjectTaskPlatformInput,
+  ProjectTaskOwner,
+  ProjectTaskOwnerInput,
+  ProjectTaskPlatform,
+  ProjectTaskStorage,
+} from '#launchers/project-task-platform.js';
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
 export type {
   ExternalAgentLogEvent,

@@ -228,6 +228,40 @@ describe('ProjectChatList', () => {
     expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
   });
 
+  it('excludes child and grandchild rows before pagination while observing every session', () => {
+    const taskLineage = {
+      taskId: 'task_child',
+      parentTaskId: 'task_root',
+      parentChatId: 'chat_1',
+      rootChatId: 'chat_1',
+    };
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        chat(1),
+        { ...chat(20, 1000), taskLineage },
+        {
+          ...chat(21, 2000),
+          taskLineage: {
+            ...taskLineage,
+            taskId: 'task_grandchild',
+            parentTaskId: 'task_child',
+            parentChatId: 'chat_20',
+          },
+        },
+        ...Array.from({ length: 6 }, (_, index) => chat(index + 2)),
+      ],
+    });
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.getAllByRole('link')).toHaveLength(5);
+    expect(screen.queryByRole('link', { name: 'Chat 20' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Chat 21' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more chats' }));
+    expect(screen.getAllByRole('link')).toHaveLength(7);
+    expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
+    expect(mockObserve).toHaveBeenCalledTimes(9);
+  });
+
   it('observes all listed chats while collapsed without rendering chat rows', () => {
     render(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
     expect(mockObserve).toHaveBeenCalledTimes(12);
@@ -393,6 +427,34 @@ describe('ProjectChatList', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
     await vi.waitFor(() => {
       expect(deleteChat).toHaveBeenCalledWith('chat_1');
+      expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
+    });
+  });
+
+  it('chooses another root after deleting the focused root even when its child is newer', async () => {
+    const deleteChat = vi.fn().mockResolvedValue(undefined);
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        { ...chat(1, 20), recencyAt: 20 },
+        { ...chat(2, 10), recencyAt: 10 },
+        {
+          ...chat(3, 100),
+          recencyAt: 100,
+          taskLineage: {
+            taskId: 'task_child',
+            parentTaskId: 'task_root',
+            parentChatId: 'chat_1',
+            rootChatId: 'chat_1',
+          },
+        },
+      ],
+    });
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, deleteChat });
+    search = '?chat=chat_1';
+    render(<ProjectChatList project={project} isProjectActive />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
+    await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
     });
   });

@@ -20,6 +20,7 @@ import {
 import type { AgentTurnContext, ClientMetricEntry, evaluationClasses, lookupOutcomes } from '@taucad/telemetry';
 import { tauToolKinds } from '@taucad/agent-host';
 import type { CadAgentExecution } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
@@ -129,6 +130,17 @@ const apiMisusePatterns = [
 /** Source extensions of the kernels' model files. */
 const modelFileExtensions = ['.ts', '.js', '.py', '.kcl', '.scad', '.cs'] as const;
 const knownTauTools: ReadonlySet<string> = new Set(tauToolNames);
+/* The deployed ingest v1 accepts these operations by kind, but its optional name enum predates these tools.
+ * Keep their quantities and outcomes while omitting only the newer labels; no execution data is affected. */
+const unnamedNewTools: ReadonlySet<string> = new Set([
+  toolName.installPackages,
+  toolName.taskSpawn,
+  toolName.taskRead,
+  toolName.taskSend,
+  toolName.taskWait,
+  toolName.taskCancel,
+  toolName.taskResume,
+]);
 const knownSkills: ReadonlySet<string> = new Set(builtInSkillSlugs);
 const knownRunStatuses: ReadonlySet<string> = new Set(geospecRunStatuses);
 const knownKernels: ReadonlySet<string> = new Set(kernelIds);
@@ -497,7 +509,7 @@ const foldChunk = (facts: TurnFacts, chunk: Readonly<Record<string, unknown>>): 
 const toolCallsOf = (facts: TurnFacts, named: boolean): Pick<AgentTurnDetail, 'toolCalls'> => {
   const counts = new Map<string, NonNullable<AgentTurnDetail['toolCalls']>[number]>();
   for (const { kind, tool, status } of facts.toolResults.values()) {
-    const name = named ? tool : undefined;
+    const name = named && (tool === undefined || !unnamedNewTools.has(tool)) ? tool : undefined;
     const key = `${kind}:${name ?? ''}:${status}`;
     const entry = counts.get(key) ?? { kind, ...(name === undefined ? {} : { tool: name }), status, count: 0 };
     entry.count += 1;

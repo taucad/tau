@@ -1,4 +1,9 @@
 import {
+  ChatMessageToolProjectTask,
+  renderProjectTaskDynamic,
+  isProjectTaskToolName,
+} from '#routes/w.$workspace.$project/chat-message-tool-project-task.js';
+import {
   BookOpen,
   Box,
   Camera,
@@ -11,7 +16,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useMemo, useState } from 'react';
+import { Fragment, memo, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import { providerPermissionResolutionSchema } from '@taucad/agent-host/wire';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -323,6 +328,10 @@ function renderAssistantPart(
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
+      const taskCard = renderProjectTaskDynamic({ part });
+      if (taskCard !== undefined) {
+        return <Fragment key={part.toolCallId}>{taskCard}</Fragment>;
+      }
       if (tau?.['presentation'] === 'tau-mcp') {
         const state = Reflect.get(part, 'preliminary') === true ? 'input-available' : part.state;
         switch (nativeName) {
@@ -435,6 +444,19 @@ function renderAssistantPart(
           <span className='truncate'>{part.filename ?? part.mediaType}</span>
         </div>
       );
+    }
+
+    case 'tool-task_spawn':
+    case 'tool-task_read':
+    case 'tool-task_send':
+    case 'tool-task_wait':
+    case 'tool-task_cancel':
+    case 'tool-task_resume': {
+      const name = part.type.slice('tool-'.length);
+      if (isProjectTaskToolName(name)) {
+        return <ChatMessageToolProjectTask key={part.toolCallId} name={name} part={part} />;
+      }
+      return undefined;
     }
 
     case 'tool-web_search': {
@@ -725,6 +747,8 @@ function AssistantParts({
 
 type ChatMessageProperties = {
   readonly messageId: string;
+  /** Preserve the shipped message display while withholding generic chat edit on task-owned logs. */
+  readonly readOnly?: boolean;
   /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
   readonly footer?: React.ReactNode;
 };
@@ -764,7 +788,11 @@ function ChatMessageTimestamp({
 }
 
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
-export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
+export const ChatMessage = memo(function ({
+  messageId,
+  footer,
+  readOnly = false,
+}: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
   const userMessagePreviewCharacterLimit = 220 * (userMessageCollapseRowThreshold + 1);
@@ -866,7 +894,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
   }
 
   const toggleEdit = (): void => {
-    if (!isUser) {
+    if (!isUser || readOnly) {
       return;
     }
 
@@ -964,15 +992,17 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
+                  !readOnly &&
                   'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
+                isUser && readOnly && 'relative z-10 rounded-lg border bg-background px-3',
                 isUser && chatUserMessagePaddingClassName,
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
-              role={isUser ? 'button' : undefined}
-              tabIndex={isUser ? 0 : undefined}
-              onClick={isUser ? handleEditClick : undefined}
-              onKeyDown={isUser ? handleEditKeyDown : undefined}
+              role={isUser && !readOnly ? 'button' : undefined}
+              tabIndex={isUser && !readOnly ? 0 : undefined}
+              onClick={isUser && !readOnly ? handleEditClick : undefined}
+              onKeyDown={isUser && !readOnly ? handleEditKeyDown : undefined}
             >
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />

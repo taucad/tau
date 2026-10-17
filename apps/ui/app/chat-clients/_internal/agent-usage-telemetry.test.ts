@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ClientMetricEntry } from '@taucad/telemetry';
+import { agentToolKinds, ingestPayloadSchema } from '@taucad/telemetry';
+import { z } from 'zod';
 import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
@@ -120,7 +122,7 @@ const acpRows = (
 const acpSkills = '/Users/u/Library/Application Support/tau/acp-skills/0123abcd/.agents/skills';
 
 /** One of Tau's own tool calls: no `external` origin, so the chunk keeps its Tau name and input. */
-const tauToolRows = (callId: string, toolName: string, io: { input: unknown; output: unknown }) => [
+const tauToolRows = (callId: string, toolName: string, io: { input: unknown; output: unknown; isError?: boolean }) => [
   logRow(0, {
     type: 'message.appended',
     message: { id: `${callId}-in`, role: 'tool-input', toolCallId: callId, toolName, content: io.input },
@@ -133,7 +135,7 @@ const tauToolRows = (callId: string, toolName: string, io: { input: unknown; out
       toolCallId: callId,
       toolName,
       content: io.output,
-      isError: false,
+      isError: io.isError ?? false,
     },
   }),
 ];
@@ -160,7 +162,137 @@ const usageRow = (id: string, input: number) =>
     },
   });
 
+/* Pin the current named-tool ingest vocabulary independently of the producer's canonical map. */
+const deployedToolNames = [
+  'read_file',
+  'list_directory',
+  'grep',
+  'glob_search',
+  'web_search',
+  'web_browser',
+  'create_file',
+  'edit_file',
+  'arrange_workbench',
+  'delete_file',
+  'evaluate_model',
+  'get_parameters',
+  'apply_parameter_operation',
+  'test_model',
+  'export_model',
+  'screenshot',
+  'revisions',
+  'use_skill',
+  'update_todos',
+  'ask_questions',
+  'list_machines',
+  'get_machine',
+  'machine_action',
+  'stop_machine',
+  'get_print_profiles',
+  'request_job',
+  'check_job',
+] as const;
+const deployedToolCalls = z
+  .array(
+    z.object({
+      kind: z.enum(agentToolKinds),
+      tool: z.enum(deployedToolNames).optional(),
+      status: z.enum(['completed', 'failed']),
+      count: z.number().int().positive(),
+    }),
+  )
+  .max(74);
+const newToolKinds = [
+  ['install_packages', 'edit'],
+  ['task_spawn', 'execute'],
+  ['task_read', 'read'],
+  ['task_send', 'edit'],
+  ['task_wait', 'read'],
+  ['task_cancel', 'other'],
+  ['task_resume', 'execute'],
+] as const;
+
 describe('trackAgentTurn', () => {
+  it.each(newToolKinds)(
+    'reports %s compatibly with deployed ingest while keeping old consented tool names',
+    (tool, kind) => {
+      const runId = `compatible-${tool}`;
+      const { publish, report } = harness(runId, {
+        identity: { agentId: 'tau', placement: 'desktop' },
+        usageMetrics: { kernelId: 'replicad' },
+      });
+      publish(
+        [
+          lifecycleRow(0, 'admitted', runId),
+          lifecycleRow(0, 'running', runId),
+          ...tauToolRows('task', tool, {
+            input: { taskId: 'private-task-id', text: 'private-task-text' },
+            output: 'private-task-output',
+          }),
+          ...tauToolRows('old', 'read_file', {
+            input: { path: 'private-source-path' },
+            output: 'private-source-bytes',
+          }),
+          lifecycleRow(0, 'completed', runId),
+        ],
+        1500,
+      );
+      const entry = report.mock.calls[0]![0];
+      if (entry.name !== 'agent.turn') {
+        throw new Error('Expected a settled agent turn.');
+      }
+      expect(entry.detail.toolCalls).toEqual([
+        { kind, status: 'completed', count: 1 },
+        { kind: 'read', tool: 'read_file', status: 'completed', count: 1 },
+      ]);
+      expect(deployedToolCalls.parse(entry.detail.toolCalls)).toEqual(entry.detail.toolCalls);
+      expect(ingestPayloadSchema.parse({ entries: [entry] })).toEqual({ entries: [entry] });
+      expect(JSON.stringify(entry)).not.toContain('private-');
+    },
+  );
+
+  it('keeps the named row bound and every quantity when new calls join all named and generic statuses', () => {
+    const runId = 'compatible-cardinality';
+    const { publish, report } = harness(runId, {
+      identity: { agentId: 'tau', placement: 'desktop' },
+      usageMetrics: { kernelId: 'replicad' },
+    });
+    const ownRows = [...deployedToolNames, ...newToolKinds.map(([name]) => name)].flatMap((name) =>
+      [false, true].flatMap((isError) =>
+        tauToolRows(`${name}-${String(isError)}`, name, { input: {}, output: {}, isError }),
+      ),
+    );
+    const genericRows = agentToolKinds.flatMap((kind) =>
+      [false, true].flatMap((isError) => toolRows(`generic-${kind}-${String(isError)}`, kind, isError)),
+    );
+    publish(
+      [
+        lifecycleRow(0, 'admitted', runId),
+        lifecycleRow(0, 'running', runId),
+        ...ownRows,
+        ...genericRows,
+        lifecycleRow(0, 'completed', runId),
+      ],
+      1500,
+    );
+    const entry = report.mock.calls[0]![0];
+    if (entry.name !== 'agent.turn') {
+      throw new Error('Expected a settled agent turn.');
+    }
+    expect(entry.detail.toolCalls).toHaveLength(74);
+    expect(entry.detail.toolCalls?.reduce((count, call) => count + call.count, 0)).toBe(88);
+    expect(entry.detail.toolCalls?.filter((call) => call.tool !== undefined)).toHaveLength(54);
+    expect(
+      entry.detail.toolCalls
+        ?.filter((call) => call.status === 'completed')
+        .reduce((count, call) => count + call.count, 0),
+    ).toBe(44);
+    expect(
+      entry.detail.toolCalls?.filter((call) => call.status === 'failed').reduce((count, call) => count + call.count, 0),
+    ).toBe(44);
+    expect(deployedToolCalls.parse(entry.detail.toolCalls)).toEqual(entry.detail.toolCalls);
+  });
+
   it('reports one completed turn with time to first update, tool kinds and reported tokens', () => {
     const { publish, report, listeners } = harness('run_ok');
     publish([lifecycleRow(0, 'admitted', 'run_ok'), lifecycleRow(0, 'running', 'run_ok')], 1200);

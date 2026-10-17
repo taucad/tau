@@ -24,5 +24,6 @@ export type {
   TurnPlacementChannel,
   TurnPlacementChannelHandle,
   TurnPlacementSession,
+  TurnPlacementToolContext,
   TurnPlacementToolPort,
 } from '#channel/turn-placement-channel.js';

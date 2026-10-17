@@ -142,6 +142,7 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => {
   const fileManager = () => ({
+    recordFiles: { exists: async () => false },
     workspace: { syncProjectRoots: browserHostHarness.syncProjectRoots },
     fileManagerRef: {
       getSnapshot: () => ({

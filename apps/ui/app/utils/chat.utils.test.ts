@@ -146,6 +146,33 @@ it.each([1, 16, 113])(
 );
 
 describe('serializeMessage', () => {
+  it('should preserve task message inputs and recorded output in exported history', () => {
+    const message = baseMessage([
+      {
+        type: 'tool-task_send',
+        toolCallId: 'send',
+        state: 'output-available',
+        input: { requestId: 'request', taskId: 'child', text: 'Check the clearance' },
+        output: {
+          id: 'mail',
+          projectId: 'project',
+          senderTaskId: 'parent',
+          recipientTaskId: 'child',
+          requestId: 'request',
+          text: 'Check the clearance',
+          sequence: 2,
+          createdAt: 1,
+        },
+      },
+    ]);
+    const text = serializeMessage(message);
+    expect(text).toContain('task_send');
+    expect(text).toContain('"requestId": "request"');
+    expect(text).toContain('"recipientTaskId": "child"');
+    expect(text).toContain('"sequence": 2');
+    expect(text).toContain('Check the clearance');
+  });
+
   describe('text parts', () => {
     it('serializes a single text part', () => {
       const message = baseMessage([{ type: 'text', text: 'Hello world' }]);

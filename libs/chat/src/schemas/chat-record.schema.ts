@@ -31,6 +31,17 @@ import type { Chat } from '#types/chat.types.js';
 
 const timestamp = z.number().int().nonnegative();
 
+/** Immutable navigation ancestry projected from the task journal. @public */
+export const chatTaskLineageSchema = z.object({
+  taskId: z.string().min(1),
+  parentTaskId: z.string().min(1),
+  parentChatId: z.string().min(1),
+  rootChatId: z.string().min(1),
+});
+
+/** Durable descendant identity; ordinary root chats omit it. @public */
+export type ChatTaskLineage = z.infer<typeof chatTaskLineageSchema>;
+
 /** Runtime shape of the durable chat record. @public */
 export const chatRecordSchema = z
   .object({
@@ -43,6 +54,7 @@ export const chatRecordSchema = z
     recencyAt: timestamp.optional(),
     deletedAt: timestamp.optional(),
     purgedAt: timestamp.optional(),
+    taskLineage: chatTaskLineageSchema.optional(),
   })
   .loose();
 

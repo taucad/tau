@@ -4,6 +4,8 @@
 
 The model is untimed. It does not assert eventual progress: a tab may remain offline, a provider may remain paused and an observation may remain delayed indefinitely. `CHECK_DEADLOCK FALSE` permits a stopped or paused run to retain queued work until an explicit action.
 
+The shared `ChatTextarea` now also serves a descendant task mailbox. In that mode its text-only `onSubmit` goes to the project-task host, while execution and attachment controls and root-run approvals are hidden. It never enters `ChatSessionStore.requestTurn` or the root `ChatMessageQueue`, so it adds no `Submit`, `Persist` or `Prepare` transition to this model. The root composer still follows the modeled queue path.
+
 ## Correspondence to implementation
 
 | Model                                        | Runtime seam                                                                                                                        |
@@ -18,6 +20,8 @@ The model is untimed. It does not assert eventual progress: a tab may remain off
 | `Crash`, `Reopen`                            | Release local delivery ownership while retaining the filesystem queue and prepared command                                          |
 
 The implementation also checks `isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)`. This is a conservative local guard during a gap between admission and projection, in addition to the durable cross-tab barrier. The model abstracts local admission into the locked preparation step; it does not independently model the local XState actor. Removing this local guard therefore does not produce a dedicated model counterexample. The service test named “should wait for full completion and preserve FIFO through a fast acknowledgement and delayed projection” exercises that combined interval. The “should serialize delivery across two tabs with stale follower history” test isolates the durable barrier's cross-tab requirement, where the follower has no live local actor.
+
+`Acknowledge` is one atomic durable queue write in this model. In the service, that write is awaited after the host accepts a command. A paused host-log projection and last-view release may occur during the await. The session must remain held until acknowledgement and the watch handoff finish; otherwise the accepted paused run loses its local observer. This is a local session-lifetime condition rather than a change to the modeled queue, accepted identity or barrier transitions. The service regression “should retain a paused queued run while its durable acknowledgement is writing after the view closes” gates the filesystem write, releases the view, and checks that the same session resumes the later attempt without another host command. The model's untimed stuttering permits the acknowledgement to wait but does not prove that local ownership condition.
 
 `message-queue.conformance.test.ts` runs the concrete filesystem-store portion of the prepared/lost-ack/reopen/ack trace and checks canonical source drift. It asserts byte-equivalent command replay, wrong-ACK rejection and atomic publication of `afterRunId` to another store instance. This is a refinement slice, not a general TLC-trace-to-runtime replay adapter. Runtime service tests additionally cover immutable prepared replay, authoritative receipt reconciliation, cancellation targeting and cancellation completion. Host replay and billing tests are separate owners.
 
@@ -70,3 +74,5 @@ The target additionally checks unique queue membership, persistence of prepared 
 Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm nx formal ui`. The initial weak model preceded implementation; this strengthened model was added after the delivery barrier and replay protocol were refined. Keep that evidence order distinct from the red-first executable runtime tests.
 
 Explicit reorder atomically moves one pending identity before another (or to the end), only while no delivery or steering command is prepared. It changes the saved sequence but preserves command identity, payload and terminal authorization. FIFO is evaluated against this user-selected order. Store tests cover stale targets, concurrent submissions, failed writes, replayed moves and reopening.
+
+The Project threads setting narrows only `task_spawn` in a newly prepared root command. `Prepare` captures that grant before enqueue; flag changes do not rewrite queued commands, replay identities or frozen permission continuations. The setting does not cancel existing tasks or alter the queue transition alphabet. Seeded execution integration tests verify both Tau and Codex command grants.

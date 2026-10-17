@@ -41,6 +41,17 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
   });
 
+  it('should persist the Project threads opt-out and allow enabling it again', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('projectThreads', storage)).toBe(true);
+    setFlagOverrides({ projectThreads: false }, storage);
+    expect(isFeatureEnabled('projectThreads', storage)).toBe(false);
+    resetFlagCache();
+    expect(getAllFlags(storage).projectThreads).toBe(false);
+    setFlagOverrides({ projectThreads: true }, storage);
+    expect(isFeatureEnabled('projectThreads', storage)).toBe(true);
+  });
+
   it.each(['webGpu', 'webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
     'should keep the hidden %s flag at its disabled default despite an override',
     (flag) => {
@@ -247,7 +258,9 @@ describe('zod schema fallback', () => {
     const flags = getAllFlags(storage);
     expect(Object.keys(flags)).toStrictEqual(Object.keys(featureFlagDefaults));
     expect(flags).not.toHaveProperty('marketingLanding');
-    expect(flags).not.toHaveProperty('planMode');
+    expect(flags.planMode).toBe(true);
+    expect(flags).not.toHaveProperty('extra');
+    expect(flags).not.toHaveProperty('another');
     expect(flags.tauDebug).toBe(true);
   });
 });

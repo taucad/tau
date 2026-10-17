@@ -30,6 +30,7 @@ export const mobilePanelIds = [
   'details',
   'share',
   'revisions',
+  'agents',
 ] as const;
 
 // ============================================================================

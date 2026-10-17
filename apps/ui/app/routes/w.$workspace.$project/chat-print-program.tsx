@@ -350,11 +350,7 @@ export function ProgramStage({
             void send();
           }}
         >
-          {isSending ? (
-            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-          ) : (
-            <Send aria-hidden />
-          )}
+          {isSending ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Send aria-hidden />}
           Review job
         </Button>
       </div>

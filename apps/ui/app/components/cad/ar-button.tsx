@@ -56,7 +56,7 @@ export const ArButton = memo(function ({
       disabled={isConverting}
       onClick={activateAr}
     >
-      {isConverting ? <Loader2 className='size-5 animate-spin' /> : <ArIcon className='size-5' />}
+      {isConverting ? <Loader2 className='size-5 spin-glyph' /> : <ArIcon className='size-5' />}
     </Button>
   );
 });

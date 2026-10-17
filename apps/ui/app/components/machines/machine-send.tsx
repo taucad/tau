@@ -359,11 +359,7 @@ function JobReview({
             void start();
           }}
         >
-          {isBusy ? (
-            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-          ) : (
-            <Play aria-hidden />
-          )}
+          {isBusy ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Play aria-hidden />}
           {startLabel}
         </Button>
         <Button
@@ -500,7 +496,7 @@ function JobProgress({
       className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-card p-3'
     >
       <p className='flex min-w-0 items-center gap-2 text-sm'>
-        <LoaderCircle aria-hidden className='size-4 shrink-0 animate-spin motion-reduce:animate-none' />
+        <LoaderCircle aria-hidden className='size-4 shrink-0 spin-glyph' />
         <span className='min-w-0 truncate'>{label}</span>
       </p>
       {job.state === 'preparing' ? null : <PrintSteps steps={progressSteps(job, delivery)} />}
@@ -573,11 +569,7 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
               void reconcile();
             }}
           >
-            {isBusy ? (
-              <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-            ) : (
-              <SearchCheck aria-hidden />
-            )}
+            {isBusy ? <LoaderCircle aria-hidden className='spin-glyph' /> : <SearchCheck aria-hidden />}
             Check again
           </Button>
         </div>

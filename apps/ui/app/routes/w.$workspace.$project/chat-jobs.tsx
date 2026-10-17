@@ -100,7 +100,7 @@ export const JobsPanelBody = (): React.JSX.Element => {
         {isLoading && jobs.length === 0 ? (
           <div role='status' className='grid min-h-full place-items-center text-sm text-muted-foreground'>
             <span className='flex items-center gap-2'>
-              <LoaderCircle aria-hidden className='size-4 animate-spin motion-reduce:animate-none' />
+              <LoaderCircle aria-hidden className='size-4 spin-glyph' />
               Loading jobs
             </span>
           </div>

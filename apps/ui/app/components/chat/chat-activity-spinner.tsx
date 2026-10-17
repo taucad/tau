@@ -27,7 +27,7 @@ export type ChatActivitySpinnerProperties = Readonly<{
  * The shared source supersamples every copy to keep its reflections crisp.
  */
 export function ChatActivitySpinner({ className }: ChatActivitySpinnerProperties): React.JSX.Element {
-  const flatSpinner = <LoaderCircle className='size-[0.9rem] shrink-0 animate-spin motion-reduce:animate-none' />;
+  const flatSpinner = <LoaderCircle className='size-[0.9rem] shrink-0 spin-glyph' />;
 
   return (
     <span

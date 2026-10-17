@@ -408,7 +408,7 @@ export function PrintSteps({
             ) : needsPerson ? (
               <Hand aria-hidden className='size-3 shrink-0 text-information' />
             ) : step.state === 'active' ? (
-              <LoaderCircle aria-hidden className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
+              <LoaderCircle aria-hidden className='size-3 shrink-0 spin-glyph' />
             ) : (
               <Circle aria-hidden className='size-3 shrink-0' />
             )}

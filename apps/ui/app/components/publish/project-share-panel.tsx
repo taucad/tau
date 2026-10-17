@@ -926,7 +926,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return (
         <SharePaneFrame isDisabled={busy} description='Loading sharing settings…'>
           <div className='flex min-h-36 items-center justify-center'>
-            <Loader2 className='size-5 animate-spin text-muted-foreground' aria-hidden />
+            <Loader2 className='size-5 spin-glyph text-muted-foreground' aria-hidden />
           </div>
         </SharePaneFrame>
       );
@@ -973,7 +973,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               </Button>
               <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
                 {busy ? (
-                  <Loader2 className='size-4 animate-spin' aria-hidden />
+                  <Loader2 className='size-4 spin-glyph' aria-hidden />
                 ) : copied ? (
                   <Check className='size-3.5' aria-hidden />
                 ) : (
@@ -1097,7 +1097,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             <Button type='button' disabled={!canPublish} onClick={handlePublish}>
               {busy ? (
                 <>
-                  <Loader2 className='size-4 animate-spin' aria-hidden />
+                  <Loader2 className='size-4 spin-glyph' aria-hidden />
                   <span>Publishing…</span>
                 </>
               ) : (

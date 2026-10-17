@@ -157,7 +157,7 @@ export function PublicationAccessPanel({
               void handleAdd();
             }}
           >
-            {mutating ? <Loader2 className='size-4 animate-spin' aria-hidden /> : null}
+            {mutating ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : null}
             <span>Add access</span>
           </Button>
         </div>
@@ -166,7 +166,7 @@ export function PublicationAccessPanel({
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between'>
           <h3 className='text-sm font-medium'>People with access</h3>
-          {loading ? <Loader2 className='size-4 animate-spin text-muted-foreground' aria-hidden /> : null}
+          {loading ? <Loader2 className='size-4 spin-glyph text-muted-foreground' aria-hidden /> : null}
         </div>
         {grants.length === 0 && !loading ? (
           <p className='rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground'>

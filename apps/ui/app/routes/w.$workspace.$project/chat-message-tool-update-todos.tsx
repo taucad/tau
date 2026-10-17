@@ -76,8 +76,7 @@ export function ChatMessageToolUpdateTodos({ part }: { readonly part: UpdateTodo
                   icon={todoStatusIcons[item.status]}
                   iconClassName={cn(
                     item.status === 'done' && 'text-success',
-                    item.status === 'in_progress' &&
-                      'animate-spin text-foreground animation-duration-[2s] motion-reduce:animate-none',
+                    item.status === 'in_progress' && 'spin-glyph text-foreground [--spin-glyph-duration:2s]',
                   )}
                 >
                   <span className='sr-only'>{todoStatusLabels[item.status]}: </span>

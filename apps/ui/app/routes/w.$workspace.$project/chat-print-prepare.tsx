@@ -1378,11 +1378,7 @@ export function PrepareActions({
               void prepare.send();
             }}
           >
-            {isSending ? (
-              <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-            ) : (
-              <Send aria-hidden />
-            )}
+            {isSending ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Send aria-hidden />}
             {action.label}
           </Button>
         </div>
@@ -1411,11 +1407,7 @@ export function PrepareActions({
           aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
           onClick={prepare.sliceNow}
         >
-          {isSlicing ? (
-            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-          ) : (
-            <Scissors aria-hidden />
-          )}
+          {isSlicing ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Scissors aria-hidden />}
           {action.label}
         </Button>
       </div>

@@ -176,7 +176,7 @@ export function DesktopUpdateControl({
                     void act();
                   }}
                 >
-                  {busy ? <LoaderCircle className='size-3 motion-safe:animate-spin' /> : undefined}
+                  {busy ? <LoaderCircle className='size-3 spin-glyph' /> : undefined}
                   {busy
                     ? 'Please wait…'
                     : phase === 'ready'

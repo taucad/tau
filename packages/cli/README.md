@@ -115,7 +115,7 @@ A seed file is used only when it hashes to its name, so a bundle from an untrust
 
 ## Serve and open
 
-`tau serve [dir]` serves a project folder on this machine. Without `--relay` it is local-first: it binds loopback only, pairs with no server and needs no account. With `--ui` it also serves a prebuilt Tau UI build and opens it in the browser.
+`tau serve [dir]` serves a project folder on this machine. Without `--relay` it is local-first: it binds loopback only, pairs with no server and needs no account. It also serves the Tau UI: by default the digest-pinned UI layer, downloaded into the payload store once and verified against the pin the CLI ships, or with `--ui=<dir>` a prebuilt Tau UI build. `--no-ui` serves agents only; when the layer cannot be prepared (offline, unsupported platform, not yet published) the daemon serves agents only and says why.
 
 ```bash
 tau serve . --ui=./tau-ui                 # http://127.0.0.1:7180, opened in the browser
@@ -129,7 +129,7 @@ The default port is `7180`; a busy port moves to the next free one unless `--str
 
 `--allowed-origins=<origin,…>` (or `TAU_HOST_ALLOWED_ORIGINS`) lets a page on another origin, such as `https://tau.new` or a local web build at `http://localhost:3000`, read `/.well-known/tau-host` and open the `/agent` socket. Origins are exact (no path, trailing slash or wildcard), and the agent token is still required.
 
-`tau open [path|url]` is the one-step launcher: a folder or file is served as above (`--ui` or `TAU_HOST_UI_DIR` names the UI) and opened in the browser, and a URL is opened as it is. `--print` and `--json` print instead of opening. `--desktop` is best effort: a `tau://` link goes to Tau Desktop, and a served folder still opens in the browser until the desktop can take one from the terminal.
+`tau open [path|url]` is the one-step launcher: a folder or file is served as above (the store's UI layer, or the build `--ui` or `TAU_HOST_UI_DIR` names) and opened in the browser, and a URL is opened as it is. `--print` and `--json` print instead of opening. `--desktop` is best effort: a `tau://` link goes to Tau Desktop, and a served folder still opens in the browser until the desktop can take one from the terminal.
 
 ### Relay
 

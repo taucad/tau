@@ -22,6 +22,8 @@ import { createConsola } from 'consola';
 
 import { acquisitionOf } from '#acquisition.js';
 import type { Acquisition } from '#acquisition.js';
+import { prepareServeUi } from '#serve-ui.js';
+import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
@@ -242,7 +244,7 @@ export const parseAllowedOrigins = (value: string | readonly string[] | undefine
  */
 const agentOptions = (
   args: {
-    readonly ui?: string;
+    readonly ui?: string | undefined;
     readonly workspace?: string;
     readonly gateway?: string;
     readonly model: string;
@@ -561,27 +563,96 @@ const announceServed = async (served: {
 };
 
 /**
- * `--smoke-test`: the daemon's descriptor must answer, as a page or client would ask it.
+ * Which UI `tau serve` serves: none (`--no-ui`), a directory (`--ui <dir>`, for development), or by default the
+ * digest-pinned Tau UI layer from the payload store (charter W18).
+ *
+ * @internal
+ * @param value - The `--ui` value: a directory, `false` under `--no-ui`, or absent.
+ * @returns The choice.
+ */
+export const serveUiChoice = (
+  value: unknown,
+): Readonly<{ kind: 'none' }> | Readonly<{ kind: 'store' }> | Readonly<{ kind: 'directory'; directory: string }> => {
+  if (value === false || value === 'false') {
+    return { kind: 'none' };
+  }
+  return typeof value === 'string' && value !== '' ? { kind: 'directory', directory: value } : { kind: 'store' };
+};
+
+/**
+ * Bytes as megabytes with one decimal, for progress lines.
+ *
+ * @param bytes - A byte count.
+ * @returns The count in megabytes, such as `122.0 MB`.
+ */
+const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
+/**
+ * Prepare the pinned Tau UI layer into the payload store, saying what it downloads (I5: automatic, with visible
+ * progress). A sealed layer answers at once and says nothing; a download reports every tenth of its bytes on stderr.
+ *
+ * @param options - Cancellation, and the preparation for tests.
+ * @returns The sealed UI directory, or why there is none.
+ */
+export const prepareStoreUi = async (
+  options: { readonly signal?: AbortSignal; readonly prepare?: typeof prepareServeUi } = {},
+): Promise<ServeUi> => {
+  /* Mutated by the progress callback, so an object: a `let` here narrows to its initial value. */
+  const progress = { announced: false, reportedTenth: 0 };
+  const ui = await (options.prepare ?? prepareServeUi)({
+    signal: options.signal ?? new AbortController().signal,
+    onProgress: ({ completedBytes, totalBytes }) => {
+      if (!progress.announced) {
+        progress.announced = true;
+        consola.start(`Downloading the Tau UI (${megabytes(totalBytes)}, once; verified against its pinned digest)`);
+      }
+      const tenth = totalBytes > 0 ? Math.floor((completedBytes / totalBytes) * 10) : 0;
+      if (tenth > progress.reportedTenth) {
+        progress.reportedTenth = tenth;
+        consola.info(`Tau UI: ${megabytes(completedBytes)} of ${megabytes(totalBytes)} (${String(tenth * 10)}%)`);
+      }
+    },
+  });
+  if (ui.status === 'ready' && progress.announced) {
+    consola.success('The Tau UI is verified and sealed in the payload store.');
+  }
+  return ui;
+};
+
+/**
+ * `--smoke-test`: the daemon's descriptor must answer, as a page or client would ask it, and so must the UI's document
+ * when one is served.
  *
  * @param url - The served origin.
- * @throws {CliError} `SMOKE_TEST_FAILED` (exit 1) when it does not answer 200 with a descriptor.
+ * @param ui - Whether a UI is served.
+ * @throws {CliError} `SMOKE_TEST_FAILED` (exit 1) when it does not answer 200 with a descriptor, or with a document.
  */
-const smokeTest = async (url: string): Promise<void> => {
+const smokeTest = async (url: string, ui: boolean): Promise<void> => {
   const descriptorUrl = new URL('/.well-known/tau-host', url);
+  const documentUrl = new URL('/', url);
+  let checked = descriptorUrl;
   try {
     const response = await fetch(descriptorUrl, { signal: AbortSignal.timeout(smokeTestTimeout) });
     const body: unknown = await response.json();
     if (!response.ok || typeof body !== 'object' || body === null) {
       throw new Error(`answered ${String(response.status)}`);
     }
+    if (ui) {
+      checked = documentUrl;
+      const document = await fetch(documentUrl, { signal: AbortSignal.timeout(smokeTestTimeout) });
+      await document.body?.cancel();
+      if (!document.ok || !(document.headers.get('content-type') ?? '').includes('text/html')) {
+        throw new Error(`answered ${String(document.status)} ${document.headers.get('content-type') ?? ''}`.trim());
+      }
+    }
   } catch (error) {
     throw cliError(
       'SMOKE_TEST_FAILED',
-      `${descriptorUrl.href} did not answer: ${error instanceof Error ? error.message : String(error)}`,
+      `${checked.href} did not answer: ${error instanceof Error ? error.message : String(error)}`,
       exitCodes.error,
     );
   }
-  consola.success(`Smoke test passed: ${descriptorUrl.href} answers.`);
+  consola.success(`Smoke test passed: ${descriptorUrl.href}${ui ? ` and ${documentUrl.href}` : ''} answer.`);
 };
 
 /** `tau serve` command. */
@@ -676,7 +747,8 @@ export const serveCommand = defineCommand({
     },
     ui: {
       type: 'string',
-      description: 'Directory of a prebuilt Tau UI served beside the agent channel, cross-origin isolated',
+      description:
+        'Directory of a prebuilt Tau UI to serve instead of the digest-pinned one from the payload store (development); --no-ui serves agents only (TAU_HOST_UI_DIR)',
       required: false,
       default: process.env['TAU_HOST_UI_DIR'],
     },
@@ -780,7 +852,24 @@ export const serveCommand = defineCommand({
         : await resolveServePort({ port: explicitAgentPort, strict: true })
       : undefined;
     const apiUrl = relay ?? process.env['TAU_API_URL'] ?? 'https://api.tau.new';
-    const configured = agentOptions({ ...args, ...(workspace === undefined ? {} : { workspace }), apiUrl }, port);
+    /* The UI: a development directory, none, or the pinned layer, prepared into the store on first use (W18). A layer
+     * that cannot be prepared leaves agents served and says why; `tau open`, which needs a UI, refuses instead. */
+    const uiChoice = serveUiChoice(args.ui);
+    let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
+    if (uiChoice.kind === 'store' && port !== undefined) {
+      const storeUi = await prepareStoreUi();
+      if (storeUi.status === 'ready') {
+        uiDirectory = storeUi.root;
+      } else {
+        consola.warn(
+          `Serving agents without a UI: ${storeUi.message} Pass --ui=<directory of a Tau UI build> to serve one.`,
+        );
+      }
+    }
+    const configured = agentOptions(
+      { ...args, ui: uiDirectory, ...(workspace === undefined ? {} : { workspace }), apiUrl },
+      port,
+    );
     if (args.machines && !configured) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
@@ -939,7 +1028,7 @@ export const serveCommand = defineCommand({
           }),
         });
         if (args.smokeTest) {
-          await smokeTest(url);
+          await smokeTest(url, configuredAgent.uiRoot !== undefined);
           return;
         }
       }

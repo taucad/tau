@@ -2,7 +2,8 @@
  * `tau open` — the launcher (charter D29, C1 R3).
  *
  * One step from a terminal to a place a person can look at a project, as `code .` and `gh browse` do. A folder or
- * file is served with `tau serve` (local-first, loopback only) and its URL opened in the browser, which is the default
+ * file is served with `tau serve` (local-first, loopback only) with the digest-pinned Tau UI from the payload store
+ * (prepared on first use, W18) or `--ui <dir>`, and its URL opened in the browser, which is the default
  * hand-off because the same-origin served page needs no secret in its URL and no Local Network Access prompt (C1 R6).
  * A URL is opened as it is. `--print` prints the URL instead of opening it.
  *
@@ -109,7 +110,8 @@ export const openCommand = defineCommand({
     },
     ui: {
       type: 'string',
-      description: 'Directory of a prebuilt Tau UI to serve the folder with (TAU_HOST_UI_DIR)',
+      description:
+        'Directory of a prebuilt Tau UI to serve the folder with instead of the pinned one from the payload store (TAU_HOST_UI_DIR)',
       required: false,
       default: process.env['TAU_HOST_UI_DIR'],
     },
@@ -141,21 +143,26 @@ export const openCommand = defineCommand({
       return;
     }
 
-    if (args.ui === undefined || args.ui === '') {
-      throw cliError(
-        'UI_NOT_AVAILABLE',
-        `No Tau UI to open ${target.folder} in. Pass --ui=<directory of a Tau UI build> (or set TAU_HOST_UI_DIR); \`tau serve\` serves the folder to agents without one.`,
-        exitCodes.refused,
-      );
+    const { prepareStoreUi, serveCommand } = await import('#commands/serve.js');
+    let ui = typeof args.ui === 'string' ? args.ui : '';
+    if (ui === '') {
+      const storeUi = await prepareStoreUi();
+      if (storeUi.status !== 'ready') {
+        throw cliError(
+          'UI_NOT_AVAILABLE',
+          `No Tau UI to open ${target.folder} in: ${storeUi.message} Pass --ui=<directory of a Tau UI build> (or set TAU_HOST_UI_DIR); \`tau serve\` serves the folder to agents without one.`,
+          exitCodes.refused,
+        );
+      }
+      ui = storeUi.root;
     }
     if (args.desktop) {
       consola.warn('Tau Desktop cannot open a served folder from the terminal yet; opening it in the browser instead.');
     }
-    const { serveCommand } = await import('#commands/serve.js');
     await runCommand(serveCommand as CommandDef, {
       rawArgs: [
         target.folder,
-        `--ui=${args.ui}`,
+        `--ui=${ui}`,
         ...(args.port === undefined || args.port === '' ? [] : [`--port=${String(args.port)}`]),
         ...(args.json ? ['--json'] : []),
         ...(args.print ? ['--print'] : []),

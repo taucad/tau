@@ -13,11 +13,19 @@ import {
   childArguments,
   defaultServePort,
   parseAllowedOrigins,
+  prepareStoreUi,
   resolveServePort,
   serveNativeKernels,
+  serveUiChoice,
   shouldOpenBrowser,
 } from '#commands/serve.js';
+import type { prepareServeUi } from '#serve-ui.js';
 import { exitCodes } from '#output.js';
+
+/* Vitest's `NODE_ENV=test` drops consola to `warn`; the progress lines asserted below are `info`. */
+vi.hoisted(() => {
+  process.env['CONSOLA_LEVEL'] = '3';
+});
 
 const nativeKernels = vi.hoisted(() => ({
   composeNativeKernels: vi.fn<() => Promise<unknown>>(),
@@ -260,5 +268,65 @@ describe('parseAllowedOrigins', () => {
 
   it('should exit with the usage code', () => {
     expect(() => parseAllowedOrigins('*')).toThrow(expect.objectContaining({ exit: exitCodes.usage }));
+  });
+});
+
+describe('serveUiChoice', () => {
+  it('should serve the pinned layer by default, a directory when named, and none under --no-ui', () => {
+    expect(serveUiChoice(undefined)).toEqual({ kind: 'store' });
+    expect(serveUiChoice('')).toEqual({ kind: 'store' });
+    expect(serveUiChoice('./tau-ui')).toEqual({ kind: 'directory', directory: './tau-ui' });
+    expect(serveUiChoice(false)).toEqual({ kind: 'none' });
+    expect(serveUiChoice('false')).toEqual({ kind: 'none' });
+  });
+});
+
+describe('prepareStoreUi', () => {
+  it('should say what it downloads, every tenth of the bytes, and that it sealed the layer', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const prepare = vi.fn<typeof prepareServeUi>(async ({ onProgress }) => {
+      for (const completedBytes of [0, 5_000_000, 12_000_000, 13_000_000, 120_000_000]) {
+        onProgress?.({ completedBytes, totalBytes: 120_000_000 });
+      }
+      return { status: 'ready', root: '/store/closures/sha256/a/client', closureIntegrity: 'sha256-a' };
+    });
+    try {
+      await expect(prepareStoreUi({ prepare })).resolves.toMatchObject({ status: 'ready' });
+      const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+
+      expect(written).toContain('Downloading the Tau UI (120.0 MB, once; verified against its pinned digest)');
+      expect(written).toContain('Tau UI: 12.0 MB of 120.0 MB (10%)');
+      expect(written).not.toContain('13.0 MB');
+      expect(written).toContain('Tau UI: 120.0 MB of 120.0 MB (100%)');
+      expect(written).toContain('The Tau UI is verified and sealed in the payload store.');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('should say nothing for a layer already sealed, and hand back why there is none', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const unpublished = {
+      status: 'unavailable',
+      reason: 'unpublished',
+      message: 'This release of the Tau CLI pins no published Tau UI yet.',
+    } as const;
+    try {
+      await expect(
+        prepareStoreUi({ prepare: async () => ({ status: 'ready', root: '/r', closureIntegrity: 'sha256-a' }) }),
+      ).resolves.toMatchObject({ status: 'ready' });
+      await expect(
+        prepareStoreUi({
+          prepare: async ({ onProgress }) => {
+            onProgress?.({ completedBytes: 0, totalBytes: 0 });
+            return unpublished;
+          },
+        }),
+      ).resolves.toEqual(unpublished);
+      await expect(prepareStoreUi()).resolves.toEqual(unpublished);
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).not.toContain('sealed');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

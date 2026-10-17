@@ -1,0 +1,8 @@
+{
+  "//": "The Tau UI that tau serve serves (charter W18, Q51): a Tau-authored layer, prepared into the payload store by digest and served from <store>/closures/sha256/<hex>/client. The release-build serve-ui-layer jobs build it from ui:build:serve without source maps (ruling X2), publish it to cdn.tau.new blobs/ and an immutable serve-ui-layer-<16 hex> GitHub Release, and attach the composed pin; scripts/serve-ui-layer.mts pin rewrites this file from that release's tau-layer.json, never by hand. Until the first ui@ release run publishes it, the pin is the fail-closed placeholder (the digest of zero bytes): tau serve serves agents only, and tau open asks for --ui.",
+  "schemaVersion": 1,
+  "integrity": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+  "byteLength": 1,
+  "unpackedByteLength": 1,
+  "urls": []
+}

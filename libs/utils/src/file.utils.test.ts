@@ -44,7 +44,6 @@ describe('downloadBlob', () => {
     downloadBlob(blob, 'test-file.txt');
 
     expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
     await vi.waitFor(() => {
       expect(mockAnchor.download).toBe('test-file.txt');
@@ -64,11 +63,29 @@ describe('downloadBlob', () => {
     });
   });
 
-  it('should revoke the object URL even when reader is asynchronous', () => {
-    const blob = new Blob(['data']);
+  /* D-UI-13 (B-18): the download is the blob itself. A base64 data URL is a
+   * second, 1.33× copy of the export in the JS heap, plus the decoded string. */
+  it('should download through the object URL, never a base64 data URL', () => {
+    const readAsDataUrl = vi.spyOn(FileReader.prototype, 'readAsDataURL');
 
-    downloadBlob(blob, 'file.txt');
+    downloadBlob(new Blob(['data']), 'file.txt');
 
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+    expect(mockAnchor.href).toBe('blob:mock-url');
+    expect(mockAnchor.click).toHaveBeenCalled();
+    expect(readAsDataUrl).not.toHaveBeenCalled();
+  });
+
+  it('should revoke the object URL only after the download has had time to start', () => {
+    vi.useFakeTimers();
+    try {
+      downloadBlob(new Blob(['data']), 'file.txt');
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+      vi.runAllTimers();
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

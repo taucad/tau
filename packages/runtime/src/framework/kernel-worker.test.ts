@@ -4705,3 +4705,44 @@ describe('CapabilitiesManifest target shape', () => {
     });
   });
 });
+
+// =============================================================================
+// Projection retention
+// =============================================================================
+
+describe('document projection retention', () => {
+  it('should keep only the latest projection per view across option changes', async () => {
+    const worker = createConfiguredWorker();
+    try {
+      await openDocument(worker, {}, createGeometryFile('test.ts'));
+      const rendered: Array<Parameters<NonNullable<typeof worker.onRendered>>[0]> = [];
+      worker.onRendered = (event) => rendered.push(event);
+      worker.handleOpenView({
+        documentId: 'test-document',
+        subscriptionId: 'scrubbed',
+        requestId: 'scrub-0',
+        view: 'model',
+        options: { step: 0 },
+      });
+      await vi.waitFor(() => {
+        expect(rendered.map(({ requestId }) => requestId)).toContain('scrub-0');
+      });
+      for (let step = 1; step <= 5; step++) {
+        const requestId = `scrub-${step}`;
+        worker.handleUpdateView({ subscriptionId: 'scrubbed', requestId, options: { step } });
+        // oxlint-disable-next-line no-await-in-loop -- each option change renders before the next one is sent.
+        await vi.waitFor(() => {
+          expect(rendered.map((event) => event.requestId)).toContain(requestId);
+        });
+      }
+
+      const projections = (
+        worker as unknown as { documents: Map<string, { current?: { projections?: Map<string, unknown> } }> }
+      ).documents.get('test-document')?.current?.projections;
+      expect(rendered.every((event) => event.success)).toBe(true);
+      expect(projections?.size).toBe(1);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
@@ -35,6 +35,8 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { toast } from '#components/ui/sonner.js';
 
 const chatsPerPage = 5;
+/** Joins chat ids into one effect key; ids never contain it. */
+const observedKeySeparator = '\u0000';
 
 /** Chats group by day (A29): the older ones are still there, just further down. */
 const startOfToday = (): number => {
@@ -76,9 +78,32 @@ export function ProjectChatList({
       releases.clear();
     };
   }, [observations]);
+  const [visibleCount, setVisibleCount] = useState(chatsPerPage);
+  const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
+  const visibleChats = sortedChats.slice(0, visibleCount);
+  /*
+   * D-UI-06 (B-20): observing a chat loads its whole transcript into this page
+   * and the agent-host worker. A row shows at most the revealed page, and the
+   * project row's mark needs only those plus an unread chat — a failed run
+   * nobody saw (P57) — so older read chats stay unloaded, collapsed or not.
+   */
+  const unreadKey = useSyncExternalStore(
+    useCallback((listener: () => void) => store.subscribeUnread(listener), [store]),
+    () =>
+      chats
+        .filter((chat) => store.isUnread(chat.id))
+        .map((chat) => chat.id)
+        .join(observedKeySeparator),
+    () => '',
+  );
+  const observedKey = [
+    ...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)]),
+  ]
+    .filter((chatId) => chatId !== '')
+    .join(observedKeySeparator);
   useEffect(() => {
     const releases = observations.leases;
-    const chatIds = new Set(chats.map((chat) => chat.id));
+    const chatIds = new Set(observedKey === '' ? [] : observedKey.split(observedKeySeparator));
     for (const [chatId, release] of releases) {
       if (!chatIds.has(chatId)) {
         release();
@@ -90,14 +115,11 @@ export function ProjectChatList({
         releases.set(chatId, observations.store.observe(chatId, observations.projectId));
       }
     }
-  }, [chats, observations]);
+  }, [observedKey, observations]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
-  const [visibleCount, setVisibleCount] = useState(chatsPerPage);
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
-  const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
-  const visibleChats = sortedChats.slice(0, visibleCount);
   /* A29: the label appears only when both groups do — a list that is all from
    * today has nothing to disclose. */
   const groupLabels = useMemo(() => {

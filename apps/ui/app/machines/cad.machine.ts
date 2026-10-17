@@ -70,6 +70,10 @@ export type CadContext = {
   documentCleanups: Array<() => void>;
   /** A park requested during connection or rendering runs after the unit settles. */
   parkWhenIdle: boolean;
+  /** Kernel heap above which an idle unit recycles its runtime (device-scaled); `undefined` never recycles. */
+  recycleHeapBytes: number | undefined;
+  /** Kernel heap reported by this runtime's first and latest renderings; cleared with the runtime. */
+  heapWatch: Readonly<{ baseline: number; latest: number }> | undefined;
   /** Invalidates an asynchronous document opening superseded by newer actor intent. */
   openAttempt: number;
 };
@@ -165,6 +169,8 @@ type CadInput = {
   fileSystemRoot: string;
   /** Milliseconds. Create-only seed from the entry's durable record; the actor owns it afterwards. */
   operationTimeout?: number;
+  /** Kernel heap in bytes above which the unit recycles its runtime once idle (`runtimeRecycleHeapBytes`). */
+  recycleHeapBytes?: number;
 };
 
 /** Release the runtime resources held by one CAD unit. */
@@ -692,7 +698,26 @@ const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
     defaultView: undefined,
     kernelClient: undefined,
     connectingClient: undefined,
+    heapWatch: undefined,
   };
+};
+
+/*
+ * D-RT-03: WebAssembly memory never shrinks, so a runtime keeps the largest heap it ever reached. Recycle it through
+ * the park and reconnect path once its heap has passed the device threshold and grown a quarter of that threshold past
+ * its first render on this runtime: the first render is what the model itself needs, so a fresh runtime never
+ * recycles on it, and a model that needs more than the threshold is rendered rather than recycled in a loop. A drag
+ * is never interrupted; the commit that ends it renders on a fresh runtime instead.
+ */
+const heapRecycleDue = (context: CadContext): boolean => {
+  const { recycleHeapBytes, heapWatch } = context;
+  return (
+    recycleHeapBytes !== undefined &&
+    heapWatch !== undefined &&
+    heapWatch.latest > recycleHeapBytes &&
+    heapWatch.latest > heapWatch.baseline + recycleHeapBytes / 4 &&
+    context.parameterRender?.kind !== 'scrub'
+  );
 };
 
 /** Close a source's document and every default-view listener before opening another source. */
@@ -879,10 +904,14 @@ const resultSignals = {
         context: patch,
       };
     }
+    const { heapBytes } = event.rendering;
     const patch: CadPatch = {
       rendering: event.rendering,
       lastProjection: event.rendering,
       latestRenderingOutcome: 'success',
+      ...(heapBytes === undefined
+        ? {}
+        : { heapWatch: { baseline: context.heapWatch?.baseline ?? heapBytes, latest: heapBytes } }),
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
         if (combinedIssues.length > 0) {
           issues.set(entryPath, combinedIssues);
@@ -980,6 +1009,8 @@ export const cadMachine = setup({
     eventCleanups: [],
     documentCleanups: [],
     parkWhenIdle: false,
+    recycleHeapBytes: input.recycleHeapBytes,
+    heapWatch: undefined,
     openAttempt: 0,
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
@@ -1197,10 +1228,13 @@ export const cadMachine = setup({
     },
 
     idle: {
-      always: ({ context }, enq) =>
-        context.parkWhenIdle
-          ? { target: 'parked', context: { ...destroyKernel(context, enq), parkWhenIdle: false } }
-          : undefined,
+      always: ({ context }, enq) => {
+        if (context.parkWhenIdle) {
+          return { target: 'parked', context: { ...destroyKernel(context, enq), parkWhenIdle: false } };
+        }
+        /* Keeps the frame, entry and session, and renders the current intent again on a fresh runtime. */
+        return heapRecycleDue(context) ? { target: 'connecting', context: destroyKernel(context, enq) } : undefined;
+      },
       on: {
         /* R3: release the kernel process while retaining geometry, editor state and
          * session. An in-flight render finishes before a pending park takes effect. */

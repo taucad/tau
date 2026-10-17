@@ -31,8 +31,12 @@ env:
   pnpm_config_verify_deps_before_run: warn
   NX_NO_CLOUD: 'true'
 
+# A newer push to a pull request cancels its outdated run. Pushes to `main` share one group and are
+# never cancelled once running: a newer push replaces the run still waiting for a runner, so `main`
+# queues at most one run behind the running one (ruling X60). The nightly and each dispatch keep
+# groups of their own, so a push never cancels them.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

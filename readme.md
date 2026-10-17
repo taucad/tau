@@ -23,7 +23,7 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
 - **Parametric Editor** — Adjustable parameters with real-time preview
 - **Multi-Kernel** — Choose the right CAD engine for your project
 - **Embeddable** — Components to bring CAD into any web application
-- **Runs Outside Tau** — Every project keeps its ecosystem's own files (`package.json`, `pyproject.toml`, a `.csproj`), so it runs with `npm ci`, `uv`, `dotnet`, OpenSCAD or the Zoo CLI; the standalone-project jobs ([Linux](https://github.com/taucad/tau/actions/workflows/ci.yml?query=branch%3Amain), [macOS](https://github.com/taucad/tau/actions/workflows/standalone-darwin.yml?query=branch%3Amain); sources [ci.yml](.github/workflows/ci.yml), [standalone-darwin.yml](.github/workflows/standalone-darwin.yml)) check each template against Tau's own export on every push to `main`
+- **Runs Outside Tau** — Every project keeps its ecosystem's own files (`package.json`, `pyproject.toml`, a `.csproj`), so it runs with `npm ci`, `uv`, `dotnet`, OpenSCAD or the Zoo CLI; the standalone-project jobs ([Linux](https://github.com/taucad/tau/actions/workflows/ci.yml?query=branch%3Amain), [macOS](https://github.com/taucad/tau/actions/workflows/native-darwin.yml?query=branch%3Amain); sources [ci.yml](.github/workflows/ci.yml), [native-darwin.yml](.github/workflows/native-darwin.yml)) check each template against Tau's own export on every push to `main`
 
 ## Use Cases
 

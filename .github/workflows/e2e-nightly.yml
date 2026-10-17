@@ -3,7 +3,8 @@ name: E2E nightly
 # The browser-backed suites, out of pull request and `main` CI: every `type:e2e`
 # project's Vitest Browser matrices and development-server qualifications, the
 # real-device WebGPU qualification, the funded desktop live turn and the live GitHub
-# account rows (C10, A4); each secret-gated lane skips until its secrets exist. Each
+# account rows (C10, A4); each secret-gated lane skips until its secrets exist. Its
+# summary ends with the W22 consumer parity table. Each
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate.
@@ -244,6 +245,8 @@ jobs:
     permissions:
       contents: 'read'
       actions: 'read'
+    outputs:
+      counts: ${{ steps.desktop-summary.outputs.counts }}
     env:
       GEOSPEC_WORKERS: 1
     steps:
@@ -281,8 +284,10 @@ jobs:
           pnpm nx run-many -t test:e2e:packaged --projects "$PROJECTS" --parallel=1 --outputStyle=stream \
             | tee "$RUNNER_TEMP/desktop-packaged.log"
 
-      # W22 (D33): one line per consumer in the nightly summary; this job owns the desktop's.
+      # W22 (D33): one line per consumer in the nightly summary; this job owns the desktop's, and
+      # hands its test counts to the consumer parity table.
       - name: Summarise the desktop consumer
+        id: desktop-summary
         if: always()
         env:
           OUTCOME: ${{ steps.packaged.outcome }}
@@ -290,6 +295,7 @@ jobs:
           counts=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged.log" 2>/dev/null \
             | grep -E '^desktop-e2e: +Tests ' | tail -1 | sed -E 's/^desktop-e2e: +Tests +//')
           echo "- Desktop consumer (packaged darwin-arm64, macos-26, desktop-e2e:test:e2e:packaged): ${OUTCOME}${counts:+, ${counts}}" >> "$GITHUB_STEP_SUMMARY"
+          echo "counts=${counts}" >> "$GITHUB_OUTPUT"
 
       - *root-hygiene
 
@@ -303,6 +309,35 @@ jobs:
             ${{ runner.temp }}/desktop-e2e-services/*.log
           if-no-files-found: ignore
           retention-days: 7
+
+  # Consumer parity (charter D33, W22, gate T16): one row per consumer of native dependency
+  # resolution, in this run's summary. It runs no suite: each row reads the latest conclusion of
+  # the jobs that already run its oracles, this run's for the nightly's own (or the latest nightly
+  # on `main` when this run skipped them), `main`'s for ci.yml and native-darwin.yml, and the latest
+  # on any ref for the path-filtered pull-request workflows. A consumer whose oracle runs nowhere
+  # is a failing row, and any failing row fails this job.
+  consumer-parity:
+    name: Consumer parity (W22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [plan, e2e, desktop-packaged]
+    if: always() && needs.plan.result == 'success'
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Write the consumer parity table
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DESKTOP_COUNTS: ${{ needs.desktop-packaged.outputs.counts }}
+        run: node scripts/src/consumer-parity-summary.ts --summary "$GITHUB_STEP_SUMMARY" --detail "Packaged desktop=${DESKTOP_COUNTS}"
 
   # runtime-e2e's Darwin host suite, quarantined out of ci.yml until its 11 failing
   # tests pass here: https://github.com/taucad/tau/issues/342. The engine's

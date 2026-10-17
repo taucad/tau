@@ -6,6 +6,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { GeometryComponentManifest } from '@taucad/types';
+import { countConstructions } from '#test/three-allocations.test-utils.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import {
   buildSectionSurfaceTopologyForGeometry,
@@ -147,27 +148,7 @@ const measureRetainedFootprint = (root: unknown): RetainedFootprint => {
   return { objects, typedBytes };
 };
 
-/**
- * Counts `THREE.Vector3` constructions while `run` executes. The constructor's first write, `this.x = x`, meets
- * a prototype setter that counts it and then defines the ordinary own property, so vectors behave as usual.
- */
-const countVector3Constructions = <T>(run: () => T): Readonly<{ result: T; constructions: number }> => {
-  let constructions = 0;
-  Object.defineProperty(THREE.Vector3.prototype, 'x', {
-    configurable: true,
-    // Never read: the constructor's write replaces this accessor with an own property first.
-    get: () => 0,
-    set(this: THREE.Vector3, value: number) {
-      constructions += 1;
-      Object.defineProperty(this, 'x', { value, writable: true, enumerable: true, configurable: true });
-    },
-  });
-  try {
-    return { result: run(), constructions };
-  } finally {
-    Reflect.deleteProperty(THREE.Vector3.prototype, 'x');
-  }
-};
+const countVector3Constructions = <T>(run: () => T) => countConstructions(THREE.Vector3.prototype, 'x', run);
 
 describe('section surface topology', () => {
   it('should update the whole root once when registering many surfaces', async () => {

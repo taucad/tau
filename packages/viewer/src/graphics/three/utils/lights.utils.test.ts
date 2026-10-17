@@ -12,6 +12,7 @@ import {
   darkModeAmbientBoost,
 } from '#graphics/three/utils/lights.utils.js';
 import type { HeadlampConfig, LightingConfig } from '#graphics/three/utils/lights.utils.js';
+import { countConstructions } from '#test/three-allocations.test-utils.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -237,6 +238,25 @@ describe('computeHeadlampTransform', () => {
 // ── applyLightingForCamera ──────────────────────────────────────────────────
 
 describe('applyLightingForCamera', () => {
+  it('should not allocate vectors or Euler angles on a lighting frame', () => {
+    const scene = new THREE.Scene();
+    const headlamp = new THREE.DirectionalLight();
+    const ambient = new THREE.AmbientLight();
+    const camera = createTestCamera();
+    const config = createDefaultLightingConfig({ webGpuPmrem: true });
+    const frame = (): void => {
+      applyLightingForCamera({ scene, camera, headlamp, ambient, config });
+    };
+    frame();
+
+    const vectors = countConstructions(THREE.Vector3.prototype, 'x', frame);
+    // `Euler` stores its angles in `_x`; its public `x` is a prototype accessor.
+    const eulers = countConstructions(THREE.Euler.prototype, '_x', frame);
+
+    expect(vectors.constructions).toBe(0);
+    expect(eulers.constructions).toBe(0);
+  });
+
   it('preserves light energy when switching projection or changing field of view', () => {
     const scene = new THREE.Scene();
     const headlamp = new THREE.DirectionalLight();

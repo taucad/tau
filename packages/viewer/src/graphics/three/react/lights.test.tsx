@@ -122,6 +122,17 @@ describe('Lights', () => {
     });
   });
 
+  it('should reuse one lighting configuration across frames while its inputs are unchanged', () => {
+    render(<Lights sceneRadius={3} />);
+    const frame = vi.mocked(useFrame).mock.calls.at(-1)?.[0];
+    frame?.(mock<RootState>(), 0);
+    frame?.(mock<RootState>(), 0);
+
+    const [first, second] = vi.mocked(applyLightingForCamera).mock.calls.map(([options]) => options.config);
+    expect(second).toBe(first);
+    expect(first).toMatchObject({ sceneRadius: 3 });
+  });
+
   it('should defer the five-panel studio environment and omit it in MatCap mode', () => {
     const view = render(<Lights settings={{ environment: 'studio' }} />);
     expect(useDeferredValue).toHaveBeenCalled();

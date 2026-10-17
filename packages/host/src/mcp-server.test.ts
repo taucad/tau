@@ -696,6 +696,70 @@ describe('the mounted /mcp route', () => {
     30_000,
   );
 
+  it('keeps the project root on a filed screenshot and on a GeoSpec report it shortens', async () => {
+    const projectRoot = '/work/gear';
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => [testModelTool],
+        invoke: async (invocation): ReturnType<ToolRegistry['invoke']> =>
+          invocation.toolName === 'screenshot'
+            ? {
+                isError: false,
+                content: {
+                  success: true,
+                  images: [{ view: 'model', dataUrl: 'data:image/webp;base64,QUJD' }],
+                  projectRoot,
+                },
+              }
+            : {
+                isError: false,
+                content: {
+                  success: true,
+                  passed: 0,
+                  total: 1,
+                  passes: [],
+                  failures: [
+                    {
+                      id: 'large-1',
+                      requirement: 'Mesh is sound',
+                      reason: 'x'.repeat(150_000),
+                      suggestion: 'Inspect details',
+                      targetFile: 'main.ts',
+                    },
+                  ],
+                  projectRoot,
+                },
+              },
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-root', chatId: 'chat-root' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-root',
+      chatId: 'chat-root',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    try {
+      const capture = await client.callTool('screenshot', { targetFile: 'main.ts' });
+      const tests = await client.callTool('test_model', {});
+
+      expect(screenshotMcpOutputSchema.parse(capture.structuredContent).projectRoot).toBe(projectRoot);
+      const summary = testModelOutputSchema.parse(tests.structuredContent);
+      expect(summary.fullResult).toBeDefined();
+      expect(summary.projectRoot).toBe(projectRoot);
+    } finally {
+      await release();
+    }
+  }, 30_000);
+
   it('codes a fault Tau hits after the tool answered, so the agent does not retry its own call', async () => {
     endpoint = createHostMcpEndpoint({
       secret,

@@ -13,7 +13,6 @@
  * @module
  */
 import { readdir, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
 
 import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRunner, HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
@@ -22,6 +21,7 @@ import { defineCommand } from 'citty';
 
 import { composeNativeKernels } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
+import { resolveProjectRoot } from '#project-root.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 
@@ -199,7 +199,10 @@ export const testCommand = defineCommand({
   },
   async run({ args }) {
     const output = await createOutput();
-    const projectRoot = resolve(typeof args.project === 'string' ? args.project : process.cwd());
+    const { root: projectRoot } = resolveProjectRoot({
+      project: typeof args.project === 'string' ? args.project : undefined,
+      cwd: process.cwd(),
+    });
     try {
       const entry = await stat(projectRoot);
       if (!entry.isDirectory()) {

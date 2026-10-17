@@ -80,3 +80,13 @@ describe('evaluateModelOutputSchema', () => {
     );
   });
 });
+
+describe('evaluateModelOutputSchema projectRoot', () => {
+  it('should name the absolute project root its targetFile resolved against', () => {
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', projectRoot: '/work/gear' })).toEqual({
+      status: 'ready',
+      projectRoot: '/work/gear',
+    });
+    expect(evaluateModelOutputSchema.safeParse({ status: 'ready', projectRoot: '' }).success).toBe(false);
+  });
+});

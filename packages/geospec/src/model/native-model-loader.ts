@@ -17,7 +17,7 @@ import type {
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import type { ExportFile, KernelIssue, SourceRevision } from '@taucad/runtime/types';
-import { sha256Bytes } from '@taucad/runtime/kernel';
+import { assertRootedPath, isNotFoundError, joinRelativePath, sha256Bytes } from '@taucad/runtime/kernel';
 
 const protocolHeader = {
   canonicalProfile: 'geospec-jcs-v1',
@@ -152,6 +152,8 @@ export type GeoSpecModelLoadEvidence = {
   readonly sourceRevision?: SourceRevision;
   /** Actual direct-source locator, when the load read one; absent for anonymous in-memory bytes. */
   readonly sourcePath?: string;
+  /** The project-relative folder the load resolved its paths in, when it named one with `rootDir`. */
+  readonly rootDir?: string;
   /** Authored default work-unit budget for claims on this subject. */
   readonly workUnitLimit?: number;
   /**
@@ -286,9 +288,99 @@ const record = (value: unknown, label: string): Record<string, unknown> => {
 const decodeRecord = (bytes: Uint8Array<ArrayBuffer>, label: string): Record<string, unknown> =>
   record(JSON.parse(decoder.decode(bytes)) as unknown, label);
 
+/** A URL or an absolute locator: named as it is, never joined to a root or a `rootDir`. */
+const locator = /^(?:\/|[A-Za-z][A-Za-z0-9+.-]*:)/u;
+
+/**
+ * A path a load names, inside the `rootDir` it names.
+ * @param folder - The load's validated project-relative folder, if any.
+ * @param path - The path as authored.
+ * @returns The project path the host reads.
+ */
+const inFolder = (folder: string | undefined, path: string): string =>
+  folder === undefined || locator.test(path) ? path : joinRelativePath(folder, path);
+
+/**
+ * Whether a `rootDir` is a canonical project-relative folder (`''` is the project root itself).
+ * @param folder - The authored folder.
+ * @returns True when the rooted-path rules accept it unchanged.
+ */
+const canonicalFolder = (folder: string): boolean => {
+  try {
+    assertRootedPath(folder);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The paths a file or path-source load names, inside its `rootDir`; inline code is refused before this matters.
+ * @param options - The load as authored.
+ * @param folder - Its validated folder.
+ * @returns The `file`, `source` and resource paths to load instead.
+ */
+const rootedPaths = (
+  options: GeoSpecNativeLoadModelOptions,
+  folder: string,
+): Readonly<{
+  file?: string;
+  source?: LoadModelSourceOptions['source'];
+  resources?: readonly GeoSpecNativeModelResource[];
+}> => {
+  if ('code' in options) {
+    return {};
+  }
+  if (!('source' in options)) {
+    return { file: inFolder(folder, options.file) };
+  }
+  return {
+    ...(typeof options.source === 'string' ? { source: inFolder(folder, options.source) } : {}),
+    ...(options.resources === undefined
+      ? {}
+      : {
+          resources: options.resources.map((resource) =>
+            typeof resource.source === 'string' ? { ...resource, source: inFolder(folder, resource.source) } : resource,
+          ),
+        }),
+  };
+};
+
+/**
+ * The absolute path a project path names, for a message.
+ * @param projectPath - The absolute project root.
+ * @param path - A project path.
+ * @returns The two joined.
+ */
+const underRoot = (projectPath: string, path: string): string => `${projectPath.replace(/[/\\]+$/u, '')}/${path}`;
+
+/** Where a direct load's paths resolve, for its read diagnostic. */
+type SourceRoot = Readonly<{ projectPath?: string | undefined; rootDir?: string | undefined }>;
+
+/**
+ * The refusal of a file load that names no file, naming the root, the path joined to it, and how to name the file.
+ * @param options - The project path looked for, the load's `rootDir`, and the project root.
+ * @returns The typed `model-load` diagnostic.
+ */
+const sourceNotFound = (options: Readonly<{ path: string } & SourceRoot>): GeometryDiagnostic => {
+  const { path, projectPath, rootDir: folder } = options;
+  return diagnostic({
+    code: 'GEOSPEC_MODEL_SOURCE_NOT_FOUND',
+    message: `loadModel found no file '${path}'${folder === undefined ? '' : ` (rootDir '${folder}')`} in the project root${projectPath === undefined ? '' : ` ${projectPath}, looking for ${underRoot(projectPath, path)}`}.`,
+    suggestion:
+      "loadModel({ file }) resolves against the project root, the same root as every tool's targetFile: name the model by its path from that root, or pass rootDir with the project-relative folder it is in, as in loadModel({ file: 'main.ts', rootDir: 'parts/gear' }).",
+    details: {
+      path,
+      ...(folder === undefined ? {} : { rootDir: folder }),
+      ...(projectPath === undefined ? {} : { projectRoot: projectPath }),
+    },
+  });
+};
+
 const directBytes = async (
   source: LoadModelSourceOptions['source'],
   readSource: GeoSpecNativeSourceReader | undefined,
+  root: SourceRoot = {},
 ): Promise<Uint8Array<ArrayBuffer>> => {
   if (source instanceof Uint8Array) {
     return Uint8Array.from(source);
@@ -303,12 +395,23 @@ const directBytes = async (
     try {
       return await readSource(source);
     } catch (error) {
+      const { projectPath, rootDir: folder } = root;
+      const rooted = typeof source === 'string' && projectPath !== undefined && !locator.test(source);
       throw failure([
         diagnostic({
           code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
-          message: `The host source reader could not read ${typeof source === 'string' ? source : 'this source'}: ${error instanceof Error ? error.message : String(error)}`,
-          suggestion: 'Check that the source exists at a project-rooted path and is readable, then retry the load.',
-          ...(typeof source === 'string' ? { details: { source } } : {}),
+          message: `The host source reader could not read ${typeof source === 'string' ? source : 'this source'}${rooted ? ` at ${underRoot(projectPath, source)} in the project root ${projectPath}${folder === undefined ? '' : ` (rootDir '${folder}')`}` : ''}: ${error instanceof Error ? error.message : String(error)}`,
+          suggestion:
+            'Check that the source exists at its path from the project root, or pass rootDir with the project-relative folder it is in, and that it is readable, then retry the load.',
+          ...(typeof source === 'string'
+            ? {
+                details: {
+                  source,
+                  ...(folder === undefined ? {} : { rootDir: folder }),
+                  ...(rooted ? { projectRoot: projectPath } : {}),
+                },
+              }
+            : {}),
         }),
       ]);
     }
@@ -849,16 +952,50 @@ export const createGeoSpecNativeModelLoader = (
     residency.resident.set(subjectHash, input);
   };
 
+  /**
+   * Whether the host's rooted reader finds no file at a project path: the Runtime reports a missing entry only as
+   * text, so a failed export asks the reader. `false` when there is no reader or it fails another way.
+   * @param path - The project path the load named.
+   * @returns True only for a not-found read.
+   */
+  const sourceMissing = async (path: string): Promise<boolean> => {
+    if (defaults.readSource === undefined) {
+      return false;
+    }
+    try {
+      await defaults.readSource(path);
+      return false;
+    } catch (error) {
+      return isNotFoundError(error);
+    }
+  };
+
+  /**
+   * What a failed Runtime export of a load refuses with: one typed not-found diagnostic, naming the root and the
+   * load's `rootDir`, when the host's reader finds no file at the load's project path; else the Runtime's issues.
+   * @param options - The load, its `file` already joined to its `rootDir`.
+   * @param issues - The failed export's issues.
+   * @returns The diagnostics to refuse with.
+   */
+  const exportFailureDiagnostics = async (
+    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
+    issues: readonly KernelIssue[],
+  ): Promise<GeometryDiagnostic[]> =>
+    !('code' in options) && (await sourceMissing(options.file))
+      ? [sourceNotFound({ path: options.file, projectPath: defaults.projectPath, rootDir: options.rootDir })]
+      : issues.map((issue) => runtimeIssueDiagnostic(issue));
+
   const loadDirect = async (
     options: Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>,
     owners: ReadonlySet<ResidencyOwner>,
   ) => {
     const format = resolveFormat(options, defaults.format);
-    const primary = await directBytes(options.source, defaults.readSource);
+    const root = { projectPath: defaults.projectPath, rootDir: options.rootDir };
+    const primary = await directBytes(options.source, defaults.readSource, root);
     const resources = await Promise.all(
       (options.resources ?? []).map(async ({ name, source }) => ({
         name,
-        bytes: await directBytes(source, defaults.readSource),
+        bytes: await directBytes(source, defaults.readSource, root),
         ...(typeof source === 'string' ? { sourcePath: source } : {}),
       })),
     );
@@ -896,6 +1033,7 @@ export const createGeoSpecNativeModelLoader = (
         parameters: options.parameters ?? {},
         ingestOptions: options.ingestOptions ?? {},
         ...(typeof options.source === 'string' ? { sourcePath: options.source } : {}),
+        ...(options.rootDir === undefined ? {} : { rootDir: options.rootDir }),
         ...(options.workUnitLimit === undefined ? {} : { workUnitLimit: options.workUnitLimit }),
         artifacts,
       } satisfies GeoSpecModelLoadEvidence,
@@ -983,7 +1121,7 @@ export const createGeoSpecNativeModelLoader = (
       }
     })();
     if (!exported.success) {
-      throw failure(exported.issues.map(runtimeIssueDiagnostic));
+      throw failure(await exportFailureDiagnostics(options, exported.issues));
     }
     if (
       region !== undefined &&
@@ -1059,6 +1197,7 @@ export const createGeoSpecNativeModelLoader = (
         exportOptions,
         ingestOptions: options.ingestOptions ?? {},
         ...(sourceRevision === undefined ? {} : { sourceRevision }),
+        ...('rootDir' in options && options.rootDir !== undefined ? { rootDir: options.rootDir } : {}),
         ...(options.workUnitLimit === undefined ? {} : { workUnitLimit: options.workUnitLimit }),
         ...(region === undefined ? {} : { region }),
         artifacts,
@@ -1153,11 +1292,12 @@ export const createGeoSpecNativeModelLoader = (
         (existing.owners !== undefined || (await fileUnchanged(options, subject.load))) &&
         adopt(subject.subjectHash, owner);
       if (reusable) {
-        const { workUnitLimit: earlierWorkUnitLimit, ...earlier } = subject.load;
+        const { workUnitLimit: earlierWorkUnitLimit, rootDir: earlierFolder, ...earlier } = subject.load;
         return {
           subjectHash: subject.subjectHash,
           load: {
             ...earlier,
+            ...('rootDir' in options && options.rootDir !== undefined ? { rootDir: options.rootDir } : {}),
             ...(options.workUnitLimit === undefined ? {} : { workUnitLimit: options.workUnitLimit }),
             reused: true,
           },
@@ -1183,16 +1323,20 @@ export const createGeoSpecNativeModelLoader = (
   const loader: GeoSpecNativeModelLoader = (options) => {
     const owner = {};
     const loadId = nextRequestId('load');
+    const folder: unknown = 'rootDir' in options ? options.rootDir : undefined;
     const snapshot = {
       ...options,
       ...('code' in options ? { code: Object.fromEntries(Object.entries(options.code)) } : {}),
       ...(options.parameters === undefined ? {} : { parameters: structuredClone(options.parameters) }),
       ...(options.ingestOptions === undefined ? {} : { ingestOptions: structuredClone(options.ingestOptions) }),
       ...('region' in options && options.region !== undefined ? { region: structuredClone(options.region) } : {}),
+      ...(typeof folder === 'string' && canonicalFolder(folder) ? rootedPaths(options, folder) : {}),
     };
     const requestedFormat = options.format ?? defaults.format ?? 'glb';
     const invalidOption = [
       'stepStreaming',
+      // Inline code names its files itself.
+      ...('code' in options ? ['rootDir'] : []),
       // Native STEP admission is BRep-only; explicit later queries may demand tessellation.
       ...(options.mesh === false && (requestedFormat === 'step' || requestedFormat === 'stp') ? [] : ['mesh']),
       ...('source' in options
@@ -1206,7 +1350,11 @@ export const createGeoSpecNativeModelLoader = (
         : []),
       // A crop is mesh-only: exact BRep evidence is never cut.
       ...(requestedFormat === 'step' || requestedFormat === 'stp' ? ['region'] : []),
-    ].find((key) => key in options && (key !== 'region' || options[key as keyof typeof options] !== undefined));
+    ].find(
+      (key) =>
+        key in options &&
+        ((key !== 'region' && key !== 'rootDir') || options[key as keyof typeof options] !== undefined),
+    );
     if (invalidOption !== undefined) {
       return Promise.reject(
         failure([
@@ -1240,6 +1388,20 @@ export const createGeoSpecNativeModelLoader = (
     const invalidRegion = 'source' in options ? undefined : regionFailure(options.region);
     if (invalidRegion !== undefined) {
       return Promise.reject(invalidRegion);
+    }
+    if (folder !== undefined && !(typeof folder === 'string' && canonicalFolder(folder))) {
+      return Promise.reject(
+        failure([
+          diagnostic({
+            code: 'GEOSPEC_MODEL_OPTION_INVALID',
+            message:
+              "loadModel rootDir must be a project-relative folder in canonical form, such as 'parts/gear': no leading or trailing '/', and no '.' or '..' segments.",
+            suggestion:
+              "Pass the folder the model is in, from the project root, as in rootDir: 'parts/gear', or name the file by its path from the project root.",
+            details: { option: 'rootDir', ...(typeof folder === 'string' ? { rootDir: folder } : {}) },
+          }),
+        ]),
+      );
     }
     const admission =
       'source' in options

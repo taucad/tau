@@ -415,6 +415,51 @@ describe('@taucad/mcp', () => {
     }
   });
 
+  it('should name the project root in each CAD result, and in the text of an inline screenshot', async () => {
+    const projectRoot = '/work/gear';
+    const image = { ...screenshotImage('f'.repeat(64)), dataUrl: 'data:image/webp;base64,AQID' };
+    const exported = {
+      to: 'glb',
+      exportId: 'glb',
+      files: [
+        { name: 'model.glb', artifactPath: '.tau/artifacts/x/model.glb', mimeType: 'model/gltf-binary', byteLength: 3 },
+      ],
+    };
+    const answers: Readonly<Record<string, Record<string, unknown>>> = {
+      [rpcName.evaluateModel]: { status: 'ready' },
+      [rpcName.runGeoSpecTests]: { passed: 1, total: 1, failures: [], passes: [] },
+      [rpcName.exportModel]: exported,
+      [rpcName.captureImages]: { images: [image] },
+    };
+    const client = await connect({
+      dispatch: async (call) => ({ success: true, ...('rpcName' in call ? answers[call.rpcName] : {}), projectRoot }),
+      screenshotImages: 'inline',
+    });
+    try {
+      const evaluated = await client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } });
+      const tested = await client.callTool({ name: toolName.testModel, arguments: {} });
+      const exportedResult = await client.callTool({
+        name: toolName.exportModel,
+        arguments: { targetFile: 'main.ts', to: 'glb' },
+      });
+      const captured = await client.callTool({ name: toolName.screenshot, arguments: { targetFile: 'main.ts' } });
+
+      expect(evaluated.structuredContent).toEqual({ status: 'ready', projectRoot });
+      expect(tested.structuredContent).toMatchObject({ passed: 1, total: 1, projectRoot });
+      expect(exportedResult.structuredContent).toEqual({ ...exported, projectRoot });
+      expect(captured.content).toContainEqual({
+        type: 'text',
+        text: [
+          'Captured 1 CAD view. The images follow in this order; each is also saved locally:',
+          `isometric: ${image.absolutePath} (3 bytes)`,
+          `projectRoot: ${projectRoot}`,
+        ].join('\n'),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('should ask Claude Code to load every tool upfront', async () => {
     const client = await connect({
       dispatch: async () => ({ success: true }),

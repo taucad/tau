@@ -48,6 +48,7 @@ export const evaluateModelOutputSchema = z.object({
   status: z.enum(['ready', 'error']).describe('The current status of the model evaluation and default view.'),
   kernelIssues: z.array(kernelIssueSchema).optional().describe('Issues encountered during evaluation or rendering.'),
   sourceRevision: sourceRevisionSchema.optional().describe('Digests of the source this verdict used.'),
+  projectRoot: z.string().min(1).optional().describe('Absolute project root targetFile resolved against.'),
   views: z.array(z.string()).optional().describe('Offered view IDs, default first; present when ready.'),
   instances: z.record(z.string(), z.array(z.object({ id: z.string(), title: z.string() }).strict())).optional(),
   exports: z.record(z.string(), z.string()).optional().describe('Export ID to extension; present when ready.'),

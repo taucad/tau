@@ -497,6 +497,41 @@ const invokePrepareKernel = async (
 /** The tools that name the project a job's artifact belongs to. */
 const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestJob, toolName.checkJob]);
 
+/** The CAD tools whose `targetFile`, and GeoSpec's `loadModel({ file })`, resolve against the project root. */
+const projectRootTools: ReadonlySet<string> = new Set([
+  toolName.evaluateModel,
+  toolName.testModel,
+  toolName.screenshot,
+  toolName.exportModel,
+]);
+
+/**
+ * A CAD tool's answer with the absolute project root its paths resolved against, so the agent reads the root from
+ * the result rather than guessing it. A failure is left as it is: its message names what went wrong.
+ *
+ * @param tool - The tool that answered.
+ * @param root - The root the call worked in.
+ * @param result - Its result.
+ * @returns The result, with `projectRoot` on a CAD tool's answer.
+ */
+const withProjectRoot = (
+  tool: string,
+  root: string,
+  result: Awaited<ReturnType<ToolRegistry['invoke']>>,
+): Awaited<ReturnType<ToolRegistry['invoke']>> => {
+  const { content } = result;
+  if (
+    result.isError ||
+    !projectRootTools.has(tool) ||
+    typeof content !== 'object' ||
+    content === null ||
+    Array.isArray(content)
+  ) {
+    return result;
+  }
+  return { ...result, content: { ...content, projectRoot: root } };
+};
+
 /**
  * Build the daemon's tool registry.
  *
@@ -804,11 +839,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??
         options.workspaceRoot;
       if (projectIdOf === undefined) {
-        return rootedRegistry(root, options.projectId).invoke(invocation);
+        const registry = rootedRegistry(root, options.projectId);
+        return withProjectRoot(invocation.toolName, root, await registry.invoke(invocation));
       }
       if (!projectPrintTools.has(invocation.toolName)) {
         /* Only a print names the project; any other tool runs on whatever registry the root has. */
-        return (rooted.get(root)?.registry ?? rootedRegistry(root, undefined)).invoke(invocation);
+        const registry = rooted.get(root)?.registry ?? rootedRegistry(root, undefined);
+        return withProjectRoot(invocation.toolName, root, await registry.invoke(invocation));
       }
       const projectId = await projectIdOf(root);
       if (projectId === undefined) {

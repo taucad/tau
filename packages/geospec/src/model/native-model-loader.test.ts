@@ -1042,3 +1042,167 @@ describe('native model loader carried scopes', () => {
     await second.releaseAll();
   });
 });
+
+describe('native model loader project root', () => {
+  const notFound = (): Error => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+  /* A runtime whose export fails the way Tau's does for a file it cannot open: a text issue, no typed signal. */
+  const missingRuntime = () => {
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: false,
+      issues: [{ code: 'RUNTIME', severity: 'error', message: "ENOENT: no such file or directory, open '/work/x'" }],
+    });
+    const open = vi.fn<GeoSpecRuntimeClient['open']>(() => document);
+    const runtime: GeoSpecRuntimeClient = { connect: async () => undefined, terminate: () => undefined, open };
+    return { runtime, open };
+  };
+
+  it('should name the root and the path it joined when a file load finds no file there', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const { runtime, open } = missingRuntime();
+    const readSource = vi.fn(async (): Promise<Uint8Array<ArrayBuffer>> => {
+      throw notFound();
+    });
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource, projectPath: '/work' });
+    try {
+      await expect(loader({ file: 'main.ts' })).rejects.toMatchObject({
+        message: "loadModel found no file 'main.ts' in the project root /work, looking for /work/main.ts.",
+        diagnostics: [
+          {
+            code: 'GEOSPEC_MODEL_SOURCE_NOT_FOUND',
+            suggestion: expect.stringContaining("loadModel({ file: 'main.ts', rootDir: 'parts/gear' })") as string,
+            details: { path: 'main.ts', projectRoot: '/work' },
+          },
+        ],
+      });
+      await expect(loader({ file: 'main.ts', rootDir: 'parts/gear' })).rejects.toMatchObject({
+        diagnostics: [
+          {
+            code: 'GEOSPEC_MODEL_SOURCE_NOT_FOUND',
+            message:
+              "loadModel found no file 'parts/gear/main.ts' (rootDir 'parts/gear') in the project root /work, looking for /work/parts/gear/main.ts.",
+            details: { path: 'parts/gear/main.ts', rootDir: 'parts/gear', projectRoot: '/work' },
+          },
+        ],
+      });
+      expect(readSource.mock.calls).toEqual([['main.ts'], ['parts/gear/main.ts']]);
+      expect(open.mock.calls.map(([request]) => request.source)).toEqual([
+        { path: 'main.ts' },
+        { path: 'parts/gear/main.ts' },
+      ]);
+      expect(ingestSubject).not.toHaveBeenCalled();
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it("should keep the Runtime's own issues when the file is there or the reader cannot tell", async () => {
+    const { engine } = testEngine();
+    const runtimeIssue = { code: 'RUNTIME', message: "ENOENT: no such file or directory, open '/work/x'" };
+    for (const readSource of [
+      async () => Uint8Array.of(1),
+      async (): Promise<Uint8Array<ArrayBuffer>> => {
+        throw new Error('Native GeoSpec file sources must be project paths.');
+      },
+      undefined,
+    ]) {
+      const loader = createGeoSpecNativeModelLoader({
+        engine,
+        runtime: missingRuntime().runtime,
+        ...(readSource === undefined ? {} : { readSource }),
+        projectPath: '/work',
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one reader at a time.
+      await expect(loader({ file: 'main.ts' })).rejects.toMatchObject({ diagnostics: [runtimeIssue] });
+      // oxlint-disable-next-line no-await-in-loop -- ditto.
+      await loader.releaseAll();
+    }
+  });
+
+  it('should load a file and a path source inside rootDir and record rootDir in the load evidence', async () => {
+    const { engine } = testEngine();
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      issues: [],
+      files: [{ name: 'part.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(1) }],
+    });
+    const open = vi.fn<GeoSpecRuntimeClient['open']>(() => document);
+    const runtime: GeoSpecRuntimeClient = { connect: async () => undefined, terminate: () => undefined, open };
+    const readSource = vi.fn(async () => Uint8Array.of(1));
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource });
+    try {
+      const file = await loader({ file: 'main.ts', rootDir: 'parts/gear' });
+      const source = await loader({
+        source: 'part.glb',
+        resources: [{ name: 'mesh.bin', source: 'mesh.bin' }],
+        rootDir: 'parts/gear',
+        format: 'glb',
+      });
+      const unnamed = await loader({ file: 'parts/gear/main.ts' });
+
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'parts/gear/main.ts' } }));
+      expect(file.load).toMatchObject({ rootDir: 'parts/gear' });
+      expect(readSource.mock.calls).toEqual([['parts/gear/part.glb'], ['parts/gear/mesh.bin']]);
+      expect(source.load).toMatchObject({
+        sourcePath: 'parts/gear/part.glb',
+        rootDir: 'parts/gear',
+        artifacts: [{ sourcePath: 'parts/gear/part.glb' }, { name: 'mesh.bin', sourcePath: 'parts/gear/mesh.bin' }],
+      });
+      expect(unnamed.load).not.toHaveProperty('rootDir');
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should refuse a rootDir that is not a canonical project folder, and any rootDir on inline code', async () => {
+    const { engine } = testEngine();
+    const { runtime, open } = missingRuntime();
+    const readSource = vi.fn(async () => Uint8Array.of(1));
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource });
+    try {
+      for (const folder of ['../parts', '/work/parts', 'parts/gear/', './parts']) {
+        // oxlint-disable-next-line no-await-in-loop -- each refusal is checked on its own.
+        await expect(loader({ file: 'main.ts', rootDir: folder })).rejects.toMatchObject({
+          diagnostics: [{ code: 'GEOSPEC_MODEL_OPTION_INVALID', details: { option: 'rootDir', rootDir: folder } }],
+        });
+      }
+      // @ts-expect-error -- inline code takes no rootDir; an untyped caller is refused at run time.
+      await expect(loader({ code: { 'main.ts': '' }, file: 'main.ts', rootDir: 'parts' })).rejects.toMatchObject({
+        diagnostics: [{ code: 'GEOSPEC_MODEL_OPTION_UNSUPPORTED', details: { option: 'rootDir' } }],
+      });
+      expect(open).not.toHaveBeenCalled();
+      expect(readSource).not.toHaveBeenCalled();
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+
+  it('should name the root and the joined path when the host cannot read a path source', async () => {
+    const { engine } = testEngine();
+    const loader = createGeoSpecNativeModelLoader({
+      engine,
+      projectPath: '/work',
+      readSource: async () => {
+        throw notFound();
+      },
+    });
+    try {
+      await expect(loader({ source: 'part.glb', rootDir: 'parts', format: 'glb' })).rejects.toMatchObject({
+        diagnostics: [
+          {
+            code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+            message:
+              "The host source reader could not read parts/part.glb at /work/parts/part.glb in the project root /work (rootDir 'parts'): ENOENT: no such file or directory",
+            suggestion: expect.stringContaining('rootDir') as string,
+            details: { source: 'parts/part.glb', rootDir: 'parts', projectRoot: '/work' },
+          },
+        ],
+      });
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+});

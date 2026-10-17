@@ -22,7 +22,7 @@ import { defineCommand } from 'citty';
 
 import { parseJsonObject } from '#commands/export.js';
 import { composeNativeKernels } from '#native-kernels.js';
-import { findProjectRoot } from '#project-root.js';
+import { resolveProjectRoot } from '#project-root.js';
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
@@ -139,7 +139,7 @@ export const checkCommand = defineCommand({
         exitCodes.refused,
       );
     }
-    const projectRoot = args.project === undefined ? findProjectRoot(inputPath) : resolve(args.project);
+    const { root: projectRoot } = resolveProjectRoot({ project: args.project, file: inputPath, cwd: process.cwd() });
     const sourcePath = relative(projectRoot, inputPath);
     if (sourcePath.startsWith('..') || resolve(projectRoot, sourcePath) !== inputPath) {
       throw cliError('INPUT_OUTSIDE_PROJECT', `${inputPath} is outside the project ${projectRoot}.`, exitCodes.usage);

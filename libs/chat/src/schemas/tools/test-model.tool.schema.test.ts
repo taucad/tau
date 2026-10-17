@@ -39,6 +39,14 @@ describe('testModelOutputSchema', () => {
     expect(testModelOutputSchema.parse(timedOut)).toStrictEqual(timedOut);
   });
 
+  it('should name the absolute project root its files resolved against', () => {
+    expect(testModelOutputSchema.parse({ ...timedOut, projectRoot: '/work/gear' })).toStrictEqual({
+      ...timedOut,
+      projectRoot: '/work/gear',
+    });
+    expect(testModelOutputSchema.safeParse({ ...timedOut, projectRoot: '' }).success).toBe(false);
+  });
+
   it('should refuse a timeout that is not the operation-timeout code', () => {
     expect(
       testModelOutputSchema.safeParse({ ...timedOut, timeout: { ...timedOut.timeout, errorCode: 'UNKNOWN' } }).success,
@@ -197,6 +205,31 @@ describe('geoSpecRunLineageSchema load evidence', () => {
         },
       ],
     };
+    expect(geoSpecRunLineageSchema.parse(lineage)).toEqual(lineage);
+  });
+
+  it('should carry the folder a load resolved its paths in', () => {
+    const lineage = {
+      status: 'complete',
+      modules: [],
+      loads: [
+        {
+          loadId: 'run:load:1',
+          status: 'complete',
+          evidence: {
+            loadId: 'run:load:1',
+            status: 'complete',
+            format: 'step',
+            parameters: {},
+            ingestOptions: {},
+            sourcePath: 'parts/gear/main.ts',
+            rootDir: 'parts/gear',
+            artifacts: [],
+          },
+        },
+      ],
+    };
+
     expect(geoSpecRunLineageSchema.parse(lineage)).toEqual(lineage);
   });
 });

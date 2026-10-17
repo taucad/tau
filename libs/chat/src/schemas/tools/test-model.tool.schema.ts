@@ -63,6 +63,7 @@ export const geoSpecRunLineageSchema = z
               ingestOptions: z.record(z.string(), jsonValueSchema),
               sourceRevision: sourceRevisionSchema.optional(),
               sourcePath: z.string().optional(),
+              rootDir: z.string().optional().describe('Project-relative folder this load resolved its paths in.'),
               workUnitLimit: z.number().int().positive().optional(),
               reused: z.literal(true).optional(),
               region: z
@@ -412,6 +413,11 @@ export const testModelOutputSchema = z.object({
     .array(sourceRevisionSchema)
     .optional()
     .describe('One entry per model the run loaded, naming the source it was evaluated from (R4).'),
+  projectRoot: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Absolute project root every targetFile and loadModel file resolved against.'),
   fullResult: testModelResultArtifactSchema
     .optional()
     .describe('Full result artifact when inline details were reduced'),

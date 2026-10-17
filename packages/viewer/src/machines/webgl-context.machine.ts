@@ -10,11 +10,45 @@ import { eventSchemas } from '#machines/machine-schemas.js';
  */
 const maxWebglContexts = 8;
 
+/**
+ * Phones and low-memory devices run out of memory long before the browser's context cap: each viewer holds
+ * its drawing buffers, render targets and geometry (about 230 MiB with AO), so two is the budget there.
+ */
+const constrainedWebglContexts = 2;
+
+/** Devices at or below this `navigator.deviceMemory` (GB, rounded down by the browser) are constrained. */
+const constrainedDeviceMemoryGigabytes = 4;
+
+/**
+ * What a viewer host knows about the device when it sizes the context budget.
+ * @public
+ */
+export type WebglContextDevice = Readonly<{
+  /** The primary pointer is coarse, as on phones and tablets. */
+  coarsePointer: boolean;
+  /** `navigator.deviceMemory`, where the browser reports it. */
+  deviceMemoryGigabytes?: number;
+}>;
+
+/**
+ * The number of viewer WebGL contexts to admit on a device.
+ * @param device - The device's pointer and memory class.
+ * @returns Two on touch-first or low-memory devices, otherwise eight.
+ * @public
+ */
+export const resolveWebglContextLimit = (device: WebglContextDevice): number =>
+  device.coarsePointer ||
+  (device.deviceMemoryGigabytes !== undefined && device.deviceMemoryGigabytes <= constrainedDeviceMemoryGigabytes)
+    ? constrainedWebglContexts
+    : maxWebglContexts;
+
 // Type definitions
 type WebglContextMachineContext = {
   count: number;
   limit: number;
 };
+
+type WebglContextMachineInput = Readonly<{ limit?: number }> | undefined;
 
 type WebglContextMachineEvents = { type: 'acquire' } | { type: 'release' };
 
@@ -36,13 +70,14 @@ export const webglContextMachine = setup({
   schemas: {
     context: types<WebglContextMachineContext>(),
     events: eventSchemas<WebglContextMachineEvents>(),
+    input: types<WebglContextMachineInput>(),
   },
 }).createMachine({
   id: 'webglContext',
-  context: {
+  context: ({ input }) => ({
     count: 0,
-    limit: maxWebglContexts,
-  },
+    limit: input?.limit ?? maxWebglContexts,
+  }),
   on: {
     acquire: {
       context: ({ context }) => ({ count: context.count + 1 }),

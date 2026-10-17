@@ -224,12 +224,8 @@ describe('createTauR3fGlProp', () => {
 
   it('should release the WebGL drawing buffer as soon as its canvas is removed', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
-    const renderer = {
-      setPixelRatio: vi.fn(),
-      getPixelRatio: () => 1,
-      dispose: vi.fn(),
-      forceContextLoss: vi.fn(),
-    };
+    const forceContextLoss = vi.fn();
+    const renderer = { setPixelRatio: vi.fn(), getPixelRatio: () => 1, dispose: vi.fn(), forceContextLoss };
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgl');
     const canvas = document.createElement('canvas');
@@ -242,10 +238,11 @@ describe('createTauR3fGlProp', () => {
     // R3F loses the context only 500 ms after unmount; a quick remount would hold both drawing buffers.
     expect(factory.isRetired()).toBe(true);
     expect(renderer.dispose).toHaveBeenCalledOnce();
-    expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
-    expect(renderer.dispose.mock.invocationCallOrder[0]).toBeLessThan(
-      renderer.forceContextLoss.mock.invocationCallOrder[0]!,
-    );
+    expect(forceContextLoss).toHaveBeenCalledOnce();
+    expect(renderer.dispose.mock.invocationCallOrder[0]).toBeLessThan(forceContextLoss.mock.invocationCallOrder[0]!);
+    // R3F's own loss, 500 ms after unmount, must not ask an already lost context again.
+    renderer.forceContextLoss();
+    expect(forceContextLoss).toHaveBeenCalledOnce();
   });
 
   it('should retire a WebGPU renderer, which has no context to lose, by disposing it', async () => {

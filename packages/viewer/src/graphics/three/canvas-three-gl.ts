@@ -62,6 +62,14 @@ export function createTauR3fGlProp(
     if (ownedRenderer && !disposed) {
       disposed = true;
       ownedRenderer.dispose();
+      // R3F loses the context only 500 ms after unmount, so a quick remount would hold two drawing buffers.
+      // `dispose()` frees what three tracks; losing the context now frees the drawing buffer too, and R3F's
+      // deferred call then finds nothing left to lose.
+      if ('forceContextLoss' in ownedRenderer) {
+        const loseContext = ownedRenderer.forceContextLoss.bind(ownedRenderer);
+        ownedRenderer.forceContextLoss = (): void => undefined;
+        loseContext();
+      }
     }
   };
   const bindCanvas = (canvas: HTMLCanvasElement | undefined): void => {

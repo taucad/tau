@@ -79,9 +79,9 @@ class Draft
 class ExtensionLine(BaseSketchObject)
 
   # build123d.drafting.ExtensionLine.__init__ (constructor)
-  ExtensionLine(border: PathDescriptor, offset: float, draft: Draft, sketch: Sketch | None = None, label: str | None = None, arrows: tuple[bool, bool] = (True, True), tolerance: float | tuple[float, float] | None = None, label_angle: bool = False, measurement_direction: VectorLike | None = None, mode: Mode = Mode.ADD)
+  ExtensionLine(border: PathDescriptor, offset: float | VectorLike, draft: Draft, sketch: Sketch | None = None, label: str | None = None, arrows: tuple[bool, bool] = (True, True), tolerance: float | tuple[float, float] | None = None, label_angle: bool = False, measurement_direction: VectorLike | None = None, mode: Mode = Mode.ADD)
   #   border: a very general type of input defining the object to be dimensioned
-  #   offset: a distance to displace the dimension line from the edge of the object
+  #   offset: displacement of the dimension line from the edge of the object
   #   draft: instance of Draft dataclass
   #   label: Defaults to ''
   #   arrows: a pair of boolean values controlling the placement of the start and end arrows

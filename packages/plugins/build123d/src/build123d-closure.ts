@@ -17,10 +17,13 @@ import type { build123dOptionsSchema } from '#build123d.schemas.js';
 
 /** Closure-relative POSIX path of the interpreter python-build-standalone ships. */
 const pythonPath = 'python/bin/python3';
-/** Closure-relative directory the three worker scripts unpack into. */
+/** Closure-relative directory the worker and its four support modules unpack into. */
 const workerDirectory = 'tau-worker';
-/** The worker scripts, in the order the options name them: the entry point, then its two support modules. */
-const workerScripts = ['worker.py', 'analyzer.py', 'glb.py'].map((name) => `${workerDirectory}/${name}`);
+/** Closure-relative worker entry point and its four support modules. */
+const workerPath = `${workerDirectory}/worker.py`;
+const supportPaths = ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map(
+  (name) => `${workerDirectory}/${name}`,
+);
 const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
 /** Characters of a failed command's standard error kept in the error message. */
 const reportedOutput = 2000;
@@ -44,17 +47,17 @@ const rowOf = (receipt: ClosureLaunch, path: string): ReceiptFile => {
 const absolute = (receipt: ClosureLaunch, path: string): string => join(receipt.root, ...path.split('/'));
 
 /**
- * Build123d's launch set (D8, ruling X29): the interpreter and the three worker scripts, which every launch hashes.
+ * Build123d's launch set: the interpreter and the five worker scripts, which every launch hashes.
  * The preparation host records their rows in the closure's launch index, so a launch never reads the 22,000-row
  * receipt; the rest of the closure is re-verified when the worker exits before its handshake.
  * @returns Closure-relative paths.
  * @public
  */
-export const build123dLaunchSet = (): readonly string[] => [pythonPath, ...workerScripts];
+export const build123dLaunchSet = (): readonly string[] => [pythonPath, workerPath, ...supportPaths];
 
 /**
  * Map a sealed `engine` closure to the options `build123dKernel` already takes: the interpreter, the worker and its
- * two support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
+ * four support modules, each with the digest the receipt recorded, and the closure root as the runtime path the
  * sandbox may read. The session hashes exactly these files at launch (D8), so the per-launch check stays O(1).
  *
  * @param receipt - The closure `tau prepare build123d` sealed: its receipt, or the launch view a preparation host's
@@ -64,25 +67,26 @@ export const build123dLaunchSet = (): readonly string[] => [pythonPath, ...worke
  * @public
  * @example <caption>Compose the kernel from the prepared closure</caption>
  * ```typescript
- * const { state } = await host.inspect({ package: '@taucad/build123d' });
- * if (state.status === 'ready') {
- *   build123d({ kernels: { default: build123dOptionsFromClosure(state.receipts['engine']!) } });
+ * import { build123d, build123dOptionsFromClosure } from '@taucad/build123d';
+ * import type { PreparationHost } from '@taucad/runtime/preparation/node';
+ * async function preparedKernel(host: PreparationHost) {
+ *   const { state } = await host.inspect({ package: '@taucad/build123d' });
+ *   if (state.status === 'ready') {
+ *     return build123d({ kernels: { default: build123dOptionsFromClosure(state.receipts['engine']!) } });
+ *   }
  * }
  * ```
  */
 export const build123dOptionsFromClosure = (receipt: ClosureLaunch): Build123dClosureOptions => {
   const python = rowOf(receipt, pythonPath);
-  const [worker, analyzer, glb] = workerScripts.map((path) => rowOf(receipt, path)) as [
-    ReceiptFile,
-    ReceiptFile,
-    ReceiptFile,
-  ];
+  const worker = rowOf(receipt, workerPath);
+  const support = supportPaths.map((path) => rowOf(receipt, path));
   return {
     pythonExecutable: absolute(receipt, python.path),
     pythonSha256: python.sha256,
     workerPath: absolute(receipt, worker.path),
     workerSha256: worker.sha256,
-    supportFiles: [analyzer, glb].map((row) => ({ path: absolute(receipt, row.path), sha256: row.sha256 })),
+    supportFiles: support.map((row) => ({ path: absolute(receipt, row.path), sha256: row.sha256 })),
     runtimePath: receipt.root,
   };
 };
@@ -193,6 +197,9 @@ export const createBuild123dSeal =
         signal: input.signal,
       });
       if (imported.exitCode === 0) {
+        // Importing native modules takes long enough for an external metadata writer to alter the tree.
+        // Check the final tree too, before the host inventories additions into the sealed receipt.
+        await assertOnlyBytecodeAdded({ ...input, root });
         return undefined;
       }
       const blocked = systemLibraryRefusal({ package: input.package, output: imported.stderr, attemptId: '' });

@@ -43,6 +43,8 @@ const closureFiles = [
   row('tau-worker/analyzer.py', 'b'),
   row('tau-worker/glb.py', 'c'),
   row('tau-worker/worker.py', 'd'),
+  row('tau-worker/native_materials.py', 'e'),
+  row('tau-worker/mechanisms.py', 'f'),
 ];
 
 describe('build123dOptionsFromClosure', () => {
@@ -57,6 +59,8 @@ describe('build123dOptionsFromClosure', () => {
       supportFiles: [
         { path: '/store/closures/sha256/abc/tau-worker/analyzer.py', sha256: hex('b') },
         { path: '/store/closures/sha256/abc/tau-worker/glb.py', sha256: hex('c') },
+        { path: '/store/closures/sha256/abc/tau-worker/native_materials.py', sha256: hex('e') },
+        { path: '/store/closures/sha256/abc/tau-worker/mechanisms.py', sha256: hex('f') },
       ],
       runtimePath: '/store/closures/sha256/abc',
     });
@@ -67,7 +71,7 @@ describe('build123dOptionsFromClosure', () => {
     const launchSet = build123dLaunchSet();
     const index = { ...full, files: full.files.filter(({ path }) => launchSet.includes(path)) };
 
-    expect(launchSet.toSorted()).toEqual(closureFiles.map(({ path }) => path));
+    expect(launchSet.toSorted()).toEqual(closureFiles.map(({ path }) => path).toSorted());
     expect(build123dOptionsFromClosure(index)).toEqual(build123dOptionsFromClosure(full));
   });
 
@@ -219,6 +223,20 @@ describe('createBuild123dSeal', () => {
       code: 'EXTRACTION_REFUSED',
       message: expect.stringContaining('python/lib/stray.txt') as string,
     });
+  });
+
+  it('should refuse unexpected files added during the native import self-test', async () => {
+    const input = closure(['python/bin/python3']);
+    const { commands, run } = runner([
+      () => exited(0),
+      compileInto(input.root, 'python/lib/python3.13/site-packages/.DS_Store'),
+    ]);
+
+    await expect(createBuild123dSeal(run)(input)).rejects.toMatchObject({
+      code: 'EXTRACTION_REFUSED',
+      message: expect.stringContaining('python/lib/python3.13/site-packages/.DS_Store') as string,
+    });
+    expect(existsSync(commands[1]!.writablePath)).toBe(false);
   });
 
   it('should refuse with missing-system-library when the host lacks a library the closure links', async () => {

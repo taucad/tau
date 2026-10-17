@@ -1,0 +1,17 @@
+bd-materials 0.2.4
+
+The pinned bd_materials-0.2.4-py3-none-any.whl carries no licence text or
+licence metadata. The upstream v0.2.4 tag is commit
+fd377b6e3d60c00ae151b6468901cff066fcf37f. Upstream subsequently added its
+Apache License 2.0 text, then corrected the copyright holder's name, in
+commit ec5b6a5f4bb42d1cf862fc45aa0b26cb298cb3fc. Comparing that commit with
+v0.2.4 shows only the added LICENSE file; there are no source-code changes.
+
+LICENSE is reproduced verbatim from:
+https://github.com/bernhard-42/bd_materials/blob/ec5b6a5f4bb42d1cf862fc45aa0b26cb298cb3fc/LICENSE
+
+Source comparison:
+https://github.com/bernhard-42/bd_materials/compare/v0.2.4...ec5b6a5f4bb42d1cf862fc45aa0b26cb298cb3fc
+
+LICENSE SHA-256:
+0ee0cca825feeb0595693bf556b2f0ed99a24aaa6ab52cea871ba6031cebdbbf

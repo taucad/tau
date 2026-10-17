@@ -28,55 +28,66 @@ size = 28702
 hashes = { sha256 = "9da13157f5b28becde0bd374fc677dcd3c290614264eff096f167c469cd9f933" }
 
 [[packages]]
-name = "build123d"
-version = "0.11.1"
+name = "bd-materials"
+version = "0.2.4"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "build123d-0.11.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
-size = 368081
-hashes = { sha256 = "4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10" }
+name = "bd_materials-0.2.4-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
+size = 74803
+hashes = { sha256 = "27a43ba75e4eb115c03b0a3ce188ee8482228d019965d2e7d892ff9c0ad38742" }
+
+[[packages]]
+name = "build123d"
+version = "0.13.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "build123d-0.13.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+size = 387753
+hashes = { sha256 = "177f114e5f0514054189134346d386c7004048f8e58430b9b84b74a04fbc94fe" }
 
 [[packages]]
 name = "cadquery-ocp-novtk"
-version = "7.9.3.1.1"
+version = "8.0.1.0.0"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
-url = "https://files.pythonhosted.org/packages/f7/80/dc46dac2ebb6ae6bcce27bc7f717438b99897199be25323cda559a76e0a1/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
-size = 62295929
-hashes = { sha256 = "2287812f213af7020f8bbc69b07d6039e529f5e0e154c0192221aff3fdac6676" }
+name = "cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_arm64.whl"
+url = "https://files.pythonhosted.org/packages/65/4d/a2536f16fc299c51b8b196fcca010a0720dd9080eee0fdf90f3653871815/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_arm64.whl"
+size = 63040335
+hashes = { sha256 = "733c976b2102d9684e4cd3f7fbad8aba8726426322f2b1d547a5cc6aceb0d6fb" }
 
 [[packages.wheels]]
-name = "cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/97/55/93f76eb2a1874b2d51c98e6cad1b55ae7562fc9b6eb36365e3b0597d25c4/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl"
-size = 67126917
-hashes = { sha256 = "e2969d2129bf21067f44953117cc18f1426f5aacaed8bcc074228eb50f3179b2" }
+name = "cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/e5/bb/090f501d57bbe1b64efc2bc0ec260b3283bdf3658b3db3e4af49cd368495/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_x86_64.whl"
+size = 67881048
+hashes = { sha256 = "757739321ae6b99f8d4541228ce5584cb2edb6d897e90a1d1056226b9125d34b" }
 
 [[packages.wheels]]
-name = "cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl"
-url = "https://files.pythonhosted.org/packages/6a/bc/3eb58a3b7513309d665e0a65c00da93fc825dc930744cd8ab23626cd2e1f/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl"
-size = 61978120
-hashes = { sha256 = "d8f68b05c2917fb0f5ea569ed88c697d47cc57a7b293929d863b52c99ace9312" }
+name = "cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_aarch64.whl"
+url = "https://files.pythonhosted.org/packages/a8/06/ae17a2b53b8193941e7c73cc79d20ab5aedd2994f40976a31e304e9f0961/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_aarch64.whl"
+size = 61443554
+hashes = { sha256 = "3938bcb1bc602c651922c8a0f5d2a255b9de55b436b29ecb3cb02306e89a026e" }
 
 [[packages.wheels]]
-name = "cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
-size = 67466562
-hashes = { sha256 = "ffcd04d4efa087d3aa942360020265a1ac0e12407bd7bcfeb37e70b4d1ee72df" }
+name = "cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/83/a8/752777f38c5bd8cb6e239f4639f3a64a704b5812f3247b0a11f2ecb48900/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_x86_64.whl"
+size = 66755109
+hashes = { sha256 = "1702dfc8f5bdcb916ce65ea0c6314fe453cc78a6a3d49a044fb3062d47b0ef9f" }
 
 [[packages]]
 name = "cadquery-ocp-proxy"
-version = "7.9.3.1.1"
+version = "8.0.1.0.0"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
-size = 3322
-hashes = { sha256 = "ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91" }
+name = "cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
+size = 3249
+hashes = { sha256 = "d6a6909a73d2300ca4581ff762ccf0137993ac75c57a2dc82e12bffa3a12b680" }
 
 [[packages]]
 name = "certifi"
@@ -122,6 +133,28 @@ name = "cloudpickle-3.1.2-py3-none-any.whl"
 url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
 size = 22228
 hashes = { sha256 = "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a" }
+
+[[packages]]
+name = "dataclasses-json"
+version = "0.6.7"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "dataclasses_json-0.6.7-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+size = 28686
+hashes = { sha256 = "0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a" }
+
+[[packages]]
+name = "deprecated"
+version = "3.0.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "deprecated-3.0.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+size = 21912
+hashes = { sha256 = "58204cf4a7f6270d547af5c278ee7a6bb56045a4b3d8441a1cd11660f41b7939" }
 
 [[packages]]
 name = "executing"
@@ -266,6 +299,17 @@ size = 1575000
 hashes = { sha256 = "b4c00033c47cfeac93b7daa069fb46e8dea4391d5522b79cd6e9f6af75e33013" }
 
 [[packages]]
+name = "marshmallow"
+version = "3.26.2"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "marshmallow-3.26.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+size = 50964
+hashes = { sha256 = "013fa8a3c4c276c24d26d84ce934dc964e2aa794345a0f8c7e5a7191482c8a73" }
+
+[[packages]]
 name = "matplotlib-inline"
 version = "0.2.2"
 index = "https://pypi.org/simple"
@@ -286,6 +330,17 @@ name = "mpmath-1.3.0-py3-none-any.whl"
 url = "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
 size = 536198
 hashes = { sha256 = "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c" }
+
+[[packages]]
+name = "mypy-extensions"
+version = "1.1.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "mypy_extensions-1.1.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+size = 4963
+hashes = { sha256 = "1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505" }
 
 [[packages]]
 name = "narwhals"
@@ -329,25 +384,36 @@ hashes = { sha256 = "29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0
 
 [[packages]]
 name = "ocp-gordon"
-version = "0.2.2"
+version = "0.3.1"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "ocp_gordon-0.2.2-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
-size = 54077
-hashes = { sha256 = "6414e901a11065a56e839c81b56f418100b4d0b81eb5aa23bb1f8f72f97ff099" }
+name = "ocp_gordon-0.3.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
+size = 52347
+hashes = { sha256 = "5df14c38032dcca582ba788e53f8d2e8b39a646a5ea786a0309e8494b3061a81" }
 
 [[packages]]
 name = "ocpsvg"
-version = "0.6.0"
+version = "0.7.0"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "ocpsvg-0.6.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
-size = 20847
-hashes = { sha256 = "5cfc6deb2f602ded845596409e41fe8f5e1b389e14e8cc727db0955f0e88de7b" }
+name = "ocpsvg-0.7.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
+size = 20946
+hashes = { sha256 = "a476bb48b6b2e2d9f1f3a6356fde579373d681618b39a6ad9c99a808a0113997" }
+
+[[packages]]
+name = "packaging"
+version = "26.3"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "packaging-26.3-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+size = 129956
+hashes = { sha256 = "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c" }
 
 [[packages]]
 name = "parso"
@@ -370,6 +436,46 @@ name = "pexpect-4.9.0-py2.py3-none-any.whl"
 url = "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl"
 size = 63772
 hashes = { sha256 = "7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523" }
+
+[[packages]]
+name = "pillow"
+version = "12.2.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/34/46/6c717baadcd62bc8ed51d238d521ab651eaa74838291bda1f86fe1f864c9/pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl"
+size = 5308094
+hashes = { sha256 = "5d2fd0fa6b5d9d1de415060363433f28da8b1526c1c129020435e186794b3795" }
+
+[[packages.wheels]]
+name = "pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl"
+url = "https://files.pythonhosted.org/packages/71/43/905a14a8b17fdb1ccb58d282454490662d2cb89a6bfec26af6d3520da5ec/pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl"
+size = 4695402
+hashes = { sha256 = "56b25336f502b6ed02e889f4ece894a72612fe885889a6e8c4c80239ff6e5f5f" }
+
+[[packages.wheels]]
+name = "pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+url = "https://files.pythonhosted.org/packages/4b/6e/3ccb54ce8ec4ddd1accd2d89004308b7b0b21c4ac3d20fa70af4760a4330/pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+size = 6395194
+hashes = { sha256 = "5cdfebd752ec52bf5bb4e35d9c64b40826bc5b40a13df7c3cda20a2c03a0f5ed" }
+
+[[packages.wheels]]
+name = "pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/67/ee/21d4e8536afd1a328f01b359b4d3997b291ffd35a237c877b331c1c3b71c/pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+size = 7082423
+hashes = { sha256 = "eedf4b74eda2b5a4b2b2fb4c006d6295df3bf29e459e198c90ea48e130dc75c3" }
+
+[[packages]]
+name = "platformdirs"
+version = "4.13.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "platformdirs-4.13.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+size = 32724
+hashes = { sha256 = "3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1" }
 
 [[packages]]
 name = "prompt-toolkit"
@@ -444,6 +550,17 @@ name = "py_lib3mf-2.5.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch6
 url = "https://files.pythonhosted.org/packages/75/1d/6b7db799a635ae283240daaf91d1c9e50af8de66625565f0b3bc9d6f3635/py_lib3mf-2.5.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl"
 size = 1632922
 hashes = { sha256 = "bcdc9eb3606c66ab336fcadba59681602887d05df787cfd7432622307f4a4362" }
+
+[[packages]]
+name = "pygltflib"
+version = "1.16.5"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "pygltflib-1.16.5-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
+size = 27557
+hashes = { sha256 = "41d3349c59dcf1586faeaee29c967be07ac2bf7cecdb8ae2b527da1f25afdaac" }
 
 [[packages]]
 name = "pygments"
@@ -603,6 +720,17 @@ size = 18638
 hashes = { sha256 = "43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb" }
 
 [[packages]]
+name = "threejs-materials"
+version = "1.2.4"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "threejs_materials-1.2.4-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+size = 89793013
+hashes = { sha256 = "791e46fc3725474e8ebcf483e815700f4baf6e7d7bd7a004d9825cd0dead0b60" }
+
+[[packages]]
 name = "traitlets"
 version = "5.16.1"
 index = "https://pypi.org/simple"
@@ -636,6 +764,17 @@ size = 45571
 hashes = { sha256 = "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8" }
 
 [[packages]]
+name = "typing-inspect"
+version = "0.9.0"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "typing_inspect-0.9.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+size = 8827
+hashes = { sha256 = "9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f" }
+
+[[packages]]
 name = "urllib3"
 version = "2.8.0"
 index = "https://pypi.org/simple"
@@ -667,3 +806,32 @@ name = "webcolors-24.8.0-py3-none-any.whl"
 url = "https://files.pythonhosted.org/packages/f0/33/12020ba99beaff91682b28dc0bbf0345bbc3244a4afbae7644e4fa348f23/webcolors-24.8.0-py3-none-any.whl"
 size = 15027
 hashes = { sha256 = "fc4c3b59358ada164552084a8ebee637c221e4059267d0f8325b3b560f6c7f0a" }
+
+[[packages]]
+name = "wrapt"
+version = "2.5.1"
+index = "https://pypi.org/simple"
+
+[[packages.wheels]]
+name = "wrapt-2.5.1-cp313-cp313-macosx_10_13_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/e4/6d/cfe55762435f36107815d56a2cfbebe7e3129b593c47a670c6eb1d7917d3/wrapt-2.5.1-cp313-cp313-macosx_10_13_x86_64.whl"
+size = 106068
+hashes = { sha256 = "f98eaf784cd12bc69c77af398084174531007cd81849c962163ccfc6e791f3ea" }
+
+[[packages.wheels]]
+name = "wrapt-2.5.1-cp313-cp313-macosx_11_0_arm64.whl"
+url = "https://files.pythonhosted.org/packages/01/b9/41642877fe741db56d240833c8822188b663c4c5d52beb087964774035d4/wrapt-2.5.1-cp313-cp313-macosx_11_0_arm64.whl"
+size = 106190
+hashes = { sha256 = "ab6db7d2a18d366cc57c2228253cf26443190aba0a6dd0939b3c1e8ac6e29e2c" }
+
+[[packages.wheels]]
+name = "wrapt-2.5.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/37/62/20edad100b93552ec5c172e509a9db898a73d5043ae701fcb6e9986f9d33/wrapt-2.5.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+size = 248519
+hashes = { sha256 = "f1630201b0e2a96bb26304b7adfbd91a4ef486abb5a4c48377444a0bed749f37" }
+
+[[packages.wheels]]
+name = "wrapt-2.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+url = "https://files.pythonhosted.org/packages/3d/e9/8d81185bc9a40cfb43d91fc70a1e80ecde752c95dc98f5452cae82037976/wrapt-2.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+size = 248488
+hashes = { sha256 = "d800c7689154622b0ba2922ceca44a3cf2ef61c3b9a4c4eeb1d8b3050d7ededa" }

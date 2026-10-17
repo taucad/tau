@@ -100,7 +100,7 @@ export const createSectionTopologyWorkerClient = (
       const id = ++sequence;
       return new Promise<SectionCanonicalTopologyWorkerResult>((resolve, reject) => {
         requests.set(id, { resolve, reject });
-        // The page keeps its own arrays: they become the retained topology, and a failed worker falls back to them.
+        // The page keeps its own arrays: they become the retained topology, and a retry after a failure resends them.
         target.postMessage({ id, input });
       });
     },

@@ -256,10 +256,13 @@ export class HeadlessImageService {
         'Automatic previews are deferred on this software WebGPU adapter.',
       );
     }
+    // Desktop renders in its native utility process; only browser batches need
+    // a prior successful render to avoid cold WebGPU startup in the viewport.
     if (
       job.kind === 'automatic-thumbnail' &&
       job.sourceFormat === 'glb' &&
       job.exportOptions.mode === 'batch' &&
+      !isDesktopTarget() &&
       !this.successfulGlbRender
     ) {
       throw new HeadlessImageError(

@@ -881,4 +881,41 @@ describe('the viewer page from a text host', () => {
     },
     kernelCallLimit,
   );
+
+  it(
+    'should fit the opening tabs beside the header buttons and activate each at its centre (VUI-5)',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Copy prompt');
+
+      const lane = page.getByRole('complementary', { name: 'Workbench' });
+      const tablist = lane.getByRole('tablist', { name: 'Open panes' });
+      const tabs = tablist.getByRole('tab');
+      expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model', 'Kinematics']);
+      await lane.getByRole('button', { name: 'Hide workbench' }).waitFor();
+      expect(await tablist.evaluate((list) => list.scrollWidth <= list.clientWidth)).toBe(true);
+      /* Each tab's centre hits the tab, never a header button drawn over it. */
+      const hits = await tabs.evaluateAll((elements) =>
+        elements.map((tab) => {
+          const box = tab.getBoundingClientRect();
+          return tab.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        }),
+      );
+      expect(hits).toEqual([true, true, true]);
+      /* A pointer click at the centre, as a browser agent clicks, with nothing scrolling the tab into view first. */
+      const kinematics = await tablist.getByRole('tab', { name: 'Kinematics' }).boundingBox();
+      if (kinematics === null) {
+        throw new Error('The Kinematics tab has no box.');
+      }
+      await page.mouse.click(kinematics.x + kinematics.width / 2, kinematics.y + kinematics.height / 2);
+      await lane.getByRole('tabpanel', { name: 'Kinematics' }).waitFor();
+      expect(await tablist.evaluate((list) => list.scrollLeft)).toBe(0);
+      await capture(page, 'lane-header');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
 });

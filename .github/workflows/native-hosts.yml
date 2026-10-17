@@ -3,8 +3,8 @@
 # no closure serves refuse with a typed reason before any download.
 #
 # - Linux x64 and arm64 (glibc): prepare, read `selection.host` from the receipt, run the Build123d
-#   suites; on x64 also the refusals: glibc 2.28 (`blocked`, axis `minimumLibcVersion`, S17) and
-#   Alpine (`blocked`, axis `libc`), each in a container, and the runner with libGL moved aside
+#   suites; on x64 also glibc 2.28 target acceptance (offline cold-store miss) and
+#   Alpine refusal (`blocked`, axis `libc`), each in a container, and the runner with libGL moved aside
 #   (`blocked`, `missing-system-library`, ruling X6). These run on every pull request that affects Build123d,
 #   PicoGK or the CLI (Nx affected), and on every push to `main`.
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
@@ -176,18 +176,16 @@ jobs:
       - name: Run the Build123d suites
         run: pnpm nx run build123d:test --outputStyle=static
 
-      # Each refusal runs `tau prepare build123d --json` from the runner's checkout, mounted read-only,
-      # and requires exit 3, the typed outcome and a store without a single blob, so it was decided
-      # before any download.
-      #
-      # - S17: glibc 2.28 refuses on the floor (`minimumLibcVersion`, 2.31 > 2.28), with no network.
-      #   Node 24 runs on glibc 2.28, so the runner's own Node is mounted.
-      # - D18: Alpine (musl) has no closure and refuses on `libc`, with Alpine's own Node.
-      - name: Refuse glibc 2.28 and musl
+      # These selection checks use the read-only checkout and an empty store without networking.
+      # glibc 2.28 is the supported floor: --offline must reach OFFLINE_MISS after target selection.
+      # This proves selection, not native execution on that floor. The Build123d manifest suite above
+      # independently tests rejection below the floor (2.27), where Node 24 itself cannot run.
+      # Alpine (musl) still has no closure and refuses on libc, with Alpine's own Node (D18).
+      - name: Accept glibc 2.28 selection and refuse musl
         if: matrix.arch == 'x64'
         run: |
           node_root=$(dirname "$(dirname "$(command -v node)")")
-          refuse() {
+          expect_blocked() {
             local name=$1 filter=$2 options=$3 image=$4
             shift 4
             local store="$RUNNER_TEMP/tau-$name" code=0
@@ -200,7 +198,7 @@ jobs:
             test "$code" = 3
             jq -e "$filter" "$store/outcome.json"
             {
-              echo "### tau prepare build123d in $image: refused"
+              echo "### tau prepare build123d in $image: expected blocked outcome"
               echo '```json'
               jq '{ code, detail: .details.detail }' "$store/outcome.json"
               echo '```'
@@ -208,9 +206,9 @@ jobs:
           }
           before_download='.code == "UNSUPPORTED_TARGET" and .details.reason == "unsupported-target"'
           for image in debian:10 rockylinux:8; do
-            refuse "${image%%:*}" "$before_download and .details.detail.axis == \"minimumLibcVersion\"
-              and .details.detail.nearest.minimumLibcVersion == \"2.31\"" --network=none "$image" \
-              /opt/node/bin/node packages/cli/dist/bin/tau.mjs prepare build123d --json
+            expect_blocked "${image%%:*}" '.code == "OFFLINE_MISS" and .details.reason == "offline-miss"' \
+              --network=none "$image" \
+              /opt/node/bin/node packages/cli/dist/bin/tau.mjs prepare build123d --offline --json
             test -z "$(ls -A "$RUNNER_TEMP/tau-${image%%:*}/payloads/blobs" 2>/dev/null)"
           done
           # The checkout's pnpm install holds glibc binaries only; an npm install on Alpine would add
@@ -225,7 +223,7 @@ jobs:
               if (name.includes("linuxmusl-x64")) console.log(`${name}@${version}`);
           ' "$sharp" | xargs docker run --rm -v "$musl:$musl" node:24-alpine \
             npm install --prefix "$musl" --no-save --no-package-lock --no-audit --no-fund
-          refuse alpine "$before_download and .details.detail.axis == \"libc\"" \
+          expect_blocked alpine "$before_download and .details.detail.axis == \"libc\"" \
             "--network=none -v $musl/node_modules:/node_modules:ro" node:24-alpine \
             node packages/cli/dist/bin/tau.mjs prepare build123d --json
           test -z "$(ls -A "$RUNNER_TEMP/tau-alpine/payloads/blobs" 2>/dev/null)"

@@ -15,7 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- this private script helper has no package import mapping.
 import { replaceResourceDirectory, verifyOcpWheel } from './build123d-wheel-integrity.mjs';
 
@@ -190,7 +190,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     throw new Error(`Unsupported Python resource target: ${targetName}`);
   }
   const output = resolve(resourceRoot, targetName);
-  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py'] as const;
+  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'] as const;
   const sourceFilesSha256 = createHash('sha256');
   const sourceContents = await Promise.all(
     [
@@ -236,7 +236,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   const temporary = resolve(resourceRoot, `.${targetName}.${String(process.pid)}.tmp`);
   await rm(temporary, { recursive: true, force: true });
   await mkdir(temporary, { recursive: true });
-  execFileSync('tar', ['-xzf', archive, '-C', temporary, '--strip-components=1'], { stdio: 'inherit' });
+  // Git Bash tar needs relative POSIX paths: a drive colon means a remote archive, and -C rejects backslashes.
+  const extractionPath = relative(dirname(archive), temporary).split(sep).join('/');
+  execFileSync('tar', ['-xzf', basename(archive), '-C', extractionPath, '--strip-components=1'], {
+    cwd: dirname(archive),
+    stdio: 'inherit',
+  });
   const pythonExecutable = resolve(temporary, target.pythonRelativePath);
   execFileSync(
     'uv',
@@ -298,10 +303,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   );
   const workerSha256 = await digest(resolve(workerRoot, 'worker.py'));
   const supportFiles = await Promise.all(
-    ['analyzer.py', 'glb.py'].map(async (name) => ({
-      path: `tau-worker/${name}`,
-      sha256: await digest(resolve(workerRoot, name)),
-    })),
+    workerFiles
+      .filter((name) => name !== 'worker.py')
+      .map(async (name) => ({
+        path: `tau-worker/${name}`,
+        sha256: await digest(resolve(workerRoot, name)),
+      })),
   );
   await writeFile(
     resolve(temporary, 'tau-runtime-manifest.json'),

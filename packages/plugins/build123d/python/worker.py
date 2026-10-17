@@ -32,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from analyzer import AnalysisIssue, analyze_project
 from glb import write_glb
+from native_materials import material_dependencies, tessellate_surface
+from mechanisms import project_mechanism
 
 PROTOCOL_VERSION = 1
 MAX_FRAME_BYTES = 1_048_576
@@ -520,7 +522,10 @@ class _ComputeAdapter:
     def _invoke(self, action: dict[str, Any], compute: Any) -> Any:
         self._checkpoint()
         digest = _action_digest(action)
-        cached = self.cache.get(digest)
+        # BRep bytes do not carry native ShapeHistory, material or Python attributes.
+        # Boolean results must be recomputed so native provenance and caller metadata survive.
+        reusable = action["operation"].startswith("Solid.make_")
+        cached = self.cache.get(digest) if reusable else None
         if cached is not None:
             self.hits += 1
             self.cache.stamp(cached, digest)
@@ -533,7 +538,7 @@ class _ComputeAdapter:
         if not isinstance(result, Shape) or result.wrapped is None:
             return result
         self.cache.stamp(result, digest)
-        if duration >= COMPUTE_ADMISSION_FLOOR:
+        if reusable and duration >= COMPUTE_ADMISSION_FLOOR:
             charge = _estimate_compute_bytes(result)
             self.cache.put(digest, result, action, charge)
             self.announcements.append(
@@ -601,6 +606,8 @@ class _ComputeAdapter:
                 _signature: inspect.Signature = signature,
                 **kwargs: Any,
             ) -> Any:
+                if _shape_type is not Solid:
+                    return _original.__func__(_shape_type, *args, **kwargs)
                 return self._primitive(_name, _original, _signature, args, kwargs)
 
             self._patches.append((Solid, name, descriptor))
@@ -675,7 +682,7 @@ def _validate_results(values: tuple[Any, ...]) -> None:
             raise ValueError("main(params) returned an invalid shape")
 
 
-def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any = None) -> tuple[tuple[Any, ...], list[str]]:
+def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any = None, motion: Any = None) -> tuple[tuple[Any, ...], list[str]]:
     workspace = workspace.resolve()
     analysis = analyze_project(workspace, entry_path)
     validated = _validate_parameters(parameters, analysis["jsonSchema"])
@@ -714,17 +721,19 @@ def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any 
         else:
             raise TypeError("main(params) must return None, a Shape or a list/tuple of Shapes")
         _validate_results(values)
-        explicit_labels = [shape.label.strip() for shape in values if shape.label and shape.label.strip()]
-        duplicates = sorted({label for label in explicit_labels if explicit_labels.count(label) > 1})
-        if duplicates:
-            raise ValueError(f"Duplicate explicit shape labels: {', '.join(duplicates)}")
+        resources = material_dependencies(values, workspace, analysis["resolved"])
+        if motion is not None:
+            declaration = getattr(module, "motion", None)
+            if declaration is not None and not callable(declaration):
+                raise TypeError("motion must be a callable motion(model) function")
+            motion(declaration(result) if declaration is not None else None)
         for index, shape in enumerate(values):
             if not shape.label or not shape.label.strip():
                 shape.label = f"Shape {index + 1}"
     finally:
         _record_project_modules(workspace, known)
         sys.modules.pop(module_name, None)
-    return values, sorted(set(_LOADED_PROJECT_MODULES.values()))
+    return values, sorted(set(_LOADED_PROJECT_MODULES.values()) | set(resources))
 
 
 def _component_id(label: str, fallback: str) -> str:
@@ -737,18 +746,6 @@ def _component_id(label: str, fallback: str) -> str:
 
 def _point(vector: Any) -> tuple[float, float, float]:
     return (float(vector.X) / 1000, float(vector.Z) / 1000, -float(vector.Y) / 1000)
-
-
-def _normal(a: tuple[float, float, float], b: tuple[float, float, float], c: tuple[float, float, float]) -> tuple[float, float, float]:
-    left = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-    right = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-    cross = (
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    )
-    length = math.hypot(*cross)
-    return (0.0, 1.0, 0.0) if length == 0 else tuple(value / length for value in cross)  # type: ignore[return-value]
 
 
 class _OverBudget(Exception):
@@ -787,7 +784,7 @@ def _triangulate(shape: Any, linear_tolerance: float, angular_tolerance: float) 
     copied = BRepBuilderAPI_Copy()
     copied.Perform(shape.wrapped, True, False)
     detached = _cast_shape(copied.Shape())
-    located = detached.moved(shape.location.inverse() * shape.global_location)
+    located = detached.located(shape.global_location)
     # I4: absolute deflection, so the tolerance is a length and density does not depend on each edge's size.
     BRepMesh_IncrementalMesh(located.wrapped, linear_tolerance, False, angular_tolerance, True)
     triangles = 0
@@ -799,44 +796,59 @@ def _triangulate(shape: Any, linear_tolerance: float, angular_tolerance: float) 
 
 def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
     located, _triangles = _triangulate(shape, linear_tolerance, angular_tolerance)
-    return _mesh_arrays(shape, located, linear_tolerance)
+    return _mesh_arrays(shape, located, linear_tolerance, angular_tolerance)
 
 
-def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float) -> dict[str, Any]:
+def _edge_points(shape: Any, linear_tolerance: float, angular_tolerance: float) -> list[list[Any]]:
+    """Read the surface's own boundary samples, retaining native edge order and seams.
+
+    Build123D shape equality is OCCT IsSame (location matters, orientation does not),
+    so a shared edge is emitted once. Free edges have no face triangulation and use
+    OCCT's angular-and-chordal discretizer, with the same effective tolerances.
+    """
+    from build123d import Vector
     from OCP.BRep import BRep_Tool
-    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GCPnts import GCPnts_TangentialDeflection
     from OCP.TopLoc import TopLoc_Location
 
-    positions: list[float] = []
-    normals: list[float] = []
-    indices: list[int] = []
-    face_groups: list[dict[str, int]] = []
-    for face_id, face in enumerate(located.faces(), 1):
+    edges = shape.edges()
+    points = {}
+    for face in shape.faces():
         location = TopLoc_Location()
         triangulation = BRep_Tool.Triangulation_s(face.wrapped, location)
-        transform = location.Transformation()
-        vertices = []
-        for index in range(1, triangulation.NbNodes() + 1):
-            point = triangulation.Node(index).Transformed(transform)
-            vertices.append((float(point.X()) / 1000, float(point.Z()) / 1000, -float(point.Y()) / 1000))
-        reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
-        start = len(indices)
-        for triangle_index in range(1, triangulation.NbTriangles() + 1):
-            first, second, third = triangulation.Triangle(triangle_index).Get()
-            triangle = (first - 1, third - 1, second - 1) if reverse else (first - 1, second - 1, third - 1)
-            points = [vertices[index] for index in triangle]
-            normal = _normal(*points)
-            for point in points:
-                positions.extend(point)
-                normals.extend(normal)
-                indices.append(len(indices))
-        face_groups.append({"start": start, "count": len(indices) - start, "faceId": face_id})
+        if triangulation is None:
+            continue
+        for edge in face.edges():
+            if edge in points:
+                continue
+            polygon = BRep_Tool.PolygonOnTriangulation_s(edge.wrapped, triangulation, location)
+            if polygon is None:
+                continue
+            nodes = polygon.Nodes()
+            points[edge] = [
+                Vector(triangulation.Node(nodes.Value(index)).Transformed(location.Transformation()))
+                for index in range(nodes.Lower(), nodes.Upper() + 1)
+            ]
+    for edge in edges:
+        if edge not in points:
+            curve = GCPnts_TangentialDeflection(
+                BRepAdaptor_Curve(edge.wrapped), angular_tolerance, linear_tolerance, 2, 1e-9, 1e-7
+            )
+            points[edge] = [Vector(curve.Value(index)) for index in range(1, curve.NbPoints() + 1)]
+    return [points[edge] for edge in edges]
+
+
+def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+    # _triangulate has already meshed absolutely. Native tessellate_with_uvs
+    # reuses that triangulation and supplies smooth normals and native face UVs.
+    surface = tessellate_surface(located, linear_tolerance, angular_tolerance, pretriangulated=True)
 
     lines: list[float] = []
     line_indices: list[int] = []
     edge_groups: list[dict[str, int]] = []
-    for edge_id, edge in enumerate(located.edges(), 1):
-        points = [_point(point) for point in edge.positions(deflection=linear_tolerance)]
+    for edge_id, edge in enumerate(_edge_points(located, linear_tolerance, angular_tolerance), 1):
+        points = [_point(point) for point in edge]
         start = len(line_indices)
         for first, second in zip(points, points[1:]):
             lines.extend(first)
@@ -845,10 +857,8 @@ def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float) -> dict[str,
         edge_groups.append({"start": start, "count": len(line_indices) - start, "edgeId": edge_id})
     color = tuple(shape.color) if shape.color is not None else (0.8, 0.8, 0.82, 1.0)
     return {
-        "positions": positions,
-        "normals": normals,
-        "indices": indices,
-        "faceGroups": face_groups,
+        **surface,
+        "nativeMaterial": shape.material,
         "lines": lines,
         "lineIndices": line_indices,
         "edgeGroups": edge_groups,
@@ -917,7 +927,7 @@ def _topology(
     if max_triangles is not None and triangles > max_triangles:
         raise _OverBudget(triangles)
     meshes = {
-        component_id: _mesh_arrays(shape, located, linear_tolerance)
+        component_id: _mesh_arrays(shape, located, linear_tolerance, angular_tolerance)
         for component_id, shape, located, _count in triangulated
     }
     return components, meshes
@@ -928,6 +938,7 @@ class Worker:
         self.workspace = workspace.resolve()
         self.artifacts = artifacts.resolve()
         self.handles: dict[str, tuple[Any, ...]] = {}
+        self.motion: dict[str, Any] = {}
         self.seen_requests: set[str] = set()
         self.compute = _ComputeCache()
         self.cancelled = threading.Event()
@@ -1062,12 +1073,14 @@ class Worker:
             adapter = (
                 _ComputeAdapter(self.compute, params["compute"], self.cancelled) if "compute" in params else None
             )
+            motion: list[Any] = []
             with adapter if adapter is not None else nullcontext():
                 shapes, observed = _load_model(
-                    self.workspace, params["entryPath"], params.get("parameters", {}), adapter
+                    self.workspace, params["entryPath"], params.get("parameters", {}), adapter, motion.append
                 )
             handle_id = uuid.uuid4().hex
             self.handles[handle_id] = shapes
+            self.motion[handle_id] = motion[0]
             return {
                 "handleId": handle_id,
                 "observedDependencies": observed,
@@ -1110,13 +1123,17 @@ class Worker:
             except _OverBudget as exceeded:
                 return {"triangles": exceeded.triangles, "vertices": exceeded.triangles * 3}
             triangles = sum(len(mesh["indices"]) // 3 for mesh in meshes.values())
+            vertices = sum(len(mesh["positions"]) // 3 for mesh in meshes.values())
+            projection = project_mechanism(shapes, components, self.motion.get(params["handleId"]), meshes=meshes)
             artifact = self._artifact("glb")
-            write_glb(artifact, components, meshes)
+            write_glb(artifact, components, meshes, topology_metadata=projection)
             return {
                 "artifactPath": str(artifact),
                 "byteLength": artifact.stat().st_size,
                 "triangles": triangles,
-                "vertices": triangles * 3,
+                "vertices": vertices,
+                "mechanismDiagnostics": projection.get("mechanismDiagnostics", []),
+                **{key: projection[key] for key in ("mechanism", "mechanismIntent") if key in projection},
             }
         if method == "export":
             if params["format"] != "step":
@@ -1133,9 +1150,11 @@ class Worker:
             return {"artifactPath": str(artifact), "byteLength": artifact.stat().st_size}
         if method == "release":
             self.handles.pop(params["handleId"], None)
+            self.motion.pop(params["handleId"], None)
             return {}
         if method == "shutdown":
             self.handles.clear()
+            self.motion.clear()
             self.compute.clear(self.compute.generation)
             return {"shutdown": True}
         raise ValueError(f"Unknown protocol method: {method}")

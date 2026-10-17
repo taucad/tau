@@ -11,6 +11,7 @@ import type {
   JointLimits,
   JointType,
   Mechanism,
+  ValidateMechanismMotionInput,
 } from '#types.js';
 
 /** One degree of freedom of a joint type: id suffix, kind and the key of its limits. */
@@ -75,10 +76,13 @@ export const dofId = (jointId: string, suffix: string): string => (suffix === ''
  * @param spec - The degree of freedom's spec.
  * @returns The limits, or `undefined` when the joint declares none.
  */
-export const dofLimits = (joint: Joint, spec: DegreeOfFreedomSpec): JointLimits | undefined => {
+export const dofLimits = (joint: Joint, spec: DegreeOfFreedomSpec): DegreeOfFreedom['limits'] => {
   const limits: unknown = 'limits' in joint ? joint.limits : undefined;
   // Admission establishes that a joint's limits (or each nested entry) are JointLimits.
-  return (spec.limitKey === undefined || !isRecord(limits) ? limits : limits[spec.limitKey]) as JointLimits | undefined;
+  const bounds = (spec.limitKey === undefined || !isRecord(limits) ? limits : limits[spec.limitKey]) as
+    | JointLimits
+    | undefined;
+  return bounds === undefined ? undefined : { lower: bounds.lower ?? -Infinity, upper: bounds.upper ?? Infinity };
 };
 
 // Issue codes are wire-visible constants, so the table is keyed by code rather than property names.
@@ -340,11 +344,19 @@ const checkLimits = (value: unknown, path: string, symmetric: boolean): Issue[] 
   }
   const issues = unknownKeys(value, ['lower', 'upper'], path);
   const { lower, upper } = value;
-  if (!isFiniteNumber(lower) || !isFiniteNumber(upper) || lower > upper) {
+  if (
+    (lower !== undefined && !isFiniteNumber(lower)) ||
+    (upper !== undefined && !isFiniteNumber(upper)) ||
+    (isFiniteNumber(lower) && isFiniteNumber(upper) && lower > upper)
+  ) {
     issues.push(
       problem('INVALID_LIMITS', path, `Limits need finite lower ≤ upper; got ${show(lower)} and ${show(upper)}.`),
     );
-  } else if (symmetric && lower !== -upper) {
+  } else if (
+    symmetric &&
+    (lower !== undefined || upper !== undefined) &&
+    (!isFiniteNumber(lower) || !isFiniteNumber(upper) || lower !== -upper)
+  ) {
     // One box shared by the three rotation-vector components stays one box only if it is symmetric.
     issues.push(
       problem('INVALID_LIMITS', path, `Spherical limits must be symmetric, lower = −upper; got ${lower} and ${upper}.`),
@@ -698,7 +710,10 @@ const checkTree = (mechanism: Mechanism): Tree => {
 
 type Relations = Readonly<{ issues: readonly Issue[]; couplingOf: ReadonlyMap<string, Coupling> }>;
 
-const checkRelations = (mechanism: Mechanism, dofs: ReadonlyMap<string, DegreeOfFreedomSpec>): Relations => {
+const checkRelations = (
+  mechanism: Pick<Mechanism, 'couplings' | 'animations'>,
+  dofs: ReadonlySet<string>,
+): Relations => {
   const issues: Issue[] = [];
   const couplingOf = new Map<string, Coupling>();
   const couplings = mechanism.couplings ?? [];
@@ -756,6 +771,26 @@ const checkRelations = (mechanism: Mechanism, dofs: ReadonlyMap<string, DegreeOf
     }
   }
   return { issues, couplingOf };
+};
+
+/**
+ * Validate coupling and animation declarations without requiring a supported physical tree.
+ *
+ * Uses the same structural and coordinate-reference rules as {@link admitMechanism}.
+ * Physical graph support and coordinate travel bounds remain the owning graph's responsibility.
+ *
+ * @param input - Known coordinates and untrusted motion declarations.
+ * @returns Canonical issues; an empty array means the declarations are valid.
+ * @public
+ */
+export const validateMechanismMotion = (input: ValidateMechanismMotionInput): readonly Issue[] => {
+  const issues = [...checkCouplingShapes(input.couplings), ...checkAnimationShapes(input.animations)];
+  if (issues.length > 0) {
+    return issues;
+  }
+  // The structural checks above establish every coupling and animation field.
+  const motion = input as Pick<Mechanism, 'couplings' | 'animations'>;
+  return checkRelations(motion, new Set(input.coordinates)).issues;
 };
 
 const normalized = (vector: SpatialVector): SpatialVector => {
@@ -994,7 +1029,7 @@ const analyze = (input: unknown): Analysis => {
     }
   }
   const tree = checkTree(mechanism);
-  const relations = checkRelations(mechanism, dofs);
+  const relations = checkRelations(mechanism, new Set(dofs.keys()));
   issues.push(...tree.issues, ...relations.issues);
   if (issues.length > 0) {
     return { status: 'invalid', issues };

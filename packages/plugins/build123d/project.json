@@ -57,7 +57,15 @@
       }
     },
     "test": {
-      "dependsOn": ["seed"]
+      "dependsOn": ["seed"],
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py",
+        {
+          "env": "TAU_BUILD123D_TEST_STORE"
+        }
+      ]
     },
     "test:native-darwin": {
       "executor": "nx:run-commands",
@@ -78,6 +86,27 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts"
+      },
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "env": "TAU_BUILD123D_TEST_STORE"
+        }
+      ]
+    },
+    "test-python-desktop": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "prepare-build123d-python"
+        }
+      ],
+      "outputs": ["{workspaceRoot}/out/reports/coverage/packages/plugins/build123d-python"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts --desktop"
       }
     },
     "benchmark-native": {

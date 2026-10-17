@@ -30,7 +30,7 @@ extrude(to_extrude: Face | Sketch | None = None, amount: float | None = None, di
 
 # Category: operations_part
 # Part Operation
-# Remarks: Loft the pending sketches/faces, across all workplanes, into a solid.
+# Remarks: Loft the pending sketches/faces, across all workplanes, into a solid. Faces may contain inner wires, which are lofted as holes and subtracted from the outer loft. When a face has more than one inner wire, the wires in each subsequent section are matched to the preceding section by choosing the assignment with the smallest total distance between wire centers. This makes the result independent of the order in which inner wires are returned, but it is only a geometric heuristic: holes that are close together, cross paths, or change position significantly may be matched incorrectly. All sections must contain the same number of inner wires.
 # build123d.operations_part.loft (function)
 loft(sections: Face | Sketch | Iterable[Vertex | Face | Sketch] | None = None, ruled: bool = False, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 #   sections: slices to loft into object

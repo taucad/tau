@@ -74,6 +74,7 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
         writablePath: scratch,
         workingDirectory: scratch,
         commandId: 'Build123d closure self-test',
+        signal: AbortSignal.timeout(60_000),
       });
       expect(result.exitCode, result.stderr).toBe(0);
     } finally {

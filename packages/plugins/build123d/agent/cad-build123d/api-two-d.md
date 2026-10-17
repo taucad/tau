@@ -35,12 +35,17 @@ class Face(Mixin2D)
   # geometry of planar face
   geometry: None | str
 
-  # Determine whether a given face is convex relative to its underlying geometry
-  # Remarks: for supported geometries: cylinder, sphere, torus. Returns: bool: True if convex; otherwise, False.
+  # How the material behind this face sits against it
+  # Remarks: Read from the surface's principal curvatures against the outward normal, sampled over the face: ``CONVEX`` where the surface curves away from the material, as on a boss or the outside of a sphere; ``CONCAVE`` where it curves into it, as in a hole or a cavity; ``SMOOTH`` where it does not curve, as on a plane; and ``SADDLE`` where the two principal curvatures disagree, as on the inner side of a torus, or where different parts of the face curve different ways. Which side is material comes from the face's orientation, so a face taken from a solid reports against that solid. See :class:`~build_enums.Convexity`.
+  # Throws: ValueError: the surface is degenerate everywhere it was sampled
+  convexity: Convexity
+
+  # Does this face curve away from the material behind it?
+  # Remarks: Equivalent to ``face.convexity == Convexity.CONVEX``, as on a boss or an outside fillet. See :attr:`convexity`.
   is_circular_convex: bool
 
-  # Determine whether a given face is concave relative to its underlying geometry
-  # Remarks: for supported geometries: cylinder, sphere, torus. Returns: bool: True if concave; otherwise, False.
+  # Does this face curve into the material behind it?
+  # Remarks: Equivalent to ``face.convexity == Convexity.CONCAVE``, as in a hole or an inside fillet. See :attr:`convexity`.
   is_circular_concave: bool
 
   # Is the face planar even though its geom_type may not be PLANE - if so return Plane
@@ -67,6 +72,10 @@ class Face(Mixin2D)
 
   # volume - the volume of this Face, which is always zero
   volume: float
+
+  # mass - the mass of this Face, which is always zero
+  # build123d.topology.two_d.Face.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
 
   # width of planar face
   width: None | float
@@ -97,10 +106,6 @@ class Face(Mixin2D)
   #   profiles: Profiles defined as points or edges
   #   guides: Guides defined as points or edges
   #   tolerance: Tolerance used for surface construction and intersection calculations
-
-  # Create a unlimited size Face aligned with plane
-  # build123d.topology.two_d.Face.make_plane (method)
-  make_plane(plane: Plane = Plane.XY) -> Face
 
   # make_rect
   # Remarks: Make a Rectangle centered on center with the given normal Returns: Face: The centered rectangle
@@ -257,12 +262,6 @@ class Face(Mixin2D)
   #   target_object: Object to project onto
   #   direction: projection direction
 
-  # to_arcs
-  # Remarks: Approximate planar face with arcs and straight line segments. This is a utility used internally to convert or adapt a face for Boolean operations. Its purpose is not typically for general use, but rather as a helper within the Boolean kernel to ensure input faces are in a compatible and canonical form. Returns: Face: approximated face
-  # build123d.topology.two_d.Face.to_arcs (method)
-  to_arcs(tolerance: float = 0.001) -> Face
-  #   tolerance: Approximation tolerance
-
   # without_holes
   # Remarks: Remove all of the holes from this face. Returns: Face: A new Face instance identical to the original but without any holes.
   # build123d.topology.two_d.Face.without_holes (method)
@@ -308,6 +307,10 @@ class Shell(Mixin2D)
 
   # volume - the volume of this Shell if manifold, otherwise zero
   volume: float
+
+  # mass - the mass of this Shell if manifold in g, otherwise zero
+  # build123d.topology.two_d.Shell.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
 
   # extrude
   # Remarks: Extrude a Wire into a Shell. Returns: Edge: extruded shape
@@ -356,10 +359,6 @@ class Shell(Mixin2D)
 # Additional methods to add to Face and Shell class
 # build123d.topology.two_d.Mixin2D (class)
 class Mixin2D(ABC, Shape)
-
-  # Returns the right type of wrapper, given a OCCT object
-  # build123d.topology.two_d.Mixin2D.cast (method)
-  cast(obj: TopoDS_Shape) -> Vertex | Edge | Wire | Face | Shell
 
   # Unused - only here because Mixin1D is a subclass of Shape
   # build123d.topology.two_d.Mixin2D.extrude (method)

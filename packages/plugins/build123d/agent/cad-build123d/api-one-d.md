@@ -50,8 +50,8 @@ class Edge(Mixin1D)
   # build123d.topology.one_d.Edge.make_constrained_arcs (method)
   make_constrained_arcs(*args, sagitta: Sagitta = Sagitta.SHORT, **kwargs) -> ShapeList[Edge]
 
-  # Create planar line(s) on XY subject to tangency/contact constraints
-  # Remarks: Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point
+  # Create planar line(s) on XY subject to tangency, point-incidence, or
+  # Remarks: orientation constraints. Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point 3. Tangent to one curve with a fixed orientation
   # build123d.topology.one_d.Edge.make_constrained_lines (method)
   make_constrained_lines(*args, **kwargs) -> ShapeList[Edge]
 
@@ -235,14 +235,6 @@ class Edge(Mixin1D)
   reversed(reconstruct: bool = False) -> Edge
   #   reconstruct: rebuild edge instead of setting OCCT flag
 
-  # Translate a linear Edge to an Axis
-  # build123d.topology.one_d.Edge.to_axis (method)
-  to_axis() -> Axis
-
-  # Edge as Wire
-  # build123d.topology.one_d.Edge.to_wire (method)
-  to_wire() -> Wire
-
   # trim
   # Remarks: Create a new edge by keeping only the section between start and end. Returns: Edge: trimmed edge
   # Throws: TypeError: invalid input, must be float or VectorLike
@@ -356,9 +348,9 @@ class Wire(Mixin1D)
   # build123d.topology.one_d.Wire.close (method)
   close() -> Wire
 
-  # edges - all the edges in this Shape
+  # edges - all the edges in this Shape, in connection order
   # build123d.topology.one_d.Wire.edges (method)
-  edges() -> ShapeList[Edge]
+  edges(select: Select = Select.ALL) -> ShapeList[Edge]
 
   # fillet_2d
   # Remarks: Apply 2D fillet to a wire Returns: Wire: filleted wire
@@ -418,10 +410,6 @@ class Wire(Mixin1D)
   stitch(other: Wire) -> Wire
   #   other: wire to combine
 
-  # Return Wire - used as a pair with Edge.to_wire when self is Wire | Edge
-  # build123d.topology.one_d.Wire.to_wire (method)
-  to_wire() -> Wire
-
   # Trim a wire between [start, end] normalized over total length
   # Remarks: Returns: Wire: trimmed Wire
   # build123d.topology.one_d.Wire.trim (method)
@@ -442,9 +430,6 @@ edges_to_wires(edges: Iterable[Edge], tol: float = 1e-06) -> ShapeList[Wire]
 # Remarks: Returns: ShapeList[Edge]: Connected edges meeting the continuity requirement.
 # build123d.topology.one_d.topo_explore_connected_edges (function)
 topo_explore_connected_edges(edge: Edge, parent: Shape | None = None, continuity: ContinuityLevel = ContinuityLevel.C0) -> ShapeList[Edge]
-#   edge: The reference edge to explore from
-#   parent: Optional parent Shape
-#   continuity: Minimum required continuity (C0/G0, C1/G1, C2/G2)
 
 # Category: one_d
 # Methods to add to the Edge and Wire classes
@@ -457,8 +442,16 @@ class Mixin1D(Shape)
   # Does the Edge/Wire loop forward or reverse
   is_forward: bool
 
-  # Check if the edge is an interior edge
-  # Remarks: An interior edge lies between surfaces that are part of the body (internal to the geometry) and does not form part of the exterior boundary. Returns: bool: True if the edge is an interior edge, False otherwise.
+  # How the shape this edge was selected from sits around it
+  # Remarks: An edge of a solid or shell is a crease between two faces, and the dihedral angle through the material says which way the crease turns: ``CONVEX`` on the outer edge of a box, ``CONCAVE`` at the inner corner of a pocket, ``SMOOTH`` where a fillet meets the face it blends into. The angle is sampled along the edge, so one that turns one way at one end and the other way at the other is a ``SADDLE``. A seam edge, with the same face on both sides, is ``SMOOTH``. The faces come from ``topo_parent``, so the edge has to have been selected from a shape rather than built on its own. See :class:`~build_enums.Convexity`.
+  # Throws: ValueError: the edge has no ``topo_parent``; it lies on one face
+  # Throws: only, as a boundary edge of a face or open shell does; or more
+  # Throws: than two faces meet at it
+  convexity: Convexity
+
+  # Is this a concave edge of the shape it was selected from?
+  # Remarks: Equivalent to ``edge.convexity == Convexity.CONCAVE``: the material closes around the edge by more than half a turn, as at the inner corner of a pocket. See :attr:`convexity`.
+  # Throws: ValueError: the edge cannot be classified, see :attr:`convexity`
   is_interior: bool
 
   # Edge or Wire length
@@ -472,9 +465,9 @@ class Mixin1D(Shape)
   # volume - the volume of this Edge or Wire, which is always zero
   volume: float
 
-  # Returns the right type of wrapper, given a OCCT object
-  # build123d.topology.one_d.Mixin1D.cast (method)
-  cast(obj: TopoDS_Shape) -> Vertex | Edge | Wire
+  # mass - the mass of this Edge or Wire, which is always zero
+  # build123d.topology.one_d.Mixin1D.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
 
   # Unused - only here because Mixin1D is a subclass of Shape
   # build123d.topology.one_d.Mixin1D.extrude (method)
@@ -534,10 +527,10 @@ class Mixin1D(Shape)
   end_point() -> Vector
 
   # Locations along curve
-  # Remarks: Generate a location along the underlying curve. Returns: Location: A Location object representing local coordinate system at the specified distance.
+  # Remarks: Generate a location along the underlying curve. Note: Numeric values are normally within the shape: ``[0.0, 1.0]`` in parameter mode or ``[0.0, length]`` in length mode. Values outside that range extrapolate or wrap on an Edge where its underlying curve supports it, while a Wire clamps them to its first or last point. Returns: Location: A Location object representing local coordinate system at the specified distance.
   # build123d.topology.one_d.Mixin1D.location_at (method)
   location_at(distance: float, position_mode: PositionMode = PositionMode.PARAMETER, frame_method: FrameMethod = FrameMethod.FRENET, x_dir: VectorLike | None = None) -> Location
-  #   distance: distance or parameter value
+  #   distance: normalized parameter or length value
   #   position_mode: position calculation mode
   #   frame_method: moving frame calculation method
   #   x_dir: override the x_dir to help with plane creation along a 1D shape
@@ -558,6 +551,7 @@ class Mixin1D(Shape)
 
   # 2d Offset
   # Remarks: Offsets a planar edge/wire Returns: Wire: offset wire
+  # Throws: RuntimeError: 2D offset calculation failed
   # Throws: RuntimeError: Multiple Wires generated
   # Throws: RuntimeError: Unexpected result type
   # build123d.topology.one_d.Mixin1D.offset_2d (method)
@@ -576,10 +570,10 @@ class Mixin1D(Shape)
   #   plane: plane containing perpendicular line
 
   # Position At
-  # Remarks: Generate a position along the underlying Wire. Returns: Vector: position on the underlying curve
+  # Remarks: Generate a position along the underlying 1D shape. Note: Numeric values are normally within the shape: ``[0.0, 1.0]`` in parameter mode or ``[0.0, length]`` in length mode. Values outside that range extrapolate or wrap on an Edge where its underlying curve supports it, while a Wire clamps them to its first or last point. Returns: Vector: position on the underlying curve
   # build123d.topology.one_d.Mixin1D.position_at (method)
   position_at(position: float, position_mode: PositionMode = PositionMode.PARAMETER) -> Vector
-  #   position: distance or parameter value
+  #   position: normalized parameter or length value
   #   position_mode: position calculation mode
 
   # Positions along curve
@@ -621,7 +615,7 @@ class Mixin1D(Shape)
   #   plane: plane line was constructed on
 
   # tangent_at
-  # Remarks: Find the tangent at a given position on the 1D shape where the position is either a float (or int) parameter or a point that lies on the shape. Returns: Vector: tangent value
+  # Remarks: Find the tangent at a given position on the 1D shape where the position is either a float (or int) parameter or a point that lies on the shape. Note: Numeric positions are normally within the shape: ``[0.0, 1.0]`` in parameter mode or ``[0.0, length]`` in length mode. Values outside that range evaluate the tangent of an extrapolated or periodic Edge where supported, while a Wire uses its first or last tangent. Returns: Vector: tangent value
   # build123d.topology.one_d.Mixin1D.tangent_at (method)
   tangent_at(position: float | VectorLike = 0.5, position_mode: PositionMode = PositionMode.PARAMETER) -> Vector
   #   position: distance, parameter value, or point on shape

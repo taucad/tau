@@ -555,18 +555,18 @@ describe('composeView agent mask', () => {
  */
 describe('composeView path policy', () => {
   it('should classify generated project views only by project-relative path', async () => {
-    const context = await createWorkspaceFileService();
     const segment = fc
       .array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789_-'), { minLength: 1, maxLength: 10 })
       .map((characters) => characters.join(''));
 
-    try {
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'), { minLength: 21, maxLength: 21 }),
-          segment,
-          fc.array(segment, { minLength: 1, maxLength: 4 }),
-          async (projectCharacters, providerBasePath, pathSegments) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'), { minLength: 21, maxLength: 21 }),
+        segment,
+        fc.array(segment, { minLength: 1, maxLength: 4 }),
+        async (projectCharacters, providerBasePath, pathSegments) => {
+          const context = await createWorkspaceFileService();
+          try {
             const projectId = `proj_${projectCharacters.join('')}`;
             const path = pathSegments.join('/');
             await context.provider.mkdir(providerBasePath, { recursive: true });
@@ -585,12 +585,19 @@ describe('composeView path policy', () => {
             expect(classify).toHaveBeenCalledWith(path);
             expect(classify.mock.calls.every(([classified]) => !classified.startsWith('/'))).toBe(true);
             expect(classify.mock.calls.every(([classified]) => !classified.includes(projectId))).toBe(true);
-          },
-        ),
-      );
-    } finally {
-      context.service.dispose();
-    }
+          } finally {
+            context.service.dispose();
+          }
+        },
+      ),
+      {
+        // CI seed -355979691 exposed a directory/file collision between generated cases.
+        examples: [
+          [Array.from({ length: 21 }, () => 'a'), 'n', ['2', 'file']],
+          [Array.from({ length: 21 }, () => 'a'), 'n', ['2']],
+        ],
+      },
+    );
   });
 
   it('should mask by the injected policy rather than by the Tau registry', async () => {

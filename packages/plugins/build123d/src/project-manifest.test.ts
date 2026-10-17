@@ -19,7 +19,7 @@ describe('build123d project libraries', () => {
       expect(requirements).toMatch(new RegExp(`^${name}==${version.replaceAll('.', String.raw`\.`)}$`, 'mu'));
     }
     expect(libraryVersionMismatches(template)).toEqual([]);
-    expect(template).toContain('dependencies = [\n  "build123d==0.11.1",\n  "cadquery-ocp-novtk==7.9.3.1.1",\n]');
+    expect(template).toContain('dependencies = [\n  "build123d==0.13.0",\n  "cadquery-ocp-novtk==8.0.1.0.0",\n]');
   });
 });
 
@@ -38,12 +38,12 @@ describe('libraryVersionMismatches', () => {
       manifest: 'pyproject.toml',
       library: 'cadquery-ocp-novtk',
       declared: '7.8.0',
-      runs: '7.9.3.1.1',
+      runs: '8.0.1.0.0',
     });
     expect([first]).toEqual([
       {
         message:
-          'pyproject.toml pins build123d==0.10.0, but the build123d kernel runs build123d 0.11.1. Pin "build123d==0.11.1" in [project] dependencies so the project runs the same library inside and outside Tau.',
+          'pyproject.toml pins build123d==0.10.0, but the build123d kernel runs build123d 0.13.0. Pin "build123d==0.13.0" in [project] dependencies so the project runs the same library inside and outside Tau.',
         code: 'LIBRARY_VERSION_MISMATCH',
         type: 'kernel',
         severity: 'warning',
@@ -53,14 +53,14 @@ describe('libraryVersionMismatches', () => {
           manifest: 'pyproject.toml',
           library: 'build123d',
           declared: '0.10.0',
-          runs: '0.11.1',
+          runs: '0.13.0',
         },
       },
     ]);
   });
 
   it('accepts the kernel versions, ranges, unpinned and other libraries', () => {
-    const text = pyproject('  "build123d==0.11.1",\n  "cadquery-ocp-novtk>=7.8",\n  "numpy==1.0.0",\n  \'trimesh\',');
+    const text = pyproject('  "build123d==0.13.0",\n  "cadquery-ocp-novtk>=7.8",\n  "numpy==1.0.0",\n  \'trimesh\',');
 
     expect(libraryVersionMismatches(text)).toEqual([]);
   });

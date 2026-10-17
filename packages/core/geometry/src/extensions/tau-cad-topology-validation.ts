@@ -1,3 +1,4 @@
+import { mechanismIntentIssues } from '#extensions/mechanism-intent-validation.js';
 import { admitMechanism } from '@taucad/kinematics';
 import type { TauCadTopologyPayload, TauCadTopologyPrimitiveRef } from '#extensions/tau-cad-topology.types.js';
 
@@ -95,5 +96,5 @@ export const validateTauCadTopology = (
       }
     }
   }
-  return [...issues, ...mechanismIssues(payload.mechanism, identifiers)];
+  return [...issues, ...mechanismIntentIssues(payload), ...mechanismIssues(payload.mechanism, identifiers)];
 };

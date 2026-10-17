@@ -331,7 +331,7 @@ export class PythonSession {
       return;
     }
     const supportByPath = new Set(this.options.supportFiles.map(({ path }) => resolve(path)));
-    for (const name of ['analyzer.py', 'glb.py']) {
+    for (const name of ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py']) {
       if (!supportByPath.has(resolve(dirname(this.options.workerPath), name))) {
         throw new Error(`Build123d worker manifest is missing ${name}.`);
       }

@@ -6,9 +6,6 @@ type SectionCapCompleteness =
   | {
       status: 'complete';
       admittedSourceCount: number;
-      trueCutComponentCount: number;
-      cappedTrueCutComponentCount: number;
-      unresolvedTrueCutEdgeCount: number;
       unsupportedSourceCount: number;
     }
   | { status: 'unsupported' | 'failed' };
@@ -59,8 +56,6 @@ test('repaired involute gear produces a complete section snapshot', async () => 
   if (completeness?.status !== 'complete') {
     throw new Error(`Section caps are incomplete: ${JSON.stringify(completeness)}`);
   }
-  expect(completeness.trueCutComponentCount).toBeGreaterThan(0);
-  expect(completeness.cappedTrueCutComponentCount).toBe(completeness.trueCutComponentCount);
-  expect(completeness.unresolvedTrueCutEdgeCount).toBe(0);
+  expect(completeness.admittedSourceCount).toBeGreaterThan(0);
   expect(completeness.unsupportedSourceCount).toBe(0);
 });

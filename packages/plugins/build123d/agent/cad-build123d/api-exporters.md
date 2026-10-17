@@ -58,20 +58,20 @@ class ExportDXF(Export2D)
 
 # Category: exporters
 # ExportSVG
-# Remarks: SVG file export functionality. The ExportSVG class provides functionality for exporting 2D shapes to SVG (Scalable Vector Graphics) format. SVG is a widely used vector graphics format that is supported by web browsers and various graphic editors. Example: .. code-block:: python exporter = ExportSVG(unit=Unit.MM, line_weight=0.5) exporter.add_layer("Layer 1", fill_color=(255, 0, 0), line_color=(0, 0, 255)) exporter.add_shape(shape_object, layer="Layer 1") exporter.write("output.svg")
+# Remarks: SVG file export functionality. The ExportSVG class provides functionality for exporting 2D shapes to SVG (Scalable Vector Graphics) format. SVG is a widely used vector graphics format that is supported by web browsers and various graphic editors. Example: .. code-block:: python exporter = ExportSVG(unit=Unit.MM, line_weight=0.5) exporter.add_layer("Layer 1", fill_color="red", line_color="blue") exporter.add_shape(shape_object, layer="Layer 1") exporter.write("output.svg")
 # Throws: ValueError: Invalid unit.
 # build123d.exporters.ExportSVG (class)
 class ExportSVG(Export2D)
 
   # build123d.exporters.ExportSVG.__init__ (constructor)
-  ExportSVG(unit: Unit = Unit.MM, scale: float = 1, margin: float = 0, fit_to_stroke: bool = True, precision: int = 6, fill_color: ColorIndex | RGB | Color | None = None, line_color: ColorIndex | RGB | Color | None = Export2D.DEFAULT_COLOR_INDEX, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE, dot_length: DotLength | float = DotLength.INKSCAPE_COMPAT)
+  ExportSVG(unit: Unit = Unit.MM, scale: float = 1, margin: float = 0, fit_to_stroke: bool = True, precision: int = 6, fill_color: ColorLike | ColorIndex | RGB | None | sentinel = _INHERIT_COLOR, line_color: ColorLike | ColorIndex | RGB | None | sentinel = _INHERIT_COLOR, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE, dot_length: DotLength | float = DotLength.INKSCAPE_COMPAT)
   #   unit: The unit used for the exported SVG
   #   scale: The scaling factor applied to the exported SVG
   #   margin: The margin added around the exported shapes
   #   fit_to_stroke: A boolean indicating whether the SVG view box should fit the strokes of the shapes
   #   precision: The number of decimal places used for rounding coordinates in the SVG
-  #   fill_color: The default fill color for shapes
-  #   line_color: The default line color for shapes
+  #   fill_color: The fill color for shapes
+  #   line_color: The line color for shapes
   #   line_weight: The default line weight (stroke width) for shapes, in millimeters
   #   line_type: The default line type for shapes
   #   dot_length: The width of rendered dots in a Can be either a DotLength enum or a float value in tenths of an inch
@@ -81,7 +81,7 @@ class ExportSVG(Export2D)
   # Throws: ValueError: Duplicate layer name
   # Throws: ValueError: Unknown linetype
   # build123d.exporters.ExportSVG.add_layer (method)
-  add_layer(name: str, *, fill_color: ColorIndex | RGB | Color | None = None, line_color: ColorIndex | RGB | Color | None = Export2D.DEFAULT_COLOR_INDEX, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE) -> Self
+  add_layer(name: str, *, fill_color: ColorLike | ColorIndex | RGB | None | sentinel = _INHERIT_COLOR, line_color: ColorLike | ColorIndex | RGB | None | sentinel = _INHERIT_COLOR, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE) -> Self
   #   name: The name of the layer
   #   fill_color: The fill color for shapes on this layer
   #   line_color: The line color for shapes on this layer

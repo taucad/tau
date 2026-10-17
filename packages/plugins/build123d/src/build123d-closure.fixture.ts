@@ -20,8 +20,10 @@ export const packageRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(packageRoot, '../../..');
 /** The digest-addressed payload seed `pnpm nx run build123d:seed` fills (`blobs/sha256/<hex>`). */
 export const seedDirectory = resolve(workspaceRoot, 'out/cache/build123d-seed');
-/** The store the native tests share; a sealed closure is reused across files and runs. */
-export const storeDirectory = resolve(workspaceRoot, 'out/cache/build123d-store');
+/** The native test store; an isolated store can avoid unrelated filesystem metadata writers. */
+export const storeDirectory = process.env['TAU_BUILD123D_TEST_STORE']
+  ? resolve(process.env['TAU_BUILD123D_TEST_STORE'])
+  : resolve(workspaceRoot, 'out/cache/build123d-store');
 
 export const deployment: PluginDeployment = parsePluginDeployment(
   JSON.parse(readFileSync(join(packageRoot, 'tau-plugin.json'), 'utf8')) as unknown,

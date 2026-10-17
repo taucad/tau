@@ -54,6 +54,7 @@ describe('HeadlessImageService', () => {
     }
     activeServices.clear();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('transcodes the settled thumbnail GLB without a kernel render or filesystem', async () => {
@@ -68,6 +69,7 @@ describe('HeadlessImageService', () => {
   });
 
   it('defers only cold automatic part batches and lets one explicit retry warm the shared worker', async () => {
+    vi.stubEnv('TAU_TARGET', 'web');
     const { imageClient, service } = createFixture();
     vi.mocked(imageClient.transcode).mockRejectedValueOnce(new Error('Invalid GLB'));
     const partBatch: WebpGlbJob = {
@@ -86,6 +88,23 @@ describe('HeadlessImageService', () => {
     await expect(service.export({ ...partBatch, kind: 'manual-thumbnail' })).resolves.toEqual(files());
     await expect(service.export({ ...partBatch, identity: 'warm-part' })).resolves.toEqual(files());
     expect(imageClient.transcode).toHaveBeenCalledTimes(3);
+  });
+
+  it('should render cold desktop part previews through the native worker without a prior capture', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { imageClient, service } = createFixture();
+    const partBatch: WebpGlbJob = {
+      ...thumbnailJob('cold-native-part'),
+      exportOptions: { mode: 'batch', width: 256, height: 256, views: [] },
+    };
+    await expect(service.export(partBatch)).resolves.toEqual(files());
+    expect(imageClient.connect).toHaveBeenCalledOnce();
+    expect(imageClient.transcode).toHaveBeenCalledWith({
+      from: 'glb',
+      to: 'webp',
+      files: [{ name: 'render.glb', bytes: glb, mimeType: 'model/gltf-binary' }],
+      options: partBatch.exportOptions,
+    });
   });
 
   it('transcodes settled GLB bytes without a kernel render or filesystem', async () => {

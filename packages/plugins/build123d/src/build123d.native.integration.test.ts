@@ -6,13 +6,15 @@ import { resolve } from 'node:path';
 
 import { createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import { validateTauCadTopology } from '@taucad/geometry-core';
-import type { TauCadTopologyPayload } from '@taucad/geometry-core';
+import { evaluatePose } from '@taucad/kinematics';
+import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import {
   createTestRuntimeClient,
   extractGltfFromResult,
   getBoundingBoxFromInspect,
   getGeometryStatsFromInspect,
   getInspectReport,
+  glbToDocument,
   getSignedVolumeFromGlb,
   validateGlbData,
 } from '@taucad/runtime-testing';
@@ -92,6 +94,10 @@ const v8Source = readFileSync(
   resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/v8-engine-brep/main.py'),
   'utf8',
 );
+const planetarySource = readFileSync(
+  resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py'),
+  'utf8',
+);
 const assemblySource = `from dataclasses import dataclass
 from build123d import Box, Color, Compound
 from dimensions import width
@@ -144,7 +150,374 @@ const readTopology = (
   return { json, payload };
 };
 
+// Column-major point application; expected landmarks below are authored geometry, not joint frames.
+const transformPoint = (matrix: readonly number[], point: readonly number[]): number[] =>
+  [0, 1, 2].map(
+    (axis) =>
+      matrix[axis]! * point[0]! + matrix[axis + 4]! * point[1]! + matrix[axis + 8]! * point[2]! + matrix[axis + 12]!,
+  );
+
 describe.runIf(seedPresent)('Build123d native kernel', () => {
+  it('should preserve independently derived nested box corners in GLB and STEP-reimported GLB', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: {
+        'main.py': `from dataclasses import dataclass
+from build123d import Box, Compound, Location
+
+@dataclass(frozen=True)
+class Params:
+    width: float = 12.0
+
+def main(params):
+    leaf = Box(params.width, 18, 24).located(Location((3, 4, 5), (0, 0, 90)))
+    module = Compound(children=[leaf]).located(Location((48, -12, 7), (0, 90, 0)))
+    return Compound(children=[module]).located(Location((-31, 9, 17), (90, 0, 0)))
+`,
+      },
+    });
+    const document = client.open({ source: { path: 'main.py' } });
+    // Rz90/local, then Ry90/module, then Rx90/root give (z+22, 5-y, x+9) in native mm.
+    const corners = [-6, 6].flatMap((x) =>
+      [-9, 9].flatMap((y) => [-12, 12].map((z) => [(z + 22) / 1000, (x + 9) / 1000, (y - 5) / 1000])),
+    );
+    const assertCorners = async (bytes: Uint8Array<ArrayBuffer>) => {
+      const reopened = await glbToDocument(bytes);
+      const seenModes = new Set<number>();
+      for (const node of reopened.getRoot().listNodes()) {
+        for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
+          seenModes.add(primitive.getMode());
+          const positions = primitive.getAttribute('POSITION')!;
+          const seenCorners = new Set<number>();
+          for (let vertex = 0; vertex < positions.getCount(); vertex += 1) {
+            const point = transformPoint(node.getWorldMatrix(), positions.getElement(vertex, []));
+            const distances = corners.map((corner) => Math.hypot(...point.map((value, axis) => value - corner[axis]!)));
+            const nearest = Math.min(...distances);
+            expect(nearest, JSON.stringify({ point, corners })).toBeLessThan(1e-8);
+            seenCorners.add(distances.indexOf(nearest));
+          }
+          expect(seenCorners.size).toBe(8);
+        }
+      }
+      expect(seenModes).toEqual(new Set([4, 1]));
+    };
+    try {
+      const exported = await document.export('glb');
+      assert.ok(exported.success);
+      await assertCorners(Uint8Array.from(exported.files[0].bytes));
+      const step = await document.export('step');
+      assert.ok(step.success);
+      const restored = client.open({
+        source: {
+          entry: 'restored.py',
+          files: {
+            'model.step': Uint8Array.from(step.files[0].bytes),
+            'restored.py': `from dataclasses import dataclass
+from pathlib import Path
+from build123d import Location, import_step
+
+@dataclass(frozen=True)
+class Params:
+    offset: float = 0.0
+
+__tau__ = {"dependencies": ["model.step"]}
+
+def main(params):
+    return import_step(Path(__file__).with_name("model.step")).moved(Location((params.offset, 0, 0)))
+`,
+          },
+        },
+      });
+      try {
+        const restoredGlb = await restored.export('glb');
+        assert.ok(restoredGlb.success);
+        await assertCorners(Uint8Array.from(restoredGlb.files[0].bytes));
+      } finally {
+        restored.close();
+      }
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  }, 180_000);
+
+  it.each([0, 30])(
+    'should keep exported planetary bore axes on their pins from authored input %s°',
+    async (inputAngle) => {
+      const client = createTestRuntimeClient({
+        runtime,
+        files: { 'main.py': planetarySource },
+      });
+      const document = client.open({
+        source: { path: 'main.py' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Native Python parameter names are the public model contract.
+        parameters: { input_angle: inputAngle },
+      });
+      try {
+        const exported = await document.export('glb');
+        assert.ok(exported.success);
+        const bytes = Uint8Array.from(exported.files[0].bytes);
+        const { json, payload } = readTopology(bytes);
+        expect(payload.components.filter(({ kind }) => kind === 'part')).toHaveLength(34);
+        expect(payload.components.filter(({ kind }) => kind === 'assembly')).toHaveLength(5);
+        expect(payload.mechanismDiagnostics ?? []).toEqual([]);
+        expect(payload.mechanismIntent?.connections.length).toBeGreaterThanOrEqual(5);
+        expect(
+          payload.mechanism?.couplings
+            ?.map((coupling) => ('ratio' in coupling ? coupling.ratio : 0))
+            .toSorted((left, right) => left - right),
+        ).toEqual([-0.75, -0.75, -0.75, 0.25]);
+        expect(
+          validateTauCadTopology(payload, {
+            nodes: json.nodes.map(({ mesh }) => ({ meshIndex: mesh })),
+            meshes: json.meshes.map(({ primitives }) =>
+              primitives.map(({ mode = 4, indices }) => ({
+                mode,
+                indexCount: indices === undefined ? 0 : json.accessors[indices]!.count,
+              })),
+            ),
+          }),
+        ).toEqual([]);
+        const reopened = await glbToDocument(bytes);
+        const { mechanism } = payload;
+        assert.ok(mechanism);
+        const driver = Object.entries(mechanism.joints).find(([, joint]) => joint.name === 'sun')?.[0];
+        assert.ok(driver);
+        for (const angle of [0, 61.21, -84.18, -720, 1440]) {
+          const outcome = evaluatePose({
+            mechanism,
+            coordinates: { [driver]: angle },
+          });
+          assert.equal(outcome.status, 'posed');
+          for (let planet = 1; planet <= 3; planet += 1) {
+            const orbit = (((planet - 1) * 120 + (inputAngle + angle) / 4) * Math.PI) / 180;
+            const expected = [0.048 * Math.cos(orbit), 0.007, -0.048 * Math.sin(orbit)];
+            const centers = ['gear', 'pin'].map((role) => {
+              const id = `occurrence:path/0/2/${planet + 1}/${role === 'gear' ? 0 : 1}`;
+              const component = payload.components.find((candidate) => candidate.id === id);
+              assert.ok(component?.primitiveRefs);
+              const linkId = Object.entries(mechanism.links).find(([, body]) => body.components.includes(id))?.[0];
+              assert.ok(linkId);
+              const delta = outcome.pose.linkTransforms[linkId];
+              assert.ok(delta);
+              const minimum = [Infinity, Infinity, Infinity];
+              const maximum = [-Infinity, -Infinity, -Infinity];
+              for (const reference of component.primitiveRefs) {
+                const node = reopened.getRoot().listNodes()[reference.nodeIndex]!;
+                const primitive = node.getMesh()!.listPrimitives()[reference.primitiveIndex]!;
+                if (primitive.getMode() !== 4) {
+                  continue;
+                }
+                const positions = primitive.getAttribute('POSITION')!;
+                for (let vertex = 0; vertex < positions.getCount(); vertex += 1) {
+                  const point = transformPoint(
+                    delta,
+                    transformPoint(node.getWorldMatrix(), positions.getElement(vertex, [])),
+                  );
+                  for (let axis = 0; axis < 3; axis += 1) {
+                    minimum[axis] = Math.min(minimum[axis]!, point[axis]!);
+                    maximum[axis] = Math.max(maximum[axis]!, point[axis]!);
+                  }
+                }
+              }
+              // This 24-tooth gear and axisymmetric pin are centrally symmetric about their shared bore midpoint.
+              const center = minimum.map((value, axis) => (value + maximum[axis]!) / 2);
+              const error = Math.hypot(...center.map((value, axis) => value - expected[axis]!));
+              expect(error, JSON.stringify({ inputAngle, angle, id, center, expected })).toBeLessThan(1e-7);
+              return center;
+            });
+            expect(Math.hypot(...centers[0]!.map((value, axis) => value - centers[1]![axis]!))).toBeLessThan(1e-7);
+          }
+        }
+      } finally {
+        document.close();
+        await client.shutdown();
+      }
+    },
+    180_000,
+  );
+
+  it('should round-trip all 34 native planetary STEP solids and their placements', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.py': planetarySource },
+    });
+    const document = client.open({ source: { path: 'main.py' } });
+    try {
+      const step = await document.export('step');
+      assert.ok(step.success);
+      const restored = client.open({
+        source: {
+          entry: 'main.py',
+          files: {
+            'model.step': Uint8Array.from(step.files[0].bytes),
+            'planetary.py': planetarySource,
+            'main.py': `from dataclasses import dataclass
+from math import isclose
+from pathlib import Path
+from build123d import Location, import_step
+from planetary import main as original_model, Params as PlanetParams
+
+@dataclass(frozen=True)
+class Params:
+    bounds_tolerance: float = 1e-5
+
+__tau__ = {"dependencies": ["model.step"]}
+
+def main(params):
+    assembly = import_step(Path(__file__).with_name("model.step"))
+    if len(assembly.solids()) != 34:
+        raise ValueError("STEP round-trip must preserve exactly 34 native solids")
+    original = original_model(PlanetParams())
+    def leaves(model):
+        return {tuple(part.label.replace(" ", "_") for part in node.path[1:]): node
+                for node in model.descendants if not node.children}
+    expected, actual = leaves(original), leaves(assembly)
+    if expected.keys() != actual.keys() or len(actual) != 34:
+        raise ValueError("STEP must preserve every named occurrence path")
+    for path, before in expected.items():
+        after = actual[path]
+        if not isclose(before.volume, after.volume, rel_tol=1e-8, abs_tol=1e-6):
+            raise ValueError(f"STEP changed native leaf volume: {path}")
+        for row in range(1, 4):
+            for column in range(1, 5):
+                left = before.global_location.wrapped.Transformation().Value(row, column)
+                right = after.global_location.wrapped.Transformation().Value(row, column)
+                if not isclose(left, right, rel_tol=1e-9, abs_tol=1e-7):
+                    raise ValueError(f"STEP changed occurrence placement: {path}")
+        def bounds(shape):
+            world = Location()
+            for ancestor in shape.path:
+                world = world * ancestor.location
+            box = shape.located(world).bounding_box()
+            return (*box.min, *box.max)
+        if any(abs(left - right) > params.bounds_tolerance for left, right in zip(bounds(before), bounds(after), strict=True)):
+            raise ValueError(f"STEP changed world-space native bounds: {path}")
+    return assembly
+`,
+          },
+        },
+      });
+      try {
+        const outcome = await restored.view('model').rendering();
+        expect(outcome.superseded).toBe(false);
+        if (outcome.superseded) {
+          throw new Error('STEP reimport was superseded');
+        }
+        assert.ok(outcome.rendering.success, outcome.rendering.success ? undefined : JSON.stringify(outcome.rendering));
+        const restoredBytes = extractGltfFromResult(outcome.rendering);
+        assert.ok(restoredBytes);
+        expect(readTopology(restoredBytes).payload.components.filter(({ kind }) => kind === 'part')).toHaveLength(34);
+      } finally {
+        restored.close();
+      }
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  }, 180_000);
+
+  it('reopens exported native assembly intent and invalidates an imported part on an image-only edit', async () => {
+    const red = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    const blue = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC',
+        'base64',
+      ),
+    );
+    const files = {
+      'main.py': `from dataclasses import dataclass
+from build123d import Axis, Box, Compound, RevoluteJoint, RigidJoint
+from reusable import textured_part
+
+@dataclass(frozen=True)
+class Params:
+    size: float = 10.0
+
+def main(params):
+    base = Box(params.size, params.size, 2)
+    rotor = textured_part(params.size)
+    RevoluteJoint("shaft", base, Axis.Z, angle_reference=(1, 1, 0))
+    RigidJoint("mount", rotor)
+    base.joints["shaft"].connect_to(rotor.joints["mount"], angle=22.5)
+    return Compound(children=[base, rotor], label="Module")
+
+def motion(model):
+    base, rotor = model.children
+    joint = base.joints["shaft"]
+    return {"ground": base,
+            "animations": [{"id": "turn", "duration": 1, "keyframes": [
+                {"time": 0, "coordinates": {(joint, "angle"): 22.5}},
+                {"time": 1, "coordinates": {(joint, "angle"): 112.5}}]}]}
+`,
+      'reusable.py': `from pathlib import Path
+from build123d import Box
+from bd_materials import FinishedMaterial, metals
+from threejs_materials import PbrProperties, PbrMaps, PbrValues
+
+__tau__ = {"dependencies": ["finish.png"]}
+
+def textured_part(size):
+    result = Box(size, 2, 2)
+    result.label = "Reusable rotor"
+    result.material = FinishedMaterial(metals.aluminum().material, pbr=PbrProperties(
+        "finish", "Finish", "test", "", "CC0", values=PbrValues(roughness=0.4),
+        maps=PbrMaps(color="finish.png"), maps_dir=Path(__file__).parent))
+    return result
+`,
+      'finish.png': red,
+    };
+    const client = createTestRuntimeClient({ runtime, files });
+    const exportAssembly = async (image: Uint8Array<ArrayBuffer>) => {
+      const document = client.open({ source: { files: { ...files, 'finish.png': image }, entry: 'main.py' } });
+      try {
+        const exported = await document.export('glb');
+        assert.ok(exported.success);
+        const bytes = Uint8Array.from(exported.files[0].bytes);
+        const reopened = await glbToDocument(bytes);
+        const payload = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
+        expect(payload).toMatchObject({
+          mechanismIntent: { schemaVersion: 1, ground: 'occurrence:path/0/0', connections: [expect.any(Object)] },
+          mechanism: { animations: [{ id: 'turn' }] },
+        });
+        const textures = reopened.getRoot().listTextures();
+        expect(textures).toHaveLength(1);
+        expect(textures[0]!.getImage()).toEqual(image);
+        expect(
+          reopened
+            .getRoot()
+            .listMaterials()
+            .some((material) => material.getBaseColorTexture() !== null),
+        ).toBe(true);
+        expect(
+          reopened
+            .getRoot()
+            .listMeshes()
+            .flatMap((mesh) => mesh.listPrimitives())
+            .some((primitive) => primitive.getAttribute('TEXCOORD_0') !== null),
+        ).toBe(true);
+        return { bytes, payload };
+      } finally {
+        document.close();
+      }
+    };
+    try {
+      const initial = await exportAssembly(red);
+      const edited = await exportAssembly(blue);
+      expect(edited.bytes).not.toEqual(initial.bytes);
+      expect(edited.payload?.['mechanismIntent']).toEqual(initial.payload?.['mechanismIntent']);
+      expect(edited.payload?.['mechanism']).toEqual(initial.payload?.['mechanism']);
+      expect(await getSignedVolumeFromGlb(edited.bytes)).toBeCloseTo(await getSignedVolumeFromGlb(initial.bytes), 12);
+    } finally {
+      await client.shutdown();
+    }
+  }, 180_000);
+
   it('admits declared units without changing native values or geometry', async () => {
     const previousPath = process.env['PATH'];
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
@@ -231,7 +604,7 @@ describe.runIf(seedPresent)('Build123d native kernel', () => {
       const { json, payload } = readTopology(glb);
       expect(payload.components).toEqual([
         expect.objectContaining({
-          id: 'component:housing',
+          id: 'occurrence:path/0',
           name: 'Housing',
           selector: 'node/0',
           color: expect.arrayContaining([expect.any(Number)]),
@@ -498,21 +871,21 @@ describe.runIf(seedPresent)('Build123d native kernel', () => {
       const { json, payload } = readTopology(initial);
       expect(payload.components).toEqual([
         expect.objectContaining({
-          id: 'component:assembly',
+          id: 'occurrence:path/0',
           name: 'Assembly',
           kind: 'assembly',
-          childIds: ['component:left', 'component:right'],
+          childIds: ['occurrence:path/0/0', 'occurrence:path/0/1'],
         }),
         expect.objectContaining({
-          id: 'component:left',
-          parentId: 'component:assembly',
+          id: 'occurrence:path/0/0',
+          parentId: 'occurrence:path/0',
           color: [1, 0, 0, 1],
           faceGroups: expect.any(Array),
           edgeGroups: expect.any(Array),
         }),
         expect.objectContaining({
-          id: 'component:right',
-          parentId: 'component:assembly',
+          id: 'occurrence:path/0/1',
+          parentId: 'occurrence:path/0',
           color: [0, 0, 1, 1],
           faceGroups: expect.any(Array),
           edgeGroups: expect.any(Array),

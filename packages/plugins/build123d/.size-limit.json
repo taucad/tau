@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 10.2 kB brotli on 2026-10-16; absolute tessellation (presets, triangle budget, cost report, stale-value fallback) adds 0.95 kB to the 9.01 kB of 2026-10-15 and the pyproject.toml library-version check's 0.73 kB",
+    "name": "total (ESM JS) \u2014 measured 10598 B brotli on 2026-10-17; main absolute tessellation plus native mechanism admission and preserved metadata through budget wrappers",
     "path": "dist/**/*.mjs",
-    "limit": "10.5 kB"
+    "limit": "10.75 kB"
   }
 ]

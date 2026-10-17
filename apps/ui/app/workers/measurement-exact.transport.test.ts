@@ -1,4 +1,5 @@
 // @vitest-environment node
+/* eslint-disable @typescript-eslint/naming-convention -- pointAMeters/pointBMeters are existing exact-measurement response fields. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
 

@@ -49,6 +49,11 @@ export type GeoSpecWorkerRpcClientOptions = {
   initTimeout?: number;
   /** Milliseconds to wait after cooperative abort before hard-resetting the worker. */
   abortGrace?: number;
+  /**
+   * Milliseconds the worker may sit with no run before it is terminated with
+   * its runtime, kernels and engine. The next run starts a fresh one.
+   */
+  idleTimeout?: number;
 };
 
 export type GeoSpecWorkerRpcClient = RpcGeoSpecClient & {
@@ -72,6 +77,13 @@ type PendingRun = {
 
 /** Milliseconds to wait after cooperative abort before hard-resetting. */
 const defaultAbortGrace = 5000;
+/**
+ * Milliseconds of no runs before the worker is released. Each worker holds a
+ * full runtime (kernels, esbuild, WASM heaps that never shrink) beside the
+ * editor's, so an idle one is the largest avoidable cost of a tab; a burst of
+ * agent test runs stays well inside this window.
+ */
+const defaultIdleTimeout = 60_000;
 /**
  * Milliseconds. Worker startup is a fetch plus module evaluation — measured in
  * hundreds of milliseconds — so a startup that has not finished by now is hung,
@@ -110,6 +122,8 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   let closeRequestId: string | undefined;
   let resolveClose: (() => void) | undefined;
   let initTimeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
+  let idleTimeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
+  let fileSystemBridge: FileSystemBridgeConnection | undefined;
   let closed = false;
   // ponytail: quarantine an oversized remote for this client session; reopening the project retries.
   let candidateFetchLimitReached = false;
@@ -124,6 +138,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   const hostRunBudget = Math.min(options.runnerTimeout ?? geoSpecDefaultRunBudget, hostLimits.maxRunBudget);
   const initTimeout = options.initTimeout ?? defaultInitTimeout;
   const abortGrace = options.abortGrace ?? defaultAbortGrace;
+  const idleTimeout = options.idleTimeout ?? defaultIdleTimeout;
 
   const requireSessionId = (): string => {
     if (sessionId === undefined) {
@@ -145,6 +160,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       pending.signal?.removeEventListener('abort', pending.abortListener);
     }
     pendingRuns.delete(requestId);
+    armIdleTimeout();
   };
 
   const resolveRun = (requestId: string, result: RunGeoSpecTestsRpcResult): void => {
@@ -219,6 +235,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   const detachWorker = (): void => {
     worker?.removeEventListener('message', onMessage);
     worker?.removeEventListener('error', onError);
+    globalThis.clearTimeout(idleTimeoutId);
+    idleTimeoutId = undefined;
+    fileSystemBridge?.dispose();
+    fileSystemBridge = undefined;
     worker = undefined;
     sessionId = undefined;
     closeRequestId = undefined;
@@ -232,6 +252,22 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     worker?.terminate();
     detachWorker();
   };
+
+  /** Release a worker that has no run in flight once it has stayed idle for the whole window. */
+  function armIdleTimeout(): void {
+    globalThis.clearTimeout(idleTimeoutId);
+    idleTimeoutId = undefined;
+    if (worker === undefined || pendingRuns.size > 0 || closed) {
+      return;
+    }
+    idleTimeoutId = globalThis.setTimeout(() => {
+      idleTimeoutId = undefined;
+      if (pendingRuns.size === 0 && initializePromise === undefined) {
+        worker?.terminate();
+        detachWorker();
+      }
+    }, idleTimeout);
+  }
 
   function onProgressMessage(message: Extract<GeoSpecRunnerWorkerResponse, { type: 'progress' }>): void {
     const pending = pendingRuns.get(message.requestId);
@@ -338,7 +374,8 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
-    const fileSystemBridge = options.openFileSystemBridge();
+    fileSystemBridge = options.openFileSystemBridge();
+    const { port: fileSystemPort } = fileSystemBridge;
     const nextSessionId = createRequestId();
     const requestId = createRequestId();
     initializeRequestId = requestId;
@@ -357,12 +394,11 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         requestId,
         sessionId: nextSessionId,
         runtimeConfig: options.runtimeConfig,
-        fileSystemPort: fileSystemBridge.port,
+        fileSystemPort,
         maxWorkUnitLimit: hostLimits.maxWorkUnitLimit,
       };
-      worker.postMessage(request, [fileSystemBridge.port]);
+      worker.postMessage(request, [fileSystemPort]);
     } catch (error) {
-      fileSystemBridge.dispose();
       const message = error instanceof Error ? error.message : 'GeoSpec worker failed to start.';
       terminateWorker(message);
       throw new Error(message);
@@ -475,6 +511,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       return errorResult('GeoSpec worker is not available.');
     }
     if (context?.signal?.aborted) {
+      armIdleTimeout();
       return errorResult('GeoSpec request cancelled.');
     }
 
@@ -493,6 +530,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         ...(context?.signal ? { signal: context.signal } : {}),
       };
       pendingRuns.set(requestId, pending);
+      armIdleTimeout();
       armRunBudget(requestId, pending);
       try {
         activeWorker.postMessage({

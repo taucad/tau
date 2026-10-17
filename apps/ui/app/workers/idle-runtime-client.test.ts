@@ -5,10 +5,13 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 
 type Document = ReturnType<AppRuntimeClient['open']>;
+type Description = Awaited<ReturnType<AppRuntimeClient['describe']>>;
+
+const description = { success: true, kernelId: 'replicad', parameters: {}, issues: [] } as unknown as Description;
 
 const fakeClient = (): AppRuntimeClient => {
   const client = mock<AppRuntimeClient>();
-  client.describe.mockResolvedValue({ success: true, kernelId: 'replicad', parameters: {}, issues: [] } as never);
+  client.describe.mockResolvedValue(description);
   client.connect.mockResolvedValue();
   client.open.mockImplementation(() => mock<Document>());
   return client;
@@ -68,7 +71,7 @@ describe('idle runtime client', () => {
 
   it('should keep the runtime while a call is in flight', async () => {
     const runtime = createIdleRuntimeClient({ create, idleTimeout });
-    const described = Promise.withResolvers<Awaited<ReturnType<AppRuntimeClient['describe']>>>();
+    const described = Promise.withResolvers<Description>();
 
     const pending = runtime.connect();
     vi.mocked(created[0]!.describe).mockReturnValueOnce(described.promise);
@@ -76,7 +79,7 @@ describe('idle runtime client', () => {
     await pending;
     await vi.advanceTimersByTimeAsync(idleTimeout * 5);
     expect(created[0]?.terminate).not.toHaveBeenCalled();
-    described.resolve({ success: true, kernelId: 'replicad', parameters: {}, issues: [] } as never);
+    described.resolve(description);
     await describing;
     await vi.advanceTimersByTimeAsync(idleTimeout);
 

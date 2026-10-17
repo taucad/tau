@@ -52,6 +52,8 @@ import { closeProvidedPorts, createDisposers } from '#workers/agent-host-project
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
+import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 type ProjectFileSystemBridge = Pick<
@@ -171,6 +173,13 @@ const bridgeReadyBound = 15_000;
 
 /** How long a parameter actor may take to finish its last write when the host closes (D15). Milliseconds. */
 const parameterCloseBound = 10_000;
+/**
+ * Milliseconds the agent's runtime may sit with no tool call or open document
+ * before its worker is terminated; the next tool call starts a fresh one. A
+ * turn's tool calls land well inside it, so only the gaps between turns pay a
+ * restart.
+ */
+const agentRuntimeIdleTimeout = 120_000;
 
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
   const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
@@ -358,11 +367,10 @@ const createRuntimeFsLike = (proxy: RuntimeFsSource): FsLike => {
 };
 
 const createRuntimeRpcClients = (options: {
-  readonly runtimeClient: AppRuntimeClient;
+  readonly runtimeClient: RuntimeAgentClient;
   readonly imageService: HeadlessImageService;
 }) => {
-  const { runtimeClient } = options;
-  const runtime: RuntimeAgentClient = runtimeClient;
+  const { runtimeClient: runtime } = options;
   return createRuntimeAgentClients({
     runtime,
     exportImage: async (job) => {
@@ -551,13 +559,19 @@ const composeProjectHost = async (
   );
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
   // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
-  const runtimeClient: AppRuntimeClient = createRuntimeClient<AnyRuntimeDefinition>(
-    createDefaultKernelOptions({
-      fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
-      runtimeConfig,
-      compute,
-    }),
-  );
+  const createAgentRuntime = (): AppRuntimeClient =>
+    createRuntimeClient<AnyRuntimeDefinition>(
+      createDefaultKernelOptions({
+        fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
+        runtimeConfig,
+        compute,
+      }),
+    );
+  /* A machine connection is a stateful session, so a machines-enabled host keeps its runtime resident. Otherwise
+   * the runtime, a second full copy of the editor's kernels, lives only while agent tools use it (B-07). */
+  const residentRuntime = provide.machinesEnabled === true ? createAgentRuntime() : undefined;
+  const runtimeClient: IdleRuntimeClient | AppRuntimeClient =
+    residentRuntime ?? createIdleRuntimeClient({ create: createAgentRuntime, idleTimeout: agentRuntimeIdleTimeout });
   opened(() => {
     runtimeClient.terminate();
   });
@@ -647,7 +661,7 @@ const composeProjectHost = async (
       ...runtimeRpc,
       parameters,
       geospec: geoSpecClient,
-      ...(provide.machinesEnabled === true ? { machines: runtimeClient.machines } : {}),
+      ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),
       machineSettings: preferences,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads

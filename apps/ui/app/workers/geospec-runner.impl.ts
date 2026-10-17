@@ -385,6 +385,8 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       createDefaultKernelOptions({
         fileSystem: runtimeFileSystem,
         runtimeConfig: runtimeConfigResult.data,
+        // A memory compute store here would duplicate the editor's and grow until the worker idles out (B-07).
+        compute: { mode: 'off' },
       }),
     );
     {

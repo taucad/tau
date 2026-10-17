@@ -799,6 +799,46 @@ def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -
     return _mesh_arrays(shape, located, linear_tolerance, angular_tolerance)
 
 
+def _edge_points(shape: Any, linear_tolerance: float, angular_tolerance: float) -> list[list[Any]]:
+    """Read the surface's own boundary samples, retaining native edge order and seams.
+
+    Build123D shape equality is OCCT IsSame (location matters, orientation does not),
+    so a shared edge is emitted once. Free edges have no face triangulation and use
+    OCCT's angular-and-chordal discretizer, with the same effective tolerances.
+    """
+    from build123d import Vector
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GCPnts import GCPnts_TangentialDeflection
+    from OCP.TopLoc import TopLoc_Location
+
+    edges = shape.edges()
+    points = {}
+    for face in shape.faces():
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face.wrapped, location)
+        if triangulation is None:
+            continue
+        for edge in face.edges():
+            if edge in points:
+                continue
+            polygon = BRep_Tool.PolygonOnTriangulation_s(edge.wrapped, triangulation, location)
+            if polygon is None:
+                continue
+            nodes = polygon.Nodes()
+            points[edge] = [
+                Vector(triangulation.Node(nodes.Value(index)).Transformed(location.Transformation()))
+                for index in range(nodes.Lower(), nodes.Upper() + 1)
+            ]
+    for edge in edges:
+        if edge not in points:
+            curve = GCPnts_TangentialDeflection(
+                BRepAdaptor_Curve(edge.wrapped), angular_tolerance, linear_tolerance, 2, 1e-9, 1e-7
+            )
+            points[edge] = [Vector(curve.Value(index)) for index in range(1, curve.NbPoints() + 1)]
+    return [points[edge] for edge in edges]
+
+
 def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
     # _triangulate has already meshed absolutely. Native tessellate_with_uvs
     # reuses that triangulation and supplies smooth normals and native face UVs.
@@ -807,8 +847,8 @@ def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float, angular_tole
     lines: list[float] = []
     line_indices: list[int] = []
     edge_groups: list[dict[str, int]] = []
-    for edge_id, edge in enumerate(located.edges(), 1):
-        points = [_point(point) for point in edge.positions(deflection=linear_tolerance)]
+    for edge_id, edge in enumerate(_edge_points(located, linear_tolerance, angular_tolerance), 1):
+        points = [_point(point) for point in edge]
         start = len(line_indices)
         for first, second in zip(points, points[1:]):
             lines.extend(first)

@@ -13,6 +13,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { glbToDocument } from '@taucad/runtime-testing';
 import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
+import { renderedXyCircle } from '#support/rendered-circle.js';
 import { currentRun, durableMessages, latestCompletedRun } from '#support/acp-evidence.js';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -42,7 +43,10 @@ const topologySchema = JSON.parse(
     'utf8',
   ),
 ) as Record<string, unknown>;
-const isTopologyPayload = new Ajv2020({ strict: true, allErrors: true }).compile<TauCadTopologyPayload>(topologySchema);
+const isTopologyPayload = new Ajv2020({
+  strict: true,
+  allErrors: true,
+}).compile<TauCadTopologyPayload>(topologySchema);
 const assemblyComponents = {
   chassis: 'occurrence:path/0/0',
   carrier: 'occurrence:path/0/1/0',
@@ -80,7 +84,10 @@ const assertAssemblyIntent = (topology: TauCadTopologyPayload): void => {
     );
     expect(mount?.parent.componentId).toBe(assemblyComponents.carrier);
     // A domain property exposes the physical housing joint without changing its owner.
-    expect(mount?.child).toEqual({ componentId: `${moduleId}/0`, interfaceId: 'mount' });
+    expect(mount?.child).toEqual({
+      componentId: `${moduleId}/0`,
+      interfaceId: 'mount',
+    });
     const coupling = couplings.find((entry) => entry.driver === driveId);
     expect(coupling).toMatchObject({
       driver: driveId,
@@ -91,7 +98,10 @@ const assertAssemblyIntent = (topology: TauCadTopologyPayload): void => {
   }
   const carrier = intent.connections.find((connection) => connection.id === assemblyDrivers.carrier);
   expect(carrier?.parent.componentId).toBe(assemblyComponents.chassis);
-  expect(carrier?.child).toEqual({ componentId: assemblyComponents.carrier, interfaceId: 'mount' });
+  expect(carrier?.child).toEqual({
+    componentId: assemblyComponents.carrier,
+    interfaceId: 'mount',
+  });
 };
 
 const prompt = `Use the cad-build123d and geospec-authoring skills to create a reusable native Build123D assembly in main.py. Use native Compound, joints and ordinary factory functions or domain classes, with no Tau assembly framework.
@@ -132,10 +142,14 @@ test.skipIf(!enabled)(
       await expectSignedIn(page);
       await selectKernel(page, 'Build123d');
       await connectPickedFolder(session);
-      // The adapter advertises the model; this acceptance never pins a retired model name.
-      const advertised = await selectAgent(page, 'Codex');
+      // An account-compatible override still selects an actual advertised model through the UI.
+      const advertised = await selectAgent(page, 'Codex', process.env['TAU_E2E_CODEX_MODEL']);
       const slug = await submitPrompt(page, prompt);
-      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('chat'), {
+          timeout: 120_000,
+        })
+        .toBeTruthy();
       const projectRoot = join(session.pickedDirectory, slug);
       const eventsPath = join(projectRoot, '.tau/chats', activeChatId(page), 'events.jsonl');
       const read = (): string => (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8') : '');
@@ -181,7 +195,10 @@ test.skipIf(!enabled)(
         expect(outputs.some((message) => message.toolCallId === input?.toolCallId)).toBe(true);
         return { slug, sha256: source?.sha256, toolCallId: input?.toolCallId };
       });
-      const authoredFiles = readdirSync(projectRoot, { recursive: true, withFileTypes: true })
+      const authoredFiles = readdirSync(projectRoot, {
+        recursive: true,
+        withFileTypes: true,
+      })
         .filter((entry) => entry.isFile() && entry.name.endsWith('.py') && !entry.parentPath.includes('/.tau/'))
         .map((entry) => ({
           path: join(entry.parentPath, entry.name),
@@ -201,7 +218,11 @@ test.skipIf(!enabled)(
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
       await page.keyboard.press('Control+m');
       await expectVisible(page.getByTestId('kinematics-pane'), 60_000);
-      await expect.poll(async () => page.locator('[data-driver-control]').count(), { timeout: 60_000 }).toBe(3);
+      await expect
+        .poll(async () => page.locator('[data-driver-control]').count(), {
+          timeout: 60_000,
+        })
+        .toBe(3);
       const matrices = async () =>
         page.evaluate((componentIds) => {
           const bridge = (
@@ -235,7 +256,9 @@ test.skipIf(!enabled)(
         for (const key of ['carrier', 'left', 'right'] as const) {
           const control = page
             .locator('[data-driver-control]')
-            .filter({ has: page.getByTestId(`kinematics-dof-${assemblyDrivers[key]}`) })
+            .filter({
+              has: page.getByTestId(`kinematics-dof-${assemblyDrivers[key]}`),
+            })
             .getByRole('spinbutton');
           // oxlint-disable-next-line no-await-in-loop -- Each user control commits a distinct independent coordinate.
           await control.fill(String(coordinates[key]));
@@ -271,10 +294,26 @@ test.skipIf(!enabled)(
         expect(observed[0]).toEqual(before[0]);
         return { coordinates, expectedDegrees, matrices: observed };
       };
-      const assemblyReference = await assertAssemblyPose({ carrier: 0, left: 0, right: 0 });
-      const assemblyMoved = await assertAssemblyPose({ carrier: 30, left: 0, right: 0 });
-      const assemblyLeft = await assertAssemblyPose({ carrier: 30, left: 40, right: 0 });
-      const assemblyBoth = await assertAssemblyPose({ carrier: 30, left: 40, right: -25 });
+      const assemblyReference = await assertAssemblyPose({
+        carrier: 0,
+        left: 0,
+        right: 0,
+      });
+      const assemblyMoved = await assertAssemblyPose({
+        carrier: 30,
+        left: 0,
+        right: 0,
+      });
+      const assemblyLeft = await assertAssemblyPose({
+        carrier: 30,
+        left: 40,
+        right: 0,
+      });
+      const assemblyBoth = await assertAssemblyPose({
+        carrier: 30,
+        left: 40,
+        right: -25,
+      });
       // Driving one fresh module cannot move the other's internals or the common moving parent.
       for (const index of [1, 2, 3, 5, 7]) {
         expect(assemblyLeft.matrices[index]).toEqual(assemblyMoved.matrices[index]);
@@ -331,7 +370,9 @@ test.skipIf(!enabled)(
             (
               globalThis as typeof globalThis & {
                 __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                  getRenderedModelComponentState(id: string): { visibleMeshCount: number };
+                  getRenderedModelComponentState(id: string): {
+                    visibleMeshCount: number;
+                  };
                 }>;
               }
             ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
@@ -396,7 +437,9 @@ test.skipIf(!enabled)(
               (
                 globalThis as typeof globalThis & {
                   __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                    getRenderedModelComponentState(id: string): { visibleMeshCount: number };
+                    getRenderedModelComponentState(id: string): {
+                      visibleMeshCount: number;
+                    };
                   }>;
                 }
               ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
@@ -502,8 +545,8 @@ test.skipIf(!enabled)(
       copyFileSync(join(projectRoot, 'main.py'), join(projectRoot, 'reusable-assembly.py'));
       writeFileSync(join(projectRoot, 'main.py'), planetarySource);
       await page.keyboard.press('Control+m');
-      const planetary = async () =>
-        page.evaluate(() => {
+      const planetary = async () => {
+        const state = await page.evaluate(() => {
           const bridge = (
             globalThis as typeof globalThis & {
               __TAU_KINEMATICS_TEST__?: {
@@ -516,6 +559,7 @@ test.skipIf(!enabled)(
             globalThis as typeof globalThis & {
               __TAU_SECTION_VIEW_TEST__?: {
                 getRenderedModelComponentSurfaceBounds(id: string): { min: number[]; max: number[] } | undefined;
+                getRenderedModelComponentSurfacePoints(id: string): Array<readonly [number, number, number]>;
               };
             }
           ).__TAU_SECTION_VIEW_TEST__;
@@ -524,7 +568,7 @@ test.skipIf(!enabled)(
             return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
           };
           return {
-            ringCenter: surfaceCenter('0'),
+            ringSurfacePoints: sceneBridge?.getRenderedModelComponentSurfacePoints('occurrence:path/0/0') ?? [],
             coordinates: bridge?.getState('file:main.py')?.coordinates,
             matrices: ['0', '1', '2/1', '2/2/0', '2/3/0', '2/4/0'].map((id) =>
               bridge?.getComponentWorldMatrix('file:main.py', `occurrence:path/0/${id}`),
@@ -534,6 +578,12 @@ test.skipIf(!enabled)(
             boreCenters: [1, 2, 3].map((planet) => [0, 1].map((role) => surfaceCenter(`2/${planet + 1}/${role}`))),
           };
         });
+        const { ringSurfacePoints, ...pose } = state;
+        const ring = renderedXyCircle(ringSurfacePoints);
+        // This independent rendered-circle measurement retains any actual ring translation.
+        expect(Math.abs(ring.radius - 0.087)).toBeLessThan(1e-7);
+        return { ...pose, ringCenter: ring.center, ringRadius: ring.radius };
+      };
       await expect
         .poll(
           async () => {
@@ -579,7 +629,7 @@ test.skipIf(!enabled)(
           expect(gear).toBeDefined();
           expect(pin).toBeDefined();
           // The canonical 24/24-tooth, module-2 stage has a 48 mm center distance.
-          const radius = Math.hypot(...gear!.map((value, index) => value - state.ringCenter![index]!));
+          const radius = Math.hypot(...gear!.map((value, index) => value - state.ringCenter[index]!));
           expect(Math.abs(radius - 0.048)).toBeLessThan(1e-7);
           return Math.hypot(...gear!.map((value, index) => value - pin![index]!));
         });
@@ -635,7 +685,9 @@ test.skipIf(!enabled)(
             globalThis as typeof globalThis & {
               __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
                 getModelComponents(): Array<{ id: string; name: string }>;
-                getRenderedModelComponentState(id: string): { meshCount: number };
+                getRenderedModelComponentState(id: string): {
+                  meshCount: number;
+                };
               }>;
             }
           ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];

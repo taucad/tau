@@ -6,6 +6,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import {
   getSectionViewTestControlState,
   getRenderedModelComponentSurfaceBounds,
+  getRenderedModelComponentSurfacePoints,
   getSectionViewTestRenderedModelComponentState,
   getSectionViewTestCapOverlapDiagnostics,
   getSectionViewTestCapPerformanceDiagnostics,
@@ -86,12 +87,28 @@ describe('getSectionViewTestControlState', () => {
     const handles = createSectionHandles({ backend: 'webgl' });
     handles.update({
       cuts: [
-        { id: 'selected', kind: 'plane', plane: 'xy', offset: 0.01, isFlipped: false },
-        { id: 'other', kind: 'plane', plane: 'yz', offset: 0, isFlipped: false },
+        {
+          id: 'selected',
+          kind: 'plane',
+          plane: 'xy',
+          offset: 0.01,
+          isFlipped: false,
+        },
+        {
+          id: 'other',
+          kind: 'plane',
+          plane: 'yz',
+          offset: 0,
+          isFlipped: false,
+        },
       ],
       selectedId: 'selected',
       bounds: { min: [-0.05, -0.05, -0.05], max: [0.05, 0.05, 0.05] },
-      renderFrame: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 },
+      renderFrame: {
+        anchorFrameId: 'tau:root',
+        originMeters: [0, 0, 0],
+        metersPerRenderUnit: 0.001,
+      },
     });
     const scene = new THREE.Scene();
     scene.add(handles.root);
@@ -103,7 +120,12 @@ describe('getSectionViewTestControlState', () => {
     handles.layout(camera, 200);
     const rect = { height: 200, left: 10, top: 20, width: 200 };
     const project = (kind: 'plane' | 'select', cutId: string) =>
-      projectSectionViewTestHandle({ target: { kind, cutId }, camera, rect, scene });
+      projectSectionViewTestHandle({
+        target: { kind, cutId },
+        camera,
+        rect,
+        scene,
+      });
     // The push-pull arrow stands on the plane at the bounds centre: 10 render units up.
     const arrow = new THREE.Vector3(0, 0, 10).project(camera);
 
@@ -238,11 +260,18 @@ describe('getRenderedModelComponentSurfaceBounds', () => {
     const edgeGeometry = new LineSegmentsGeometry();
     edgeGeometry.setPositions([-100, 0, 0, 100, 0, 0]);
     const edge = new LineSegments2(edgeGeometry, new LineMaterial());
-    setModelComponentOwner(parent, { unitId: 'unit:main', componentId: 'component:gear' });
+    setModelComponentOwner(parent, {
+      unitId: 'unit:main',
+      componentId: 'component:gear',
+    });
     parent.add(surface, edge);
     scene.add(parent);
     try {
-      const renderFrame = { anchorFrameId: 'tau:root', originMeters: [1, 2, 3], metersPerRenderUnit: 0.001 } as const;
+      const renderFrame = {
+        anchorFrameId: 'tau:root',
+        originMeters: [1, 2, 3],
+        metersPerRenderUnit: 0.001,
+      } as const;
       const bounds = getRenderedModelComponentSurfaceBounds(scene, 'component:gear', renderFrame);
       expect(bounds).toBeDefined();
       for (const [index, value] of [1.008, 2.024, 3.027].entries()) {
@@ -252,6 +281,22 @@ describe('getRenderedModelComponentSurfaceBounds', () => {
         expect(bounds?.max[index]).toBeCloseTo(value, 10);
       }
       expect(getRenderedModelComponentSurfaceBounds(scene, 'component:absent', renderFrame)).toBeUndefined();
+      const points = getRenderedModelComponentSurfacePoints(scene, 'component:gear', renderFrame);
+      expect(points).toHaveLength(24);
+      expect(
+        points.some(
+          ([x, y, z]) => Math.abs(x - 1.008) < 1e-10 && Math.abs(y - 2.026) < 1e-10 && Math.abs(z - 3.033) < 1e-10,
+        ),
+      ).toBe(true);
+      parent.position.x += 4;
+      const moved = getRenderedModelComponentSurfacePoints(scene, 'component:gear', renderFrame);
+      for (const [index, point] of moved.entries()) {
+        expect(point[0] - points[index]![0]).toBeCloseTo(0.004, 10);
+        expect(point.slice(1)).toEqual(points[index]!.slice(1));
+        // A real geometry/anchor displacement remains above the planetary acceptance threshold.
+        expect(Math.hypot(...point.map((value, axis) => value - points[index]![axis]!))).toBeGreaterThan(1e-7);
+      }
+      expect(getRenderedModelComponentSurfacePoints(scene, 'component:absent', renderFrame)).toEqual([]);
     } finally {
       surface.geometry.dispose();
       surface.material.dispose();

@@ -16,7 +16,12 @@
     "build-app": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["{projectRoot}/app/**/*", "{projectRoot}/vite.app.config.ts", "^production"],
+      "inputs": [
+        "{projectRoot}/app/**/*",
+        "{projectRoot}/vite.app.config.ts",
+        "{projectRoot}/package.json",
+        "^production"
+      ],
       "outputs": ["{projectRoot}/dist-app"],
       "dependsOn": ["^build"],
       "options": {

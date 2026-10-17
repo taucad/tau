@@ -1,3 +1,5 @@
+import { rmSync } from 'node:fs';
+import type * as NodeFileSystemModule from 'node:fs';
 import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { preflight, versionOf } from '#preflight.js';
 import type { PreflightInput } from '#preflight.js';
+
+/* The real `rmSync`, which a test can make fail once, as antivirus holding a file on Windows does. */
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof NodeFileSystemModule>();
+  return { ...actual, rmSync: vi.fn(actual.rmSync) };
+});
 
 /** The contract every failure keeps: one stderr line that starts with `tau: `. */
 const oneLine = /^tau: .*\n$/u;
@@ -36,15 +44,18 @@ describe('preflight', () => {
     expect(npm).not.toHaveBeenCalled();
   });
 
-  it('should exit 4 when npm does not run', () => {
+  it.each([
+    ['is not on PATH', { code: 'ENOENT' }, 'was not found on PATH'],
+    ['fails to run, as a missing npm.cmd does under cmd.exe', { status: 1 }, 'did not run'],
+  ])('should exit 4 when npm %s, saying which', (_case, fields, reason) => {
     const npm = (): string => {
-      throw Object.assign(new Error('spawnSync npm ENOENT'), { code: 'ENOENT' });
+      throw Object.assign(new Error('spawnSync npm failed'), fields);
     };
 
     const report = preflight({ nodeVersion: '24.20.0', npm });
 
     expect(report).toEqual({
-      failure: { code: 4, message: 'tau: npm did not run; install Node.js 24 or later, which includes npm\n' },
+      failure: { code: 4, message: `tau: npm ${reason}; install Node.js 24 or later, which includes npm\n` },
     });
     expect(report.failure?.message).toMatch(oneLine);
   });
@@ -91,6 +102,18 @@ describe('preflight', () => {
     }
     await expect(readdir(join(directory, '_cacache', 'tmp'))).resolves.toEqual([]);
   });
+
+  it('should pass when the probe file was written but cannot be removed, as when antivirus holds it', () => {
+    vi.mocked(rmSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY' });
+    });
+
+    expect(preflight({ nodeVersion: '24.20.0', npm: npmAt('11.19.0', directory) })).toEqual({
+      npm: '11.19.0',
+      cache: directory,
+    });
+    expect(rmSync).toHaveBeenCalledWith(join(directory, '_cacache', 'tmp', `tau-${process.pid}`));
+  });
 });
 
 describe.skipIf(process.platform === 'win32')('versionOf', () => {
@@ -127,8 +150,41 @@ describe.skipIf(process.platform === 'win32')('versionOf', () => {
     expect(versionOf(join(directory, 'missing-tau'))).toBeUndefined();
   });
 
-  it('should give up on a CLI that does not answer within 2 s', async () => {
-    const cli = await fakeCli('setInterval(() => undefined, 1000);');
+  it('should return undefined, without waiting out the timeout, for a CLI that prints more than 128 bytes', async () => {
+    /* 131,000 bytes in `TAU_LAUNCH` would put that variable past Linux's 128 KiB cap and stop the CLI's start. */
+    const long = await fakeCli("process.stdout.write('9'.repeat(131_000)); setInterval(() => undefined, 1000);");
+    const started = Date.now();
+
+    expect(versionOf(long)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(2000);
+
+    const fits = await fakeCli("process.stdout.write('9'.repeat(128));");
+
+    expect(versionOf(fits)).toBe('9'.repeat(128));
+  });
+
+  it('should kill a CLI that ignores SIGTERM as soon as it prints more than 128 bytes', async () => {
+    /* 1,000 bytes fit the pipe, so the write completes and only SIGKILL ends it before its own exit at 6 s. */
+    const cli = await fakeCli(
+      "process.on('SIGTERM', () => undefined); process.stdout.write('9'.repeat(1000)); setTimeout(() => process.exit(0), 6000);",
+    );
+    const started = Date.now();
+
+    expect(versionOf(cli)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('should keep the version of a CLI that writes a warning on standard error', async () => {
+    const cli = await fakeCli(
+      String.raw`process.stderr.write('(node:1) ExperimentalWarning: '.repeat(100) + '\n'); process.stdout.write('0.1.0-beta.6\n');`,
+    );
+
+    expect(versionOf(cli)).toBe('0.1.0-beta.6');
+  });
+
+  it('should give up at 2 s on a CLI that does not answer, even one that ignores SIGTERM', async () => {
+    /* It exits on its own after 6 s, so a probe that only sends SIGTERM fails here rather than hanging. */
+    const cli = await fakeCli("process.on('SIGTERM', () => undefined); setTimeout(() => process.exit(0), 6000);");
     const started = Date.now();
 
     expect(versionOf(cli)).toBeUndefined();

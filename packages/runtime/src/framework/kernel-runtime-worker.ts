@@ -893,6 +893,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
   }
 
+  protected override kernelHeapBytesForOwner(owner: OperationOwner): number | undefined {
+    const kernel = this.getKernelForOwner(owner);
+    const bytes = kernel?.initialized ? kernel.definition.heapBytes?.(kernel.ctx) : undefined;
+    return typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined;
+  }
+
   protected override async resolveKernelBinding(
     input: { entryPath: string },
     runtime: KernelRuntime,

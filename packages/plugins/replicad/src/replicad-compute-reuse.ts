@@ -14,6 +14,15 @@ const supportedBooleans = new Set(['fuse', 'fuseAll', 'cut', 'cutAll', 'intersec
 const supportedTransforms = new Set(['translate', 'translateX', 'translateY', 'translateZ', 'rotate']);
 const utf8 = new TextEncoder();
 const text = new TextDecoder();
+/** Logical bytes the resident tier keeps, by least-recent use (W8 browser default). */
+const residentByteCap = 64 * 1024 * 1024;
+/** Entries the resident tier keeps, so tiny results cannot pile up without bound (W8 default). */
+const residentEntryCap = 4096;
+/**
+ * Provisional publication charge announced before a result is serialized: a cheap class charge, not its size.
+ * Serializing only to size an announcement would put the encode back on the result path (W8 G-J3).
+ */
+const provisionalBytes = 16 * 1024;
 
 type ShapeLike = {
   readonly serialize: () => string;
@@ -162,10 +171,57 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
   options: ReplicadComputeReuseOptions & { readonly library: Library },
 ): ReplicadComputeReuseAdapter<Library> => {
   let activeScope: ComputeReuseScope | undefined;
-  /** Kernel-owned residency: serialized BRep by action identity. W4 replaces it with native shapes. */
+  /**
+   * Kernel-owned residency: serialized BRep by action identity, in least-recent-use order (Map insertion order).
+   * W4 replaces it with native shapes.
+   */
   const residentBytes = new Map<ActionDigest, Uint8Array<ArrayBuffer>>();
   const residentActions = new Map<ActionDigest, ComputeAction>();
+  let residentTotal = 0;
+  let evictions = 0;
   let omissions = 0;
+
+  const forget = (digest: ActionDigest): void => {
+    const bytes = residentBytes.get(digest);
+    if (bytes) {
+      residentTotal -= bytes.byteLength;
+      residentBytes.delete(digest);
+      residentActions.delete(digest);
+    }
+  };
+
+  /** Keep `bytes` as the most recent entry, then evict the least recent past either cap. */
+  const keep = (digest: ActionDigest, bytes: Uint8Array<ArrayBuffer>, descriptor: ComputeAction): void => {
+    /* A result larger than the whole tier would evict every other entry and then itself. */
+    if (bytes.byteLength > residentByteCap) {
+      omissions += 1;
+      return;
+    }
+    forget(digest);
+    residentBytes.set(digest, bytes);
+    residentActions.set(digest, descriptor);
+    residentTotal += bytes.byteLength;
+    for (const oldest of residentBytes.keys()) {
+      if (residentTotal <= residentByteCap && residentBytes.size <= residentEntryCap) {
+        break;
+      }
+      forget(oldest);
+      evictions += 1;
+    }
+  };
+
+  /** A hit refreshes its entry's recency. */
+  const touch = (digest: ActionDigest): Uint8Array<ArrayBuffer> | undefined => {
+    const bytes = residentBytes.get(digest);
+    const descriptor = residentActions.get(digest);
+    if (bytes && descriptor) {
+      residentBytes.delete(digest);
+      residentActions.delete(digest);
+      residentBytes.set(digest, bytes);
+      residentActions.set(digest, descriptor);
+    }
+    return bytes;
+  };
   const identityByShape = new WeakMap<WeakKey, ShapeIdentity>();
   const rawByProxy = new WeakMap<WeakKey, ShapeLike>();
   const proxyByRaw = new WeakMap<WeakKey, ShapeLike>();
@@ -209,9 +265,6 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
     }
     try {
       const digest = identify(descriptor);
-      const bytes = utf8.encode(shape.serialize());
-      residentBytes.set(digest, bytes);
-      residentActions.set(digest, descriptor);
       const result = scope.announce({
         entries: [
           {
@@ -219,11 +272,16 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
             action: descriptor,
             digest,
             computeDuration,
-            estimatedBytes: bytes.byteLength,
+            estimatedBytes: provisionalBytes,
           },
         ],
       });
-      return result.admitted.length === 1 ? { actionDigest: digest } : { actionDigest: digest };
+      // A result below the admission floor, or past the publication budget, is tracked for lineage only:
+      // descendants still key on its identity, but it is neither serialized nor kept (D-RT-01).
+      if (result.admitted.length === 1) {
+        keep(digest, utf8.encode(shape.serialize()), descriptor);
+      }
+      return { actionDigest: digest };
     } catch {
       return undefined;
     }
@@ -279,7 +337,7 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
       return input.compute();
     }
     const digest = identify(input.descriptor);
-    const cached = residentBytes.get(digest);
+    const cached = touch(digest);
     if (cached) {
       try {
         const restored = restore(cached);
@@ -404,8 +462,10 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
     importEntries: async ({ entries }) => {
       const imported: ActionDigest[] = [];
       for (const entry of entries) {
-        residentBytes.set(entry.actionDigest, new Uint8Array(entry.bytes));
-        residentActions.set(entry.actionDigest, entry.action);
+        // Discovery offers every published entry on each render; one already resident is not copied again (D-RT-21).
+        if (!touch(entry.actionDigest)) {
+          keep(entry.actionDigest, new Uint8Array(entry.bytes), entry.action);
+        }
         imported.push(entry.actionDigest);
       }
       return { imported, omitted: [] };
@@ -432,14 +492,15 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
     },
     stats: () => ({
       entries: residentBytes.size,
-      logicalBytes: [...residentBytes.values()].reduce((total, bytes) => total + bytes.byteLength, 0),
+      logicalBytes: residentTotal,
       encodedBytes: { status: 'unsupported' },
-      evictions: 0,
+      evictions,
       omissions,
     }),
     clear: () => {
       residentBytes.clear();
       residentActions.clear();
+      residentTotal = 0;
     },
   };
 

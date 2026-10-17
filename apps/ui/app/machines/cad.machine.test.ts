@@ -22,7 +22,7 @@ const kernelOptionsFactory: LazyKernelOptionsFactory = async () => () =>
     config: { tauApiUrl: 'https://api.test', tauWebSocketUrl: 'wss://api.test' },
   });
 
-function fixture() {
+function fixture(input: Readonly<{ recycleHeapBytes?: number }> = {}) {
   const client = createMockRuntimeClient();
   const runtime = createMockRuntimeDocument();
   vi.mocked(client.open).mockReturnValue(runtime.document);
@@ -38,7 +38,9 @@ function fixture() {
         connectKernelActor: fromSafeAsync(connectWork),
       },
     }),
-    { input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '/projects/test', kernelOptionsFactory } },
+    {
+      input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '/projects/test', kernelOptionsFactory, ...input },
+    },
   );
   actor.start();
   return { client, runtime, cleanup, actor };
@@ -732,4 +734,78 @@ describe('cadMachine watched document', () => {
       }
     },
   );
+});
+
+// D-RT-03: WebAssembly memory never shrinks, so a runtime worker kept the session's largest heap until the tab died.
+describe('cadMachine heap recycle', () => {
+  const mebibyte = 2 ** 20;
+  const recycleHeapBytes = 512 * mebibyte;
+
+  const renderedAt = (f: ReturnType<typeof fixture>, heapBytes: number, requestId: string): Rendering => {
+    const { rendering: base } = f.runtime;
+    if (!base.success) {
+      throw new Error('The mock document renders successfully.');
+    }
+    const rendering: Rendering = { ...base, requestId, heapBytes };
+    f.runtime.emitRendered(rendering);
+    return rendering;
+  };
+
+  it('recycles the runtime once its heap grows past the threshold and its first render, keeping the frame', async () => {
+    const f = await opened(fixture({ recycleHeapBytes }));
+    renderedAt(f, 600 * mebibyte, 'first');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    renderedAt(f, 650 * mebibyte, 'second');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    expect(f.client.terminate).not.toHaveBeenCalled();
+
+    const grown = renderedAt(f, 800 * mebibyte, 'third');
+    await vi.waitFor(() => {
+      expect(f.client.terminate).toHaveBeenCalledOnce();
+    });
+    await vi.waitFor(() => {
+      expect(f.client.open).toHaveBeenCalledTimes(2);
+    });
+    expect(f.runtime.document.close).toHaveBeenCalledOnce();
+    expect(f.actor.getSnapshot().context.rendering).toBe(grown);
+    f.actor.stop();
+  });
+
+  it('reopens a recycled runtime with the parameters being previewed', async () => {
+    const f = await opened(fixture({ recycleHeapBytes }));
+    renderedAt(f, 600 * mebibyte, 'first');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    f.actor.send({ type: 'setPreviewParameters', parameters: { width: 42 } });
+    await vi.waitFor(() => {
+      expect(f.runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } });
+    });
+    renderedAt(f, 800 * mebibyte, 'previewed');
+    await vi.waitFor(() => {
+      expect(f.client.open).toHaveBeenCalledTimes(2);
+    });
+    expect(f.client.open).toHaveBeenLastCalledWith({
+      source: { path: 'main.ts' },
+      parameters: { width: 42 },
+      watch: true,
+    });
+    f.actor.stop();
+  });
+
+  it('never recycles on the first render of a fresh runtime, however large', async () => {
+    const f = await opened(fixture({ recycleHeapBytes }));
+    renderedAt(f, 2048 * mebibyte, 'first');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    expect(f.client.terminate).not.toHaveBeenCalled();
+    f.actor.stop();
+  });
+
+  it('never recycles without a threshold', async () => {
+    const f = await opened(fixture());
+    renderedAt(f, 100 * mebibyte, 'first');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    renderedAt(f, 4096 * mebibyte, 'second');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    expect(f.client.terminate).not.toHaveBeenCalled();
+    f.actor.stop();
+  });
 });

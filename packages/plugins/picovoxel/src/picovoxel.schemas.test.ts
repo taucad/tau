@@ -10,6 +10,9 @@ import {
   picovoxelRenderSchema,
 } from '#picovoxel.schemas.js';
 
+/** The schema default for the host recycle threshold: 1.5 GiB. */
+const defaultRecycleHeapBytes = 1.5 * 2 ** 30;
+
 const isolation = vi.hoisted(() => ({ status: undefined as IsolationStatus | undefined }));
 
 vi.mock('@taucad/runtime/cross-origin-isolation', async (importOriginal) => {
@@ -25,21 +28,30 @@ describe('picovoxelOptionsSchema', () => {
   it('should resolve auto to the multi-threaded build in an isolated realm', () => {
     isolation.status = { crossOriginIsolated: true, sharedArrayBuffer: true };
 
-    expect(picovoxelOptionsSchema.parse({})).toEqual({ wasm: 'multi' });
-    expect(picovoxelOptionsSchema.parse({ wasm: 'auto' })).toEqual({ wasm: 'multi' });
+    expect(picovoxelOptionsSchema.parse({})).toEqual({ wasm: 'multi', recycleHeapBytes: defaultRecycleHeapBytes });
+    expect(picovoxelOptionsSchema.parse({ wasm: 'auto' })).toEqual({
+      wasm: 'multi',
+      recycleHeapBytes: defaultRecycleHeapBytes,
+    });
   });
 
   it('should resolve auto to the serial build in a realm that is not isolated', () => {
     isolation.status = { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-coep' };
 
-    expect(picovoxelOptionsSchema.parse({})).toEqual({ wasm: 'serial' });
+    expect(picovoxelOptionsSchema.parse({})).toEqual({ wasm: 'serial', recycleHeapBytes: defaultRecycleHeapBytes });
   });
 
   it('should keep a pinned artifact whatever the realm, so validated options never hold auto', () => {
     isolation.status = { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-coep' };
 
-    expect(picovoxelOptionsSchema.parse({ wasm: 'multi' })).toEqual({ wasm: 'multi' });
-    expect(picovoxelOptionsSchema.parse({ wasm: 'serial' })).toEqual({ wasm: 'serial' });
+    expect(picovoxelOptionsSchema.parse({ wasm: 'multi' })).toEqual({
+      wasm: 'multi',
+      recycleHeapBytes: defaultRecycleHeapBytes,
+    });
+    expect(picovoxelOptionsSchema.parse({ wasm: 'serial' })).toEqual({
+      wasm: 'serial',
+      recycleHeapBytes: defaultRecycleHeapBytes,
+    });
   });
 
   it('should serve serial with the reason when the multi build cannot reserve its shared memory', async () => {
@@ -51,7 +63,10 @@ describe('picovoxelOptionsSchema', () => {
     try {
       const schemas = await import('#picovoxel.schemas.js');
 
-      expect(schemas.picovoxelOptionsSchema.parse({})).toEqual({ wasm: 'serial' });
+      expect(schemas.picovoxelOptionsSchema.parse({})).toEqual({
+        wasm: 'serial',
+        recycleHeapBytes: defaultRecycleHeapBytes,
+      });
       expect(schemas.multiUnavailableReason()).toBe('shared-memory-reservation-failed: could not allocate memory');
       // Probed once per realm.
       expect(memory).toHaveBeenCalledTimes(1);

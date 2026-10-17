@@ -150,20 +150,22 @@ INCORRECT (a `VALIDATION_ERROR`):
 
 ### 16. Bound mesh cost by lane and report what was delivered
 
-| Lane                          | Triangle budget | Over budget                                                                                                                                                   |
-| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Preview and capture (renders) | 2,000,000       | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
-| Export                        | 20,000,000      | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
+| Lane                          | Triangle budget                                   | Over budget                                                                                                                                                   |
+| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preview and capture (renders) | 2,000,000; 400,000 on a memory-constrained device | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
+| Export                        | 20,000,000                                        | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
 
 Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time; tolerance-meshed kernels add the requested form, the effective `linearTolerance` and `angularTolerance` and the downgrade steps; voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes mesh output reports it here.
 
-**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect.
+A memory-constrained device is a coarse-pointer or `navigator.deviceMemory` ≤ 4 GB one (`isMemoryConstrainedDevice` in `apps/ui`); the host passes the smaller budget as the kernels' `previewTriangleBudget` and the `displaySimplification` middleware's `maxTriangles`.
+
+**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect. On a phone, 2,000,000 preview triangles cost about 230 MiB in the viewer and over 1 GiB with Section armed.
 
 ### 17. Keep a voxel model's grid; simplify only its picture
 
 In voxel kernels (PicoVoxel, PicoGK) the voxel size is the model (ruling R2). No lane of the harness changes `voxelSize`; it is a model parameter, never a tessellation option, and iteration goes through per-call `parameters`. Choose it from the thinnest feature, about one third of the thinnest wall or strut: field evaluation time scales with 1/h³, and memory and triangles with 1/h².
 
-A voxel render over the 2,000,000-triangle preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
+A voxel render over the preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
 
 **Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while a simplified display mesh changes only the picture, within half a voxel.
 

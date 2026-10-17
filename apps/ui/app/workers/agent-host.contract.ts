@@ -392,6 +392,7 @@ const provideSchema = z.strictObject({
     tauApiUrl: z.url(),
     tauWebSocketUrl: z.url(),
     acquisition: z.enum(['open', 'locked']).optional(),
+    memoryConstrained: z.boolean().optional(),
   }),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),

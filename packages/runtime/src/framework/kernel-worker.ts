@@ -1950,6 +1950,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
           // One projection per offered view: a scrubbed option set replaces the last one instead of accumulating.
           evaluation.projections.set(slot, { hash: projectionHash, result: projected });
+          const heapBytes = projected.success ? this.kernelHeapBytesForOwner(artifact.owner) : undefined;
           result = projected.success
             ? {
                 success: true,
@@ -1962,6 +1963,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 transient: evaluation.transient,
                 issues: projected.issues,
                 ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+                ...(heapBytes === undefined ? {} : { heapBytes }),
               }
             : {
                 success: false,
@@ -4273,6 +4275,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns A diagnostic sentence, or undefined when the worker cannot describe the miss.
    */
   protected describeUnselectedKernel(_owner: OperationOwner): string | undefined {
+    return undefined;
+  }
+
+  /**
+   * Committed WebAssembly heap of the kernel bound to `owner`, read when a rendering is delivered (D-RT-03).
+   *
+   * @param _owner - The rendering's operation owner.
+   * @returns The heap in bytes, or `undefined` when the kernel reports none.
+   */
+  protected kernelHeapBytesForOwner(_owner: OperationOwner): number | undefined {
     return undefined;
   }
 

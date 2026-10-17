@@ -47,24 +47,36 @@ export async function transcribeDictation(
   }
   let preview = '';
   let buffered = '';
-  for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
-    buffered += chunk;
-    const lines = buffered.split('\n');
-    buffered = lines.pop() ?? '';
-    for (const line of lines) {
-      if (line.trim() === '') {
-        continue;
+  // WebKit's ReadableStream is not async iterable, so `for await` over the body fails on Safari.
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- NDJSON events must be consumed in order.
+      const read = await reader.read();
+      if (read.done) {
+        break;
       }
-      const event = dictationEventSchema.parse(JSON.parse(line));
-      if (event.type === 'error') {
-        throw new Error(event.message);
+      buffered += read.value;
+      const lines = buffered.split('\n');
+      buffered = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim() === '') {
+          continue;
+        }
+        const event = dictationEventSchema.parse(JSON.parse(line));
+        if (event.type === 'error') {
+          throw new Error(event.message);
+        }
+        if (event.type === 'done') {
+          return event.text;
+        }
+        preview += event.text;
+        options.onPreview(preview);
       }
-      if (event.type === 'done') {
-        return event.text;
-      }
-      preview += event.text;
-      options.onPreview(preview);
     }
+  } finally {
+    // Releases the connection when a done or error event ends the read early, as `for await` did.
+    void reader.cancel();
   }
   throw new Error('Transcription ended before it finished. Try dictation again.');
 }

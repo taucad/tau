@@ -2149,3 +2149,28 @@ describe('picovoxel region crop', () => {
     ).toThrow('region.min must be below region.max on every axis.');
   });
 });
+
+// D-RT-03: PicoVoxel recycles a runtime only past 1.5 GiB of heap, above what an iPhone tab survives (~1.5-2 GB across
+// the page, its workers and their heaps); a phone host passes a lower threshold. The voxel size stays the model's
+// (graphics-backend policy rule 17).
+describe('picovoxel host recycle threshold', () => {
+  const mebibyte = 2 ** 20;
+
+  it('should default to recycling past 1.5 GiB', () => {
+    expect(definition.optionsSchema!.parse({})).toMatchObject({ recycleHeapBytes: 1.5 * 2 ** 30 });
+  });
+
+  it("should recycle a runtime whose heap passed the host's threshold", async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
+    sessions.heapBytes = 600 * mebibyte;
+    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+
+    expect(context.runtimes.size).toBe(0);
+    expect(runtime.logger.debug).toHaveBeenCalledWith(
+      `PicoVoxel recycled the serial runtime: its heap reached ${String(600 * mebibyte)} bytes`,
+    );
+    sessions.heapBytes = undefined;
+    await definition.onDispose!(context);
+  });
+});

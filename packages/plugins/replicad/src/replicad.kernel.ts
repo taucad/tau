@@ -291,6 +291,8 @@ type ReplicadContext = {
   occt: RealmHold<OpenCascadeInstance>;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
+  /** Triangles a preview may carry before it is coarsened. */
+  previewTriangleBudget: number;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
   exportNameMap: Map<string, string>;
@@ -481,6 +483,13 @@ export type ReplicadOptions = {
    * @default true
    */
   tessellationInstancing?: boolean;
+  /**
+   * Triangles a preview may carry before it is coarsened one step at a time (and a `TESSELLATION_DOWNGRADED`
+   * warning reported). A host on a memory-constrained device passes a smaller budget.
+   *
+   * @default occtTriangleBudgets.preview (2,000,000)
+   */
+  previewTriangleBudget?: number;
   /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
   withSourceMapping?: boolean;
 };
@@ -542,6 +551,7 @@ export const replicadKernel = defineKernel({
       libraryTracing,
       withSourceMapping,
       tessellationInstancing,
+      previewTriangleBudget,
       wasm,
       computeReuse: computeReuseOption,
     } = options;
@@ -692,6 +702,7 @@ export const replicadKernel = defineKernel({
         occt,
         replicadLibrary,
         tessellationInstancing,
+        previewTriangleBudget,
         replicadInitialised: true,
         librarySourceMapCache,
         exportNameMap,
@@ -939,7 +950,7 @@ export const replicadKernel = defineKernel({
             operation: () =>
               renderWithinBudget(namedShapes, {
                 request: { tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-                budget: occtTriangleBudgets.preview,
+                budget: context.previewTriangleBudget,
                 collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
@@ -1202,6 +1213,9 @@ export const replicadKernel = defineKernel({
       })),
     };
   },
+
+  // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
+  heapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
     context.occt.release();

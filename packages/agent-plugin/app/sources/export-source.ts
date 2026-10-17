@@ -13,7 +13,11 @@ import type {
   ExportRequest,
   ExportSchema,
   ExportSource,
+  ExportUnavailable,
 } from '@taucad/workbench-panes/export/export-source';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
+import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
 import { decodeBase64 } from '#app/model-loader.js';
 
@@ -81,18 +85,53 @@ const loadingState: ExportEntryState = {
   hasGeometry: true,
   formats: undefined,
 };
-const unavailableState: ExportEntryState = {
+const noGeometryState: ExportEntryState = {
   hasGeometry: false,
   formats: undefined,
+};
+
+/**
+ * Why the formats could not be listed, for the person. The plugin, the CLI and the MCP server release as one version,
+ * so a server without the formats tool is an older `tau` that only the matching CLI replaces; any other failure may
+ * pass and is offered again.
+ *
+ * @param error - What the listing threw.
+ * @param retry - Asks for the formats again.
+ * @returns The pane's account of the failure.
+ */
+const unavailableOf = (error: unknown, retry: () => void): ExportUnavailable => {
+  if (error instanceof ToolCallError && error.code === 'UNKNOWN_TOOL') {
+    const { version } = packageJson;
+    return {
+      code: error.code,
+      message: `This Tau server has no export formats; plugin ${version} needs the same version: npm install -g @taucad/cli@${version}, then restart the Tau server or your agent`,
+      retry: undefined,
+    };
+  }
+  return {
+    code: error instanceof ToolCallError && error.code !== undefined ? error.code : 'FORMATS_UNAVAILABLE',
+    message: error instanceof Error ? error.message : String(error),
+    retry,
+  };
 };
 
 const createEntryCache = (load: (entryPath: string) => Promise<ExportFormatEntry[]>): EntryCache => {
   const states = new Map<string, ExportEntryState>();
   const listeners = new Set<() => void>();
-  const settle = (entryPath: string, state: ExportEntryState): void => {
-    states.set(entryPath, state);
+  const notify = (): void => {
     for (const listener of listeners) {
       listener();
+    }
+  };
+  const settle = (entryPath: string, state: ExportEntryState): void => {
+    states.set(entryPath, state);
+    notify();
+  };
+  /* Forgetting the failure makes the next read ask again; every reader hears it and reads. */
+  const retry = (entryPath: string): void => {
+    if (states.get(entryPath)?.unavailable !== undefined) {
+      states.delete(entryPath);
+      notify();
     }
   };
   return {
@@ -112,8 +151,14 @@ const createEntryCache = (load: (entryPath: string) => Promise<ExportFormatEntry
       const fetchFormats = async (): Promise<void> => {
         try {
           settle(entryPath, { hasGeometry: true, formats: await load(entryPath) });
-        } catch {
-          settle(entryPath, unavailableState);
+        } catch (error) {
+          settle(entryPath, {
+            hasGeometry: true,
+            formats: undefined,
+            unavailable: unavailableOf(error, () => {
+              retry(entryPath);
+            }),
+          });
         }
       };
       // async-iife: the cache owns the request; every reader of this entry hears its settlement.
@@ -195,11 +240,14 @@ export function createExportSource(bridge: HostBridge, model: TauViewerModel): E
     }
     return formatEntries(listed.formats);
   });
+  /* Until the page learns what the render drew, an empty model file is the one sign that it drew nothing. */
+  const hasGeometry = model.byteLength > 0;
+  const read = (entryPath: string): ExportEntryState => (hasGeometry ? entries.get(entryPath) : noGeometryState);
   const useEntry = (entryPath: string): ExportEntryState =>
     useSyncExternalStore(
       entries.subscribe,
-      () => entries.get(entryPath),
-      () => entries.get(entryPath),
+      () => read(entryPath),
+      () => read(entryPath),
     );
 
   /* The loopback server finds the project from the shown model; a host frame names it in the call's `_meta`, and

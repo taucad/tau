@@ -180,7 +180,7 @@ Each kernel worker compiles each build's WebAssembly module once (or instantiate
 compiled for the same URL) and keeps one warm PicoVoxel runtime per build (the multi build's thread
 pool included); every render opens a fresh session on it and disposes it, together with any session
 the model created itself, when the render ends. A runtime is replaced after a WebAssembly trap or once
-its heap passes 1.5 GiB; the replacement instantiates the module already compiled. Renders are
+its heap passes `recycleHeapBytes` (1.5 GiB by default; a phone host passes less); the replacement instantiates the module already compiled. Renders are
 cancelled cooperatively: a superseded render stops at its next PicoVoxel call.
 
 The binaries and the pthread worker script load from explicit URLs of picovoxel's asset subpaths

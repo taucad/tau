@@ -38,13 +38,13 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export                  | Kind            | Use                                                                                                             |
-| ----------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `opencascade`           | toolkit factory | package-named authoring factory; presets select capabilities                                                    |
-| `plugin`                | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key                                   |
-| `opencascadeKernel`     | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                                                  |
-| `OpenCascadeOptions`    | type            | `{ wasm?: 'auto' \| 'full' \| 'multi' \| OpenCascadeWasmConfig, ocTracing?: 'off' \| 'summary' \| 'per-call' }` |
-| `OpenCascadeWasmConfig` | type            | `{ wasmUrl, wasmBindingsUrl }` for a custom libcascade build                                                    |
+| Export                  | Kind            | Use                                                                                                                                             |
+| ----------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `opencascade`           | toolkit factory | package-named authoring factory; presets select capabilities                                                                                    |
+| `plugin`                | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key                                                                   |
+| `opencascadeKernel`     | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                                                                                  |
+| `OpenCascadeOptions`    | type            | `{ wasm?: 'auto' \| 'full' \| 'multi' \| OpenCascadeWasmConfig, ocTracing?: 'off' \| 'summary' \| 'per-call', previewTriangleBudget?: number }` |
+| `OpenCascadeWasmConfig` | type            | `{ wasmUrl, wasmBindingsUrl }` for a custom libcascade build                                                                                    |
 
 One preset, `default`, selecting `kernels.default`.
 

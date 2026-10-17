@@ -366,6 +366,37 @@ describe('OpenRSCADKernel', () => {
     expect(definition.version).toBe('0.11.0-beta.4');
   });
 
+  it('keeps the geometry cache bounded across repeated parameter edits of one model', async () => {
+    const engine = await import('@taulabs/openrscad-engine');
+    let residentBytes = 0;
+    const clearCache = vi.fn(engine.clearCache);
+    const cacheStats = vi.fn(async () => ({ ...(await engine.cacheStats()), bytes: residentBytes }));
+    const definition = await resolveRuntimePluginDefinition(
+      'kernel',
+      createOpenrscadKernel({ loadBackend: async () => ({ ...engine, clearCache, cacheStats }) })(),
+    );
+    const runtime = createRuntime({ 'project/model.scad': 'size = 1; cube(size);' });
+    const context = await definition.initialize({}, runtime);
+    const edit = async (size: number) =>
+      definition.evaluate({ entryPath: 'project/model.scad', parameters: { size }, options: {} }, runtime, context);
+
+    await edit(1);
+    clearCache.mockClear();
+
+    // A warm cache that fits stays resident, so the next edit reuses it.
+    residentBytes = 1024 * 1024;
+    await edit(2);
+    expect(clearCache).not.toHaveBeenCalled();
+
+    // Each parameter set adds geometry; once the resident bytes outgrow the cap the cache is dropped.
+    residentBytes = 1024 * 1024 * 1024;
+    await edit(3);
+    expect(clearCache).toHaveBeenCalledTimes(1);
+    const rendered = await edit(4);
+    expect(clearCache).toHaveBeenCalledTimes(2);
+    expect(rendered.handle.stats.volume).toBeCloseTo(64, 6);
+  });
+
   it('logs the backend the engine bound', async () => {
     const engine = await import('@taulabs/openrscad-engine');
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());

@@ -2,6 +2,8 @@
 // registry `fetch`. The global `fetch` is replaced by a tripwire, so no scenario can reach the network.
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { createServer, get } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join, relative, sep } from 'node:path';
 
 import { measureCapacityDomain } from '@taucad/filesystem';
@@ -854,6 +856,101 @@ describe('createPreparationHost', () => {
       expect(error.message).toContain(`${mirror}blobs/sha256/`);
       expect(locked.registry.calls.filter((url) => url.startsWith('https://registry.example/'))).toEqual([]);
     });
+
+    it(
+      'should never ask a no-fallback mirror for a payload its package ships (X51, I10)',
+      { timeout: prepareTimeout },
+      async () => {
+        const directory = await temporaryDirectory('tau-preparation-in-package-');
+        cleanups.push(directory.remove);
+        const packageRoot = join(directory.path, 'package');
+        await mkdir(join(packageRoot, 'python'), { recursive: true });
+        const bytes = pythonPayloadBytes();
+        await writeFile(join(packageRoot, 'python', 'worker.py'), bytes['worker.py']);
+        const [python, demo, worker] = pythonPayloads(bytes);
+        const inPackage: DependencyPayload = { ...worker!, origin: { kind: 'packagePath', path: 'python/worker.py' } };
+        const external = { [sha256Hex(bytes.python)]: bytes.python, [sha256Hex(bytes.demo)]: bytes.demo };
+
+        // A recording mirror over node:http: every request is logged; it holds only the external payloads.
+        const requests: string[] = [];
+        const server = createServer((request, response) => {
+          requests.push(`${request.method ?? ''} ${request.url ?? ''}`);
+          const blob =
+            external[/^\/tau\/blobs\/sha256\/(?<hex>[\da-f]{64})$/u.exec(request.url ?? '')?.groups?.['hex'] ?? ''];
+          if (blob === undefined) {
+            response.writeHead(404).end();
+            return;
+          }
+          response.writeHead(200, { 'content-length': String(blob.byteLength) }).end(blob);
+        });
+        await new Promise<void>((resolve) => {
+          server.listen(0, '127.0.0.1', resolve);
+        });
+        cleanups.push(
+          async () =>
+            new Promise<void>((resolve) => {
+              server.close(() => {
+                resolve();
+              });
+            }),
+        );
+        const { port } = server.address() as AddressInfo;
+        const baseUrl = `http://127.0.0.1:${String(port)}/tau/`;
+        // A `fetch` over node:http that reaches only the mirror (the global one is a test stub): a fallback to a
+        // manifest origin would fail the scenario rather than reach the network.
+        const loopbackFetch: typeof fetch = async (input) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (!url.startsWith(baseUrl)) {
+            throw new Error(`Unexpected request outside the mirror: ${url}`);
+          }
+          return new Promise<Response>((resolve, reject) => {
+            get(url, (response) => {
+              const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+              response.on('data', (chunk: Uint8Array<ArrayBuffer>) => chunks.push(chunk));
+              response.on('end', () => {
+                resolve(new Response(Buffer.concat(chunks), { status: response.statusCode ?? 500 }));
+              });
+            }).on('error', reject);
+          });
+        };
+        const host = createPreparationHost({
+          plugins: [
+            {
+              ...pluginOf(packageName, { engine: [{ target: linuxTarget, payloads: [python, demo!, inPackage] }] }),
+              directory: packageRoot,
+            },
+          ],
+          store: join(directory.path, 'store'),
+          hostPath: join(directory.path, 'tau-host.mjs'),
+          indicators: linuxHost,
+          fetch: loopbackFetch,
+          tauVersion: '1.0.0',
+          mirror: { baseUrl, noFallback: true },
+        });
+        cleanups.push(() => {
+          host.dispose();
+        });
+
+        const receipt = readyReceipt(await prepare(host));
+
+        expect(requests.toSorted()).toEqual(
+          [
+            `GET /tau/blobs/sha256/${sha256Hex(bytes.python)}`,
+            `GET /tau/blobs/sha256/${sha256Hex(bytes.demo)}`,
+          ].toSorted(),
+        );
+        expect(receipt.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom.kind])).toEqual([
+          ['python', 'mirror'],
+          ['demo', 'mirror'],
+          ['worker.py', 'origin'],
+        ]);
+
+        // Warm: preparing again asks the mirror nothing at all.
+        requests.length = 0;
+        readyReceipt(await prepare(host));
+        expect(requests).toEqual([]);
+      },
+    );
   });
 
   describe('verify and repair', () => {

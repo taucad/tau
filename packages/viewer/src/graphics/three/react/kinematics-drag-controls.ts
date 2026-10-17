@@ -310,8 +310,17 @@ export function useKinematicsDragControls({
       raycaster.near = 0;
       raycaster.far = Number.POSITIVE_INFINITY;
       // The section cut is read at the press, as the model's own raycast reads it, not selected per drag step.
-      const clipping = resolveSectionViewRaycastClip(graphicsContext, renderFrame);
-      const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: getPickableMeshes(), clipping });
+      const pickable = getPickableMeshes();
+      // The model's own pick already answered this press when it hit a part; ask the trees only otherwise. A pick
+      // still waiting on a tree is not a miss: the press is left alone.
+      const delivered = pickable.find((mesh) => mesh === event.object);
+      const hit = delivered
+        ? { object: delivered, point: event.point }
+        : raycastFirstVisibleMeshHit({
+            raycaster,
+            meshes: pickable,
+            clipping: resolveSectionViewRaycastClip(graphicsContext, renderFrame),
+          }).hit;
       const componentId = getModelComponentIdInHierarchy(hit?.object);
       const linkId = componentId === undefined ? undefined : findLinkByComponent({ mechanism, componentId });
       if (!hit || componentId === undefined || linkId === undefined) {

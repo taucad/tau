@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { INTERSECTED, NOT_INTERSECTED } from 'three-mesh-bvh';
-import { getOrBuildBvh } from '#graphics/three/utils/bvh-cache.js';
+import { ensureBvh, getBvh, getBvhStatus } from '#graphics/three/utils/bvh-cache.js';
+import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { getModelComponentId, getModelComponentOwnerInHierarchy } from '#graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { hasSceneTag, hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
@@ -25,7 +26,8 @@ export type SectionTopologyFailure = Readonly<{
     | 'non-finite-position'
     | 'non-manifold-vertex'
     | 'partial-visibility'
-    | 'slice-invariant';
+    | 'slice-invariant'
+    | 'bvh-unavailable';
   message: string;
   sourceKey: string;
 }>;
@@ -1014,8 +1016,6 @@ const createParticipant = (options: {
   order: number;
   association?: GltfAssociation;
 }): SectionSurfaceParticipant => {
-  getOrBuildBvh(options.mesh.geometry);
-
   return {
     mesh: options.mesh,
     localToSource: new THREE.Matrix4().multiplyMatrices(options.rootInverse, options.mesh.matrixWorld),
@@ -1504,6 +1504,35 @@ const createRegisteredSource = async (options: {
   };
 };
 
+/** Standalone geometries whose failed tree was already reported: collection runs every frame, the span once. */
+const reportedStandaloneTreeFailures = new WeakSet<THREE.BufferGeometry>();
+
+const recordSourceUnsupported = (sourceKey: string, reason: string): void => {
+  recordRendererSpan('renderer.section-source-unsupported', {
+    startTime: performance.now(),
+    duration: 0,
+    attributes: { sourceKey, code: 'bvh-unavailable', reason },
+  });
+};
+
+/**
+ * A source whose participant has no tree cannot be sliced: the BVH worker failed for it. It resolves unsupported,
+ * which section views skip, so a span records it.
+ */
+const withoutMissingTrees = (
+  source: SectionSurfaceSource,
+  missingTrees: ReadonlySet<THREE.BufferGeometry>,
+): SectionSurfaceSource => {
+  const missing = source.participants.find(({ mesh }) => missingTrees.has(mesh.geometry));
+  if (!missing) {
+    return source;
+  }
+  const status = getBvhStatus(missing.mesh.geometry);
+  const reason = status.status === 'failed' ? status.reason : 'its tree is unavailable';
+  recordSourceUnsupported(source.key, reason);
+  return { ...source, topology: topologyFailure(source.key, 'bvh-unavailable', `no BVH (${reason})`) };
+};
+
 /** Builds and registers the private topology owned by one loaded glTF scene. @internal */
 export const registerGltfSectionSurfaceSources = async (options: {
   scene: THREE.Group;
@@ -1535,6 +1564,11 @@ export const registerGltfSectionSurfaceSources = async (options: {
       order,
       association: getAssociation(mesh, options.parser.associations),
     }),
+  );
+  // Slicing needs every participant's tree. The ones above the synchronous threshold build in the BVH worker
+  // while the topology recipes build in theirs; registration stays pending until both land.
+  const trees = new Map(
+    [...new Set(meshes.map((mesh) => mesh.geometry))].map((geometry) => [geometry, ensureBvh(geometry)] as const),
   );
   const participantsByComponent = new Map<string, SectionSurfaceParticipant[]>();
   for (const participant of participants) {
@@ -1634,10 +1668,13 @@ export const registerGltfSectionSurfaceSources = async (options: {
       sliceStartedAt = performance.now();
     }
   }
-  const sources = await Promise.all(pending);
+  const built = await Promise.all(pending);
+  const landed = await Promise.all([...trees].map(async ([geometry, tree]) => ({ geometry, tree: await tree })));
+  const missingTrees = new Set(landed.filter(({ tree }) => !tree).map(({ geometry }) => geometry));
   if (options.isCancelled?.()) {
     throw new DOMException('Section preparation superseded', 'AbortError');
   }
+  const sources = built.map((source) => withoutMissingTrees(source, missingTrees));
   sectionSourceRegistry.set(options.scene, { status: 'ready', sources });
   const completedAt = performance.now();
   const workerMilliseconds = sources.reduce(
@@ -1657,7 +1694,7 @@ export const registerGltfSectionSurfaceSources = async (options: {
 /** Collects registered glTF sources plus topology-certified standalone meshes. @internal */
 export const collectSectionSurfaceSources = (
   root: THREE.Group,
-  onBlocked?: () => void,
+  onBlocked?: (ready?: Promise<unknown>) => void,
 ): VisibleSectionSurfaceSource[] => {
   const registered: SectionSurfaceSource[] = [];
   const coveredMeshes = new Set<SectionSurfaceMesh>();
@@ -1692,7 +1729,25 @@ export const collectSectionSurfaceSources = (
       hasPositionAttribute(object.geometry) &&
       !hasSceneTag(object, sceneTag.sectionViewHelper)
     ) {
-      standalone.push(createStandaloneSource(object));
+      // A standalone surface above the synchronous threshold has no cut until its worker tree lands.
+      if (getBvh(object.geometry)) {
+        standalone.push(createStandaloneSource(object));
+        return;
+      }
+      const tree = getBvhStatus(object.geometry);
+      if (tree.status === 'failed') {
+        const source = createStandaloneSource(object);
+        if (!reportedStandaloneTreeFailures.has(object.geometry)) {
+          reportedStandaloneTreeFailures.add(object.geometry);
+          recordSourceUnsupported(source.key, tree.reason);
+        }
+        standalone.push({
+          ...source,
+          topology: topologyFailure(source.key, 'bvh-unavailable', `no BVH (${tree.reason})`),
+        });
+        return;
+      }
+      onBlocked?.(ensureBvh(object.geometry));
     }
   });
 
@@ -1785,14 +1840,18 @@ const halfOpenHit = (options: {
   return vertexAt(positions, startVertex).lerp(vertexAt(positions, endVertex), start / (start - end));
 };
 
-const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: THREE.Plane): Set<number> => {
+/** The topology triangles whose bounds the plane crosses, through each participant's ready tree; never builds one. */
+const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: THREE.Plane): Set<number> | undefined => {
   const candidates = new Set<number>();
   const localPlane = new THREE.Plane();
   const inverse = new THREE.Matrix4();
   for (const participant of source.participants) {
     inverse.copy(participant.mesh.matrixWorld).invert();
     localPlane.copy(worldPlane).applyMatrix4(inverse);
-    const bvh = getOrBuildBvh(participant.mesh.geometry);
+    const bvh = getBvh(participant.mesh.geometry);
+    if (!bvh) {
+      return undefined;
+    }
     const meshBounds = bvh.getBoundingBox(new THREE.Box3());
     const planeCandidateDistanceToleranceMeshUnits =
       meshBounds.getSize(new THREE.Vector3()).length() * float32Epsilon * 8;
@@ -1863,6 +1922,9 @@ export const sliceSectionSurfaceSource = (options: {
   const sourcePlane = options.worldPlane.clone().applyMatrix4(getSectionSourceWorldMatrix(source).invert());
   const broadphaseStartedAt = performance.now();
   const candidates = candidateTopologyTriangles(source, options.worldPlane);
+  if (!candidates) {
+    return topologyFailure(source.key, 'bvh-unavailable', 'a participant has no ready tree');
+  }
   const candidateBroadphaseMilliseconds = performance.now() - broadphaseStartedAt;
   const { positions, triangleVertices, triangleEdges, edges, distanceTolerance } = topology;
   const onPlane = (vertex: number): boolean =>

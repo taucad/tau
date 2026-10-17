@@ -10,6 +10,7 @@ import type { UserConfig } from 'tsdown';
 const workerEntries = [
   'src/graphics/three/utils/measurement-features.worker.ts',
   'src/graphics/three/utils/section-surface-topology.worker.ts',
+  'src/graphics/three/workers/bvh.worker.ts',
   'src/graphics/three/workers/section-cap-overlap.worker.ts',
 ];
 

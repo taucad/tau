@@ -593,7 +593,10 @@ function extractTintHex(material: THREE.Material): number {
   return resolveModelMaterialBaseTintHex(material);
 }
 
-export function collectSectionSourceRecords(root: THREE.Group, onBlocked?: () => void): SectionSourceRecord[] {
+export function collectSectionSourceRecords(
+  root: THREE.Group,
+  onBlocked?: (ready?: Promise<unknown>) => void,
+): SectionSourceRecord[] {
   return collectSectionSurfaceSources(root, onBlocked).map((visibleSource) => {
     const { source } = visibleSource;
     const { mesh } = source.participants[0]!;
@@ -906,6 +909,7 @@ export function SectionContourFills({
     modelInteractionUnitId ? getModelInteractionUnitState(state.context, modelInteractionUnitId) : undefined,
   );
   const { invalidate, size, scene } = useThree();
+  const awaitedTreesRef = React.useRef(new Set<Promise<unknown>>());
   const resolution = React.useMemo(() => new THREE.Vector2(size.width, size.height), [size.height, size.width]);
   const invalidatedRenderStateRef = React.useRef<
     readonly [SectionCutSet, number, ModelInteractionUnitState | undefined, number, number] | undefined
@@ -1025,8 +1029,18 @@ export function SectionContourFills({
     const frameStartedAt = startSectionCapPhase(performanceFrame);
     const sourceCollectionStartedAt = startSectionCapPhase(performanceFrame);
     const readiness = { hasBlockedSources: false };
-    const sourceRecords = collectSectionSourceRecords(inner, () => {
+    const sourceRecords = collectSectionSourceRecords(inner, (ready) => {
       readiness.hasBlockedSources = true;
+      // A standalone surface waits on its worker tree: draw again once it lands, as a registration does.
+      if (ready && !awaitedTreesRef.current.has(ready)) {
+        awaitedTreesRef.current.add(ready);
+        // async-iife: bootstrap -- A frame cannot await a tree building in the worker.
+        void (async () => {
+          await ready;
+          awaitedTreesRef.current.delete(ready);
+          invalidate();
+        })();
+      }
     });
     // Deferred topology is not an empty model. Keep the last certified cuts/caps
     // until its owner publishes readiness and invalidates this demand canvas.

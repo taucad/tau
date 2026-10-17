@@ -15,7 +15,7 @@ export default defineConfig({
   root: fileURLToPath(new URL('../../../../', import.meta.url)),
   cacheDir: '../../node_modules/.cache/gltf-batches-browser',
   resolve: { dedupe: ['three'] },
-  optimizeDeps: { include: ['three', 'three/addons', 'three/webgpu', 'three/tsl'] },
+  optimizeDeps: { include: ['three', 'three/addons', 'three/webgpu', 'three/tsl', 'three-mesh-bvh'] },
   test: {
     provide: { webGpuProfile },
     include: [
@@ -23,6 +23,8 @@ export default defineConfig({
       'src/graphics/three/utils/gltf-edge-batches.browser.test.ts',
       'src/graphics/three/materials/section-clip.browser.test.ts',
       'src/graphics/three/utils/measurement-features-worker-client.browser.test.ts',
+      'src/graphics/three/utils/bvh-worker-client.browser.test.ts',
+      'src/graphics/three/utils/model-gpu-pick.browser.test.ts',
     ],
     fileParallelism: false,
     reporters: ['verbose'],

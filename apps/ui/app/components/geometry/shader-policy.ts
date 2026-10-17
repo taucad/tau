@@ -115,6 +115,16 @@ export const shaderSites = [
     risks: ['transparency', 'depth', 'lifecycle', 'hot-path'],
   },
   {
+    id: 'model-pick',
+    modules: [
+      'packages/viewer/src/graphics/three/materials/model-pick.material.ts',
+      'packages/viewer/src/graphics/three/materials/model-pick.node.ts',
+    ],
+    authoring: ['glsl', 'tsl', 'render-pass'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['camera', 'depth', 'clipping', 'lifecycle'],
+  },
+  {
     id: 'metal-morph-loader',
     modules: [
       'apps/ui/app/components/geometry/loader/metal-morph-material.node.ts',
@@ -143,6 +153,7 @@ const sectionClipUnit = 'packages/viewer/src/graphics/three/materials/section-cl
 const sectionClippingGroupUnit = 'packages/viewer/src/graphics/three/react/section-clipping-group.test.tsx';
 const sectionClipBrowser = 'packages/viewer/src/graphics/three/materials/section-clip.browser.test.ts';
 const gltfMeshLifecycleUnit = 'packages/viewer/src/graphics/three/react/gltf-mesh.camera-lifecycle.test.tsx';
+const modelPickBrowser = 'packages/viewer/src/graphics/three/utils/model-gpu-pick.browser.test.ts';
 const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${semantic}`) => ({
   reference: [`${unit}::${semantic}`],
   'generated-source': [
@@ -348,6 +359,19 @@ export const shaderEvidence = {
     'draws the outline only where mask coverage changes',
     'packages/viewer/src/graphics/three/materials/model-emphasis-silhouette.test.ts::matches stable stripped silhouette node material JSON snapshot',
   ),
+  'model-pick': {
+    reference: [`${modelPickBrowser}::should name the mesh and the distance the BVH names, away from silhouettes`],
+    'real-compile': [`${modelPickBrowser}::should name the mesh and the distance the BVH names, away from silhouettes`],
+    pixels: [`${modelPickBrowser}::should name the mesh and the distance the BVH names, away from silhouettes`],
+    'backend-differential': [
+      `${modelPickBrowser}::should name the mesh and the distance the BVH names, away from silhouettes`,
+    ],
+    'depth-clipping': [`${modelPickBrowser}::should pick what the section cut leaves, through what it removes`],
+    lifecycle: [
+      `${modelPickBrowser}::should answer pending for a scene the buffer does not show, then replay once when the pass lands`,
+      `${gltfMeshLifecycleUnit}::should leave hover and selection alone while the model pick is pending, then resolve the replayed pointer`,
+    ],
+  },
   'metal-morph-loader': {
     reference: [
       `${metalMorphLoaderRoot}/metal-morph-shapes.test.ts::should measure a cube face at its inradius and a corner at its circumradius`,

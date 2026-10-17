@@ -8,6 +8,8 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import type { GeometryComponentManifest } from '@taucad/types';
 import { countConstructions } from '#test/three-allocations.test-utils.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
+import * as bvhCache from '#graphics/three/utils/bvh-cache.js';
+import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import {
   buildSectionSurfaceTopologyForGeometry,
   collectSectionSurfaceSources,
@@ -481,6 +483,136 @@ describe('section surface topology', () => {
     setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
 
     expect(collectSectionSurfaceSources(scene)).toHaveLength(1);
+  });
+
+  describe('with a tree built in the BVH worker', () => {
+    /** Makes `geometry`'s tree absent, as one above the synchronous threshold is, until the test lands or fails it. */
+    const deferTree = (geometry: THREE.BufferGeometry) => {
+      const { getBvh, getBvhStatus } = bvhCache;
+      let status: bvhCache.BvhStatus = { status: 'building' };
+      let settle!: (tree: ReturnType<typeof getBvh>) => void;
+      const ready = new Promise<ReturnType<typeof getBvh>>((resolve) => {
+        settle = resolve;
+      });
+      vi.spyOn(bvhCache, 'getBvh').mockImplementation((candidate) =>
+        candidate === geometry && status.status !== 'ready' ? undefined : getBvh(candidate),
+      );
+      vi.spyOn(bvhCache, 'getBvhStatus').mockImplementation((candidate) =>
+        candidate === geometry ? status : getBvhStatus(candidate),
+      );
+      const ensure = vi
+        .spyOn(bvhCache, 'ensureBvh')
+        .mockImplementation(async (candidate) => (candidate === geometry ? ready : getBvh(candidate)));
+      return {
+        ready,
+        ensure,
+        land() {
+          status = { status: 'ready' };
+          settle(getBvh(geometry));
+        },
+        fail(reason: string) {
+          status = { status: 'failed', reason };
+          settle(undefined);
+        },
+      };
+    };
+
+    afterEach(() => {
+      clearRendererSpans();
+    });
+
+    it('keeps a standalone surface out of the cut until its tree lands', () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
+      const tree = deferTree(mesh.geometry);
+      const blocked = vi.fn();
+
+      expect(collectSectionSurfaceSources(scene, blocked)).toEqual([]);
+      expect(blocked).toHaveBeenCalledTimes(1);
+      expect(tree.ensure).toHaveBeenCalledWith(mesh.geometry);
+
+      tree.land();
+      blocked.mockClear();
+      expect(collectSectionSurfaceSources(scene, blocked)).toHaveLength(1);
+      expect(blocked).not.toHaveBeenCalled();
+    });
+
+    it('makes a standalone surface whose tree failed unsupported, reported once', () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
+      deferTree(mesh.geometry).fail('worker failed twice');
+
+      for (let frame = 0; frame < 2; frame++) {
+        const [visible] = collectSectionSurfaceSources(scene);
+        expect(visible?.source.topology).toMatchObject({
+          status: 'unsupported',
+          failure: { code: 'bvh-unavailable' },
+        });
+      }
+      expect(
+        rendererSpans()
+          .filter(({ name }) => name === 'renderer.section-source-unsupported')
+          .map(({ detail }) => detail),
+      ).toEqual([expect.objectContaining({ code: 'bvh-unavailable', reason: 'worker failed twice' })]);
+    });
+
+    it('keeps registration pending until every tree lands, then slices the source', async () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      const tree = deferTree(mesh.geometry);
+      let isRegistered = false;
+      const registration = (async () => {
+        await registerGltfSectionSurfaceSources({
+          scene,
+          manifest,
+          unitId: 'unit',
+          parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+        });
+        isRegistered = true;
+      })();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(isRegistered).toBe(false);
+
+      tree.land();
+      await registration;
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(
+        sliceSectionSurfaceSource({
+          visibleSource: visible!,
+          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+        }),
+      ).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
+    });
+
+    it('registers a source whose tree failed as unsupported and records why', async () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      deferTree(mesh.geometry).fail('worker failed twice');
+
+      await registerGltfSectionSurfaceSources({
+        scene,
+        manifest,
+        unitId: 'unit',
+        parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+      });
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(visible?.source.topology).toMatchObject({
+        status: 'unsupported',
+        failure: { code: 'bvh-unavailable' },
+      });
+      expect(rendererSpans().find(({ name }) => name === 'renderer.section-source-unsupported')?.detail).toMatchObject({
+        code: 'bvh-unavailable',
+        reason: 'worker failed twice',
+      });
+    });
   });
 
   it('cuts a registered part where a kinematic pose placed it after registration', async () => {

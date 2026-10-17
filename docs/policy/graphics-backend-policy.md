@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-16'
+updated: '2026-10-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -88,7 +88,9 @@ Resources allocated with `useMemo` require matching effect cleanup. Dispose only
 
 ### 10. Keep picking local and clipping-aware
 
-Route pointer-rate model picking through `raycastFirstVisibleMeshHit` in `graphics/three/utils/bvh-raycast.ts`. Pass the active clipping state so a clipped first triangle cannot hide a farther visible hit.
+Answer pointer hover and click on the model from the GPU pick in `graphics/three/utils/model-gpu-pick.ts`. Its pass draws what the viewport draws (transforms, visibility, layers, face side and the section clip) into an ID and world-position target, only when its inputs changed and the camera is still, and reads it back asynchronously. A pick is answered synchronously from the read-back copy; while the copy is stale the pick is pending: hover stays as it is, a click is neither a selection nor a miss, and the pointer is resolved again once through R3F `events.update()` when the pass lands.
+
+Rays the pick cannot answer (not through a camera pixel, or a renderer that cannot read the pass back) and exact consumers such as measurement and section topology use `raycastFirstVisibleMeshHit` in `graphics/three/utils/bvh-raycast.ts`. Pass the active clipping state so a clipped first triangle cannot hide a farther visible hit. A tree above `maxSynchronousBvhTriangles` is built in the BVH worker on demand; until it lands its mesh is pending, never a miss.
 
 Do not patch `Mesh.prototype.raycast`. Section handles and the plane picker may use the stock raycaster only on their own subtrees.
 

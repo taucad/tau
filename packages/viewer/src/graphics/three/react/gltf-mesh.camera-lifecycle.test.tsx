@@ -39,6 +39,7 @@ import {
 } from '#graphics/three/materials/model-component-appearance.js';
 import { createSectionClip } from '#graphics/three/materials/section-clip.js';
 import type { SectionClip } from '#graphics/three/materials/section-clip.js';
+import type { ModelPickResult } from '#graphics/three/utils/model-gpu-pick.js';
 
 type RendererMock = {
   compileAsync?: ReturnType<typeof vi.fn>;
@@ -48,6 +49,8 @@ type RendererMock = {
 const mocks = vi.hoisted(() => {
   const gl: RendererMock = {};
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
+  /** Widened, so a test can answer any status. */
+  const pickResult = (result: ModelPickResult): ModelPickResult => result;
   return {
     noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
@@ -100,8 +103,15 @@ const mocks = vi.hoisted(() => {
     sceneBounds,
     backend: 'webgl' as 'webgl' | 'webgpu',
     sectionClip: undefined as SectionClip | undefined,
+    /** What the GPU pick answers; `unavailable` routes every ray through the trees, as a renderer without it does. */
+    modelPickResult: pickResult({ status: 'unavailable' }),
+    modelPickReplay: vi.fn(),
   };
 });
+
+vi.mock('#graphics/three/react/use-model-gpu-pick.js', () => ({
+  useModelGpuPick: () => ({ pick: () => mocks.modelPickResult, replay: mocks.modelPickReplay }),
+}));
 
 vi.mock('@react-three/fiber', async (importOriginal) => ({
   ...(await importOriginal<typeof Fiber>()),
@@ -717,7 +727,7 @@ describe('GltfMesh camera lifecycle', () => {
     expect(collectModelPickableSurfaceMeshes(gltf.scene)).toContain(near);
     expect(near.visible).toBe(true);
     expect(gltf.scene.visible).toBe(true);
-    expect(bvhRaycast.raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] })?.object).toBe(near);
+    expect(bvhRaycast.raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] }).hit?.object).toBe(near);
     const hits = raycaster.intersectObject(gltf.scene, true);
     expect(hits.length).toBe(1);
     expect(hits[0]?.object).toBe(near);
@@ -874,6 +884,100 @@ describe('GltfMesh camera lifecycle', () => {
       expect(secondaryPointer).toHaveBeenLastCalledWith({ unitId: 'unit:test', componentId: 'far' });
       expect(raycast).toHaveBeenCalledTimes(1);
     } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  it('should leave hover and selection alone while the model pick is pending, then resolve the replayed pointer', async () => {
+    const gltf = createGltf();
+    const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    near.position.z = -2;
+    gltf.scene.add(near);
+    const originalRaycast = gltf.scene.raycast;
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const cpuRaycast = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
+    const canvas = document.createElement('canvas');
+    const renderer = Object.create(WebGLRenderer.prototype) as WebGLRenderer;
+    Object.defineProperties(renderer, {
+      dispose: { value: vi.fn() },
+      domElement: { value: canvas },
+      render: { value: vi.fn() },
+      setPixelRatio: { value: vi.fn() },
+      setSize: { value: vi.fn() },
+      outputColorSpace: { value: '', writable: true },
+      toneMapping: { value: 0, writable: true },
+      toneMappingExposure: { value: 1, writable: true },
+    });
+    extend({ Group });
+    const root = createRoot(canvas);
+    const camera = new PerspectiveCamera(60, 1, 0.1, 100);
+    const onPointerMissed = vi.fn();
+    try {
+      await act(async () => {
+        await root.configure({
+          camera,
+          events: createPointerEvents,
+          frameloop: 'never',
+          gl: renderer,
+          onPointerMissed,
+          size: { width: 800, height: 800, top: 0, left: 0 },
+        });
+      });
+      const store = root.render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
+      await waitFor(() => {
+        expect(gltf.scene.raycast).not.toBe(originalRaycast);
+      });
+      setModelComponentOwner(near, { unitId: 'unit:test', componentId: 'near' });
+      store.getState().scene.updateMatrixWorld(true);
+      const hit: ModelPickResult = {
+        status: 'hit',
+        intersection: { distance: 1.5, point: new Vector3(0, 0, -1.5), object: near },
+      };
+      const pointer = mock<PointerEvent>({ offsetX: 400, offsetY: 400, pointerId: 1, button: 0, target: canvas });
+      const { handlers } = store.getState().events;
+      const hoverMessages = () =>
+        mocks.graphicsActor.send.mock.calls.filter(([event]) =>
+          ['setHoveredModelComponent', 'toggleModelComponentSelection', 'clearModelComponentSelection'].includes(
+            (event as { type: string }).type,
+          ),
+        );
+
+      mocks.modelPickResult = hit;
+      await act(async () => handlers?.onPointerMove(pointer));
+      expect(mocks.graphicsActor.send).toHaveBeenLastCalledWith({
+        type: 'setHoveredModelComponent',
+        unitId: 'unit:test',
+        componentId: 'near',
+        source: 'viewer',
+      });
+      // The GPU answered: the trees were never asked.
+      expect(cpuRaycast).not.toHaveBeenCalled();
+
+      mocks.modelPickResult = { status: 'pending' };
+      mocks.graphicsActor.send.mockClear();
+      await act(async () => handlers?.onPointerMove(pointer));
+      await act(async () => handlers?.onPointerDown(pointer));
+      await act(async () => handlers?.onClick(pointer));
+      // Not yet known: no hover change, no selection, and the click is not a miss.
+      expect(hoverMessages()).toEqual([]);
+      expect(onPointerMissed).not.toHaveBeenCalled();
+      expect(cpuRaycast).not.toHaveBeenCalled();
+
+      // The pass lands and the replay resolves the last pointer once more, through R3F.
+      mocks.modelPickResult = { status: 'miss' };
+      await act(async () => {
+        store.getState().events.update?.();
+      });
+      expect(mocks.graphicsActor.send).toHaveBeenLastCalledWith({
+        type: 'setHoveredModelComponent',
+        unitId: 'unit:test',
+        componentId: undefined,
+        source: 'viewer',
+      });
+    } finally {
+      mocks.modelPickResult = { status: 'unavailable' };
       await act(async () => {
         root.unmount();
       });

@@ -120,6 +120,7 @@ const importOwners: ReadonlyArray<readonly [RegExp, string]> = [
   [/^manifold-3d(?:\/|$)/u, 'cad-manifold'],
   [/^(?:libcascade|opencascade\.js)(?:\/|$)/u, 'cad-opencascadejs'],
   [/^(?:picovoxel|@taucad\/picovoxel[\w-]*)(?:\/|$)/u, 'cad-picovoxel'],
+  [/^(?:@classcad\/smlibwasm|@taucad\/smlib)(?:\/|$)/u, 'cad-smlib'],
   [/^(?:tscircuit|@tscircuit\/[\w.-]+)(?:\/|$)/u, 'cad-tscircuit'],
 ];
 

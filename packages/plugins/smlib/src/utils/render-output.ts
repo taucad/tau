@@ -71,7 +71,7 @@ export const smlibColorToCss = (color: unknown): string | undefined => {
     return color;
   }
   if (Array.isArray(color) && color.length >= 3 && color.every((channel) => typeof channel === 'number')) {
-    const channels = color.slice(0, 3) as number[];
+    const channels: number[] = color.slice(0, 3);
     const scale = channels.every((channel) => channel <= 1) ? 255 : 1;
     const [red, green, blue] = channels.map((channel) => Math.round(Math.min(255, Math.max(0, channel * scale))));
     return `rgb(${red}, ${green}, ${blue})`;
@@ -109,11 +109,12 @@ function normalizeAppearance(shape: InputShape): InputShape {
     configuredOpacity = opacity ?? normalizedColor.alpha;
   }
 
-  return {
+  const normalized: InputShape = {
     ...rest,
     color: normalizedColor?.color,
     opacity: configuredOpacity,
-  } as InputShape;
+  };
+  return normalized;
 }
 
 /**
@@ -156,7 +157,13 @@ export function normalizeRenderShapes(library: SmlibLibrary, output: unknown, de
   });
 }
 
-function withSpan<T>(tracer: RuntimeSpanTracer | undefined, name: string, attributes: Record<string, string | number | boolean>, operation: () => T): T {
+type SpanRequest = {
+  tracer: RuntimeSpanTracer | undefined;
+  name: string;
+  attributes: Record<string, string | number | boolean>;
+};
+
+function withSpan<T>({ tracer, name, attributes }: SpanRequest, operation: () => T): T {
   const span = tracer?.startSpan(name, attributes);
   try {
     return operation();
@@ -169,20 +176,26 @@ const needsSurfaceCoordinates = (material: GlbMaterial | undefined): boolean =>
   material !== undefined &&
   (material.extensions?.KHR_materials_anisotropy !== undefined || JSON.stringify(material).includes('Texture'));
 
-type FaceMesh = { vertices: ArrayLike<number>; triangles: ArrayLike<number>; normals: ArrayLike<number> | null };
+type NumberArray = ArrayLike<number> & Iterable<number>;
+// oxlint-disable-next-line typescript/no-restricted-types -- `Mesh.normals` is null when the mesh has none.
+type FaceMesh = { vertices: NumberArray; triangles: NumberArray; normals: NumberArray | null };
 
 /**
  * Append one face's mesh to the shape's buffers, averaging the face's corner normals per vertex.
  * Within one face the surface is smooth, so the average is the surface normal; across faces the
  * vertices are separate, which keeps CAD edges crisp.
+ * @param target - The shape's face buffers.
+ * @param mesh - One face's mesh, with corner normals when the kernel gave them.
+ * @param faceId - The face's index in its body.
  */
 function appendFaceMesh(target: GeometrySmlib['faces'], mesh: FaceMesh, faceId: number): void {
   const base = target.vertices.length / 3;
   const start = target.triangles.length;
   const vertexCount = mesh.vertices.length / 3;
   const sums = new Float64Array(vertexCount * 3);
-  for (let index = 0; index < mesh.vertices.length; index++) {
-    target.vertices.push(mesh.vertices[index]!);
+  // Pushed one by one: spreading a large mesh into `push` overflows the call stack.
+  for (const value of mesh.vertices) {
+    target.vertices.push(value);
   }
   for (let corner = 0; corner < mesh.triangles.length; corner++) {
     const vertex = mesh.triangles[corner]!;
@@ -200,7 +213,11 @@ function appendFaceMesh(target: GeometrySmlib['faces'], mesh: FaceMesh, faceId: 
       const c = mesh.triangles[corner + 2]! * 3;
       const ab = [0, 1, 2].map((axis) => mesh.vertices[b + axis]! - mesh.vertices[a + axis]!);
       const ac = [0, 1, 2].map((axis) => mesh.vertices[c + axis]! - mesh.vertices[a + axis]!);
-      const normal = [ab[1]! * ac[2]! - ab[2]! * ac[1]!, ab[2]! * ac[0]! - ab[0]! * ac[2]!, ab[0]! * ac[1]! - ab[1]! * ac[0]!];
+      const normal = [
+        ab[1]! * ac[2]! - ab[2]! * ac[1]!,
+        ab[2]! * ac[0]! - ab[0]! * ac[2]!,
+        ab[0]! * ac[1]! - ab[1]! * ac[0]!,
+      ];
       for (const vertex of [a, b, c]) {
         for (let axis = 0; axis < 3; axis++) {
           sums[vertex + axis]! += normal[axis]!;
@@ -226,6 +243,9 @@ const maximumCurveDepth = 10;
  * Sample one edge into a polyline: its two ends for a line, otherwise an adaptive bisection on the
  * curve parameter until each chord is within the linear tolerance of the curve and turns by less
  * than the angular tolerance.
+ * @param edge - The edge to sample.
+ * @param tessellation - Linear and angular tolerances.
+ * @returns The polyline's points.
  */
 function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[][] {
   const start = edge.pointAt(0).toArray();
@@ -236,7 +256,8 @@ function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[
   const maximumTurn = (tessellation.angularTolerance * Math.PI) / 180;
   const distance = (a: number[], b: number[]): number => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
   const points: number[][] = [];
-  const refine = (t0: number, p0: number[], t1: number, p1: number[], depth: number): void => {
+  type Span = { t0: number; p0: number[]; t1: number; p1: number[] };
+  const refine = ({ t0, p0, t1, p1 }: Span, depth: number): void => {
     const tm = (t0 + t1) / 2;
     const pm = edge.pointAt(tm).toArray();
     const chordMid = [(p0[0]! + p1[0]!) / 2, (p0[1]! + p1[1]!) / 2, (p0[2]! + p1[2]!) / 2];
@@ -244,8 +265,8 @@ function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[
     const half = distance(p0, p1) / 2;
     const turn = half > 0 ? 4 * Math.atan2(sagitta, half) : 0;
     if (depth < maximumCurveDepth && (sagitta > tessellation.linearTolerance || turn > maximumTurn)) {
-      refine(t0, p0, tm, pm, depth + 1);
-      refine(tm, pm, t1, p1, depth + 1);
+      refine({ t0, p0, t1: tm, p1: pm }, depth + 1);
+      refine({ t0: tm, p0: pm, t1, p1 }, depth + 1);
       return;
     }
     points.push(p1);
@@ -256,14 +277,24 @@ function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[
   for (let index = 1; index < seeds.length; index++) {
     const t = seeds[index]!;
     const point = index === seeds.length - 1 ? end : edge.pointAt(t).toArray();
-    refine(seeds[index - 1]!, previous, t, point, 0);
+    refine({ t0: seeds[index - 1]!, p0: previous, t1: t, p1: point }, 0);
     previous = point;
   }
   return points;
 }
 
-function appendEdges(target: GeometrySmlib['edges'], edges: readonly SmlibModule.Edge[], tessellation: Tessellation): void {
-  edges.forEach((edge, edgeId) => {
+/**
+ * Append edges as a segment soup, one scalar range per edge.
+ * @param target - The shape's edge buffers.
+ * @param edges - The body's edges, in order.
+ * @param tessellation - Linear and angular tolerances.
+ */
+function appendEdges(
+  target: GeometrySmlib['edges'],
+  edges: readonly SmlibModule.Edge[],
+  tessellation: Tessellation,
+): void {
+  for (const [edgeId, edge] of edges.entries()) {
     const points = sampleEdge(edge, tessellation);
     const start = target.lines.length;
     for (let index = 1; index < points.length; index++) {
@@ -272,7 +303,153 @@ function appendEdges(target: GeometrySmlib['edges'], edges: readonly SmlibModule
     if (target.lines.length > start) {
       target.edgeGroups.push({ start, count: target.lines.length - start, edgeId });
     }
+  }
+}
+
+/** One face's triangles in a whole-body mesh: the half-open range `[start, end)` of triangle indices. */
+type FaceRun = { faceId: number; start: number; end: number };
+
+/**
+ * Which face each triangle of a whole-body mesh came from. SMLib meshes a body in one pass, so faces
+ * share their boundary samples and the mesh is watertight, but the public mesh does not say which
+ * face a triangle belongs to. The kernel emits each face's triangles as one contiguous run, so the
+ * runs are found by bisection: a triangle is classified by the face nearest its centroid (among the
+ * faces whose box holds it), and a range whose two ends share a face is that face throughout.
+ *
+ * @param faces - The body's faces, in `faces()` order.
+ * @param mesh - The body's mesh.
+ * @param tolerance - The mesh's chord tolerance, which bounds a centroid's distance from its face.
+ * @returns The face runs in mesh order.
+ */
+function findFaceRuns(faces: readonly SmlibModule.Face[], mesh: FaceMesh, tolerance: number): FaceRun[] {
+  const triangleCount = mesh.triangles.length / 3;
+  if (faces.length <= 1 || triangleCount === 0) {
+    return [{ faceId: 0, start: 0, end: triangleCount }];
+  }
+  const margin = Math.max(tolerance * 4, 1e-6);
+  const boxes = faces.map((face) => {
+    const box = face.bbox();
+    return {
+      low: box.min.toArray().map((value) => value - margin),
+      high: box.max.toArray().map((value) => value + margin),
+    };
   });
+  const owners = new Map<number, number>();
+  const classify = (triangle: number): number => {
+    const known = owners.get(triangle);
+    if (known !== undefined) {
+      return known;
+    }
+    const centroid = [0, 1, 2].map(
+      (axis) =>
+        (mesh.vertices[mesh.triangles[triangle * 3]! * 3 + axis]! +
+          mesh.vertices[mesh.triangles[triangle * 3 + 1]! * 3 + axis]! +
+          mesh.vertices[mesh.triangles[triangle * 3 + 2]! * 3 + axis]!) /
+        3,
+    );
+    const inside = boxes.flatMap(({ low, high }, faceId) =>
+      centroid.every((value, axis) => value >= low[axis]! && value <= high[axis]!) ? [faceId] : [],
+    );
+    const candidates = inside.length > 0 ? inside : faces.map((_, faceId) => faceId);
+    let owner = candidates[0]!;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const faceId of candidates) {
+      const distance = candidates.length === 1 ? 0 : faces[faceId]!.distanceTo(centroid);
+      if (distance < nearest) {
+        nearest = distance;
+        owner = faceId;
+      }
+    }
+    owners.set(triangle, owner);
+    return owner;
+  };
+  const runs: FaceRun[] = [];
+  const append = (faceId: number, start: number, end: number): void => {
+    const last = runs.at(-1);
+    if (last?.faceId === faceId && last.end === start) {
+      last.end = end;
+    } else {
+      runs.push({ faceId, start, end });
+    }
+  };
+  // Ranges are visited left to right, so runs come out in mesh order.
+  const split = (low: number, high: number): void => {
+    const first = classify(low);
+    if (first === classify(high)) {
+      append(first, low, high + 1);
+      return;
+    }
+    if (high - low === 1) {
+      append(first, low, low + 1);
+      append(classify(high), high, high + 1);
+      return;
+    }
+    const middle = Math.floor((low + high) / 2);
+    split(low, middle);
+    split(middle + 1, high);
+  };
+  split(0, triangleCount - 1);
+  return runs;
+}
+
+/**
+ * One run of a whole-body mesh as a face mesh of its own: the run's triangles with their corner
+ * normals, and the vertices they use, which keep their exact positions so neighbouring faces meet.
+ * @param mesh - The mesh SMLib made of the whole body.
+ * @param run - Which triangles belong to the face.
+ * @returns The face's mesh.
+ */
+function sliceFaceMesh(mesh: FaceMesh, { start, end }: FaceRun): FaceMesh {
+  const local = new Map<number, number>();
+  const vertices: number[] = [];
+  const triangles: number[] = [];
+  for (let corner = start * 3; corner < end * 3; corner++) {
+    const vertex = mesh.triangles[corner]!;
+    let index = local.get(vertex);
+    if (index === undefined) {
+      index = local.size;
+      local.set(vertex, index);
+      vertices.push(mesh.vertices[vertex * 3]!, mesh.vertices[vertex * 3 + 1]!, mesh.vertices[vertex * 3 + 2]!);
+    }
+    triangles.push(index);
+  }
+  if (!mesh.normals) {
+    return { vertices, triangles, normals: null };
+  }
+  const normals: number[] = [];
+  for (let index = start * 9; index < end * 9; index++) {
+    normals.push(mesh.normals[index]!);
+  }
+  return { vertices, triangles, normals };
+}
+
+/**
+ * Edges used by other than two triangles once the meshes' coincident positions are joined.
+ * @param meshes - Meshes that together should close a solid.
+ * @returns How many edges are open or non-manifold; zero for a watertight solid.
+ */
+function countOpenEdges(meshes: readonly FaceMesh[]): number {
+  const edges = new Map<string, number>();
+  for (const { vertices, triangles } of meshes) {
+    const key = (vertex: number): string =>
+      `${vertices[vertex * 3]!.toFixed(6)},${vertices[vertex * 3 + 1]!.toFixed(6)},${vertices[vertex * 3 + 2]!.toFixed(6)}`;
+    for (let corner = 0; corner < triangles.length; corner += 3) {
+      const corners = [key(triangles[corner]!), key(triangles[corner + 1]!), key(triangles[corner + 2]!)];
+      for (let side = 0; side < 3; side++) {
+        const a = corners[side]!;
+        const b = corners[(side + 1) % 3]!;
+        const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+        edges.set(edge, (edges.get(edge) ?? 0) + 1);
+      }
+    }
+  }
+  let open = 0;
+  for (const count of edges.values()) {
+    if (count !== 2) {
+      open++;
+    }
+  }
+  return open;
 }
 
 function emptyGeometry(config: NamedInputShape): GeometrySmlib {
@@ -296,6 +473,9 @@ function emptyGeometry(config: NamedInputShape): GeometrySmlib {
  * Each B-rep face is meshed on its own so every triangle carries its face id; a body whose faces
  * the kernel cannot mesh alone (some imported bodies) falls back to one mesh of the whole body as a
  * single face group.
+ * @param config - The named shape and its appearance.
+ * @param options - Library, tessellation, edge and telemetry options.
+ * @returns The shape's grouped geometry.
  */
 function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySmlib {
   const { library, tessellation, collectBrepEdges = false, tracer } = options;
@@ -308,27 +488,38 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
     collectBrepEdges,
   };
 
-  withSpan(tracer, 'smlib.tessellate.faces', { ...attributes, output: 'faces' }, () => {
+  withSpan({ tracer, name: 'smlib.tessellate.faces', attributes: { ...attributes, output: 'faces' } }, () => {
     if (shape instanceof library.Mesh) {
       appendFaceMesh(geometry.faces, shape, 0);
       return;
     }
-    const faces = shape instanceof library.Face ? [shape] : [...shape.faces()];
-    try {
-      faces.forEach((face, faceId) => {
-        appendFaceMesh(
-          geometry.faces,
-          library.tessellate(face, tessellation.linearTolerance, tessellation.angularTolerance),
-          faceId,
-        );
-      });
-    } catch {
-      geometry.faces = { triangles: [], vertices: [], normals: [], faceGroups: [] };
-      appendFaceMesh(
-        geometry.faces,
-        library.tessellate(shape, tessellation.linearTolerance, tessellation.angularTolerance),
-        0,
+    // One mesh of the whole body: faces meshed alone sample their shared edges differently and crack.
+    const mesh = library.tessellate(shape, tessellation.linearTolerance, tessellation.angularTolerance);
+    if (shape instanceof library.Part && !mesh.isClosed()) {
+      // SMLib 0.3.4 leaves a moved torus's seam open in a body mesh, though the face alone meshes
+      // closed: keep whichever mesh has fewer open edges.
+      const faceMeshes = [...shape.faces()].map((face) =>
+        library.tessellate(face, tessellation.linearTolerance, tessellation.angularTolerance),
       );
+      if (countOpenEdges(faceMeshes) < countOpenEdges([mesh])) {
+        for (const [faceId, faceMesh] of faceMeshes.entries()) {
+          appendFaceMesh(geometry.faces, faceMesh, faceId);
+        }
+        return;
+      }
+    }
+    let runs: FaceRun[];
+    try {
+      runs = shape instanceof library.Face ? [] : findFaceRuns([...shape.faces()], mesh, tessellation.linearTolerance);
+    } catch {
+      runs = [];
+    }
+    if (runs.length === 0) {
+      appendFaceMesh(geometry.faces, mesh, 0);
+      return;
+    }
+    for (const run of runs) {
+      appendFaceMesh(geometry.faces, sliceFaceMesh(mesh, run), run.faceId);
     }
   });
 
@@ -349,7 +540,7 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
   }
 
   if (collectBrepEdges && !(shape instanceof library.Mesh)) {
-    withSpan(tracer, 'smlib.tessellate.edges', { ...attributes, output: 'edges' }, () => {
+    withSpan({ tracer, name: 'smlib.tessellate.edges', attributes: { ...attributes, output: 'edges' } }, () => {
       appendEdges(geometry.edges, [...shape.edges()], tessellation);
     });
   }

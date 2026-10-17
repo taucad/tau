@@ -36,6 +36,7 @@
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {
+    "@classcad/smlibwasm": "catalog:",
     "@jscad/modeling": "catalog:",
     "@taucad/build123d": "workspace:*",
     "@taucad/geometry-core": "workspace:*",

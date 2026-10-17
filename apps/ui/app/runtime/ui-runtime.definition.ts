@@ -20,6 +20,7 @@ import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
+import { smlib } from '@taucad/smlib';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
@@ -40,6 +41,8 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     // Default wasm 'auto': the pthread build for fast viewer renders only when the worker is
     // cross-origin isolated; exact exports always run on the serial build.
     picovoxel(),
+    // Claims only files importing @classcad/smlibwasm; the kernel's WebAssembly loads on first use.
+    smlib(),
     gltf(),
     brep(),
     rhino(),

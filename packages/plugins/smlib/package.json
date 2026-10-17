@@ -76,7 +76,9 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "catalog:",
     "@taucad/esbuild": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"

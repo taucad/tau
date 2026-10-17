@@ -140,9 +140,10 @@ const smlibLibraryTracePolicy = defineLibraryTracePolicy({
   traceCall(context) {
     return context.scope === 'user-main' ? { type: 'trace' } : { type: 'ignore' };
   },
-  // Only functions are wrapped: SMLib's shapes own WebAssembly handles and must reach the kernel unproxied.
+  // Shapes built in user code are wrapped too, so their methods (`cut`, `fillet`) count; the
+  // tracer unwraps arguments and `main`'s result before SMLib or the kernel sees them.
   shouldWrapValue(context) {
-    return typeof context.value === 'function';
+    return typeof context.value === 'function' || context.scope === 'user-main';
   },
 });
 
@@ -215,11 +216,11 @@ const runMain = async (
   library: SmlibLibrary,
   parameters: Record<string, unknown>,
 ): Promise<unknown> => {
-  const main = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
-  if (typeof main !== 'function') {
+  const candidate = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
+  if (typeof candidate !== 'function') {
     return undefined;
   }
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- user code returns an unknown shape value.
+  const main = candidate as (...arguments_: unknown[]) => unknown;
   return main.length >= 2 ? await main(library, parameters) : await main(parameters);
 };
 
@@ -375,7 +376,10 @@ export const smlibKernel = defineKernel({
         }
 
         const model =
-          isRecordObject(shapes) && !Array.isArray(shapes) && 'shapes' in shapes && !(shapes instanceof context.library.Shape)
+          isRecordObject(shapes) &&
+          !Array.isArray(shapes) &&
+          'shapes' in shapes &&
+          !(shapes instanceof context.library.Shape)
             ? shapes
             : undefined;
         if (model && !Array.isArray(model['shapes'])) {
@@ -667,10 +671,7 @@ export const smlibKernel = defineKernel({
       drawings: serialized.drawings,
       shapes: serialized.shapes.map((entry) => ({
         ...entry.metadata,
-        shape:
-          entry.kind === 'brep'
-            ? library.fromSmb(entry.smb)
-            : new library.Mesh(entry.vertices, entry.triangles),
+        shape: entry.kind === 'brep' ? library.fromSmb(entry.smb) : new library.Mesh(entry.vertices, entry.triangles),
       })) as NamedInputShape[],
     };
   },
@@ -678,7 +679,13 @@ export const smlibKernel = defineKernel({
 
 type ExportCoordinateSystem = 'y-up' | 'z-up' | undefined;
 
-/** A body to export: faces become sheets, and y-up turns the Z-up model about X by −90°. */
+/**
+ * A body to export: faces become sheets, and y-up turns the Z-up model about X by −90°.
+ * @param library - Loaded SMLib module.
+ * @param shape - A body or face.
+ * @param coordinateSystem - The export's up axis.
+ * @returns The body to write.
+ */
 const toExportBody = (
   library: SmlibLibrary,
   shape: NamedInputShape['shape'],

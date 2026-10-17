@@ -55,3 +55,9 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
+
+- `@classcad/smlibwasm` is pinned exactly in the pnpm catalog; a bump changes meshes and snapshots, so bump this kernel's `version` with it.
+- Its shape constructors are functions (`Box(...)`, `Pos(...).mul(...)`), not classes; `Mesh` is the one class authors construct.
+- Bodies are tessellated whole so faces share boundary samples; face groups come from the contiguous per-face triangle runs (`findFaceRuns`). A Part whose body mesh is open falls back to per-face meshes when those close better (0.3.4 leaves a moved torus's seam open).
+- Edges and wires are sampled into `DrawingEntry` polylines at evaluation, so drawings survive the msgpack handle snapshot; bodies snapshot losslessly through `toSmb`/`fromSmb`.
+- Library tracing wraps values built in `user-main` (shapes have no private fields); the tracer unwraps `main`'s result before the kernel reads it.

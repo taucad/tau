@@ -15,6 +15,7 @@ import openrscad from '@taucad/openrscad/agent/resources.js';
 import picogk from '@taucad/picogk/agent/resources.js';
 import picovoxel from '@taucad/picovoxel/agent/resources.js';
 import replicad from '@taucad/replicad/agent/resources.js';
+import smlib from '@taucad/smlib/agent/resources.js';
 import tscircuit from '@taucad/tscircuit/agent/resources.js';
 import workbench from '@taucad/workbench/agent/resources.js';
 import zoo from '@taucad/zoo/agent/resources.js';
@@ -60,6 +61,7 @@ export const systemSkillBundles: readonly SystemSkillBundle[] = Object.freeze([
   ...openrscad,
   ...picogk,
   ...picovoxel,
+  ...smlib,
   ...zoo,
   ...tscircuit,
   ...geospec,

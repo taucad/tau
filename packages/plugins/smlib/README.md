@@ -10,18 +10,23 @@ SMLib kernel plugin for Tau
 
 ## Why @taucad/smlib?
 
-- **One call composes it** — `smlib()` registers this package's capabilities with `defineRuntime`.
-- **Role factories** — `smlibKernel()` support direct authoring, isolated tests, and whole-role ordering outside plugin expansion.
-- **No module-scope work** — backends load in `initialize()` and stay in capability context, one payload per worker.
+- **A NURBS B-rep kernel in the browser** — author `.ts`/`.js` models against
+  [`@classcad/smlibwasm`](https://www.npmjs.com/package/@classcad/smlibwasm), the WebAssembly build of
+  SMLib from NVIDIA's USD BRep with a build123d-style API (`Box`, `fillet`, `GridLocations`).
+- **Exact exports** — STEP keeps each body's name and color; STL, GLB, and glTF follow Tau's tessellation presets and budgets.
+- **Physical materials and mechanisms** — `@taucad/smlib/model` returns glTF PBR materials and textures; an
+  exported `mechanism` animates the model through `@taucad/kinematics`.
+- **No module-scope work** — the library and its WebAssembly load in `initialize()`, one instance per worker.
 
 ## Install
 
 ```bash
-npm i @taucad/smlib @taucad/runtime
+npm i @taucad/smlib @taucad/runtime zod
 ```
 
-`@taucad/runtime` is a required peer — one install must hold one runtime. A capability with an options
-schema adds `zod` as a second required peer.
+`@taucad/runtime` and `zod` are required peers: the runtime parses this package's option schemas, so
+one install must hold one runtime and one zod. `@classcad/smlibwasm` is a dependency, pinned to the
+release this kernel's version and cache identity describe.
 
 ## Quick start
 
@@ -32,27 +37,57 @@ import { smlib } from '@taucad/smlib';
 const runtime = defineRuntime({ plugins: [smlib()] });
 ```
 
+A model is a module whose default export returns shapes:
+
+```typescript
+import { Box, Cylinder, GridLocations, Z } from '@classcad/smlibwasm';
+
+export const defaultParams = { width: 80, depth: 60, thickness: 10 };
+
+export default function main(params: typeof defaultParams) {
+  const plate = Box(params.width, params.depth, params.thickness);
+  const rounded = plate.fillet(plate.edges().parallelTo(Z), 3);
+  return rounded.cut(GridLocations(60, 40, 2, 2).mul(Cylinder(4, params.thickness * 2)));
+}
+```
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
 
-
 ## API
 
-| Export | Kind | Use |
-| --- | --- | --- |
-| `smlib` | toolkit factory | package-named authoring factory; presets select capabilities |
-| `plugin` | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `smlibKernel` | kernel factory | direct `kernels` composition, with options |
+| Export         | Kind            | Use                                                                              |
+| -------------- | --------------- | -------------------------------------------------------------------------------- |
+| `smlib`        | toolkit factory | package-named factory; forwards `kernels.default` options to `smlibKernel`       |
+| `plugin`       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key    |
+| `smlibKernel`  | kernel factory  | direct `kernels` composition; reads `ts`, `js` that import `@classcad/smlibwasm` |
+| `SmlibOptions` | type            | `libraryTracing`: `'off'` (default), `'summary'`, or `'per-call'`                |
 
-One preset, `default`, selecting `kernels.default`.
+The `default` preset selects `kernels.default`.
+
+| Subpath               | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `@taucad/smlib`       | the toolkit, alias, and kernel factory                               |
+| `@taucad/smlib/model` | `Model`, `ShapeConfig`, `Material`, `Image`, `Resources` for authors |
+| `@taucad/smlib/agent` | the agent skill bundle for SMLib authoring                           |
+
+`main` returns a shape, an array or `ShapeList`, `{ shape, name, color, material, ... }` entries, or a
+`Model` (`{ shapes, images, textures, samplers }`). Bodies, faces, and meshes render in the model
+view; edges and wires render as SVG in the drawing view. A two-parameter `main(smlib, params)` receives
+the library as its first argument.
+
+## Limits
+
+- STEP carries names and colors, not density, PMI, or named interfaces.
+- Textured and anisotropic materials use box-projected UVs, not the surface's own parameterization.
+- Curves are drawings only: they are sampled once at evaluation and do not export to STEP.
 
 ## Environment
 
-| Host | Supported | Notes |
-| --- | --- | --- |
-| Browser worker | Yes | no Node built-ins in the payload |
-| Node.js | Yes | `>=24` |
+| Host           | Supported | Notes                                 |
+| -------------- | --------- | ------------------------------------- |
+| Browser worker | Yes       | one single-threaded WebAssembly build |
+| Node.js        | Yes       | `>=24`                                |
 
 ## Versioning and stability
 
@@ -71,7 +106,7 @@ npm audit signatures
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). Bundled third-party payloads keep their own licenses.
+Apache-2.0 — see [LICENSE](./LICENSE). `@classcad/smlibwasm` is MIT, and its SMLib/USD BRep WebAssembly is Apache-2.0.
 
 ## Links
 

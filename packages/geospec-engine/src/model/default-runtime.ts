@@ -12,6 +12,7 @@ import { openrscad } from '@taucad/openrscad';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { smlib } from '@taucad/smlib';
 import { tscircuit } from '@taucad/tscircuit';
 
 export const defaultRuntime = defineRuntime({
@@ -26,6 +27,7 @@ export const defaultRuntime = defineRuntime({
     // Serial, not 'auto': Node reports cross-origin isolated, and GeoSpec evidence must come from
     // the single-threaded build (blueprint D34). Exact exports run serial regardless.
     picovoxel({ kernels: { default: { wasm: 'serial' } } }),
+    smlib(),
     gltf(),
     brep(),
     rhino(),

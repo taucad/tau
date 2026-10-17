@@ -5,7 +5,7 @@ docType: how-to
 icon: lucide:package
 ---
 
-Give JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD, tscircuit) the bundler they require: it resolves imports, bundles model code, and executes it inside the worker.
+Give JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD, PicoVoxel, SMLib, tscircuit) the bundler they require: it resolves imports, bundles model code, and executes it inside the worker.
 
 Python [Build123d](../reference/build123d) models do not pass through this bundler.
 
@@ -132,6 +132,7 @@ export const runtime = defineRuntime({
 ## Variations
 
 - **Multiple bundlers**: The worker matches the entry path's extension against each `bundler.extensions`; the first matching bundler wins.
+- **SMLib under Vite's dev server**: `@classcad/smlibwasm` finds its WebAssembly with `new URL('smlibwasm.wasm', import.meta.url)`, which dependency pre-bundling breaks. Add `optimizeDeps: { exclude: ['@classcad/smlibwasm'] }` to the app's Vite config; production builds need no change.
 - **Test the production composition**: Pass `esbuild()` in the `defineRuntime` used by `createTestRuntimeClient`; unit tests of a definition can use `createMockKernelRuntime` when bundling is not part of the invariant.
 
 ## Related

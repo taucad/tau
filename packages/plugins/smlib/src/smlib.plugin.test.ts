@@ -1,4 +1,3 @@
-
 import { builtinModules } from 'node:module';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -7,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { plugin, smlib } from '#index.js';
+import { smlibDetectPattern } from '#smlib.constants.js';
+import { smlibOptionsSchema } from '#smlib.schemas.js';
 
 describe('@taucad/smlib', () => {
   it('binds the mechanical plugin alias to the package-named factory', () => {
@@ -25,6 +26,23 @@ describe('@taucad/smlib', () => {
     expect(capabilities.machines.map(({ id }) => id)).toEqual([]);
   });
 
+  it('defaults library tracing off and rejects unknown modes', () => {
+    expect(smlibOptionsSchema.parse({})).toEqual({ libraryTracing: 'off' });
+    expect(smlibOptionsSchema.parse({ libraryTracing: 'per-call' })).toEqual({ libraryTracing: 'per-call' });
+    expect(smlibOptionsSchema.safeParse({ libraryTracing: 'verbose' }).success).toBe(false);
+  });
+
+  it.each([
+    [`import { Box } from '@classcad/smlibwasm';`, true],
+    [`import * as smlib from "@classcad/smlibwasm";`, true],
+    [`const { Box } = require('@classcad/smlibwasm');`, true],
+    [`const smlib = await import('@classcad/smlibwasm');`, true],
+    [`/** @typedef {import('@classcad/smlibwasm').Part} Part */`, true],
+    [`import { Box } from '@classcad/smlibwasm-extra';`, false],
+    [`import { makeBox } from 'replicad';`, false],
+  ])('detects %s as SMLib: %s', (source, expected) => {
+    expect(smlibDetectPattern.test(source)).toBe(expected);
+  });
 
   it('keeps native, Python, and Node-only payloads out of browser source', () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
@@ -66,5 +84,4 @@ describe('@taucad/smlib', () => {
 
     expect(offenders).toEqual([]);
   });
-
 });

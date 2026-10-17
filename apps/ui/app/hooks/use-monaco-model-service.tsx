@@ -12,7 +12,8 @@
  *
  * The provider never withholds its children: the workspace (chat, viewer,
  * revision UI) renders at once, and consumers read `undefined` services until
- * Monaco is configured. Code panes own their own placeholder.
+ * Monaco is configured. Code panes own their own placeholder, and opening one
+ * is what configures Monaco: the provider only observes (B-16).
  */
 
 import type { ReactNode } from 'react';
@@ -39,7 +40,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { getMonacoLanguageIdsForKernel } from '#lib/kernel-monaco-language.utils.js';
-import { useConfiguredMonaco } from '#hooks/use-monaco-configuration.js';
+import { useMonacoIfConfigured } from '#hooks/use-monaco-configuration.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 
 type MonacoServicesContextType = {
@@ -54,7 +55,8 @@ const MonacoServicesContext = createContext<MonacoServicesContextType>(defaultCo
 export function MonacoModelServiceProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   'use no memo';
 
-  const monaco = useConfiguredMonaco();
+  /* B-16: the services follow Monaco; only a code pane or editor intent starts it. */
+  const monaco = useMonacoIfConfigured();
   const { projectId, editorRef, geometryUnits } = useProject();
   const { fileManagerRef, contentService, treeService, readFile, exists, readdir, getDirectoryStat } = useFileManager();
 

@@ -86,7 +86,7 @@ import { useFileContent } from '#hooks/use-file-content.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import type { FileProvenance } from '@taucad/types';
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
-import { useConfiguredMonaco } from '#hooks/use-monaco-configuration.js';
+import { useConfiguredMonaco, useMonacoIfConfigured } from '#hooks/use-monaco-configuration.js';
 import type { MonacoModelService } from '#lib/monaco-model-service.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -1722,7 +1722,8 @@ export const WorkbenchDockview = memo(function ({
   const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const monaco = useConfiguredMonaco();
+  /* Only jump-to-line reads it, and only after an editor pane has configured Monaco (B-16). */
+  const monaco = useMonacoIfConfigured();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
 

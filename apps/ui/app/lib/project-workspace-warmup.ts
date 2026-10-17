@@ -1,4 +1,5 @@
 import { warmMonaco } from '#lib/monaco-warmup.js';
+import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 
 let isWarming = false;
 
@@ -8,7 +9,10 @@ export const warmProjectWorkspace = (): void => {
   if (globalThis.window === undefined) {
     return;
   }
-  warmMonaco();
+  /* B-16: a phone opens on the Model tab; the Editor tab configures Monaco when it is opened. */
+  if (!isMemoryConstrainedDevice()) {
+    warmMonaco();
+  }
   if (isWarming) {
     return;
   }

@@ -12,7 +12,11 @@
 import { useSyncExternalStore } from 'react';
 import type * as Monaco from 'monaco-editor';
 import type { MonacoConfiguration } from '#lib/monaco.lib.client.js';
-import { getMonacoConfiguration, subscribeMonacoConfiguration } from '#lib/monaco.lib.client.js';
+import {
+  getMonacoConfiguration,
+  observeMonacoConfiguration,
+  subscribeMonacoConfiguration,
+} from '#lib/monaco.lib.client.js';
 
 const serverConfiguration: MonacoConfiguration = { status: 'idle' };
 
@@ -20,6 +24,7 @@ const serverConfiguration: MonacoConfiguration = { status: 'idle' };
  * called in the browser. */
 const subscribe = (listener: () => void): (() => void) => subscribeMonacoConfiguration(listener);
 const getSnapshot = (): MonacoConfiguration => getMonacoConfiguration();
+const observe = (listener: () => void): (() => void) => observeMonacoConfiguration(listener);
 const getServerSnapshot = (): MonacoConfiguration => serverConfiguration;
 
 /**
@@ -38,5 +43,18 @@ export function useMonacoConfiguration(): MonacoConfiguration {
  */
 export function useConfiguredMonaco(): typeof Monaco | undefined {
   const configuration = useMonacoConfiguration();
+  return configuration.status === 'ready' ? configuration.monaco : undefined;
+}
+
+/**
+ * The configured Monaco instance once something else has configured it.
+ *
+ * Reading this never starts configuration: a code pane or editor intent does
+ * (B-16). Use it for services that are only needed while an editor exists.
+ *
+ * @returns The instance once configured; `undefined` until then.
+ */
+export function useMonacoIfConfigured(): typeof Monaco | undefined {
+  const configuration = useSyncExternalStore(observe, getSnapshot, getServerSnapshot);
   return configuration.status === 'ready' ? configuration.monaco : undefined;
 }

@@ -25,6 +25,29 @@ export function attachTypescriptShim(stub: MonacoTestStub): void {
   };
   let tsModeConfiguration = { ...fullModeConfiguration };
   let jsModeConfiguration = { ...fullModeConfiguration };
+  /* Monaco's defaults keep what was last set; the contributions skip a set that changes nothing. */
+  const familyOptions = () => {
+    let compilerOptions: unknown = {};
+    let inlayHintsOptions: unknown = {};
+    return {
+      getCompilerOptions: () => compilerOptions,
+      get inlayHintsOptions() {
+        return inlayHintsOptions;
+      },
+      setCompilerOptions: vi.fn((next: unknown) => {
+        compilerOptions = next;
+      }),
+      setInlayHintsOptions: vi.fn((next: unknown) => {
+        inlayHintsOptions = next;
+      }),
+    };
+  };
+  /* Descriptors, not `Object.assign`: the getters must stay getters. */
+  const withFamilyOptions = <Extra extends object>(extra: Extra) =>
+    Object.defineProperties(familyOptions(), Object.getOwnPropertyDescriptors(extra)) as ReturnType<
+      typeof familyOptions
+    > &
+      Extra;
   const mockWorker = {
     getLibFiles: vi.fn(async (): Promise<Record<string, string>> => ({})),
     getDefinitionAtPosition: vi.fn(),
@@ -42,9 +65,7 @@ export function attachTypescriptShim(stub: MonacoTestStub): void {
 
   Object.assign(stub.monaco, {
     typescript: {
-      typescriptDefaults: {
-        setCompilerOptions: vi.fn(),
-        setInlayHintsOptions: vi.fn(),
+      typescriptDefaults: withFamilyOptions({
         setEagerModelSync: vi.fn(),
         addExtraLib: vi.fn(() => ({ dispose: vi.fn() })),
         get modeConfiguration() {
@@ -55,10 +76,8 @@ export function attachTypescriptShim(stub: MonacoTestStub): void {
         }),
         getExtraLibs: vi.fn(() => ({})),
         onDidExtraLibsChange: vi.fn(() => ({ dispose: vi.fn() })),
-      },
-      javascriptDefaults: {
-        setCompilerOptions: vi.fn(),
-        setInlayHintsOptions: vi.fn(),
+      }),
+      javascriptDefaults: withFamilyOptions({
         setEagerModelSync: vi.fn(),
         addExtraLib: vi.fn(() => ({ dispose: vi.fn() })),
         get modeConfiguration() {
@@ -69,7 +88,7 @@ export function attachTypescriptShim(stub: MonacoTestStub): void {
         }),
         getExtraLibs: vi.fn(() => ({})),
         onDidExtraLibsChange: vi.fn(() => ({ dispose: vi.fn() })),
-      },
+      }),
       getTypeScriptWorker: vi.fn(async () => workerFunction),
       getJavaScriptWorker: vi.fn(async () => workerFunction),
       ModuleResolutionKind: { NodeJs: 'NodeJs', Bundler: 'Bundler' },

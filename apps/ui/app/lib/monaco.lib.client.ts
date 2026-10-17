@@ -149,6 +149,19 @@ export const subscribeMonacoConfiguration = (listener: () => void): (() => void)
   return unsubscribe;
 };
 
+/**
+ * Subscribe to configuration changes without starting configuration.
+ *
+ * For readers that only use Monaco once something else has asked for it —
+ * the model service and the workbench's jump-to-line — so a project that never
+ * shows a code pane never downloads or configures the editor (B-16, D-UI-02).
+ *
+ * @param listener - Called after every state change.
+ * @returns The unsubscribe function.
+ */
+export const observeMonacoConfiguration = (listener: () => void): (() => void) =>
+  configurationTopic.subscribe(listener);
+
 const initializeMonaco = async (): Promise<typeof Monaco> => {
   // Prime Geist Mono before Monaco's first DomCharWidthReader pass.
   //

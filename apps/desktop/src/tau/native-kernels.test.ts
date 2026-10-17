@@ -53,6 +53,16 @@ describe('desktop native kernels', () => {
     });
   });
 
+  it('should bound every native request and artifact so a runaway worker is recycled', () => {
+    const native = desktopNativeKernels(nativeKernelsFixture({ picogk: true }));
+
+    /* Unbounded defaults let one script hold all memory for as long as it runs. */
+    for (const options of [native.build123d, native.picogk]) {
+      expect(options?.requestTimeout).toBe(10 * 60_000);
+      expect(options?.maxArtifactBytes).toBe(1024 * 1024 * 1024);
+    }
+  });
+
   it('should answer describe, render and export of a file whose kernel has no closure with main refusal', async () => {
     const { unavailable, build123d } = desktopNativeKernels({
       type: 'tau:native-kernels',

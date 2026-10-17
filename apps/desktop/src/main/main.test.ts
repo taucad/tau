@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
@@ -15,6 +16,7 @@ import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  agentHostSessionChannels,
   computeControlChannels,
   openDirectoryChannel,
   revealPathChannel,
@@ -48,6 +50,7 @@ const state = vi.hoisted(() => ({
         compute?: unknown;
         env?: Readonly<Record<string, string>>;
         fileSystemPort?: unknown;
+        release?: () => void;
       }),
   workers: [] as NodeWorker[],
   /* What main asked to start; the built files themselves exist only under `dist/main`. */
@@ -71,6 +74,15 @@ const state = vi.hoisted(() => ({
   servicesRecover: vi.fn(async () => undefined),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
+  runtimeResidentLimit: undefined as
+    | undefined
+    | {
+        readonly maxBytes: number;
+        readonly intervalMilliseconds: number;
+        readonly sample: (utility: { pid: number | undefined }) => number | undefined;
+      },
+  servicesRetainAgentHost: vi.fn(),
+  servicesReleaseAgentHost: vi.fn(async () => undefined),
   servicesQuiesce: vi.fn(
     async (
       _boundMilliseconds: number,
@@ -272,9 +284,15 @@ vi.mock('electron', () => ({
 vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
   registerElectronRuntimeMain: vi.fn(
-    (options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork; utilityEntry: string }) => {
+    (options: {
+      maxUtilities?: number;
+      residentLimit?: typeof state.runtimeResidentLimit;
+      resolveFork?: typeof state.resolveFork;
+      utilityEntry: string;
+    }) => {
       state.resolveFork = options.resolveFork;
       state.runtimeMaxUtilities = options.maxUtilities;
+      state.runtimeResidentLimit = options.residentLimit;
       state.kernelUtilityEntry = options.utilityEntry;
       return { connect: vi.fn(), dispose: vi.fn(), post: state.runtimePost, prewarm: state.runtimePrewarm };
     },
@@ -359,6 +377,8 @@ vi.mock('#main/services-broker.js', () => ({
       recover: state.servicesRecover,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
+      retainAgentHost: state.servicesRetainAgentHost,
+      releaseAgentHost: state.servicesReleaseAgentHost,
       computeProjectRoot: (root: string) =>
         root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
     };
@@ -439,6 +459,9 @@ afterEach(async () => {
   state.servicesConnect.mockClear();
   state.geometryMeasurementConnect.mockClear();
   state.geometrySampleResidentBytes = undefined;
+  state.runtimeResidentLimit = undefined;
+  state.servicesRetainAgentHost.mockClear();
+  state.servicesReleaseAgentHost.mockClear();
   app.getAppMetrics.mockReset();
   app.getAppMetrics.mockReturnValue([]);
   state.runtimePrewarm.mockClear();
@@ -668,6 +691,85 @@ describe('desktop main compute owner', () => {
       expect(state.servicesConnect).toHaveBeenLastCalledWith('runtimeFileSystem', {
         workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
       });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should keep a root's compute connection while any utility holds it and drop it after the last release",
+    async () => {
+      const projectRoot = await bootstrap();
+      const first = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const second = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const storeOf = (resolved: typeof first): unknown => (resolved.compute as { store: unknown }).store;
+      expect(storeOf(second)).toBe(storeOf(first));
+
+      /* One utility of two goes: the other still reads through the same connection. */
+      first.release!();
+      const third = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      expect(storeOf(third)).toBe(storeOf(first));
+
+      /* Every holder gone: main keeps no connection for a root nobody runs. */
+      second.release!();
+      third.release!();
+      const reopened = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      expect(storeOf(reopened)).not.toBe(storeOf(first));
+      reopened.release!();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should cap every kernel utility at a resident ceiling sampled from the exact pid',
+    async () => {
+      await bootstrap();
+      const limit = state.runtimeResidentLimit;
+      expect(limit).toBeDefined();
+      expect(limit!.maxBytes).toBeGreaterThanOrEqual(2 * 1024 * 1024 * 1024);
+      expect(limit!.maxBytes).toBeLessThanOrEqual(8 * 1024 * 1024 * 1024);
+      expect(limit!.intervalMilliseconds).toBe(5000);
+      app.getAppMetrics.mockReturnValue([
+        { pid: 41, memory: { workingSetSize: 999 } },
+        { pid: 42, memory: { workingSetSize: 512 } },
+      ]);
+      expect(limit!.sample({ pid: 42 })).toBe(512 * 1024);
+      expect(limit!.sample({ pid: undefined })).toBeUndefined();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should release every agent-host attachment a document held once that document goes',
+    async () => {
+      const projectRoot = await bootstrap();
+      const retain = state.handlers.get(agentHostSessionChannels.retain)!;
+      const release = state.handlers.get(agentHostSessionChannels.release)!;
+      // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's WebContents is a Node EventEmitter.
+      const sender = Object.assign(new EventEmitter(), { id: 7 });
+      const event = { sender, senderFrame: { url: 'app://tau/' } };
+      const held = { workspaceRoot: projectRoot, projectId: 'proj_a', attachmentId: 'attachment-1' };
+      const released = { workspaceRoot: projectRoot, projectId: 'proj_a', attachmentId: 'attachment-2' };
+      await retain(event, held);
+      await retain(event, released);
+      await release(event, released);
+      state.servicesReleaseAgentHost.mockClear();
+
+      /* A deep link or Open-With replaces the document without closing the window. */
+      sender.emit('did-navigate', {}, 'app://tau/w/other');
+      await vi.waitFor(() => {
+        expect(state.servicesReleaseAgentHost).toHaveBeenCalledExactlyOnceWith(held, expect.any(Number));
+      });
+
+      /* The next document holds its own; the window closing releases it, and nothing twice. */
+      const next = { workspaceRoot: projectRoot, projectId: 'proj_a', attachmentId: 'attachment-3' };
+      await retain(event, next);
+      sender.emit('destroyed');
+      await vi.waitFor(() => {
+        expect(state.servicesReleaseAgentHost).toHaveBeenLastCalledWith(next, expect.any(Number));
+      });
+      expect(state.servicesReleaseAgentHost).toHaveBeenCalledTimes(2);
+      expect(sender.listenerCount('destroyed')).toBe(0);
+      expect(sender.listenerCount('did-navigate')).toBe(0);
     },
     bootMilliseconds,
   );

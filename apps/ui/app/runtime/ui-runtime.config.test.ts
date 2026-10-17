@@ -21,6 +21,7 @@ describe('createUiRuntimeConfig', () => {
       tauApiUrl: 'https://api.tau.test',
       tauWebSocketUrl: 'wss://api.tau.test',
       acquisition: 'open',
+      memoryConstrained: false,
     } satisfies RuntimeConfigInput<typeof runtime>);
     expect(uiRuntimeConfigSchema.parse(config)).toEqual(config);
   });
@@ -78,5 +79,45 @@ describe('createUiRuntimeConfig', () => {
     expect(resolvedRuntime.bundlers.find(({ id }) => id === 'esbuild')).toMatchObject({
       options: { acquisition: 'open' },
     });
+  });
+
+  it('should carry the page device memory class into the runtime config', () => {
+    const environment = {
+      [tauApiUrlEnvironmentKey]: 'https://api.tau.test',
+      [tauWebSocketUrlEnvironmentKey]: 'wss://api.tau.test',
+      [tauAcquisitionEnvironmentKey]: 'open',
+    } as const;
+
+    expect(createUiRuntimeConfig(environment, { memoryConstrained: true })).toMatchObject({ memoryConstrained: true });
+    expect(createUiRuntimeConfig(environment, { memoryConstrained: false })).toMatchObject({
+      memoryConstrained: false,
+    });
+  });
+
+  // D-RT-04: the pthread builds reserve a 4 GiB shared memory, spawn a worker per core with 8 MiB stacks, and cost
+  // +124 MB WASM and +4 workers at load on the iPhone profile.
+  it('should select the single-threaded OCCT and PicoVoxel builds on a memory-constrained device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+      memoryConstrained: true,
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ wasm: 'single' });
+    // OpenCascade defaults to its single-threaded 'full' build; nothing may ask for 'multi' or 'auto' here.
+    expect(kernelOptions('opencascade')?.['wasm'] ?? 'full').toBe('full');
+    expect(kernelOptions('picovoxel')).toMatchObject({ wasm: 'serial' });
+  });
+
+  it('should keep the automatic build choice on a standard device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ wasm: 'auto' });
+    expect(kernelOptions('picovoxel')?.['wasm']).not.toBe('serial');
   });
 });

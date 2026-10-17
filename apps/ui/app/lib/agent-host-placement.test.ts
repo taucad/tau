@@ -692,8 +692,8 @@ describe('rung 5 admission by URL', () => {
       expect(notify).toHaveBeenCalledOnce();
     });
 
-    const [[outcome]] = notify.mock.calls as Array<[{ readonly error: AgentHostPlacementError }]>;
-    expect(outcome.error).toBeInstanceOf(AgentHostPlacementError);
-    expect(outcome.error.code).toBe('RUNG5_NO_ADMISSION');
+    const outcome = (notify.mock.calls as Array<[{ readonly error: AgentHostPlacementError }]>)[0]?.[0];
+    expect(outcome?.error).toBeInstanceOf(AgentHostPlacementError);
+    expect(outcome?.error.code).toBe('RUNG5_NO_ADMISSION');
   });
 });

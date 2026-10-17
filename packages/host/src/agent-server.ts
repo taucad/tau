@@ -38,6 +38,7 @@ import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { HostSessionHandle } from '@taucad/runtime/host';
 import type { NodeMachineChannelHandle, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
+import { agentSubprotocol, createLoopbackHandOff, sessionOfSubprotocols } from '#hand-off.js';
 import { isolationHeaders, serveStaticUi } from '#static-ui.js';
 import type { StaticUiHandler } from '#static-ui.js';
 
@@ -56,6 +57,23 @@ export const hostSessionCookieName = 'tau_host_session';
  * @public
  */
 export const hostDescriptorPath = '/.well-known/tau-host';
+
+/**
+ * Where the token holder mints a one-time hand-off code (X54). Beside the descriptor, so no UI route can shadow it.
+ *
+ * @public
+ */
+export const handOffMintPath = `${hostDescriptorPath}/hand-off`;
+
+/**
+ * Where a listed origin redeems a hand-off code for a session bound to that origin (X54).
+ *
+ * @public
+ */
+export const handOffSessionPath = `${hostDescriptorPath}/session`;
+
+/** Longest hand-off redemption body read, in bytes: `{"code":"<43 characters>"}` with room to spare. */
+const redemptionBodyLimit = 1024;
 
 /** Milliseconds a socket has to answer the server's close frame. */
 const closeGrace = 1000;
@@ -129,7 +147,11 @@ export type AgentServerOptions = {
    * A listed origin may also read {@link hostDescriptorPath} across origins:
    * its answers echo that origin in `Access-Control-Allow-Origin`, and its
    * preflight is answered. An unlisted origin gets no CORS grant and its
-   * `/agent` upgrade is refused with 403. Admission still needs the token.
+   * `/agent` upgrade is refused with 403. Admission still needs the token, or a
+   * session the listed origin redeemed from a one-time hand-off code (X54): the
+   * token holder mints the code at {@link handOffMintPath}, the page redeems it
+   * at {@link handOffSessionPath}, and offers the session as the
+   * `tau-session.<session>` subprotocol on its upgrade.
    */
   readonly allowedOrigins?: readonly string[] | undefined;
   /** Absolute directory of a prebuilt Tau UI to serve at `/`. */
@@ -198,7 +220,13 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
   }
   const pathPrefix = options.pathPrefix ?? '/';
   const httpServer: HttpServer = createServer();
-  const agentSocketServer = new WebSocketServer({ noServer: true });
+  /* A page admitted by a hand-off session offers `tau-agent` beside it; the answer is always `tau-agent`, so the
+   * session is never echoed back. A client that offers no subprotocol (rung 1, the relay) is not asked. */
+  const agentSocketServer = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => (protocols.has(agentSubprotocol) ? agentSubprotocol : false),
+  });
+  const handOff = createLoopbackHandOff();
   const machineSocketServer = new WebSocketServer({ noServer: true, maxPayload: 1_048_576 });
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
   const sockets = new Set<WebSocket>();
@@ -325,7 +353,10 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
       refuseUpgrade(socket, '403 Forbidden');
       return;
     }
-    if (!isAdmitted(request)) {
+    const redeemed =
+      route === 'agent' &&
+      handOff.admits(sessionOfSubprotocols(request.headers['sec-websocket-protocol']), request.headers.origin);
+    if (!redeemed && !isAdmitted(request)) {
       refuseUpgrade(socket, '401 Unauthorized');
       return;
     }
@@ -386,6 +417,98 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     response.end(request.method === 'HEAD' ? undefined : body);
   };
 
+  /**
+   * `POST` {@link handOffMintPath}: the token holder mints one single-use code (X54). A page never holds the token, so
+   * a page never reaches this.
+   * @param request - The mint request.
+   * @param response - Its answer.
+   */
+  const serveHandOffMint = (request: IncomingMessage, response: ServerResponse): void => {
+    const headers = { 'cache-control': 'no-store' };
+    if (request.method !== 'POST') {
+      response.writeHead(405, { ...headers, allow: 'POST' }).end();
+      return;
+    }
+    if (!isAdmitted(request)) {
+      response.writeHead(401, headers).end();
+      return;
+    }
+    const body = JSON.stringify({ v: 1, ...handOff.mint() });
+    response.writeHead(200, {
+      ...headers,
+      'content-type': 'application/json',
+      'content-length': String(Buffer.byteLength(body)),
+    });
+    response.end(body);
+  };
+
+  /**
+   * `POST` {@link handOffSessionPath}: a listed origin redeems a hand-off code, once, for a session bound to that origin.
+   * @param request - The redemption, or its preflight.
+   * @param response - Its answer.
+   */
+  const serveHandOffRedemption = (request: IncomingMessage, response: ServerResponse): void => {
+    const cors = corsHeaders(request);
+    const headers = { ...cors, 'cache-control': 'no-store' };
+    const { origin } = request.headers;
+    if (origin === undefined || !('access-control-allow-origin' in cors)) {
+      response.writeHead(403, headers).end();
+      return;
+    }
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        ...cors,
+        'access-control-allow-methods': 'POST',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '600',
+        ...(request.headers['access-control-request-private-network'] === 'true'
+          ? { 'access-control-allow-private-network': 'true' }
+          : {}),
+      });
+      response.end();
+      return;
+    }
+    if (request.method !== 'POST') {
+      response.writeHead(405, { ...headers, allow: 'POST, OPTIONS' }).end();
+      return;
+    }
+    const answer = async (): Promise<void> => {
+      let code: unknown;
+      try {
+        let bytes = 0;
+        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+        for await (const chunk of request) {
+          if (!Buffer.isBuffer(chunk)) {
+            throw new TypeError('invalid request chunk');
+          }
+          bytes += chunk.byteLength;
+          if (bytes > redemptionBodyLimit) {
+            throw new Error('request too large');
+          }
+          chunks.push(Uint8Array.from(chunk));
+        }
+        const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        code = typeof parsed === 'object' && parsed !== null ? Reflect.get(parsed, 'code') : undefined;
+      } catch {
+        response.writeHead(400, headers).end();
+        return;
+      }
+      const session = typeof code === 'string' && code !== '' ? handOff.redeem(code, origin) : undefined;
+      if (session === undefined) {
+        response.writeHead(401, headers).end();
+        return;
+      }
+      const body = JSON.stringify({ v: 1, session });
+      response.writeHead(200, {
+        ...headers,
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(body)),
+      });
+      response.end(body);
+    };
+    void answer();
+  };
+
   const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
     /* Ahead of the static UI: the SPA fallback answers every extension-less path
      * with the shell, which would turn discovery into an HTML parse error, and
@@ -419,6 +542,14 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     }
     if (pathname === hostDescriptorPath) {
       serveDescriptor(request, response);
+      return;
+    }
+    if (pathname === handOffMintPath) {
+      serveHandOffMint(request, response);
+      return;
+    }
+    if (pathname === handOffSessionPath) {
+      serveHandOffRedemption(request, response);
       return;
     }
     const computeOperation = routeOfPath(pathname, pathPrefix)?.match(/^compute\/(inspect|clear|collect)$/u)?.[1];

@@ -21,7 +21,7 @@ import type { HostSessionHandle } from '@taucad/runtime/host';
 import type { NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeGeneration, ComputeStoreControl } from '@taucad/runtime/types';
 
-import { hostSessionCookieName, startAgentServer } from '#agent-server.js';
+import { handOffMintPath, handOffSessionPath, hostSessionCookieName, startAgentServer } from '#agent-server.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { AgentServerHandle } from '#agent-server.js';
@@ -227,6 +227,125 @@ describe('startAgentServer', () => {
       await expect(
         upgrade(origin, { headers: { authorization: `Bearer ${token}`, origin: 'https://evil.example' } }),
       ).rejects.toThrow(/403/u);
+    });
+  });
+
+  /**
+   * The hand-off (X54): the token holder mints a code, a listed origin redeems it once for a session, and that session
+   * admits that origin's upgrade as a subprotocol, where a browser can put it.
+   */
+  describe('hand-off', () => {
+    const desktop = 'app://tau';
+
+    const startListed = async (): Promise<URL> => {
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, allowedOrigins: [desktop] });
+      await server.ready;
+      return server.url();
+    };
+
+    const mint = async (origin: URL, headers?: Record<string, string>): Promise<Response> =>
+      fetch(new URL(handOffMintPath, origin), {
+        method: 'POST',
+        headers: headers ?? { authorization: `Bearer ${token}` },
+      });
+
+    /** A minted code, as the token holder reads it. */
+    const mintedCode = async (origin: URL): Promise<string> => {
+      const minted = await mint(origin);
+      const body = (await minted.json()) as { readonly code: string };
+      return body.code;
+    };
+
+    const redeem = async (origin: URL, code: string, from = desktop): Promise<Response> =>
+      fetch(new URL(handOffSessionPath, origin), {
+        method: 'POST',
+        headers: { origin: from, 'content-type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+
+    it('should mint a code only for the token holder', async () => {
+      const origin = await startListed();
+
+      const minted = await mint(origin);
+      expect(minted.status).toBe(200);
+      expect(minted.headers.get('cache-control')).toBe('no-store');
+      const body = (await minted.json()) as { readonly v: number; readonly code: string; readonly expiresAt: number };
+      expect(body.v).toBe(1);
+      expect(body.code).toMatch(/^[\w-]{43}$/u);
+      expect(body.expiresAt).toBeGreaterThan(Date.now());
+      const fromPage = await mint(origin, { origin: desktop });
+      expect(fromPage.status).toBe(401);
+    });
+
+    it('should redeem a code once from a listed origin, with its CORS grant', async () => {
+      const origin = await startListed();
+      const code = await mintedCode(origin);
+
+      const redeemed = await redeem(origin, code);
+      expect(redeemed.status).toBe(200);
+      expect(redeemed.headers.get('access-control-allow-origin')).toBe(desktop);
+      const body = (await redeemed.json()) as { readonly v: number; readonly session: string };
+      expect(body.v).toBe(1);
+      expect(body.session).toMatch(/^[\w-]{43}$/u);
+
+      const again = await redeem(origin, code);
+      expect(again.status).toBe(401);
+    });
+
+    it('should refuse a redemption from an unlisted origin without spending the code', async () => {
+      const origin = await startListed();
+      const code = await mintedCode(origin);
+
+      const foreign = await redeem(origin, code, 'https://evil.example');
+      expect(foreign.status).toBe(403);
+      expect(foreign.headers.get('access-control-allow-origin')).toBeNull();
+      const listed = await redeem(origin, code);
+      expect(listed.status).toBe(200);
+    });
+
+    it('should answer a listed origin redemption preflight', async () => {
+      const origin = await startListed();
+      const preflight = await fetch(new URL(handOffSessionPath, origin), {
+        method: 'OPTIONS',
+        headers: {
+          origin: desktop,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type',
+          'access-control-request-private-network': 'true',
+        },
+      });
+
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('access-control-allow-origin')).toBe(desktop);
+      expect(preflight.headers.get('access-control-allow-methods')).toBe('POST');
+      expect(preflight.headers.get('access-control-allow-headers')).toBe('content-type');
+      expect(preflight.headers.get('access-control-allow-private-network')).toBe('true');
+    });
+
+    it('should admit the redeeming origin upgrade by its session subprotocol, and no other', async () => {
+      const origin = await startListed();
+      const redeemed = await redeem(origin, await mintedCode(origin));
+      const { session } = (await redeemed.json()) as { readonly session: string };
+      const agentUrl = new URL('/agent', origin).href.replace('http:', 'ws:');
+
+      const socket = new WebSocket(agentUrl, ['tau-agent', `tau-session.${session}`], { origin: desktop });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          socket.once('open', resolve);
+          socket.once('error', reject);
+        });
+        expect(socket.protocol).toBe('tau-agent');
+      } finally {
+        socket.close();
+      }
+      await expect(upgrade(origin, { headers: { origin: desktop } })).rejects.toThrow(/401/u);
+      const forged = new WebSocket(agentUrl, ['tau-agent', 'tau-session.forged'], { origin: desktop });
+      await expect(
+        new Promise<void>((resolve, reject) => {
+          forged.once('open', resolve);
+          forged.once('error', reject);
+        }),
+      ).rejects.toThrow(/401/u);
     });
   });
 

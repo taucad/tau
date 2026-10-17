@@ -3,7 +3,7 @@
  *
  * The app ships the sealed closures of its native kernels under `Contents/Resources/payloads/closures/sha256/<hex>`,
  * the store's own layout. At startup main seeds the shared store from them: each closure the store lacks is cloned
- * (`/bin/cp -c -R`, a copy only where a clone fails) into staging, verified file by file against its receipt, checked
+ * (`/bin/cp -c -p -R`, a copy only where a clone fails) into staging, verified file by file against its receipt, checked
  * against the pins `tau-plugin.json` declares, and published by `rename`, as a preparation publishes one. A closure
  * already sealed is never copied again. Main then reads the launch indexes and posts what each kernel runs from to
  * the kernel utilities, and collects the store's garbage. Nothing here downloads.
@@ -72,6 +72,7 @@ export const openDesktopPreparationHost = (input: {
 /**
  * Copy a directory tree whose target does not exist yet: an APFS clone on macOS (no new blocks), a reflink where a
  * Linux filesystem has one, and a plain copy only where neither works (D24). Never Node's `copyFile`.
+ * Preserve the sealed modes even under a restrictive host umask; receipt verification still rejects mode drift.
  * @param source - The tree to copy.
  * @param target - The new tree; its parent exists.
  * @returns How the tree was copied.
@@ -82,16 +83,16 @@ export const cloneTree = async (source: string, target: string): Promise<'clone'
   }
   if (process.platform === 'darwin') {
     try {
-      await execFileAsync('/bin/cp', ['-c', '-R', source, target]);
+      await execFileAsync('/bin/cp', ['-c', '-p', '-R', source, target]);
       return 'clone';
     } catch {
       // Another volume, or a filesystem without clonefile(2): copy instead.
       await rm(target, { recursive: true, force: true });
     }
-    await execFileAsync('/bin/cp', ['-R', source, target]);
+    await execFileAsync('/bin/cp', ['-p', '-R', source, target]);
     return 'copy';
   }
-  await execFileAsync('cp', ['-R', '--reflink=auto', source, target]);
+  await execFileAsync('cp', ['-R', '--preserve=mode', '--reflink=auto', source, target]);
   return 'clone';
 };
 

@@ -1,7 +1,22 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import {
   computeClosureIntegrity,
@@ -102,6 +117,79 @@ const bundledClosure = async (): Promise<string> => {
   const [key] = await readdir(join(bundle, 'closures', 'sha256'));
   return join(bundle, 'closures', 'sha256', key!);
 };
+
+describe.each([
+  { mode: 'native', forceFallback: false },
+  { mode: 'Darwin plain-copy fallback', forceFallback: true },
+])('cloneTree $mode', ({ forceFallback }) => {
+  it.skipIf(forceFallback && process.platform !== 'darwin')(
+    'should preserve sealed modes and symlinks under a restrictive child umask',
+    async () => {
+      const source = join(root, 'mode-source');
+      const target = join(root, 'mode-target');
+      await mkdir(join(source, 'nested'), { recursive: true });
+      await writeFile(join(source, 'data'), 'sealed data');
+      await writeFile(join(source, 'nested', 'executable'), 'sealed executable');
+      await writeFile(join(source, 'private'), 'private data');
+      await symlink('data', join(source, 'alias'));
+      const modes = [
+        ['', 0o755],
+        ['nested', 0o750],
+        ['data', 0o644],
+        ['nested/executable', 0o755],
+        ['private', 0o600],
+      ] as const;
+      await Promise.all(modes.map(async ([path, mode]) => chmod(join(source, path), mode)));
+      // Only the disposable child changes its mask; parallel tests and the application retain theirs.
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '--eval',
+          `process.umask(0o077);
+       if (process.argv[4] === 'true') {
+         const { default: childProcess } = await import('node:child_process');
+         const { syncBuiltinESMExports } = await import('node:module');
+         const original = childProcess.execFile;
+         childProcess.execFile = (file, args, ...rest) =>
+           file === '/bin/cp' && args.includes('-c')
+             ? original('/usr/bin/false', [], ...rest)
+             : original(file, args, ...rest);
+         syncBuiltinESMExports();
+       }
+       const { cloneTree } = await import(process.argv[1]);
+       console.log(await cloneTree(process.argv[2], process.argv[3]));`,
+          new URL('native-store.ts', import.meta.url).href,
+          source,
+          target,
+          String(forceFallback),
+        ],
+        { timeout: 10_000 },
+      );
+      if (forceFallback) {
+        expect(stdout.trim()).toBe('copy');
+      } else if (process.platform === 'darwin') {
+        expect(['clone', 'copy']).toContain(stdout.trim());
+      } else {
+        expect(stdout.trim()).toBe('clone');
+      }
+      await Promise.all(
+        modes.map(async ([path, mode]) => {
+          const [copied, original] = await Promise.all([stat(join(target, path)), stat(join(source, path))]);
+          expect(copied.mode % 0o1000).toBe(mode);
+          expect(original.mode % 0o1000).toBe(mode);
+        }),
+      );
+      expect(await readFile(join(target, 'data'), 'utf8')).toBe('sealed data');
+      expect(await readFile(join(target, 'nested', 'executable'), 'utf8')).toBe('sealed executable');
+      expect(await readFile(join(target, 'private'), 'utf8')).toBe('private data');
+      expect(await readlink(join(target, 'alias'))).toBe('data');
+    },
+    15_000,
+  );
+});
 
 describe('seedNativeStore', () => {
   it('should seed a closure the store lacks, whose receipt names the closureIntegrity the manifest pins', async () => {

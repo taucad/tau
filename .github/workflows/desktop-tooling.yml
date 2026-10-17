@@ -9,6 +9,8 @@ on:
       - 'scripts/src/typecheck-projects*'
       - 'scripts/src/tsgo-plugin-target.test.ts'
       - 'pnpm-lock.yaml'
+      - 'apps/desktop/src/tau/native-store.ts'
+      - 'apps/desktop/src/tau/native-store.test.ts'
   workflow_dispatch:
 
 permissions:
@@ -48,3 +50,8 @@ jobs:
       # This is tooling qualification, not a desktop package or signing result.
       - name: Exercise portable compiler runner
         run: pnpm nx run scripts:test --watch=false src/typecheck-projects.test.ts src/tsgo-plugin-target.test.ts
+      # Real host copy/clone semantics, including a child-only restrictive umask.
+      # This verifies store receipts; it does not package, sign or launch the product.
+      - name: Verify native store clone permissions
+        if: runner.os != 'Windows'
+        run: pnpm nx run-many -t test-native-store --parallel=1

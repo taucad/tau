@@ -375,6 +375,15 @@
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
       }
+    },
+    "test-native-store": {
+      "executor": "nx:run-commands",
+      "inputs": ["default", "^production"],
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "options": {
+        "cwd": "apps/desktop",
+        "command": "vitest src/tau/native-store.test.ts --watch=false --maxWorkers=1"
+      }
     }
   }
 }

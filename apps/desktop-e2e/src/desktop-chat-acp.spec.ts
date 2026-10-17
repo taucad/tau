@@ -250,11 +250,20 @@ const codexAvailable = ((): boolean => {
  * @returns The image as a `data:` URL.
  */
 const captureDataUrl = (
-  image: { readonly dataUrl: string } | { readonly mimeType: string; readonly absolutePath: string },
-): string =>
-  'dataUrl' in image
-    ? image.dataUrl
-    : `data:${image.mimeType};base64,${readFileSync(image.absolutePath).toString('base64')}`;
+  image:
+    | { readonly dataUrl: string }
+    | { readonly mimeType: string; readonly absolutePath: string }
+    | { readonly path: string },
+): string => {
+  if ('dataUrl' in image) {
+    return image.dataUrl;
+  }
+  if (!('absolutePath' in image)) {
+    // Only the browser host stores captures as chat attachments; a desktop capture is inline or saved.
+    throw new Error(`Desktop capture unexpectedly stored as ${image.path}.`);
+  }
+  return `data:${image.mimeType};base64,${readFileSync(image.absolutePath).toString('base64')}`;
+};
 
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;

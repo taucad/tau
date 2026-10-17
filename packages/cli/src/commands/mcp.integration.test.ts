@@ -399,6 +399,45 @@ const stopIfRunning = (served: Served) => async (): Promise<void> => {
   }
 };
 
+/**
+ * A preload that replaces the global `fetch` in every thread of a server with one that records the URL and throws:
+ * guarantee G1 of the managed profile (charter D25, W10) at full depth, where a warm store under
+ * `TAU_ACQUISITION=locked` must let `tau mcp` evaluate with no request at all. Worker threads inherit the `--import`.
+ * `file:`, `data:` and `blob:` URLs reach no origin, so they pass through to the original `fetch`.
+ *
+ * @param name - Names the preload and its log, one per server.
+ * @returns The `--import` specifier, and the URLs the server has tried to fetch so far.
+ */
+const fetchTripwire = async (name: string) => {
+  const log = join(scratch, `${name}.fetches.log`);
+  const hook = join(scratch, `${name}.fetch-tripwire.mjs`);
+  await writeFile(
+    hook,
+    `import { appendFileSync } from 'node:fs';
+const local = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  /* Not a request: the runtime's loadBinaryFile tries fetch on a file: URL before reading the file itself. */
+  if (/^(?:file|data|blob):/u.test(url)) {
+    return local(input, init);
+  }
+  appendFileSync(${JSON.stringify(log)}, url + '\\n');
+  throw new TypeError('G1 tripwire: tau mcp fetched ' + url + ' on a warm store under TAU_ACQUISITION=locked');
+};
+`,
+  );
+  return {
+    specifier: pathToFileURL(hook).href,
+    fetched: async (): Promise<string[]> => {
+      if (!(await exists(log))) {
+        return [];
+      }
+      const recorded = await readFile(log, 'utf8');
+      return recorded.split('\n').filter((line) => line !== '');
+    },
+  };
+};
+
 describe('tau mcp over stdio', () => {
   let served: Served;
   let client: Client;
@@ -1542,6 +1581,7 @@ describe('tau mcp native kernels (W5 tier 4a)', () => {
       'from build123d import Box\n\n\ndef main():\n    return Box(10, 20, 30)\n',
     );
     await writeFile(join(project, 'main.cs'), 'using PicoGK;\n\npublic static class Model {}\n');
+    await writeFile(join(project, 'main.ts'), files.block['main.ts']);
     const manifest = join(scratch, 'picogk-tau-plugin.json');
     await writeFile(manifest, JSON.stringify(syntheticManifest));
     rosterHook = join(scratch, 'native-roster.mjs');
@@ -1703,6 +1743,41 @@ registerHooks({
           code: 'KERNEL_NOT_PREPARED',
           details: { kernel: 'build123d' },
         });
+      },
+      kernelCallLimit,
+    );
+
+    it(
+      'G1: should make no request while a second server evaluates .cs and .ts on the warm store under TAU_ACQUISITION=locked',
+      async () => {
+        const tripwire = await fetchTripwire('g1-locked');
+        const mirrorRequests = mirror.requests.length;
+        const env = nativeEnvironment(store);
+        env['TAU_ACQUISITION'] = 'locked';
+        const locked = launch(project, undefined, {
+          env,
+          imports: [pathToFileURL(rosterHook).href, tripwire.specifier],
+        });
+        disposers.push(stopIfRunning(locked));
+        const lockedClient = new Client({ name: 'tau-mcp-integration-native-g1', version: '1' });
+        await connect(lockedClient, locked);
+
+        const prepared = await callOn(lockedClient, { name: 'prepare_kernel', arguments: { kernel: 'picogk' } });
+        const csharp = await callOn(lockedClient, { name: 'evaluate_model', arguments: { targetFile: 'main.cs' } });
+        const typescript = await callOn(lockedClient, { name: 'evaluate_model', arguments: { targetFile: 'main.ts' } });
+        const python = await callOn(lockedClient, { name: 'evaluate_model', arguments: { targetFile: 'main.py' } });
+        await keepFrames('g1-locked', locked);
+        await lockedClient.close();
+
+        expect(prepared.structuredContent, textOf(prepared)).toMatchObject({ status: 'ready', kernel: 'picogk' });
+        expect(kernelIssuesOf(csharp).map(({ code }) => code)).not.toContain('KERNEL_NOT_PREPARED');
+        expect(typescript.structuredContent, textOf(typescript)).toMatchObject({ status: 'ready' });
+        expect(kernelIssuesOf(python)[0]).toMatchObject({
+          code: 'KERNEL_NOT_PREPARED',
+          details: { kernel: 'build123d' },
+        });
+        expect(await tripwire.fetched()).toEqual([]);
+        expect(mirror.requests).toHaveLength(mirrorRequests);
       },
       kernelCallLimit,
     );
@@ -1890,6 +1965,21 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
   ): Promise<CallToolResult> =>
     CallToolResultSchema.parse(await client.callTool(params, undefined, { timeout: realPrepareLimit, ...options }));
 
+  /**
+   * Built by assignment so no environment key is a source literal. The rest of the managed profile is cleared: the
+   * manifests' own origins, this host's target, this suite's store.
+   */
+  const darwinEnvironment = (acquisition: '' | 'locked'): Record<string, string> => {
+    const env: Record<string, string> = {};
+    env['TAU_CONFIG_DIR'] = store;
+    env['TAU_ACQUISITION'] = acquisition;
+    env['TAU_PAYLOAD_DIR'] = '';
+    env['TAU_PAYLOAD_MIRROR'] = '';
+    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '';
+    env['TAU_PAYLOAD_TARGET'] = '';
+    return env;
+  };
+
   const closuresIn = async (): Promise<string[]> => {
     const entries = await entriesOf(store);
     return entries.filter((entry) => /(?:^|\/)closures\/sha256\/[\da-f]{64}\/receipt\.json$/u.test(entry));
@@ -1901,18 +1991,10 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
     await mkdir(project);
     await writeFile(join(project, 'main.py'), egressCheckedPython(canary.port));
     await writeFile(join(project, 'main.cs'), egressCheckedCsharp(canary.port));
+    await writeFile(join(project, 'main.ts'), files.block['main.ts']);
     store = await mkdtemp(join(tmpdir(), 'mcp-native-darwin-store-'));
     disposers.push(async () => rm(store, { recursive: true, force: true }));
-    /* Built by assignment so no environment key is a source literal. The managed profile is cleared: the manifests'
-     * own origins, this host's target, an empty store. */
-    const env: Record<string, string> = {};
-    env['TAU_CONFIG_DIR'] = store;
-    env['TAU_ACQUISITION'] = '';
-    env['TAU_PAYLOAD_DIR'] = '';
-    env['TAU_PAYLOAD_MIRROR'] = '';
-    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '';
-    env['TAU_PAYLOAD_TARGET'] = '';
-    served = launch(project, undefined, { env });
+    served = launch(project, undefined, { env: darwinEnvironment('') });
     disposers.push(stopIfRunning(served));
     disposers.push(async () => {
       const directory = process.env['TAU_TEST_FRAME_LOG_DIR'];
@@ -2062,6 +2144,36 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
       }
     },
     kernelCallLimit,
+  );
+
+  it(
+    'G1: should evaluate .py, .cs and .ts with no request from a second server on the warm store under TAU_ACQUISITION=locked',
+    async () => {
+      const tripwire = await fetchTripwire('g1-native-darwin');
+      const locked = launch(project, undefined, { env: darwinEnvironment('locked'), imports: [tripwire.specifier] });
+      disposers.push(stopIfRunning(locked));
+      const lockedClient = new Client({ name: 'tau-mcp-integration-native-darwin-g1', version: '1' });
+      await connect(lockedClient, locked);
+
+      const results: Array<[string, CallToolResult]> = [];
+      for (const targetFile of ['main.py', 'main.cs', 'main.ts']) {
+        // oxlint-disable-next-line no-await-in-loop -- one server, one evaluation at a time.
+        const evaluated = await lockedClient.callTool(
+          { name: 'evaluate_model', arguments: { targetFile } },
+          undefined,
+          { timeout: kernelCallLimit },
+        );
+        results.push([targetFile, CallToolResultSchema.parse(evaluated)]);
+      }
+      await lockedClient.close();
+
+      for (const [targetFile, evaluated] of results) {
+        expect(evaluated.structuredContent, `${targetFile}: ${textOf(evaluated)}`).toMatchObject({ status: 'ready' });
+        expect(kernelIssuesOf(evaluated), targetFile).toEqual([]);
+      }
+      expect(await tripwire.fetched()).toEqual([]);
+    },
+    kernelCallLimit * 3,
   );
 
   it('should keep both workers from reaching the network or the loopback canary', () => {

@@ -12,6 +12,8 @@
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;
 \* queued admission, FIFO delivery and durable cancellation retain these owners.
+\* The composer's mobile collapse tracks focus for layout only; submit, admission
+\* and queue delivery keep the same paths.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

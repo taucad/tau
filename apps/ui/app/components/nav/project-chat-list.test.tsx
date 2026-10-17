@@ -309,7 +309,7 @@ describe('ProjectChatList', () => {
     });
     rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
 
-    /* chat_1 was never observed; the new chat_13 pushes chat_8 off the newest page. */
+    /* The oldest chat was never observed; the new chat_13 pushes chat_8 off the newest page. */
     expect(mockRelease.mock.calls).toEqual([['chat_8']]);
     expect(mockObserve).toHaveBeenCalledTimes(6);
     expect(mockObserve).toHaveBeenLastCalledWith('chat_13', project.id);

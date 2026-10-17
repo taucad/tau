@@ -15,9 +15,9 @@ vi.mock('#providers/posthog-analytics-provider.js', () => ({
   }: {
     readonly children: ReactNode;
     readonly isReplayEnabled: boolean;
-  }) => {
+  }): React.JSX.Element => {
     state.replay.push(isReplayEnabled);
-    return children;
+    return <div>{children}</div>;
   },
 }));
 

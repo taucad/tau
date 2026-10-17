@@ -259,7 +259,7 @@ const sameOptions = (left: unknown, right: unknown): boolean => JSON.stringify(l
 const applyFamilyOptions = (
   defaults: FamilyDefaults,
   compilerOptions: Monaco.typescript.CompilerOptions,
-  hints: Monaco.typescript.InlayHintsOptions,
+  hints: Parameters<FamilyDefaults['setInlayHintsOptions']>[0],
 ): void => {
   if (!sameOptions(defaults.getCompilerOptions(), compilerOptions)) {
     defaults.setCompilerOptions(compilerOptions);
@@ -270,29 +270,37 @@ const applyFamilyOptions = (
 };
 
 export function setTsCompilerOptions(monaco: typeof Monaco): void {
-  applyFamilyOptions(monaco.typescript.typescriptDefaults, {
-    experimentalDecorators: true,
-    allowSyntheticDefaultImports: true,
-    allowImportingTsExtensions: true,
-    moduleResolution: moduleResolutionBundler,
-    target: monaco.typescript.ScriptTarget.ESNext,
-    module: monaco.typescript.ModuleKind.ESNext,
-    noLib: false,
-    allowNonTsExtensions: true,
-    noEmit: true,
-    esModuleInterop: true,
-    baseUrl: '.',
-  }, inlayHintsOptions);
+  applyFamilyOptions(
+    monaco.typescript.typescriptDefaults,
+    {
+      experimentalDecorators: true,
+      allowSyntheticDefaultImports: true,
+      allowImportingTsExtensions: true,
+      moduleResolution: moduleResolutionBundler,
+      target: monaco.typescript.ScriptTarget.ESNext,
+      module: monaco.typescript.ModuleKind.ESNext,
+      noLib: false,
+      allowNonTsExtensions: true,
+      noEmit: true,
+      esModuleInterop: true,
+      baseUrl: '.',
+    },
+    inlayHintsOptions,
+  );
 }
 
 export function setJsCompilerOptions(monaco: typeof Monaco): void {
-  applyFamilyOptions(monaco.typescript.javascriptDefaults, {
-    allowSyntheticDefaultImports: true,
-    moduleResolution: moduleResolutionBundler,
-    target: monaco.typescript.ScriptTarget.ESNext,
-    module: monaco.typescript.ModuleKind.ESNext,
-    allowJs: true,
-    checkJs: true,
-    esModuleInterop: true,
-  }, inlayHintsOptions);
+  applyFamilyOptions(
+    monaco.typescript.javascriptDefaults,
+    {
+      allowSyntheticDefaultImports: true,
+      moduleResolution: moduleResolutionBundler,
+      target: monaco.typescript.ScriptTarget.ESNext,
+      module: monaco.typescript.ModuleKind.ESNext,
+      allowJs: true,
+      checkJs: true,
+      esModuleInterop: true,
+    },
+    inlayHintsOptions,
+  );
 }

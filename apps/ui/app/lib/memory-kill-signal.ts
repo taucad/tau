@@ -55,8 +55,8 @@ export type MemoryKillSignal = Readonly<{
   arm: () => void;
 }>;
 
-const parseMarker = (raw: string | null): AliveMarker | undefined => {
-  if (raw === null) {
+const parseMarker = (raw: string | undefined): AliveMarker | undefined => {
+  if (raw === undefined) {
     return undefined;
   }
   try {
@@ -112,7 +112,7 @@ export const createMemoryKillSignal = ({
       taken = true;
       let previous: AliveMarker | undefined;
       try {
-        previous = parseMarker(storage?.getItem(markerKey) ?? null);
+        previous = parseMarker(storage?.getItem(markerKey) ?? undefined);
       } catch {
         previous = undefined;
       }

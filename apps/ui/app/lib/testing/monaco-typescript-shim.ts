@@ -43,7 +43,7 @@ export function attachTypescriptShim(stub: MonacoTestStub): void {
     };
   };
   /* Descriptors, not `Object.assign`: the getters must stay getters. */
-  const withFamilyOptions = <Extra extends object>(extra: Extra) =>
+  const withFamilyOptions = <Extra extends Record<string, unknown>>(extra: Extra) =>
     Object.defineProperties(familyOptions(), Object.getOwnPropertyDescriptors(extra)) as ReturnType<
       typeof familyOptions
     > &

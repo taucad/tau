@@ -9,9 +9,23 @@
  */
 
 type DeviceEnvironment = Readonly<{
-  matchMedia?: (query: string) => Readonly<{ matches: boolean }>;
-  navigator?: Readonly<{ deviceMemory?: number }>;
+  matchMedia?: ((query: string) => Readonly<{ matches: boolean }>) | undefined;
+  navigator?: Readonly<{ deviceMemory?: number | undefined }> | undefined;
 }>;
+
+/** `navigator.deviceMemory`, which the DOM library does not declare; `undefined` outside Chromium and during SSR. */
+const readDeviceMemory = (): number | undefined => {
+  if (typeof navigator === 'undefined' || !('deviceMemory' in navigator)) {
+    return undefined;
+  }
+  const { deviceMemory } = navigator;
+  return typeof deviceMemory === 'number' ? deviceMemory : undefined;
+};
+
+const browserEnvironment = (): DeviceEnvironment => ({
+  matchMedia: typeof globalThis.matchMedia === 'function' ? (query) => globalThis.matchMedia(query) : undefined,
+  navigator: { deviceMemory: readDeviceMemory() },
+});
 
 /** At or below this many GB, `navigator.deviceMemory` marks a device as constrained. */
 const constrainedDeviceMemoryGigabytes = 4;
@@ -23,7 +37,7 @@ const constrainedDeviceMemoryGigabytes = 4;
  * @returns `true` on a coarse-pointer or low-memory device; `false` elsewhere and during SSR.
  * @public
  */
-export const isMemoryConstrainedDevice = (environment: DeviceEnvironment = globalThis): boolean => {
+export const isMemoryConstrainedDevice = (environment: DeviceEnvironment = browserEnvironment()): boolean => {
   const deviceMemory = environment.navigator?.deviceMemory;
   if (typeof deviceMemory === 'number' && deviceMemory <= constrainedDeviceMemoryGigabytes) {
     return true;

@@ -8,7 +8,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, renderHook, screen } from '@testing-library/react';
+import { render, renderHook, screen } from '@testing-library/react';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';

@@ -96,9 +96,7 @@ export function ProjectChatList({
         .join(observedKeySeparator),
     () => '',
   );
-  const observedKey = [
-    ...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)]),
-  ]
+  const observedKey = [...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
     .filter((chatId) => chatId !== '')
     .join(observedKeySeparator);
   useEffect(() => {

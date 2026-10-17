@@ -29,7 +29,12 @@ describe('MemoryKillReporter (B-01)', () => {
     expect(capture).toHaveBeenCalledTimes(1);
     expect(capture).toHaveBeenCalledWith(
       'memory.suspected_kill',
-      expect.objectContaining({ deviceClass: 'constrained', liveProjectCount: 1, chatCount: 3, lastBreadcrumb: 'export' }),
+      expect.objectContaining({
+        deviceClass: 'constrained',
+        liveProjectCount: 1,
+        chatCount: 3,
+        lastBreadcrumb: 'export',
+      }),
     );
   });
 });

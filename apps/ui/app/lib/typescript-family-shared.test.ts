@@ -60,7 +60,9 @@ describe('TS family option re-application (B-16, D-UI-30)', () => {
       typescript: {
         typescriptDefaults,
         javascriptDefaults,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors Monaco's enum names.
         ScriptTarget: { ESNext: 99 },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors Monaco's enum names.
         ModuleKind: { ESNext: 99 },
       },
     } as unknown as typeof Monaco;

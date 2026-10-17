@@ -390,7 +390,7 @@ export const sessionsMachine = setup({
          * idle window could, says why on the row, and leaves the project on
          * screen alone (I24, I25, B-08). */
         releaseMemory: ({ context, event }, enq) => {
-          let refusals = context.refusals;
+          let { refusals } = context;
           for (const [projectId, ref] of Object.entries(context.refs)) {
             if (projectId === event.keepProjectId) {
               continue;

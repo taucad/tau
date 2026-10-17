@@ -775,7 +775,7 @@ export class MonacoModelService {
         return;
       }
       const model = this.monaco.editor.getModel(this.createUri(path));
-      if (model !== null && model !== undefined && !this.isEvictable(path, model)) {
+      if (model !== null && !this.isEvictable(path, model)) {
         continue;
       }
       model?.dispose();

@@ -210,7 +210,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * arrived from `completed` straight to `done` without passing through
      * `finishing` (`chat-session.machine.ts:339-343`), and the marker prefers a
      * settled revision over any run state (`chat-turn-revision-state.ts:73`).
-     * So assert the promise — Working first, the confirmed save last, and any
+     * So assert the promise — any Working first, the confirmed save last, and any
      * *Saving revision* strictly between them — not the intermediate beat. */
     const lastLabel = async (): Promise<string | undefined> => {
       const seen = await markerLabels();
@@ -222,10 +222,26 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * base revision has a name. */
     const working = labels.findLastIndex((label) => label === 'New revision' || label.startsWith('Starting '));
     console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
-    expect(working, `marker never said Working: ${JSON.stringify(labels)}`).toBeGreaterThanOrEqual(0);
+    /* Working is shown only while the attempt's change proof is in and its terminal row is not
+     * (`deriveTurnRevisionState`: no proof yet hides the marker, proof after the terminal row is *Saving revision*),
+     * so a turn this short can skip it. When it is shown it comes before the save; either way the turn ends on a
+     * newer revision than any the marker showed before it (the seed's, sampled as the recorder starts). */
+    const revision = (label: string | undefined): number =>
+      Number(/^Rev (\d+) saved/u.exec(label ?? '')?.[1] ?? Number.NaN);
+    const earlierRevisions = labels
+      .slice(0, -1)
+      .map((label) => revision(label))
+      .filter((value) => Number.isFinite(value));
+    expect(earlierRevisions, `the seed's save never showed: ${JSON.stringify(labels)}`).not.toHaveLength(0);
+    expect(revision(labels.at(-1)), `this turn saved no newer revision: ${JSON.stringify(labels)}`).toBeGreaterThan(
+      Math.max(...earlierRevisions),
+    );
     expect(labels.length - 1, `marker never settled after Working: ${JSON.stringify(labels)}`).toBeGreaterThan(working);
-    /* Sliced from Working, because the seeding turn's own labels are in front. */
-    const thisTurn = labels.slice(working);
+    /* Sliced from Working, or from the seed's last save, because the seeding turn's labels are in front. */
+    const seedSaved = labels.findLastIndex(
+      (label, index) => index < labels.length - 1 && Number.isFinite(revision(label)),
+    );
+    const thisTurn = labels.slice(working === -1 ? seedSaved + 1 : working);
     expect(
       thisTurn.lastIndexOf('Saving revision'),
       `Saving revision outlived this turn's save: ${JSON.stringify(labels)}`,

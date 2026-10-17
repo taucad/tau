@@ -220,7 +220,10 @@ const picogkWorkers = (): readonly NativeWorker[] => {
   }
   const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
-  const workerCommand = /^\s*(\d+)\s+.*Tau\.PicoGK\.Worker --workspace (\S+) --artifacts (\S+) --parent-pid \d+$/u;
+  /* The apphost (`Tau.PicoGK.Worker`) from prepared resources, or the store closure's `dotnet` running the assembly
+   * (`tau-worker/Tau.PicoGK.Worker.dll`, `picogk-closure.ts`). */
+  const workerCommand =
+    /^\s*(\d+)\s+.*Tau\.PicoGK\.Worker(?:\.dll)? --workspace (\S+) --artifacts (\S+) --parent-pid \d+$/u;
   return result.stdout.split('\n').flatMap((line) => {
     const match = workerCommand.exec(line);
     const pid = match?.[1];
@@ -526,6 +529,24 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     if (process.platform !== 'win32') {
       const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
       expect(workers.length).toBeGreaterThan(0);
+      /* A real quit, as the PicoGK row below: the fixture's own disposal is `app.exit`, which skips the shutdown
+       * that removes each worker's temporary root. */
+      const electronProcess = session.application.process();
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(() => {
+              const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
+              return shell.tau?.quit?.isReady() ?? false;
+            }),
+          { timeout: 120_000 },
+        )
+        .toBe(true);
+      await session.application.evaluate(({ app }) => {
+        app.quit();
+      });
+      await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+      expect(electronProcess.signalCode).toBeNull();
       await session.close();
       session = undefined;
       await expect

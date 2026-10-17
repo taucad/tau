@@ -17,6 +17,7 @@ import { installBrowserHost } from '#main/browser-host.js';
 
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -305,6 +306,11 @@ const machineStreamingMilliseconds = machineStartWaitMilliseconds + 2000;
  * shortest idle-sleep timer an operating system offers (one minute).
  */
 const keepAwakeIntervalMilliseconds = 20_000;
+/* Kernel utility resident ceiling (D-DT-02): the upper bound on half of physical memory. */
+const maxKernelResidentBytes = 8 * 1024 * 1024 * 1024;
+const kernelResidentPollMilliseconds = 5000;
+/* One metrics read serves every sampler for this long. */
+const residentMetricsReuseMilliseconds = 500;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -643,6 +649,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
       held.release();
     }
   };
+  /* One `getAppMetrics()` answers every utility sampled in the same moment: the
+   * kernel broker samples each adopted utility on one tick, and the geometry
+   * slot every second. */
+  let appMetrics: { readonly at: number; readonly residentBytes: ReadonlyMap<number, number> } | undefined;
+  const residentBytesOf = (utility: { readonly pid?: number | undefined }): number | undefined => {
+    if (utility.pid === undefined) {
+      return undefined;
+    }
+    const now = Date.now();
+    if (appMetrics === undefined || now - appMetrics.at > residentMetricsReuseMilliseconds) {
+      appMetrics = {
+        at: now,
+        // Electron ProcessMetric workingSetSize is KiB; the broker budgets are bytes.
+        residentBytes: new Map(app.getAppMetrics().map((entry) => [entry.pid, entry.memory.workingSetSize * 1024])),
+      };
+    }
+    return appMetrics.residentBytes.get(utility.pid);
+  };
   const baseForkResolver = createKernelForkResolver({
     registry: roots,
     defaultRoot: homeRoot,
@@ -666,6 +690,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
      * three utilities and the sessions registry admits as many as memory holds,
      * so this sits an order of magnitude above realistic use. */
     maxUtilities: 64,
+    /* D-DT-02: WebAssembly memory never shrinks, so a kernel utility stays at
+     * its peak until it dies. Past the ceiling it is killed and its project
+     * reports the exit, rather than the machine swapping. Half of physical
+     * memory, at most 8 GiB, sits well above any single healthy model. */
+    residentLimit: {
+      maxBytes: Math.min(maxKernelResidentBytes, Math.floor(totalmem() / 2)),
+      intervalMilliseconds: kernelResidentPollMilliseconds,
+      sample: residentBytesOf,
+    },
     resolveFork: (context) => {
       const requestedRoot = context['projectRoot'];
       const registeredProjectRoot =
@@ -752,15 +785,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
     connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
-    sampleResidentBytes: (utility) => {
-      if (utility.pid === undefined) {
-        return undefined;
-      }
-      const metric = app.getAppMetrics().find((entry) => entry.pid === utility.pid);
-      const kibibytes = metric?.memory.workingSetSize;
-      // Electron ProcessMetric workingSetSize is KiB; the broker budget is bytes.
-      return kibibytes === undefined ? undefined : kibibytes * 1024;
-    },
+    sampleResidentBytes: residentBytesOf,
     runtimeConfig: {
       tauApiUrl: environment['TAU_API_URL']!,
       tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,

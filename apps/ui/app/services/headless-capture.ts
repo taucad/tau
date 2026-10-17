@@ -1,5 +1,6 @@
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { asKnownArtifact } from '@taucad/runtime';
+import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import type { Rendering } from '@taucad/runtime';
 import { canonicalCaptureViews, captureFilesToDataUrls as encodeCaptureDataUrls } from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
@@ -361,6 +362,7 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
       ? copyCameraState(options.cameraState ?? getGraphicsCameraState(options.graphicsRef))
       : undefined;
   const presentation = snapshotPresentationIntent(graphicsSnapshot);
+  recordMemoryBreadcrumb('capture');
   const freshnessStartedAt = performance.now();
   const rendering = options.captureRendering ? await options.captureRendering() : undefined;
   const cadSnapshot = options.captureRendering ? options.cadRef.getSnapshot() : await awaitFreshRender(options.cadRef);

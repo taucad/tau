@@ -22,6 +22,7 @@ import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constan
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { useMemoryRelease } from '#hooks/use-memory-release.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -237,6 +238,7 @@ export function ProjectRouteGate({
     ) {
       return;
     }
+    recordMemoryBreadcrumb('open');
     sessions.send({ type: 'open', projectId: requestedProjectId });
     sessions.send({ type: 'touch', projectId: requestedProjectId });
   }, [requestedProjectId, resolved, sessions]);

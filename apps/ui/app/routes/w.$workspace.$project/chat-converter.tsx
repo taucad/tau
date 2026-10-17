@@ -1,5 +1,6 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '@taucad/runtime';
@@ -290,6 +291,7 @@ async function downloadExports(
   if (queue.length === 0) {
     return;
   }
+  recordMemoryBreadcrumb('export');
 
   if (zipMultiple && queue.length > 1) {
     const zipBlob = await createExportArtifactZip(queue.map(({ format, files }) => ({ directory: format, files })));

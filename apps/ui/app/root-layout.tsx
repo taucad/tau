@@ -31,6 +31,7 @@ import { ProjectSessionsHost, projectRoutePath } from '#routes/w.$workspace.$pro
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { CommunityPageSkeleton } from '#routes/_index/community-page-skeleton.js';
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
+import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
@@ -138,6 +139,7 @@ export function RootLayout({
                 {/* A35: liveness is owned by the registry, not by a route. */}
                 <SessionsProvider>
                   <GlobalChatFlushGuard />
+                  <DocumentMemoryKillReporter />
                   <RevisionActorIdentity />
                   {children}
                 </SessionsProvider>

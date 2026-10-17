@@ -11,8 +11,10 @@
  *   backup; `desktop --remove` takes it out.
  * - `preview --sha <commit>` installs a pkg.pr.new preview into Claude Code: the plugin from a scratch catalog and the
  *   CLI with npm, so nothing reads the checkout.
- * - `doctor [--smoke] [--project <folder>]` starts the launcher as each host would and checks the server answers,
- *   lists the expected tools and serves the viewer page; `--smoke` also builds, tests, screenshots and shows a block.
+ * - `doctor [--smoke] [--project <folder>] [--plugin <folder>]` starts the launcher as each host would and checks the
+ *   server answers, lists the expected tools and serves the viewer page; `--smoke` also builds, tests, screenshots and
+ *   shows a block. `--plugin` names an installed plugin folder, such as a pkg.pr.new preview in `node_modules`, in
+ *   place of this one; it then finds its CLI as a host would (`TAU_CLI`, then `tau` on `PATH`).
  *
  * @module
  */
@@ -48,6 +50,18 @@ export const expectedTools = [
 
 /** Files a build leaves in the plugin folder; without them a host loads a plugin that starts nothing. */
 export const builtFiles = ['dist/launch.mjs', 'dist-app/app.html', 'skills/tau/SKILL.md', '.dev/cli.json'] as const;
+
+/**
+ * The built files a plugin folder lacks.
+ *
+ * @param root - The plugin folder.
+ * @param workspace - Whether it is this checkout's folder, which also needs the `.dev/cli.json` pointer; an installed
+ *   folder (a published or preview package) has no pointer and finds its CLI as a host would.
+ * @param exists - Whether a path exists.
+ * @returns The missing files, relative to `root`.
+ */
+export const missingBuiltFiles = (root: string, workspace: boolean, exists: (path: string) => boolean): string[] =>
+  builtFiles.filter((file) => workspace || file !== '.dev/cli.json').filter((file) => !exists(join(root, file)));
 
 type Host = 'claude' | 'codex';
 
@@ -136,10 +150,15 @@ const hostsOf = (value: string | undefined): Host[] => {
   return fail(`--host takes claude, codex or all, not ${value}`);
 };
 
-const requireBuild = (): void => {
-  const missing = builtFiles.filter((file) => !existsSync(join(pluginRoot, file)));
+const requireBuild = (root = pluginRoot): void => {
+  const workspace = root === pluginRoot;
+  const missing = missingBuiltFiles(root, workspace, existsSync);
   if (missing.length > 0) {
-    fail(`the plugin folder is not built (missing ${missing.join(', ')}); run: pnpm nx run agent-plugin:build`);
+    fail(
+      workspace
+        ? `the plugin folder is not built (missing ${missing.join(', ')}); run: pnpm nx run agent-plugin:build`
+        : `${root} is not an installed Tau plugin (missing ${missing.join(', ')})`,
+    );
   }
 };
 
@@ -236,9 +255,10 @@ const preview = (sha: string | undefined): void => {
 
 /** A JSON-RPC session with the launcher over its stdio. */
 const connect = (
+  root: string,
   args: readonly string[],
 ): { child: ChildProcessWithoutNullStreams; request: (method: string, params: unknown) => Promise<unknown> } => {
-  const child = spawn(process.execPath, [join(pluginRoot, 'dist', 'launch.mjs'), ...args], {
+  const child = spawn(process.execPath, [join(root, 'dist', 'launch.mjs'), ...args], {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -312,8 +332,10 @@ const smokeProject = (): string => {
 
 type ToolResult = { readonly isError?: boolean; readonly content?: ReadonlyArray<{ type: string; text?: string }> };
 
-const doctor = async (smoke: boolean, project: string | undefined): Promise<void> => {
-  requireBuild();
+const doctor = async (smoke: boolean, project: string | undefined, plugin: string | undefined): Promise<void> => {
+  const root = plugin === undefined ? pluginRoot : resolve(plugin);
+  requireBuild(root);
+  log(`ok  plugin folder ${root}`);
   const major = Number.parseInt(process.versions.node, 10);
   log(`${major >= 24 ? 'ok' : 'FAIL'}  Node.js ${process.versions.node} (the CLI needs 24 or later)`);
   for (const host of ['claude', 'codex'] as const) {
@@ -323,7 +345,7 @@ const doctor = async (smoke: boolean, project: string | undefined): Promise<void
     );
   }
   const folder = project === undefined ? smokeProject() : resolve(project);
-  const { child, request } = connect(['--project', folder]);
+  const { child, request } = connect(root, ['--project', folder]);
   const problems: string[] = [];
   try {
     const started = Date.now();
@@ -394,6 +416,7 @@ const main = async (): Promise<void> => {
     options: {
       host: { type: 'string' },
       project: { type: 'string' },
+      plugin: { type: 'string' },
       sha: { type: 'string' },
       remove: { type: 'boolean', default: false },
       smoke: { type: 'boolean', default: false },
@@ -418,12 +441,12 @@ const main = async (): Promise<void> => {
       break;
     }
     case 'doctor': {
-      await doctor(values.smoke, values.project);
+      await doctor(values.smoke, values.project, values.plugin);
       break;
     }
     default: {
       fail(
-        'usage: pnpm plugin:dev install|uninstall|desktop|preview|doctor [--host claude|codex|all] [--project <folder>] [--sha <commit>] [--smoke] [--remove]',
+        'usage: pnpm plugin:dev install|uninstall|desktop|preview|doctor [--host claude|codex|all] [--project <folder>] [--plugin <folder>] [--sha <commit>] [--smoke] [--remove]',
       );
     }
   }

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // oxlint-disable-next-line no-restricted-imports -- `pnpm plugin:dev` runs this script by path; the `#` import map covers only src/.
-import { desktopConfigPath, desktopServerName, previewUrl, withDesktopServer } from './dev.js';
+import { desktopConfigPath, desktopServerName, missingBuiltFiles, previewUrl, withDesktopServer } from './dev.js';
 
 describe('desktopConfigPath', () => {
   it("names Claude Desktop's config file on each platform", () => {
@@ -47,5 +47,24 @@ describe('previewUrl', () => {
     expect(previewUrl('@taucad/agent-plugin', 'abc1234')).toBe(
       'https://pkg.pr.new/taucad/tau/@taucad/agent-plugin@abc1234',
     );
+  });
+});
+
+describe('missingBuiltFiles', () => {
+  const root = join('/p', 'plugin');
+  const present = (files: readonly string[]) => (path: string) => files.some((file) => join(root, file) === path);
+
+  it('requires the .dev/cli.json pointer only in the workspace folder', () => {
+    const installed = present(['dist/launch.mjs', 'dist-app/app.html', 'skills/tau/SKILL.md']);
+
+    expect(missingBuiltFiles(root, false, installed)).toEqual([]);
+    expect(missingBuiltFiles(root, true, installed)).toEqual(['.dev/cli.json']);
+  });
+
+  it('names every missing file of an installed folder', () => {
+    expect(missingBuiltFiles(root, false, present(['skills/tau/SKILL.md']))).toEqual([
+      'dist/launch.mjs',
+      'dist-app/app.html',
+    ]);
   });
 });

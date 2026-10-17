@@ -306,6 +306,26 @@ const nextWithin = async <T>(watch: StallWatch<T>): Promise<IteratorResult<T>> =
   }
 };
 
+/** The waits between lookups of an attempt the gateway is still settling, about 15 s in all, before the run ends. */
+const pendingAttemptWaits = [250, 500, 1000, 2000, 4000, 8000] as const;
+
+/** Resolve after `milliseconds` on the clock, or reject with the signal's reason once it aborts. */
+const waitOn = async (clock: HostClock, milliseconds: number, signal: AbortSignal): Promise<void> => {
+  signal.throwIfAborted();
+  let waitTimer: unknown;
+  await new Promise<void>((resolve, reject) => {
+    const abort = (): void => {
+      clock.clearTimeout(waitTimer);
+      reject(signal.reason instanceof Error ? signal.reason : new DOMException('The wait was aborted.', 'AbortError'));
+    };
+    waitTimer = clock.setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+};
+
 /**
  * Bound the silence between a stream's events (E9, L4 D-105). A firing late by a whole bound means the process was
  * frozen, not the stream silent: it re-arms once (W4 T9, RV7-F1).
@@ -1473,6 +1493,28 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     }
   };
   /**
+   * Ask about one earlier attempt until it settles, within {@link pendingAttemptWaits} (EQ1: Tau waits by itself). A
+   * stopped run's call is still settling at the gateway when the next message starts at once, as Steer does.
+   */
+  const settledInvocation = async (
+    funding: Extract<InvocationFunding, { type: 'funded' }>,
+    attemptId: string,
+    signal: AbortSignal,
+  ): Promise<InvocationResolution> => {
+    const clock = options.clock ?? globalThis;
+    let resolution = await funding.resolveInvocation({ attemptId, signal });
+    for (const wait of pendingAttemptWaits) {
+      if (resolution.status !== 'pending' && resolution.status !== 'unavailable') {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each lookup follows the previous answer's wait.
+      await waitOn(clock, wait, signal);
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      resolution = await funding.resolveInvocation({ attemptId, signal });
+    }
+    return resolution;
+  };
+  /**
    * Prepare one funded call (RA-R11). A generation call first resolves every unresolved attempt in the chat and records
    * each answer (`model.invocation-settled`), so a lost reply's charge is durable before the next attempt
    * (ChargeAfterRecordedLoss, EQ1); a pending one ends the run `MODEL_ATTEMPT_PENDING`. The key is deterministic,
@@ -1503,7 +1545,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
       for (const attemptId of unresolved) {
         // oxlint-disable-next-line no-await-in-loop -- each answer is recorded before the next attempt is asked about.
-        const resolution = await funding.resolveInvocation({ attemptId, signal });
+        const resolution = await settledInvocation(funding, attemptId, signal);
         if (resolution.status === 'pending' || resolution.status === 'unavailable') {
           throw Object.assign(
             new Error(`The gateway has not finished model request ${attemptId}; resume the turn once it has.`),

@@ -70,7 +70,7 @@ describe('queued message adornment', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument();
   });
-  it('should label a failed durable steer and retry its existing command', async () => {
+  it('should label a failed durable Send now and retry its existing command', async () => {
     const user = userEvent.setup();
     const props = fixture({ error: 'Connection lost. Retry to confirm the interruption.' });
     const items = props.items.map<ChatMessageQueueProps['items'][number]>((item) => ({
@@ -78,20 +78,20 @@ describe('queued message adornment', () => {
       steer: { type: 'cancel', commandId: 'same_cancel', payload: { chatId: 'chat', runId: 'original' } },
     }));
     render(<ChatMessageQueueView {...props} items={items} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Steer failed');
-    expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Send failed');
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(props.onRetry).toHaveBeenCalledOnce();
     expect(props.onSteer).not.toHaveBeenCalled();
   });
-  it('should retain text and show a spinner while Steer is pending, then report a failed save', async () => {
+  it('should retain text and show a spinner while Send now is pending, then report a failed save', async () => {
     const user = userEvent.setup();
     const operation = Promise.withResolvers<void>();
     const props = fixture({ onSteer: async () => operation.promise });
     render(<ChatMessageQueueView {...props} />);
-    await user.click(screen.getByRole('button', { name: 'Steer' }));
+    await user.click(screen.getByRole('button', { name: 'Send now' }));
     expect(screen.getByText('Keep the scope large')).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('Steering');
+    expect(screen.getByRole('status')).toHaveTextContent('Sending');
     expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
     operation.reject(new Error('Disk full. Message is still saved.'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Disk full');
@@ -115,7 +115,7 @@ describe('queued message adornment', () => {
     const user = userEvent.setup();
     const props = fixture({ sendingId: 'one', error: 'Waiting for acknowledgement' });
     render(<ChatMessageQueueView {...props} />);
-    expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(props.onRetry).toHaveBeenCalledOnce();
@@ -150,7 +150,7 @@ describe('queued message adornment', () => {
         ]);
         expect(props.onRetry).not.toHaveBeenCalled();
         expect(screen.getByRole('status')).toHaveTextContent(action === 'edit' ? 'Saving' : 'Removing');
-        expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
       } finally {
         retried.resolve();
       }

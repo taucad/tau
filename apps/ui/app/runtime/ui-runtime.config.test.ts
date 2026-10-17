@@ -120,4 +120,21 @@ describe('createUiRuntimeConfig', () => {
     expect(kernelOptions('replicad')).toMatchObject({ wasm: 'auto' });
     expect(kernelOptions('picovoxel')?.['wasm']).not.toBe('serial');
   });
+
+  // D-RT-01: replicad's semantic reuse keeps serialized BRep per operation (measured ~10 MB per edit on the iPhone
+  // profile); a phone renders without it until its resident bound is qualified there.
+  it('should turn replicad compute reuse off on a memory-constrained device only', async () => {
+    const replicadOptions = async (memoryConstrained: boolean) => {
+      const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+        tauApiUrl: 'https://api.tau.test',
+        tauWebSocketUrl: 'wss://api.tau.test',
+        memoryConstrained,
+      });
+      return resolvedRuntime.kernels.find((kernel) => kernel.id === 'replicad')?.options;
+    };
+
+    expect(await replicadOptions(true)).toMatchObject({ computeReuse: false });
+    const standard = await replicadOptions(false);
+    expect(standard?.['computeReuse']).toBeUndefined();
+  });
 });

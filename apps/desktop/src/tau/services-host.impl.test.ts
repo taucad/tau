@@ -1201,7 +1201,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     }
   });
 
-  it('should keep an agent runtime client while a call it serves is still running', async () => {
+  it('should keep an agent runtime client while a document it opened is still open', async () => {
     const broker = runtimePortBroker();
     const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort: broker.requestRuntimePort });
     connect(host, workspaceRoot);
@@ -1209,14 +1209,17 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const client = await registry.runtimeClient!(workspaceRoot);
-      /* The fake port never answers, so this call stays in flight. */
-      const running = client.describe({ source: { files: { 'main.ts': 'model' } } });
-      running.catch(() => undefined);
+      /* A tool call holds its document until it is done with it. */
+      const document = client.open({ source: { files: { 'main.ts': 'model' } }, watch: false });
 
       await vi.advanceTimersByTimeAsync(240_000);
 
       expect(runtimeClientCalls[0]!.terminate).not.toHaveBeenCalled();
       await expect(registry.runtimeClient!(workspaceRoot)).resolves.toBe(client);
+
+      document.close();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -1325,9 +1328,12 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       expect(requestRuntimePort).toHaveBeenCalledTimes(2);
     });
     leases[1]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
-    expect(await connecting).toBe(runtimeClientCalls[1]);
+    /* The served client is a use-tracking view of the one created; its transport is that client's own. */
+    const served = await connecting;
+    expect(Reflect.get(served, 'transport')).toBe(runtimeClientCalls[1]!.transport);
     checkouts.set('run-2', candidateCheckout(cwd));
-    expect(await registry.runtimeClient!(cwd)).toBe(runtimeClientCalls[1]);
+    const reused = await registry.runtimeClient!(cwd);
+    expect(Reflect.get(reused, 'transport')).toBe(runtimeClientCalls[1]!.transport);
   });
 
   it('should never serve a terminated client from the cache', async () => {

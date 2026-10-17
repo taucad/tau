@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -172,6 +172,22 @@ describe('tau CLI dist (real binary)', () => {
 
     expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
     expect(result.stdout.trim()).toBe(manifest.version);
+  }, 60_000);
+
+  it('should report the version of the package.json it is installed with, as a preview rewrites after the build', async () => {
+    // A pkg.pr.new preview packs this same `dist` with its manifest rewritten to `0.0.0-preview-<sha>`.
+    const installed = join(workspace, 'preview', 'node_modules', '@taucad', 'cli');
+    await cp(dirname(cliBinPath), join(installed, 'dist', 'bin'), { recursive: true });
+    await writeFile(
+      join(installed, 'package.json'),
+      JSON.stringify({ name: '@taucad/cli', version: '0.0.0-preview-test' }),
+    );
+    // The copy resolves `citty` from its own `node_modules`, as an installed package does.
+    await symlink(resolve(repoRoot, 'packages/cli/node_modules'), join(installed, 'node_modules'), 'junction');
+
+    const { stdout } = await execFileAsync(process.execPath, [join(installed, 'dist', 'bin', 'tau.mjs'), '--version']);
+
+    expect(stdout).toBe('0.0.0-preview-test\n');
   }, 60_000);
 
   it('should ship the serve command and its CLI-owned runtime child', async () => {

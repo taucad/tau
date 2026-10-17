@@ -218,7 +218,7 @@ codex plugin add tau@tau-dev
 
 After changing a skill, a manifest or the launcher, rebuild, run `codex plugin add tau@tau-dev` again (or `pnpm plugin:dev install --host codex`) and start a new session or thread. CLI changes need no refresh: each copy's `.dev/cli.json` still points at this checkout.
 
-`pnpm plugin:dev preview --sha <commit>` installs a [pkg.pr.new](https://pkg.pr.new) build of a `main` commit instead, published by the `Preview packages` workflow: the plugin from a scratch catalog in `~/.cache/tau-plugin-preview` and the CLI with `npm install --global`, so nothing reads the checkout. A preview's packages carry the version `0.0.0-preview-<sha>`, but its `tau --version` prints the version it was built from, so the launcher passes that `tau` over: start Claude Code with `TAU_CLI="$(command -v tau)" claude` to run it.
+`pnpm plugin:dev preview --sha <commit>` installs a [pkg.pr.new](https://pkg.pr.new) build of a `main` commit instead, published by the `Preview packages` workflow: the plugin from a scratch catalog in `~/.cache/tau-plugin-preview` and the CLI with `npm install --global`, so nothing reads the checkout.
 
 ```bash
 pnpm nx run-many -t lint test typecheck build -p agent-plugin

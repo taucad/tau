@@ -26,6 +26,7 @@
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -49,6 +50,7 @@ import {
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -222,6 +224,72 @@ const nativeGeoSpecEngineLimits: HostEngineLimits = { maxMeshBytes: 1024 * 1024 
 
 let nativeSession: NativeGeoSpecSession | undefined;
 let nativeTail: Promise<void> = Promise.resolve();
+let nativeAdmission: Promise<ModelAdmissionLimits | undefined> | undefined;
+
+/** The engine's `initialize` request, in the canonical form the engine reads; its configuration names the limits. */
+const engineConfigurationRequest =
+  '{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":5,"requestId":"configuration"}';
+const engineLimit = z.number().int().positive();
+const engineConfigurationSchema = z.object({
+  requestId: z.literal('configuration'),
+  result: z.object({
+    configuration: z.object({
+      binaryAdmissionLimits: z.object({
+        maxTriangles: engineLimit,
+        maxVertices: engineLimit,
+        maxSubjectBytes: engineLimit,
+      }),
+    }),
+  }),
+});
+
+/**
+ * The limits the `test_model` engine admits one subject within, read once per process from the
+ * `initialize` configuration of an engine built with the same limits and closed at once, so the
+ * shared session engine and its retained subjects are never touched. `evaluate_model` estimates a
+ * whole-model load against them.
+ *
+ * @returns The engine's admission limits, or `undefined`, with one warning, when it cannot report them.
+ */
+const nativeAdmissionLimits = async (): Promise<ModelAdmissionLimits | undefined> => {
+  nativeAdmission ??= (async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
+      const { Engine } = await import('geospec-engine/node');
+      const engine = new Engine(undefined, undefined, nativeGeoSpecEngineLimits);
+      let limits: ModelAdmissionLimits;
+      try {
+        const response = engine.processRequest(new TextEncoder().encode(engineConfigurationRequest));
+        const answer: unknown = JSON.parse(new TextDecoder().decode(response));
+        const { maxTriangles, maxVertices, maxSubjectBytes } =
+          engineConfigurationSchema.parse(answer).result.configuration.binaryAdmissionLimits;
+        limits = { maxTriangles, maxVertices, maxSubjectBytes };
+      } finally {
+        try {
+          engine.close();
+        } catch (error) {
+          // The limits it already reported stand; a probe engine that fails to close leaks only itself.
+          console.warn('GeoSpec admission probe engine failed to close:', error);
+        }
+      }
+      return limits;
+    } catch (error) {
+      console.warn('GeoSpec admission limits unavailable; evaluate_model reports no admission:', error);
+      return undefined;
+    }
+  })();
+  return nativeAdmission;
+};
+
+/**
+ * Whether `test_model` runs on the host's own native engine here, the engine whose limits
+ * `evaluate_model` reports: the default runner over an attached runtime, with the engine installed.
+ *
+ * @param options - The registry's options.
+ * @returns True when the default native runner serves `test_model`.
+ */
+const runsNativeGeoSpec = (options: HostToolRegistryOptions): boolean =>
+  options.geospecRunner === undefined && options.runtimeClient !== undefined && geoSpecEngineResolves();
 
 const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSession> => {
   const canonicalRoot = await realpath(root);
@@ -620,6 +688,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     const { kernelClient, graphics, images } = createRuntimeAgentClients({
       runtime: async () => requireRuntime(),
       mapRuntimeError: runtimeFailure,
+      admissionLimits: async () => (runsNativeGeoSpec(options) ? nativeAdmissionLimits() : undefined),
       async exportImage(job) {
         const client = await requireRuntime(job);
         const bytes = job.sourceFormat === 'svg' ? new TextEncoder().encode(job.content) : job.content;

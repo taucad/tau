@@ -490,7 +490,26 @@ describe('tau mcp over stdio', () => {
       const result = await call({ name: 'evaluate_model', arguments: { targetFile: 'main.ts' } });
 
       expect(result.isError ?? false, textOf(result)).toBe(false);
-      expect(result.structuredContent).toMatchObject({ status: 'ready', projectRoot: join(scratch, 'block') });
+      /* The admission limits are the native GeoSpec engine's own, as its initialize configuration reports them. */
+      expect(result.structuredContent).toMatchObject({
+        status: 'ready',
+        projectRoot: join(scratch, 'block'),
+        summary: {
+          bounds: {
+            min: { x: -10, y: -5, z: 0 },
+            max: { x: 10, y: 5, z: 4 },
+            size: { x: 20, y: 10, z: 4 },
+            unit: 'mm',
+          },
+          componentCount: 1,
+          admission: {
+            triangles: { limit: 4_000_000 },
+            vertices: { limit: 2_000_000 },
+            subjectBytes: { limit: 67_108_864 },
+          },
+        },
+      });
+      expect(result.structuredContent).not.toHaveProperty('summary.admission.warning');
       expect(served.stderr()).toContain(`tau mcp: project root ${join(scratch, 'block')} (CLAUDE_PROJECT_DIR)`);
       /* The first call loads the runtime, which proves the module log sees kernels at all. */
       expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/replicad\.kernel\.ts$/u));

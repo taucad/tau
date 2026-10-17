@@ -90,3 +90,46 @@ describe('evaluateModelOutputSchema projectRoot', () => {
     expect(evaluateModelOutputSchema.safeParse({ status: 'ready', projectRoot: '' }).success).toBe(false);
   });
 });
+
+describe('evaluateModelOutputSchema summary', () => {
+  const summary = {
+    bounds: {
+      min: { x: -10, y: -30, z: 0 },
+      max: { x: 110, y: 10, z: 510 },
+      size: { x: 120, y: 40, z: 510 },
+      unit: 'mm',
+    },
+    componentCount: 2,
+    triangles: 1_000_064,
+    vertices: 3_000_192,
+    admission: {
+      triangles: { estimated: 1_000_064, limit: 4_000_000 },
+      vertices: { estimated: 3_000_192, limit: 2_000_000 },
+      subjectBytes: { estimated: 72_004_608, limit: 67_108_864 },
+      warning: 'A whole-model GeoSpec loadModel of this model is estimated to exceed the engine admission limits.',
+    },
+  };
+
+  it('should keep the box, parts, mesh and admission estimates of the default view', () => {
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', summary })).toEqual({ status: 'ready', summary });
+    const counts = { componentCount: 0, triangles: 0, vertices: 0 };
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', summary: counts })).toEqual({
+      status: 'ready',
+      summary: counts,
+    });
+  });
+
+  it('should refuse a summary in another unit, with a count it cannot hold, or with a field it does not name', () => {
+    for (const refused of [
+      { ...summary, bounds: { ...summary.bounds, unit: 'm' } },
+      { ...summary, componentCount: -1 },
+      { ...summary, triangles: 1.5 },
+      { ...summary, volume: 12 },
+      { ...summary, admission: { ...summary.admission, subjectBytes: { estimated: 72_004_608, limit: 0 } } },
+      { ...summary, admission: { ...summary.admission, vertices: { used: 3_000_192, limit: 2_000_000 } } },
+      { ...summary, admission: { ...summary.admission, warning: '' } },
+    ]) {
+      expect(evaluateModelOutputSchema.safeParse({ status: 'ready', summary: refused }).success).toBe(false);
+    }
+  });
+});

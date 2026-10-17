@@ -2,9 +2,10 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ToolRegistry } from '@taucad/agent-host';
-import type { RuntimeDocument } from '@taucad/runtime/client';
+import type { RuntimeDocument, UpdateOutcome, ViewUpdateOutcome } from '@taucad/runtime/client';
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -25,7 +26,7 @@ const native = vi.hoisted(() => {
           canonicalPlan: new Uint8Array(),
           canonicalResult: new Uint8Array(),
         })),
-        processRequest: vi.fn(() => new Uint8Array()),
+        processRequest: vi.fn((_request: Uint8Array<ArrayBuffer>) => new Uint8Array()),
         ingestSubject: vi.fn(() => new Uint8Array()),
         subjectHandle: vi.fn(() => new Uint8Array()),
         releaseSubject: vi.fn(() => new Uint8Array()),
@@ -327,6 +328,183 @@ describe('native host GeoSpec composition', () => {
         geospecRunner: false,
       });
       expect(registry.list().map((tool) => tool.name)).not.toContain('test_model');
+    });
+
+    describe('evaluate_model admission limits', () => {
+      const limits = { maxTriangles: 3_999_999, maxVertices: 1_999_999, maxSubjectBytes: 65_536 };
+      const configuration = (binaryAdmissionLimits: unknown): Uint8Array<ArrayBuffer> =>
+        new TextEncoder().encode(
+          JSON.stringify({ requestId: 'configuration', result: { configuration: { binaryAdmissionLimits } } }),
+        );
+      /** An engine that answers every request with `response`, built as the default mock builds one. */
+      const engineAnswering = (response: Uint8Array<ArrayBuffer>, close?: Mock<() => void>) => {
+        const processRequest = vi.fn((_request: Uint8Array<ArrayBuffer>) => response);
+        const base = native.engine.getMockImplementation();
+        native.engine.mockImplementationOnce(function () {
+          return { ...base!(), processRequest, ...(close === undefined ? {} : { close }) };
+        });
+        return processRequest;
+      };
+      /** A runtime whose default view draws one triangle, so a whole-model load is 72 bytes. */
+      const oneTriangleRuntime = (): HostRuntimeClient => {
+        const text = JSON.stringify({
+          nodes: [{ mesh: 0 }],
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics are uppercase by specification.
+          meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+          accessors: [{ componentType: 5126, type: 'VEC3', count: 3, min: [0, 0, 0], max: [0.01, 0.01, 0.01] }],
+        });
+        const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
+        const content = new Uint8Array(20 + json.byteLength);
+        const header = new DataView(content.buffer);
+        header.setUint32(0, 0x46_54_6c_67, true);
+        header.setUint32(4, 2, true);
+        header.setUint32(8, content.byteLength, true);
+        header.setUint32(12, json.byteLength, true);
+        header.setUint32(16, 0x4e_4f_53_4a, true);
+        content.set(json, 20);
+        const evaluated: UpdateOutcome = {
+          superseded: false,
+          evaluation: {
+            id: 'evaluation',
+            success: true,
+            transient: false,
+            views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+            exports: [],
+            issues: [],
+          },
+        };
+        const rendered: ViewUpdateOutcome = {
+          superseded: false,
+          rendering: {
+            success: true,
+            requestId: 'rendering',
+            evaluationId: 'evaluation',
+            transient: false,
+            view: 'model',
+            artifact: { mimeType: 'model/gltf-binary', content },
+            hash: 'geometry',
+            issues: [],
+          },
+        };
+        const view = { rendering: vi.fn(async () => rendered), close: vi.fn() };
+        const client = mock<HostRuntimeClient>();
+        client.open.mockReturnValue({
+          evaluation: vi.fn(async () => evaluated),
+          export: vi.fn(),
+          close: vi.fn(),
+          view: vi.fn(() => view),
+        });
+        return client;
+      };
+      const evaluate = async (registry: ToolRegistry) =>
+        registry.invoke({
+          toolCallId: 'evaluate-model',
+          toolName: 'evaluate_model',
+          input: { targetFile: 'main.ts' },
+          signal: new AbortController().signal,
+        });
+
+      it('should read them once from an engine built like the test_model engine, closed at once', async () => {
+        const createHostToolRegistry = await freshRegistry();
+        const processRequest = engineAnswering(configuration({ ...limits, maxResourceBytes: 1 }));
+        const client = oneTriangleRuntime();
+        const registry = createHostToolRegistry({
+          workspaceRoot: await project('admission'),
+          runtimeClient: async () => client,
+        });
+
+        const first = await evaluate(registry);
+        const second = await evaluate(registry);
+
+        const admission = {
+          triangles: { estimated: 1, limit: limits.maxTriangles },
+          vertices: { estimated: 3, limit: limits.maxVertices },
+          subjectBytes: { estimated: 72, limit: limits.maxSubjectBytes },
+        };
+        expect(first.isError).toBe(false);
+        expect(first.content).toHaveProperty('summary.admission', admission);
+        expect(second.content).toHaveProperty('summary.admission', admission);
+        expect(native.engine).toHaveBeenCalledExactlyOnceWith(undefined, undefined, {
+          maxMeshBytes: 1024 * 1024 * 1024,
+        });
+        expect(native.close).toHaveBeenCalledOnce();
+        expect(processRequest).toHaveBeenCalledOnce();
+        expect(JSON.parse(new TextDecoder().decode(processRequest.mock.calls[0]?.[0]))).toEqual({
+          canonicalProfile: 'geospec-jcs-v1',
+          method: 'initialize',
+          protocolVersion: 3,
+          registryVersion: 5,
+          requestId: 'configuration',
+        });
+      });
+
+      it('should evaluate without admission, warning once, when the engine does not report its limits', async () => {
+        const createHostToolRegistry = await freshRegistry();
+        engineAnswering(configuration({ maxTriangles: 4_000_000 }));
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const client = oneTriangleRuntime();
+        const registry = createHostToolRegistry({
+          workspaceRoot: await project('admission-unknown'),
+          runtimeClient: async () => client,
+        });
+        try {
+          const first = await evaluate(registry);
+          await evaluate(registry);
+
+          expect(first.isError).toBe(false);
+          expect(first.content).toMatchObject({ status: 'ready', summary: { componentCount: 1, triangles: 1 } });
+          expect(first.content).not.toHaveProperty('summary.admission');
+          expect(native.engine).toHaveBeenCalledOnce();
+          expect(native.close).toHaveBeenCalledOnce();
+          expect(warning).toHaveBeenCalledOnce();
+          expect(warning.mock.calls[0]?.[0]).toContain('GeoSpec admission limits unavailable');
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      it('should keep the limits it read, warning once, when that engine fails to close', async () => {
+        const createHostToolRegistry = await freshRegistry();
+        const close = vi.fn<() => void>(() => {
+          throw new Error('engine already closed');
+        });
+        engineAnswering(configuration(limits), close);
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const client = oneTriangleRuntime();
+        const registry = createHostToolRegistry({
+          workspaceRoot: await project('admission-close'),
+          runtimeClient: async () => client,
+        });
+        try {
+          const result = await evaluate(registry);
+
+          expect(result.content).toHaveProperty('summary.admission.subjectBytes', {
+            estimated: 72,
+            limit: limits.maxSubjectBytes,
+          });
+          expect(close).toHaveBeenCalledOnce();
+          expect(warning).toHaveBeenCalledOnce();
+          expect(warning.mock.calls[0]?.[0]).toContain('GeoSpec admission probe engine failed to close');
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      it('should build no engine for them when test_model runs another runner', async () => {
+        const createHostToolRegistry = await freshRegistry();
+        const client = oneTriangleRuntime();
+        const registry = createHostToolRegistry({
+          workspaceRoot: await project('admission-explicit'),
+          runtimeClient: async () => client,
+          geospecRunner: async () => mock<GeoSpecRunner>(),
+        });
+
+        const result = await evaluate(registry);
+
+        expect(result.content).toMatchObject({ status: 'ready', summary: { componentCount: 1, triangles: 1 } });
+        expect(result.content).not.toHaveProperty('summary.admission');
+        expect(native.engine).not.toHaveBeenCalled();
+      });
     });
   });
 });

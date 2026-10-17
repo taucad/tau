@@ -457,6 +457,26 @@ describe('Replicad semantic compute reuse', () => {
       expect(stats.evictions).toBeGreaterThan(0);
     });
 
+    it('skips a result larger than the byte cap instead of evicting the working set for it', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      const adapter = createReplicadComputeReuse({
+        library: {
+          makeSphere: (radius: number) =>
+            new FakeShape(`sphere(${String(radius)})`.padEnd(radius > 1 ? residentByteCap + mebibyte : 16, ' ')),
+          deserializeShape: (serialized: string) => new FakeShape(serialized),
+        },
+        enabled: true,
+        producer: producer(),
+        environment: { variant: 'single' },
+      });
+      const { makeSphere } = adapter.library;
+      await adapter.run(createScope(adapter, cache).scope, async () => makeSphere(1));
+      await adapter.run(createScope(adapter, cache).scope, async () => makeSphere(2));
+      const stats = adapter.resident.stats();
+      expect(stats).toMatchObject({ entries: 1, evictions: 0 });
+      expect(stats.omissions).toBeGreaterThan(0);
+    });
+
     it('caps the number of resident entries however small they are', async () => {
       const cache = new Map<ActionDigest, CacheEntry>();
       const { adapter } = createFixture();

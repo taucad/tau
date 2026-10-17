@@ -192,6 +192,11 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
 
   /** Keep `bytes` as the most recent entry, then evict the least recent past either cap. */
   const keep = (digest: ActionDigest, bytes: Uint8Array<ArrayBuffer>, descriptor: ComputeAction): void => {
+    /* A result larger than the whole tier would evict every other entry and then itself. */
+    if (bytes.byteLength > residentByteCap) {
+      omissions += 1;
+      return;
+    }
     forget(digest);
     residentBytes.set(digest, bytes);
     residentActions.set(digest, descriptor);

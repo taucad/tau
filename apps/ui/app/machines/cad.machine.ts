@@ -406,6 +406,22 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   return { type: 'kernelConnected', client, cleanups };
 });
 
+/** What a fresh document opens with; a heap recycle reopens mid-preview and keeps the previewed values. */
+const openingParameters = (
+  change: ParameterRender | undefined,
+): Partial<Pick<Extract<ParameterRender, { kind: 'initial' }>, 'parameters' | 'stage'>> => {
+  if (change?.kind === 'preview') {
+    return { parameters: change.parameters };
+  }
+  if (change?.kind !== 'initial') {
+    return {};
+  }
+  return {
+    ...(change.parameters === undefined ? {} : { parameters: change.parameters }),
+    ...(change.stage === undefined ? {} : { stage: change.stage }),
+  };
+};
+
 const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, signal }) => {
   if (!input.client) {
     throw new Error('Kernel client is not connected');
@@ -415,11 +431,9 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
   }
 
   if (!input.document) {
-    const initial = input.parameterRender?.kind === 'initial' ? input.parameterRender : undefined;
     const document = input.client.open({
       source: { path: input.entryPath },
-      ...(initial?.parameters === undefined ? {} : { parameters: initial.parameters }),
-      ...(initial?.stage === undefined ? {} : { stage: initial.stage }),
+      ...openingParameters(input.parameterRender),
       watch: true,
     });
     let defaultView: ViewSubscription | undefined;

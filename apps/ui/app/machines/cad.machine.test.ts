@@ -771,6 +771,26 @@ describe('cadMachine heap recycle', () => {
     f.actor.stop();
   });
 
+  it('reopens a recycled runtime with the parameters being previewed', async () => {
+    const f = await opened(fixture({ recycleHeapBytes }));
+    renderedAt(f, 600 * mebibyte, 'first');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    f.actor.send({ type: 'setPreviewParameters', parameters: { width: 42 } });
+    await vi.waitFor(() => {
+      expect(f.runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } });
+    });
+    renderedAt(f, 800 * mebibyte, 'previewed');
+    await vi.waitFor(() => {
+      expect(f.client.open).toHaveBeenCalledTimes(2);
+    });
+    expect(f.client.open).toHaveBeenLastCalledWith({
+      source: { path: 'main.ts' },
+      parameters: { width: 42 },
+      watch: true,
+    });
+    f.actor.stop();
+  });
+
   it('never recycles on the first render of a fresh runtime, however large', async () => {
     const f = await opened(fixture({ recycleHeapBytes }));
     renderedAt(f, 2048 * mebibyte, 'first');

@@ -22,6 +22,7 @@ import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
+import { runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
@@ -46,8 +47,9 @@ const constrainedPreviewTriangleBudget = 400_000;
  * D-RT-03: WebAssembly memory never shrinks, and iOS kills a tab at roughly 1.5-2 GB across the page, its workers and
  * their heaps. PicoVoxel's own recycle threshold (1.5 GiB) is lowered to the audit's 512 MiB on a phone. The voxel
  * size stays the model's (graphics-backend policy rule 17); only its display mesh is simplified to the budget above.
+ * The CAD machine recycles the editor runtime at the same threshold.
  */
-const constrainedRecycleHeapBytes = 512 * 2 ** 20;
+const constrainedRecycleHeapBytes = runtimeRecycleHeapBytes(true);
 
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [

@@ -721,31 +721,32 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (!computeProjectRoot) {
         throw new Error('Desktop shell refused unadmitted compute project root.');
       }
-      /* Held for exactly the utility's life: the broker calls `release` when it goes. */
-      const held = mode === 'durable' ? holdComputeConnection(computeProjectRoot) : undefined;
-      const compute: ComputeBinding = held === undefined ? { mode } : { mode, store: held.connection.store };
       /* The execution root reaches the utility rooted on `fileSystemPort`, and
        * never through the process environment: an environment that varied per
        * project would give every open its own pool key, so no warm spare could
        * ever be adopted (W-L03-4). */
       const forkEnvironment = { ...resolved.env };
       delete forkEnvironment['TAU_PROJECT_ROOT'];
-      try {
-        return {
-          ...resolved,
-          env: forkEnvironment,
-          compute,
-          ...(held === undefined ? {} : { release: held.release }),
-          ...(context['purpose'] === 'ephemeral'
-            ? {}
-            : {
-                fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
-              }),
-        };
-      } catch (error) {
-        held?.release();
-        throw error;
+      const fileSystem =
+        context['purpose'] === 'ephemeral'
+          ? {}
+          : { fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }) };
+      /* Held for exactly the utility's life: the broker calls `release` when it goes. */
+      let held: ReturnType<typeof holdComputeConnection> | undefined;
+      let compute: ComputeBinding;
+      if (mode === 'durable') {
+        held = holdComputeConnection(computeProjectRoot);
+        compute = { mode, store: held.connection.store };
+      } else {
+        compute = { mode };
       }
+      return {
+        ...resolved,
+        env: forkEnvironment,
+        compute,
+        ...(held === undefined ? {} : { release: held.release }),
+        ...fileSystem,
+      };
     },
     serviceName: 'tau-kernel-host',
     onError(error) {
@@ -889,11 +890,61 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return { workspaceRoot, projectId, attachmentId };
   };
+  /*
+   * D-DT-04: the attachments each document holds, by the web contents that
+   * holds them. A renderer releases its own on the way out, but a deep link,
+   * Open-With, a crash reload or a recovery replaces the document without
+   * that, and the broker keeps a project's host (and its kernel utility) while
+   * any attachment remains. So main releases whatever a document still holds
+   * once it navigates away, its process is gone, or its contents are destroyed.
+   */
+  type AgentHostAttachment = ReturnType<typeof agentHostSessionInput>;
+  const documentAttachments = new Map<number, Map<string, AgentHostAttachment>>();
+  const attachmentKey = (input: AgentHostAttachment): string =>
+    JSON.stringify([input.workspaceRoot, input.attachmentId]);
+  const releaseAgentHostAttachment = async (input: AgentHostAttachment): Promise<void> => {
+    try {
+      await services.releaseAgentHost(input, quitQuiesceMilliseconds);
+    } catch (error) {
+      log.log('warn', 'main.agent-host-release', error);
+    }
+  };
+  const holdDocumentAttachment = (sender: IpcMainInvokeEvent['sender'], input: AgentHostAttachment): void => {
+    let held = documentAttachments.get(sender.id);
+    if (held === undefined) {
+      const attachments = new Map<string, AgentHostAttachment>();
+      held = attachments;
+      documentAttachments.set(sender.id, attachments);
+      const documentGone = (): void => {
+        sender.removeListener('did-navigate', documentGone);
+        sender.removeListener('render-process-gone', documentGone);
+        sender.removeListener('destroyed', documentGone);
+        if (documentAttachments.get(sender.id) === attachments) {
+          documentAttachments.delete(sender.id);
+        }
+        for (const attachment of attachments.values()) {
+          void releaseAgentHostAttachment(attachment);
+        }
+        attachments.clear();
+      };
+      sender.on('did-navigate', documentGone);
+      sender.on('render-process-gone', documentGone);
+      sender.on('destroyed', documentGone);
+    }
+    held.set(attachmentKey(input), input);
+  };
+  const dropDocumentAttachment = (sender: IpcMainInvokeEvent['sender'], input: AgentHostAttachment): void => {
+    documentAttachments.get(sender.id)?.delete(attachmentKey(input));
+  };
   ipcMain.handle(agentHostSessionChannels.retain, async (event, payload) => {
-    services.retainAgentHost(agentHostSessionInput(event, payload));
+    const input = agentHostSessionInput(event, payload);
+    services.retainAgentHost(input);
+    holdDocumentAttachment(event.sender, input);
   });
   ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
-    await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
+    const input = agentHostSessionInput(event, payload);
+    dropDocumentAttachment(event.sender, input);
+    await services.releaseAgentHost(input, quitQuiesceMilliseconds);
   });
   /* The secret half of the binding ceremony (D10). The renderer never keeps
    * the access code: it rides this one invoke to the utility, which saves it

@@ -72,14 +72,16 @@ describe('browser exact measurement transport', () => {
     expect(FakeExactWorker.created[0]?.terminate).not.toHaveBeenCalled();
   });
 
-  it('should transfer the AP242 bytes instead of cloning them', async () => {
+  it('should transfer a copy of the AP242 bytes and leave the caller buffer attached', async () => {
     const { runExactRequest } = await import('./measurement-exact.transport.js');
     const sent = request(3);
 
     await runExactRequest(sent);
 
-    const [, transfer] = FakeExactWorker.created[0]!.postMessage.mock.calls[0]!;
-    expect(transfer).toEqual([sent.source.bytes.buffer]);
+    const [posted, transfer] = FakeExactWorker.created[0]!.postMessage.mock.calls[0]!;
+    expect(transfer).toEqual([posted.source.bytes.buffer]);
+    expect(posted.source.bytes.buffer).not.toBe(sent.source.bytes.buffer);
+    expect(Array.from(posted.source.bytes)).toEqual(Array.from(sent.source.bytes));
   });
 
   it('should terminate the worker once it has been idle', async () => {

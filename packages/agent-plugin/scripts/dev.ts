@@ -253,10 +253,21 @@ const preview = (sha: string | undefined): void => {
   log('claude plugin marketplace remove tau-preview, npm uninstall --global @taucad/cli.');
 };
 
-/** A JSON-RPC session with the launcher over its stdio. */
-const connect = (
+/** Milliseconds one request may wait for its answer: a cold first call boots a kernel, but a silent server fails. */
+export const requestTimeout = 180_000;
+
+/**
+ * A JSON-RPC session with the launcher over its stdio.
+ *
+ * @param root - The plugin folder whose `dist/launch.mjs` starts the server.
+ * @param args - The launcher's arguments.
+ * @param timeout - Milliseconds each request may wait before it fails with the server's last stderr.
+ * @returns The server process and a request function.
+ */
+export const connect = (
   root: string,
   args: readonly string[],
+  timeout = requestTimeout,
 ): { child: ChildProcessWithoutNullStreams; request: (method: string, params: unknown) => Promise<unknown> } => {
   const child = spawn(process.execPath, [join(root, 'dist', 'launch.mjs'), ...args], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -301,7 +312,20 @@ const connect = (
   const request = async (method: string, params: unknown): Promise<unknown> =>
     new Promise((resolve, reject) => {
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method} got no answer in ${String(timeout / 1000)} s:\n${stderr}`));
+      }, timeout);
+      pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
     });
   return { child, request };

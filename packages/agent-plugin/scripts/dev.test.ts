@@ -1,8 +1,18 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// oxlint-disable-next-line no-restricted-imports -- `pnpm plugin:dev` runs this script by path; the `#` import map covers only src/.
-import { desktopConfigPath, desktopServerName, missingBuiltFiles, previewUrl, withDesktopServer } from './dev.js';
+/* oxlint-disable no-restricted-imports -- `pnpm plugin:dev` runs this script by path; the `#` import map covers only src/. */
+import {
+  connect,
+  desktopConfigPath,
+  desktopServerName,
+  missingBuiltFiles,
+  previewUrl,
+  withDesktopServer,
+} from './dev.js';
+/* oxlint-enable no-restricted-imports */
 
 describe('desktopConfigPath', () => {
   it("names Claude Desktop's config file on each platform", () => {
@@ -66,5 +76,21 @@ describe('missingBuiltFiles', () => {
       'dist/launch.mjs',
       'dist-app/app.html',
     ]);
+  });
+});
+
+describe('connect', () => {
+  it('fails a request the server never answers, with its stderr', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tau-plugin-silent-'));
+    mkdirSync(join(root, 'dist'));
+    /* A server that started, said something and then answers nothing. */
+    writeFileSync(join(root, 'dist', 'launch.mjs'), "process.stderr.write('listening\\n');\nprocess.stdin.resume();\n");
+    const { child, request } = connect(root, [], 2000);
+    try {
+      await expect(request('initialize', {})).rejects.toThrow('initialize got no answer in 2 s:\nlistening');
+    } finally {
+      child.kill('SIGKILL');
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

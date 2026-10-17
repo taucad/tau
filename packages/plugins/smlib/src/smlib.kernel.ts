@@ -211,16 +211,17 @@ const formatSmlibError = (error: unknown, context: ErrorContext): KernelIssue =>
   };
 };
 
+const isCallable = (value: unknown): value is (...arguments_: unknown[]) => unknown => typeof value === 'function';
+
 const runMain = async (
   module: unknown,
   library: SmlibLibrary,
   parameters: Record<string, unknown>,
 ): Promise<unknown> => {
-  const candidate = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
-  if (typeof candidate !== 'function') {
+  const main = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
+  if (!isCallable(main)) {
     return undefined;
   }
-  const main = candidate as (...arguments_: unknown[]) => unknown;
   return main.length >= 2 ? await main(library, parameters) : await main(parameters);
 };
 
@@ -577,7 +578,9 @@ export const smlibKernel = defineKernel({
           }
 
           case 'step': {
-            const bodies = entries.filter(({ shape }) => !(shape instanceof library.Mesh));
+            const bodies = entries.flatMap(({ shape, name, color }) =>
+              shape instanceof library.Mesh ? [] : [{ shape, name, color }],
+            );
             if (bodies.length === 0) {
               return runtimeError(
                 entries.length === 0
@@ -590,10 +593,13 @@ export const smlibKernel = defineKernel({
             try {
               text = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
                 library.toStep(
-                  bodies.map(({ shape, name, color }) => {
+                  bodies.flatMap(({ shape, name, color }) => {
                     const placed = toExportBody(library, shape, coordinateSystem);
+                    if (!(placed instanceof library.Part || placed instanceof library.Shell)) {
+                      return [];
+                    }
                     const labelled = placed.named(name);
-                    return color ? labelled.colored(color) : labelled;
+                    return [color ? labelled.colored(color) : labelled];
                   }),
                   { name: bodies.length === 1 ? bodies[0]!.name : 'assembly' },
                 ),
@@ -669,10 +675,12 @@ export const smlibKernel = defineKernel({
       ...(serialized.samplers === undefined ? {} : { samplers: serialized.samplers }),
       ...(serialized.mechanism === undefined ? {} : { mechanism: serialized.mechanism }),
       drawings: serialized.drawings,
-      shapes: serialized.shapes.map((entry) => ({
-        ...entry.metadata,
-        shape: entry.kind === 'brep' ? library.fromSmb(entry.smb) : new library.Mesh(entry.vertices, entry.triangles),
-      })) as NamedInputShape[],
+      shapes: serialized.shapes.map(
+        (entry): NamedInputShape => ({
+          ...entry.metadata,
+          shape: entry.kind === 'brep' ? library.fromSmb(entry.smb) : new library.Mesh(entry.vertices, entry.triangles),
+        }),
+      ),
     };
   },
 });
@@ -688,10 +696,10 @@ type ExportCoordinateSystem = 'y-up' | 'z-up' | undefined;
  */
 const toExportBody = (
   library: SmlibLibrary,
-  shape: NamedInputShape['shape'],
+  shape: Exclude<NamedInputShape['shape'], InstanceType<SmlibLibrary['Mesh']>>,
   coordinateSystem: ExportCoordinateSystem,
 ) => {
-  const body = shape instanceof library.Face ? shape.toShell() : (shape as InstanceType<SmlibLibrary['Part']>);
+  const body = shape instanceof library.Face ? shape.toShell() : shape;
   return coordinateSystem === 'y-up' ? body.rotate(library.Axis.X, -90) : body;
 };
 

@@ -9,6 +9,7 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useAgentHostPlacements, useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+import { placementRungOf } from '#lib/agent-host-placement.js';
 import { externalAgentRefusalReasons } from '#lib/external-agent.js';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
@@ -163,7 +164,7 @@ const useExecutionTargets = (): {
         hostTargets.find((target) => target.agentId === undefined && target.placement.hostId === hostId) ??
         tauHostTarget({
           hostId,
-          rung: hostId === 'origin' ? 1 : 2,
+          rung: placementRungOf(hostId),
           label: hostId,
           workspaceRoot: '',
           online: false,
@@ -176,7 +177,7 @@ const useExecutionTargets = (): {
       acpAgentTarget(
         {
           hostId,
-          rung: hostId === 'desktop' ? 'in-process' : hostId === 'origin' ? 1 : 2,
+          rung: placementRungOf(hostId),
           label: hostId,
           workspaceRoot: '',
           online: false,

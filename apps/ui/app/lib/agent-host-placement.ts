@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Topic } from '@taucad/events';
 import { packageVersion } from '@taucad/runtime/metadata';
 import { agentChannelPort, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
@@ -7,8 +8,8 @@ import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#lib/remote-host-client.js';
-import { desktopBridge, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } from '#filesystem/desktop-bridge.js';
+import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 
@@ -22,10 +23,14 @@ import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
  * - **2 — relayed.** A paired device, reached through the API's session route.
  *   The browser leg is admitted by the API session cookie; the API relays
  *   frames on to the daemon.
- * - **5 — loopback.** `ws://127.0.0.1:<port>/agent` from a page on another
- *   origin. There is no admission design for it (ruling 2 forbids inventing a
- *   token hand-off), so it is *probed* and refused with a reason that names the
- *   two rungs that do work.
+ * - **5 — loopback, by URL.** `ws://127.0.0.1:<port>/agent` from a page on
+ *   another origin: Tau Desktop (`app://tau`) or a website the daemon lists.
+ *   Admission is a hand-off (ruling X54): `tau open --desktop` (or
+ *   `--ui-origin`) gives the page the daemon's origin and a single-use code,
+ *   the page redeems the code at the daemon for a session bound to its own
+ *   origin, and offers that session as a WebSocket subprotocol. The token never
+ *   reaches the page and a URL never carries the session. A loopback daemon
+ *   with no redeemed session is still refused, naming how to hand it over.
  *
  * Rungs 3 and 4 (a local CA and a public name) need operator infrastructure and
  * are not client-side placements at all.
@@ -92,6 +97,26 @@ export const agentPlacementOf = (execution: CadAgentExecution): 'browser' | 'des
  */
 export const externalAgentDisplayName = (agentId: string): string =>
   discoveredAgents.get(agentId)?.displayName ?? agentId;
+
+/** Host ids of a loopback daemon reached by URL (rung 5) start with this, followed by its origin. @public */
+export const loopbackHostIdPrefix = 'loopback:';
+
+/**
+ * The rung one host id is placed on.
+ *
+ * @param hostId - The execution's host id.
+ * @returns `in-process` for this computer, 1 for this page's origin, 5 for a loopback daemon by URL, else 2.
+ * @public
+ */
+export const placementRungOf = (hostId: TauAgentHostId): AgentHostPlacementRung => {
+  if (hostId === 'desktop') {
+    return 'in-process';
+  }
+  if (hostId === 'origin') {
+    return 1;
+  }
+  return hostId.startsWith(loopbackHostIdPrefix) ? 5 : 2;
+};
 
 /** Every way a placement can fail, as a code the banner can key copy off. @public */
 export type AgentHostPlacementErrorCode =
@@ -251,6 +276,36 @@ const pageOrigin = (): string | undefined => {
 };
 
 /**
+ * Read one origin's daemon descriptor.
+ *
+ * @param origin - The origin to ask.
+ * @param options - Optional `fetch` and cancellation.
+ * @returns The descriptor, or `undefined` when that origin serves no agent or does not answer this page.
+ */
+const fetchTauHostDescriptor = async (
+  origin: string,
+  options: { readonly fetch?: typeof globalThis.fetch | undefined; readonly signal?: AbortSignal | undefined } = {},
+): Promise<TauHostDescriptor | undefined> => {
+  const request = options.fetch ?? globalThis.fetch;
+  let response: Response;
+  try {
+    response = await request(new URL('/.well-known/tau-host', origin).href, {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  } catch {
+    // A page served by anything other than a daemon simply has no descriptor.
+    return undefined;
+  }
+  if (!response.ok) {
+    return undefined;
+  }
+  const parsed = tauHostDescriptorSchema.safeParse(await response.json().catch(() => undefined));
+  return parsed.success ? parsed.data : undefined;
+};
+
+/**
  * Ask this origin whether it is a daemon.
  *
  * @param options - Optional `fetch` and origin overrides, for tests.
@@ -272,23 +327,192 @@ export const discoverOriginAgentHost = async (
   if (origin === undefined) {
     return undefined;
   }
+  return fetchTauHostDescriptor(origin, options);
+};
+
+/** One loopback daemon this page redeemed a hand-off code at: its origin and the session bound to this page. */
+type LoopbackAdmission = { readonly origin: string; readonly session: string };
+
+/** Loopback daemons this page holds a session for, by host id. */
+const loopbackAdmissions = new Map<TauAgentHostId, LoopbackAdmission>();
+const loopbackChanges = new Topic<void>({ name: 'agentHostPlacement.loopbackChanges' });
+/* Per tab: a reload keeps the daemon, a new tab is handed one of its own. */
+const loopbackStorageKey = 'tau:loopback-agent-hosts';
+let loopbackRestored = false;
+
+/* The same loopback shapes the desktop shell admits from a `tau://host/…` link, and the daemon binds. */
+const loopbackOriginPattern = /^http:\/\/(?:127\.0\.0\.1|localhost):([1-9]\d{0,4})$/u;
+
+const isLoopbackOrigin = (origin: string): boolean => {
+  const port = loopbackOriginPattern.exec(origin)?.[1];
+  return port !== undefined && Number(port) <= 65_535;
+};
+
+const restoreLoopbackAdmissions = (): void => {
+  if (loopbackRestored) {
+    return;
+  }
+  loopbackRestored = true;
+  try {
+    const stored = JSON.parse(globalThis.sessionStorage.getItem(loopbackStorageKey) ?? '[]') as unknown;
+    for (const entry of Array.isArray(stored) ? stored : []) {
+      const { origin, session } = (entry ?? {}) as { readonly origin?: unknown; readonly session?: unknown };
+      if (typeof origin === 'string' && typeof session === 'string' && isLoopbackOrigin(origin)) {
+        loopbackAdmissions.set(`${loopbackHostIdPrefix}${origin}`, { origin, session });
+      }
+    }
+  } catch {
+    // Storage blocked or garbled: the page simply holds no session until it is handed one again.
+  }
+};
+
+const admitLoopbackHost = (admission: LoopbackAdmission): TauAgentHostId => {
+  restoreLoopbackAdmissions();
+  const hostId: TauAgentHostId = `${loopbackHostIdPrefix}${admission.origin}`;
+  loopbackAdmissions.set(hostId, admission);
+  try {
+    globalThis.sessionStorage.setItem(loopbackStorageKey, JSON.stringify([...loopbackAdmissions.values()]));
+  } catch {
+    // Kept for this page's lifetime only.
+  }
+  loopbackChanges.emit();
+  return hostId;
+};
+
+/**
+ * Listen for a loopback daemon this page was handed, so a listing can be re-run.
+ *
+ * @param listener - Called after each redemption.
+ * @returns Unsubscribe.
+ * @public
+ */
+export const onLoopbackAgentHostsChanged = (listener: () => void): (() => void) =>
+  loopbackChanges.subscribe(() => {
+    listener();
+  });
+
+/** Test-only reset of the loopback admissions. @internal */
+export const resetLoopbackAgentHosts = (): void => {
+  loopbackAdmissions.clear();
+  loopbackRestored = false;
+  try {
+    globalThis.sessionStorage.removeItem(loopbackStorageKey);
+  } catch {
+    // Nothing stored.
+  }
+};
+
+const loopbackTarget = (
+  hostId: TauAgentHostId,
+  origin: string,
+  descriptor: TauHostDescriptor | undefined,
+): AgentHostPlacementTarget => ({
+  hostId,
+  rung: 5,
+  label: descriptor?.label ?? new URL(origin).host,
+  workspaceRoot: descriptor?.workspaceRoot ?? '',
+  online: descriptor !== undefined,
+  ...(descriptor?.externalAgents ? { externalAgents: descriptor.externalAgents } : {}),
+});
+
+/**
+ * Redeem a daemon hand-off (rung 5, ruling X54): exchange the single-use code at the loopback daemon for a session
+ * bound to this page's origin, and place the daemon among this page's hosts.
+ *
+ * @param handOff - The loopback origin and the code `tau open --desktop` (or `--ui-origin`) handed this page.
+ * @param options - Optional `fetch`, for tests.
+ * @returns The daemon as a placement target.
+ * @throws {AgentHostPlacementError} `RUNG5_NO_ADMISSION` for a non-loopback origin or a refused code, and
+ *   `HOST_UNREACHABLE` when the daemon does not answer.
+ * @public
+ */
+export const redeemLoopbackHandOff = async (
+  handOff: DesktopHostHandOff,
+  options: { readonly fetch?: typeof globalThis.fetch | undefined } = {},
+): Promise<AgentHostPlacementTarget> => {
+  const { origin, code } = handOff;
+  if (!isLoopbackOrigin(origin)) {
+    throw new AgentHostPlacementError(
+      'RUNG5_NO_ADMISSION',
+      5,
+      `${origin} is not a daemon on this computer, so Tau will not sign in to it.`,
+    );
+  }
   const request = options.fetch ?? globalThis.fetch;
   let response: Response;
   try {
-    response = await request(new URL('/.well-known/tau-host', origin).href, {
-      headers: { accept: 'application/json' },
+    response = await request(new URL('/.well-known/tau-host/session', origin).href, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
       cache: 'no-store',
-      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch {
-    // A page served by anything other than a daemon simply has no descriptor.
-    return undefined;
+    throw new AgentHostPlacementError(
+      'HOST_UNREACHABLE',
+      5,
+      `The daemon at ${origin} did not answer. Check that \`tau open\` is still running, then run it again.`,
+    );
   }
-  if (!response.ok) {
-    return undefined;
+  const body = (response.ok ? await response.json().catch(() => undefined) : undefined) as
+    | { readonly v?: unknown; readonly session?: unknown }
+    | undefined;
+  if (body?.v !== 1 || typeof body.session !== 'string' || body.session === '') {
+    throw new AgentHostPlacementError(
+      'RUNG5_NO_ADMISSION',
+      5,
+      response.status === 403
+        ? `The daemon at ${origin} does not admit this page. Run \`tau open --desktop\`, or \`tau open --ui-origin=<this site>\`, to hand it over.`
+        : `That link to the daemon at ${origin} was already used or has expired. Run \`tau open --desktop\` again.`,
+    );
   }
-  const parsed = tauHostDescriptorSchema.safeParse(await response.json().catch(() => undefined));
-  return parsed.success ? parsed.data : undefined;
+  const hostId = admitLoopbackHost({ origin, session: body.session });
+  const descriptor = await fetchTauHostDescriptor(origin, options);
+  return loopbackTarget(hostId, origin, descriptor);
+};
+
+/**
+ * Take every daemon hand-off this page is given (X54): from the desktop shell's `tau://host/…` links, and on the web
+ * from a `#tau-host=<origin>&tau-code=<code>` fragment, which is removed from the address at once.
+ *
+ * @param notify - Told of each redemption's outcome, for a toast.
+ * @param options - Location, history and redemption overrides, for tests.
+ * @returns Unsubscribe from the desktop shell.
+ * @public
+ */
+export const installLoopbackHandOff = (
+  notify: (outcome: { readonly target: AgentHostPlacementTarget } | { readonly error: Error }) => void,
+  options: {
+    readonly location?: Pick<Location, 'hash' | 'pathname' | 'search'> | undefined;
+    readonly history?: Pick<History, 'replaceState' | 'state'> | undefined;
+    readonly redeem?: typeof redeemLoopbackHandOff | undefined;
+    readonly onDesktopHandOff?: typeof onDesktopHostHandOff | undefined;
+  } = {},
+): (() => void) => {
+  const redeem = (handOff: DesktopHostHandOff): void => {
+    // async-iife: bootstrap -- a hand-off arrives from an event, and its outcome goes to `notify`.
+    void (async () => {
+      try {
+        notify({ target: await (options.redeem ?? redeemLoopbackHandOff)(handOff) });
+      } catch (error) {
+        notify({ error: error instanceof Error ? error : new Error(String(error)) });
+      }
+    })();
+  };
+  const location = options.location ?? (globalThis as { location?: Location }).location;
+  if (location?.hash.includes('tau-code=')) {
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const origin = fragment.get('tau-host') ?? '';
+    const code = fragment.get('tau-code') ?? '';
+    fragment.delete('tau-host');
+    fragment.delete('tau-code');
+    const rest = fragment.toString();
+    const history = options.history ?? (globalThis as { history?: History }).history;
+    /* The code is spent on first use either way; keeping it out of the address keeps it out of bookmarks and shares. */
+    history?.replaceState(history.state, '', `${location.pathname}${location.search}${rest === '' ? '' : `#${rest}`}`);
+    redeem({ origin, code });
+  }
+  return (options.onDesktopHandOff ?? onDesktopHostHandOff)(redeem);
 };
 
 let directoryOutage: string | undefined;
@@ -339,12 +563,15 @@ export const listAgentHostPlacements = async (
     readonly desktop?: boolean | undefined;
     /** Desktop-bridge override, for tests. */
     readonly bridge?: typeof desktopBridge | undefined;
+    /** Loopback descriptor override, for tests. */
+    readonly describeLoopback?: ((origin: string) => Promise<TauHostDescriptor | undefined>) | undefined;
   } = {},
 ): Promise<readonly AgentHostPlacementTarget[]> => {
   directoryOutage = undefined;
   discoveryIncomplete = false;
   const bridge = (options.bridge ?? desktopBridge)();
-  const [origin, paired, desktopAgents] = await Promise.all([
+  restoreLoopbackAdmissions();
+  const [origin, paired, desktopAgents, loopbackTargets] = await Promise.all([
     (options.discoverOrigin ?? discoverOriginAgentHost)(),
     (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
       directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
@@ -360,6 +587,16 @@ export const listAgentHostPlacements = async (
       console.error('[agentHostPlacement] external agent listing failed', error);
       return [];
     }) ?? [],
+    /* Each daemon this page was handed (rung 5) answers its own descriptor across origins, or reads as offline. */
+    Promise.all(
+      [...loopbackAdmissions].map(async ([hostId, admission]) =>
+        loopbackTarget(
+          hostId,
+          admission.origin,
+          await (options.describeLoopback ?? (async (next: string) => fetchTauHostDescriptor(next)))(admission.origin),
+        ),
+      ),
+    ),
   ]);
   /* Launcher 2 first: on the desktop build the in-process host is always there
    * — no discovery, no network — so it is the placement a user reaches for. The
@@ -407,7 +644,7 @@ export const listAgentHostPlacements = async (
           ]
         : [],
   );
-  const targets = [...desktopTarget, ...originTarget, ...pairedTargets];
+  const targets = [...desktopTarget, ...originTarget, ...pairedTargets, ...loopbackTargets];
   discoveredAgents.clear();
   cloudHostIds.clear();
   for (const target of targets) {
@@ -486,7 +723,7 @@ const awaitSocketOpen = async (socket: WebSocket, openTimeout = socketOpenTimeou
 
 type OpenAgentHostChannelOptions = {
   readonly origin?: string | undefined;
-  readonly createSocket?: ((url: string) => WebSocket) | undefined;
+  readonly createSocket?: ((url: string, protocols?: readonly string[]) => WebSocket) | undefined;
   readonly createSession?: typeof createRemoteHostSession | undefined;
   readonly listHosts?: typeof listRemoteHosts | undefined;
   readonly runtimeVersion?: string | undefined;
@@ -595,15 +832,16 @@ const daemonLivenessTimeout = 10_000;
 /**
  * Dial one daemon and hand back its agent channel client.
  *
- * No secret is ever assembled here (ruling 2): rung 1 rides the daemon's own
- * `HttpOnly` cookie on a same-origin upgrade, and rung 2 rides the API session
- * cookie. A URL never carries a token.
+ * No token is ever assembled here (ruling 2): rung 1 rides the daemon's own
+ * `HttpOnly` cookie on a same-origin upgrade, rung 2 rides the API session
+ * cookie, and rung 5 offers the session this page redeemed from a single-use
+ * hand-off code (X54) as a subprotocol. A URL never carries a secret.
  *
  * The first dial happens here, and its refusal is thrown with the rung that gave
  * up. The client redials through the same ladder when the wire dies (a relayed
  * session is minted afresh each time) and re-sends its unanswered commands by key.
  *
- * @param hostId - `origin` for rung 1, otherwise a paired device id.
+ * @param hostId - `origin` for rung 1, `loopback:<origin>` for rung 5, otherwise a paired device id.
  * @param options - Socket, session and discovery overrides for tests.
  * @returns A channel client whose first connection is open.
  * @throws {AgentHostPlacementError} With the rung that gave up.
@@ -619,18 +857,30 @@ export const openAgentHostChannel = async (
        * hello on claim, and wrapping is what starts the port. */
       return agentChannelPort(await desktopAgentPort(options));
     }
-    const rung: AgentHostPlacementRung = hostId === 'origin' ? 1 : 2;
+    const rung = placementRungOf(hostId);
     let url: string;
+    let protocols: readonly string[] | undefined;
     if (rung === 1) {
       const origin = options.origin ?? pageOrigin();
       if (origin === undefined) {
         throw new AgentHostPlacementError('ORIGIN_NOT_HOSTED', 1, 'This page was not served by an agent host.');
       }
       url = originAgentSocketUrl(origin);
+    } else if (rung === 5) {
+      restoreLoopbackAdmissions();
+      const admission = loopbackAdmissions.get(hostId);
+      if (admission === undefined) {
+        throw loopbackAdmissionRefusal(hostId.slice(loopbackHostIdPrefix.length));
+      }
+      url = originAgentSocketUrl(admission.origin);
+      protocols = ['tau-agent', `tau-session.${admission.session}`];
     } else {
       url = await relayedAgentUrl(hostId, options);
     }
-    const socket = (options.createSocket ?? ((next: string) => new WebSocket(next)))(url);
+    const socket = (
+      options.createSocket ??
+      ((next: string, offered?: readonly string[]) => new WebSocket(next, offered ? [...offered] : undefined))
+    )(url, protocols);
     /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
      * instant the upgrade completes, and a listener attached later never sees it. */
     const port = agentChannelPort(socket);
@@ -662,13 +912,13 @@ export const openAgentHostChannel = async (
 };
 
 /**
- * Probe a loopback daemon from a page on another origin (rung 5).
+ * Probe a loopback daemon from a page on another origin (rung 5), before any hand-off.
  *
- * Always refuses, and that is the finding, not a stub: a page has no way to
- * present the daemon's cookie across origins, and Local Network Access blocks
- * the request outright in browsers that ship it — often without the request
- * ever reaching the daemon, so a "connection refused" here proves nothing about
- * whether the daemon is running.
+ * Reachability only, never admission: without a redeemed hand-off code a page has
+ * no way to sign in across origins, and Local Network Access blocks the request
+ * outright in browsers that ship it — often without the request ever reaching the
+ * daemon, so a "connection refused" here proves nothing about whether the daemon
+ * is running.
  *
  * @param port - The loopback port to probe.
  * @param options - Socket and permission overrides, for tests.
@@ -717,10 +967,10 @@ export const probeLoopbackAgentHost = async (
   return { reachable, ...(permission === undefined ? {} : { permission }) };
 };
 
-/** The refusal every rung-5 selection gets, with the two rungs that do work. @public */
+/** The refusal a rung-5 selection gets while this page holds no session for that daemon, naming the hand-off. @public */
 export const loopbackAdmissionRefusal = (label = 'That daemon'): AgentHostPlacementError =>
   new AgentHostPlacementError(
     'RUNG5_NO_ADMISSION',
     5,
-    `${label} is running on this machine, but a page on this origin has no way to sign in to it. Open the daemon's own address (\`tau serve --ui\`), or pair it with your account and use it from there.`,
+    `${label} is running on this machine, but this page has not been handed it. Run \`tau open --desktop\` (or \`tau open --ui-origin=<this site>\`) to hand it over, open the daemon's own address, or pair it with your account.`,
   );

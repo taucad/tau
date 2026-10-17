@@ -16,7 +16,13 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { StorageDurabilityClass } from '@taucad/agent-host';
-import { hostDirectoryOutage, hostPlacementsIncomplete, listAgentHostPlacements } from '#lib/agent-host-placement.js';
+import {
+  hostDirectoryOutage,
+  hostPlacementsIncomplete,
+  listAgentHostPlacements,
+  loopbackHostIdPrefix,
+  onLoopbackAgentHostsChanged,
+} from '#lib/agent-host-placement.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 
@@ -71,11 +77,16 @@ const availabilityKey = (projectId: string | undefined, hostId?: TauAgentHostId)
 
 /**
  * Whether the pairing directory is what describes this placement. Only a paired
- * device is: this computer and the page's own origin are discovered without it,
- * so its outage — a signed-out `401` included — says nothing about either.
+ * device is: this computer, the page's own origin and a loopback daemon handed
+ * over by URL are discovered without it, so its outage — a signed-out `401`
+ * included — says nothing about them.
  */
 const isPairedHost = (hostId: string | undefined): boolean =>
-  hostId !== undefined && hostId !== 'browser' && hostId !== 'desktop' && hostId !== 'origin';
+  hostId !== undefined &&
+  hostId !== 'browser' &&
+  hostId !== 'desktop' &&
+  hostId !== 'origin' &&
+  !hostId.startsWith(loopbackHostIdPrefix);
 
 const publishAvailability = (key: string, availability: BrowserAgentHostProjectAvailability): void => {
   resolvedAvailability.set(key, availability);
@@ -306,9 +317,14 @@ export const useAgentHostPlacements = (): {
       }
     };
     globalThis.addEventListener('focus', rediscoverIfIncomplete);
+    /* A daemon handed to this page (X54) is a new row: list again. */
+    const stopListening = onLoopbackAgentHostsChanged(() => {
+      void discover();
+    });
     return () => {
       active = false;
       globalThis.removeEventListener('focus', rediscoverIfIncomplete);
+      stopListening();
     };
   }, [projectId]);
 

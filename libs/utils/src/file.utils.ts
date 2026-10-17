@@ -23,10 +23,18 @@ export function asBuffer(data: Uint8Array<ArrayBuffer> | ArrayBufferLike): Uint8
 }
 
 /**
+ * How long a download's object URL outlives the click.
+ *
+ * The browser reads the blob after the click returns, and Safari cancels a
+ * download whose URL is revoked first; FileSaver.js waits 40 s for the same reason.
+ */
+const objectUrlLifetimeMilliseconds = 40_000;
+
+/**
  * Trigger a browser file download from a Blob.
  *
- * Creates a temporary anchor element to initiate a file download using
- * a data URL read from the provided Blob.
+ * Creates a temporary anchor element pointing at an object URL for the blob,
+ * so the download streams from the blob rather than from a base64 copy of it.
  *
  * @param blob - The blob data to download
  * @param filename - The filename for the downloaded file
@@ -34,28 +42,15 @@ export function asBuffer(data: Uint8Array<ArrayBuffer> | ArrayBufferLike): Uint8
  */
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  try {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      const base64data = reader.result;
-      if (typeof base64data === 'string') {
-        const a = document.createElement('a');
-        a.href = base64data;
-        a.download = filename;
-        document.body.append(a);
-        a.click();
-        a.remove();
-      } else {
-        throw new TypeError('Failed to convert blob to base64 string.');
-      }
-    });
-    reader.addEventListener('error', () => {
-      throw new Error('FileReader failed to read the blob.');
-    });
-    reader.readAsDataURL(blob);
-  } finally {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => {
     URL.revokeObjectURL(url);
-  }
+  }, objectUrlLifetimeMilliseconds);
 }
 
 /**

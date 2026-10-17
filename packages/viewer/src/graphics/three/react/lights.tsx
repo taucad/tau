@@ -253,8 +253,12 @@ function OwnedLightingEnvironment({
     // A generator keeps a ping-pong target as large as its output until disposed, and is only
     // needed while filtering: each capture gets its own and releases it immediately.
     const generator = isViewportWebGpu(gl) ? new WebGpuPmremGenerator(gl) : new PMREMGenerator(gl);
-    const filtered = generator.fromCubemap(source);
-    generator.dispose();
+    let filtered: ReturnType<typeof generator.fromCubemap>;
+    try {
+      filtered = generator.fromCubemap(source);
+    } finally {
+      generator.dispose();
+    }
     // oxlint-disable-next-line react/immutability -- This effect owns the external Three scene's filtered environment and restores it on cleanup.
     scene.environment = filtered.texture;
     invalidate();

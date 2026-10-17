@@ -11,6 +11,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { runCommand } from 'citty';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as Host from '@taucad/host';
+import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostRuntimeClient, HostToolRegistryOptions } from '@taucad/host/agent-tools';
 import type * as Runtime from '@taucad/runtime';
 
@@ -116,6 +117,26 @@ describe('mcpCommand', () => {
       );
     },
   );
+
+  it('should exit non-zero with its error when it cannot start serving', async () => {
+    vi.mocked(createHostToolRegistry).mockImplementationOnce(() => {
+      throw new Error('Provider tool schema has a tuple that cannot use one items schema');
+    });
+    const written: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array<ArrayBuffer>) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const mcpCommand = await importMcpCommand();
+
+    await runCommand(mcpCommand, { rawArgs: [] });
+
+    expect(exitNow).toHaveBeenCalledExactlyOnceWith(1);
+    expect(written.join('')).toContain(
+      'tau mcp: could not start: Error: Provider tool schema has a tuple that cannot use one items schema',
+    );
+    expect(serveLocalHostMcp).not.toHaveBeenCalled();
+  });
 
   it('should keep a thread while its tool call works between two operations past the idle release', async () => {
     const project = '/fixture/project';

@@ -85,11 +85,11 @@ describe('contentSecurityPolicy', () => {
     expect(policy.startsWith("default-src 'none'; ")).toBe(true);
   });
 
-  it('reaches the npm registry, the API and WebSocket origins, plus GitHub public reads for Import, and nothing else', () => {
+  it('reaches the npm registry, the API and WebSocket origins, a handed-over loopback daemon, plus GitHub public reads for Import, and nothing else', () => {
     /* The Import page reads repository metadata and trees from api.github.com without credentials, as the
      * web app's policy (apps/ui/netlify.toml) already allows; archives still come through the API. */
     expect(directive('connect-src')).toBe(
-      "connect-src 'self' data: blob: https://api.github.com https://registry.npmjs.org http://localhost:4000 ws://localhost:4001",
+      "connect-src 'self' data: blob: https://api.github.com https://registry.npmjs.org http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* http://localhost:4000 ws://localhost:4001",
     );
   });
 

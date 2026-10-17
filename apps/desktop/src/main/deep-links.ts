@@ -13,6 +13,10 @@
  * parses as host `invitations` with path `/<token>` — the first path segment a
  * reader sees is the **host**. `tau:invitations/<token>`, with no authority, is
  * a different URL with an opaque path, and is refused rather than guessed at.
+ *
+ * One link names an address rather than a route: `tau://host/<loopback origin>?code=<code>`, which `tau open --desktop`
+ * opens for a folder it serves (ruling X54). It is admitted only for a loopback HTTP origin with a port, because the
+ * renderer redeems its single-use code there and nowhere else: a link cannot point the app at another machine.
  */
 
 /** Scheme prefix, as it appears in `process.argv` and `open-url`. */
@@ -45,6 +49,10 @@ const fragmentPattern = /^[A-Za-z0-9*%=&+._-]+$/u;
 /* The same shape `apps/ui/app/routes/auth.desktop` refuses to carry. */
 const statePattern = /^[\w-]{8,128}$/u;
 const oneTimeTokenPattern = /^[\w-]{1,256}$/u;
+/* The daemon mints 32 random bytes, base64url: 43 characters. */
+const handOffCodePattern = /^[\w-]{16,256}$/u;
+/* Loopback only, with a port: the daemon binds `127.0.0.1` and names `localhost` among its own origins. */
+const loopbackOriginPattern = /^http:\/\/(?:127\.0\.0\.1|localhost):([1-9]\d{0,4})$/u;
 
 /** One admitted `tau://` link. */
 export type DeepLink =
@@ -56,7 +64,9 @@ export type DeepLink =
   /** `tau://i/<repository path>`. */
   | { readonly kind: 'import'; readonly route: string }
   /** `tau://auth/callback` — redeemed in main; it never reaches the renderer. */
-  | { readonly kind: 'auth-callback'; readonly oneTimeToken: string; readonly state: string };
+  | { readonly kind: 'auth-callback'; readonly oneTimeToken: string; readonly state: string }
+  /** `tau://host/<loopback origin>?code=<code>` — handed to the renderer, which redeems the code at that daemon. */
+  | { readonly kind: 'host'; readonly origin: string; readonly code: string };
 
 const machineRoute = (segments: readonly string[]): DeepLink | undefined => {
   if (segments.length === 0 || (segments.length === 1 && segments[0] === '')) {
@@ -135,6 +145,15 @@ const authCallback = (segments: readonly string[], parameters: URLSearchParams):
   return { kind: 'auth-callback', oneTimeToken, state };
 };
 
+const hostHandOff = (path: string, parameters: URLSearchParams): DeepLink | undefined => {
+  const port = loopbackOriginPattern.exec(path)?.[1];
+  const code = parameters.get('code') ?? '';
+  if (port === undefined || Number(port) > 65_535 || parameters.size !== 1 || !handOffCodePattern.test(code)) {
+    return undefined;
+  }
+  return { kind: 'host', origin: path, code };
+};
+
 /**
  * Parse one inbound `tau://` link.
  *
@@ -187,6 +206,11 @@ export const parseDeepLink = (value: string): DeepLink | undefined => {
     }
     case 'auth': {
       return url.hash === '' ? authCallback(segments, url.searchParams) : undefined;
+    }
+    case 'host': {
+      /* The origin is the whole path after `/`, compared verbatim: a dot segment, a second slash or a userinfo makes
+       * it fail the pattern rather than normalise into one. */
+      return url.hash === '' ? hostHandOff(url.pathname.slice(1), url.searchParams) : undefined;
     }
     default: {
       return undefined;

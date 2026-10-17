@@ -6,6 +6,7 @@ import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
+  hostHandOffChannel,
   openDirectoryChannel,
   revealPathChannel,
   quitChannels,
@@ -106,6 +107,26 @@ describe('desktop machine navigation bridge', () => {
     vi.mocked(ipcRenderer.send).mockClear();
     quitApi().reportQuiesced('attempt-2', true);
     expect(ipcRenderer.send).toHaveBeenCalledExactlyOnceWith(quitChannels.quiesced, 'attempt-2', true);
+  });
+});
+
+describe('desktop host hand-off bridge', () => {
+  it('should buffer a daemon hand-off until the page subscribes, and drop a malformed one', () => {
+    for (const listener of state.listeners.get(hostHandOffChannel) ?? []) {
+      listener({}, { origin: 'http://127.0.0.1:7180', code: 'one-time-code' });
+      listener({}, { origin: 7180 });
+    }
+    const { hostHandOff } = state.exposed.get('tau') as {
+      readonly hostHandOff: {
+        onHandOff(handler: (handOff: { readonly origin: string; readonly code: string }) => void): () => void;
+      };
+    };
+    const handler = vi.fn();
+
+    const unsubscribe = hostHandOff.onHandOff(handler);
+
+    expect(handler).toHaveBeenCalledExactlyOnceWith({ origin: 'http://127.0.0.1:7180', code: 'one-time-code' });
+    unsubscribe();
   });
 });
 

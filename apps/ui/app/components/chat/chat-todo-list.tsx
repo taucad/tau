@@ -59,7 +59,7 @@ function TodoRow({ item }: { readonly item: TodoItem }): React.JSX.Element {
         className={cn(
           'mt-0.5 size-3 shrink-0',
           item.status === 'done' && 'text-success',
-          item.status === 'in_progress' && 'animate-spin animation-duration-[2s] motion-reduce:animate-none',
+          item.status === 'in_progress' && 'spin-glyph [--spin-glyph-duration:2s]',
         )}
       />
       <span className='min-w-0 flex-1 wrap-break-word'>

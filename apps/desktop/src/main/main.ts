@@ -118,6 +118,7 @@ import {
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
+  hostHandOffChannel,
   quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
@@ -1461,7 +1462,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       const link = parseDeepLink(value);
       if (link === undefined) {
         /* A custom scheme has no ownership proof, so a link that is not one of
-         * the four the app publishes is another application's, or an attempt. */
+         * the links the app publishes is another application's, or an attempt. */
         /* Only the shape: a malformed sign-in callback still carries a live
          * one-time token in its query, a refused invitation carries its token in
          * the path, and a share fragment is the payload. */
@@ -1477,6 +1478,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
         const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
         if (link.kind === 'machine') {
           window.webContents.send(quitChannels.navigate, link.route);
+        } else if (link.kind === 'host') {
+          /* The page redeems the single-use code at the loopback daemon the link named (X54); it is not a route. */
+          window.webContents.send(hostHandOffChannel, { origin: link.origin, code: link.code });
         } else {
           await window.loadURL(rendererUrl(link.route));
         }

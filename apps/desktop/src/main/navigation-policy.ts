@@ -131,6 +131,9 @@ export const isTrustedSender = (frame: SenderFrame | undefined, origins: readonl
  * `worker-src`/`connect-src` by the runtime's worker delivery and Monaco.
  * `https://registry.npmjs.org` is where the Packages panel's Install reads
  * packuments and tarballs (every tarball is checked against the lock's integrity).
+ * The loopback origins are a `tau serve` daemon handed over by `tau open --desktop`
+ * (X54): its descriptor, its one-time code redemption and its `/agent` socket.
+ * They are loopback only, and the daemon still admits nothing without a redeemed code.
  * `default-src 'none'` makes every directive below an explicit grant, and
  * `base-uri`/`form-action`/`frame-ancestors 'none'` close the three
  * redirect-style escapes a CSP is usually forgotten on.
@@ -149,7 +152,7 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
     "media-src 'self' blob:",
     /* GitHub's public API: the Import page's unauthenticated public reads (repository metadata and tree), as on the web.
      * The npm registry: packuments and tarballs for project package installs. */
-    `connect-src 'self' data: blob: https://api.github.com https://registry.npmjs.org${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
+    `connect-src 'self' data: blob: https://api.github.com https://registry.npmjs.org http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
     "worker-src 'self' blob:",
     "child-src 'self' blob:",
     "object-src 'none'",

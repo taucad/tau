@@ -6,6 +6,11 @@
 # select it through Nx, never a path filter: on every pull request that affects one, and on
 # every push to `main`. A consumer row (charter W22, tier 8) joins by declaring the target.
 #
+# The same job then runs the nuget row of the standalone-project oracles (charter W23, D34, I14;
+# go-live row PRJ-1), whose other rows run in `ci.yml`: the PicoGK project Tau creates restores and
+# runs outside Tau with the .NET SDK alone and matches `tau export` of the same project. Its selection
+# was always this row's, so it shares the runner and a pull request keeps one macOS job (ruling X60).
+#
 # Nightly, and on dispatch with `benchmarks`, the projects with a `benchmark-native` target run
 # it as a gate (D23): each script exits non-zero on an integrity, runtime or budget failure.
 #
@@ -38,10 +43,12 @@ env:
   pnpm_config_verify_deps_before_run: warn
   NX_NO_CLOUD: 'true'
 
-# A newer push to a pull request cancels its outdated run; each push to `main` has a group of its
-# own and is never cancelled.
+# A newer push to a pull request cancels its outdated run. Pushes to `main` share one group and are
+# never cancelled once running: a newer push replaces the run still waiting for a runner, so `main`
+# queues at most one run behind the running one (ruling X60). The nightly and each dispatch keep
+# groups of their own, so a push never cancels them.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -97,7 +104,13 @@ jobs:
     needs: [plan]
     if: needs.plan.outputs.projects != ''
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
+      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
+      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
     steps:
       - name: Start the row stopwatch
         run: echo "ROW_STARTED=$(date +%s)" >> "$GITHUB_ENV"
@@ -158,6 +171,7 @@ jobs:
       # Each closure test appends its golden comparison to TAU_GOLDEN_SUMMARY_FILE (and fails on
       # a mismatch), so two runs, a cache hit and a cache miss, compare by one string.
       - name: Run the darwin-arm64 native rows
+        id: rows
         env:
           PROJECTS: ${{ needs.plan.outputs.projects }}
           TAU_TEST_FRAME_LOG_DIR: ${{ runner.temp }}/native-darwin-frames
@@ -189,6 +203,24 @@ jobs:
           row=$(( $(date +%s) - ROW_STARTED ))
           echo "::notice title=native-darwin row::${row} s from job start (seed cache hit: ${SEED_HIT})"
           echo "native-darwin row: ${row} s from job start; seed cache hit: ${SEED_HIT}" >> "$GITHUB_STEP_SUMMARY"
+
+      # The standalone nuget row runs whether or not the native rows passed, so each oracle reports
+      # on its own; it is skipped only when the job failed before the rows. The SDK is installed
+      # after the rows, and after their stopwatch, so its DOTNET_ROOT never reaches them.
+      - name: Install the .NET 10 SDK
+        id: dotnet
+        if: ${{ !cancelled() && steps.rows.outcome != 'skipped' }}
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
+          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/dotnet"
+          tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
+          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
+
+      - name: Check every nuget template outside Tau
+        if: ${{ !cancelled() && steps.dotnet.outcome == 'success' }}
+        run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
 
       - name: Upload the MCP and daemon logs
         if: always()

@@ -643,18 +643,30 @@ jobs:
     timeout-minutes: 90
     env:
       NX_DAEMON: 'false'
-      # The same build-time origins ci.yml and e2e-nightly.yml give every UI build.
-      TAU_API_URL: http://localhost:4000
-      TAU_WEBSOCKET_URL: ws://localhost:4001
-      TAU_FRONTEND_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: refs/tags/${{ needs.resolve.outputs.tag }}
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Build the serve UI
-        run: pnpm nx run ui:build:serve --outputStyle=stream
+      # The published layer is the UI `tau serve` hands users, so it is built with the production origins the `ui`
+      # release serves tau.new with (ruling X58): the public values the production desktop channel also pins
+      # (apps/desktop/src/main/environment.ts). ci.yml and e2e-nightly.yml keep their localhost origins for test builds.
+      # `build:serve` does not key its cache on these variables, so a cached localhost build must not be reused here.
+      - name: Build the serve UI with production origins
+        env:
+          TAU_API_URL: https://api.tau.new
+          TAU_WEBSOCKET_URL: wss://api.tau.new
+          TAU_FRONTEND_URL: https://tau.new
+        run: |
+          set -euo pipefail
+          pnpm nx run ui:build:serve --skip-nx-cache --outputStyle=stream
+          shell=apps/ui/serve/build/client/index.html
+          grep -q 'https://api.tau.new' "$shell"
+          if grep -Eq 'localhost:(3000|4000|4001)' "$shell"; then
+            echo "::error::The serve UI shell carries a localhost origin; the published layer must use production origins."
+            exit 1
+          fi
       - name: Build the layer and its record
         run: |
           set -euo pipefail

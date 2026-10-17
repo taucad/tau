@@ -80,7 +80,7 @@ export function ChatMessageReasoning({
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
         >
           {isThinking ? (
-            <LoaderCircle aria-hidden='true' className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
+            <LoaderCircle aria-hidden='true' className='size-3 shrink-0 spin-glyph' />
           ) : (
             <ThoughtBubble aria-hidden='true' className='size-3 shrink-0' />
           )}

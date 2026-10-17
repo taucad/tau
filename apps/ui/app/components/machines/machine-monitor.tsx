@@ -1009,7 +1009,7 @@ export function HistoryStage({
                   />
                 ) : null}
                 {operation.state === 'sending' || operation.state === 'confirming' ? (
-                  <LoaderCircle aria-hidden className='size-3.5 shrink-0 animate-spin motion-reduce:animate-none' />
+                  <LoaderCircle aria-hidden className='size-3.5 shrink-0 spin-glyph' />
                 ) : null}
                 <span className='min-w-0 flex-1 truncate'>
                   {operation.action?.label ?? (operation.kind === 'action' ? 'Action' : kindWords[operation.kind])}

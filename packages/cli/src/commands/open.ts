@@ -7,10 +7,12 @@
  * hand-off because the same-origin served page needs no secret in its URL and no Local Network Access prompt (C1 R6).
  * A URL is opened as it is. `--print` prints the URL instead of opening it.
  *
- * `--desktop` is best effort. A `tau://` link the desktop admits (an invitation, a share, an import) goes to the OS
- * scheme handler. A served folder cannot reach the desktop yet: the daemon-naming `tau://host/<origin>?code=` link
- * arrives with the serve UI hand-off after spike S32 (W18), so until then the browser opens and the CLI says why.
- * Cloning a Tau Cloud project is `tau clone`.
+ * `--desktop` hands a served folder to Tau Desktop (charter S32, ruling X54): the daemon is served with no UI of its own,
+ * admits `app://tau`, and mints a single-use, short-lived code, and the OS scheme handler gets
+ * `tau://host/<loopback origin>?code=<code>`. The desktop redeems the code at the daemon and lists it under Runs on.
+ * `--ui-origin <origin>` does the same for the Tau UI on a website, such as https://tau.new, with the code in the
+ * link's fragment. A `tau://` link the desktop admits (an invitation, a share, an import) goes to the scheme handler as
+ * it is. Cloning a Tau Cloud project is `tau clone`.
  *
  * @module
  */
@@ -95,8 +97,15 @@ export const openCommand = defineCommand({
     },
     desktop: {
       type: 'boolean',
-      description: 'Prefer Tau Desktop; best effort, the browser opens when the desktop cannot take this target',
+      description:
+        'Open in Tau Desktop: a served folder is handed over with a one-time code (tau://host/<origin>?code=…)',
       default: false,
+    },
+    uiOrigin: {
+      type: 'string',
+      description:
+        'Hand a served folder to the Tau UI at this exact origin (e.g. https://tau.new) with a one-time code, instead of serving a UI',
+      required: false,
     },
     print: {
       type: 'boolean',
@@ -144,6 +153,23 @@ export const openCommand = defineCommand({
     }
 
     const { prepareStoreUi, serveCommand } = await import('#commands/serve.js');
+    const uiOrigin = typeof args.uiOrigin === 'string' && args.uiOrigin !== '' ? args.uiOrigin : undefined;
+    /* Handed over, the folder is shown by Tau Desktop or the website's own UI: the daemon serves agents only (X54). */
+    const handOff = args.desktop ? 'desktop' : uiOrigin;
+    if (handOff !== undefined) {
+      await runCommand(serveCommand as CommandDef, {
+        rawArgs: [
+          target.folder,
+          '--no-ui',
+          `--hand-off=${handOff}`,
+          ...(args.port === undefined || args.port === '' ? [] : [`--port=${String(args.port)}`]),
+          ...(args.json ? ['--json'] : []),
+          ...(args.print ? ['--print'] : []),
+          ...(scripted ? ['--no-open'] : []),
+        ],
+      });
+      return;
+    }
     let ui = typeof args.ui === 'string' ? args.ui : '';
     if (ui === '') {
       const storeUi = await prepareStoreUi();
@@ -155,9 +181,6 @@ export const openCommand = defineCommand({
         );
       }
       ui = storeUi.root;
-    }
-    if (args.desktop) {
-      consola.warn('Tau Desktop cannot open a served folder from the terminal yet; opening it in the browser instead.');
     }
     await runCommand(serveCommand as CommandDef, {
       rawArgs: [

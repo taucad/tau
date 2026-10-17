@@ -326,14 +326,14 @@ describe('ProjectNavigation', () => {
     const pendingLink = screen.getByRole('link', { name: 'Two' });
     const idleLink = screen.getByRole('link', { name: 'One' });
     expect(pendingLink).toHaveAttribute('aria-busy', 'true');
-    expect(pendingLink.querySelector('.animate-spin')).toBeNull();
+    expect(pendingLink.querySelector('.spin-glyph')).toBeNull();
     const mark = screen
       .getByRole('button', { name: /(?:Expand|Collapse) Two/u })
       .querySelector<HTMLElement>('[data-glyph]');
     expect(mark?.dataset['glyph']).toBe('pending');
-    expect(mark?.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(mark?.querySelector('.spin-glyph')).toBeInTheDocument();
     expect(mark?.className).not.toContain('group-hover/row:hidden');
-    expect(idleLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).toBeNull();
+    expect(idleLink.closest('[data-slot=project-trigger]')?.querySelector('.spin-glyph')).toBeNull();
   });
 
   it('opens the rename field on a double-click, but not from the disclosure control', () => {

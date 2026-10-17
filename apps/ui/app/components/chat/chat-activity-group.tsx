@@ -39,7 +39,7 @@ export function ChatActivityGroup({
             <LoaderCircle
               aria-hidden='true'
               data-slot='activity-group-spinner'
-              className='size-3 shrink-0 animate-spin motion-reduce:animate-none'
+              className='size-3 shrink-0 spin-glyph'
             />
           ) : (
             <Icon aria-hidden='true' className='size-3 shrink-0' />

@@ -33,6 +33,7 @@ import {
   revealPathChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
+  hostHandOffChannel,
   machinesChannels,
   quitChannels,
   computeControlChannels,
@@ -89,6 +90,22 @@ ipcRenderer.on(quitChannels.navigate, (_event, route: unknown) => {
     machineNavigationHandler(route);
   } else {
     pendingMachineRoute = route;
+  }
+});
+
+/** One daemon hand-off from main (X54), kept until the page listens: a cold launch delivers it before React mounts. */
+type HostHandOff = { readonly origin: string; readonly code: string };
+const pendingHostHandOffs: HostHandOff[] = [];
+let hostHandOffHandler: ((handOff: HostHandOff) => void) | undefined;
+ipcRenderer.on(hostHandOffChannel, (_event, value: unknown) => {
+  const { origin, code } = (value ?? {}) as { readonly origin?: unknown; readonly code?: unknown };
+  if (typeof origin !== 'string' || typeof code !== 'string') {
+    return;
+  }
+  if (hostHandOffHandler) {
+    hostHandOffHandler({ origin, code });
+  } else {
+    pendingHostHandOffs.push({ origin, code });
   }
 });
 
@@ -222,6 +239,19 @@ contextBridge.exposeInMainWorld('tau', {
       ipcRenderer.on(windowFullscreenChannel, handler);
       return () => {
         ipcRenderer.off(windowFullscreenChannel, handler);
+      };
+    },
+  },
+  hostHandOff: {
+    onHandOff: (handler: (handOff: HostHandOff) => void): (() => void) => {
+      hostHandOffHandler = handler;
+      for (const handOff of pendingHostHandOffs.splice(0)) {
+        handler(handOff);
+      }
+      return () => {
+        if (hostHandOffHandler === handler) {
+          hostHandOffHandler = undefined;
+        }
       };
     },
   },

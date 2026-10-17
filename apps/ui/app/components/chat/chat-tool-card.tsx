@@ -233,9 +233,7 @@ function ChatToolCardIcon({ icon: Icon, className, tone }: ChatToolCardIconProps
   const { status, variant, isCollapsible } = useChatToolCard();
 
   if (status === 'loading') {
-    return (
-      <LoaderCircle className={cn('size-3 shrink-0 animate-spin text-inherit motion-reduce:animate-none', className)} />
-    );
+    return <LoaderCircle className={cn('size-3 shrink-0 spin-glyph text-inherit', className)} />;
   }
 
   const toneClassName = tone ? toneClass[tone] : undefined;

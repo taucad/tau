@@ -208,7 +208,7 @@ export function GithubGistManagement({
     return (
       <div className='flex items-center gap-1'>
         <span role='status' className='flex items-center gap-1.5 px-1 text-xs text-muted-foreground'>
-          <Loader2 className='size-3.5 animate-spin' aria-hidden />
+          <Loader2 className='size-3.5 spin-glyph' aria-hidden />
           Finish in your browser
         </span>
         <Button type='button' size='sm' variant='ghost' className='h-8 px-2.5 text-xs' onClick={cancelBrowserConsent}>
@@ -267,7 +267,7 @@ export function GithubGistManagement({
             disabled={status === undefined || busy}
           >
             {busy ? (
-              <Loader2 className='size-3.5 animate-spin' aria-hidden />
+              <Loader2 className='size-3.5 spin-glyph' aria-hidden />
             ) : (
               <EllipsisVertical className='size-3.5' aria-hidden />
             )}
@@ -312,7 +312,7 @@ export function GithubGistManagement({
                 void unpublish();
               }}
             >
-              {busy ? <Loader2 className='size-4 animate-spin' aria-hidden /> : null}
+              {busy ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : null}
               Unpublish Gist
             </Button>
           </AlertDialogFooter>

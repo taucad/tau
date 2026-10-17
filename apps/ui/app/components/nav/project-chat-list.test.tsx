@@ -368,12 +368,12 @@ describe('ProjectChatList', () => {
 
     const pendingLink = screen.getByRole('link', { name: 'Chat 11' });
     expect(pendingLink).toHaveAttribute('aria-busy', 'true');
-    expect(pendingLink.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(pendingLink.querySelector('.spin-glyph')).not.toBeInTheDocument();
     const pendingRow = pendingLink.closest('[data-slot=chat-trigger]');
-    expect(pendingRow?.querySelector('[data-slot=chat-status][data-glyph=pending] .animate-spin')).toBeInTheDocument();
+    expect(pendingRow?.querySelector('[data-slot=chat-status][data-glyph=pending] .spin-glyph')).toBeInTheDocument();
     expect(pendingRow?.querySelector('[data-glyph=failed]')).toBeNull();
     expect(
-      screen.getByRole('link', { name: 'Chat 12' }).closest('[data-slot=chat-trigger]')?.querySelector('.animate-spin'),
+      screen.getByRole('link', { name: 'Chat 12' }).closest('[data-slot=chat-trigger]')?.querySelector('.spin-glyph'),
     ).toBeNull();
   });
 

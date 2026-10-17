@@ -673,6 +673,30 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('tablist', { name: 'Runs on' })).toBeInTheDocument();
   });
 
+  it('should list a daemon handed over by URL under Runs on, and place the chat on it (X54)', async () => {
+    state.placements = [
+      {
+        hostId: 'loopback:http://127.0.0.1:7180',
+        rung: 5,
+        label: 'studio-mini',
+        workspaceRoot: '/Users/x/lamp',
+        online: true,
+      },
+    ];
+    renderSheet();
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Settings/u }));
+
+    const runsOn = screen.getByRole('tablist', { name: 'Runs on' });
+    await userEvent.click(within(runsOn).getByRole('tab', { name: 'studio-mini' }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({
+      kind: 'tau',
+      model: fable.id,
+      hostId: 'loopback:http://127.0.0.1:7180',
+    });
+  });
+
   it('draws the model as one row, without its provider line', async () => {
     renderSheet();
     await openSheet();

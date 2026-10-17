@@ -277,7 +277,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
               invite.mutate();
             }}
           >
-            {invite.isPending ? <Loader2 className='size-4 animate-spin' aria-hidden /> : undefined}
+            {invite.isPending ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : undefined}
             <span>Create invitation</span>
           </Button>
         </div>

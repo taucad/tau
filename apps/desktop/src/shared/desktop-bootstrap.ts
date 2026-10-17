@@ -47,6 +47,12 @@ export const quitChannels = {
 } as const;
 
 /**
+ * A served daemon handed to this app by `tau open --desktop` (ruling X54): main sends `{ origin, code }` from a
+ * `tau://host/<loopback origin>?code=<code>` link it admitted, and the page redeems the code at that daemon.
+ */
+export const hostHandOffChannel = 'tau:host:hand-off';
+
+/**
  * The external ACP agents launcher 2 can start (W4-ACP).
  *
  * A call rather than a bootstrap value (D17): resolving them runs a CLI probe

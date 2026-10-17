@@ -119,7 +119,7 @@ function ShareLinkActionIcon({
   readonly icon: ShareLinkMethod['action']['icon'];
 }): React.JSX.Element {
   if (isBusy) {
-    return <Loader2 className='size-4 animate-spin' aria-hidden />;
+    return <Loader2 className='size-4 spin-glyph' aria-hidden />;
   }
   return isCopied ? <Check className='size-3.5' aria-hidden /> : <Icon className='size-3.5' aria-hidden />;
 }

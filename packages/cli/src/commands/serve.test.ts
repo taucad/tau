@@ -12,6 +12,8 @@ import {
   agentWorkspaceRoot,
   childArguments,
   defaultServePort,
+  handOffLink,
+  handOffTarget,
   parseAllowedOrigins,
   prepareStoreUi,
   resolveServePort,
@@ -268,6 +270,43 @@ describe('parseAllowedOrigins', () => {
 
   it('should exit with the usage code', () => {
     expect(() => parseAllowedOrigins('*')).toThrow(expect.objectContaining({ exit: exitCodes.usage }));
+  });
+});
+
+describe('handOffTarget', () => {
+  it('should admit Tau Desktop for desktop, and one website origin otherwise', () => {
+    expect(handOffTarget('desktop')).toEqual({ kind: 'desktop', origin: 'app://tau' });
+    expect(handOffTarget('https://tau.new')).toEqual({ kind: 'website', origin: 'https://tau.new' });
+    expect(handOffTarget(undefined)).toBeUndefined();
+    expect(handOffTarget('')).toBeUndefined();
+  });
+
+  it.each(['https://tau.new/', 'app://tau', 'https://tau.new,https://taucad.dev', '*'])(
+    'should refuse %s as a usage error',
+    (value) => {
+      expect(() => handOffTarget(value)).toThrow(
+        expect.objectContaining({ code: 'ORIGIN_INVALID', exit: exitCodes.usage }),
+      );
+    },
+  );
+});
+
+describe('handOffLink', () => {
+  it('should name the loopback origin and the code in a tau://host link for the desktop', () => {
+    expect(handOffLink({ kind: 'desktop', origin: 'app://tau' }, 'http://127.0.0.1:7180/', 'c0de_-x')).toBe(
+      'tau://host/http://127.0.0.1:7180?code=c0de_-x',
+    );
+  });
+
+  it('should carry both in the fragment for a website, where its server never sees them', () => {
+    const link = new URL(handOffLink({ kind: 'website', origin: 'https://tau.new' }, 'http://127.0.0.1:7180/', 'c0de'));
+
+    expect(link.origin).toBe('https://tau.new');
+    expect(link.search).toBe('');
+    expect(Object.fromEntries(new URLSearchParams(link.hash.slice(1)))).toEqual({
+      'tau-host': 'http://127.0.0.1:7180',
+      'tau-code': 'c0de',
+    });
   });
 });
 

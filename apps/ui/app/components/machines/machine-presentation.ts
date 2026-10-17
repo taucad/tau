@@ -11,7 +11,7 @@ export type MachinePresentation = Readonly<{
   iconClassName: string;
 }>;
 
-const spinning = 'text-information animate-spin motion-reduce:animate-none';
+const spinning = 'text-information spin-glyph';
 
 /** How a job in flight reads while the machine's own report still describes the moment before it. */
 const inFlightPresentation: Partial<Record<MachineJob['state'], MachinePresentation>> = {

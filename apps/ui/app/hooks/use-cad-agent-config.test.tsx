@@ -109,6 +109,8 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   },
   hostDirectoryOutage: () => directoryHarness.outage,
   hostPlacementsIncomplete: () => directoryHarness.incomplete,
+  loopbackHostIdPrefix: 'loopback:',
+  onLoopbackAgentHostsChanged: () => () => undefined,
 }));
 
 const noop = (): void => undefined;
@@ -347,6 +349,17 @@ describe('useCadAgentConfig', () => {
     directoryHarness.listings = [
       [{ hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true }],
     ];
+
+    renderHook(() => useAgentHostPlacements());
+
+    await expect(settled).resolves.toMatchObject({ status: 'available' });
+  });
+
+  it('should not refuse a loopback daemon handed over by URL over a pairing directory outage', async () => {
+    directoryHarness.outage = 'Tau Host refused the request (UNAUTHORIZED).';
+    const hostId = 'loopback:http://127.0.0.1:7180';
+    const settled = awaitAgentHostAvailability({ projectId: 'project-test', hostId }, 1000);
+    directoryHarness.listings = [[{ hostId, rung: 5, label: 'studio-mini', workspaceRoot: '/w', online: true }]];
 
     renderHook(() => useAgentHostPlacements());
 

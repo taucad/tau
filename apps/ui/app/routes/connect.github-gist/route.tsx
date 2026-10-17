@@ -157,7 +157,7 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
                 }}
               >
                 {starting ? (
-                  <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+                  <Loader2 className='size-4 spin-glyph' aria-hidden='true' />
                 ) : (
                   <SvgIcon id='github' className='size-4' aria-hidden='true' />
                 )}

@@ -186,11 +186,7 @@ function StopButton({ control }: { readonly control: MachineControl }): React.JS
           void control.stop();
         }}
       >
-        {control.isStopping ? (
-          <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-        ) : (
-          <OctagonX aria-hidden />
-        )}
+        {control.isStopping ? <LoaderCircle aria-hidden className='spin-glyph' /> : <OctagonX aria-hidden />}
         Stop
       </Button>
       {/* Neither done nor failed: the machine has not said yet. Stop stays pressable meanwhile. */}

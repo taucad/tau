@@ -312,10 +312,7 @@ function TestingSwitch({
         <span className='flex shrink-0 items-center gap-2'>
           {isPending ? (
             <span role='status' aria-label='Saving' aria-busy='true'>
-              <LoaderCircle
-                aria-hidden
-                className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none'
-              />
+              <LoaderCircle aria-hidden className='size-3.5 spin-glyph text-muted-foreground' />
             </span>
           ) : null}
           <Switch
@@ -444,7 +441,7 @@ const BoundMachine = memo(function BoundMachine({
             )}
             <div className='flex flex-wrap gap-2'>
               <Button type='button' size='sm' variant='destructive' disabled={isRemoving} onClick={remove}>
-                {isRemoving ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}
+                {isRemoving ? <LoaderCircle aria-hidden className='spin-glyph' /> : null}
                 Remove
               </Button>
               <Button type='button' size='sm' variant='outline' disabled={isRemoving} autoFocus onClick={cancel}>
@@ -777,8 +774,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             disabled={busy || finding || physicalProviders.length === 0}
             onClick={onFind}
           >
-            {finding ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}Find
-            machines
+            {finding ? <LoaderCircle aria-hidden className='spin-glyph' /> : null}Find machines
           </Button>
           <Button
             type='button'

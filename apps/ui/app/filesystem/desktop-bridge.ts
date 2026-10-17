@@ -52,6 +52,10 @@ type DesktopShell = {
     reportQuiesced(attemptId: string, forced: boolean): void;
     onNavigate(handler: (route: string) => void): () => void;
   };
+  /** A `tau serve` daemon `tau open --desktop` handed over (X54); absent on a shell that predates it. */
+  readonly hostHandOff?: {
+    onHandOff(handler: (handOff: DesktopHostHandOff) => void): () => void;
+  };
   readonly directories?: DesktopBridge['directories'];
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
@@ -84,6 +88,13 @@ type DesktopShell = {
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
+
+/**
+ * One daemon handed to the desktop app: the loopback origin a `tau://host/…` link named and its single-use code,
+ * which main admitted and the page redeems at that origin (X54).
+ * @public
+ */
+export type DesktopHostHandOff = { readonly origin: string; readonly code: string };
 
 /**
  * The native half of one binding ceremony (D10). The host pins trust from the
@@ -477,6 +488,17 @@ export const nodeHomeRoot = (): string => {
 export const onDesktopMachineNavigation = (handler: (route: string) => void): (() => void) => {
   const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.quit?.onNavigate(handler) ?? ((): void => undefined);
+};
+
+/**
+ * Daemon hand-offs main admitted from `tau://host/…` links, including one that arrived before the page listened.
+ *
+ * @param handler - Called with each hand-off.
+ * @returns Unsubscribe; a no-op off the desktop build.
+ */
+export const onDesktopHostHandOff = (handler: (handOff: DesktopHostHandOff) => void): (() => void) => {
+  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  return shell?.hostHandOff?.onHandOff(handler) ?? ((): void => undefined);
 };
 
 /** Updates are available only through the desktop preload, never in a web session. */

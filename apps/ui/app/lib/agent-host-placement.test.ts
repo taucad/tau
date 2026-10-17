@@ -1,20 +1,26 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentHostPlacementError,
   discoverOriginAgentHost,
   externalAgentDisplayName,
   hostDirectoryOutage,
+  installLoopbackHandOff,
   listAgentHostPlacements,
   loopbackAdmissionRefusal,
+  onLoopbackAgentHostsChanged,
   openAgentHostChannel,
+  placementRungOf,
   probeCloudPlacement,
   probeLoopbackAgentHost,
+  redeemLoopbackHandOff,
+  resetLoopbackAgentHosts,
   shouldAutoOfferCloudPlacement,
 } from '#lib/agent-host-placement.js';
 import { RemoteHostApiError } from '#lib/remote-host-client.js';
 import { getComputeReuseMode, setComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 
 const descriptor = { v: 1, agent: true, label: 'studio-mini', workspaceRoot: '/Users/x/tau-workspace/lamp' } as const;
 
@@ -514,13 +520,180 @@ describe('rung 5', () => {
     ).resolves.toEqual({ reachable: false, permission: 'denied' });
   });
 
-  it('refuses with the two rungs that do work and never a token hand-off', () => {
+  it('refuses a daemon this page was never handed, naming the hand-off and never a token', () => {
     const refusal = loopbackAdmissionRefusal('studio-mini');
 
     expect(refusal).toBeInstanceOf(AgentHostPlacementError);
     expect(refusal).toMatchObject({ code: 'RUNG5_NO_ADMISSION', rung: 5 });
-    expect(refusal.message).toMatch(/tau serve --ui/u);
+    expect(refusal.message).toMatch(/tau open --desktop/u);
     expect(refusal.message).toMatch(/pair it/u);
     expect(refusal.message).not.toMatch(/token/iu);
+  });
+});
+
+/**
+ * Rung 5 by URL (ruling X54): a page redeems the single-use code `tau open --desktop` (or `--ui-origin`) handed it,
+ * and the daemon joins its placements; the session rides a subprotocol, never the URL.
+ */
+describe('rung 5 admission by URL', () => {
+  const daemon = 'http://127.0.0.1:7180';
+  const hostId = `loopback:${daemon}`;
+
+  afterEach(() => {
+    resetLoopbackAgentHosts();
+  });
+
+  /** A daemon that redeems `code` once from this page, and describes itself. */
+  const loopbackDaemon = (code = 'one-time-code') => {
+    let spent = false;
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `${daemon}/.well-known/tau-host/session`) {
+        const offered = (JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { code?: string }).code;
+        if (init?.method !== 'POST' || offered !== code || spent) {
+          return jsonResponse({}, 401);
+        }
+        spent = true;
+        return jsonResponse({ v: 1, session: 'redeemed-session' });
+      }
+      return url === `${daemon}/.well-known/tau-host` ? jsonResponse(descriptor) : jsonResponse({}, 404);
+    });
+  };
+
+  it('should redeem a hand-off code and list the daemon on rung 5', async () => {
+    const changed = vi.fn();
+    const stop = onLoopbackAgentHostsChanged(changed);
+    const fetchMock = loopbackDaemon();
+
+    const target = await redeemLoopbackHandOff(
+      { origin: daemon, code: 'one-time-code' },
+      { fetch: fetchMock as unknown as typeof fetch },
+    );
+    stop();
+
+    expect(target).toEqual({
+      hostId,
+      rung: 5,
+      label: 'studio-mini',
+      workspaceRoot: descriptor.workspaceRoot,
+      online: true,
+    });
+    expect(changed).toHaveBeenCalledOnce();
+    await expect(
+      listAgentHostPlacements({
+        discoverOrigin: async () => undefined,
+        listHosts: async () => [],
+        desktop: false,
+        bridge: () => undefined,
+        describeLoopback: async (origin) => (origin === daemon ? descriptor : undefined),
+      }),
+    ).resolves.toEqual([target]);
+    expect(placementRungOf(hostId)).toBe(5);
+  });
+
+  it('should dial the redeemed daemon with its session as a subprotocol, never in the URL', async () => {
+    await redeemLoopbackHandOff(
+      { origin: daemon, code: 'one-time-code' },
+      { fetch: loopbackDaemon() as unknown as typeof fetch },
+    );
+    const dialled: Array<{ readonly url: string; readonly protocols: readonly string[] | undefined }> = [];
+
+    const client = await openAgentHostChannel(hostId, {
+      createSocket: (url, protocols) => {
+        dialled.push({ url, protocols });
+        return { ...silentSocket(), readyState: 1 } as unknown as WebSocket;
+      },
+    });
+
+    expect(dialled).toEqual([
+      { url: 'ws://127.0.0.1:7180/agent', protocols: ['tau-agent', 'tau-session.redeemed-session'] },
+    ]);
+    client.close();
+  });
+
+  it('should refuse a code the daemon already redeemed', async () => {
+    const fetchMock = loopbackDaemon();
+    await redeemLoopbackHandOff(
+      { origin: daemon, code: 'one-time-code' },
+      { fetch: fetchMock as unknown as typeof fetch },
+    );
+
+    const refused = redeemLoopbackHandOff(
+      { origin: daemon, code: 'one-time-code' },
+      { fetch: fetchMock as unknown as typeof fetch },
+    );
+
+    await expect(refused).rejects.toThrow(/already used or has expired/u);
+    await expect(refused).rejects.toMatchObject({ code: 'RUNG5_NO_ADMISSION', rung: 5 });
+  });
+
+  it.each(['https://evil.example', 'http://192.168.1.20:7180', 'http://127.0.0.1', 'http://127.0.0.1:7180/agent'])(
+    'should refuse %s without asking it',
+    async (origin) => {
+      const fetchMock = vi.fn();
+
+      await expect(
+        redeemLoopbackHandOff({ origin, code: 'one-time-code' }, { fetch: fetchMock as unknown as typeof fetch }),
+      ).rejects.toMatchObject({ code: 'RUNG5_NO_ADMISSION', rung: 5 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should still refuse a loopback daemon this page holds no session for', async () => {
+    await expect(openAgentHostChannel('loopback:http://127.0.0.1:9999')).rejects.toMatchObject({
+      code: 'RUNG5_NO_ADMISSION',
+      rung: 5,
+    });
+  });
+
+  it('should take a website hand-off from the fragment and remove it from the address', async () => {
+    const target: AgentHostPlacementTarget = {
+      hostId,
+      rung: 5,
+      label: 'studio-mini',
+      workspaceRoot: '/w',
+      online: true,
+    };
+    const redeem = vi.fn(async () => target);
+    const replaceState = vi.fn();
+    const notify = vi.fn();
+
+    const stop = installLoopbackHandOff(notify, {
+      location: { hash: `#tau-host=${encodeURIComponent(daemon)}&tau-code=one-time-code`, pathname: '/', search: '' },
+      history: { replaceState, state: null },
+      redeem,
+      onDesktopHandOff: () => () => undefined,
+    });
+    await vi.waitFor(() => {
+      expect(notify).toHaveBeenCalledOnce();
+    });
+    stop();
+
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/');
+    expect(redeem).toHaveBeenCalledWith({ origin: daemon, code: 'one-time-code' });
+    expect(notify).toHaveBeenCalledWith({ target });
+  });
+
+  it('should redeem each desktop hand-off and report a refusal', async () => {
+    let deliver: ((handOff: { readonly origin: string; readonly code: string }) => void) | undefined;
+    const notify = vi.fn();
+
+    installLoopbackHandOff(notify, {
+      location: { hash: '', pathname: '/', search: '' },
+      redeem: async () => {
+        throw loopbackAdmissionRefusal();
+      },
+      onDesktopHandOff: (handler) => {
+        deliver = handler;
+        return () => undefined;
+      },
+    });
+    deliver?.({ origin: daemon, code: 'spent' });
+    await vi.waitFor(() => {
+      expect(notify).toHaveBeenCalledOnce();
+    });
+
+    const outcome = (notify.mock.calls as Array<[{ readonly error: AgentHostPlacementError }]>)[0]?.[0];
+    expect(outcome?.error).toBeInstanceOf(AgentHostPlacementError);
+    expect(outcome?.error.code).toBe('RUNG5_NO_ADMISSION');
   });
 });

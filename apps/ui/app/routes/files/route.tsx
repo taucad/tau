@@ -360,7 +360,7 @@ function ColumnShell({
                   disabled={isLoading || isDisabled}
                   onClick={onRefresh}
                 >
-                  <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
+                  <RefreshCw className={cn('size-3.5', isLoading && 'spin-glyph')} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Refresh</TooltipContent>

@@ -492,7 +492,7 @@ function StageStatus({
     <div className='absolute top-3 left-3 flex flex-wrap items-center gap-2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-xs'>
       {isRendering ? (
         <span role='status' aria-busy='true' className='flex items-center gap-1.5'>
-          <LoaderCircle aria-hidden='true' className='size-3.5 motion-safe:animate-spin' />
+          <LoaderCircle aria-hidden='true' className='size-3.5 spin-glyph' />
           Rendering preview
         </span>
       ) : undefined}

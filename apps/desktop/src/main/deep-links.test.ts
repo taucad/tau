@@ -56,6 +56,16 @@ const admitted: ReadonlyArray<readonly [string, string, DeepLink]> = [
   ['a dot segment the parser resolves away', 'tau://i/./taucad', { kind: 'import', route: '/import/taucad' }],
   ['a dot-dot segment the parser resolves away', 'tau://i/taucad/../etc', { kind: 'import', route: '/import/etc' }],
   ['an empty fragment marker', 'tau://s/direct#', { kind: 'share', route: '/s/direct' }],
+  [
+    'a daemon hand-off on 127.0.0.1',
+    'tau://host/http://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+    { kind: 'host', origin: 'http://127.0.0.1:7180', code: 'Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN' },
+  ],
+  [
+    'a daemon hand-off on localhost',
+    'tau://host/http://localhost:65535?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+    { kind: 'host', origin: 'http://localhost:65535', code: 'Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN' },
+  ],
 ];
 
 const refused: ReadonlyArray<readonly [string, string]> = [
@@ -87,6 +97,56 @@ const refused: ReadonlyArray<readonly [string, string]> = [
   ['a callback whose state is too short', 'tau://auth/callback?ott=A1b2C3d4&state=short'],
   ['a callback carrying an extra parameter', 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl&next=/admin'],
   ['a callback carrying a fragment', 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl#x'],
+  /* A hand-off names the daemon the renderer will redeem its code at, so only a loopback HTTP origin passes. */
+  [
+    'a hand-off to another machine',
+    'tau://host/http://192.168.1.20:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  ['a hand-off to a public origin', 'tau://host/https://evil.example?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN'],
+  [
+    'a hand-off over https to loopback',
+    'tau://host/https://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  ['a hand-off with no port', 'tau://host/http://127.0.0.1?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN'],
+  ['a hand-off on port 0', 'tau://host/http://127.0.0.1:0?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN'],
+  [
+    'a hand-off past the last port',
+    'tau://host/http://127.0.0.1:65536?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  [
+    'a hand-off origin with a path',
+    'tau://host/http://127.0.0.1:7180/agent?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  [
+    'a hand-off origin with userinfo',
+    'tau://host/http://evil@127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  [
+    'a hand-off host that only starts with loopback',
+    'tau://host/http://127.0.0.1.evil.example:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  [
+    'a percent-encoded hand-off origin',
+    'tau://host/http%3A%2F%2F127.0.0.1%3A7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
+  ['a hand-off with no code', 'tau://host/http://127.0.0.1:7180'],
+  ['a hand-off with a short code', 'tau://host/http://127.0.0.1:7180?code=abc'],
+  [
+    'a hand-off code outside base64url',
+    'tau://host/http://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbm%2F',
+  ],
+  [
+    'a hand-off carrying an extra parameter',
+    'tau://host/http://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN&next=/admin',
+  ],
+  [
+    'a hand-off carrying a fragment',
+    'tau://host/http://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN#x',
+  ],
+  [
+    'an uppercase hand-off origin scheme',
+    'tau://host/HTTP://127.0.0.1:7180?code=Zm9yLXRoZS1kYWVtb24tb25jZS1hbmQtb25seS1vbmN',
+  ],
   // oxlint-disable-next-line eslint/no-script-url -- the row exists precisely to prove this is refused
   ['a javascript: URL', 'javascript:alert(1)'],
   ['an https: URL', 'https://tau.new/invitations/token'],
@@ -120,7 +180,7 @@ describe('parseDeepLink', () => {
   it('should only ever produce a route built from validated segments', () => {
     for (const [, value] of admitted) {
       const link = parseDeepLink(value);
-      if (link !== undefined && link.kind !== 'auth-callback') {
+      if (link !== undefined && link.kind !== 'auth-callback' && link.kind !== 'host') {
         expect(link.route.startsWith('/')).toBe(true);
         expect(new URL(link.route, 'app://tau/').href.startsWith('app://tau/')).toBe(true);
       }

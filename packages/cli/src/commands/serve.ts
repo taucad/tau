@@ -6,7 +6,13 @@ import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { defaultConfigDirectory, defaultMachineProviders, defaultPayloadStore, startHostDaemon } from '@taucad/host';
+import {
+  defaultConfigDirectory,
+  defaultMachineProviders,
+  defaultPayloadStore,
+  handOffMintPath,
+  startHostDaemon,
+} from '@taucad/host';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
@@ -229,6 +235,60 @@ export const parseAllowedOrigins = (value: string | readonly string[] | undefine
     }
   }
   return [...new Set(values)];
+};
+
+/** The renderer origin of Tau Desktop (`app://tau`), admitted for a desktop hand-off (X54). */
+export const desktopOrigin = 'app://tau';
+
+/** Where a served daemon is handed after it is ready: Tau Desktop, or the Tau UI at a listed website origin. */
+export type HandOffTarget =
+  | Readonly<{ kind: 'desktop'; origin: string }>
+  | Readonly<{ kind: 'website'; origin: string }>;
+
+/**
+ * Read `--hand-off`: `desktop`, or one exact website origin serving the Tau UI (the `tau open --ui-origin` escape
+ * hatch, charter S32). Either way its origin is admitted, for that hand-off.
+ *
+ * @internal
+ * @param value - The flag's value.
+ * @returns The target, or `undefined` when there is no hand-off.
+ * @throws {CliError} `ORIGIN_INVALID` (exit 2) for a value that is neither `desktop` nor one exact origin.
+ */
+export const handOffTarget = (value: unknown): HandOffTarget | undefined => {
+  if (typeof value !== 'string' || value === '') {
+    return undefined;
+  }
+  if (value === 'desktop') {
+    return { kind: 'desktop', origin: desktopOrigin };
+  }
+  const origins = parseAllowedOrigins(value);
+  if (origins.length !== 1 || !/^https?:\/\//u.test(origins[0]!)) {
+    throw cliError(
+      'ORIGIN_INVALID',
+      `--hand-off takes desktop or one exact http(s) origin serving the Tau UI, such as https://tau.new; ${JSON.stringify(value)} is not one.`,
+      exitCodes.usage,
+    );
+  }
+  return { kind: 'website', origin: origins[0]! };
+};
+
+/**
+ * The link that hands a served daemon to its target with a one-time code (X54). Tau Desktop takes
+ * `tau://host/<loopback origin>?code=<code>`; a website takes the same two values in its fragment, which never
+ * reaches the website's server.
+ *
+ * @internal
+ * @param target - Where the daemon is handed.
+ * @param served - The daemon's served URL.
+ * @param code - The one-time code.
+ * @returns The link to open.
+ */
+export const handOffLink = (target: HandOffTarget, served: string, code: string): string => {
+  const { origin } = new URL(served);
+  if (target.kind === 'desktop') {
+    return `tau://host/${origin}?code=${encodeURIComponent(code)}`;
+  }
+  return `${target.origin}/#${new URLSearchParams({ 'tau-host': origin, 'tau-code': code }).toString()}`;
 };
 
 /**
@@ -537,6 +597,8 @@ const parsePositiveInteger = (name: string, value: string): number => {
  */
 const announceServed = async (served: {
   readonly url: string;
+  /** The hand-off link, which is printed and opened in place of the URL. */
+  readonly handOff?: string | undefined;
   readonly workspace: string;
   readonly relay: string | undefined;
   readonly ui: boolean;
@@ -552,13 +614,14 @@ const announceServed = async (served: {
       workspace: served.workspace,
       relay: served.relay ?? null,
       ui: served.ui,
+      ...(served.handOff === undefined ? {} : { handOff: served.handOff }),
     });
   } else if (served.print) {
-    await writeStdout(`${served.url}\n`);
+    await writeStdout(`${served.handOff ?? served.url}\n`);
   }
   consola.success(`Serving ${served.workspace} at ${served.url}${served.relay === undefined ? ' (local only)' : ''}`);
   if (served.open) {
-    openInBrowser(served.url);
+    openInBrowser(served.handOff ?? served.url);
   }
 };
 
@@ -617,6 +680,35 @@ export const prepareStoreUi = async (
     consola.success('The Tau UI is verified and sealed in the payload store.');
   }
   return ui;
+};
+
+/**
+ * Mint one hand-off code at the daemon, with the token this process minted for it.
+ *
+ * @param served - The daemon's served URL.
+ * @param token - The daemon's admission token.
+ * @returns The code.
+ * @throws {CliError} `HAND_OFF_FAILED` (exit 1) when the daemon does not mint one.
+ */
+const mintHandOffCode = async (served: string, token: string): Promise<string> => {
+  try {
+    const response = await fetch(new URL(handOffMintPath, served), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(smokeTestTimeout),
+    });
+    const body = (await response.json()) as { readonly code?: unknown };
+    if (!response.ok || typeof body.code !== 'string') {
+      throw new Error(`answered ${String(response.status)}`);
+    }
+    return body.code;
+  } catch (error) {
+    throw cliError(
+      'HAND_OFF_FAILED',
+      `The daemon at ${served} did not mint a hand-off code: ${error instanceof Error ? error.message : String(error)}`,
+      exitCodes.error,
+    );
+  }
 };
 
 /**
@@ -760,6 +852,12 @@ export const serveCommand = defineCommand({
       multiple: true,
       default: process.env['TAU_HOST_ALLOWED_ORIGINS'],
     },
+    handOff: {
+      type: 'string',
+      description:
+        'Once ready, hand the daemon to Tau Desktop (desktop) or to the Tau UI at one exact origin (e.g. https://tau.new) with a one-time code, admitting that origin',
+      required: false,
+    },
     workspace: {
       type: 'string',
       description:
@@ -834,6 +932,7 @@ export const serveCommand = defineCommand({
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
     const workspace = typeof args.dir === 'string' && args.dir !== '' ? args.dir : args.workspace;
+    const handOff = handOffTarget(args.handOff);
     /* `--agentPort` is exact (its old contract); `--port` and the default search upward unless strict. Relayed, the
      * channel stays off unless a port or a UI asks for it, as before. */
     const explicitAgentPort =
@@ -843,6 +942,7 @@ export const serveCommand = defineCommand({
       explicitAgentPort !== undefined ||
       (args.port !== undefined && args.port !== '') ||
       Boolean(args.ui) ||
+      handOff !== undefined ||
       args.smokeTest ||
       args.print ||
       args.json;
@@ -866,8 +966,19 @@ export const serveCommand = defineCommand({
         );
       }
     }
+    /* A hand-off admits its target's origin beside the listed ones (X54). */
+    /* `multiple` yields an array at run time though citty types one string. */
+    const listedOrigins: unknown = args.allowedOrigins;
     const configured = agentOptions(
-      { ...args, ui: uiDirectory, ...(workspace === undefined ? {} : { workspace }), apiUrl },
+      {
+        ...args,
+        ui: uiDirectory,
+        ...(workspace === undefined ? {} : { workspace }),
+        apiUrl,
+        allowedOrigins: [listedOrigins, handOff?.origin]
+          .flat()
+          .filter((origin): origin is string => typeof origin === 'string'),
+      },
       port,
     );
     if (args.machines && !configured) {
@@ -1012,20 +1123,30 @@ export const serveCommand = defineCommand({
               stopped.promise.then(() => undefined),
             ]);
       if (configuredAgent !== undefined && url !== undefined) {
+        const scripted = args.print || args.json || args.smokeTest;
+        const handOffUrl =
+          handOff === undefined
+            ? undefined
+            : handOffLink(handOff, url, await mintHandOffCode(url, configuredAgent.token));
         await announceServed({
           url,
+          handOff: handOffUrl,
           workspace: configuredAgent.workspaceRoot,
           relay,
           ui: configuredAgent.uiRoot !== undefined,
           print: args.print,
           json: args.json,
-          open: shouldOpenBrowser({
-            open: args.open,
-            ui: configuredAgent.uiRoot !== undefined,
-            scripted: args.print || args.json || args.smokeTest,
-            interactive: process.stdout.isTTY,
-            ci: Boolean(process.env['CI']),
-          }),
+          /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
+          open:
+            handOffUrl === undefined
+              ? shouldOpenBrowser({
+                  open: args.open,
+                  ui: configuredAgent.uiRoot !== undefined,
+                  scripted,
+                  interactive: process.stdout.isTTY,
+                  ci: Boolean(process.env['CI']),
+                })
+              : (args.open ?? !scripted),
         });
         if (args.smokeTest) {
           await smokeTest(url, configuredAgent.uiRoot !== undefined);

@@ -39,7 +39,7 @@ describe('ChatActivityGroup', () => {
     expect(container.querySelector('.lucide-book-open')).not.toBeNull();
 
     await user.click(trigger);
-    expect(spinner()).toHaveClass('animate-spin', 'motion-reduce:animate-none');
+    expect(spinner()).toHaveClass('spin-glyph');
     expect(trigger).toHaveAttribute('aria-busy', 'true');
     expect(container.querySelector('.lucide-book-open')).toBeNull();
 

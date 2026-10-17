@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><title>Tau renderer spike</title
+  ><style>
+    body {
+      font: 16px system-ui;
+      background: #15171c;
+      color: #eee;
+      margin: 24px;
+    }
+    canvas {
+      display: block;
+      margin: 16px 0;
+      max-width: 100%;
+    }
+    button {
+      padding: 10px;
+      margin: 4px;
+    }
+    pre {
+      white-space: pre-wrap;
+    }
+  </style>
+  <h1>Tau renderer checkpoint</h1>
+  <p>Isolated unlit geometry benchmark. Existing application renderer stays available.</p>
+  <button id="orbit">Move camera</button
+  ><button id="light">Change preview intensity</button
+  ><canvas width="640" height="480"></canvas>
+  <pre id="status">Loading…</pre>
+  <script type="module" src="/viewer.js"></script>
+</html>

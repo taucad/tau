@@ -217,7 +217,7 @@ type DocumentEvaluation = {
   readonly transient: boolean;
   readonly result: Evaluation;
   readonly artifact?: MaterializedRender;
-  /** The latest projection of each open view, keyed by view id; views with equal requests share one. */
+  /** The latest projection of each offered view, instance and content, whatever options rendered it. */
   projections?: Map<string, { readonly hash: string; readonly result: RenderResult }>;
 };
 type ViewRecord = {
@@ -1157,8 +1157,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
     this.documentViews.delete(view.id);
     view.document.views.delete(view.id);
-    view.document.current?.projections?.delete(view.id);
-    view.document.committed?.projections?.delete(view.id);
     for (const controller of view.operations) {
       controller.abort();
     }
@@ -1878,7 +1876,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             canonicalJson([await this.computeDependencyHash(dependencies), key]),
           );
           evaluation.projections ??= new Map();
-          let projected = [...evaluation.projections.values()].find(({ hash }) => hash === projectionHash)?.result;
+          const slot = canonicalJson([selection.view, selection.instance ?? null, view.content ?? null]);
+          const latest = evaluation.projections.get(slot);
+          let projected = latest?.hash === projectionHash ? latest.result : undefined;
           if (!projected) {
             this.onDocumentProgressUpdate?.({
               documentId: document.id,
@@ -1948,8 +1948,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               }
             }
           }
-          // One projection per view: a scrubbed option set replaces the view's last one instead of accumulating.
-          evaluation.projections.set(view.id, { hash: projectionHash, result: projected });
+          // One projection per offered view: a scrubbed option set replaces the last one instead of accumulating.
+          evaluation.projections.set(slot, { hash: projectionHash, result: projected });
           result = projected.success
             ? {
                 success: true,

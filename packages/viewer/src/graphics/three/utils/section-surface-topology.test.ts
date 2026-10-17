@@ -107,7 +107,7 @@ type RetainedFootprint = Readonly<{ objects: number; typedBytes: number }>;
  * counting JS objects and typed-array bytes, so the footprint of the topology alone is measurable.
  */
 const measureRetainedFootprint = (root: unknown): RetainedFootprint => {
-  const seen = new Set<object>();
+  const seen = new Set<unknown>();
   let objects = 0;
   let typedBytes = 0;
   const skippedKeys = new Set(['mesh', 'root', 'owner', 'localToSource']);
@@ -155,6 +155,8 @@ const countVector3Constructions = <T>(run: () => T): Readonly<{ result: T; const
   let constructions = 0;
   Object.defineProperty(THREE.Vector3.prototype, 'x', {
     configurable: true,
+    // Never read: the constructor's write replaces this accessor with an own property first.
+    get: () => 0,
     set(this: THREE.Vector3, value: number) {
       constructions += 1;
       Object.defineProperty(this, 'x', { value, writable: true, enumerable: true, configurable: true });

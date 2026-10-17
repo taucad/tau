@@ -5,6 +5,7 @@ import { getOrBuildBvh } from '#graphics/three/utils/bvh-cache.js';
 import { getModelComponentId, getModelComponentOwnerInHierarchy } from '#graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { hasSceneTag, hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
+import { buildSectionTopologyRecipeInWorker } from '#graphics/three/utils/section-surface-topology-worker-client.js';
 
 const float32Epsilon = 1.1920928955078125e-7;
 const sectionCoordinatePrecision = 100_000_000;
@@ -36,48 +37,40 @@ type SectionSurfaceParticipant = {
   readonly nodeIndex: number | undefined;
   readonly meshIndex: number | undefined;
   readonly primitiveIndex: number | undefined;
-  readonly topologyTrianglesByGeometryTriangle: Map<number, number[]>;
-  /** The material orders of the triangles in `topologyTrianglesByGeometryTriangle`, filled with it. */
+  /** The topology triangle of each geometry triangle, or -1; filled with the topology. */
+  topologyTriangleByGeometryTriangle: Int32Array;
+  /** The material orders of the triangles in `topologyTriangleByGeometryTriangle`, filled with it. */
   readonly usedMaterialOrders: Set<number>;
 };
 
 type SectionSurfaceMesh = THREE.Mesh;
 
-type TopologyTriangle = {
-  readonly vertices: readonly [number, number, number];
-  points: [THREE.Vector3, THREE.Vector3, THREE.Vector3];
-  readonly participant: SectionSurfaceParticipant;
-  readonly participantTriangleIndex: number;
-  readonly material: THREE.Material;
-  readonly materialOrder: number;
-  edges: [number, number, number];
-};
-
-type HalfEdge = Readonly<{
-  triangle: number;
-  slot: number;
-  start: number;
-  end: number;
-}>;
-
-type PendingEdge = Readonly<{ first: number; second: number }>;
-
-type CanonicalEdge = Readonly<{
-  start: THREE.Vector3;
-  end: THREE.Vector3;
-  triangles: readonly [number, number];
-}>;
-
 type SurfaceComponent = Readonly<{
-  triangles: readonly number[];
-  edges: readonly number[];
+  triangles: Uint32Array;
+  edges: Uint32Array;
 }>;
 
+/**
+ * A certified surface kept as typed arrays (struct of arrays), about 90 B per triangle. Slices read vertices
+ * out of `positions` and allocate vectors only for the edges they cut, so nothing here grows a JS object per
+ * vertex, triangle or edge.
+ */
 export type SectionSurfaceTopology = Readonly<{
   path: SectionTopologyPath;
   sourceKey: string;
-  triangles: readonly TopologyTriangle[];
-  edges: readonly CanonicalEdge[];
+  /** The x, y and z of every vertex in the source frame. */
+  positions: Float64Array;
+  /** Three canonical (seam-representative) vertices per triangle. */
+  triangleVertices: Uint32Array;
+  /** Three canonical edges per triangle, in the order of its vertices. */
+  triangleEdges: Int32Array;
+  /** The index into `participants` of each triangle. */
+  triangleParticipants: Uint32Array;
+  /** The render material slot of each triangle in its participant's mesh. */
+  triangleMaterialOrders: Uint32Array;
+  participants: readonly SectionSurfaceParticipant[];
+  /** Four entries per canonical edge: start vertex, end vertex and its two triangles. */
+  edges: Int32Array;
   components: readonly SurfaceComponent[];
   /** The index into `components` of each topology triangle, built with the topology so slices only read it. */
   componentByTriangle: Int32Array;
@@ -136,15 +129,16 @@ export type SectionSurfaceSliceResult =
 type TopologyBuildInput = Readonly<{
   sourceKey: string;
   path: SectionTopologyPath;
-  positions: readonly THREE.Vector3[];
-  triangles: TopologyTriangle[];
+  /** The x, y and z of every vertex in the source frame. */
+  positions: Float64Array;
+  /** Three vertices per triangle; replaced in place by their seam representatives once the recipe is built. */
+  triangleVertices: Uint32Array;
+  triangleParticipants: Uint32Array;
+  triangleMaterialOrders: Uint32Array;
+  participants: readonly SectionSurfaceParticipant[];
   allowSeamFallback: boolean;
   onHydrate?: (milliseconds: number) => void;
   onPack?: (milliseconds: number) => void;
-}>;
-
-type TopologyTriangleVertices = Readonly<{
-  vertices: readonly [number, number, number];
 }>;
 
 export type SectionCanonicalTopologyWorkerInput = Readonly<{
@@ -278,74 +272,90 @@ const topologyFailure = (
 const orderedPair = (left: number, right: number): readonly [number, number] =>
   left <= right ? [left, right] : [right, left];
 
-const halfEdgeCompare = (left: HalfEdge, right: HalfEdge): number => {
-  const [leftA, leftB] = orderedPair(left.start, left.end);
-  const [rightA, rightB] = orderedPair(right.start, right.end);
-  return leftA - rightA || leftB - rightB || left.start - right.start || left.end - right.end;
-};
+/** Half-edge `h` is slot `h % 3` of triangle `h / 3`: vertex slot → next slot, as `[v0,v1]`, `[v1,v2]`, `[v2,v0]`. */
+const halfEdgeTriangle = (halfEdge: number): number => Math.floor(halfEdge / 3);
 
-const sameUndirectedEdge = (left: HalfEdge, right: HalfEdge): boolean => {
-  const [leftA, leftB] = orderedPair(left.start, left.end);
-  const [rightA, rightB] = orderedPair(right.start, right.end);
-  return leftA === rightA && leftB === rightB;
-};
+const halfEdgeStart = (triangleVertices: Uint32Array, halfEdge: number): number => triangleVertices[halfEdge]!;
+
+const halfEdgeEnd = (triangleVertices: Uint32Array, halfEdge: number): number =>
+  triangleVertices[halfEdge % 3 === 2 ? halfEdge - 2 : halfEdge + 1]!;
 
 const comparePosition = (left: THREE.Vector3, right: THREE.Vector3): number =>
   left.x - right.x || left.y - right.y || left.z - right.z;
 
-const topologyExtent = (positions: readonly THREE.Vector3[]): number =>
-  new THREE.Box3()
-    .setFromPoints(positions as THREE.Vector3[])
-    .getSize(new THREE.Vector3())
-    .length();
+/** `comparePosition` for two vertices of a packed xyz array. */
+const comparePositionAt = (positions: Float64Array, left: number, right: number): number =>
+  positions[left * 3]! - positions[right * 3]! ||
+  positions[left * 3 + 1]! - positions[right * 3 + 1]! ||
+  positions[left * 3 + 2]! - positions[right * 3 + 2]!;
 
-const normalizeTopologyPositions = (positions: readonly THREE.Vector3[]): THREE.Vector3[] => {
-  const bounds = new THREE.Box3().setFromPoints(positions as THREE.Vector3[]);
-  const origin = bounds.getCenter(new THREE.Vector3());
-  const extent = bounds.getSize(new THREE.Vector3()).length();
-  if (!(extent > 0)) {
-    return positions.map(() => new THREE.Vector3());
+const positionBounds = (positions: Float64Array): THREE.Box3 => {
+  const bounds = new THREE.Box3();
+  const point = new THREE.Vector3();
+  for (let offset = 0; offset < positions.length; offset += 3) {
+    bounds.expandByPoint(point.fromArray(positions, offset));
   }
-  return positions.map((position) => position.clone().sub(origin).divideScalar(extent));
+  return bounds;
 };
 
-const spatialCellKey = (position: THREE.Vector3, epsilon: number): string =>
-  `${Math.floor(position.x / epsilon)},${Math.floor(position.y / epsilon)},${Math.floor(position.z / epsilon)}`;
+const topologyExtent = (positions: Float64Array): number =>
+  positionBounds(positions).getSize(new THREE.Vector3()).length();
 
-const spatialClusters = (
-  vertices: readonly number[],
-  positions: readonly THREE.Vector3[],
-  epsilon: number,
-): Int32Array => {
-  const sorted = [...vertices].sort(
-    (left, right) => comparePosition(positions[left]!, positions[right]!) || left - right,
-  );
+const normalizeTopologyPositions = (positions: Float64Array): Float64Array => {
+  const bounds = positionBounds(positions);
+  const origin = bounds.getCenter(new THREE.Vector3());
+  const extent = bounds.getSize(new THREE.Vector3()).length();
+  const normalized = new Float64Array(positions.length);
+  if (!(extent > 0)) {
+    return normalized;
+  }
+  // Matches `Vector3.divideScalar`, which multiplies by the reciprocal.
+  const scale = 1 / extent;
+  for (let offset = 0; offset < positions.length; offset += 3) {
+    normalized[offset] = (positions[offset]! - origin.x) * scale;
+    normalized[offset + 1] = (positions[offset + 1]! - origin.y) * scale;
+    normalized[offset + 2] = (positions[offset + 2]! - origin.z) * scale;
+  }
+  return normalized;
+};
+
+const spatialCellKey = (positions: Float64Array, vertex: number, epsilon: number): string =>
+  `${Math.floor(positions[vertex * 3]! / epsilon)},${Math.floor(positions[vertex * 3 + 1]! / epsilon)},${Math.floor(positions[vertex * 3 + 2]! / epsilon)}`;
+
+const distanceSquaredAt = (positions: Float64Array, left: number, right: number): number => {
+  const dx = positions[left * 3]! - positions[right * 3]!;
+  const dy = positions[left * 3 + 1]! - positions[right * 3 + 1]!;
+  const dz = positions[left * 3 + 2]! - positions[right * 3 + 2]!;
+  return dx * dx + dy * dy + dz * dz;
+};
+
+const spatialClusters = (vertices: readonly number[], positions: Float64Array, epsilon: number): Int32Array => {
+  const sorted = [...vertices].sort((left, right) => comparePositionAt(positions, left, right) || left - right);
   const sets = new DisjointSet(sorted.length);
   const cells = new Map<string, number[]>();
 
   for (const [index, vertex] of sorted.entries()) {
-    const position = positions[vertex]!;
-    const cellX = Math.floor(position.x / epsilon);
-    const cellY = Math.floor(position.y / epsilon);
-    const cellZ = Math.floor(position.z / epsilon);
+    const cellX = Math.floor(positions[vertex * 3]! / epsilon);
+    const cellY = Math.floor(positions[vertex * 3 + 1]! / epsilon);
+    const cellZ = Math.floor(positions[vertex * 3 + 2]! / epsilon);
     for (let x = cellX - 1; x <= cellX + 1; x++) {
       for (let y = cellY - 1; y <= cellY + 1; y++) {
         for (let z = cellZ - 1; z <= cellZ + 1; z++) {
           for (const candidate of cells.get(`${x},${y},${z}`) ?? []) {
-            if (position.distanceToSquared(positions[sorted[candidate]!]!) <= epsilon * epsilon) {
+            if (distanceSquaredAt(positions, vertex, sorted[candidate]!) <= epsilon * epsilon) {
               sets.union(index, candidate);
             }
           }
         }
       }
     }
-    const key = spatialCellKey(position, epsilon);
+    const key = spatialCellKey(positions, vertex, epsilon);
     const entries = cells.get(key) ?? [];
     entries.push(index);
     cells.set(key, entries);
   }
 
-  const clusters = new Int32Array(positions.length).fill(-1);
+  const clusters = new Int32Array(positions.length / 3).fill(-1);
   for (const [index, vertex] of sorted.entries()) {
     clusters[vertex] = sets.representative(index);
   }
@@ -360,13 +370,12 @@ const pairKey = (left: number, right: number): string => {
 const uniquelyPairSeams = (options: {
   forward: readonly number[];
   reverse: readonly number[];
-  halfEdges: readonly HalfEdge[];
   patches: Int32Array;
   affinities: ReadonlyMap<string, number>;
 }): Array<readonly [number, number]> | undefined => {
-  const { halfEdges, patches, affinities } = options;
+  const { patches, affinities } = options;
   const score = (left: number, right: number): number =>
-    affinities.get(pairKey(patches[halfEdges[left]!.triangle]!, patches[halfEdges[right]!.triangle]!)) ?? 0;
+    affinities.get(pairKey(patches[halfEdgeTriangle(left)]!, patches[halfEdgeTriangle(right)]!)) ?? 0;
   const uniqueBest = (edge: number, candidates: readonly number[]): number | undefined => {
     let bestScore = Number.NEGATIVE_INFINITY;
     let best: number | undefined;
@@ -410,37 +419,35 @@ const uniquelyPairSeams = (options: {
 
 const validateVertexLinks = (options: {
   sourceKey: string;
-  triangles: readonly TopologyTriangleVertices[];
-  halfEdges: readonly HalfEdge[];
-  pairs: readonly PendingEdge[];
+  triangleVertices: Uint32Array;
+  /** Paired half-edges, two entries per pair. */
+  pairs: readonly number[];
   vertexCount: number;
 }): SectionTopologyFailure | undefined => {
-  const { sourceKey, triangles, halfEdges, pairs, vertexCount } = options;
+  const { sourceKey, triangleVertices, pairs, vertexCount } = options;
   const canonical = new DisjointSet(vertexCount);
-  for (const pair of pairs) {
-    const first = halfEdges[pair.first]!;
-    const second = halfEdges[pair.second]!;
-    canonical.union(first.start, second.end);
-    canonical.union(first.end, second.start);
+  for (let offset = 0; offset < pairs.length; offset += 2) {
+    const first = pairs[offset]!;
+    const second = pairs[offset + 1]!;
+    canonical.union(halfEdgeStart(triangleVertices, first), halfEdgeEnd(triangleVertices, second));
+    canonical.union(halfEdgeEnd(triangleVertices, first), halfEdgeStart(triangleVertices, second));
   }
   const roots = Int32Array.from({ length: vertexCount }, (_, vertex) => canonical.representative(vertex));
   const trianglesAt = new Map<number, number[]>();
-  for (const [triangleIndex, triangle] of triangles.entries()) {
-    for (const vertex of triangle.vertices) {
-      const root = roots[vertex]!;
-      const entries = trianglesAt.get(root) ?? [];
-      entries.push(triangleIndex);
-      trianglesAt.set(root, entries);
-    }
+  for (const [corner, vertex] of triangleVertices.entries()) {
+    const root = roots[vertex]!;
+    const entries = trianglesAt.get(root) ?? [];
+    entries.push(halfEdgeTriangle(corner));
+    trianglesAt.set(root, entries);
   }
   const linkEdges = new Map<number, Array<readonly [number, number]>>();
-  for (const pair of pairs) {
-    const first = halfEdges[pair.first]!;
-    const second = halfEdges[pair.second]!;
-    for (const vertex of [first.start, first.end]) {
+  for (let offset = 0; offset < pairs.length; offset += 2) {
+    const first = pairs[offset]!;
+    const second = pairs[offset + 1]!;
+    for (const vertex of [halfEdgeStart(triangleVertices, first), halfEdgeEnd(triangleVertices, first)]) {
       const root = roots[vertex]!;
       const entries = linkEdges.get(root) ?? [];
-      entries.push([first.triangle, second.triangle]);
+      entries.push([halfEdgeTriangle(first), halfEdgeTriangle(second)]);
       linkEdges.set(root, entries);
     }
   }
@@ -463,7 +470,7 @@ const validateVertexLinks = (options: {
       degrees[right]! += 1;
       connected.union(left, right);
     }
-    if ([...degrees].some((degree) => degree !== 2)) {
+    if (degrees.some((degree) => degree !== 2)) {
       return {
         sourceKey,
         code: 'non-manifold-vertex',
@@ -484,50 +491,54 @@ const validateVertexLinks = (options: {
 
 const buildCanonicalTopologyRecipe = (input: {
   sourceKey: string;
-  positions: readonly THREE.Vector3[];
-  triangles: readonly TopologyTriangleVertices[];
+  positions: Float64Array;
+  triangleVertices: Uint32Array;
   allowSeamFallback: boolean;
 }): SectionCanonicalTopologyWorkerResult => {
   const startedAt = performance.now();
-  const { sourceKey, positions, triangles } = input;
-  if (triangles.length === 0) {
+  const { sourceKey, positions, triangleVertices } = input;
+  const triangleCount = triangleVertices.length / 3;
+  const vertexCount = positions.length / 3;
+  if (triangleCount === 0) {
     return topologyFailure(sourceKey, 'degenerate-triangle', 'contains no non-degenerate triangles');
   }
 
-  const halfEdges: HalfEdge[] = [];
-  for (const [triangle, value] of triangles.entries()) {
-    const triangleEdges: ReadonlyArray<readonly [number, number]> = [
-      [value.vertices[0], value.vertices[1]],
-      [value.vertices[1], value.vertices[2]],
-      [value.vertices[2], value.vertices[0]],
-    ];
-    for (const [slot, [start, end]] of triangleEdges.entries()) {
-      halfEdges.push({ triangle, slot, start, end });
-    }
-  }
+  const start = (halfEdge: number): number => halfEdgeStart(triangleVertices, halfEdge);
+  const end = (halfEdge: number): number => halfEdgeEnd(triangleVertices, halfEdge);
+  const low = (halfEdge: number): number => Math.min(start(halfEdge), end(halfEdge));
+  const high = (halfEdge: number): number => Math.max(start(halfEdge), end(halfEdge));
+  const sameUndirectedEdge = (left: number, right: number): boolean =>
+    low(left) === low(right) && high(left) === high(right);
 
-  const indexed = [...halfEdges.keys()].sort((left, right) => halfEdgeCompare(halfEdges[left]!, halfEdges[right]!));
-  const pairs: PendingEdge[] = [];
+  const indexed = Uint32Array.from({ length: triangleVertices.length }, (_, halfEdge) => halfEdge);
+  // The index tie-break keeps the order of the stable sort over half-edge records this replaced.
+  indexed.sort(
+    (left, right) =>
+      low(left) - low(right) ||
+      high(left) - high(right) ||
+      start(left) - start(right) ||
+      end(left) - end(right) ||
+      left - right,
+  );
+  /** Paired half-edges, two entries per pair. */
+  const pairs: number[] = [];
   const unmatched: number[] = [];
   for (let offset = 0; offset < indexed.length; ) {
     const firstOffset = offset;
     offset++;
-    while (
-      offset < indexed.length &&
-      sameUndirectedEdge(halfEdges[indexed[firstOffset]!]!, halfEdges[indexed[offset]!]!)
-    ) {
+    while (offset < indexed.length && sameUndirectedEdge(indexed[firstOffset]!, indexed[offset]!)) {
       offset++;
     }
-    const group = indexed.slice(firstOffset, offset);
-    const first = halfEdges[group[0]!]!;
-    if (group.length === 1) {
-      unmatched.push(group[0]!);
+    const first = indexed[firstOffset]!;
+    const groupLength = offset - firstOffset;
+    if (groupLength === 1) {
+      unmatched.push(first);
     } else if (
-      group.length === 2 &&
-      first.start === halfEdges[group[1]!]!.end &&
-      first.end === halfEdges[group[1]!]!.start
+      groupLength === 2 &&
+      start(first) === end(indexed[firstOffset + 1]!) &&
+      end(first) === start(indexed[firstOffset + 1]!)
     ) {
-      pairs.push({ first: group[0]!, second: group[1]! });
+      pairs.push(first, indexed[firstOffset + 1]!);
     } else {
       return topologyFailure(
         sourceKey,
@@ -541,67 +552,62 @@ const buildCanonicalTopologyRecipe = (input: {
     return topologyFailure(sourceKey, 'open-surface', 'has an open edge in authoritative manifold topology');
   }
 
-  const normalizedPositions = normalizeTopologyPositions(positions);
-  let maximumCoordinate = Number.MIN_VALUE;
-  for (const position of normalizedPositions) {
-    maximumCoordinate = Math.max(maximumCoordinate, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z));
-  }
-  const epsilon = 1e-6;
-  const matchRadius = Math.min(
-    Math.max(maximumCoordinate * float32Epsilon * 4, minimumNormalizedTopologyTolerance),
-    epsilon,
-  );
-  const representativeVertices = Int32Array.from({ length: positions.length }, (_, vertex) => vertex);
+  const representativeVertices = Int32Array.from({ length: vertexCount }, (_, vertex) => vertex);
 
   if (unmatched.length > 0) {
-    const seamVertices = [...new Set(unmatched.flatMap((edge) => [halfEdges[edge]!.start, halfEdges[edge]!.end]))].sort(
+    const normalizedPositions = normalizeTopologyPositions(positions);
+    let maximumCoordinate = Number.MIN_VALUE;
+    for (const coordinate of normalizedPositions) {
+      maximumCoordinate = Math.max(maximumCoordinate, Math.abs(coordinate));
+    }
+    const epsilon = 1e-6;
+    const matchRadius = Math.min(
+      Math.max(maximumCoordinate * float32Epsilon * 4, minimumNormalizedTopologyTolerance),
+      epsilon,
+    );
+    const seamVertices = [...new Set(unmatched.flatMap((edge) => [start(edge), end(edge)]))].sort(
       (left, right) => left - right,
     );
     const clusters = spatialClusters(seamVertices, normalizedPositions, matchRadius);
     const bySeam = new Map<string, number[]>();
-    for (const edgeIndex of unmatched) {
-      const edge = halfEdges[edgeIndex]!;
-      const key = pairKey(clusters[edge.start]!, clusters[edge.end]!);
+    for (const edge of unmatched) {
+      const key = pairKey(clusters[start(edge)]!, clusters[end(edge)]!);
       const entries = bySeam.get(key) ?? [];
-      entries.push(edgeIndex);
+      entries.push(edge);
       bySeam.set(key, entries);
     }
 
-    const patchSets = new DisjointSet(triangles.length);
-    for (const pair of pairs) {
-      patchSets.union(halfEdges[pair.first]!.triangle, halfEdges[pair.second]!.triangle);
+    const patchSets = new DisjointSet(triangleCount);
+    for (let offset = 0; offset < pairs.length; offset += 2) {
+      patchSets.union(halfEdgeTriangle(pairs[offset]!), halfEdgeTriangle(pairs[offset + 1]!));
     }
-    const patches = Int32Array.from({ length: triangles.length }, (_, triangle) => patchSets.representative(triangle));
+    const patches = Int32Array.from({ length: triangleCount }, (_, triangle) => patchSets.representative(triangle));
     const affinities = new Map<string, number>();
     for (const edges of bySeam.values()) {
-      const first = halfEdges[edges[0]!]!;
-      const firstStart = clusters[first.start]!;
-      const firstEnd = clusters[first.end]!;
-      const [low, high] = orderedPair(firstStart, firstEnd);
-      const forward = edges.filter((edgeIndex) => {
-        const edge = halfEdges[edgeIndex]!;
-        return clusters[edge.start] === low && clusters[edge.end] === high;
-      });
-      const reverse = edges.filter((edgeIndex) => !forward.includes(edgeIndex));
+      const first = edges[0]!;
+      const [lowCluster, highCluster] = orderedPair(clusters[start(first)]!, clusters[end(first)]!);
+      const forward = edges.filter(
+        (edge) => clusters[start(edge)] === lowCluster && clusters[end(edge)] === highCluster,
+      );
+      const reverse = edges.filter((edge) => !forward.includes(edge));
       for (const left of forward) {
         for (const right of reverse) {
-          const key = pairKey(patches[halfEdges[left]!.triangle]!, patches[halfEdges[right]!.triangle]!);
+          const key = pairKey(patches[halfEdgeTriangle(left)]!, patches[halfEdgeTriangle(right)]!);
           affinities.set(key, (affinities.get(key) ?? 0) + 1);
         }
       }
     }
 
     for (const edges of bySeam.values()) {
-      const first = halfEdges[edges[0]!]!;
-      const [low, high] = orderedPair(clusters[first.start]!, clusters[first.end]!);
-      if (low === high) {
+      const first = edges[0]!;
+      const [lowCluster, highCluster] = orderedPair(clusters[start(first)]!, clusters[end(first)]!);
+      if (lowCluster === highCluster) {
         return topologyFailure(sourceKey, 'collapsed-triangle', 'has a seam edge collapsed by topology tolerance');
       }
-      const forward = edges.filter((edgeIndex) => {
-        const edge = halfEdges[edgeIndex]!;
-        return clusters[edge.start] === low && clusters[edge.end] === high;
-      });
-      const reverse = edges.filter((edgeIndex) => !forward.includes(edgeIndex));
+      const forward = edges.filter(
+        (edge) => clusters[start(edge)] === lowCluster && clusters[end(edge)] === highCluster,
+      );
+      const reverse = edges.filter((edge) => !forward.includes(edge));
       if (edges.length === 1) {
         return topologyFailure(sourceKey, 'open-surface', 'has an open material seam');
       }
@@ -611,18 +617,12 @@ const buildCanonicalTopologyRecipe = (input: {
       const resolved =
         forward.length === 1
           ? ([[forward[0]!, reverse[0]!]] as const)
-          : uniquelyPairSeams({
-              forward,
-              reverse,
-              halfEdges,
-              patches,
-              affinities,
-            });
+          : uniquelyPairSeams({ forward, reverse, patches, affinities });
       if (!resolved) {
         return topologyFailure(sourceKey, 'ambiguous-seam', 'has an ambiguous material seam');
       }
       for (const [firstEdge, secondEdge] of resolved) {
-        pairs.push({ first: firstEdge, second: secondEdge });
+        pairs.push(firstEdge, secondEdge);
       }
     }
 
@@ -630,7 +630,7 @@ const buildCanonicalTopologyRecipe = (input: {
     for (const vertex of seamVertices) {
       const cluster = clusters[vertex]!;
       const current = representativeByCluster.get(cluster);
-      if (current === undefined || comparePosition(positions[vertex]!, positions[current]!) < 0) {
+      if (current === undefined || comparePositionAt(positions, vertex, current) < 0) {
         representativeByCluster.set(cluster, vertex);
       }
     }
@@ -639,42 +639,34 @@ const buildCanonicalTopologyRecipe = (input: {
     }
   }
 
-  const vertexLinkFailure = validateVertexLinks({
-    sourceKey,
-    triangles,
-    halfEdges,
-    pairs,
-    vertexCount: positions.length,
-  });
+  const vertexLinkFailure = validateVertexLinks({ sourceKey, triangleVertices, pairs, vertexCount });
   if (vertexLinkFailure) {
     return { status: 'unsupported', failure: vertexLinkFailure };
   }
 
-  const triangleEdges = new Int32Array(triangles.length * 3).fill(-1);
-  const edges: number[] = [];
-  for (const pair of pairs) {
-    const first = halfEdges[pair.first]!;
-    const second = halfEdges[pair.second]!;
-    const edgeIndex = edges.length / 4;
-    triangleEdges[first.triangle * 3 + first.slot] = edgeIndex;
-    triangleEdges[second.triangle * 3 + second.slot] = edgeIndex;
-    edges.push(
-      representativeVertices[first.start]!,
-      representativeVertices[first.end]!,
-      first.triangle,
-      second.triangle,
-    );
+  const triangleEdges = new Int32Array(triangleCount * 3).fill(-1);
+  const edges = new Int32Array(pairs.length * 2);
+  for (let offset = 0; offset < pairs.length; offset += 2) {
+    const first = pairs[offset]!;
+    const second = pairs[offset + 1]!;
+    const edgeIndex = offset / 2;
+    triangleEdges[first] = edgeIndex;
+    triangleEdges[second] = edgeIndex;
+    edges[edgeIndex * 4] = representativeVertices[start(first)]!;
+    edges[edgeIndex * 4 + 1] = representativeVertices[end(first)]!;
+    edges[edgeIndex * 4 + 2] = halfEdgeTriangle(first);
+    edges[edgeIndex * 4 + 3] = halfEdgeTriangle(second);
   }
   if (triangleEdges.some((edge) => edge < 0)) {
     return topologyFailure(sourceKey, 'open-surface', 'has an unpaired surface edge');
   }
 
-  const componentSets = new DisjointSet(triangles.length);
+  const componentSets = new DisjointSet(triangleCount);
   for (let offset = 0; offset < edges.length; offset += 4) {
     componentSets.union(edges[offset + 2]!, edges[offset + 3]!);
   }
   const componentsByRoot = new Map<number, number[]>();
-  for (const triangle of triangles.keys()) {
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
     const root = componentSets.representative(triangle);
     const entries = componentsByRoot.get(root) ?? [];
     entries.push(triangle);
@@ -699,7 +691,7 @@ const buildCanonicalTopologyRecipe = (input: {
     status: 'ready',
     representativeVertices,
     triangleEdges,
-    edges: Int32Array.from(edges),
+    edges,
     components,
     buildMilliseconds: performance.now() - startedAt,
   };
@@ -715,166 +707,77 @@ const indexComponentsByTriangle = (triangleCount: number, components: readonly S
   return componentByTriangle;
 };
 
-const hydrateCanonicalTopologyRecipe = (
-  input: TopologyBuildInput,
-  recipe: SectionCanonicalTopologyWorkerResult,
-): SectionSurfaceTopologyResult => {
-  if (recipe.status === 'unsupported') {
-    return recipe;
-  }
-  for (const [triangleIndex, triangle] of input.triangles.entries()) {
-    const edgeOffset = triangleIndex * 3;
-    triangle.edges = [
-      recipe.triangleEdges[edgeOffset]!,
-      recipe.triangleEdges[edgeOffset + 1]!,
-      recipe.triangleEdges[edgeOffset + 2]!,
-    ];
-    triangle.points = triangle.vertices.map((vertex) => input.positions[recipe.representativeVertices[vertex]!]!) as [
-      THREE.Vector3,
-      THREE.Vector3,
-      THREE.Vector3,
-    ];
-  }
-  const edges: CanonicalEdge[] = [];
-  for (let offset = 0; offset < recipe.edges.length; offset += 4) {
-    edges.push({
-      start: input.positions[recipe.edges[offset]!]!,
-      end: input.positions[recipe.edges[offset + 1]!]!,
-      triangles: [recipe.edges[offset + 2]!, recipe.edges[offset + 3]!],
-    });
-  }
-  const components = recipe.components.map((component) => ({
-    triangles: [...component.triangles],
-    edges: [...component.edges],
-  }));
-  return {
-    status: 'ready',
-    topology: {
-      path: input.path,
-      sourceKey: input.sourceKey,
-      triangles: input.triangles,
-      edges,
-      components,
-      componentByTriangle: indexComponentsByTriangle(input.triangles.length, components),
-      distanceTolerance: sourceTopologyEpsilon(input.positions),
-      buildMilliseconds: recipe.buildMilliseconds,
-    },
-  };
-};
-
-const hydrateCanonicalTopology = (
+/** Keeps the recipe's typed arrays as the topology; only triangle vertices are rewritten, in place. */
+const assembleCanonicalTopology = (
   input: TopologyBuildInput,
   recipe: SectionCanonicalTopologyWorkerResult,
 ): SectionSurfaceTopologyResult => {
   const startedAt = performance.now();
-  const result = hydrateCanonicalTopologyRecipe(input, recipe);
+  if (recipe.status === 'unsupported') {
+    input.onHydrate?.(performance.now() - startedAt);
+    return recipe;
+  }
+  const { triangleVertices } = input;
+  for (let corner = 0; corner < triangleVertices.length; corner++) {
+    triangleVertices[corner] = recipe.representativeVertices[triangleVertices[corner]!]!;
+  }
+  const triangleCount = triangleVertices.length / 3;
+  const result: SectionSurfaceTopologyResult = {
+    status: 'ready',
+    topology: {
+      path: input.path,
+      sourceKey: input.sourceKey,
+      positions: input.positions,
+      triangleVertices,
+      triangleEdges: recipe.triangleEdges,
+      triangleParticipants: input.triangleParticipants,
+      triangleMaterialOrders: input.triangleMaterialOrders,
+      participants: input.participants,
+      edges: recipe.edges,
+      components: recipe.components,
+      componentByTriangle: indexComponentsByTriangle(triangleCount, recipe.components),
+      distanceTolerance: sourceTopologyEpsilon(input.positions),
+      buildMilliseconds: recipe.buildMilliseconds,
+    },
+  };
   input.onHydrate?.(performance.now() - startedAt);
   return result;
 };
 
 const buildCanonicalTopology = (input: TopologyBuildInput): SectionSurfaceTopologyResult =>
-  hydrateCanonicalTopology(input, buildCanonicalTopologyRecipe(input));
+  assembleCanonicalTopology(input, buildCanonicalTopologyRecipe(input));
 
 export const buildSectionCanonicalTopologyWorkerResult = (
   input: SectionCanonicalTopologyWorkerInput,
-): SectionCanonicalTopologyWorkerResult => {
-  const positions = Array.from(
-    { length: input.positions.length / 3 },
-    (_, vertex) =>
-      new THREE.Vector3(input.positions[vertex * 3], input.positions[vertex * 3 + 1], input.positions[vertex * 3 + 2]),
-  );
-  const triangles = Array.from({ length: input.triangleVertices.length / 3 }, (_, triangle) => ({
-    vertices: [
-      input.triangleVertices[triangle * 3]!,
-      input.triangleVertices[triangle * 3 + 1]!,
-      input.triangleVertices[triangle * 3 + 2]!,
-    ] as const,
-  }));
-  return buildCanonicalTopologyRecipe({ ...input, positions, triangles });
-};
-
-let topologyWorker: Worker | undefined;
-let topologyWorkerSequence = 0;
-const topologyWorkerRequests = new Map<
-  number,
-  Readonly<{
-    resolve: (result: SectionCanonicalTopologyWorkerResult) => void;
-    reject: (error: Error) => void;
-  }>
->();
-
-const getTopologyWorker = (): Worker | undefined => {
-  if (topologyWorker !== undefined || typeof Worker === 'undefined' || import.meta.env.MODE === 'test') {
-    return topologyWorker;
-  }
-  try {
-    topologyWorker = new Worker(new URL('section-surface-topology.worker.ts', import.meta.url), { type: 'module' });
-    topologyWorker.addEventListener(
-      'message',
-      (event: MessageEvent<Readonly<{ id: number; result: SectionCanonicalTopologyWorkerResult }>>) => {
-        const request = topologyWorkerRequests.get(event.data.id);
-        topologyWorkerRequests.delete(event.data.id);
-        request?.resolve(event.data.result);
-      },
-    );
-    topologyWorker.addEventListener('error', (event) => {
-      const error = new Error(event.message || 'Section topology worker failed');
-      for (const request of topologyWorkerRequests.values()) {
-        request.reject(error);
-      }
-      topologyWorkerRequests.clear();
-      topologyWorker?.terminate();
-      topologyWorker = undefined;
-    });
-  } catch {
-    topologyWorker = undefined;
-  }
-  return topologyWorker;
-};
+): SectionCanonicalTopologyWorkerResult => buildCanonicalTopologyRecipe(input);
 
 const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<SectionSurfaceTopologyResult> => {
-  const worker = getTopologyWorker();
-  if (!worker) {
-    return buildCanonicalTopology(input);
-  }
   const packStartedAt = performance.now();
-  const positions = new Float64Array(input.positions.length * 3);
-  for (const [vertex, position] of input.positions.entries()) {
-    positions[vertex * 3] = position.x;
-    positions[vertex * 3 + 1] = position.y;
-    positions[vertex * 3 + 2] = position.z;
-  }
-  const triangleVertices = new Uint32Array(input.triangles.length * 3);
-  for (const [triangleIndex, triangle] of input.triangles.entries()) {
-    triangleVertices.set(triangle.vertices, triangleIndex * 3);
-  }
   const request: SectionCanonicalTopologyWorkerInput = {
     sourceKey: input.sourceKey,
-    positions,
-    triangleVertices,
+    positions: input.positions,
+    triangleVertices: input.triangleVertices,
     allowSeamFallback: input.allowSeamFallback,
   };
+  const pending = buildSectionTopologyRecipeInWorker(request);
+  if (!pending) {
+    return buildCanonicalTopology(input);
+  }
   input.onPack?.(performance.now() - packStartedAt);
-  const id = ++topologyWorkerSequence;
   try {
-    const result = await new Promise<SectionCanonicalTopologyWorkerResult>((resolve, reject) => {
-      topologyWorkerRequests.set(id, { resolve, reject });
-      worker.postMessage({ id, input: request }, [positions.buffer, triangleVertices.buffer]);
-    });
-    return hydrateCanonicalTopology(input, result);
+    return assembleCanonicalTopology(input, await pending);
   } catch {
     return buildCanonicalTopology(input);
   }
 };
 
-const materialAtTriangle = (mesh: SectionSurfaceMesh, triangleIndex: number): readonly [THREE.Material, number] => {
-  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+/** The render material slot of one geometry triangle, from the geometry's groups. */
+const materialOrderAtTriangle = (mesh: SectionSurfaceMesh, triangleIndex: number): number => {
   const indexOffset = triangleIndex * 3;
   const group = mesh.geometry.groups.find(
     (candidate) => indexOffset >= candidate.start && indexOffset < candidate.start + candidate.count,
   );
-  const materialIndex = group?.materialIndex ?? 0;
-  return [materials[materialIndex] ?? materials[0]!, materialIndex];
+  return group?.materialIndex ?? 0;
 };
 
 const geometryRevision = (geometry: THREE.BufferGeometry): string => {
@@ -892,40 +795,118 @@ const geometryRevision = (geometry: THREE.BufferGeometry): string => {
   ].join(':');
 };
 
-const sourceTopologyEpsilon = (positions: readonly THREE.Vector3[]): number => topologyExtent(positions) * 1e-6;
+const sourceTopologyEpsilon = (positions: Float64Array): number => topologyExtent(positions) * 1e-6;
+
+/**
+ * The squared length of the cross product of a triangle's edges (twice its area, squared), as `Vector3.cross`
+ * computes it, for the three vertices at `offset` in `triangleVertices`.
+ */
+const triangleAreaSquared = (() => {
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  return (positions: Float64Array, triangleVertices: Uint32Array, offset: number): number => {
+    a.fromArray(positions, triangleVertices[offset]! * 3);
+    b.fromArray(positions, triangleVertices[offset + 1]! * 3).sub(a);
+    c.fromArray(positions, triangleVertices[offset + 2]! * 3).sub(a);
+    return b.cross(c).lengthSq();
+  };
+})();
+
+/** Writes every vertex of `position`, moved by `matrix`, into `target` from vertex `base`; false on a non-finite one. */
+const writeSourcePositions = (options: {
+  position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  matrix: THREE.Matrix4;
+  target: Float64Array;
+  base: number;
+}): boolean => {
+  const { position, matrix, target, base } = options;
+  const point = new THREE.Vector3();
+  for (let vertex = 0; vertex < position.count; vertex++) {
+    point.set(position.getX(vertex), position.getY(vertex), position.getZ(vertex)).applyMatrix4(matrix);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+      return false;
+    }
+    point.toArray(target, (base + vertex) * 3);
+  }
+  return true;
+};
+
+/**
+ * Triangle columns sized for `capacity`, trimmed to the triangles actually kept. A triangle is staged first, so
+ * it can be tested in place, and kept only when committed.
+ */
+const createTriangleColumns = (capacity: number) => {
+  const vertices = new Uint32Array(capacity * 3);
+  const participants = new Uint32Array(capacity);
+  const materialOrders = new Uint32Array(capacity);
+  let count = 0;
+  return {
+    get count() {
+      return count;
+    },
+    stage(first: number, second: number, third: number): void {
+      vertices[count * 3] = first;
+      vertices[count * 3 + 1] = second;
+      vertices[count * 3 + 2] = third;
+    },
+    stagedAreaSquared: (positions: Float64Array): number => triangleAreaSquared(positions, vertices, count * 3),
+    /** Keeps the staged triangle and returns its topology index. */
+    commit(participant: number, materialOrder: number): number {
+      participants[count] = participant;
+      materialOrders[count] = materialOrder;
+      return count++;
+    },
+    finish: () =>
+      count === capacity
+        ? { triangleVertices: vertices, triangleParticipants: participants, triangleMaterialOrders: materialOrders }
+        : {
+            triangleVertices: vertices.slice(0, count * 3),
+            triangleParticipants: participants.slice(0, count),
+            triangleMaterialOrders: materialOrders.slice(0, count),
+          },
+  };
+};
 
 const createFallbackTopologyInput = (options: {
   sourceKey: string;
   participants: readonly SectionSurfaceParticipant[];
 }): TopologyBuildInput | SectionSurfaceTopologyResult => {
-  const positions: THREE.Vector3[] = [];
-  const triangles: TopologyTriangle[] = [];
-  let sawDegenerateTriangle = false;
-  const vertexBaseByParticipant = new Map<SectionSurfaceParticipant, number>();
-
+  let vertexCount = 0;
+  let triangleCapacity = 0;
+  const vertexBaseByParticipant: number[] = [];
   for (const participant of options.participants) {
-    participant.topologyTrianglesByGeometryTriangle.clear();
+    participant.topologyTriangleByGeometryTriangle = new Int32Array(0);
     participant.usedMaterialOrders.clear();
     const { position } = participant.mesh.geometry.attributes;
     if (!position || position.itemSize < 3) {
       return topologyFailure(options.sourceKey, 'missing-position', 'is missing a VEC3 position attribute');
     }
-    vertexBaseByParticipant.set(participant, positions.length);
-    for (let vertex = 0; vertex < position.count; vertex++) {
-      const point = new THREE.Vector3(position.getX(vertex), position.getY(vertex), position.getZ(vertex)).applyMatrix4(
-        participant.localToSource,
-      );
-      if (![point.x, point.y, point.z].every((value) => Number.isFinite(value))) {
-        return topologyFailure(options.sourceKey, 'non-finite-position', 'contains a non-finite position');
-      }
-      positions.push(point);
+    vertexBaseByParticipant.push(vertexCount);
+    vertexCount += position.count;
+    triangleCapacity += Math.floor((participant.mesh.geometry.getIndex()?.count ?? position.count) / 3);
+  }
+  const positions = new Float64Array(vertexCount * 3);
+  for (const [participantIndex, participant] of options.participants.entries()) {
+    const position = participant.mesh.geometry.attributes['position']!;
+    if (
+      !writeSourcePositions({
+        position,
+        matrix: participant.localToSource,
+        target: positions,
+        base: vertexBaseByParticipant[participantIndex]!,
+      })
+    ) {
+      return topologyFailure(options.sourceKey, 'non-finite-position', 'contains a non-finite position');
     }
   }
 
   const epsilon = sourceTopologyEpsilon(positions);
-  for (const participant of options.participants) {
+  const triangles = createTriangleColumns(triangleCapacity);
+  let sawDegenerateTriangle = false;
+  for (const [participantIndex, participant] of options.participants.entries()) {
     const position = participant.mesh.geometry.attributes['position']!;
-    const vertexBase = vertexBaseByParticipant.get(participant)!;
+    const vertexBase = vertexBaseByParticipant[participantIndex]!;
 
     const index = participant.mesh.geometry.getIndex();
     const indexCount = index?.count ?? position.count;
@@ -938,59 +919,40 @@ const createFallbackTopologyInput = (options: {
     if ((drawEnd - drawStart) % 3 !== 0) {
       return topologyFailure(options.sourceKey, 'collapsed-triangle', 'has an incomplete triangle index list');
     }
+    const topologyTriangleByGeometryTriangle = new Int32Array(Math.ceil(indexCount / 3)).fill(-1);
+    participant.topologyTriangleByGeometryTriangle = topologyTriangleByGeometryTriangle;
+    const isVertex = (vertex: number): boolean => Number.isInteger(vertex) && vertex >= 0 && vertex < position.count;
     for (let offset = drawStart; offset < drawEnd; offset += 3) {
-      const localVertices = [
-        index ? index.getX(offset) : offset,
-        index ? index.getX(offset + 1) : offset + 1,
-        index ? index.getX(offset + 2) : offset + 2,
-      ] as const;
-      if (localVertices.some((vertex) => !Number.isInteger(vertex) || vertex < 0 || vertex >= position.count)) {
+      const first = index ? index.getX(offset) : offset;
+      const second = index ? index.getX(offset + 1) : offset + 1;
+      const third = index ? index.getX(offset + 2) : offset + 2;
+      if (!isVertex(first) || !isVertex(second) || !isVertex(third)) {
         return topologyFailure(options.sourceKey, 'missing-position', 'references a missing vertex');
       }
-      if (
-        localVertices[0] === localVertices[1] ||
-        localVertices[1] === localVertices[2] ||
-        localVertices[2] === localVertices[0]
-      ) {
+      if (first === second || second === third || third === first) {
         return topologyFailure(options.sourceKey, 'collapsed-triangle', 'contains a collapsed triangle');
       }
-      const vertices = localVertices.map((vertex) => vertexBase + vertex) as [number, number, number];
-      const points = vertices.map((vertex) => positions[vertex]!) as [THREE.Vector3, THREE.Vector3, THREE.Vector3];
-      const areaSquared = new THREE.Vector3()
-        .subVectors(points[1], points[0])
-        .cross(new THREE.Vector3().subVectors(points[2], points[0]))
-        .lengthSq();
-      if (areaSquared <= epsilon ** 4) {
+      triangles.stage(vertexBase + first, vertexBase + second, vertexBase + third);
+      if (triangles.stagedAreaSquared(positions) <= epsilon ** 4) {
         sawDegenerateTriangle = true;
         continue;
       }
       const participantTriangleIndex = Math.floor(offset / 3);
-      const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+      const materialOrder = materialOrderAtTriangle(participant.mesh, participantTriangleIndex);
       participant.usedMaterialOrders.add(materialOrder);
-      const topologyTriangleIndex = triangles.length;
-      triangles.push({
-        vertices,
-        points,
-        participant,
-        participantTriangleIndex,
-        material,
-        materialOrder,
-        edges: [-1, -1, -1],
-      });
-      const mapped = participant.topologyTrianglesByGeometryTriangle.get(participantTriangleIndex) ?? [];
-      mapped.push(topologyTriangleIndex);
-      participant.topologyTrianglesByGeometryTriangle.set(participantTriangleIndex, mapped);
+      topologyTriangleByGeometryTriangle[participantTriangleIndex] = triangles.commit(participantIndex, materialOrder);
     }
   }
 
-  if (triangles.length === 0 && sawDegenerateTriangle) {
+  if (triangles.count === 0 && sawDegenerateTriangle) {
     return topologyFailure(options.sourceKey, 'degenerate-triangle', 'contains only degenerate triangles');
   }
   return {
     sourceKey: options.sourceKey,
     path: 'fallback',
     positions,
-    triangles,
+    ...triangles.finish(),
+    participants: options.participants,
     allowSeamFallback: true,
   };
 };
@@ -1061,7 +1023,7 @@ const createParticipant = (options: {
     nodeIndex: options.association?.nodes,
     meshIndex: options.association?.meshes,
     primitiveIndex: options.association?.primitives,
-    topologyTrianglesByGeometryTriangle: new Map(),
+    topologyTriangleByGeometryTriangle: new Int32Array(0),
     usedMaterialOrders: new Set(),
   };
 };
@@ -1144,10 +1106,7 @@ const asAccessor = (value: unknown): (THREE.BufferAttribute | THREE.InterleavedB
   return undefined;
 };
 
-const readUnsignedAccessor = async (
-  parser: SectionTopologyGltfParser,
-  accessorIndex: number,
-): Promise<readonly number[]> => {
+const readUnsignedAccessor = async (parser: SectionTopologyGltfParser, accessorIndex: number): Promise<Uint32Array> => {
   const descriptor = parser.json.accessors?.[accessorIndex];
   if (descriptor?.type !== 'SCALAR' || ![5121, 5123, 5125].includes(descriptor.componentType ?? -1)) {
     throw new Error(`accessor ${accessorIndex} must be an unsigned SCALAR accessor`);
@@ -1156,9 +1115,13 @@ const readUnsignedAccessor = async (
   if (accessor?.itemSize !== 1 || accessor.count !== descriptor.count) {
     throw new Error(`accessor ${accessorIndex} could not be decoded as SCALAR`);
   }
-  const values = Array.from({ length: accessor.count }, (_, index) => accessor.getX(index));
-  if (values.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 0xff_ff_ff_ff)) {
-    throw new Error(`accessor ${accessorIndex} contains an invalid unsigned index`);
+  const values = new Uint32Array(accessor.count);
+  for (let index = 0; index < accessor.count; index++) {
+    const value = accessor.getX(index);
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0xff_ff_ff_ff) {
+      throw new Error(`accessor ${accessorIndex} contains an invalid unsigned index`);
+    }
+    values[index] = value;
   }
   return values;
 };
@@ -1225,14 +1188,22 @@ const decodeManifoldTopology = async (options: {
     const originalByPrimitive = await Promise.all(
       indexAccessors.map(async (index) => readUnsignedAccessor(parser, index!)),
     );
-    const original = originalByPrimitive.flat();
+    const original = new Uint32Array(originalByPrimitive.reduce((total, indices) => total + indices.length, 0));
+    let originalOffset = 0;
+    for (const indices of originalByPrimitive) {
+      original.set(indices, originalOffset);
+      originalOffset += indices.length;
+    }
     const manifoldIndices = await readUnsignedAccessor(parser, manifold.indices);
     if (manifoldIndices.length !== original.length) {
       return fail('manifold and render index streams must have equal length');
     }
-    const changed = original.flatMap((before, offset) =>
-      before === manifoldIndices[offset] ? [] : [[offset, manifoldIndices[offset]!] as const],
-    );
+    const changed: Array<readonly [number, number]> = [];
+    for (const [offset, before] of original.entries()) {
+      if (before !== manifoldIndices[offset]) {
+        changed.push([offset, manifoldIndices[offset]!]);
+      }
+    }
     if (extension.mergeIndices === undefined && extension.mergeValues === undefined) {
       if (changed.length > 0) {
         return fail('changed manifold indices require mergeIndices and mergeValues');
@@ -1242,7 +1213,7 @@ const decodeManifoldTopology = async (options: {
     } else {
       const mergeIndices = await readUnsignedAccessor(parser, extension.mergeIndices);
       const mergeValues = await readUnsignedAccessor(parser, extension.mergeValues);
-      const described = mergeIndices.map((offset, index) => [offset, mergeValues[index]!] as const);
+      const described = Array.from(mergeIndices, (offset, index) => [offset, mergeValues[index]] as const);
       if (JSON.stringify(described) !== JSON.stringify(changed)) {
         return fail('mergeIndices/mergeValues do not describe the manifold index changes');
       }
@@ -1298,78 +1269,60 @@ const decodeManifoldTopology = async (options: {
     ) {
       return fail('render primitives do not share one source transform');
     }
-    const positions = Array.from({ length: position.count }, (_, vertex) =>
-      new THREE.Vector3(position.getX(vertex), position.getY(vertex), position.getZ(vertex)).applyMatrix4(
-        representative.localToSource,
-      ),
-    );
-    if (positions.some((point) => ![point.x, point.y, point.z].every((value) => Number.isFinite(value)))) {
+    const positions = new Float64Array(position.count * 3);
+    if (!writeSourcePositions({ position, matrix: representative.localToSource, target: positions, base: 0 })) {
       return fail('contains a non-finite position');
     }
     const epsilon = sourceTopologyEpsilon(positions);
-    const participantByPrimitive = new Map(
-      participants.map((participant) => [participant.primitiveIndex ?? 0, participant] as const),
+    const participantIndexByPrimitive = new Map(
+      participants.map((participant, index) => [participant.primitiveIndex ?? 0, index] as const),
     );
-    const triangles: TopologyTriangle[] = [];
+    const triangles = createTriangleColumns(manifoldIndices.length / 3);
     let sawDegenerateTriangle = false;
     let indexOffset = 0;
     for (const [primitiveIndex, primitiveIndices] of originalByPrimitive.entries()) {
-      const participant = participantByPrimitive.get(primitiveIndex);
-      if (!participant) {
+      const participantIndex = participantIndexByPrimitive.get(primitiveIndex);
+      const participant = participantIndex === undefined ? undefined : participants[participantIndex];
+      if (participantIndex === undefined || !participant) {
         return fail(`primitive ${primitiveIndex} has no loaded render participant`);
       }
-      participant.topologyTrianglesByGeometryTriangle.clear();
+      const topologyTriangleByGeometryTriangle = new Int32Array(primitiveIndices.length / 3).fill(-1);
+      participant.topologyTriangleByGeometryTriangle = topologyTriangleByGeometryTriangle;
       participant.usedMaterialOrders.clear();
       for (let primitiveOffset = 0; primitiveOffset < primitiveIndices.length; primitiveOffset += 3) {
-        const vertices = manifoldIndices.slice(indexOffset + primitiveOffset, indexOffset + primitiveOffset + 3) as [
-          number,
-          number,
-          number,
-        ];
-        if (vertices.some((vertex) => vertex < 0 || vertex >= position.count)) {
+        const first = manifoldIndices[indexOffset + primitiveOffset]!;
+        const second = manifoldIndices[indexOffset + primitiveOffset + 1]!;
+        const third = manifoldIndices[indexOffset + primitiveOffset + 2]!;
+        if (first >= position.count || second >= position.count || third >= position.count) {
           return fail('manifold primitive index out of range');
         }
-        if (vertices[0] === vertices[1] || vertices[1] === vertices[2] || vertices[2] === vertices[0]) {
+        if (first === second || second === third || third === first) {
           return fail('manifold primitive contains a collapsed triangle');
         }
-        const points = vertices.map((vertex) => positions[vertex]!) as [THREE.Vector3, THREE.Vector3, THREE.Vector3];
-        if (
-          new THREE.Vector3()
-            .subVectors(points[1], points[0])
-            .cross(new THREE.Vector3().subVectors(points[2], points[0]))
-            .lengthSq() <=
-          epsilon ** 4
-        ) {
+        triangles.stage(first, second, third);
+        if (triangles.stagedAreaSquared(positions) <= epsilon ** 4) {
           sawDegenerateTriangle = true;
           continue;
         }
         const participantTriangleIndex = primitiveOffset / 3;
-        const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+        const materialOrder = materialOrderAtTriangle(participant.mesh, participantTriangleIndex);
         participant.usedMaterialOrders.add(materialOrder);
-        const topologyTriangleIndex = triangles.length;
-        triangles.push({
-          vertices,
-          points,
-          participant,
-          participantTriangleIndex,
-          material,
+        topologyTriangleByGeometryTriangle[participantTriangleIndex] = triangles.commit(
+          participantIndex,
           materialOrder,
-          edges: [-1, -1, -1],
-        });
-        const mapped = participant.topologyTrianglesByGeometryTriangle.get(participantTriangleIndex) ?? [];
-        mapped.push(topologyTriangleIndex);
-        participant.topologyTrianglesByGeometryTriangle.set(participantTriangleIndex, mapped);
+        );
       }
       indexOffset += primitiveIndices.length;
     }
-    if (triangles.length === 0 && sawDegenerateTriangle) {
+    if (triangles.count === 0 && sawDegenerateTriangle) {
       return fail('contains only degenerate triangles');
     }
     return await buildCanonicalTopologyAsync({
       sourceKey,
       path: 'extension',
       positions,
-      triangles,
+      ...triangles.finish(),
+      participants,
       allowSeamFallback: false,
       onHydrate: options.onHydrate,
       onPack: options.onPack,
@@ -1379,54 +1332,95 @@ const decodeManifoldTopology = async (options: {
   }
 };
 
+const offsetComponents = (
+  components: readonly SurfaceComponent[],
+  triangleOffset: number,
+  edgeOffset: number,
+): SurfaceComponent[] =>
+  components.map((component) => ({
+    triangles: component.triangles.map((triangle) => triangle + triangleOffset),
+    edges: component.edges.map((edge) => edge + edgeOffset),
+  }));
+
 const combineExactTopologies = (
   sourceKey: string,
   topologies: readonly SectionSurfaceTopology[],
 ): SectionSurfaceTopologyResult => {
-  const triangles: TopologyTriangle[] = [];
-  const edges: CanonicalEdge[] = [];
+  let vertexCount = 0;
+  let triangleCount = 0;
+  let edgeCount = 0;
+  for (const topology of topologies) {
+    vertexCount += topology.positions.length / 3;
+    triangleCount += topology.triangleParticipants.length;
+    edgeCount += topology.edges.length / 4;
+  }
+  const positions = new Float64Array(vertexCount * 3);
+  const triangleVertices = new Uint32Array(triangleCount * 3);
+  const triangleEdges = new Int32Array(triangleCount * 3);
+  const triangleParticipants = new Uint32Array(triangleCount);
+  const triangleMaterialOrders = new Uint32Array(triangleCount);
+  const edges = new Int32Array(edgeCount * 4);
+  const participants: SectionSurfaceParticipant[] = [];
+  const participantIndices = new Map<SectionSurfaceParticipant, number>();
   const components: SurfaceComponent[] = [];
+  let vertexOffset = 0;
+  let triangleOffset = 0;
+  let edgeOffset = 0;
   let buildMilliseconds = 0;
   for (const topology of topologies) {
     buildMilliseconds += topology.buildMilliseconds;
-    const triangleOffset = triangles.length;
-    const edgeOffset = edges.length;
-    for (const triangle of topology.triangles) {
-      triangles.push({
-        ...triangle,
-        edges: triangle.edges.map((edge) => edge + edgeOffset) as [number, number, number],
-      });
+    positions.set(topology.positions, vertexOffset * 3);
+    for (const [corner, vertex] of topology.triangleVertices.entries()) {
+      triangleVertices[triangleOffset * 3 + corner] = vertex + vertexOffset;
+      triangleEdges[triangleOffset * 3 + corner] = topology.triangleEdges[corner]! + edgeOffset;
     }
-    for (const edge of topology.edges) {
-      edges.push({
-        ...edge,
-        triangles: [edge.triangles[0] + triangleOffset, edge.triangles[1] + triangleOffset],
-      });
+    const participantRemap = topology.participants.map((participant) => {
+      const existing = participantIndices.get(participant);
+      if (existing !== undefined) {
+        return existing;
+      }
+      participantIndices.set(participant, participants.length);
+      participants.push(participant);
+      return participants.length - 1;
+    });
+    for (const [triangle, participant] of topology.triangleParticipants.entries()) {
+      triangleParticipants[triangleOffset + triangle] = participantRemap[participant]!;
     }
-    for (const component of topology.components) {
-      components.push({
-        triangles: component.triangles.map((triangle) => triangle + triangleOffset),
-        edges: component.edges.map((edge) => edge + edgeOffset),
-      });
+    triangleMaterialOrders.set(topology.triangleMaterialOrders, triangleOffset);
+    for (let offset = 0; offset < topology.edges.length; offset += 4) {
+      const target = edgeOffset * 4 + offset;
+      edges[target] = topology.edges[offset]! + vertexOffset;
+      edges[target + 1] = topology.edges[offset + 1]! + vertexOffset;
+      edges[target + 2] = topology.edges[offset + 2]! + triangleOffset;
+      edges[target + 3] = topology.edges[offset + 3]! + triangleOffset;
     }
-    for (const participant of new Set(topology.triangles.map((triangle) => triangle.participant))) {
-      for (const [geometryTriangle, mapped] of participant.topologyTrianglesByGeometryTriangle) {
-        participant.topologyTrianglesByGeometryTriangle.set(
-          geometryTriangle,
-          mapped.map((value) => value + triangleOffset),
-        );
+    components.push(...offsetComponents(topology.components, triangleOffset, edgeOffset));
+    for (const participant of topology.participants) {
+      const mapped = participant.topologyTriangleByGeometryTriangle;
+      for (const [geometryTriangle, topologyTriangle] of mapped.entries()) {
+        if (topologyTriangle >= 0) {
+          mapped[geometryTriangle] = topologyTriangle + triangleOffset;
+        }
       }
     }
+    vertexOffset += topology.positions.length / 3;
+    triangleOffset += topology.triangleParticipants.length;
+    edgeOffset += topology.edges.length / 4;
   }
   return {
     status: 'ready',
     topology: {
       path: 'extension',
       sourceKey,
-      triangles,
+      positions,
+      triangleVertices,
+      triangleEdges,
+      triangleParticipants,
+      triangleMaterialOrders,
+      participants,
       edges,
       components,
-      componentByTriangle: indexComponentsByTriangle(triangles.length, components),
+      componentByTriangle: indexComponentsByTriangle(triangleCount, components),
       distanceTolerance: Math.max(...topologies.map((topology) => topology.distanceTolerance)),
       buildMilliseconds,
     },
@@ -1760,19 +1754,35 @@ const canonicalizeRing = (ring: THREE.Vector3[], normal: THREE.Vector3): THREE.V
   return [...deduped.slice(start), ...deduped.slice(0, start)];
 };
 
-const halfOpenHit = (options: { edge: CanonicalEdge; plane: THREE.Plane }): THREE.Vector3 | undefined => {
-  const start = options.plane.distanceToPoint(options.edge.start);
-  const end = options.plane.distanceToPoint(options.edge.end);
+/** `Plane.distanceToPoint` for one vertex of a packed xyz array. */
+const planeDistanceAt = (plane: THREE.Plane, positions: Float64Array, vertex: number): number =>
+  plane.normal.x * positions[vertex * 3]! +
+  plane.normal.y * positions[vertex * 3 + 1]! +
+  plane.normal.z * positions[vertex * 3 + 2]! +
+  plane.constant;
+
+const vertexAt = (positions: Float64Array, vertex: number): THREE.Vector3 =>
+  new THREE.Vector3().fromArray(positions, vertex * 3);
+
+const halfOpenHit = (options: {
+  positions: Float64Array;
+  startVertex: number;
+  endVertex: number;
+  plane: THREE.Plane;
+}): THREE.Vector3 | undefined => {
+  const { positions, startVertex, endVertex, plane } = options;
+  const start = planeDistanceAt(plane, positions, startVertex);
+  const end = planeDistanceAt(plane, positions, endVertex);
   if (start > 0 === end > 0) {
     return undefined;
   }
   if (start === 0) {
-    return options.edge.start.clone();
+    return vertexAt(positions, startVertex);
   }
   if (end === 0) {
-    return options.edge.end.clone();
+    return vertexAt(positions, endVertex);
   }
-  return options.edge.start.clone().lerp(options.edge.end, start / (start - end));
+  return vertexAt(positions, startVertex).lerp(vertexAt(positions, endVertex), start / (start - end));
 };
 
 const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: THREE.Plane): Set<number> => {
@@ -1793,7 +1803,8 @@ const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: TH
         return localPlane.intersectsBox(expandedBounds) ? INTERSECTED : NOT_INTERSECTED;
       },
       intersectsTriangle(_triangle, triangleIndex) {
-        for (const topologyTriangle of participant.topologyTrianglesByGeometryTriangle.get(triangleIndex) ?? []) {
+        const topologyTriangle = participant.topologyTriangleByGeometryTriangle[triangleIndex];
+        if (topologyTriangle !== undefined && topologyTriangle >= 0) {
           candidates.add(topologyTriangle);
         }
         return false;
@@ -1853,34 +1864,34 @@ export const sliceSectionSurfaceSource = (options: {
   const broadphaseStartedAt = performance.now();
   const candidates = candidateTopologyTriangles(source, options.worldPlane);
   const candidateBroadphaseMilliseconds = performance.now() - broadphaseStartedAt;
+  const { positions, triangleVertices, triangleEdges, edges, distanceTolerance } = topology;
+  const onPlane = (vertex: number): boolean =>
+    Math.abs(planeDistanceAt(sourcePlane, positions, vertex)) <= distanceTolerance;
+  const triangleOnPlane = (triangle: number): boolean =>
+    onPlane(triangleVertices[triangle * 3]!) &&
+    onPlane(triangleVertices[triangle * 3 + 1]!) &&
+    onPlane(triangleVertices[triangle * 3 + 2]!);
   const candidateEdges = new Set<number>();
   for (const triangle of candidates) {
-    for (const edge of topology.triangles[triangle]!.edges) {
-      candidateEdges.add(edge);
-    }
+    candidateEdges.add(triangleEdges[triangle * 3]!);
+    candidateEdges.add(triangleEdges[triangle * 3 + 1]!);
+    candidateEdges.add(triangleEdges[triangle * 3 + 2]!);
   }
   const hits = new Map<number, THREE.Vector3>();
   const openPolylines: THREE.Vector3[][] = [];
   for (const edge of candidateEdges) {
-    const canonicalEdge = topology.edges[edge]!;
-    const startDistance = sourcePlane.distanceToPoint(canonicalEdge.start);
-    const endDistance = sourcePlane.distanceToPoint(canonicalEdge.end);
+    const startVertex = edges[edge * 4]!;
+    const endVertex = edges[edge * 4 + 1]!;
     if (
-      Math.abs(startDistance) <= topology.distanceTolerance &&
-      Math.abs(endDistance) <= topology.distanceTolerance &&
-      !canonicalEdge.triangles.every((triangle) =>
-        topology.triangles[triangle]!.points.every(
-          (point) => Math.abs(sourcePlane.distanceToPoint(point)) <= topology.distanceTolerance,
-        ),
-      )
+      onPlane(startVertex) &&
+      onPlane(endVertex) &&
+      !(triangleOnPlane(edges[edge * 4 + 2]!) && triangleOnPlane(edges[edge * 4 + 3]!))
     ) {
       const [start, end] =
-        comparePosition(canonicalEdge.start, canonicalEdge.end) <= 0
-          ? [canonicalEdge.start, canonicalEdge.end]
-          : [canonicalEdge.end, canonicalEdge.start];
-      openPolylines.push([start.clone(), end.clone()]);
+        comparePositionAt(positions, startVertex, endVertex) <= 0 ? [startVertex, endVertex] : [endVertex, startVertex];
+      openPolylines.push([vertexAt(positions, start), vertexAt(positions, end)]);
     }
-    const hit = halfOpenHit({ edge: canonicalEdge, plane: sourcePlane });
+    const hit = halfOpenHit({ positions, startVertex, endVertex, plane: sourcePlane });
     if (hit) {
       hits.set(edge, hit);
     }
@@ -1888,7 +1899,7 @@ export const sliceSectionSurfaceSource = (options: {
   const cutEdges = new Map<number, [number, number]>();
   const edgeLists = new Map<number, number[]>();
   for (const edge of hits.keys()) {
-    for (const triangle of topology.edges[edge]!.triangles) {
+    for (const triangle of [edges[edge * 4 + 2]!, edges[edge * 4 + 3]!]) {
       const entries = edgeLists.get(triangle) ?? [];
       entries.push(edge);
       edgeLists.set(triangle, entries);
@@ -1959,18 +1970,22 @@ export const sliceSectionSurfaceSource = (options: {
       ring.push(point);
       const outgoing = incoming === triangleEdges[0] ? triangleEdges[1] : triangleEdges[0];
       const outgoingPoint = hits.get(outgoing)!;
-      const triangleValue = topology.triangles[triangle]!;
-      const liveMaterials = Array.isArray(triangleValue.participant.mesh.material)
-        ? triangleValue.participant.mesh.material
-        : [triangleValue.participant.mesh.material];
-      const material = liveMaterials[triangleValue.materialOrder] ?? liveMaterials[0] ?? triangleValue.material;
-      const contribution = materialLengths.get(material) ?? {
-        length: 0,
-        order: triangleValue.participant.order * 1_000_000 + triangleValue.materialOrder,
-      };
-      contribution.length += point.distanceTo(outgoingPoint);
-      materialLengths.set(material, contribution);
-      const [left, right] = topology.edges[outgoing]!.triangles;
+      const participant = topology.participants[topology.triangleParticipants[triangle]!]!;
+      const materialOrder = topology.triangleMaterialOrders[triangle]!;
+      const liveMaterials = Array.isArray(participant.mesh.material)
+        ? participant.mesh.material
+        : [participant.mesh.material];
+      const material = liveMaterials[materialOrder] ?? liveMaterials[0];
+      if (material) {
+        const contribution = materialLengths.get(material) ?? {
+          length: 0,
+          order: participant.order * 1_000_000 + materialOrder,
+        };
+        contribution.length += point.distanceTo(outgoingPoint);
+        materialLengths.set(material, contribution);
+      }
+      const left = edges[outgoing * 4 + 2]!;
+      const right = edges[outgoing * 4 + 3]!;
       const next: number | undefined = triangle === left ? right : triangle === right ? left : undefined;
       if (next === undefined) {
         return {

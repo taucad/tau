@@ -73,6 +73,9 @@ type ComboBoxResponsiveProperties<T> = Omit<
   readonly footer?: ReactNode;
 };
 
+/** A drawer's rows are thumb targets: 44px tall (Tau's spacing unit is 4.4px), the touch minimum, on every surface. */
+const drawerItemClassName = '[&_[data-slot=command-item]]:min-h-10';
+
 /**
  * A searchable single-choice list: a popover above the trigger on wide screens and a drawer on mobile.
  *
@@ -180,7 +183,12 @@ export function ComboBoxResponsive<T>({
           aria-describedby='drawer-description'
           {...properties}
           {...drawerProperties}
-          className={cn('[&_[data-slot=command]]:bg-transparent', className, drawerProperties?.className)}
+          className={cn(
+            '[&_[data-slot=command]]:bg-transparent',
+            drawerItemClassName,
+            className,
+            drawerProperties?.className,
+          )}
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);

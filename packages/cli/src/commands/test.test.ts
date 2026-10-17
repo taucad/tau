@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { testRecord } from '#commands/test.js';
+import { testRecord, testSummary } from '#commands/test.js';
 
 const test = (name: string, status: string, message?: string) => ({
   name,
@@ -67,5 +67,35 @@ describe('testRecord', () => {
     });
 
     expect(record.status).toBe('refused');
+  });
+});
+
+describe('testSummary', () => {
+  it('should name the inconclusive tests, which are neither passed nor failed', () => {
+    const passing = testRecord('/project', ['block.geospec.ts'], {
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [{ file: 'block.geospec.ts', result: { tests: [test('is 20 mm', 'passed')] } }],
+    });
+    const refusal = 'Primary geometry is 68.7 MiB; the configured binary subject limit is 64 MiB.';
+    const undecided = testRecord('/project', ['knot.geospec.ts'], {
+      success: false,
+      passed: 0,
+      failed: 0,
+      selectedTests: 2,
+      files: [
+        {
+          file: 'knot.geospec.ts',
+          result: {
+            tests: [test('is watertight', 'inconclusive', refusal), test('is one piece', 'inconclusive', refusal)],
+          },
+        },
+      ],
+    });
+
+    expect(testSummary(passing)).toBe('1 passed, 0 failed of 1 selected');
+    expect(testSummary(undecided)).toBe('0 passed, 0 failed of 2 selected, 2 inconclusive');
   });
 });

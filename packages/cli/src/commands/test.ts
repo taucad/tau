@@ -138,6 +138,18 @@ const exitFor: Readonly<Record<TestRecord['status'], number>> = {
 };
 
 /**
+ * The run's one-line totals, naming the inconclusive tests that are neither passed nor failed.
+ *
+ * @internal
+ * @param record - The run's record.
+ * @returns The summary line.
+ */
+export const testSummary = (record: TestRecord): string => {
+  const inconclusive = record.tests.filter((test) => test.status === 'inconclusive').length;
+  return `${String(record.passed)} passed, ${String(record.failed)} failed of ${String(record.selected)} selected${inconclusive === 0 ? '' : `, ${String(inconclusive)} inconclusive`}`;
+};
+
+/**
  * `tau test` command.
  *
  * @example <caption>Run a project's GeoSpec suites in CI</caption>
@@ -294,7 +306,7 @@ export const testCommand = defineCommand({
     for (const issue of record.issues) {
       output.error(`${issue.code}: ${issue.message}`);
     }
-    const summary = `${String(record.passed)} passed, ${String(record.failed)} failed of ${String(record.selected)} selected`;
+    const summary = testSummary(record);
     if (record.status === 'passed') {
       output.success(summary);
       return;

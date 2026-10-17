@@ -15,7 +15,7 @@ describe('regionScopeRefusal', () => {
     }
   });
 
-  it('should refuse whole-model and all-components claims on a crop, without suggesting a smaller model', () => {
+  it('should refuse whole-model and all-components claims on a crop, without suggesting a smaller model or a budget', () => {
     const wholeModel: Array<GeoSpecAssertion['kind']> = [
       'connectedComponents',
       'componentInterference',
@@ -34,7 +34,7 @@ describe('regionScopeRefusal', () => {
         severity: 'error',
         details: { kind, region: { min: [0, 0, 0], max: [5, 5, 5] } },
       });
-      expect(refusal?.suggestion).not.toMatch(/\b(?:coarsen|coarser|shrink|crop|simplify)\b/iu);
+      expect(refusal?.suggestion).not.toMatch(/\b(?:coarsen|coarser|shrink|crop|simplify|workUnitLimit)\b/iu);
     }
   });
 });

@@ -895,18 +895,63 @@ describe('native model loader carried scopes', () => {
       await loader.releaseAll();
     }
   });
+  /** The engine's `limit-exceeded` capacity shape on a host byte refusal, naming the limit the host enforced. */
+  const hostByteRefusal = (message: string, capacity: { name: string; limit: number; required: unknown }) => ({
+    name: 'RangeError',
+    code: 'limit-exceeded',
+    message,
+    capacity: { code: 'GEOSPEC_RESOURCE_LIMIT', limitClass: 'admission', unit: 'bytes', ...capacity, source: 'host' },
+  });
   it('should reject a descriptor exceeding the existing wire byte ceiling before native admission', async () => {
     const { engine, ingestSubject } = contentEngine();
     const loader = createGeoSpecNativeModelLoader({ engine });
     try {
       await expect(
         loader({ source: Uint8Array.of(1), format: 'step', ingestOptions: { name: 'x'.repeat(16 * 1024 * 1024) } }),
-      ).rejects.toMatchObject({
-        name: 'RangeError',
-        code: 'limit-exceeded',
-        message: 'GeoSpec retained admission input exceeds its byte limit.',
-      });
+      ).rejects.toMatchObject(
+        hostByteRefusal('GeoSpec retained admission input exceeds its byte limit.', {
+          name: 'descriptorBytes',
+          limit: 16 * 1024 * 1024,
+          required: expect.toSatisfy((bytes: number) => bytes > 16 * 1024 * 1024),
+        }),
+      );
       expect(ingestSubject).not.toHaveBeenCalled();
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+  it('should reject one input above the total binary limit before native admission', async () => {
+    const { engine, ingestSubject } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      await expect(loader({ source: new Uint8Array(1025), format: 'step' })).rejects.toMatchObject(
+        hostByteRefusal('GeoSpec retained admission input exceeds its byte limit.', {
+          name: 'maxTotalBinaryBytes',
+          limit: 1024,
+          required: 1025,
+        }),
+      );
+      expect(ingestSubject).not.toHaveBeenCalled();
+    } finally {
+      await loader.releaseAll();
+    }
+  });
+  it('should reject retained descriptors that together exceed the wire byte ceiling', async () => {
+    const { engine, ingestSubject } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine });
+    const half = 'x'.repeat(9 * 1024 * 1024);
+    try {
+      await loader({ source: Uint8Array.of(1), format: 'step', ingestOptions: { name: half } });
+      await expect(
+        loader({ source: Uint8Array.of(2), format: 'step', ingestOptions: { name: half } }),
+      ).rejects.toMatchObject(
+        hostByteRefusal('GeoSpec live admission snapshots exceed their retained input byte limit.', {
+          name: 'descriptorBytes',
+          limit: 16 * 1024 * 1024,
+          required: expect.toSatisfy((bytes: number) => bytes > 18 * 1024 * 1024),
+        }),
+      );
+      expect(ingestSubject).toHaveBeenCalledOnce();
     } finally {
       await loader.releaseAll();
     }
@@ -920,11 +965,13 @@ describe('native model loader carried scopes', () => {
       await loader({ source: bytes, format: 'step' });
       await loader({ source: Uint8Array.from(bytes), format: 'step' });
       const before = ingestSubject.mock.calls.length;
-      await expect(loader({ source: Uint8Array.of(2), format: 'step' })).rejects.toMatchObject({
-        name: 'RangeError',
-        code: 'limit-exceeded',
-        message: 'GeoSpec live admission snapshots exceed their retained input byte limit.',
-      });
+      await expect(loader({ source: Uint8Array.of(2), format: 'step' })).rejects.toMatchObject(
+        hostByteRefusal('GeoSpec live admission snapshots exceed their retained input byte limit.', {
+          name: 'maxTotalBinaryBytes',
+          limit: 1024,
+          required: 1025,
+        }),
+      );
       expect(ingestSubject).toHaveBeenCalledTimes(before);
       await loader.releaseAll();
       await expect(loader({ source: Uint8Array.of(2), format: 'step' })).resolves.toMatchObject({

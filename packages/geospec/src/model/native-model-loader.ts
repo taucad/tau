@@ -61,6 +61,15 @@ const countRefusal = (error: unknown): boolean =>
   error.capacity !== null &&
   'unit' in error.capacity &&
   error.capacity.unit === 'retained subjects';
+// The host's own byte refusal carries the engine's `limit-exceeded` capacity shape, plus the limit it enforced.
+const byteRefusal = (
+  message: string,
+  capacity: { readonly name: string; readonly limit: number; readonly required: number },
+): RangeError =>
+  Object.assign(new RangeError(message), {
+    code: 'limit-exceeded',
+    capacity: { code: 'GEOSPEC_RESOURCE_LIMIT', limitClass: 'admission', unit: 'bytes', ...capacity, source: 'host' },
+  });
 
 const residencyFor = (engine: GeoSpecNativeModelEngine): Residency => {
   const cached = engineResidency.get(engine);
@@ -635,14 +644,20 @@ export const createGeoSpecNativeModelLoader = (
       (sum, { bytes }) => sum + bytes.byteLength,
       options.primary.byteLength,
     );
-    // Check before copying; an already owned identical load is still admitted afresh below.
-    if (
-      !Number.isSafeInteger(binaryBytes) ||
-      binaryBytes > residency.binaryLimit ||
-      request.byteLength > descriptorLimit
-    ) {
-      throw Object.assign(new RangeError('GeoSpec retained admission input exceeds its byte limit.'), {
-        code: 'limit-exceeded',
+    // Check before copying; an already owned identical load is still admitted afresh below. The engine keeps
+    // maxSubjectBytes at or below maxTotalBinaryBytes, so the binary limit is the total.
+    if (!Number.isSafeInteger(binaryBytes) || binaryBytes > residency.binaryLimit) {
+      throw byteRefusal('GeoSpec retained admission input exceeds its byte limit.', {
+        name: 'maxTotalBinaryBytes',
+        limit: residency.binaryLimit,
+        required: binaryBytes,
+      });
+    }
+    if (request.byteLength > descriptorLimit) {
+      throw byteRefusal('GeoSpec retained admission input exceeds its byte limit.', {
+        name: 'descriptorBytes',
+        limit: descriptorLimit,
+        required: request.byteLength,
       });
     }
     const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
@@ -657,13 +672,18 @@ export const createGeoSpecNativeModelLoader = (
         input.resources.every((bytes, index) => sameBytes(bytes, options.resources[index]!.bytes))
       );
     });
-    if (
-      shared === undefined &&
-      (binaryBytes > residency.binaryLimit - residency.binaryBytes ||
-        request.byteLength > descriptorLimit - residency.descriptorBytes)
-    ) {
-      throw Object.assign(new RangeError('GeoSpec live admission snapshots exceed their retained input byte limit.'), {
-        code: 'limit-exceeded',
+    if (shared === undefined && binaryBytes > residency.binaryLimit - residency.binaryBytes) {
+      throw byteRefusal('GeoSpec live admission snapshots exceed their retained input byte limit.', {
+        name: 'maxTotalBinaryBytes',
+        limit: residency.binaryLimit,
+        required: residency.binaryBytes + binaryBytes,
+      });
+    }
+    if (shared === undefined && request.byteLength > descriptorLimit - residency.descriptorBytes) {
+      throw byteRefusal('GeoSpec live admission snapshots exceed their retained input byte limit.', {
+        name: 'descriptorBytes',
+        limit: descriptorLimit,
+        required: residency.descriptorBytes + request.byteLength,
       });
     }
     const input: ResidentInput = shared ?? {
@@ -939,7 +959,7 @@ export const createGeoSpecNativeModelLoader = (
             code: 'GEOSPEC_MODEL_REGION_UNSUPPORTED',
             message: `No direct ${format.toUpperCase()} export of this Runtime${kernelIds.length === 0 ? '' : ` (${kernelIds.join(', ')})`} declares a region option, so GeoSpec cannot crop '${options.file}' before admission.`,
             suggestion:
-              'Load the whole model; if it exceeds a host limit, provision more resources and report the claim as not decided at this capacity. A region load needs a kernel whose GLB export crops, such as PicoVoxel, and only scopes a separate claim to that region.',
+              'Load the whole model; if it exceeds a host limit, report the claim as not decided at this capacity. A region load needs a kernel whose GLB export crops, such as PicoVoxel, and only scopes a separate claim to that region.',
             details: { file: options.file, format, region, kernelIds },
           }),
         ]);

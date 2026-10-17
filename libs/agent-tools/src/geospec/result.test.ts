@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
-import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
+import { geoSpecFailureCategorySchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
 import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecTestCase } from 'geospec/runner';
@@ -574,19 +574,34 @@ describe('failure categories and suggestions', () => {
   };
   const weakening = /update the model or expected geometry assertion|weaken|relax the tolerance/iu;
   const reducing = /\b(?:coarsen|coarser export|shrink|crop the|smaller part)\b/iu;
-
-  it.each([
+  const limitRows: ReadonlySet<string> = new Set(['analysis-limit', 'resource-limit', 'work-budget']);
+  /** One row of every failure category, each with the next step its suggestion must lead with. */
+  const categoryRows: ReadonlyArray<{
+    readonly code: string;
+    readonly message: string;
+    readonly suggestion?: string;
+    readonly decided?: boolean;
+    readonly category: string;
+    readonly next: RegExp;
+  }> = [
+    {
+      code: 'GEOSPEC_CONNECTED_COMPONENTS_MISMATCH',
+      message: 'The model has 2 spatially disjoint components; the claim declares 1.',
+      decided: true,
+      category: 'geometry',
+      next: /^Change the model so it meets this requirement/u,
+    },
     {
       code: 'GEOSPEC_ANALYSIS_LIMIT',
       message: 'Connectivity scratch 6.1 GB exceeds the 256 MiB analysis limit.',
       category: 'analysis-limit',
-      next: /Provision more resources[^]*not decided at this capacity/u,
+      next: /^Not decided: the analysis limit[^]*No `test_model` argument raises it[^]*not decided\.$/u,
     },
     {
       code: 'GEOSPEC_RESOURCE_LIMIT',
       message: 'Primary geometry 54 MB exceeds the 64 MiB subject limit.',
       category: 'resource-limit',
-      next: /Provision more resources[^]*not decided at this capacity/u,
+      next: /^Not decided: the admission limit[^]*No `test_model` argument raises it[^]*not decided\.$/u,
     },
     {
       code: 'MATCHER_TIMEOUT',
@@ -601,21 +616,51 @@ describe('failure categories and suggestions', () => {
       next: /testTimeout/u,
     },
     {
+      code: 'GEOSPEC_EVIDENCE_UNSUPPORTED',
+      message: 'The subject is outside the qualified continuous wall-thickness domains.',
+      category: 'unsupported-evidence',
+      next: /^Keep the assertion and load evidence that can answer it\./u,
+    },
+    {
+      code: 'GEOSPEC_MODEL_OPTION_INVALID',
+      message:
+        "GeoSpec loadModel workUnitLimit must be a positive integer no greater than this host's maximum of 512000000 (the host can raise it with maximumWorkUnitLimit); received 0.",
+      suggestion: 'Pass a positive integer workUnitLimit within the stated bound, or omit it for the engine default.',
+      category: 'model-load',
+      next: /^Pass a positive integer workUnitLimit/u,
+    },
+    {
       code: 'GEOSPEC_SOME_FUTURE_CODE',
       message: 'A refusal this host has never seen.',
       category: 'infrastructure',
       next: /not a geometry verdict/u,
     },
-  ])(
+  ];
+
+  it.each(categoryRows)(
     'should map $code to its own $category category with a next step that keeps the claim',
-    ({ code, message, category, next }) => {
-      const failure = failureOf(refused({ code, severity: 'error', message }));
+    ({ code, message, suggestion, decided = false, category, next }) => {
+      const diagnostic: GeometryDiagnostic = {
+        code,
+        severity: 'error',
+        message,
+        ...(suggestion === undefined ? {} : { suggestion }),
+      };
+      const failure = failureOf(refused(diagnostic, decided ? 'failed' : 'refused'));
       expect(failure.category).toBe(category);
       expect(failure.suggestion).toMatch(next);
       expect(failure.suggestion).not.toMatch(weakening);
       expect(failure.suggestion).not.toMatch(reducing);
+      // Of the limit rows, only work-budget rows name workUnitLimit; a model-load row may name the option it refuses.
+      expect(limitRows.has(category) && failure.suggestion.includes('workUnitLimit')).toBe(category === 'work-budget');
     },
   );
+
+  it('should give every failure category a row in the category table', () => {
+    expect(new Set(categoryRows.map((row) => row.category))).toStrictEqual(
+      new Set(geoSpecFailureCategorySchema.options),
+    );
+  });
 
   it('should drop an engine suggestion that reduces the model to fit a limit', () => {
     const failure = failureOf(
@@ -627,22 +672,329 @@ describe('failure categories and suggestions', () => {
       }),
     );
     expect(failure.suggestion).not.toMatch(reducing);
-    expect(failure.suggestion).toContain('Provision more resources');
+    expect(failure.suggestion).toMatch(/^Not decided: /u);
+  });
+
+  describe('typed limits', () => {
+    const claimRefusal = (diagnostic: GeometryDiagnostic, capability: string): GeoSpecTestCase => {
+      const test = refused(diagnostic);
+      const [assertion] = test.assertions;
+      return {
+        ...test,
+        assertions: [
+          {
+            ...assertion!,
+            report: { ...assertion!.report!, claim: { claimId: 'claim-1', capability } },
+          },
+        ],
+      };
+    };
+    /** A load that threw before any claim: the collector records the refusal on the test alone. */
+    const admissionRefusal = (diagnostic: GeometryDiagnostic): GeoSpecTestCase => ({
+      suite: ['knot'],
+      name: 'is watertight',
+      status: 'inconclusive',
+      assertions: [],
+      diagnostics: [diagnostic],
+    });
+    const projected = (test: GeoSpecTestCase) => {
+      const output = project(test, 'lamp.geospec.ts');
+      expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+      const [failure] = output.failures;
+      expect(output.tests?.[0]?.limit).toStrictEqual(failure?.limit);
+      return failure!;
+    };
+    const engineSuggestion =
+      'The claim could not be decided within the configured limit. Keep the claim unchanged; the host can construct the engine with a larger limit or work budget.';
+
+    it('should name an analysis refusal by the evidence the engine names, with its numbers and no retry', () => {
+      const failure = projected(
+        claimRefusal(
+          {
+            code: 'GEOSPEC_ANALYSIS_LIMIT',
+            severity: 'error',
+            message:
+              'Continuous evidence needs 35.6 MiB (37290112 bytes); the analysis limit is 32 MiB (33554432 bytes).',
+            suggestion: engineSuggestion,
+            details: { limit: 33_554_432, limitClass: 'analysis', required: 37_290_112, unit: 'bytes' },
+          },
+          'toHaveNoComponentInterference',
+        ),
+      );
+      expect(failure).toMatchObject({
+        category: 'analysis-limit',
+        limit: {
+          kind: 'capacity',
+          name: 'continuousEvidenceBytes',
+          declared: 33_554_432,
+          measured: 37_290_112,
+          unit: 'bytes',
+          operation: 'toHaveNoComponentInterference',
+          subject: 'load-1',
+          retry: null,
+          source: 'engine',
+        },
+        suggestion:
+          'Not decided: toHaveNoComponentInterference needs more than continuousEvidenceBytes (33554432 bytes; this subject 37290112). No `test_model` argument raises it; keep the model and assertion as designed and report the claim as not decided.',
+      });
+      expect(failure.suggestion).not.toMatch(/step|mesh|workUnitLimit|work budget/iu);
+    });
+
+    it('should read a plural "limits" refusal by its code, not its wording', () => {
+      const message = 'The report bundle exceeds the declared binary or retained derived-data limits.';
+      const limited = projected(
+        claimRefusal(
+          {
+            code: 'GEOSPEC_ANALYSIS_LIMIT',
+            severity: 'error',
+            message,
+            details: { limit: 1_048_576, limitClass: 'analysis', required: 2_097_152, unit: 'bytes' },
+          },
+          'toHaveNoComponentInterference',
+        ),
+      );
+      expect(limited).toMatchObject({
+        category: 'analysis-limit',
+        limit: { name: 'reportBundleBytes', declared: 1_048_576, measured: 2_097_152, retry: null },
+      });
+      const gap = projected(refused({ code: 'GEOSPEC_UNSUPPORTED_EVIDENCE', severity: 'error', message }));
+      expect(gap.category).toBe('unsupported-evidence');
+      expect(gap).not.toHaveProperty('limit');
+    });
+
+    it.each([
+      {
+        message:
+          'Primary geometry is 68.7 MiB (72000184 bytes); the configured binary subject limit is 64 MiB (67108864 bytes).',
+        details: { limitClass: 'admission', unit: 'bytes', limit: 67_108_864, required: 72_000_184 },
+        limit: { name: 'maxSubjectBytes', declared: 67_108_864, measured: 72_000_184, unit: 'bytes', source: 'engine' },
+      },
+      {
+        message: 'GeoSpec retained admission input exceeds its byte limit.',
+        details: {
+          limitClass: 'admission',
+          unit: 'bytes',
+          name: 'maxTotalBinaryBytes',
+          limit: 134_217_728,
+          required: 144_000_184,
+          source: 'host',
+        },
+        limit: {
+          name: 'maxTotalBinaryBytes',
+          declared: 134_217_728,
+          measured: 144_000_184,
+          unit: 'bytes',
+          source: 'host',
+        },
+      },
+      {
+        message: 'The decoded mesh has 4000064 triangles; the configured triangle limit is 4000000 triangles.',
+        details: { limitClass: 'admission', unit: 'triangles', limit: 4_000_000, required: 4_000_064 },
+        limit: { name: 'maxTriangles', declared: 4_000_000, measured: 4_000_064, unit: 'triangles', source: 'engine' },
+      },
+      {
+        message:
+          'This admission needs 33 retained subjects; the configured retained subject limit is 32 retained subjects.',
+        details: { limitClass: 'admission', unit: 'retained subjects', limit: 32, required: 33 },
+        limit: { name: 'maxRetainedSubjects', declared: 32, measured: 33, unit: 'retained subjects', source: 'engine' },
+      },
+    ])('should type the refused admission as its configured limit $limit.name', ({ message, details, limit }) => {
+      const failure = projected(
+        admissionRefusal({ code: 'GEOSPEC_RESOURCE_LIMIT', severity: 'error', message, details }),
+      );
+      expect(failure.category).toBe('resource-limit');
+      expect(failure.limit).toStrictEqual({ kind: 'capacity', ...limit, operation: 'ingestSubject', retry: null });
+      expect(failure.suggestion).toBe(
+        `Not decided: ingestSubject needs more than ${limit.name} (${limit.declared} ${limit.unit}; this subject ${limit.measured}). No \`test_model\` argument raises it; keep the model and assertion as designed and report the claim as not decided.`,
+      );
+    });
+
+    it('should fall back to the limit class for a refusal whose message names no evidence', () => {
+      const failure = projected(
+        claimRefusal(
+          {
+            code: 'GEOSPEC_ANALYSIS_LIMIT',
+            severity: 'error',
+            message: 'Refused.',
+            details: { limitClass: 'analysis', unit: 'mesh entries', limit: 256 },
+          },
+          'toBeWatertight',
+        ),
+      );
+      expect(failure.limit).toMatchObject({ name: 'analysisMeshEntries', declared: 256 });
+      expect(failure.limit).not.toHaveProperty('measured');
+      expect(failure.suggestion).toMatch(
+        /^Not decided: toBeWatertight needs more than analysisMeshEntries \(256 mesh entries\)\. /u,
+      );
+    });
+
+    it('should leave a refusal without a unit untyped and name the operation from the matcher kind', () => {
+      const untyped = projected(
+        refused({ code: 'GEOSPEC_ANALYSIS_LIMIT', severity: 'error', message: 'x', details: { limit: 1 } }),
+      );
+      expect(untyped).not.toHaveProperty('limit');
+      const typed = projected(
+        refused({
+          code: 'GEOSPEC_ANALYSIS_LIMIT',
+          severity: 'error',
+          message: 'Material exact scratch needs 1.3 MiB (1327776 bytes); the analysis limit is 64 KiB (65536 bytes).',
+          details: { limit: 65_536, required: 1_327_776, unit: 'bytes', limitClass: 'analysis' },
+        }),
+      );
+      expect(typed.limit).toMatchObject({ name: 'materialExactScratchBytes', operation: 'connectedComponents' });
+      const unnamed = projected(
+        refused({
+          code: 'GEOSPEC_ANALYSIS_LIMIT',
+          severity: 'error',
+          message: '',
+          details: { unit: 'bytes', limitClass: 7 },
+        }),
+      );
+      expect(unnamed.limit).toMatchObject({ name: 'engineBytes' });
+      expect(unnamed.suggestion).toMatch(/^Not decided: connectedComponents needs more than engineBytes\. /u);
+    });
+
+    it.each([
+      {
+        budget: 'below the host maximum',
+        details: { limit: 8_000_000, used: 8_000_001, maximumLimit: 512_000_000 },
+        retry: { parameter: 'workUnitLimit', value: 512_000_000 },
+        next: 'Raise workUnitLimit to 512000000 where this claim',
+      },
+      {
+        budget: 'at the host maximum',
+        details: { limit: 512_000_000, maximumLimit: 512_000_000 },
+        retry: null,
+        next: 'needs more work units than this host allows (512000000 work units).',
+      },
+      {
+        budget: 'used beyond the host maximum',
+        details: { limit: 8_000_000, used: 600_000_000, maximumLimit: 512_000_000 },
+        retry: null,
+        next: 'needs more work units than this host allows (8000000 work units; used 600000000).',
+      },
+    ])('should type a work-budget refusal $budget with its one honest retry', ({ details, retry, next }) => {
+      const failure = projected(
+        claimRefusal(
+          { code: 'MATCHER_TIMEOUT', severity: 'error', message: 'The claim exhausted its work budget.', details },
+          'toHaveConnectedComponents',
+        ),
+      );
+      expect(failure).toMatchObject({
+        category: 'work-budget',
+        limit: {
+          kind: 'budget',
+          name: 'workUnitLimit',
+          declared: details.limit,
+          unit: 'work-units',
+          operation: 'toHaveConnectedComponents',
+          subject: 'load-1',
+          retry,
+          source: 'engine',
+        },
+      });
+      expect(failure.limit?.measured).toBe(details.used);
+      expect(failure.suggestion).toContain(next);
+      expect(failure.suggestion.includes('Raise workUnitLimit')).toBe(retry !== null);
+    });
+
+    it.each([undefined, { limit: 8_000_000 }, { maximumLimit: 512_000_000 }])(
+      'should keep the generic budget advice when the refusal does not report its budget and maximum (%o)',
+      (details) => {
+        const failure = projected(
+          refused({
+            code: 'MATCHER_TIMEOUT',
+            severity: 'error',
+            message: 'Exhausted.',
+            ...(details === undefined ? {} : { details }),
+          }),
+        );
+        expect(failure).not.toHaveProperty('limit');
+        expect(failure.suggestion).toContain('test_model workUnitLimit');
+      },
+    );
+
+    it('should type only the limit rows, from the first diagnostic of their category', () => {
+      const geometry = projected(
+        refused(
+          {
+            code: 'GEOSPEC_CONNECTED_COMPONENTS_MISMATCH',
+            severity: 'error',
+            message: 'Expected 1 component, found 3.',
+            details: { limit: 1, unit: 'bytes' },
+          },
+          'failed',
+        ),
+      );
+      expect(geometry).not.toHaveProperty('limit');
+      const test = admissionRefusal({
+        code: 'GEOSPEC_RESOURCE_LIMIT',
+        severity: 'error',
+        message: 'Untyped admission refusal.',
+      });
+      const failure = projected({
+        ...test,
+        diagnostics: [
+          ...test.diagnostics,
+          {
+            code: 'limit-exceeded',
+            severity: 'error',
+            message: 'The decoded mesh has 9 vertices; the configured vertex limit is 8 vertices.',
+            details: { limitClass: 'admission', unit: 'vertices', limit: 8, required: 9 },
+          },
+        ],
+      });
+      expect(failure.limit).toMatchObject({ name: 'maxVertices', declared: 8, measured: 9 });
+    });
+
+    it('should read an engine refusal inside a claim as an infrastructure failure, not a limit', () => {
+      // The collector records a refusal thrown after admission like any exception inside a claim: on the claim and,
+      // by the same diagnostic, on the test.
+      const message = 'GeoSpec engine handles are exhausted.';
+      const diagnostic: GeometryDiagnostic = {
+        code: 'TEST_FAILED',
+        severity: 'error',
+        message,
+        details: { name: 'ProtocolError', message },
+      };
+      const failure = projected({
+        suite: ['knot'],
+        name: 'is watertight',
+        status: 'failed',
+        assertions: [
+          {
+            kind: 'watertight',
+            subject: {},
+            expected: true,
+            passed: false,
+            loadId: 'load-1',
+            diagnostics: [diagnostic],
+          },
+        ],
+        diagnostics: [diagnostic],
+      });
+      expect(failure.category).toBe('infrastructure');
+      expect(failure.reason).toContain(message);
+      expect(failure).not.toHaveProperty('limit');
+      expect(failure.suggestion).toMatch(/^This is not a geometry verdict\./u);
+      expect(failure.suggestion).not.toMatch(/not decided/iu);
+    });
   });
 
   it('should answer a whole-model claim on a region crop with its scope refusal, not a BRep or limit hint', () => {
+    const suggestion =
+      'Keep the claim and make it on a whole-model load (loadModel without region). If the whole model exceeds a host limit, report the claim as not decided at this capacity. A region load answers only bounding box, volume, surface area, mass and center of mass of that region.';
     const failure = failureOf(
       refused({
         code: 'GEOSPEC_REGION_WHOLE_MODEL_CLAIM',
         severity: 'error',
-        message: "A 'connectedComponents' claim is about the whole model.",
-        suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
+        message:
+          "A 'connectedComponents' claim is about the whole model, and this subject is cropped to the region min [0, 0, 0] max [5, 5, 5] mm, so the claim cannot be decided on it.",
+        suggestion,
       }),
     );
-    expect(failure).toMatchObject({
-      category: 'unsupported-evidence',
-      suggestion: 'Keep the claim and make it on a whole-model load (loadModel without region).',
-    });
+    expect(failure).toMatchObject({ category: 'unsupported-evidence', suggestion });
+    expect(failure.suggestion).not.toMatch(/workUnitLimit|brep|step/iu);
   });
 
   it('should read the shared evidence code as an evidence gap even when its message names a limit', () => {

@@ -49,7 +49,7 @@ export const regionScopeRefusal = (
         severity: 'error',
         message: `A '${kind}' claim is about the whole model, and this subject is cropped to the region min [${region.min.join(', ')}] max [${region.max.join(', ')}] mm, so the claim cannot be decided on it.`,
         suggestion:
-          'Keep the claim and make it on a whole-model load (loadModel without region). If the whole model exceeds a host limit, provision more resources (host admission limits or workUnitLimit) and report the claim as not decided at this capacity. A region load answers only bounding box, volume, surface area, mass and center of mass of that region.',
+          'Keep the claim and make it on a whole-model load (loadModel without region). If the whole model exceeds a host limit, report the claim as not decided at this capacity. A region load answers only bounding box, volume, surface area, mass and center of mass of that region.',
         details: {
           kind,
           region: { min: [...region.min], max: [...region.max] },

@@ -570,6 +570,17 @@ describe('the mounted /mcp route', () => {
     'keeps six screenshots and an oversized GeoSpec report readable outside MCP payloads (record artifact: %s)',
     async (alreadyRetained) => {
       const views = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+      const compactLimit = {
+        kind: 'capacity',
+        name: 'continuousEvidenceBytes',
+        declared: 33_554_432,
+        measured: 37_290_112,
+        unit: 'bytes',
+        operation: 'toHaveNoComponentInterference',
+        subject: 'run:load:5',
+        retry: null,
+        source: 'engine',
+      } as const;
       const recordArtifact = {
         path: '.tau/artifacts/call__geospec-json/result.json',
         mimeType: 'application/json',
@@ -610,6 +621,8 @@ describe('the mounted /mcp route', () => {
                     requirement: 'Mesh is sound',
                     reason: 'Failed',
                     suggestion: 'Inspect details',
+                    category: 'analysis-limit',
+                    limit: compactLimit,
                     targetFile: 'main.cs',
                     diagnostics: [
                       {
@@ -661,7 +674,7 @@ describe('the mounted /mcp route', () => {
           omittedTests: 1,
           omittedLineage: 0,
         });
-        expect(summary.failures[0]?.id).toBe('large-1');
+        expect(summary.failures[0]).toMatchObject({ id: 'large-1', category: 'analysis-limit', limit: compactLimit });
         expect(JSON.stringify(tests).length).toBeLessThan(128 * 1024);
         expect(summary.fullResult).toBeDefined();
         if (alreadyRetained) {

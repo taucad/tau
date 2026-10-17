@@ -1,3 +1,4 @@
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
@@ -15,6 +16,7 @@ import {
   getCollector,
   installCollector,
 } from '#runner/collector.js';
+import { runGeoSpecModule } from '#runner/index.js';
 
 const failure: GeometryDiagnostic = { code: 'FIXTURE_FAIL', severity: 'error', message: 'nope' };
 
@@ -49,6 +51,37 @@ const createNativeFixture = (status = 'passed', diagnostics: readonly GeometryDi
 };
 
 const createTestCollector = () => createCollector({ nativeAssertions: createNativeFixture().options });
+
+/** The GeoSpec files a module run reads. */
+class SpecFileSystem implements VmFileSystem {
+  private readonly files = new Map<string, string>();
+
+  public setText(path: string, content: string): void {
+    this.files.set(path, content);
+  }
+
+  public async exists(path: string): Promise<boolean> {
+    return this.files.has(path);
+  }
+
+  public async readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  public async readFile(path: string, encoding: 'utf8'): Promise<string>;
+  public async readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    const content = this.files.get(path);
+    if (content === undefined) {
+      throw new Error(`ENOENT: ${path}`);
+    }
+    return encoding === 'utf8' ? content : new TextEncoder().encode(content);
+  }
+
+  public async writeFile(path: string, content: string): Promise<void> {
+    this.files.set(path, content);
+  }
+
+  public async ensureDir(): Promise<void> {
+    return undefined;
+  }
+}
 
 describe('compiled report outcome accounting', () => {
   it.each([
@@ -335,6 +368,196 @@ describe('suite and test tree', () => {
     await completion;
 
     expect(collector.tests[0]?.status).toBe('passed');
+  });
+});
+
+describe('refused admissions', () => {
+  const capacity = {
+    code: 'GEOSPEC_RESOURCE_LIMIT',
+    limitClass: 'admission',
+    unit: 'bytes',
+    limit: 67_108_864,
+    required: 72_000_184,
+  };
+  const engineRefusal = Object.assign(
+    new Error(
+      'Primary geometry is 68.7 MiB (72000184 bytes); the configured binary subject limit is 64 MiB (67108864 bytes).',
+    ),
+    { name: 'ProtocolError', code: 'limit-exceeded', capacity },
+  );
+  const hostRefusal = Object.assign(new RangeError('GeoSpec retained admission input exceeds its byte limit.'), {
+    code: 'limit-exceeded',
+    capacity: { ...capacity, name: 'maxTotalBinaryBytes', limit: 134_217_728, required: 144_000_184, source: 'host' },
+  });
+
+  it.each([
+    {
+      by: 'the engine',
+      error: engineRefusal,
+      diagnostic: {
+        code: 'GEOSPEC_RESOURCE_LIMIT',
+        severity: 'error',
+        message: engineRefusal.message,
+        details: { limitClass: 'admission', unit: 'bytes', limit: 67_108_864, required: 72_000_184 },
+      },
+    },
+    {
+      by: 'the host',
+      error: hostRefusal,
+      diagnostic: {
+        code: 'GEOSPEC_RESOURCE_LIMIT',
+        severity: 'error',
+        message: hostRefusal.message,
+        details: {
+          limitClass: 'admission',
+          unit: 'bytes',
+          name: 'maxTotalBinaryBytes',
+          limit: 134_217_728,
+          required: 144_000_184,
+          source: 'host',
+        },
+      },
+    },
+    {
+      by: 'a transport without its numbers',
+      error: { code: 'limit-exceeded' },
+      diagnostic: { code: 'GEOSPEC_RESOURCE_LIMIT', severity: 'error', message: 'GeoSpec refused to admit this load.' },
+    },
+  ])('should record a load refused by $by as an inconclusive test with its capacity', async ({ error, diagnostic }) => {
+    const collector = createTestCollector();
+    collector.it('knot', async () => {
+      await Promise.resolve();
+      // oxlint-disable-next-line typescript/only-throw-error -- Refusals can arrive as plain structured data.
+      throw error;
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe('inconclusive');
+    expect(collector.tests[0]?.diagnostics).toStrictEqual([diagnostic]);
+  });
+
+  it.each([
+    { thrown: 'a refused load', error: engineRefusal, status: 'inconclusive', code: 'GEOSPEC_RESOURCE_LIMIT' },
+    { thrown: 'any other error', error: new Error('definition exploded'), status: 'failed', code: 'TEST_FAILED' },
+  ])('should record $thrown in a describe body as a $status suite', async ({ error, status, code }) => {
+    const collector = createTestCollector();
+    collector.describe('async knots', async () => {
+      await Promise.resolve();
+      throw error;
+    });
+    collector.describe('knots', () => {
+      throw error;
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests.map((entry) => [entry.name, entry.status, entry.diagnostics[0]?.code])).toStrictEqual([
+      ['knots', status, code],
+      ['async knots', status, code],
+    ]);
+  });
+
+  it.each([
+    {
+      refusal: 'an engine ProtocolError',
+      error: Object.assign(new Error('GeoSpec engine handles are exhausted.'), {
+        name: 'ProtocolError',
+        code: 'limit-exceeded',
+      }),
+      name: 'ProtocolError',
+      message: 'GeoSpec engine handles are exhausted.',
+    },
+    {
+      refusal: 'a bare structured refusal',
+      error: { code: 'limit-exceeded' },
+      name: 'Error',
+      message: 'GeoSpec ran out of room for this claim.',
+    },
+  ])('should fail a claim the engine refuses while evaluating it ($refusal), never as a limit', async (refused) => {
+    const engine: GeoSpecAssertionClientOptions['engine'] = {
+      processRequest: (input) => input,
+      evaluateClaim: () => {
+        // oxlint-disable-next-line typescript/only-throw-error -- Refusals can arrive as plain structured data.
+        throw refused.error;
+      },
+    };
+    const options: GeoSpecAssertionClientOptions = { engine, workUnitLimit: 1000 };
+    const subject = bindGeoSpecSubject({
+      engine,
+      client: createGeoSpecAssertionClient(options),
+      identity: { subjectHash: 'a'.repeat(64) },
+      isLive: () => true,
+    });
+    const collector = createCollector({ nativeAssertions: options });
+    collector.it('handles', () => {
+      collector.expectGeo(subject).toBeWatertight();
+    });
+    await collector.waitForCompletion();
+    const { name, message } = refused;
+    const diagnostic = { code: 'TEST_FAILED', severity: 'error', message, details: { name, message } };
+    const [test] = collector.tests;
+    expect(test).toMatchObject({
+      status: 'failed',
+      assertions: [{ passed: false, diagnostics: [diagnostic] }],
+      diagnostics: [diagnostic],
+    });
+    // The test repeats its claim's own diagnostic, so a projection reads one infrastructure failure.
+    expect(test?.diagnostics[0]).toBe(test?.assertions[0]?.diagnostics?.[0]);
+  });
+
+  it('should leave passed claims undecided as a whole when a later load is refused', async () => {
+    const fixture = createNativeFixture();
+    const collector = createCollector({ nativeAssertions: fixture.options });
+    collector.it('passed then refused', () => {
+      collector.expectGeo(fixture.subject).toBeWatertight();
+      throw hostRefusal;
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe('inconclusive');
+  });
+
+  it('should keep a test failed when a claim was decided false or could not run beside a refused load', async () => {
+    const fixture = createNativeFixture('failed', [failure]);
+    const collector = createCollector({ nativeAssertions: fixture.options });
+    collector.it('decided then refused', () => {
+      try {
+        collector.expectGeo(fixture.subject).toBeWatertight();
+      } catch {
+        /* The decided claim is still recorded. */
+      }
+      throw engineRefusal;
+    });
+    collector.it('unevaluated then refused', () => {
+      try {
+        collector.expectGeo('subject').toHaveVolume({ value: 1 });
+      } catch {
+        /* The unevaluated claim is still recorded. */
+      }
+      throw engineRefusal;
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests.map((entry) => entry.status)).toStrictEqual(['failed', 'failed']);
+  });
+
+  it('should count a refused load as inconclusive, never failed, in the run accounting', async () => {
+    const filesystem = new SpecFileSystem();
+    filesystem.setText(
+      'knot.geospec.ts',
+      `import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('is watertight', async () => { await loadModel({ file: 'knot.glb' }); });`,
+    );
+    const result = await runGeoSpecModule({
+      filesystem,
+      entryPath: 'knot.geospec.ts',
+      nativeAssertions: createNativeFixture().options,
+      nativeModelLoader: async () => {
+        throw engineRefusal;
+      },
+    });
+    expect(result).toMatchObject({
+      tests: [
+        { status: 'inconclusive', diagnostics: [{ code: 'GEOSPEC_RESOURCE_LIMIT', details: { limit: 67_108_864 } }] },
+      ],
+      accounting: { completed: 1, passed: 0, failed: 0, inconclusive: 1 },
+      lineage: { loads: [{ status: 'failed', error: engineRefusal.message }] },
+    });
   });
 });
 

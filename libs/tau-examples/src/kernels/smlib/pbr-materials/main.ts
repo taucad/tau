@@ -1,3 +1,4 @@
+/* oxlint-disable eslint/new-cap -- smlibwasm's shape constructors are functions (Box, Pos), as in build123d. */
 import {
   Align,
   Box,
@@ -137,7 +138,7 @@ export default function main(p = defaultParams): Model {
   const columns = [-s, 0, s];
   const rows = [s / 2, -s / 2];
   const at = (column: number, row: number) =>
-    Pos(columns[column]!, rows[row]!, top);
+    Pos(columns[column], rows[row], top);
 
   let plinth = Box(s * 3 + 10, s * 2 + 10, top, { align: standing });
   plinth = plinth.fillet(plinth.edges().parallelTo(Z), 6);

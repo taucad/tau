@@ -74,13 +74,13 @@ export const uiSsrOptions = {
 } as const satisfies UserConfig['ssr'];
 
 /**
- * Dependency-optimizer policy, shared with `desktop/vite.config.ts`.
+ * Dependency-optimizer policy, mirrored by `desktop/vite.config.ts`.
  *
  * `@classcad/smlibwasm` (loaded by `@taucad/smlib` in the runtime worker) finds
  * its WebAssembly with `new URL('smlibwasm.wasm', import.meta.url)`; pre-bundling
  * moves the module into `.vite/deps` and the dev server would then miss the file.
  */
-export const uiOptimizeDepsOptions = {
+const uiOptimizeDepsOptions = {
   exclude: ['@classcad/smlibwasm'],
 } as const satisfies UserConfig['optimizeDeps'];
 

@@ -12,13 +12,7 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  * plugin beats duplicating 40 lines that would then drift.
  */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
-import {
-  createUiReactCompilerPlugin,
-  createUiSourceAliasPlugin,
-  uiOptimizeDepsOptions,
-  uiResolveAlias,
-  uiSsrOptions,
-} from '../vite.config';
+import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
@@ -74,7 +68,8 @@ export default defineConfig({
   },
   resolve: { alias: [...uiResolveAlias] },
   ssr: uiSsrOptions,
-  optimizeDeps: { exclude: [...uiOptimizeDepsOptions.exclude] },
+  // Mirrors `uiOptimizeDepsOptions` in the web config: smlibwasm resolves its WASM from import.meta.url.
+  optimizeDeps: { exclude: ['@classcad/smlibwasm'] },
   server: {
     // 3000 is the web dev server; 3001 keeps both runnable side by side.
     port: 3001,

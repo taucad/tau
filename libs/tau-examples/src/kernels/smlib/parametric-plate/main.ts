@@ -1,3 +1,4 @@
+/* oxlint-disable eslint/new-cap -- smlibwasm's shape constructors are functions (Box, Pos), as in build123d. */
 import { Align, Box, Cylinder, GridLocations, Z } from '@classcad/smlibwasm';
 import type { ShapeConfig } from '@taucad/smlib/model';
 

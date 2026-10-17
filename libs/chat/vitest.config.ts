@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -19,5 +20,19 @@ export default defineConfig({
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec}.ts'],
     },
+    projects: [
+      { extends: true, test: { name: 'chat' } },
+      {
+        // A published bundle builds these schemas with the Zod its consumer resolves, which may be newer than the
+        // workspace's: the provider wire contract must hold under both.
+        extends: true,
+        test: {
+          name: 'chat (newest zod)',
+          include: ['src/schemas/provider-tool-schema-compat.test.ts'],
+          typecheck: { enabled: false },
+        },
+        resolve: { alias: [{ find: /^zod$/u, replacement: fileURLToPath(import.meta.resolve('zod-latest')) }] },
+      },
+    ],
   },
 });

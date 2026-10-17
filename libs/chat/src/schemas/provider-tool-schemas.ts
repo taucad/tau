@@ -88,13 +88,15 @@ const normalizeTupleItems = (value: unknown): void => {
   if (Array.isArray(items)) {
     const tupleItems: unknown[] = items;
     const [first] = tupleItems;
+    // Zod 4.5 and later close a tuple with `additionalItems: false` (4.4 leaves it out); either way it has a fixed length.
     if (
       first === undefined ||
-      object['additionalItems'] !== undefined ||
+      (object['additionalItems'] !== undefined && object['additionalItems'] !== false) ||
       tupleItems.some((item) => JSON.stringify(item) !== JSON.stringify(first))
     ) {
       throw new Error('Provider tool schema has a tuple that cannot use one items schema');
     }
+    delete object['additionalItems'];
     object['items'] = first;
     object['minItems'] = tupleItems.length;
     object['maxItems'] = tupleItems.length;

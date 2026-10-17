@@ -121,7 +121,8 @@
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
     "@types/js-yaml": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "zod-latest": "npm:zod@4.6.7"
   },
   "imports": {
     "#*.js": "./src/*.ts",

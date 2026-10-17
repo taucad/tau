@@ -266,6 +266,19 @@ describe('provider-facing tool schema compatibility', () => {
     }
   });
 
+  it('should keep a tuple Zod 4.5 and later close with additionalItems false as a fixed array', () => {
+    // A consumer whose install resolves a newer Zod builds these schemas with it; `.meta` stands in for its emit here.
+    const closed = z.object({
+      direction: z.tuple([z.number(), z.number(), z.number()]).meta({ additionalItems: false }),
+    });
+
+    expect(toProviderToolJsonSchema(closed)).toStrictEqual({
+      type: 'object',
+      properties: { direction: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 } },
+      required: ['direction'],
+    });
+  });
+
   it('should refuse tuples that cannot preserve their constraints as homogeneous fixed arrays', () => {
     for (const schema of [z.tuple([z.number(), z.string()]), z.tuple([z.number()]).rest(z.number())]) {
       expect(() => toProviderToolJsonSchema(schema)).toThrow(

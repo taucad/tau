@@ -13,6 +13,7 @@ import type * as Monaco from 'monaco-editor';
 import {
   createWorkspaceContentBinding,
   isRecordingEditorConflict,
+  maxBackgroundModels,
   MonacoModelService,
 } from '#lib/monaco-model-service.js';
 import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
@@ -578,49 +579,58 @@ describe('MonacoModelService', () => {
       expect(service.isApplyingFilesystemContent('background.ts')).toBe(false);
     });
 
-    it('should create a model for machine-sourced .scad files', () => {
+    /* D-UI-03 (B-17): a write updates a model an editor already has; it never
+     * creates one. A 20 MB STEP export saved to the project used to become a
+     * model string plus a base copy, about 3× its size, for a file nobody opened. */
+    it.each([
+      ['main.scad', 'cube([10,10,10]);', 'machine'],
+      ['main.kcl', 'fn main() {}', 'machine'],
+      ['test.json', '{"key": "value"}', 'machine'],
+      ['src/new.ts', 'export const x = 1;', 'user'],
+    ] as const)('should NOT create a model for a %s write nobody has opened (%s)', (path, text, source) => {
+      contentService._handler?.({ type: 'written', path, data: new TextEncoder().encode(text), source });
+
+      expect(monaco.editor.createModel).not.toHaveBeenCalled();
+      expect(service.getDiagnostics().backgroundCount).toBe(0);
+    });
+
+    it('should NOT create a model for a batch write of unopened files', () => {
+      contentService.peek.mockReturnValue(new TextEncoder().encode('cube(1);'));
+      contentService._handler?.({ type: 'batchWritten', paths: ['a.scad', 'b.scad'], source: 'machine' });
+
+      expect(monaco.editor.createModel).not.toHaveBeenCalled();
+    });
+
+    it('should update a background model when the file is written', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('cube(1);'));
+      await service.acquireModel('main.scad');
+      service.releaseModel('main.scad');
+
       contentService._handler?.({
         type: 'written',
         path: 'main.scad',
-        data: new TextEncoder().encode('cube([10,10,10]);'),
+        data: new TextEncoder().encode('cube(2);'),
         source: 'machine',
       });
 
-      expect(monaco.editor.createModel).toHaveBeenCalledWith(
-        'cube([10,10,10]);',
-        'openscad',
-        expect.objectContaining({ path: '/main.scad' }),
-      );
+      expect(models.get('file:///main.scad')?.setValue).toHaveBeenCalledWith('cube(2);');
     });
 
-    it('should create a model for machine-sourced .kcl files', () => {
-      contentService._handler?.({
-        type: 'written',
-        path: 'main.kcl',
-        data: new TextEncoder().encode('fn main() {}'),
-        source: 'machine',
-      });
+    it('should evict the least recently used clean background models beyond the cap (B-17)', async () => {
+      contentService.resolve.mockImplementation(async () => textResult('cube(1);'));
+      await service.acquireModel('held.scad');
+      for (let index = 0; index < 30; index += 1) {
+        // eslint-disable-next-line no-await-in-loop -- each open settles before the next, as a person opens files
+        await service.acquireModel(`file${String(index)}.scad`);
+        service.releaseModel(`file${String(index)}.scad`);
+      }
 
-      expect(monaco.editor.createModel).toHaveBeenCalledWith(
-        'fn main() {}',
-        'kcl',
-        expect.objectContaining({ path: '/main.kcl' }),
-      );
-    });
-
-    it('should create a model for machine-sourced .json files', () => {
-      contentService._handler?.({
-        type: 'written',
-        path: 'test.json',
-        data: new TextEncoder().encode('{"key": "value"}'),
-        source: 'machine',
-      });
-
-      expect(monaco.editor.createModel).toHaveBeenCalledWith(
-        '{"key": "value"}',
-        'json',
-        expect.objectContaining({ path: '/test.json' }),
-      );
+      const diagnostics = service.getDiagnostics();
+      expect(diagnostics.backgroundCount).toBeLessThanOrEqual(maxBackgroundModels);
+      expect(diagnostics.editorHeldCount).toBe(1);
+      expect(models.get('file:///held.scad')?.dispose).not.toHaveBeenCalled();
+      expect(models.get('file:///file0.scad')?.dispose).toHaveBeenCalled();
+      expect(models.get('file:///file29.scad')?.dispose).not.toHaveBeenCalled();
     });
 
     it('should NOT create a model for machine-sourced files with unknown extensions', () => {

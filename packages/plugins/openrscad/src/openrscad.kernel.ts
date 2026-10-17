@@ -42,6 +42,14 @@ const maxIncludeDepth = 50;
 const useIncludePattern = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
 const importedAssetPattern = /\b(?:import|surface)\s*\(\s*(?:file\s*=\s*)?"([^"]+)"/g;
 type OpenRscadBackend = typeof OpenRscadModule;
+
+/**
+ * Resident mesh bytes above which the engine's geometry cache is dropped before the next evaluation. The engine's
+ * own cap is 256 MiB, and parameter edits of one model add every new parameter set's geometry to WASM memory that
+ * never shrinks, so the kernel keeps it to what a few warm edits of a large model need.
+ */
+const geometryCacheByteCap = 64 * 1024 * 1024;
+
 type OpenRscadContext = {
   backend: OpenRscadBackend;
   entryPath: string | undefined;
@@ -638,7 +646,8 @@ export const createOpenrscadKernel = ({
 
     async evaluate({ entryPath, parameters }, { filesystem, logger, tracer }, context) {
       const normalizedEntryPath = assertRootedPath(entryPath);
-      if (context.entryPath !== normalizedEntryPath) {
+      const { bytes: cachedBytes } = await context.backend.cacheStats();
+      if (context.entryPath !== normalizedEntryPath || cachedBytes > geometryCacheByteCap) {
         await context.backend.clearCache();
         context.entryPath = normalizedEntryPath;
       }

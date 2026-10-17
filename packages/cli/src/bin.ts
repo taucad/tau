@@ -8,6 +8,16 @@ import type { ArgsDef, CommandContext, CommandDef, SubCommandsDef } from 'citty'
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../package.json' with { type: 'json' };
 
+import { installedVersion } from '#installed-version.js';
+
+/*
+ * The version of the package this file is installed in, not the copy inlined at build time: pkg.pr.new packs a
+ * preview after its build and rewrites its manifest to `0.0.0-preview-<sha>`, and the agent plugin runs a `tau`
+ * only when `--version` matches its own manifest. The inlined copy stands where there is no installed manifest,
+ * as for `src/bin.ts` run from a checkout, whose inlined manifest is the checkout's own.
+ */
+const version = installedVersion(import.meta.url, { name: packageJson.name, version: packageJson.version });
+
 /*
  * `meta` is eager while `args` and `run` stay lazy. citty's usage renderer resolves
  * every subcommand to read its `meta`, so registering a subcommand as a thunk imports
@@ -105,7 +115,7 @@ const subCommands: Record<string, CommandDef> = {
 const main = defineCommand({
   meta: {
     name: 'tau',
-    version: packageJson.version,
+    version,
     description: 'CLI for Tau — check, test, export and serve CAD projects from the terminal',
   },
   subCommands,
@@ -150,7 +160,7 @@ const run = async (): Promise<void> => {
   }
 
   if (rawArgs.length === 1 && (rawArgs[0] === '--version' || rawArgs[0] === '-v')) {
-    await writeStdout(`${packageJson.version}\n`);
+    await writeStdout(`${version}\n`);
     return;
   }
 

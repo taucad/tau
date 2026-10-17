@@ -34,6 +34,8 @@ const isMachine = (value: unknown): boolean =>
 const harness = (options?: {
   readonly budget?: number;
   readonly closeNever?: boolean;
+  /** The producer flush refuses, as it does while an editor's conflict is being recorded. */
+  readonly flushRefuses?: boolean;
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 }) => {
   const started: string[] = [];
@@ -54,7 +56,11 @@ const harness = (options?: {
   const projectSession = projectSessionMachine.provide({
     actors: {
       cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async () => undefined),
-      flushProducers: fromSafeAsync<void, { projectId: string }>(async () => undefined),
+      flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
+        if (options?.flushRefuses === true) {
+          throw new Error('An editor conflict is being recorded');
+        }
+      }),
       flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
         if (options?.closeNever === true) {
           await new Promise<void>(() => {
@@ -229,6 +235,85 @@ describe('sessionsMachine', async () => {
     expect(refusal?.projectId).toBe('projNinth');
     expect(refusal?.suggestions).toHaveLength(browserLiveProjectBudget);
     expect(started).not.toContain('projNinth');
+    actor.stop();
+  });
+
+  it.each([
+    { label: 'dirty', facts: { dirty: true } },
+    { label: 'unpushed', facts: { pushed: false } },
+  ])(
+    'closes the $label project without asking when another opens on a one-project device (B-08)',
+    async ({ facts }) => {
+      const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget });
+      actor.send({ type: 'open', projectId: 'projFirst' });
+      await settle();
+      report(actor, 'projFirst', facts);
+
+      actor.send({ type: 'open', projectId: 'projSecond' });
+      await settle();
+
+      /* Opening the second project is the only way forward from the first, so it
+       * takes the dialog's one answer: the person's own close, flush included (I25). */
+      expect(emitted.find((event) => event.type === 'budgetRefused')).toBeUndefined();
+      expect(stopped).toEqual(['projFirst']);
+      expect(started).toEqual(['projFirst', 'projSecond']);
+      expect(actor.getSnapshot().context.closed['projFirst']?.reason).toBe('user');
+      expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projSecond']);
+      actor.stop();
+    },
+  );
+
+  it('still asks before stopping a running project on a one-project device (I24)', async () => {
+    const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget });
+    actor.send({ type: 'open', projectId: 'projFirst' });
+    await settle();
+    report(actor, 'projFirst', { runs: 1 });
+
+    actor.send({ type: 'open', projectId: 'projSecond' });
+    await settle();
+
+    expect(emitted.find((event) => event.type === 'budgetRefused')).toMatchObject({
+      projectId: 'projSecond',
+      suggestions: ['projFirst'],
+    });
+    expect(stopped).toEqual([]);
+    expect(started).toEqual(['projFirst']);
+    actor.stop();
+  });
+
+  it('keeps refusing a ninth open in the browser when every project is dirty (desktop budget unchanged)', async () => {
+    const { actor, emitted, started } = harness();
+    for (let index = 0; index < browserLiveProjectBudget; index += 1) {
+      const projectId = `proj${index}`;
+      actor.send({ type: 'open', projectId });
+      await settle();
+      report(actor, projectId, { dirty: true });
+    }
+
+    actor.send({ type: 'open', projectId: 'projNinth' });
+    await settle();
+
+    expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projNinth');
+    expect(started).not.toContain('projNinth');
+    actor.stop();
+  });
+
+  it('asks the person when the project closed to make room refuses to close (R4)', async () => {
+    const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget, flushRefuses: true });
+    await openIdle(actor, 'projFirst');
+
+    actor.send({ type: 'open', projectId: 'projSecond' });
+    await settle();
+
+    /* The close came back live with its reason recorded; the open is not left
+     * waiting on a slot that will never free. */
+    expect(stopped).toEqual([]);
+    expect(started).toEqual(['projFirst']);
+    expect(emitted.find((event) => event.type === 'budgetRefused')).toMatchObject({
+      projectId: 'projSecond',
+      suggestions: ['projFirst'],
+    });
+    expect(actor.getSnapshot().context.pendingOpen).toBe('projSecond');
     actor.stop();
   });
 

@@ -49,14 +49,18 @@ const engineResidency = new WeakMap<GeoSpecNativeModelEngine, Residency>();
 // The existing native JSON codec profile limits each request to 16 MiB. Retained descriptors
 // use that same byte ceiling in aggregate, separately from retained binary input bytes.
 const descriptorLimit = 16 * 1024 * 1024;
-// The engine's retained-subject refusal carries only the protocol code and this message, no
-// structured detail, so both are matched. retained-subject-eviction.test.ts drives the real engine
-// past its retained count, so a reworded message fails that test rather than a run.
+// The engine's retained-subject refusal is a `limit-exceeded` protocol error whose `capacity`
+// counts retained subjects. retained-subject-eviction.test.ts drives the real engine past its
+// retained count, so a change to that shape fails that test rather than a run.
 const countRefusal = (error: unknown): boolean =>
   error instanceof Error &&
   'code' in error &&
   error.code === 'limit-exceeded' &&
-  error.message === 'Engine exceeds the configured retained subject count.';
+  'capacity' in error &&
+  typeof error.capacity === 'object' &&
+  error.capacity !== null &&
+  'unit' in error.capacity &&
+  error.capacity.unit === 'retained subjects';
 
 const residencyFor = (engine: GeoSpecNativeModelEngine): Residency => {
   const cached = engineResidency.get(engine);

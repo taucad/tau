@@ -81,7 +81,7 @@ export type MinimumDistanceResult =
   | { readonly status: 'complete'; readonly fact: MinimumDistanceFact }
   | {
       readonly status: 'refused';
-      readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit';
+      readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
       readonly message: string;
     }
   | {
@@ -207,6 +207,12 @@ const minimumDistanceOutcome = (
   }
   if (code === 'MATCHER_TIMEOUT') {
     return { status: 'refused', code: 'work-limit', message };
+  }
+  if (code === 'GEOSPEC_ANALYSIS_LIMIT') {
+    return { status: 'refused', code: 'analysis-limit', message };
+  }
+  if (code === 'GEOSPEC_RESOURCE_LIMIT') {
+    return { status: 'refused', code: 'resource-limit', message };
   }
   if (code === 'GEOSPEC_UNSUPPORTED_EVIDENCE' || code === 'GEOSPEC_EVIDENCE_UNSUPPORTED') {
     return { status: 'refused', code: 'unsupported-evidence', message };

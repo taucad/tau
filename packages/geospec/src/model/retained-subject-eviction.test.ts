@@ -58,9 +58,9 @@ afterEach(() => {
 });
 
 describe('retained subject eviction against the real engine', () => {
-  // The loader recognizes the engine's retained-subject refusal by its protocol code and exact
-  // message, because the engine carries no structured detail for it. This test admits more
-  // subjects than the engine retains, so an engine rewording fails here instead of in a run.
+  // The loader recognizes the engine's retained-subject refusal by its protocol code and the
+  // capacity it counts. This test admits more subjects than the engine retains, so a change to
+  // that refusal fails here instead of in a run.
   it('should evict and re-admit when a scope admits more subjects than the engine retains', async () => {
     const engine = new Engine();
     engines.push(engine);
@@ -78,7 +78,7 @@ describe('retained subject eviction against the real engine', () => {
     }
   });
 
-  it('should refuse past the retained count with the exact protocol code and message the loader keys on', () => {
+  it('should refuse past the retained count with the protocol code and capacity the loader keys on', () => {
     const engine = new Engine();
     engines.push(engine);
     const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
@@ -106,7 +106,13 @@ describe('retained subject eviction against the real engine', () => {
     expect(() => ingest(32)).toThrow(
       expect.objectContaining({
         code: 'limit-exceeded',
-        message: 'Engine exceeds the configured retained subject count.',
+        capacity: {
+          code: 'GEOSPEC_RESOURCE_LIMIT',
+          limitClass: 'admission',
+          unit: 'retained subjects',
+          limit: 32,
+          required: 33,
+        },
       }),
     );
   });

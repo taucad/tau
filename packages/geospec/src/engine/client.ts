@@ -295,7 +295,12 @@ export const resolveGeoSpecNativeWorkUnitLimit = (engine: GeoSpecNativeEngine, o
           entry['registryVersion'] === nativeRegistryVersion,
       ),
   );
-  if (configuration['configurationProfile'] !== 'geospec-entry-config-v1') {
+  const { configurationProfile } = configuration;
+  // The entry profile, or a host profile the engine derives from host-selected limits.
+  if (
+    configurationProfile !== 'geospec-entry-config-v1' &&
+    !(typeof configurationProfile === 'string' && configurationProfile.startsWith('geospec-host-config-v1-'))
+  ) {
     throw new TypeError('GeoSpec engine returned an unsupported configuration profile.');
   }
   const defaultWorkUnitLimit = configuration['defaultWorkUnitBudget'];

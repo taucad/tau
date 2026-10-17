@@ -94,7 +94,7 @@
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",
-    "geospec-engine": "^0.1.0-next.19",
+    "geospec-engine": "^0.2.0",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.0.0"
   },

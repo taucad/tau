@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import {
@@ -91,6 +91,81 @@ const createBodyManifest = (bodyId: string, faceIds: readonly string[]): Geometr
     ),
   },
 });
+
+/** A closed, fully indexed sphere of `20 × (detail + 1)²` triangles. */
+const indexedSphereGeometry = (detail: number): THREE.BufferGeometry => {
+  const geometry = new THREE.IcosahedronGeometry(1, detail);
+  geometry.deleteAttribute('normal');
+  geometry.deleteAttribute('uv');
+  return mergeVertices(geometry);
+};
+
+type RetainedFootprint = Readonly<{ objects: number; typedBytes: number }>;
+
+/**
+ * Walks everything a section source keeps alive except the scene it points at (meshes, materials, the root),
+ * counting JS objects and typed-array bytes, so the footprint of the topology alone is measurable.
+ */
+const measureRetainedFootprint = (root: unknown): RetainedFootprint => {
+  const seen = new Set<object>();
+  let objects = 0;
+  let typedBytes = 0;
+  const skippedKeys = new Set(['mesh', 'root', 'owner', 'localToSource']);
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== 'object' || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    if (ArrayBuffer.isView(value)) {
+      typedBytes += value.byteLength;
+      return;
+    }
+    if (value instanceof THREE.Material || value instanceof THREE.Object3D) {
+      return;
+    }
+    objects += 1;
+    if (value instanceof Map) {
+      for (const [key, entry] of value) {
+        visit(key);
+        visit(entry);
+      }
+      return;
+    }
+    if (value instanceof Set) {
+      for (const entry of value) {
+        visit(entry);
+      }
+      return;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      if (!skippedKeys.has(key)) {
+        visit(entry);
+      }
+    }
+  };
+  visit(root);
+  return { objects, typedBytes };
+};
+
+/**
+ * Counts `THREE.Vector3` constructions while `run` executes. The constructor's first write, `this.x = x`, meets
+ * a prototype setter that counts it and then defines the ordinary own property, so vectors behave as usual.
+ */
+const countVector3Constructions = <T>(run: () => T): Readonly<{ result: T; constructions: number }> => {
+  let constructions = 0;
+  Object.defineProperty(THREE.Vector3.prototype, 'x', {
+    configurable: true,
+    set(this: THREE.Vector3, value: number) {
+      constructions += 1;
+      Object.defineProperty(this, 'x', { value, writable: true, enumerable: true, configurable: true });
+    },
+  });
+  try {
+    return { result: run(), constructions };
+  } finally {
+    Reflect.deleteProperty(THREE.Vector3.prototype, 'x');
+  }
+};
 
 describe('section surface topology', () => {
   it('should update the whole root once when registering many surfaces', async () => {
@@ -866,6 +941,52 @@ describe('section surface topology', () => {
       trueCutComponentCount: 2,
       cappedTrueCutComponentCount: 2,
       unresolvedTrueCutEdgeCount: 0,
+    });
+  });
+  describe('retained memory', () => {
+    const detail = 30;
+    const triangleCount = 20 * (detail + 1) ** 2;
+
+    it('should keep the topology of a closed surface in typed arrays rather than per-triangle objects', () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(indexedSphereGeometry(detail), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(visible?.source.topology).toMatchObject({ status: 'ready' });
+
+      const footprint = measureRetainedFootprint(visible!.source);
+
+      // A struct-of-arrays topology keeps a fixed number of containers whatever the triangle count.
+      expect(footprint.objects).toBeLessThan(64);
+      expect(footprint.typedBytes / triangleCount).toBeLessThan(128);
+    });
+
+    it('should not allocate a vector per vertex or per triangle while building a topology', () => {
+      const geometry = indexedSphereGeometry(detail);
+      const { result, constructions } = countVector3Constructions(() =>
+        buildSectionSurfaceTopologyForGeometry(geometry),
+      );
+
+      expect(result).toMatchObject({ status: 'ready' });
+      expect(constructions).toBeLessThan(64);
+    });
+
+    it('should allocate vectors only for the edges a slice touches', () => {
+      const geometry = indexedSphereGeometry(detail);
+      expect(buildSectionSurfaceTopologyForGeometry(geometry)).toMatchObject({ status: 'ready' });
+      const { result, constructions } = countVector3Constructions(() =>
+        sliceSectionSurfaceTopologyForGeometry({
+          geometry,
+          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+          meshWorldMatrix: new THREE.Matrix4(),
+        }),
+      );
+
+      expect(result).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
+      const contourPoints = result.status === 'complete' ? result.closedContours[0]!.length : 0;
+      // The cut crosses about √T triangles; a slice may allocate a few vectors for each, never one per triangle.
+      expect(constructions).toBeLessThan(contourPoints * 8 + 64);
+      expect(constructions).toBeLessThan(triangleCount / 10);
     });
   });
 });

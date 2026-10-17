@@ -942,6 +942,9 @@ export const opencascadeKernel = defineKernel({
     return retainShapeEntries(serialized.entries.map((entry, index) => deserializeShapeEntry(context, entry, index)));
   },
 
+  // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
+  heapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
+
   async onDispose(context) {
     context.occt.release();
   },

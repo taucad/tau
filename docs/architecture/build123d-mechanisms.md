@@ -3,12 +3,26 @@ title: 'Build123D parts and mechanisms'
 description: 'Native Build123D parts, joints and compounds with ordinary Python reuse, plain-data relationships and portable playback.'
 status: active
 created: '2026-10-15'
-updated: '2026-10-17'
+updated: '2026-10-18'
 ---
 
 # Build123D parts and mechanisms
 
 Models use Build123D 0.13 native shapes, finished materials and all five joint classes. Native `Compound`, factories and ordinary domain classes express reusable models. The 2026-10-17 operator ruling removes the former Tau Python Assembly supplement; it is not an authoring dependency. Native geometry and STEP export run outside Tau with the model's native dependencies.
+
+## Kernel parity status
+
+Parity means preserving the same portable meaning while using each kernel's native authoring idiom. It does not require identical author APIs or imply that all kernels implement every capability.
+
+| Capability           | Implemented Build123D behavior                                                                                                              | Boundary                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Parts and assemblies | Native shapes, `Compound`, fresh factories and domain classes; safe descendant joint properties                                             | Product containment alone does not establish rigid ownership; no Tau Python package                                            |
+| Joints and motion    | Rigid, Revolute, Linear, Cylindrical and Ball native joints project into attachment interfaces, physical intent and supported tree playback | Couplings, grounding and clips use the plain-data hook because native connection history is incomplete; no general loop solver |
+| Native appearance    | Native `Shape.material`, finished-material PBR, native normals/face UVs and embedded texture images in GLB                                  | Declare project texture files as dependencies; appearance does not deliver physical material properties                        |
+| Curved BRep edges    | Edge polylines reuse the surface triangulation boundary; free curves use both chordal and angular tolerances                                | Valid seams remain visible; meshed lines approximate exact BRep edges                                                          |
+| Interchange          | GLB preserves topology, hierarchy, appearance and mechanism intent; STEP preserves native geometry and assembly placement                   | STEP AP242 mechanism entities and embedded-source Restore are not delivered                                                    |
+
+The shared extension preserves physical intent separately from its compiled playback profile. Replicad and the Pico kernels keep their current authoring APIs; redesigning those APIs or claiming their full joint/material parity is outside this delivery. The [kernel parity research owner](../research/kernel-parity-control-center.md) tracks broader cross-kernel work.
 
 ## Ownership
 
@@ -82,6 +96,8 @@ The shipped JSON Schema checks structural shape; `validateTauCadTopology` checks
 ## Qualification and boundaries
 
 The Python native matrix oracle and checked TypeScript fixtures compare the actual Tau evaluator with Build123D `relative_to`: five native classes, legal pair directions, nonzero reference, mixed-axis linear/revolute, nested rotations/translations, near-singular Ball states and unwrapped four turns. Additional tests cover distinct articulated modules on a moving parent, explicit identity across reordered labels, stale endpoints, explicit repeated connections, unconnected interfaces and unsupported graphs.
+
+The edge-alignment correction is qualified by independent emitted-triangle boundary tests at multiple tolerances, nested placements, free curves, missing face polygons, sphere/cone poles and budget retries. The sealed Python suite passes 69 tests with 100% line and branch coverage. Targeted native GLB/STEP and planetary tests pass. Rebuilt Desktop verification preserves the continuous hub tangent edge and aligned curved borders, while four playback poses retain pin coincidence and the 48 mm orbit. These checks establish this Build123D implementation, not universal parity across kernels.
 
 This contract does not implement force dynamics, a general closed-loop solver, STEP AP242 mechanism entities, embedded source recovery, physical material properties, warehouse publication or other-kernel authoring redesign. Native STEP export remains geometry/assembly export; a GLB carrying mechanism intent is the motion-preserving interchange for this delivery. Alternate unit/frame exports must not claim intent preservation unless their complete metadata transformation has been qualified.
 

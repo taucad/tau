@@ -7,20 +7,20 @@ icon: lucide:git-compare
 
 Pick kernels by source language or import format, and install only the packages your host needs.
 
-| Kernel package        | Input                                     | Best fit                                     |
-| --------------------- | ----------------------------------------- | -------------------------------------------- |
-| `@taucad/replicad`    | TypeScript/JavaScript using Replicad      | High-level parametric BRep                   |
-| `@taucad/opencascade` | TypeScript/JavaScript using OCCT bindings | Direct BRep and topology control             |
-| `@taucad/manifold`    | TypeScript/JavaScript using Manifold      | Mesh-first robust booleans                   |
-| `@taucad/jscad`       | TypeScript/JavaScript using JSCAD         | CSG modeling                                 |
-| `@taucad/openrscad`   | OpenSCAD                                  | `.scad` models in browser or Node            |
-| `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution              |
-| `@taucad/gltf`        | glTF/GLB                                  | glTF interchange with optional Draco         |
-| `@taucad/brep`        | STEP/STP/IGES/IGS/BREP                    | BRep-family file import                      |
-| `@taucad/rhino`       | 3DM                                       | Rhino file import                            |
-| `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports |
-| `@taucad/build123d`   | Python using Build123d                    | Native desktop BRep, topology, and STEP      |
-| `@taucad/tscircuit`   | TSX using tscircuit                       | Electronics: 3D board, schematic, PCB, BOM   |
+| Kernel package        | Input                                     | Best fit                                              |
+| --------------------- | ----------------------------------------- | ----------------------------------------------------- |
+| `@taucad/replicad`    | TypeScript/JavaScript using Replicad      | High-level parametric BRep                            |
+| `@taucad/opencascade` | TypeScript/JavaScript using OCCT bindings | Direct BRep and topology control                      |
+| `@taucad/manifold`    | TypeScript/JavaScript using Manifold      | Mesh-first robust booleans                            |
+| `@taucad/jscad`       | TypeScript/JavaScript using JSCAD         | CSG modeling                                          |
+| `@taucad/openrscad`   | OpenSCAD                                  | `.scad` models in browser or Node                     |
+| `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution                       |
+| `@taucad/gltf`        | glTF/GLB                                  | glTF interchange with optional Draco                  |
+| `@taucad/brep`        | STEP/STP/IGES/IGS/BREP                    | BRep-family file import                               |
+| `@taucad/rhino`       | 3DM                                       | Rhino file import                                     |
+| `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports          |
+| `@taucad/build123d`   | Python using Build123d                    | Native BRep assemblies, joints, textured GLB and STEP |
+| `@taucad/tscircuit`   | TSX using tscircuit                       | Electronics: 3D board, schematic, PCB, BOM            |
 
 There is no catch-all Tau kernel. Every first-party import extension has one explicit owner.
 

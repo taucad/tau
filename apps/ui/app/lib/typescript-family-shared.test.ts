@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { loadKernelStaticTypesFromMount } from '#lib/typescript-family-shared.js';
+import { describe, expect, it, vi } from 'vitest';
+import type * as Monaco from 'monaco-editor';
+import {
+  loadKernelStaticTypesFromMount,
+  setJsCompilerOptions,
+  setTsCompilerOptions,
+} from '#lib/typescript-family-shared.js';
 
 type ReadFile = NonNullable<Parameters<typeof loadKernelStaticTypesFromMount>[0]>['readFile'];
 const unusedReadFile = (async () => new Uint8Array()) as unknown as ReadFile;
@@ -26,5 +31,49 @@ describe('kernel static type loading', () => {
         readFile: unusedReadFile,
       }),
     ).rejects.toThrow('OPFS installation failed');
+  });
+});
+
+/** Monaco's defaults object: every setter fires `onDidChange`, which stops and restarts the TS worker. */
+const languageDefaults = () => {
+  let compilerOptions: Record<string, unknown> = {};
+  let inlayHintsOptions: Record<string, unknown> = {};
+  return {
+    getCompilerOptions: () => compilerOptions,
+    get inlayHintsOptions() {
+      return inlayHintsOptions;
+    },
+    setCompilerOptions: vi.fn((next: Record<string, unknown>) => {
+      compilerOptions = next;
+    }),
+    setInlayHintsOptions: vi.fn((next: Record<string, unknown>) => {
+      inlayHintsOptions = next;
+    }),
+  };
+};
+
+describe('TS family option re-application (B-16, D-UI-30)', () => {
+  it('does not re-set unchanged options on reactivation, so the TS worker is not restarted', () => {
+    const typescriptDefaults = languageDefaults();
+    const javascriptDefaults = languageDefaults();
+    const monaco = {
+      typescript: {
+        typescriptDefaults,
+        javascriptDefaults,
+        ScriptTarget: { ESNext: 99 },
+        ModuleKind: { ESNext: 99 },
+      },
+    } as unknown as typeof Monaco;
+
+    setTsCompilerOptions(monaco);
+    setJsCompilerOptions(monaco);
+    /* The project is reopened: its contributions activate again. */
+    setTsCompilerOptions(monaco);
+    setJsCompilerOptions(monaco);
+
+    expect(typescriptDefaults.setCompilerOptions).toHaveBeenCalledTimes(1);
+    expect(typescriptDefaults.setInlayHintsOptions).toHaveBeenCalledTimes(1);
+    expect(javascriptDefaults.setCompilerOptions).toHaveBeenCalledTimes(1);
+    expect(javascriptDefaults.setInlayHintsOptions).toHaveBeenCalledTimes(1);
   });
 });

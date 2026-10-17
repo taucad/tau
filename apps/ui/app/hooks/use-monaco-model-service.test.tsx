@@ -37,9 +37,11 @@ const configuration = vi.hoisted(() => {
 });
 const useMonaco = vi.hoisted(() => vi.fn(() => undefined));
 vi.mock('@monaco-editor/react', () => ({ useMonaco }));
+const observe = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco.lib.client.js', () => ({
   getMonacoConfiguration: configuration.get,
   subscribeMonacoConfiguration: configuration.subscribe,
+  observeMonacoConfiguration: observe,
 }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_one', editorRef: { send: vi.fn() }, geometryUnits: new Map() }),
@@ -48,8 +50,13 @@ vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
 
 /* The workspace never waits for Monaco (blueprint D3), and nothing reaches the
  * loader before configuration (I1): the provider reads the configured instance
- * and never calls `useMonaco`, which would run `loader.init()`. */
-it('renders the workspace at once and reads Monaco only from its configuration', async () => {
+ * and never calls `useMonaco`, which would run `loader.init()`.
+ *
+ * B-16 (D-UI-02): the provider only *observes* configuration. A phone that
+ * never opens the Editor tab must not download, parse and configure Monaco and
+ * Shiki; the code pane (or editor intent) starts it. */
+it('renders the workspace at once and never starts Monaco configuration itself', async () => {
+  observe.mockImplementation(() => () => undefined);
   render(
     <MonacoModelServiceProvider>
       <span>Workspace</span>
@@ -57,11 +64,8 @@ it('renders the workspace at once and reads Monaco only from its configuration',
   );
   expect(screen.getByText('Workspace')).toBeInTheDocument();
   expect(screen.queryByText(/Loading editor/u)).not.toBeInTheDocument();
-  expect(configuration.subscribe).toHaveBeenCalled();
-  await act(async () => {
-    configuration.resolve({ editor: {} });
-  });
-  expect(screen.getByText('Workspace')).toBeInTheDocument();
+  expect(configuration.subscribe).not.toHaveBeenCalled();
+  expect(observe).toHaveBeenCalled();
   expect(useMonaco).not.toHaveBeenCalled();
 });
 

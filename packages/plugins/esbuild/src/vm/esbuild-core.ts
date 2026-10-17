@@ -19,7 +19,7 @@ import type { BuiltinModule } from '@taucad/runtime/bundler';
 
 import { importBrowserModule } from '#vm/browser-module-import.js';
 import { esbuildNamespace } from '#vm/esbuild.constants.js';
-import { isNode } from '#vm/environment.js';
+import { getEnvironment, isNode } from '#vm/environment.js';
 import { executeCodeInNode, importNodeModule } from '#vm/node-module-execution.js';
 import type { VmExecuteResult, VmFileSystem, VmIssue } from '#vm/types.js';
 
@@ -112,7 +112,10 @@ export const initializeEsbuild = async (): Promise<void> => {
         await activeEsbuild.initialize({});
       } else {
         const { esbuildWasmUrl } = await import('#vm/esbuild-wasm-url.js');
-        await activeEsbuild.initialize({ wasmURL: esbuildWasmUrl });
+        // Inside a worker esbuild already runs off the main thread; its own nested worker would only add a realm.
+        await activeEsbuild.initialize(
+          getEnvironment() === 'worker' ? { wasmURL: esbuildWasmUrl, worker: false } : { wasmURL: esbuildWasmUrl },
+        );
       }
       esbuildInitialized = true;
     } catch (error) {

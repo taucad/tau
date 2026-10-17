@@ -150,7 +150,7 @@ const applyRuntimeHeaders = async (responseHeaders: Record<string, string[]>): P
  * @returns The frame stub, so a caller can observe what the broker posted to it.
  */
 const requestRuntimePort = <Frame extends { postMessage: ReturnType<typeof vi.fn> }>(
-  sender: { once: ReturnType<typeof vi.fn> },
+  sender: { once: ReturnType<typeof vi.fn>; removeListener: ReturnType<typeof vi.fn> },
   senderFrame?: Frame,
   request: { readonly context?: unknown; readonly requestId?: string } = {},
 ): Frame => {
@@ -313,7 +313,7 @@ describe('Electron main runtime helpers', () => {
       vi.fn<
         (channel: string, payload: { readonly hostId: string; readonly requestId: string }, ports: unknown[]) => void
       >();
-    const sender = { once: senderOnce };
+    const sender = { once: senderOnce, removeListener: vi.fn() };
 
     const handle = registerElectronRuntimeMain({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Node defines this environment variable name.
@@ -352,7 +352,7 @@ describe('Electron main runtime helpers', () => {
     const forkCallsBefore = fork.mock.calls.length;
     const onError = vi.fn<(error: Error) => void>();
     const handle = registerElectronRuntimeMain({ onError, utilityEntry: '/dist/main/kernel-host.js' });
-    const event = { sender: { once: vi.fn() }, senderFrame: { postMessage: vi.fn() } };
+    const event = { sender: { once: vi.fn(), removeListener: vi.fn() }, senderFrame: { postMessage: vi.fn() } };
 
     for (const payload of [undefined, {}, { requestId: '' }, { requestId: 7 }, { requestId: 'x'.repeat(129) }]) {
       listeners.get('taucad:connect-runtime')?.(event, payload);
@@ -505,7 +505,7 @@ describe('Electron main runtime helpers', () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     liveUtilities.length = 0;
     const onError = vi.fn<(error: Error) => void>();
-    const sender = { once: vi.fn() };
+    const sender = { once: vi.fn(), removeListener: vi.fn() };
     const handle = registerElectronRuntimeMain({
       utilityEntry: '/dist/main/kernel-host.js',
       maxUtilities: 1,
@@ -553,7 +553,7 @@ describe('Electron main runtime helpers', () => {
 
   it('kills only the utility process addressed by a renderer release', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
-    const sender = { once: vi.fn() };
+    const sender = { once: vi.fn(), removeListener: vi.fn() };
     const postMessage = vi.fn();
     const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
 
@@ -614,7 +614,7 @@ describe('Electron main runtime helpers', () => {
     const senderOnce = vi.fn<(event: string, handler: () => void) => void>();
     const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
 
-    requestRuntimePort({ once: senderOnce });
+    requestRuntimePort({ once: senderOnce, removeListener: vi.fn() });
 
     expect(senderOnce).toHaveBeenCalledWith('render-process-gone', expect.any(Function));
     const utility = liveUtilities.at(-1);
@@ -636,14 +636,14 @@ describe('Electron main runtime helpers', () => {
     const execArgv = ['--max-old-space-size=8192'];
 
     const tuned = registerElectronRuntimeMain({ execArgv, utilityEntry: '/dist/main/kernel-host.js' });
-    requestRuntimePort({ once: vi.fn() });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() });
     const tunedOptions = fork.mock.calls.at(-1)?.[2];
     expect(tunedOptions).toMatchObject({ execArgv: ['--max-old-space-size=8192'] });
     expect(tunedOptions?.execArgv).not.toBe(execArgv);
     tuned.dispose();
 
     const untuned = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
-    requestRuntimePort({ once: vi.fn() });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() });
     expect(fork.mock.calls.at(-1)?.[2]).not.toHaveProperty('execArgv');
     untuned.dispose();
   });
@@ -672,7 +672,7 @@ describe('Electron main runtime helpers', () => {
     const { utilityProcess } = await import('electron');
     const fork = vi.mocked(utilityProcess.fork);
     const forkCallsBefore = fork.mock.calls.length;
-    const allowedSender = { once: vi.fn() };
+    const allowedSender = { once: vi.fn(), removeListener: vi.fn() };
     const gated = new Map<string, Handler>();
     const filteringIpcMain = {
       on: vi.fn((channel: string, handler: Handler) => {
@@ -694,7 +694,7 @@ describe('Electron main runtime helpers', () => {
       utilityEntry: '/dist/main/kernel-host.js',
     });
     gated.get('taucad:connect-runtime')?.(
-      { sender: { once: vi.fn() }, senderFrame: { postMessage: vi.fn() } },
+      { sender: { once: vi.fn(), removeListener: vi.fn() }, senderFrame: { postMessage: vi.fn() } },
       { requestId: 'request-denied' },
     );
 
@@ -713,7 +713,7 @@ describe('Electron main runtime helpers', () => {
     const postMessage = vi.fn<(channel: string, payload: { readonly hostId: string }, ports?: unknown[]) => void>();
     const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
 
-    const senderFrame = requestRuntimePort({ once: vi.fn() }, { postMessage });
+    const senderFrame = requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage });
     const { hostId } = senderFrame.postMessage.mock.calls[0]![1] as { hostId: string };
 
     await exitLastUtility(7);
@@ -732,7 +732,7 @@ describe('Electron main runtime helpers', () => {
     const fork = vi.mocked(utilityProcess.fork);
 
     const piped = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
-    requestRuntimePort({ once: vi.fn() });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() });
     expect(fork.mock.calls.at(-1)?.[2]?.stdio).toBe('pipe');
     /* Draining is unconditional: an unread pipe stalls the child. */
     expect(liveUtilities.at(-1)?.stdout?.resume).toHaveBeenCalledOnce();
@@ -740,7 +740,7 @@ describe('Electron main runtime helpers', () => {
     piped.dispose();
 
     const inherited = registerElectronRuntimeMain({ stdio: 'inherit', utilityEntry: '/dist/main/kernel-host.js' });
-    requestRuntimePort({ once: vi.fn() });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() });
     expect(fork.mock.calls.at(-1)?.[2]?.stdio).toBe('inherit');
     inherited.dispose();
   });
@@ -758,7 +758,7 @@ describe('Electron main runtime helpers', () => {
       utilityEntry: '/dist/main/kernel-host.js',
     });
 
-    requestRuntimePort({ once: vi.fn() }, { postMessage });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage });
     const { hostId } = postMessage.mock.calls[0]![1] as { hostId: string };
     expect(onUtilityFork).toHaveBeenCalledExactlyOnceWith({ hostId, entry: '/dist/main/kernel-host.js' });
 
@@ -785,7 +785,7 @@ describe('Electron main runtime helpers', () => {
     const postMessage = vi.fn<(channel: string, payload: Record<string, unknown>, ports?: unknown[]) => void>();
     const handle = registerElectronRuntimeMain({ onUtilityExit, utilityEntry: '/dist/main/kernel-host.js' });
 
-    requestRuntimePort({ once: vi.fn() }, { postMessage });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage });
     const { hostId } = postMessage.mock.calls[0]![1] as { hostId: string };
 
     /* Electron's order for a boot death: `'exit'` first, the stack after. */
@@ -812,7 +812,7 @@ describe('Electron main runtime helpers', () => {
     const postMessage = vi.fn<(channel: string, payload: Record<string, unknown>, ports?: unknown[]) => void>();
     const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
 
-    requestRuntimePort({ once: vi.fn() }, { postMessage });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage });
     const { hostId } = postMessage.mock.calls[0]![1] as { hostId: string };
 
     vi.useFakeTimers();
@@ -843,7 +843,7 @@ describe('Electron main runtime helpers', () => {
     /* Each of the four kill paths: renderer release, destroyed sender, gone
      * renderer process, broker dispose — plus a main-client lease dispose. */
     const senderOnce = vi.fn<(event: string, handler: () => void) => void>();
-    const sender = { once: senderOnce };
+    const sender = { once: senderOnce, removeListener: vi.fn() };
     const postMessage = vi.fn<(channel: string, payload: Record<string, unknown>) => void>();
     const relayedRelease = async (): Promise<boolean> => {
       await exitLastUtility(0);
@@ -981,7 +981,9 @@ describe('Electron main runtime helpers', () => {
       utilityEntry: '/dist/main/kernel-host.js',
     });
 
-    requestRuntimePort({ once: vi.fn() }, undefined, { context: { definition: 'debug', projectRoot: '/projects/a' } });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, undefined, {
+      context: { definition: 'debug', projectRoot: '/projects/a' },
+    });
 
     expect(resolveFork).toHaveBeenCalledExactlyOnceWith({ definition: 'debug', projectRoot: '/projects/a' });
     const [entry, , forkOptions] = fork.mock.calls.at(-1)!;
@@ -998,7 +1000,7 @@ describe('Electron main runtime helpers', () => {
     const resolveFork = vi.fn(() => ({}));
     const handle = registerElectronRuntimeMain({ resolveFork, utilityEntry: '/dist/main/kernel-host.js' });
 
-    requestRuntimePort({ once: vi.fn() });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() });
 
     expect(resolveFork).toHaveBeenCalledExactlyOnceWith({});
     expect(fork.mock.calls.at(-1)?.[0]).toBe('/dist/main/kernel-host.js');
@@ -1026,7 +1028,7 @@ describe('Electron main runtime helpers', () => {
       { blob: 'x'.repeat(8193) },
     ];
     for (const context of refused) {
-      requestRuntimePort({ once: vi.fn() }, undefined, { context });
+      requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, undefined, { context });
     }
 
     expect(fork).toHaveBeenCalledTimes(forkCallsBefore);
@@ -1050,7 +1052,9 @@ describe('Electron main runtime helpers', () => {
       },
       utilityEntry: '/dist/main/kernel-host.js',
     });
-    requestRuntimePort({ once: vi.fn() }, undefined, { context: { projectRoot: '/projects/missing' } });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, undefined, {
+      context: { projectRoot: '/projects/missing' },
+    });
     throwing.dispose();
 
     /* No allowlist at all is the strict default: every returned key is denied. */
@@ -1060,7 +1064,9 @@ describe('Electron main runtime helpers', () => {
       resolveFork: () => ({ env: { TAU_PROJECT_ROOT: '/projects/a' } }),
       utilityEntry: '/dist/main/kernel-host.js',
     });
-    requestRuntimePort({ once: vi.fn() }, undefined, { context: { projectRoot: '/projects/a' } });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, undefined, {
+      context: { projectRoot: '/projects/a' },
+    });
     unlisted.dispose();
 
     const disallowed = registerElectronRuntimeMain({
@@ -1070,7 +1076,9 @@ describe('Electron main runtime helpers', () => {
       resolveFork: () => ({ env: { ELECTRON_RUN_AS_NODE: '1', TAU_PROJECT_ROOT: '/projects/a' } }),
       utilityEntry: '/dist/main/kernel-host.js',
     });
-    requestRuntimePort({ once: vi.fn() }, undefined, { context: { projectRoot: '/projects/a' } });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, undefined, {
+      context: { projectRoot: '/projects/a' },
+    });
     disallowed.dispose();
 
     expect(fork).toHaveBeenCalledTimes(forkCallsBefore);
@@ -1148,7 +1156,7 @@ describe('Electron main runtime helpers', () => {
     });
     const handle = registerElectronRuntimeMain({ onError, utilityEntry: '/dist/main/kernel-host.js' });
 
-    requestRuntimePort({ once: vi.fn() }, { postMessage });
+    requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage });
     const utility = liveUtilities.at(-1);
 
     await exitLastUtility(3);
@@ -1157,5 +1165,156 @@ describe('Electron main runtime helpers', () => {
     /* The record is gone, so disposing the broker has nothing left to kill. */
     handle.dispose();
     expect(utility?.kill).not.toHaveBeenCalled();
+  });
+});
+
+describe('Electron main runtime memory supervision', () => {
+  it('should remove its sender lifecycle listeners once each utility is released', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+    const sender = new EventEmitter();
+    const postMessage = vi.fn<(channel: string, payload: Record<string, unknown>) => void>();
+    try {
+      /* One window opens and closes many previews over its life: every lease
+       * must take its listeners with it, or the sender accumulates one pair
+       * per request until the window closes. */
+      for (let request = 0; request < 12; request += 1) {
+        requestRuntimePort(
+          sender as unknown as Parameters<typeof requestRuntimePort>[0],
+          { postMessage },
+          {
+            requestId: `request-${String(request)}`,
+          },
+        );
+        const { hostId } = postMessage.mock.calls.at(-1)![1] as { hostId: string };
+        listeners.get('taucad:connect-runtime:release')?.({ sender }, { hostId });
+      }
+      /* A utility that dies on its own takes its listeners too. */
+      requestRuntimePort(
+        sender as unknown as Parameters<typeof requestRuntimePort>[0],
+        { postMessage },
+        {
+          requestId: 'crashes',
+        },
+      );
+      await exitLastUtility(9);
+
+      expect(sender.listenerCount('destroyed')).toBe(0);
+      expect(sender.listenerCount('render-process-gone')).toBe(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  it('should kill an adopted utility whose resident memory passes the limit and report why', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onError = vi.fn();
+    const resident = new Map<unknown, number>();
+    const handle = registerElectronRuntimeMain({
+      onError,
+      residentLimit: {
+        maxBytes: 1000,
+        intervalMilliseconds: 5000,
+        sample: (utility) => resident.get(utility),
+      },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage: vi.fn() });
+      const bloated = liveUtilities.at(-1)!;
+      requestRuntimePort(
+        { once: vi.fn(), removeListener: vi.fn() },
+        { postMessage: vi.fn() },
+        {
+          requestId: 'request-2',
+        },
+      );
+      const healthy = liveUtilities.at(-1)!;
+      resident.set(bloated, 1001);
+      resident.set(healthy, 999);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(bloated.kill).toHaveBeenCalledOnce();
+      expect(healthy.kill).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringMatching(/resident memory 1001 bytes exceeds 1000/u) }),
+      );
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should stop sampling once no adopted utility remains', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const sample = vi.fn(() => 1);
+    const handle = registerElectronRuntimeMain({
+      residentLimit: { maxBytes: 1000, intervalMilliseconds: 5000, sample },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      /* A prewarmed spare is nobody's yet: nothing to supervise. */
+      handle.prewarm();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sample).not.toHaveBeenCalled();
+
+      const lease = handle.connect({ purpose: 'main-process-client' });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(sample).toHaveBeenCalled();
+      lease.dispose();
+      sample.mockClear();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sample).not.toHaveBeenCalled();
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("should release the resolver's per-fork resources exactly once when the utility goes", async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const releases: string[] = [];
+    const handle = registerElectronRuntimeMain({
+      resolveFork: (context) => ({
+        release: () => {
+          releases.push(context['projectRoot'] ?? '');
+        },
+      }),
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      const released = handle.connect({ purpose: 'main-process-client', context: { projectRoot: '/projects/a' } });
+      handle.connect({ purpose: 'main-process-client', context: { projectRoot: '/projects/b' } });
+      released.dispose();
+      released.dispose();
+      expect(releases).toEqual(['/projects/a']);
+
+      /* A utility that dies on its own releases what was resolved for it, too. */
+      await exitLastUtility(9);
+      expect(releases).toEqual(['/projects/a', '/projects/b']);
+    } finally {
+      handle.dispose();
+    }
+    expect(releases).toEqual(['/projects/a', '/projects/b']);
+  });
+
+  it("should release the resolver's resources when the fork is refused after resolution", async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const release = vi.fn();
+    const handle = registerElectronRuntimeMain({
+      maxUtilities: 0,
+      resolveFork: () => ({ release }),
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      expect(() => handle.connect({ purpose: 'main-process-client' })).toThrow(/refusing to exceed 0/u);
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
+      handle.dispose();
+    }
   });
 });

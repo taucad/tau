@@ -490,6 +490,31 @@
   }
 }
 
+/* A spinning glyph turns its drawing about the viewBox centre instead of turning its own box. WebKit
+   rotates a spinning box about that box's pixel-snapped centre, so a glyph whose box lands on a
+   fractional size (`size-[0.9rem]`, page zoom) orbits its true centre and wobbles. Turning the
+   children in the SVG's own coordinates keeps the spin concentric at every size. Apply it to the
+   `<svg>`; `--spin-glyph-duration` sets the pace. */
+@utility spin-glyph {
+  & > * {
+    transform-box: view-box;
+    transform-origin: center;
+    animation: spin-glyph var(--spin-glyph-duration, 1s) linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    & > * {
+      animation: none;
+    }
+  }
+}
+
+@keyframes spin-glyph {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 /* AlertDialogAction composes primary classes with a consumer's destructive button variant. */
 @utility destructive-action {
   --focus-outline-color: var(--destructive-foreground);

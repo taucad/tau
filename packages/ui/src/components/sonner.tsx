@@ -33,7 +33,7 @@ function Toaster({ theme = 'system', className, toastOptions, icons, ...properti
         info: <Info aria-hidden className='size-4 text-information' />,
         warning: <TriangleAlert aria-hidden className='size-4 text-warning' />,
         error: <CircleAlert aria-hidden className='size-4 text-feature' />,
-        loading: <LoaderCircle aria-hidden className='size-4 animate-spin motion-reduce:animate-none' />,
+        loading: <LoaderCircle aria-hidden className='size-4 spin-glyph' />,
         close: <X aria-hidden className='size-3' />,
         ...icons,
       }}

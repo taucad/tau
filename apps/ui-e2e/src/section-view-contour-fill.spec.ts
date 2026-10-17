@@ -45,11 +45,6 @@ type SectionCapCompleteness =
   | Readonly<{
       status: 'complete';
       admittedSourceCount: number;
-      extensionSourceCount: number;
-      fallbackSourceCount: number;
-      trueCutComponentCount: number;
-      cappedTrueCutComponentCount: number;
-      unresolvedTrueCutEdgeCount: number;
       unsupportedSourceCount: number;
     }>
   | Readonly<{
@@ -330,10 +325,6 @@ async function expectCompleteSectionCaps(context: string): Promise<void> {
     completeness.admittedSourceCount,
     `${context}: at least one logical source should be admitted`,
   ).toBeGreaterThan(0);
-  expect(completeness.cappedTrueCutComponentCount, `${context}: every true-cut component should be capped`).toBe(
-    completeness.trueCutComponentCount,
-  );
-  expect(completeness.unresolvedTrueCutEdgeCount, `${context}: no true-cut edge may remain unresolved`).toBe(0);
   expect(completeness.unsupportedSourceCount, `${context}: no admitted source may be unsupported`).toBe(0);
 }
 
@@ -350,20 +341,13 @@ async function expectClosedSectionCapIntegrity(backend: 'webgl' | 'webgpu', star
   expect(stats.yellowish, `start=${start}°: yellow internal part should remain visible`).toBeGreaterThan(6);
   expect(stats.blueish, `start=${start}°: blue holed housing cap should remain visible`).toBeGreaterThan(6);
   expect(stats.reddish, `start=${start}°: red internal posts should remain visible`).toBeGreaterThan(2);
+  // The stencil caps outline the cut on the GPU, without contour line helpers.
+  expect(helperSummary.sectionHelperContourSegmentCount, `${backend}: no CPU contour helpers`).toBe(0);
+  const diagnostics = await getSectionCapStencilDiagnostics();
   expect(
-    helperSummary.sectionHelperLineSegments2Count,
-    `${backend}: section contour fills should render fat-line clipped-cap borders`,
+    diagnostics?.latest?.outlineSourceCount ?? 0,
+    `${backend}: caps should outline their cut edges`,
   ).toBeGreaterThan(0);
-  expect(
-    helperSummary.sectionHelperContourSegmentCount,
-    `${backend}: section contour fill borders should contain drawable segment endpoints`,
-  ).toBeGreaterThan(0);
-  expect(
-    helperSummary.sectionHelperMaterialStates.some(
-      (state) => state.objectType === 'LineSegments2' && !state.transparent && state.depthTest && !state.depthWrite,
-    ),
-    `${backend}: section contour outlines should use opaque, depth-tested, non-depth-writing material state`,
-  ).toBe(true);
   expect(
     stats.edgeLineish,
     `start=${start}°: generated cap outlines should remain visibly near-black in the composed frame`,

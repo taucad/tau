@@ -157,11 +157,6 @@ export type SectionViewTestCapCompleteness =
   | Readonly<{
       status: 'complete';
       admittedSourceCount: number;
-      extensionSourceCount: number;
-      fallbackSourceCount: number;
-      trueCutComponentCount: number;
-      cappedTrueCutComponentCount: number;
-      unresolvedTrueCutEdgeCount: number;
       unsupportedSourceCount: number;
     }>
   | Readonly<{

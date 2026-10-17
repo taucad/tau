@@ -84,6 +84,9 @@ const closedDescription = (reason: ProjectSessionCloseReason | undefined, idleWi
   if (reason === 'budget') {
     return 'Closed to free memory for other projects. Its files and chats are saved.';
   }
+  if (reason === 'memory') {
+    return 'Closed to save memory on this device. Its files and chats are saved.';
+  }
   return 'Its files and chats are saved. Reopen it to continue where you left off.';
 };
 

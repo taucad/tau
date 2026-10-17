@@ -22,6 +22,28 @@ import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/p
 /** The browser holds at most eight live projects (OQ-W25, operator ruling). */
 export const browserLiveProjectBudget = 8;
 
+/**
+ * A phone or low-memory device holds one live project (B-08).
+ *
+ * Each live project keeps its kernel WASM, workers and caches; on an iPhone a
+ * second retained OCCT project alone can reach the tab's memory limit.
+ */
+export const constrainedLiveProjectBudget = 1;
+
+/**
+ * The live-project budget for a host.
+ *
+ * @param host - Whether this is the desktop app, and whether the device is memory-constrained.
+ * @returns Desktop: no count (it is memory-bound). Otherwise the constrained or browser budget.
+ * @public
+ */
+export const liveProjectBudgetFor = (host: Readonly<{ desktop: boolean; constrained: boolean }>): number => {
+  if (host.desktop) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return host.constrained ? constrainedLiveProjectBudget : browserLiveProjectBudget;
+};
+
 /** Why a policy refused to close a project. @public */
 export type SessionsCloseRefusal = 'running' | 'dirty' | 'unpushed';
 
@@ -86,6 +108,8 @@ export type SessionsMachineEvent =
   | { readonly type: 'close'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
   | { readonly type: 'touch'; readonly projectId: string }
   | { readonly type: 'idleExpired'; readonly projectId: string }
+  /** Free memory: close every project a policy may close except the focused one (B-08). */
+  | { readonly type: 'releaseMemory'; readonly keepProjectId?: string }
   | {
       readonly type: 'sessionState';
       readonly projectId: string;
@@ -183,7 +207,7 @@ const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record
  * @public
  */
 export const sessionsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
-  ...['open', 'touch', 'close', 'idleExpired', 'quit'].map((type) => ['quitting', type] as const),
+  ...['open', 'touch', 'close', 'idleExpired', 'releaseMemory', 'quit'].map((type) => ['quitting', type] as const),
   ['ready', 'quitAnyway'],
 ];
 
@@ -361,6 +385,26 @@ export const sessionsMachine = setup({
               refusals: refusal === undefined ? context.refusals : { ...context.refusals, [event.projectId]: refusal },
             },
           };
+        },
+        /* The memory policy is a visible policy too: it closes only what the
+         * idle window could, says why on the row, and leaves the project on
+         * screen alone (I24, I25, B-08). */
+        releaseMemory: ({ context, event }, enq) => {
+          let refusals = context.refusals;
+          for (const [projectId, ref] of Object.entries(context.refs)) {
+            if (projectId === event.keepProjectId) {
+              continue;
+            }
+            if (isClosable(context, projectId)) {
+              enq.sendTo(ref, { type: 'close', reason: 'memory' });
+              continue;
+            }
+            const refusal = refusalFor(context, projectId);
+            if (refusal !== undefined) {
+              refusals = { ...refusals, [projectId]: refusal };
+            }
+          }
+          return refusals === context.refusals ? {} : { context: { refusals } };
         },
         quit: { target: 'quitting' },
       },

@@ -373,6 +373,9 @@ const closedDetail = (
   if (reason === 'idle') {
     return idleCloseText(idleWindowMilliseconds);
   }
+  if (reason === 'memory') {
+    return 'Closed to save memory · reopen any time';
+  }
   return reason === 'budget' ? 'Closed · memory budget · reopen any time' : undefined;
 };
 

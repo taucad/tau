@@ -1,0 +1,32 @@
+/**
+ * Whether this device should be treated as memory-constrained.
+ *
+ * iOS Safari kills a tab silently at roughly 1.5–2 GB across the page, its
+ * workers and their WASM heaps, and gives no pressure signal first. The two
+ * hints a page can read are a coarse primary pointer (phones and tablets) and
+ * `navigator.deviceMemory` (Chromium only, rounded, capped at 8). Either one is
+ * enough to budget for a phone (editor memory remediation B-08, B-16, B-19).
+ */
+
+type DeviceEnvironment = Readonly<{
+  matchMedia?: (query: string) => Readonly<{ matches: boolean }>;
+  navigator?: Readonly<{ deviceMemory?: number }>;
+}>;
+
+/** At or below this many GB, `navigator.deviceMemory` marks a device as constrained. */
+const constrainedDeviceMemoryGigabytes = 4;
+
+/**
+ * Read the device's memory class.
+ *
+ * @param environment - The global object; a test passes a stand-in.
+ * @returns `true` on a coarse-pointer or low-memory device; `false` elsewhere and during SSR.
+ * @public
+ */
+export const isMemoryConstrainedDevice = (environment: DeviceEnvironment = globalThis): boolean => {
+  const deviceMemory = environment.navigator?.deviceMemory;
+  if (typeof deviceMemory === 'number' && deviceMemory <= constrainedDeviceMemoryGigabytes) {
+    return true;
+  }
+  return environment.matchMedia?.('(pointer: coarse)').matches === true;
+};

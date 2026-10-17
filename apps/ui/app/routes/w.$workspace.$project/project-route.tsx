@@ -20,6 +20,8 @@ import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skele
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
+import { useMemoryRelease } from '#hooks/use-memory-release.js';
+import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -98,6 +100,7 @@ export function ProjectRouteGate({
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const sessions = useSessions();
+  const [isConstrainedDevice] = useState(isMemoryConstrainedDevice);
   const liveProjectIds = useLiveProjectIds();
   const closedReason = useSelector(sessions, (state) =>
     requestedProjectId === undefined ? undefined : state.context.closed[requestedProjectId]?.reason,
@@ -237,6 +240,9 @@ export function ProjectRouteGate({
     sessions.send({ type: 'open', projectId: requestedProjectId });
     sessions.send({ type: 'touch', projectId: requestedProjectId });
   }, [requestedProjectId, resolved, sessions]);
+
+  /* B-08: a phone cannot keep a project it left warm; elsewhere I22 holds. */
+  useMemoryRelease({ sessions, focusedProjectId: requestedProjectId, constrained: isConstrainedDevice });
 
   /* The other half of "navigation and focus only" (R16): coming back to the
    * window is attention, so the idle window measures time since the person was

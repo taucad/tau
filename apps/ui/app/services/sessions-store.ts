@@ -21,7 +21,8 @@ import { randomUuid } from '@taucad/utils/id';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
-import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
+import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
+import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
@@ -271,7 +272,8 @@ export type SessionsActorOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | '
  * Create the app's registry, unstarted (MC-R4, PV-S5).
  *
  * Desktop is bounded by memory rather than a count (A35): its budget is the
- * absence of one, and the idle window still applies.
+ * absence of one, and the idle window still applies. A phone or low-memory
+ * browser holds one live project (B-08).
  *
  * @param options - The clock, inspector and rejected-event hook for this root.
  * @returns The registry actor; the caller starts it once.
@@ -281,7 +283,7 @@ export const createSessionsActor = (options: SessionsActorOptions = {}): Actor<t
   createActor(sessionsMachine.provide({ actors: { projectSession } }), {
     ...options,
     input: {
-      budget: isDesktopTarget ? Number.POSITIVE_INFINITY : browserLiveProjectBudget,
+      budget: liveProjectBudgetFor({ desktop: isDesktopTarget, constrained: isMemoryConstrainedDevice() }),
     },
   });
 

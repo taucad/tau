@@ -18,7 +18,7 @@ import { eventSchemas } from '#lib/xstate.lib.js';
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
-export type ProjectSessionCloseReason = 'user' | 'idle' | 'budget' | 'quit';
+export type ProjectSessionCloseReason = 'user' | 'idle' | 'budget' | 'memory' | 'quit';
 
 /** The four things a project needs before it is usable. @public */
 export type ProjectSessionRegion = 'views' | 'runtime' | 'agentHost' | 'compute';

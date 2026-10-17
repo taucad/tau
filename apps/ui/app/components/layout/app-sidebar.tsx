@@ -28,9 +28,9 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const desktopTarget = isDesktopTarget();
   const isCompact = desktopTarget && !isMobile;
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
-  const navMainItems = React.useMemo(
+  const navMoreItems = React.useMemo(
     () =>
-      [...navRoutes.navMain, ...billingNavRoutes].filter(
+      [...navRoutes.navMore, ...billingNavRoutes].filter(
         (item) => item.featureFlag === undefined || flags[item.featureFlag],
       ),
     [flags],
@@ -82,8 +82,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         </div>
         <div className='flex-1 overflow-y-auto'>
           <div className='flex flex-col justify-between'>
+            <NavMain items={navRoutes.navMain} moreItems={navMoreItems} className={isCompact ? 'py-1' : undefined} />
             <ProjectNavigation className={isCompact ? 'py-1' : undefined} />
-            <NavMain items={navMainItems} groupLabel='Platform' className={isCompact ? 'py-1' : undefined} />
           </div>
         </div>
       </SidebarContent>

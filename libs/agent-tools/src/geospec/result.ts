@@ -14,7 +14,7 @@ import { geoSpecRunAccountingSchema, geoSpecRunLineageSchema } from '@taucad/cha
 import { isRecord } from '@taucad/utils/schema';
 import type { GeometryDiagnostic } from 'geospec/mesh';
 import { geoSpecMeshEvidenceMatchers, geoSpecRegionWholeModelClaimCode } from 'geospec/model';
-import { isGeoSpecTimeoutCode } from 'geospec/runner';
+import { isGeoSpecTimeoutCode } from 'geospec/runner/worker';
 import type { GeoSpecTestCase } from 'geospec/runner';
 import type { GeoSpecRunnerFileResult, GeoSpecRunnerResult } from 'geospec/runner/worker';
 

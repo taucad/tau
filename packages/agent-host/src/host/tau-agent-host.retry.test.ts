@@ -95,4 +95,57 @@ describe('Try again after a run that failed before recording its turn', () => {
     ]);
     await host.close();
   });
+
+  it('keeps the requested prefix when retrying a recorded turn a later rewind removed', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'rewound',
+      }),
+    );
+    const settle = async (runId: string) => {
+      await vi.waitFor(async () => {
+        expect(await host.snapshot('chat-rewound')).toMatchObject({ runId, state: 'completed' });
+      });
+    };
+    await host.admit({
+      chatId: 'chat-rewound',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'First.' },
+    });
+    await settle('run-1');
+    await host.admit({
+      chatId: 'chat-rewound',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+    await settle('run-2');
+    // Editing the first turn rewinds the second away; its admission row stays in the log.
+    await host.admit({
+      chatId: 'chat-rewound',
+      runId: 'run-3',
+      trigger: 'edit',
+      retainedMessageIds: [],
+      message: { id: 'turn-1', role: 'user', content: 'First, edited.' },
+    });
+    await settle('run-3');
+
+    await host.admit({
+      chatId: 'chat-rewound',
+      runId: 'run-4',
+      trigger: 'regenerate',
+      retainedMessageIds: [],
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+    await settle('run-4');
+
+    const history = reduceEventLog(await readLog(file));
+    expect(history.filter((message) => message.role === 'user').map((message) => message.id)).toEqual(['turn-2']);
+    await host.close();
+  });
 });

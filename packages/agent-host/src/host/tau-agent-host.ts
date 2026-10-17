@@ -1247,10 +1247,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (messages.length > 0) {
           /* The rewind point is the turn the caller names; the prefix it keeps is this log's own (F2). */
           const rewindTo = messages.findIndex((message) => message.id === start.message.id);
-          /* A turn this log admitted whose run ended before recording its message (a session that could not rebuild
+          /* A turn this log admitted whose run ended before ever recording its message (a session that could not rebuild
            * its history) left nothing to rewind: its retry keeps the whole history. The page names its own messages
            * (an assistant reply by its run id), so its prefix cannot be compared with this log's here. */
-          const unrecorded = rewindTo === -1 && events.some((event) => admittedTurnIdOf(event) === start.message.id);
+          const unrecorded =
+            rewindTo === -1 &&
+            events.some((event) => admittedTurnIdOf(event) === start.message.id) &&
+            !events.some(
+              (event) =>
+                (event.type === 'message.appended' || event.type === 'turn.history-projection-committed') &&
+                event.message.id === start.message.id,
+            );
           const retained = unrecorded ? messages.map((message) => message.id) : (start.retainedMessageIds ?? []);
           if (
             rewindTo === -1 &&

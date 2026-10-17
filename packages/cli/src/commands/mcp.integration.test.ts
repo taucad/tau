@@ -1750,6 +1750,9 @@ registerHooks({
     it(
       'G1: should make no request while a second server evaluates .cs and .ts on the warm store under TAU_ACQUISITION=locked',
       async () => {
+        /* Warm the store here rather than rely on the tests above; on a sealed closure this is a no-op. */
+        const warmed = await callOn(client, { name: 'prepare_kernel', arguments: { kernel: 'picogk' } });
+        expect(warmed.structuredContent, textOf(warmed)).toMatchObject({ status: 'ready', kernel: 'picogk' });
         const tripwire = await fetchTripwire('g1-locked');
         const mirrorRequests = mirror.requests.length;
         const env = nativeEnvironment(store);

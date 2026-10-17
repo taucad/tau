@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toProviderToolJsonSchema } from '#schemas/provider-tool-schemas.js';
-import { screenshotInputSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 
 describe('screenshotInputSchema', () => {
   it('defaults an omitted mode to single and still requires targetFile', () => {
@@ -74,5 +74,26 @@ describe('screenshotInputSchema includeEdges', () => {
     const wire = toProviderToolJsonSchema(screenshotInputSchema);
     expect(wire['required']).toEqual(['targetFile']);
     expect(wire).toMatchObject({ properties: { includeEdges: { type: 'boolean' } } });
+  });
+});
+
+describe('screenshotOutputSchema stored captures (D-UI-04)', () => {
+  const stored = {
+    view: '3d',
+    angle: 'isometric',
+    path: `attachments/${'a'.repeat(64)}.webp`,
+    mimeType: 'image/webp',
+    byteLength: 1024,
+    sha256: 'a'.repeat(64),
+  };
+
+  it('accepts a capture the host stored as a chat attachment, without inline bytes', () => {
+    expect(screenshotOutputSchema.parse({ images: [stored] }).images).toEqual([stored]);
+  });
+
+  it('still refuses a stored capture with inline bytes beside its reference', () => {
+    expect(screenshotOutputSchema.safeParse({ images: [{ ...stored, dataUrl: 'data:image/webp;base64,AQID' }] }).success).toBe(
+      false,
+    );
   });
 });

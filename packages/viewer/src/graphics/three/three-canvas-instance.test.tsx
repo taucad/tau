@@ -263,9 +263,9 @@ describe('ThreeCanvasInstance', () => {
       render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
     };
 
-    it('should cap a coarse-pointer phone at 1.5 so every render target holds 44% fewer pixels', () => {
+    it('should cap a coarse-pointer phone at 2, as on desktop, so edges stay sharp', () => {
       renderAt(3, true);
-      expect(latestCanvasDpr).toBe(1.5);
+      expect(latestCanvasDpr).toBe(2);
     });
 
     it('should keep the 2x cap on a fine-pointer display', () => {

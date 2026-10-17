@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload the MCP and daemon logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-darwin-logs
           path: ${{ runner.temp }}/native-darwin-frames
@@ -274,7 +274,7 @@ jobs:
 
       - name: Upload the benchmark output
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-benchmarks
           path: ${{ runner.temp }}/benchmarks

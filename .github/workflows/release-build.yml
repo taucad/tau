@@ -416,7 +416,7 @@ jobs:
       # Uploaded before verification so a failed verify leaves the signed app
       # for verify-desktop-macos.yml. Publishing still needs this whole job.
       - name: Upload the macOS archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-darwin-${{ matrix.arch }}
           path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-${{ matrix.arch }}.zip
@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload the Tau PicoGK layer
         if: matrix.arch == 'arm64'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: picogk-layer-darwin-arm64
           path: |
@@ -538,7 +538,7 @@ jobs:
             echo "- release \`$LAYER_TAG\`"
             echo "- pin: the \`picogk-tau-plugin\` artifact (\`tau-plugin.json\` and its SBOM \`tau-plugin.cdx.json\`)"
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: picogk-tau-plugin
           path: |
@@ -705,7 +705,7 @@ jobs:
             apps/ui-e2e/src/support/serve-ui-build.test.ts > "$generated"
           test "$(diff apps/ui-e2e/src/support/serve-ui-build.test.ts "$generated" | grep -c '^>' || true)" = 1
           pnpm exec vitest run --dir apps/ui-e2e "$generated" --environment=node
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: serve-ui-layer
           path: |
@@ -793,7 +793,7 @@ jobs:
             echo "- release \`$LAYER_TAG\`"
             echo "- pin: the \`serve-ui-layer-pin\` artifact (\`serve-ui-layer.json\`)"
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: serve-ui-layer-pin
           path: out/serve-ui-layer/serve-ui-layer.json
@@ -957,7 +957,7 @@ jobs:
           pnpm nx run "desktop:${{ matrix.target }}" --parallel=1
 
       - name: Upload the archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.platform }}
           path: ${{ env.TAU_DESKTOP_PACKAGE_OUTPUT_ROOT }}/${{ matrix.archive }}
@@ -1013,7 +1013,7 @@ jobs:
             out/desktop/assets/*.json
             out/desktop/assets/SHA256SUMS.txt
           github-token: ${{ steps.bot.outputs.token }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-metadata
           path: out/desktop/assets/*.json
@@ -1164,7 +1164,7 @@ jobs:
             '{tag:$tag,target:$target,accepted:$accepted}' > "out/desktop/assets/ota-qualification-$TARGET.json"
       - name: Retain OTA receipts and diagnostics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ota-acceptance-${{ matrix.arch }}
           path: |

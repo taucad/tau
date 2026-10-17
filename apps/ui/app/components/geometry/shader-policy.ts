@@ -61,6 +61,17 @@ export const shaderSites = [
     risks: ['derivatives', 'depth', 'clipping', 'lifecycle'],
   },
   {
+    id: 'section-stencil-caps',
+    modules: [
+      'packages/viewer/src/graphics/three/materials/section-stencil.material.ts',
+      'packages/viewer/src/graphics/three/materials/section-cap-outline.material.ts',
+      'packages/viewer/src/graphics/three/materials/section-cap-outline.node.ts',
+    ],
+    authoring: ['glsl', 'tsl', 'fixed-function', 'render-pass'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['camera', 'depth', 'clipping', 'lifecycle', 'hot-path'],
+  },
+  {
     id: 'surface-depth-bias',
     modules: ['packages/viewer/src/graphics/three/materials/gltf-surface-depth-bias.ts'],
     authoring: ['on-before-compile', 'fixed-function'],
@@ -153,6 +164,9 @@ const sectionClipUnit = 'packages/viewer/src/graphics/three/materials/section-cl
 const sectionClippingGroupUnit = 'packages/viewer/src/graphics/three/react/section-clipping-group.test.tsx';
 const sectionClipBrowser = 'packages/viewer/src/graphics/three/materials/section-clip.browser.test.ts';
 const gltfMeshLifecycleUnit = 'packages/viewer/src/graphics/three/react/gltf-mesh.camera-lifecycle.test.tsx';
+const sectionStencilCapsUnit = 'packages/viewer/src/graphics/three/utils/section-stencil-caps.test.ts';
+const sectionStencilCapsBrowser = 'packages/viewer/src/graphics/three/utils/section-stencil-caps.browser.test.ts';
+const sectionCapOutlineUnit = 'packages/viewer/src/graphics/three/materials/section-cap-outline.material.test.ts';
 const modelPickBrowser = 'packages/viewer/src/graphics/three/utils/model-gpu-pick.browser.test.ts';
 const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${semantic}`) => ({
   reference: [`${unit}::${semantic}`],
@@ -242,11 +256,57 @@ export const shaderEvidence = {
     'packages/viewer/src/graphics/three/scene-overlay.test.tsx',
     'renders only the overlay scene once',
   ),
-  'section-stripes': evidence(
-    'packages/viewer/src/graphics/three/materials/striped-material-vertex-colored.test.ts',
-    'keeps a shared material pinned',
-    'packages/viewer/src/graphics/three/materials/striped-material-vertex-colored.test.ts::stable stripped vertex-colored WebGPU node material graph',
-  ),
+  'section-stripes': {
+    ...evidence(
+      sectionStencilCapsUnit,
+      'should cap with the shared surface depth bias and the cap stencil test',
+      'packages/viewer/src/graphics/three/materials/striped-material.test.ts::matches stable stripped section cap node material JSON snapshot',
+    ),
+    'real-compile': [
+      `${sectionStencilCapsBrowser}::should compile and draw every pass without a shader or pipeline error`,
+    ],
+    pixels: [`${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`],
+    'depth-clipping': [
+      `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
+    ],
+    lifecycle: [
+      `${sectionStencilCapsUnit}::should reuse its pooled draws frame after frame, and let go of a source that left`,
+    ],
+  },
+  'section-stencil-caps': {
+    reference: [
+      `${sectionStencilCapsUnit}::should take the half-spaces whose removed side holds a perspective eye`,
+      `${sectionStencilCapsUnit}::should cut a box into the polygon where the plane meets it, ordered around it`,
+    ],
+    'generated-source': [
+      `${sectionCapOutlineUnit}::should compile the outline band after the clipping chunks and discard off the band`,
+      `${sectionCapOutlineUnit}::matches stable stripped section cap outline node material JSON snapshot`,
+    ],
+    'real-compile': [
+      `${sectionStencilCapsBrowser}::should compile and draw every pass without a shader or pipeline error`,
+    ],
+    pixels: [
+      `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
+      `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,
+      `${sectionStencilCapsBrowser}::should outline the cut edges, beside the caps`,
+    ],
+    'backend-differential': [
+      `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,
+    ],
+    'depth-clipping': [
+      `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
+      `${sectionStencilCapsUnit}::should cap with the shared surface depth bias and the cap stencil test`,
+    ],
+    lifecycle: [
+      `${sectionStencilCapsUnit}::should reuse its pooled draws frame after frame, and let go of a source that left`,
+    ],
+    'structural-perf': [
+      `${sectionStencilCapsUnit}::should count, cap and outline each crossing source with draws that do not depend on its triangles`,
+    ],
+    'gpu-whole-frame': [
+      `${sectionStencilCapsBrowser}::should spend main-thread time on pieces and meshes, not triangles`,
+    ],
+  },
   'surface-depth-bias': evidence(
     'packages/viewer/src/graphics/three/materials/gltf-surface-depth-bias.test.ts',
     'fails compilation when the expected log-depth chunk is absent or duplicated',
@@ -282,7 +342,7 @@ export const shaderEvidence = {
       `${sectionClippingGroupUnit}::should return early on a frame whose pieces are unchanged`,
     ],
     'gpu-whole-frame': [
-      'apps/ui-e2e/src/section-view-overlap-performance-diagnostics.spec.ts::captures overlap and no-overlap diagnostics in',
+      `${sectionStencilCapsBrowser}::should spend main-thread time on pieces and meshes, not triangles`,
     ],
   },
   'fat-lines': {

@@ -33,10 +33,8 @@ import { getModelComponentIdInHierarchy } from '@taucad/viewer/graphics/three/ut
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getControlsDistance, resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
-import { sectionCapOverlapDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-overlap-debug';
-import type { SectionCapOverlapDebugSummary } from '@taucad/viewer/graphics/three/utils/section-cap-overlap-debug';
-import { sectionCapPerformanceDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
-import type { SectionCapPerformanceDebugSummary } from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
+import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { useViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
 import type { ViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
@@ -262,8 +260,7 @@ export type SectionViewTestBridgeApi = Readonly<{
   getMeasureState(): SectionViewTestMeasureState;
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
-  getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
-  getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDebugSummary | undefined;
+  getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
 }>;
 
 type SectionViewTestGlobal = typeof globalThis & {
@@ -459,34 +456,19 @@ export const projectSectionViewTestHandle = ({
   return bounds.isEmpty() ? undefined : toProjectedPoint(bounds.getCenter(new THREE.Vector3()).project(camera), rect);
 };
 
-export const getSectionViewTestCapOverlapDiagnostics = (
+export const getSectionViewTestCapStencilDiagnostics = (
   scene: THREE.Object3D,
-): SectionCapOverlapDebugSummary | undefined => {
-  let summary: SectionCapOverlapDebugSummary | undefined;
+): SectionCapStencilDiagnostics | undefined => {
+  let diagnostics: SectionCapStencilDiagnostics | undefined;
 
   scene.traverse((child) => {
-    const candidate = (child.userData as Record<string, unknown>)[sectionCapOverlapDebugUserDataKey];
+    const candidate = (child.userData as Record<string, unknown>)[sectionCapStencilDebugUserDataKey];
     if (candidate && typeof candidate === 'object') {
-      summary = candidate as SectionCapOverlapDebugSummary;
+      diagnostics = candidate as SectionCapStencilDiagnostics;
     }
   });
 
-  return summary;
-};
-
-export const getSectionViewTestCapPerformanceDiagnostics = (
-  scene: THREE.Object3D,
-): SectionCapPerformanceDebugSummary | undefined => {
-  let summary: SectionCapPerformanceDebugSummary | undefined;
-
-  scene.traverse((child) => {
-    const candidate = (child.userData as Record<string, unknown>)[sectionCapPerformanceDebugUserDataKey];
-    if (candidate && typeof candidate === 'object') {
-      summary = candidate as SectionCapPerformanceDebugSummary;
-    }
-  });
-
-  return summary;
+  return diagnostics;
 };
 
 export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometryFramed: boolean }): React.ReactNode {
@@ -1031,11 +1013,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         });
         return completeness;
       },
-      getSectionCapOverlapDiagnostics() {
-        return getSectionViewTestCapOverlapDiagnostics(scene);
-      },
-      getSectionCapPerformanceDiagnostics() {
-        return getSectionViewTestCapPerformanceDiagnostics(scene);
+      getSectionCapStencilDiagnostics() {
+        return getSectionViewTestCapStencilDiagnostics(scene);
       },
     };
 

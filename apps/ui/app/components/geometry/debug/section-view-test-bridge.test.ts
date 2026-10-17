@@ -6,19 +6,14 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import {
   getSectionViewTestControlState,
   getSectionViewTestRenderedModelComponentState,
-  getSectionViewTestCapOverlapDiagnostics,
-  getSectionViewTestCapPerformanceDiagnostics,
+  getSectionViewTestCapStencilDiagnostics,
   getSectionViewTestHelperSummary,
   projectSectionViewTestHandle,
 } from '#components/geometry/debug/section-view-test-bridge.js';
 import { setModelComponentOwner } from '@taucad/viewer/graphics/three/utils/model-component-owner';
 import { createSectionHandles } from '@taucad/viewer/graphics/three/controls/section-handles';
-import { sectionCapOverlapDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-overlap-debug';
-import {
-  appendSectionCapPerformanceFrame,
-  createSectionCapFramePerformance,
-  sectionCapPerformanceDebugUserDataKey,
-} from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
+import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { viewportRenderTiers } from '@taucad/viewer/graphics/three/utils/render-order.utils';
 import { sceneTag, sceneTagData } from '@taucad/viewer/graphics/three/utils/scene-tags';
 
@@ -114,63 +109,27 @@ describe('getSectionViewTestControlState', () => {
     handles.dispose();
   });
 
-  it('should report exact-only section cap overlap diagnostics from the debug scene', () => {
+  it('should report the latest stencil cap counts from the debug scene', () => {
     const scene = new THREE.Scene();
     const helperRoot = new THREE.Group();
-    helperRoot.userData[sectionCapOverlapDebugUserDataKey] = {
-      sourceCount: 3,
-      sourcePairCount: 3,
-      broadphaseCandidatePairCount: 2,
-      exactIntersectionPairCount: 2,
-      positiveAreaPairCount: 1,
-      renderedOverlapArea: 0.25,
-      splitFailed: false,
-      diagnostics: [],
+    const published: SectionCapStencilDiagnostics = {
+      sequence: 3,
+      latest: {
+        pieceCount: 1,
+        drawnPieceCount: 1,
+        crossingSourceCount: 2,
+        overlapCandidateSourceCount: 1,
+        outlineSourceCount: 2,
+        meshDrawCount: 6,
+        polygonDrawCount: 5,
+        submitMilliseconds: 0.5,
+      },
     };
+    helperRoot.userData[sectionCapStencilDebugUserDataKey] = published;
     scene.add(helperRoot);
 
-    const diagnostics = getSectionViewTestCapOverlapDiagnostics(scene);
-
-    expect(diagnostics?.exactIntersectionPairCount).toBe(diagnostics?.broadphaseCandidatePairCount);
-    expect(diagnostics?.renderedOverlapArea).toBe(0.25);
-    expect(Object.keys(diagnostics ?? {}).sort()).toEqual([
-      'broadphaseCandidatePairCount',
-      'diagnostics',
-      'exactIntersectionPairCount',
-      'positiveAreaPairCount',
-      'renderedOverlapArea',
-      'sourceCount',
-      'sourcePairCount',
-      'splitFailed',
-    ]);
-  });
-
-  it('should report section cap performance diagnostics from the debug scene', () => {
-    const scene = new THREE.Scene();
-    const helperRoot = new THREE.Group();
-    const frame = createSectionCapFramePerformance(1, 100);
-    frame.timings.frameTotal = 12;
-    frame.counters.sourceCount = 2;
-    frame.counters.baseFillVertexCount = 12;
-    frame.counters.baseBoundarySegmentCount = 4;
-    frame.counters.exactDiagnosticPendingFrameCount = 1;
-    frame.baseCapTopologyKey = 'base:topology';
-    frame.baseCapFrameTopologyKey = 'base:topology';
-    frame.baseCapIsCurrent = true;
-    frame.exactDiagnosticIsCurrent = false;
-    helperRoot.userData[sectionCapPerformanceDebugUserDataKey] = appendSectionCapPerformanceFrame(undefined, frame);
-    scene.add(helperRoot);
-
-    const diagnostics = getSectionViewTestCapPerformanceDiagnostics(scene);
-
-    expect(diagnostics?.latestFrame.sequence).toBe(1);
-    expect(diagnostics?.latestFrame.counters.sourceCount).toBe(2);
-    expect(diagnostics?.latestFrame.counters.baseFillVertexCount).toBe(12);
-    expect(diagnostics?.latestFrame.counters.baseBoundarySegmentCount).toBe(4);
-    expect(diagnostics?.latestFrame.baseCapIsCurrent).toBe(true);
-    expect(diagnostics?.latestFrame.exactDiagnosticIsCurrent).toBe(false);
-    expect(diagnostics?.aggregates.frameTotal.max).toBe(12);
-    expect(Object.keys(diagnostics?.latestFrame.timings ?? {}).sort()).toContain('overlapClassify');
+    expect(getSectionViewTestCapStencilDiagnostics(new THREE.Scene())).toBeUndefined();
+    expect(getSectionViewTestCapStencilDiagnostics(scene)).toBe(published);
   });
 });
 

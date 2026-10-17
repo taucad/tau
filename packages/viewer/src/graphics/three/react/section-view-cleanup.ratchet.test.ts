@@ -21,6 +21,20 @@ function listTypeScriptFilesRecursively(directory: string): string[] {
   return output;
 }
 
+/**
+ * The stencil caps of D10 (viewer render hot path blueprint) live in these modules and their tests alone: one owner
+ * for every stencil state, so no other pass starts writing the stencil the caps count in.
+ */
+const stencilCapOwners = [
+  'materials/section-stencil.material.ts',
+  'utils/section-stencil-caps.ts',
+  'utils/section-stencil-caps.test.ts',
+  'utils/section-stencil-caps.browser.test.ts',
+] as const;
+
+const isStencilCapOwner = (filePath: string): boolean =>
+  stencilCapOwners.some((owner) => filePath.replaceAll('\\', '/').endsWith(`/graphics/three/${owner}`));
+
 describe('Section view stencil / manifold cleanup ratchet', () => {
   it('never reintroduces deleted stencil-cap symbols under graphics/three', () => {
     const needles = [
@@ -30,11 +44,6 @@ describe('Section view stencil / manifold cleanup ratchet', () => {
       'SectionCapPlane',
       'useSectionCapManifoldSources',
       'cappingMaterialRef',
-      'IncrementWrapStencilOp',
-      'DecrementWrapStencilOp',
-      'NotEqualStencilFunc',
-      'AlwaysStencilFunc',
-      'ReplaceStencilOp',
     ] as const;
 
     const files = listTypeScriptFilesRecursively(graphicsThreeRoot);
@@ -57,11 +66,39 @@ describe('Section view stencil / manifold cleanup ratchet', () => {
     expect(offenders, JSON.stringify(offenders, undefined, 2)).toHaveLength(0);
   });
 
-  it('does not substring-match `clearStencil` / `stencilWrite` identifiers in shaders or materials here', () => {
+  it('keeps every stencil operation in the stencil cap owners', () => {
+    const needles = [
+      'IncrementWrapStencilOp',
+      'DecrementWrapStencilOp',
+      'NotEqualStencilFunc',
+      'AlwaysStencilFunc',
+      'ReplaceStencilOp',
+    ] as const;
+
+    const files = listTypeScriptFilesRecursively(graphicsThreeRoot);
+    const offenders: Array<{ needle: string; file: string }> = [];
+
+    for (const filePath of files) {
+      if (filePath.endsWith('section-view-cleanup.ratchet.test.ts') || isStencilCapOwner(filePath)) {
+        continue;
+      }
+
+      const source = readFileSync(filePath, 'utf8');
+      for (const needle of needles) {
+        if (source.includes(needle)) {
+          offenders.push({ needle, file: filePath });
+        }
+      }
+    }
+
+    expect(offenders, JSON.stringify(offenders, undefined, 2)).toHaveLength(0);
+  });
+
+  it('does not use `clearStencil` / `stencilWrite` outside the stencil cap owners', () => {
     /* Full-word style scan: disallow these exact identifiers appearing as tokens. */
     const bannedIdentifiers = ['clearStencil', 'stencilWrite'] as const;
     const files = listTypeScriptFilesRecursively(graphicsThreeRoot).filter(
-      (path) => !path.endsWith('section-view-cleanup.ratchet.test.ts'),
+      (path) => !path.endsWith('section-view-cleanup.ratchet.test.ts') && !isStencilCapOwner(path),
     );
 
     const rxById: Record<(typeof bannedIdentifiers)[number], RegExp> = {

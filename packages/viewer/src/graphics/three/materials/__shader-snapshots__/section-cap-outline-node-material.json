@@ -1,16 +1,36 @@
 {
   "blendColor": 0,
   "color": 16777215,
+  "depthWrite": false,
   "envMapRotation": [0, 0, 0, "XYZ"],
+  "fog": false,
   "inputNodes": {
-    "colorNode": "<nodeRef>"
+    "colorNode": "<nodeRef>",
+    "maskNode": "<nodeRef>"
   },
   "metadata": {
     "generator": "Material.toJSON",
     "type": "Material",
     "version": 4.7
   },
+  "name": "TauSectionCapOutline",
   "nodes": [
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>"
+      },
+      "nodeType": null,
+      "precision": null,
+      "type": "UniformNode",
+      "value": [1, 0, 0],
+      "valueType": "color"
+    },
+    {
+      "name": "object",
+      "shared": false,
+      "type": "UniformGroupNode",
+      "version": 0
+    },
     {
       "inputNodes": {
         "node": "<nodeRef>"
@@ -27,11 +47,9 @@
       "type": "Node"
     }
   ],
-  "polygonOffset": true,
-  "polygonOffsetFactor": -1.5,
-  "polygonOffsetUnits": -2,
   "reflectivity": 1,
   "refractionRatio": 0.98,
   "side": 2,
+  "toneMapped": false,
   "type": "MeshBasicNodeMaterial"
 }

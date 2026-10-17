@@ -265,9 +265,15 @@ test('claims no save when the gateway refuses the turn', async () => {
     await submitPrompt(page, prompt);
     await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
 
+    /* The seeding turn's marker settles on its save; it can remount while the route settles, so sample its count
+     * and text together. */
     const markers = page.locator('[role="status"][aria-label="Turn revision status"]');
-    await expect.poll(lastMarkerText(markers), { timeout: 120_000 }).toMatch(/^Rev \d+ saved/u);
-    const markersBefore = await markers.count();
+    await expect
+      .poll(async () => `${String(await markers.count())} ${(await lastMarkerText(markers)()) ?? ''}`, {
+        timeout: 120_000,
+      })
+      .toMatch(/^1 Rev \d+ saved/u);
+    const markersBefore = 1;
     const savedBefore = await lastMarkerText(markers)();
 
     fixture.setFailure({ status: 500, message: 'Provider unavailable for this test.' });

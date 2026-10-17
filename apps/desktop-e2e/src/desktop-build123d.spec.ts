@@ -27,6 +27,7 @@ import {
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
+  openViewerIssues,
   renderCycleCount,
   selectChatModel,
   selectKernel,
@@ -453,7 +454,8 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectGeometryFramed(page);
 
     writeFileSync(sourcePath, failingBuild123dSource, 'utf8');
-    const editorFailure = page.getByText(failureSentinel, { exact: true });
+    const failureIssues = await openViewerIssues(page);
+    const editorFailure = failureIssues.getByText(failureSentinel, { exact: true });
     await expectVisible(editorFailure, 120_000);
     await expectCount(editorFailure, 1);
     await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0);
@@ -782,9 +784,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       picogkHelperSource(3).replace('radius * scale', 'MissingPicoGkSymbol * scale'),
       'utf8',
     );
-    const issues = page.locator('[data-slot="collapsible"]').filter({
-      has: page.getByRole('button', { name: /^Issues/u }),
-    });
+    const issues = await openViewerIssues(page);
     const compileFailure = issues.getByText("The name 'MissingPicoGkSymbol' does not exist in the current context", {
       exact: true,
     });

@@ -290,13 +290,31 @@ export const expectNativeKernelEngine = async (logPath: string): Promise<string>
   return engine!.version!;
 };
 
+/**
+ * Whether a person could use the Files pane: present, and the topmost element at its centre. A pane in a squeezed
+ * editor group is still "visible" to Playwright while the viewer covers it, and only *Open files* gives the workbench
+ * room (`openPanel` opens it with `compactAuxiliary: 'workbench'`).
+ */
+const isFilesPaneUsable = async (page: Page): Promise<boolean> => {
+  try {
+    return await filesPaneOf(page).evaluate(
+      (pane) => {
+        const box = pane.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return box.width > 0 && box.height > 0 && hit !== null && pane.contains(hit);
+      },
+      undefined,
+      { timeout: 1000 },
+    );
+  } catch {
+    /* No pane yet. */
+    return false;
+  }
+};
+
 /** Open the Files pane through the command palette when it is not already up. */
 export const ensureFilesPane = async (page: Page): Promise<void> => {
-  if (
-    !(await filesPaneOf(page)
-      .isVisible()
-      .catch(() => false))
-  ) {
+  if (!(await isFilesPaneUsable(page))) {
     await page
       .getByRole('button', { name: /Search/u })
       .first()
@@ -305,6 +323,30 @@ export const ensureFilesPane = async (page: Page): Promise<void> => {
     await page.getByText('Open files', { exact: true }).first().click();
   }
   await expectVisible(filesPaneOf(page), 30_000);
+  await expect
+    .poll(async () => isFilesPaneUsable(page), {
+      message: 'the Files pane never took room in the workbench',
+      timeout: 30_000,
+    })
+    .toBe(true);
+};
+
+/**
+ * Open the viewer bar's issues list and return it. The list is closed by default (`ViewerIssuesContent`); its segment
+ * reads `Issues: …`, prefixed `Build failed. ` when the build failed, and appears once there is an issue to show.
+ *
+ * @param page - The renderer.
+ * @returns The open `Issues` region.
+ */
+export const openViewerIssues = async (page: Page): Promise<Locator> => {
+  const segment = page.getByRole('button', { name: /^(?:Build failed\. )?Issues: /u }).first();
+  await expectVisible(segment, 120_000);
+  if ((await segment.getAttribute('aria-expanded')) !== 'true') {
+    await segment.click();
+  }
+  const list = page.getByRole('region', { name: 'Issues', exact: true });
+  await expectVisible(list, 30_000);
+  return list;
 };
 
 /** One viewer bridge's camera state, for the framing assertion and its report. */
@@ -644,8 +686,8 @@ export const expectModelBuilt = async (options: {
  *
  * @param page - The renderer.
  * @param parameterLabel - The pane's label for a declaration present only in the
- *   new bytes, in `formatDisplayLabel` casing (`tauSmokeDepth` reads as
- *   `Tau Smoke Depth`).
+ *   new bytes, as `formatFieldLabel` shows it: a kernel that titles a
+ *   declaration with its own name keeps that name (OpenSCAD's `tauSmokeDepth`).
  * @returns Nothing.
  */
 export const expectKernelReparsed = async (page: Page, parameterLabel: string): Promise<void> => {

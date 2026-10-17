@@ -21,7 +21,7 @@ import { defineCommand, runCommand } from 'citty';
 import type { CommandDef } from 'citty';
 import { createConsola } from 'consola';
 
-import { projectRootOf } from '#commands/check.js';
+import { findProjectRoot } from '#project-root.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 
 const consola = createConsola({ stdout: process.stderr });
@@ -52,7 +52,7 @@ export const openTarget = async (target: string | undefined, cwd: string): Promi
   if (entry.isDirectory()) {
     return { kind: 'folder', folder: path };
   }
-  return { kind: 'folder', folder: projectRootOf(path) };
+  return { kind: 'folder', folder: findProjectRoot(path) };
 };
 
 /**

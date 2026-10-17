@@ -59,16 +59,6 @@ export type CheckRecord = Readonly<{
 }>;
 
 /**
- * The project a model belongs to, as every CLI verb roots it: the nearest folder at or above it holding a `tau.json`,
- * else the model's own folder. `tau open` reads it from here; the discovery itself is shared with `tau export`.
- *
- * @internal
- * @param inputPath - Absolute path of the model.
- * @returns The absolute project root.
- */
-export const projectRootOf = (inputPath: string): string => findProjectRoot(inputPath);
-
-/**
  * Classify one evaluation's issues into the `check` status.
  *
  * @internal
@@ -149,7 +139,7 @@ export const checkCommand = defineCommand({
         exitCodes.refused,
       );
     }
-    const projectRoot = args.project === undefined ? projectRootOf(inputPath) : resolve(args.project);
+    const projectRoot = args.project === undefined ? findProjectRoot(inputPath) : resolve(args.project);
     const sourcePath = relative(projectRoot, inputPath);
     if (sourcePath.startsWith('..') || resolve(projectRoot, sourcePath) !== inputPath) {
       throw cliError('INPUT_OUTSIDE_PROJECT', `${inputPath} is outside the project ${projectRoot}.`, exitCodes.usage);

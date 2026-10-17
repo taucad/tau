@@ -2247,7 +2247,7 @@ function TreeItem({
             <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
           )}
           <input
-            className='h-full min-w-0 flex-1 border-0 bg-transparent px-0 text-sm outline-hidden'
+            className='h-full min-w-0 flex-1 border-0 bg-transparent px-0 text-sm outline-hidden pointer-coarse:text-base'
             autoCorrect='off'
             {...renameInputProps}
             onFocus={(event) => {
@@ -2627,7 +2627,7 @@ function PendingFolderInput({
           <input
             autoFocus
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none pointer-coarse:text-base'
             placeholder='Folder name'
             onChange={(event) => {
               setValue(event.target.value);
@@ -2758,7 +2758,7 @@ function PendingFileInput({
           <input
             ref={inputRef}
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none pointer-coarse:text-base'
             placeholder='New File'
             onChange={(event) => {
               setValue(event.target.value);

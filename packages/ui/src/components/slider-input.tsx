@@ -446,7 +446,7 @@ export const SliderInput = ({
           disabled={disabled}
           readOnly={isReadOnly}
           className={cn(
-            'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-right tabular-nums outline-none',
+            'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-right tabular-nums outline-none pointer-coarse:text-base',
             isEditing ? 'opacity-100' : 'pointer-events-none opacity-0',
           )}
           data-slot='slider-input-input'

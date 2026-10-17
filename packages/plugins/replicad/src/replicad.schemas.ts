@@ -14,6 +14,7 @@ import {
   occtQualityGltfExportSchema,
   occtQualityRenderOptionSchema,
   occtQualityStlExportSchema,
+  occtTriangleBudgets,
 } from '@taucad/occt-core';
 
 /**
@@ -44,6 +45,11 @@ export const replicadOptionsSchema = z.object({
    * installs no proxy and constructs no recipe.
    */
   computeReuse: z.boolean().optional(),
+  /**
+   * Triangles a preview may carry before it is coarsened and a `TESSELLATION_DOWNGRADED` warning is reported.
+   * Defaults to the policy preview budget; a host on a memory-constrained device passes a smaller one.
+   */
+  previewTriangleBudget: z.number().int().positive().optional().default(occtTriangleBudgets.preview),
 });
 
 /**

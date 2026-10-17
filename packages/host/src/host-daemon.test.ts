@@ -2473,6 +2473,7 @@ describe('startHostDaemon runtime child per root and session', () => {
           compose,
           closureRoots: async () => [],
           start: vi.fn(),
+          verify: vi.fn(),
         },
       },
       agent: { ...(await agentOptionsIn(temporaryDirectory)), prepareKernel },

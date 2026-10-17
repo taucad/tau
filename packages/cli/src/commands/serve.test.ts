@@ -12,6 +12,7 @@ import {
   agentWorkspaceRoot,
   childArguments,
   defaultServePort,
+  parseAllowedOrigins,
   resolveServePort,
   serveNativeKernels,
   shouldOpenBrowser,
@@ -20,6 +21,10 @@ import { exitCodes } from '#output.js';
 
 const nativeKernels = vi.hoisted(() => ({
   composeNativeKernels: vi.fn<() => Promise<unknown>>(),
+  verifyStoreClosure: vi.fn(async (_root: string, _signal: AbortSignal) => ({
+    files: ['lib/python3.13/site-packages/build123d/__init__.pyc'],
+    remedy: 'Run `tau prepare --verify` to repair it.',
+  })),
   prepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel })),
   dispose: vi.fn(async () => undefined),
   opened: 0,
@@ -27,6 +32,7 @@ const nativeKernels = vi.hoisted(() => ({
 
 vi.mock('#native-kernels.js', () => ({
   composeNativeKernels: nativeKernels.composeNativeKernels,
+  verifyStoreClosure: nativeKernels.verifyStoreClosure,
   openNativePreparation: () => {
     nativeKernels.opened += 1;
     return { prepare: nativeKernels.prepare, dispose: nativeKernels.dispose };
@@ -152,6 +158,17 @@ describe('serveNativeKernels', () => {
     expect(nativeKernels.dispose).toHaveBeenCalledOnce();
   });
 
+  it('should re-verify a closure for a child in this process, where the store is readable (X35)', async () => {
+    const kernels = serveNativeKernels();
+    const { signal } = new AbortController();
+
+    await expect(kernels.native.verify('/store/closures/sha256/a', signal)).resolves.toEqual({
+      files: ['lib/python3.13/site-packages/build123d/__init__.pyc'],
+      remedy: 'Run `tau prepare --verify` to repair it.',
+    });
+    expect(nativeKernels.verifyStoreClosure).toHaveBeenCalledWith('/store/closures/sha256/a', signal);
+  });
+
   it('should serve without native kernels, and start nothing, when the store cannot be composed', async () => {
     nativeKernels.composeNativeKernels.mockRejectedValue(new Error('TAU_ACQUISITION is "sometimes"'));
     const kernels = serveNativeKernels();
@@ -220,5 +237,28 @@ describe('shouldOpenBrowser', () => {
 
   it('should open under --open even when printing', () => {
     expect(shouldOpenBrowser({ ...base, open: true, scripted: true, ci: true })).toBe(true);
+  });
+});
+
+describe('parseAllowedOrigins', () => {
+  it('should take exact origins, comma-separated or repeated, once each', () => {
+    expect(parseAllowedOrigins(undefined)).toEqual([]);
+    expect(parseAllowedOrigins('')).toEqual([]);
+    expect(parseAllowedOrigins(['https://tau.new, http://localhost:3000', 'app://tau', 'https://tau.new'])).toEqual([
+      'https://tau.new',
+      'http://localhost:3000',
+      'app://tau',
+    ]);
+  });
+
+  it.each(['*', 'https://tau.new/', 'https://tau.new/w/project', 'HTTPS://TAU.NEW', 'tau.new', 'null'])(
+    'should refuse %s, which no browser sends as its Origin',
+    (origin) => {
+      expect(() => parseAllowedOrigins(origin)).toThrow(expect.objectContaining({ code: 'ORIGIN_INVALID' }));
+    },
+  );
+
+  it('should exit with the usage code', () => {
+    expect(() => parseAllowedOrigins('*')).toThrow(expect.objectContaining({ exit: exitCodes.usage }));
   });
 });

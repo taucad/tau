@@ -272,6 +272,41 @@ describe('T2 — tau serve prints one URL and answers', () => {
   });
 });
 
+describe('T2b — tau serve --allowed-origins (S32 website cell, X32)', () => {
+  it('should grant a listed origin the descriptor across origins and nothing to another', async () => {
+    const served = start([
+      'serve',
+      project(),
+      '--print',
+      '--port=0',
+      '--no-external-agents',
+      '--allowed-origins=https://tau.new,http://localhost:3000',
+    ]);
+    try {
+      const url = await served.firstLine;
+      const listed = await fetch(new URL('/.well-known/tau-host', url), {
+        headers: { origin: 'http://localhost:3000' },
+      });
+      const unlisted = await fetch(new URL('/.well-known/tau-host', url), {
+        headers: { origin: 'https://evil.example' },
+      });
+
+      expect(listed.status).toBe(200);
+      expect(listed.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+      expect(unlisted.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      await served.stop();
+    }
+  });
+
+  it('should refuse a wildcard as a usage error', async () => {
+    const run = await tau(['serve', project(), '--smoke-test', '--port=0', '--allowed-origins=*']);
+
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain('--allowed-origins takes exact origins');
+  });
+});
+
 describe('T3 — tau open --desktop (best effort until the W18 hand-off)', () => {
   it('should fall back to the browser URL and say why the desktop cannot take a served folder', async () => {
     const ui = join(scratch, 'ui');

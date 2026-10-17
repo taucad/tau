@@ -285,6 +285,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         compose: async () => ({ unavailable: [], closureRoots: [sealed] }),
         closureRoots: async () => [sealed],
         start,
+        verify: vi.fn(),
       },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
@@ -321,6 +322,56 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(started?.runtimePath).toBe(sealed);
     expect(started?.workspacePath).toMatch(/\/tau-runtime-child-[^/]+\/tmp\/mirror-[^/]+\/workspace$/u);
     expect(started?.sandboxRoot).toBe(dirname(childTemporaryDirectory));
+  });
+
+  it('re-verifies a closure the child cannot read in the daemon, once for concurrent asks, and refuses one outside the store (X35)', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-verify-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    const { closure: damaged } = await sealedClosure(scratch);
+    const { closure: intact } = await sealedClosure(scratch, 'b'.repeat(64));
+    const outside = join(scratch, 'outside');
+    await mkdir(outside);
+    const verify = vi.fn(async (runtimePath: string, signal: AbortSignal) => {
+      expect(signal.aborted).toBe(false);
+      /* Long enough that the second ask for the same closure arrives while the first runs. */
+      await delay(200);
+      return runtimePath === damaged
+        ? { files: ['lib/damaged.pyc'], remedy: 'Run `tau prepare --verify` to repair it.' }
+        : undefined;
+    });
+    const checks = [
+      { name: 'damaged', runtimePath: damaged },
+      { name: 'damagedAgain', runtimePath: damaged },
+      { name: 'intact', runtimePath: intact },
+      { name: 'outside', runtimePath: outside },
+    ];
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-verify-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify(checks)],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [], closureRoots: [damaged, intact] }),
+        closureRoots: async () => [damaged, intact],
+        start: vi.fn(),
+        verify,
+      },
+    });
+    const proof = z
+      .object({
+        outcomes: z.record(z.string(), z.object({ damage: z.unknown(), ownRead: z.string() })),
+      })
+      .parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    await child.close();
+
+    const named = { files: ['lib/damaged.pyc'], remedy: 'Run `tau prepare --verify` to repair it.' };
+    expect(proof.outcomes['damaged']).toEqual({ damage: named, ownRead: 'ERR_ACCESS_DENIED' });
+    expect(proof.outcomes['damagedAgain']).toEqual({ damage: named, ownRead: 'ERR_ACCESS_DENIED' });
+    expect(proof.outcomes['intact']).toEqual({ damage: null, ownRead: 'ERR_ACCESS_DENIED' });
+    /* Refused before the verifier runs: the bare exit stands. */
+    expect(proof.outcomes['outside']?.damage).toBeNull();
+    expect(verify.mock.calls.map(([runtimePath]) => runtimePath).toSorted()).toEqual([damaged, intact].toSorted());
   });
 
   it('launches from a store reached through a symbolic link, and still refuses a closure whose real path leaves the store', async () => {
@@ -360,6 +411,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         compose: async () => ({ unavailable: [], closureRoots: [sealed, escaping] }),
         closureRoots: async () => [sealed, escaping],
         start,
+        verify: vi.fn(),
       },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
@@ -402,6 +454,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         compose: async () => ({ unavailable: [] }),
         closureRoots: async () => [closure],
         start,
+        verify: vi.fn(),
       },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
@@ -455,6 +508,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         compose: async () => ({ unavailable: [] }),
         closureRoots: async () => [],
         start: vi.fn(),
+        verify: vi.fn(),
       },
     });
     const whileRunning = await readdir(directory);
@@ -489,6 +543,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         compose: async () => ({ unavailable: [] }),
         closureRoots: async () => [closure],
         start,
+        verify: vi.fn(),
       },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
@@ -517,6 +572,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
           throw new Error('the store cannot be read');
         },
         closureRoots: async () => [sealed],
+        verify: vi.fn(),
         start: async () => {
           throw new Error('The native runtime is unavailable because its sandbox could not start: no bwrap.');
         },

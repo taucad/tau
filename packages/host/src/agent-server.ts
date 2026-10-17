@@ -126,6 +126,10 @@ export type AgentServerOptions = {
    * Extra exact-match browser origins. This server's *own* origins are always
    * admitted, so the rung-1 same-origin UI needs no configuration; a
    * cross-origin browser (rung 5, behind Local Network Access) must be listed.
+   * A listed origin may also read {@link hostDescriptorPath} across origins:
+   * its answers echo that origin in `Access-Control-Allow-Origin`, and its
+   * preflight is answered. An unlisted origin gets no CORS grant and its
+   * `/agent` upgrade is refused with 403. Admission still needs the token.
    */
   readonly allowedOrigins?: readonly string[] | undefined;
   /** Absolute directory of a prebuilt Tau UI to serve at `/`. */
@@ -209,6 +213,25 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     }
     const port = String(bound.port);
     return [`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`];
+  };
+
+  /* Listed cross-origin pages (rung 5, behind Local Network Access): exact strings, as `isOriginAllowed` matches. */
+  const crossOrigins = new Set(options.allowedOrigins ?? []);
+
+  /**
+   * The CORS answer for one request: the request's origin echoed when it is listed, and `Vary: Origin` whenever any
+   * origin is, so a cache never hands one origin's answer to another. An unlisted origin gets no grant at all.
+   * @param request - The request whose `Origin` is checked.
+   * @returns The headers to add to its answer.
+   */
+  const corsHeaders = (request: IncomingMessage): Record<string, string> => {
+    if (crossOrigins.size === 0) {
+      return {};
+    }
+    const { origin } = request.headers;
+    return origin !== undefined && crossOrigins.has(origin)
+      ? { 'access-control-allow-origin': origin, vary: 'Origin' }
+      : { vary: 'Origin' };
   };
 
   const isAdmitted = (request: IncomingMessage): boolean => {
@@ -325,8 +348,24 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
   };
 
   const serveDescriptor = (request: IncomingMessage, response: ServerResponse): void => {
+    const cors = corsHeaders(request);
+    /* A listed origin's preflight. The descriptor carries no secret, so the grant is the read alone: no credentials,
+     * no extra headers, and the private-network grant Chromium's preflight asks a loopback answer for. */
+    if (request.method === 'OPTIONS' && 'access-control-allow-origin' in cors) {
+      response.writeHead(204, {
+        ...cors,
+        'access-control-allow-methods': 'GET, HEAD',
+        'access-control-allow-headers': 'accept',
+        'access-control-max-age': '600',
+        ...(request.headers['access-control-request-private-network'] === 'true'
+          ? { 'access-control-allow-private-network': 'true' }
+          : {}),
+      });
+      response.end();
+      return;
+    }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      response.writeHead(405, { ...isolationHeaders, allow: 'GET, HEAD' });
+      response.writeHead(405, { ...isolationHeaders, ...cors, allow: 'GET, HEAD' });
       response.end();
       return;
     }
@@ -339,6 +378,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     });
     response.writeHead(200, {
       ...isolationHeaders,
+      ...cors,
       'content-type': 'application/json',
       'cache-control': 'no-store',
       'content-length': String(Buffer.byteLength(body)),

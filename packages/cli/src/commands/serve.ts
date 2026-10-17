@@ -197,6 +197,38 @@ export const agentWorkspaceRoot = (workspace: string | undefined, cwd: string): 
   }
 };
 
+/* An origin as a browser sends it: a scheme, `://` and an authority, nothing after (`app://tau` included). */
+const originPattern = /^[a-z][\d+.a-z-]*:\/\/[^\s#/?]+$/u;
+
+/**
+ * The browser origins `--allowed-origins` lists (charter S32, ruling X32): exact strings, as a browser sends `Origin`,
+ * comma-separated or repeated. A listed origin may read the descriptor across origins and its `/agent` upgrade passes
+ * the origin check; admission still needs the token. A wildcard, a path or a trailing slash never matches a browser's
+ * `Origin`, so each is refused rather than silently ignored.
+ *
+ * @internal
+ * @param value - The flag's value or values, or `TAU_HOST_ALLOWED_ORIGINS`.
+ * @returns The origins, deduplicated, in the order given.
+ * @throws {CliError} `ORIGIN_INVALID` (exit 2) for a value that is not an exact origin.
+ */
+export const parseAllowedOrigins = (value: string | readonly string[] | undefined): readonly string[] => {
+  const values = (typeof value === 'string' ? [value] : (value ?? []))
+    .flatMap((entry) => entry.split(','))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  for (const origin of values) {
+    const special = /^https?:/u.test(origin) && URL.canParse(origin) ? new URL(origin).origin : undefined;
+    if (!originPattern.test(origin) || (special !== undefined && special !== origin)) {
+      throw cliError(
+        'ORIGIN_INVALID',
+        `--allowed-origins takes exact origins such as https://tau.new or http://localhost:3000 (no path, no trailing slash, no wildcard); ${JSON.stringify(origin)} is not one.`,
+        exitCodes.usage,
+      );
+    }
+  }
+  return [...new Set(values)];
+};
+
 /**
  * Build Launcher 1's configuration from the CLI surface.
  *
@@ -219,10 +251,12 @@ const agentOptions = (
     readonly externalAgents?: boolean;
     readonly testModel?: boolean;
     readonly computeMode: string;
+    readonly allowedOrigins?: string | readonly string[];
   },
   port: number | undefined,
 ): HostDaemonAgentOptions | undefined => {
   const uiRoot = args.ui ? resolve(args.ui) : undefined;
+  const allowedOrigins = parseAllowedOrigins(args.allowedOrigins);
   if (port === undefined) {
     return undefined;
   }
@@ -260,6 +294,7 @@ const agentOptions = (
     token,
     port,
     ...(uiRoot ? { uiRoot } : {}),
+    ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
     /* On by default and self-limiting: an adapter that is not installed, or a
      * CLI that is not on PATH, is simply not advertised. `--no-external-agents`
      * is the operator's off switch, not a prerequisite. Resolution is anchored
@@ -342,6 +377,11 @@ export const serveNativeKernels = (): {
         return closureRoots ?? [];
       },
       start: startNativeWorker,
+      /* A runtime child cannot read the store, so a failed handshake is re-verified here (D8, X35). */
+      verify: async (runtimePath, signal) => {
+        const { verifyStoreClosure } = await nativeKernels();
+        return verifyStoreClosure(runtimePath, signal);
+      },
     },
     prepareKernel: async ({ kernel }, { signal, onProgress }) => {
       preparation ??= openPreparation();
@@ -639,6 +679,14 @@ export const serveCommand = defineCommand({
       description: 'Directory of a prebuilt Tau UI served beside the agent channel, cross-origin isolated',
       required: false,
       default: process.env['TAU_HOST_UI_DIR'],
+    },
+    allowedOrigins: {
+      type: 'string',
+      description:
+        'Browser origins that may read /.well-known/tau-host and open /agent across origins, comma-separated and exact (e.g. https://tau.new); the agent token is still required (TAU_HOST_ALLOWED_ORIGINS)',
+      required: false,
+      multiple: true,
+      default: process.env['TAU_HOST_ALLOWED_ORIGINS'],
     },
     workspace: {
       type: 'string',

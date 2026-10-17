@@ -150,6 +150,86 @@ describe('startAgentServer', () => {
     });
   });
 
+  /*
+   * Rung 5 (S32, X32): a page on a listed origin reads the descriptor across origins and its `/agent` upgrade passes
+   * the origin check; an unlisted origin gets neither. `fetch` from Node sends whatever `origin` header it is given,
+   * so these assert exactly what a browser would be granted.
+   */
+  describe('allowed origins', () => {
+    const website = 'https://tau.new';
+
+    const startListed = async (): Promise<URL> => {
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, allowedOrigins: [website] });
+      await server.ready;
+      return server.url();
+    };
+
+    it('grants a listed origin the descriptor and varies on Origin', async () => {
+      const origin = await startListed();
+      const response = await fetch(new URL('/.well-known/tau-host', origin), { headers: { origin: website } });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe(website);
+      expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+      expect(response.headers.get('vary')).toBe('Origin');
+      await expect(response.json()).resolves.toMatchObject({ v: 1, agent: true, workspaceRoot });
+    });
+
+    it('grants an unlisted origin nothing', async () => {
+      const origin = await startListed();
+      const response = await fetch(new URL('/.well-known/tau-host', origin), {
+        headers: { origin: 'https://evil.example' },
+      });
+
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(response.headers.get('vary')).toBe('Origin');
+    });
+
+    it('answers a listed origin preflight, with the private-network grant it asks for', async () => {
+      const origin = await startListed();
+      const preflight = await fetch(new URL('/.well-known/tau-host', origin), {
+        method: 'OPTIONS',
+        headers: {
+          origin: website,
+          'access-control-request-method': 'GET',
+          'access-control-request-private-network': 'true',
+        },
+      });
+
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('access-control-allow-origin')).toBe(website);
+      expect(preflight.headers.get('access-control-allow-methods')).toBe('GET, HEAD');
+      expect(preflight.headers.get('access-control-allow-private-network')).toBe('true');
+
+      const foreign = await fetch(new URL('/.well-known/tau-host', origin), {
+        method: 'OPTIONS',
+        headers: { origin: 'https://evil.example', 'access-control-request-method': 'GET' },
+      });
+      expect(foreign.status).toBe(405);
+      expect(foreign.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('sends no CORS headers when no origin is listed', async () => {
+      const origin = await start();
+      const response = await fetch(new URL('/.well-known/tau-host', origin), { headers: { origin: website } });
+
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(response.headers.get('vary')).toBeNull();
+    });
+
+    it('admits the upgrade of a listed origin with the token, and refuses an unlisted one', async () => {
+      const origin = await startListed();
+
+      await expect(
+        upgrade(origin, { headers: { authorization: `Bearer ${token}`, origin: website } }),
+      ).resolves.toBeUndefined();
+      await expect(upgrade(origin, { headers: { origin: website } })).rejects.toThrow(/401/u);
+      await expect(
+        upgrade(origin, { headers: { authorization: `Bearer ${token}`, origin: 'https://evil.example' } }),
+      ).rejects.toThrow(/403/u);
+    });
+  });
+
   it('admits a bearer, refuses a missing one, and refuses a foreign origin', async () => {
     const origin = await start();
 

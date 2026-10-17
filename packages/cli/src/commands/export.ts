@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { resolve, basename, dirname, extname } from 'node:path';
+import { resolve, basename, dirname, extname, relative, sep } from 'node:path';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileExtensionSet } from '@taucad/runtime/types';
@@ -8,6 +8,7 @@ import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import { loadCliRuntime } from '#runtime-options.js';
 import { nativeKernelFor } from '#native-kernels.js';
+import { findProjectRoot } from '#project-root.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
@@ -174,13 +175,16 @@ export const exportCommand = defineCommand({
     output.start(`Exporting ${inputFilename} → ${streamToStdout ? 'stdout' : basename(outputPath)}`);
     profileLedger?.checkpoint('cli.prepare');
 
-    const projectRoot = process.cwd();
+    // The project is rooted at the nearest `tau.json`, as `tau check` roots it, so a sibling import above the model's
+    // folder resolves (S11 F2). Plugins still load from the invoking project.
+    const projectRoot = findProjectRoot(inputPath);
+    const sourcePath = relative(projectRoot, inputPath).split(sep).join('/');
     // The native kernel for this input, from the payload store's receipts; nothing is downloaded.
     const native = await nativeKernelFor(extname(inputPath).slice(1));
     const unprepared = native !== undefined && 'code' in native ? native : undefined;
     authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
-      projectRoot,
+      projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
       ...(native !== undefined && !('code' in native) && native),
@@ -190,7 +194,7 @@ export const exportCommand = defineCommand({
     profileLedger?.checkpoint('cli.create-runtime');
     const client = await createNodeClient({
       runtime,
-      projectPath: inputDirectory,
+      projectPath: projectRoot,
     });
     profileLedger?.checkpoint('runtime.create-client');
     const telemetryEntries: TelemetryEntry[] = [];
@@ -221,7 +225,7 @@ export const exportCommand = defineCommand({
     try {
       // One export, then exit: a file watcher would only race the shutdown.
       const opened = client.open({
-        source: { path: inputFilename },
+        source: { path: sourcePath },
         parameters: suppliedParameters,
         watch: false,
       });

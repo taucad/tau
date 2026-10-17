@@ -277,6 +277,37 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
       });
     });
 
+    it('should pass over a tau that prints 131,000 bytes for --version, keeping none of them, and run the next', async () => {
+      /* Kept, those bytes would put TAU_LAUNCH past Linux's 128 KiB cap on one variable, and `spawn` would throw. */
+      const noisy = await fakeExecutable(join(directory, 'noisy', 'tau'), "process.stdout.write('noisy served');", {
+        version: '9'.repeat(131_000),
+      });
+      const matching = await fakeExecutable(join(directory, 'matching', 'tau'), reportStart, { version });
+
+      const run = await launch(pathEnvironment(join(directory, 'noisy'), join(directory, 'matching')), { entry });
+
+      expect(run).toMatchObject({ stderr: '', code: 0 });
+      const started = JSON.parse(run.stdout) as Started;
+      expect(started.launch).toMatchObject({ source: 'installed', path: matching, cli: version });
+      expect(started.launch.skipped).toEqual([{ path: noisy }]);
+    });
+
+    it('should report a CLI that spawn refuses to start on one stderr line and exit 1', async () => {
+      /* A plugin version that takes TAU_LAUNCH past every cap makes `spawn` throw E2BIG rather than emit an error:
+       * Linux limits one variable to 32 pages (128 KiB with 4 KiB pages, 2 MiB with the 64 KiB pages of some
+       * aarch64 kernels) and macOS all of them to 1 MiB. */
+      await writeFile(
+        join(directory, 'plugin', 'package.json'),
+        JSON.stringify({ name: '@taucad/agent-plugin', version: '9'.repeat(2_200_000) }),
+      );
+      const cli = await fakeCli(reportStart);
+
+      const run = await launch(explicitEnvironment(cli, baseEnvironment()), { entry });
+
+      expect(run).toMatchObject({ stdout: '', code: 1 });
+      expect(run.stderr).toMatch(/^tau: cannot start .*tau: spawn E2BIG\n$/u);
+    });
+
     it('should fetch the plugin version with npx once the preflight passes', async () => {
       const older = await fakeExecutable(join(directory, 'older', 'tau'), "process.stdout.write('older served');", {
         version: '0.0.0-older',
@@ -320,7 +351,7 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
 
       expect(run).toEqual({
         stdout: '',
-        stderr: 'tau: npm did not run; install Node.js 24 or later, which includes npm\n',
+        stderr: 'tau: npm was not found on PATH; install Node.js 24 or later, which includes npm\n',
         code: 4,
       });
     });

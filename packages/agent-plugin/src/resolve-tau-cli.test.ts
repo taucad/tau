@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Process environment names keep their wire spelling. */
+import { win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { resolveTauCli } from '#resolve-tau-cli.js';
@@ -190,6 +191,20 @@ describe('resolveTauCli', () => {
       expect(cli.skipped).toEqual([{ path: '/usr/local/bin/tau', version: '1.2.3-beta.2' }]);
     });
 
+    it('should probe a folder once when PATH names it with and without a trailing slash', () => {
+      const versionOf = vi.fn<ResolveTauCliInput['versionOf']>(() => '1.2.3-beta.2');
+      const files = { ...pluginManifest, '/home/me/bin/tau': '', '/usr/local/bin/tau': '' };
+      const cli = resolveTauCli(
+        host(files, { env: { PATH: '/home/me/bin:/home/me/bin/:/usr/local/bin/' }, versionOf }),
+      );
+
+      expect(versionOf.mock.calls).toEqual([['/home/me/bin/tau'], ['/usr/local/bin/tau']]);
+      expect(cli.skipped).toEqual([
+        { path: '/home/me/bin/tau', version: '1.2.3-beta.2' },
+        { path: '/usr/local/bin/tau', version: '1.2.3-beta.2' },
+      ]);
+    });
+
     it('should look in Homebrew, then /usr/local/bin, when PATH has no matching tau', () => {
       const both = { ...pluginManifest, '/opt/homebrew/bin/tau': '', '/usr/local/bin/tau': '' };
       const usrLocal = { ...pluginManifest, '/usr/local/bin/tau': '' };
@@ -264,6 +279,18 @@ describe('resolveTauCli', () => {
         pluginVersion,
         skipped: [{ path: npmShim, version: '1.2.3-beta.2' }],
       });
+      expect(versionOf.mock.calls).toEqual([[npmShim]]);
+    });
+
+    it('should probe a tau.cmd once when PATH names its folder with and without a trailing backslash', () => {
+      const versionOf = vi.fn<ResolveTauCliInput['versionOf']>(() => '1.2.3-beta.2');
+      const folder = win32.dirname(npmShim);
+      const files = { ...windowsManifest, [npmShim]: '' };
+      resolveTauCli({
+        ...windows(files, { PATH: [folder, `${folder}${win32.sep}`].join(win32.delimiter) }),
+        versionOf,
+      });
+
       expect(versionOf.mock.calls).toEqual([[npmShim]]);
     });
   });

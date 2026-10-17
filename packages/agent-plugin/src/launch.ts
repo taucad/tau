@@ -67,25 +67,32 @@ const launch = (): void => {
     plugin: pluginVersion,
     node: process.versions.node,
   });
-  /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. */
-  const child = spawn(shell ? `"${command}"` : command, [...args, ...process.argv.slice(2)], {
-    stdio: 'inherit',
-    shell,
-    env,
-  });
-
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => {
-      child.kill(signal);
-    });
-  }
-  child.once('error', (error) => {
+  const cannotStart = (error: Error): void => {
     process.stderr.write(`tau: cannot start ${command}: ${error.message}\n`);
     process.exitCode = 1;
-  });
-  child.once('exit', (code) => {
-    process.exitCode = code ?? 1;
-  });
+  };
+  try {
+    /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. */
+    const child = spawn(shell ? `"${command}"` : command, [...args, ...process.argv.slice(2)], {
+      stdio: 'inherit',
+      shell,
+      env,
+    });
+
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      process.on(signal, () => {
+        child.kill(signal);
+      });
+    }
+    child.once('error', cannotStart);
+    child.once('exit', (code) => {
+      process.exitCode = code ?? 1;
+    });
+  } catch (error) {
+    /* `spawn` throws, rather than emits, a failure such as E2BIG (an argument or variable past the system's
+     * limit): the same one line, not a stack. */
+    cannotStart(error as Error);
+  }
 };
 
 launch();

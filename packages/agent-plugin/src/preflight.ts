@@ -8,6 +8,7 @@
  * @module
  */
 import { execFileSync } from 'node:child_process';
+import type { ExecFileSyncOptions } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -28,31 +29,43 @@ export const needsShell = (command: string): boolean => windows && /\.(?:bat|cmd
  *
  * @param command - The executable.
  * @param args - Its arguments.
- * @param answerTimeout - Milliseconds before the command is killed; without one it runs until it exits.
+ * @param limits - Milliseconds before the command is killed (`timeout`), the bytes of standard output it may
+ *   print (`maxBuffer`) and the signal that kills it past either (`killSignal`); without them it runs until it
+ *   exits and may print 1 MiB.
  * @returns What it printed on standard output, trimmed.
- * @throws When it cannot start, exits non-zero or is killed.
+ * @throws When it cannot start, exits non-zero, is killed or prints past `maxBuffer`.
  */
-const run = (command: string, args: readonly string[], answerTimeout?: number): string => {
+const run = (
+  command: string,
+  args: readonly string[],
+  limits?: Pick<ExecFileSyncOptions, 'killSignal' | 'maxBuffer' | 'timeout'>,
+): string => {
   const shell = needsShell(command);
+  /* Discarded rather than piped, standard error never counts towards `maxBuffer`: a warning there does not
+   * cost a matching `tau` its turn. */
   return execFileSync(shell ? `"${command}"` : command, args, {
     encoding: 'utf8',
     shell,
-    stdio: 'pipe',
-    timeout: answerTimeout,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    ...limits,
   }).trim();
 };
 
 /**
  * What a Tau CLI prints for `--version`, for `resolveTauCli`'s `versionOf`.
  *
+ * At most 128 bytes are kept, which every Tau version fits: the answer reaches the CLI inside `TAU_LAUNCH`, and
+ * Linux refuses to start a process with a variable over 128 KiB. A `tau` past either limit is killed with SIGKILL:
+ * `execFileSync` signals once and then waits with no timer, so one that traps SIGTERM would hang the launcher.
+ *
  * @internal
  * @param path - The `tau` executable.
- * @returns The version, or `undefined` when it cannot start, fails, or does not answer within 2 s (a warm
- *   `tau` answers in about 45 ms).
+ * @returns The version, or `undefined` when it cannot start, fails, prints more than 128 bytes, or does not
+ *   answer within 2 s (a warm `tau` answers in about 45 ms).
  */
 export const versionOf = (path: string): string | undefined => {
   try {
-    return run(path, ['--version'], 2000);
+    return run(path, ['--version'], { timeout: 2000, maxBuffer: 128, killSignal: 'SIGKILL' });
   } catch {
     return undefined;
   }
@@ -64,7 +77,10 @@ export const versionOf = (path: string): string | undefined => {
  * @internal
  */
 export type PreflightFailure = {
-  /** 2: Node.js is older than 24. 3: npm's cache is not writable. 4: npm does not run or is older than 11. */
+  /**
+   * 2: Node.js is older than 24. 3: npm's cache is not writable. 4: npm is not on `PATH` or does not run, or is
+   * older than 11.
+   */
   readonly code: 2 | 3 | 4;
   /** One line that starts with `tau: `, names the fix and ends with a newline. */
   readonly message: string;
@@ -92,7 +108,10 @@ export type PreflightReport = {
 export type PreflightInput = {
   /** The Node.js version that runs the launcher, as `process.versions.node` gives it. */
   readonly nodeVersion?: string;
-  /** Runs npm with the arguments and returns its trimmed output; throws when npm cannot start or fails. */
+  /**
+   * Runs npm with the arguments and returns its trimmed output; throws when npm cannot start, with `code`
+   * `ENOENT` when it is not on `PATH`, or fails.
+   */
   readonly npm?: (args: readonly string[]) => string;
 };
 
@@ -120,8 +139,11 @@ export const preflight = ({
   let version: string;
   try {
     version = npm(['--version']);
-  } catch {
-    return { failure: { code: 4, message: 'tau: npm did not run; install Node.js 24 or later, which includes npm\n' } };
+  } catch (error) {
+    /* ENOENT is an npm missing from the host's `PATH`, as under Claude Desktop's minimal one. Windows' `cmd.exe`
+     * reports a missing `npm.cmd` as a failed command, which reads as npm not running. */
+    const reason = (error as { readonly code?: unknown }).code === 'ENOENT' ? 'was not found on PATH' : 'did not run';
+    return { failure: { code: 4, message: `tau: npm ${reason}; install Node.js 24 or later, which includes npm\n` } };
   }
   if (!(Number.parseInt(version, 10) >= 11)) {
     return { failure: { code: 4, message: `tau: npm ${version} is older than 11; run: npm install -g npm@11\n` } };
@@ -133,7 +155,12 @@ export const preflight = ({
     mkdirSync(temporary, { recursive: true });
     const probe = join(temporary, `tau-${process.pid}`);
     writeFileSync(probe, '');
-    rmSync(probe);
+    try {
+      rmSync(probe);
+    } catch {
+      /* The write proved the cache writable: a probe that cannot be removed, as when antivirus holds it on
+       * Windows (EBUSY or EPERM), does not undo that. */
+    }
   } catch {
     /* Without a named cache there is nothing to check. Otherwise this is the fix npm itself prints for a
      * cache that `sudo npm` left owned by root; Windows has no owner to restore. */

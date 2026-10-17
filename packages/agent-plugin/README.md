@@ -163,7 +163,7 @@ Both hosts start `node dist/launch.mjs`. The launcher starts `<tau> mcp` on its 
 
 1. `TAU_CLI`, a path to a `tau` executable, whatever its version.
 2. `.dev/cli.json`, the workspace checkout's CLI (see [Development](#development)).
-3. The first installed `tau` whose `tau --version` prints this package's version, searching `PATH`, then `/opt/homebrew/bin` and `/usr/local/bin` for desktop apps started with a minimal `PATH`. A `tau` of another version, or one that fails or does not answer within 2 seconds, is passed over.
+3. The first installed `tau` whose `tau --version` prints this package's version, searching `PATH`, then `/opt/homebrew/bin` and `/usr/local/bin` for desktop apps started with a minimal `PATH`. A `tau` of another version, or one that fails, prints more than 128 bytes or does not answer within 2 seconds, is passed over.
 4. `npx --yes --package=@taucad/cli@<version> tau mcp`, where `<version>` is this package's version.
 
 Before `npx`, the launcher checks what `npx` needs. When a check fails it starts nothing: it writes one line to stderr that begins with `tau:` and names the fix, and exits with the check's code.
@@ -172,11 +172,11 @@ Before `npx`, the launcher checks what `npx` needs. When a check fails it starts
 | --------- | ----------------------------------------------------------------------------------------------------- |
 | 2         | Node.js is older than 24                                                                              |
 | 3         | npm's cache is not writable, as when `sudo npm` left it owned by root; the line gives the `chown` fix |
-| 4         | npm does not run, or is older than 11                                                                 |
+| 4         | npm was not found on `PATH` or does not run, or is older than 11                                      |
 
 When the CLI cannot be started, the launcher exits 1. A host shows only that the server failed to start; run `node <plugin folder>/dist/launch.mjs </dev/null` to read the line.
 
-The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed).
+The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed if it answered within 2 seconds and 128 bytes).
 
 `resolveTauCli`, the package's one export, is that resolution as a pure function; its caller passes `versionOf`, which reads what `<path> --version` prints.
 

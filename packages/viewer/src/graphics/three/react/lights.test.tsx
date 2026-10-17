@@ -226,6 +226,14 @@ describe('Lights', () => {
     expect(scene.environment).toBe(targets[1]?.texture);
   });
 
+  it('should release the PMREM working target when filtering throws', () => {
+    mocks.webglPrefilter.mockImplementation(() => {
+      throw new Error('filter failed');
+    });
+    expect(() => render(<Lights settings={{ environment: 'studio' }} />)).toThrow('filter failed');
+    expect(mocks.generatorDispose).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     { pointer: 'coarse', resolution: 256 },
     { pointer: 'fine', resolution: 512 },

@@ -16,6 +16,7 @@ import type { ThreeCamera } from '@taucad/three/camera';
 import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.jsx';
 import { useOverlayDepthRestore } from '#graphics/three/scene-overlay.jsx';
 import { ManagedN8AoPass } from '#graphics/three/n8ao-pass.js';
+import { isCoarsePointerDevice } from '#graphics/three/utils/device-tier.js';
 import { defaultPostProcessingSettings, resolveAoRadiusCssPixels } from '#graphics/three/post-processing-settings.js';
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 
@@ -24,6 +25,11 @@ type ComposerResources = Readonly<{
   renderPass: RenderPass;
   depthRestore: CanvasDepthRestorePass;
   aoPasses: Map<ThreeCamera, ManagedN8AoPass>;
+  /**
+   * Coarse-pointer tier: one AO endpoint at a time, at half resolution, in a single-sample composer.
+   * Each N8AO endpoint holds ~20 B per drawing-buffer pixel, and composer MSAA another ~48.
+   */
+  constrained: boolean;
   scene: Scene;
   state: { sync?: ComposerSync };
   beforeAoToneMappingEffect: ToneMappingEffect;
@@ -43,27 +49,44 @@ const toneMappingModes = {
 
 const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
 
-const selectComposerCamera = (resource: ComposerResources, camera: ThreeCamera, aoEnabled: boolean): void => {
+/** @returns Whether an AO endpoint was created, which then needs the current configuration. */
+const selectComposerCamera = (resource: ComposerResources, camera: ThreeCamera, aoEnabled: boolean): boolean => {
   resource.renderPass.mainCamera = camera;
+  if (resource.constrained) {
+    for (const [endpoint, aoPass] of resource.aoPasses) {
+      if (endpoint !== camera) {
+        resource.composer.removePass(aoPass);
+        aoPass.dispose();
+        resource.aoPasses.delete(endpoint);
+      }
+    }
+  }
+  let created = false;
   if (aoEnabled && !resource.aoPasses.has(camera)) {
     const aoPass = new ManagedN8AoPass(resource.scene, camera);
     resource.aoPasses.set(camera, aoPass);
     resource.composer.addPass(aoPass, resource.composer.passes.indexOf(resource.toneMappingPass));
+    created = true;
   }
   for (const [endpoint, aoPass] of resource.aoPasses) {
     // N8AO bakes camera projection into three materials. Keep those cameras fixed.
     aoPass.enabled = aoEnabled && endpoint === camera;
   }
+  return created;
 };
 
 const configureComposer = (
   resource: ComposerResources,
   settings: WebGlPostProcessingSettings,
-  viewport: { readonly width: number; readonly height: number; readonly dpr: number },
+  viewport: {
+    readonly width: number;
+    readonly height: number;
+    readonly dpr: number;
+  },
 ): void => {
   for (const aoPass of resource.aoPasses.values()) {
     Object.assign(aoPass.configuration, {
-      halfRes: settings.webglHalfResolution,
+      halfRes: settings.webglHalfResolution || resource.constrained,
       screenSpaceRadius: true,
       // EffectComposer gives passes physical drawing-buffer dimensions.
       aoRadius: resolveAoRadiusCssPixels(settings.radiusCssPixels, viewport) * viewport.dpr,
@@ -94,7 +117,11 @@ const configureComposer = (
 
 type ComposerSync = Readonly<{
   settings: WebGlPostProcessingSettings;
-  viewport: { readonly width: number; readonly height: number; readonly dpr: number };
+  viewport: {
+    readonly width: number;
+    readonly height: number;
+    readonly dpr: number;
+  };
 }>;
 
 /** Size the composer and apply the viewer's settings for the active camera. */
@@ -110,9 +137,8 @@ const syncComposer = (resource: ComposerResources, activeCamera: ThreeCamera, sy
   ) {
     resource.composer.setSize(viewport.width, viewport.height);
   }
-  const count = resource.aoPasses.size;
-  selectComposerCamera(resource, activeCamera, settings.aoEnabled && settings.displayMode !== 'no-ao');
-  if (previous !== sync || count !== resource.aoPasses.size) {
+  const created = selectComposerCamera(resource, activeCamera, settings.aoEnabled && settings.displayMode !== 'no-ao');
+  if (previous !== sync || created) {
     configureComposer(resource, settings, viewport);
   }
   resource.state.sync = sync;
@@ -181,7 +207,13 @@ const createComposer = ({
   readonly gl: WebGLRenderer;
   readonly scene: Scene;
 }): ComposerResources => {
-  const composer = new EffectComposer(gl, { stencilBuffer: true, multisampling: 4, frameBufferType: HalfFloatType });
+  const constrained = isCoarsePointerDevice();
+  // The constrained tier relies on the FXAA pass below instead of a multisampled HDR target.
+  const composer = new EffectComposer(gl, {
+    stencilBuffer: true,
+    multisampling: constrained ? 0 : 4,
+    frameBufferType: HalfFloatType,
+  });
   // EffectComposer starts each frame at inputBuffer. Only geometry needs MSAA;
   // fullscreen post passes consume its resolved color and use this target.
   composer.outputBuffer.samples = 0;
@@ -216,6 +248,7 @@ const createComposer = ({
       renderPass,
       depthRestore,
       aoPasses,
+      constrained,
       beforeAoToneMappingEffect,
       beforeAoToneMappingPass,
       toneMappingEffect,

@@ -63,7 +63,13 @@ type ModelEmphasisMaskLayer = (typeof modelEmphasisMaskLayers)[number];
  */
 export const modelEmphasisMaskSamples = 4;
 
-type Proxy = Readonly<{ source: Mesh; state: ModelEmphasisState; mask: Mesh; visibility: Mesh; wash: Mesh }>;
+type Proxy = Readonly<{
+  source: Mesh;
+  state: ModelEmphasisState;
+  mask: Mesh;
+  visibility: Mesh;
+  wash: Mesh;
+}>;
 
 type CompositeMaterial =
   | ReturnType<typeof createWebGlSilhouetteMaterial>
@@ -274,6 +280,11 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
   for (const source of set.selected) {
     add(source, 'selected');
   }
+  if (resources.proxies.length === 0) {
+    // Nothing is emphasised: give back the device-resolution multisampled target. The mask pass
+    // sizes it again on the next emphasised frame.
+    resources.setMaskSize({ width: 1, height: 1, pixelRatio: 1 });
+  }
 }
 
 /** Per-frame CPU work: follow the sources' world transforms. */
@@ -301,7 +312,12 @@ export function renderModelEmphasisMask(
     camera,
     restoreDepth,
     previousClear,
-  }: { gl: WebGLRenderer; camera: Camera; restoreDepth: DepthRestore; previousClear: Color },
+  }: {
+    gl: WebGLRenderer;
+    camera: Camera;
+    restoreDepth: DepthRestore;
+    previousClear: Color;
+  },
 ): void {
   const previousTarget = gl.getRenderTarget();
   const previousAutoClear = gl.autoClear;

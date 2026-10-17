@@ -99,6 +99,7 @@ import type {
   GltfSectionTopologyTiming,
   SectionTopologyGltfParser,
 } from '#graphics/three/utils/section-surface-topology.js';
+import { releaseGltfBinaryChunk } from '#graphics/three/utils/gltf-binary-chunk.js';
 import { createSectionTopologyScheduler } from '#graphics/three/utils/section-topology-scheduler.js';
 import { releaseSectionTopologyWorker } from '#graphics/three/utils/section-surface-topology-worker-client.js';
 import { useKinematicsViewer } from '#graphics/three/react/kinematics-viewer.js';
@@ -385,6 +386,695 @@ type PreparedGltfPresentation = {
   dispose: () => void;
   disposeResources: () => void;
 };
+
+/*
+ * Presentation disposers are built here, at module scope, never inside the component. A closure
+ * created inside the component keeps that render's whole scope alive, and that scope holds the
+ * presentation then on screen: a live bundle's disposer would retain its predecessor, whose own
+ * disposer retained the one before it, so every superseded scene, parser and GLB stayed reachable
+ * for as long as the viewer was mounted.
+ */
+const disposeNothing = (): void => undefined;
+
+/** Surface batches keep this for the presentation's lifetime, so it must not close over a render. */
+function createSectionClipInstaller(clip: ReturnType<typeof useSectionClip>): (material: Material) => void {
+  return (material) => {
+    installSectionClip(material, clip);
+  };
+}
+
+/**
+ * Dispose every bundle the viewer still owns when it unmounts. This lives outside the component so
+ * its mount-long cleanup holds only these refs, not the first render's scope and that render's GLB.
+ */
+function useDisposePresentationsOnUnmount(
+  topologyScheduler: ReturnType<typeof createSectionTopologyScheduler>,
+  [candidate, committed, retired]: readonly [
+    { readonly current: PreparedGltfPresentation | undefined },
+    { readonly current: PreparedGltfPresentation | undefined },
+    { readonly current: PreparedGltfPresentation[] },
+  ],
+): void {
+  useEffect(
+    () => () => {
+      topologyScheduler.dispose();
+      releaseSectionTopologyWorker();
+      candidate.current?.dispose();
+      committed.current?.dispose();
+      for (const bundle of retired.current.splice(0)) {
+        bundle.dispose();
+      }
+    },
+    [candidate, committed, retired, topologyScheduler],
+  );
+}
+
+/** Disposes a fully prepared bundle once, cancelling its section analysis first. */
+function createPresentationDispose(bundle: PreparedGltfPresentation): () => void {
+  return () => {
+    if (bundle.disposed) {
+      return;
+    }
+    bundle.disposed = true;
+    bundle.sectionStatus = 'cancelled';
+    setGltfSectionSurfaceRegistrationState(bundle.scene, 'cancelled');
+    bundle.disposeResources();
+  };
+}
+
+/** Releases the surface batches and the loader-owned resources of one presented scene. */
+function createPresentationResourceDispose(
+  scene: Group,
+  originalMaterials: Map<number, Material | Material[]>,
+): () => void {
+  const disposeCanonicalResources = createGltfResourceDisposer(scene, originalMaterials);
+  return () => {
+    disposeGltfSurfaceBatches(scene);
+    disposeCanonicalResources();
+  };
+}
+
+/** An in-place bundle takes over the scene, and the duty to free it, from the bundle it replaces. */
+function createInPlaceDispose(bundle: PreparedGltfPresentation, disposeResources: () => void): () => void {
+  return () => {
+    bundle.disposed = true;
+    disposeResources();
+  };
+}
+
+type GltfPreparationStats = {
+  activeParses: number;
+  activeParseHighWaterMark: number;
+  parsesStarted: number;
+  parsesDiscarded: number;
+  committedBundleHighWaterMark: number;
+  candidateBundleHighWaterMark: number;
+};
+
+type PresentationTelemetryOptions = Readonly<{
+  graphicsActor: ReturnType<typeof useGraphics>;
+  backend: ReturnType<typeof useThreeGraphicsBackend>;
+  topologyScheduler: ReturnType<typeof createSectionTopologyScheduler>;
+  frameProbe: {
+    readonly current: { revision: number; modelEmptyFrames: number } | undefined;
+  };
+  preparationStats: { readonly current: GltfPreparationStats };
+}>;
+
+/*
+ * The viewer's long-lived callbacks are built at module scope too: a callback memoised on stable
+ * inputs would otherwise keep its first render's scope, and with it the first GLB, for the viewer's
+ * whole lifetime.
+ */
+function createPresentationTelemetry({
+  graphicsActor,
+  backend,
+  topologyScheduler,
+  frameProbe,
+  preparationStats,
+}: PresentationTelemetryOptions): (
+  bundle: PreparedGltfPresentation,
+  outcome: GltfPresentationTelemetry['outcome'],
+) => void {
+  return (bundle: PreparedGltfPresentation, outcome: GltfPresentationTelemetry['outcome']): void => {
+    if (bundle.telemetrySent || (outcome === 'presented' && bundle.firstFrameAt === undefined)) {
+      return;
+    }
+    bundle.telemetrySent = true;
+    const schedulerStats = topologyScheduler.stats();
+    graphicsActor.send({
+      type: 'gltfPresentationMeasured',
+      telemetry: {
+        revision: bundle.revision,
+        key: bundle.key,
+        backend,
+        barrier: bundle.barrier,
+        outcome,
+        glbBytes: bundle.sourceBytes.byteLength,
+        renderBoundary: 'submitted',
+        ...countGltfPresentation(bundle.scene),
+        durations: bundle.timings,
+        modelEmptyFrames:
+          frameProbe.current?.revision === bundle.revision
+            ? frameProbe.current.modelEmptyFrames
+            : bundle.modelEmptyFrames,
+        ...preparationStats.current,
+        topologyJobsStarted: schedulerStats.started,
+        topologyJobsDiscarded: schedulerStats.discarded,
+      },
+    });
+  };
+}
+
+type SectionAnalysisOptions = Readonly<{
+  graphicsActor: ReturnType<typeof useGraphics>;
+  backend: ReturnType<typeof useThreeGraphicsBackend>;
+  topologyScheduler: ReturnType<typeof createSectionTopologyScheduler>;
+  committed: { readonly current: PreparedGltfPresentation | undefined };
+  invalidate: () => void;
+  emitTelemetry: ReturnType<typeof createPresentationTelemetry>;
+}>;
+
+function createSectionAnalysis({
+  graphicsActor,
+  backend,
+  topologyScheduler,
+  committed,
+  invalidate,
+  emitTelemetry,
+}: SectionAnalysisOptions): (bundle: PreparedGltfPresentation) => Promise<'completed' | 'discarded' | 'failed'> {
+  return async (bundle: PreparedGltfPresentation): Promise<'completed' | 'discarded' | 'failed'> => {
+    if (bundle.sectionStatus === 'ready') {
+      return 'completed';
+    }
+    if (bundle.sectionStatus === 'cancelled') {
+      return 'discarded';
+    }
+    if (bundle.sectionStatus === 'unsupported') {
+      return 'failed';
+    }
+    if (bundle.analysisPromise) {
+      return bundle.analysisPromise;
+    }
+    const analyze = async (): Promise<'completed' | 'discarded' | 'failed'> => {
+      const outcome = await topologyScheduler.submit({
+        generation: bundle.revision,
+        run: async () => {
+          const analysisStartedAt = performance.now();
+          await registerGltfSectionSurfaceSources({
+            scene: bundle.scene,
+            manifest: bundle.manifest,
+            unitId: bundle.unitId,
+            parser: bundle.parser,
+            isCancelled: () => bundle.disposed,
+            onTiming: (timing: GltfSectionTopologyTiming) => {
+              bundle.timings.topologySubmit = timing.submitMilliseconds;
+              bundle.timings.topologyWorker = timing.workerMilliseconds;
+              bundle.timings.topologyPack = timing.packMilliseconds;
+              bundle.timings.topologyHydrate = timing.hydrateMilliseconds;
+              bundle.timings.topologyResolve = timing.resolveMilliseconds;
+              recordRendererSpan('renderer.section-topology', {
+                startTime: analysisStartedAt,
+                duration: performance.now() - analysisStartedAt,
+                attributes: {
+                  key: bundle.key,
+                  revision: bundle.revision,
+                  backend,
+                  ...timing,
+                },
+              });
+            },
+          });
+        },
+      });
+      const completedWhileDisplayed = outcome === 'discarded' && committed.current === bundle;
+      if ((outcome === 'completed' || completedWhileDisplayed) && !bundle.disposed) {
+        bundle.sectionStatus = 'ready';
+        graphicsActor.send({
+          type: 'gltfAnalysisReady',
+          revision: bundle.revision,
+          key: bundle.key,
+        });
+        invalidate();
+      } else {
+        bundle.sectionStatus = outcome === 'failed' ? 'unsupported' : 'cancelled';
+        setGltfSectionSurfaceRegistrationState(bundle.scene, bundle.sectionStatus);
+      }
+      if (bundle.firstFrameAt !== undefined) {
+        emitTelemetry(bundle, 'presented');
+      }
+      return outcome;
+    };
+    bundle.analysisPromise = analyze();
+    return bundle.analysisPromise;
+  };
+}
+
+type PresentationPreparationInput = Readonly<{
+  activePreparationRef: { current: Promise<void> | undefined };
+  candidatePresentationRef: { current: PreparedGltfPresentation | undefined };
+  colorScheme: ReturnType<typeof useViewerEnvironment>['colorScheme'];
+  committedPresentationRef: { current: PreparedGltfPresentation | undefined };
+  emitTelemetry: ReturnType<typeof createPresentationTelemetry>;
+  ensureSectionAnalysis: ReturnType<typeof createSectionAnalysis>;
+  frameProbeRef: {
+    current: { revision: number; modelEmptyFrames: number } | undefined;
+  };
+  geometryHash: string | undefined;
+  gltfFile: Uint8Array<ArrayBuffer>;
+  graphicsActor: ReturnType<typeof useGraphics>;
+  graphicsBackendThree: ReturnType<typeof useThreeGraphicsBackend>;
+  invalidate: () => void;
+  materialOptionsRef: {
+    readonly current: {
+      enableMatcap: boolean;
+      matcapTint: number;
+      enableLines: boolean | undefined;
+    };
+  };
+  materialSignaturesRef: {
+    readonly current: WeakMap<PreparedGltfPresentation, string>;
+  };
+  measurementDemandRef: { readonly current: boolean };
+  preparationStats: { readonly current: GltfPreparationStats };
+  presentationRevision: number;
+  requestedUnitId: string;
+  resolutionRef: { readonly current: Vector2 };
+  retiredPresentationsRef: { readonly current: PreparedGltfPresentation[] };
+  sectionBarrierRef: { readonly current: GltfPresentationBarrier };
+  sectionClip: ReturnType<typeof useSectionClip>;
+  setPresentation: (presentation: PreparedGltfPresentation) => void;
+  sourceFile: string | undefined;
+  topologyScheduler: ReturnType<typeof createSectionTopologyScheduler>;
+}>;
+
+/**
+ * Parse and present each new GLB. A module-level hook, so the component's own render scope never
+ * closes over `gltfFile`: a callback the component memoises on stable inputs keeps the render that
+ * created it, and that render would otherwise keep its GLB for the viewer's whole lifetime.
+ */
+function usePresentationPreparation({
+  activePreparationRef,
+  candidatePresentationRef,
+  colorScheme,
+  committedPresentationRef,
+  emitTelemetry,
+  ensureSectionAnalysis,
+  frameProbeRef,
+  geometryHash,
+  gltfFile,
+  graphicsActor,
+  graphicsBackendThree,
+  invalidate,
+  materialOptionsRef,
+  materialSignaturesRef,
+  measurementDemandRef,
+  preparationStats,
+  presentationRevision,
+  requestedUnitId,
+  resolutionRef,
+  retiredPresentationsRef,
+  sectionBarrierRef,
+  sectionClip,
+  setPresentation,
+  sourceFile,
+  topologyScheduler,
+}: PresentationPreparationInput): void {
+  // Parse and fully prepare one unattached candidate while the committed scene remains visible.
+  useEffect(() => {
+    // Cleanup may cancel across any awaited loader, task yield or analysis.
+    const cancellation = { cancelled: false };
+    const isCancelled = (): boolean => cancellation.cancelled;
+
+    const preparationAt = performance.now();
+    const presentationAdmission = holdGeometryPresentation(gltfFile);
+    const receivedAt = geometryReceiptAt(gltfFile) ?? preparationAt;
+    const timings: GltfPresentationTimings = {
+      receiptToPreparation: preparationAt - receivedAt,
+    };
+    frameProbeRef.current = {
+      revision: presentationRevision,
+      modelEmptyFrames: 0,
+    };
+    graphicsActor.send({
+      type: 'gltfPreparationStarted',
+      revision: presentationRevision,
+      key: geometryHash ?? '',
+    });
+
+    let candidateMetadata: ReturnType<typeof prepareGltfMetadata> | undefined;
+    const prepareMetadata = (): ReturnType<typeof prepareGltfMetadata> => {
+      if (candidateMetadata) {
+        return candidateMetadata;
+      }
+      const startedAt = performance.now();
+      candidateMetadata = prepareGltfMetadata(gltfFile, {
+        sourceFile,
+        geometryHash,
+      });
+      timings.manifest = performance.now() - startedAt;
+      return candidateMetadata;
+    };
+
+    /* D22: a result whose topology, accessor layout and materials are unchanged is written straight into
+     * the presented buffers — no reparse, no fat-line rebuild, no material recompile, no new scene graph.
+     * It is refused while a section view is armed or while the presented scene carries section topology
+     * (I11: exact-section semantics on updated buffers are unproven), and whenever any primitive fails to
+     * validate, in which case nothing has been mutated and the full path below presents the result. */
+    const presentInPlace = (): boolean => {
+      const committed = committedPresentationRef.current;
+      if (
+        !committed ||
+        committed.disposed ||
+        candidatePresentationRef.current !== undefined ||
+        committed.sectionStatus !== 'pending' ||
+        sectionBarrierRef.current !== 'display-ready'
+      ) {
+        return false;
+      }
+
+      // Validate component and mechanism metadata before touching any live buffer.
+      const { manifest, getMeasurementFeatures, parsed } = prepareMetadata();
+      if (ownershipSignature(manifest) !== committed.ownershipSignature) {
+        return false;
+      }
+      const measurementFeatures = measurementDemandRef.current ? getMeasurementFeatures() : undefined;
+      const inPlaceStartedAt = performance.now();
+      committed.inPlace ??= captureInPlaceGeometryTargets({
+        scene: committed.scene,
+        associations: committed.parser.associations,
+        bytes: committed.sourceBytes,
+      });
+      if (!committed.inPlace) {
+        return false;
+      }
+      if (!applyInPlaceGeometryUpdate(committed.inPlace, gltfFile, parsed)) {
+        return false;
+      }
+      committed.surfaceBatches.sync();
+      // Updated prototype bounds affect every placed instance, even when its matrix is unchanged.
+      for (const object of committed.surfaceBatches.group.children) {
+        if ('isInstancedMesh' in object && object.isInstancedMesh) {
+          const batch = object as InstancedMesh;
+          batch.computeBoundingBox();
+          batch.computeBoundingSphere();
+        }
+      }
+      timings.inPlace = performance.now() - inPlaceStartedAt;
+
+      const annotationStartedAt = performance.now();
+      // Component ids are unchanged with the topology, so this only re-keys them to the new unit.
+      annotateSceneComponents(committed.scene, manifest, {
+        unitId: requestedUnitId,
+        preserveInventory: true,
+        measurementFeatures,
+      });
+      timings.annotation = performance.now() - annotationStartedAt;
+
+      const bundle: PreparedGltfPresentation = {
+        ...committed,
+        revision: presentationRevision,
+        key: geometryHash ?? '',
+        unitId: requestedUnitId,
+        manifest,
+        getMeasurementFeatures,
+        sourceBytes: gltfFile,
+        presentationAdmission,
+        receivedAt,
+        timings,
+        barrier: 'display-ready',
+        sectionStatus: 'pending',
+        analysisPromise: undefined,
+        committedAt: performance.now(),
+        firstFrameAt: undefined,
+        modelEmptyFrames: 0,
+        telemetrySent: false,
+      };
+      // Both bundles describe one scene: ownership of its resources moves to the live bundle so the
+      // retirement effect cannot dispose the geometry that is still on screen.
+      committed.dispose = disposeNothing;
+      bundle.dispose = createInPlaceDispose(bundle, committed.disposeResources);
+      materialSignaturesRef.current.set(bundle, materialSignaturesRef.current.get(committed) ?? '');
+      committedPresentationRef.current = bundle;
+      preparationStats.current.committedBundleHighWaterMark = 1;
+      graphicsActor.send({
+        type: 'gltfDisplayReady',
+        revision: bundle.revision,
+        key: bundle.key,
+        barrier: bundle.barrier,
+      });
+      setPresentation(bundle);
+      invalidate();
+      return true;
+    };
+
+    const loadGltf = async (): Promise<void> => {
+      let unpreparedDispose: (() => void) | undefined;
+      try {
+        if (presentInPlace()) {
+          return;
+        }
+        const parseStartedAt = performance.now();
+        const loaderBytes =
+          gltfFile.byteOffset === 0 && gltfFile.byteLength === gltfFile.buffer.byteLength
+            ? gltfFile.buffer
+            : new Uint8Array(gltfFile).buffer;
+        const stats = preparationStats.current;
+        stats.parsesStarted += 1;
+        stats.activeParses += 1;
+        stats.activeParseHighWaterMark = Math.max(stats.activeParseHighWaterMark, stats.activeParses);
+        let gltf: GLTF;
+        try {
+          gltf = await gltfLoader.parseAsync(loaderBytes, '');
+        } finally {
+          stats.activeParses -= 1;
+        }
+        timings.parse = performance.now() - parseStartedAt;
+        // The presentation keeps the parser for section topology and keeps `gltfFile`; one copy of the
+        // binary data is enough.
+        releaseGltfBinaryChunk(gltf.parser, gltfFile);
+        unpreparedDispose = createGltfResourceDisposer(gltf.scene, undefined, true);
+
+        if (timings.parse >= 50) {
+          // A real task boundary lets input and the prior scene paint after a large loader job.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 0);
+          });
+        }
+        if (isCancelled()) {
+          stats.parsesDiscarded += 1;
+          unpreparedDispose();
+          return;
+        }
+
+        if (gltf.scene.children.length === 0) {
+          probeGltfScene(gltf, gltfFile.byteLength);
+        }
+        // The bounds owner measures/validates the complete committed scene once, after its saved pose.
+
+        const { manifest, getMeasurementFeatures } = prepareMetadata();
+        const annotationStartedAt = performance.now();
+        annotateSceneComponents(gltf.scene, manifest, {
+          unitId: requestedUnitId,
+          associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
+          measurementFeatures: measurementDemandRef.current ? getMeasurementFeatures() : undefined,
+        });
+        timings.annotation = performance.now() - annotationStartedAt;
+        setGltfSectionSurfaceRegistrationState(gltf.scene, 'pending');
+
+        // Convert LineSegments to LineSegments2 for fat line rendering
+        const fatLinesStartedAt = performance.now();
+        const edgeColor = colorScheme === 'dark' ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
+        if (materialOptionsRef.current.enableLines) {
+          applyFatLineSegments(gltf, {
+            resolution: resolutionRef.current,
+            backend: graphicsBackendThree,
+            edgeColor,
+          });
+        }
+        if (materialOptionsRef.current.enableLines) {
+          expandedEdgeScenes.add(gltf.scene);
+        }
+        timings.fatLines = performance.now() - fatLinesStartedAt;
+
+        if (performance.now() - annotationStartedAt >= 16) {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 0);
+          });
+          if (isCancelled()) {
+            unpreparedDispose();
+            return;
+          }
+        }
+        const originalMaterials = saveOriginalMaterials(gltf.scene);
+        unpreparedDispose = createGltfResourceDisposer(gltf.scene, originalMaterials);
+        const materialsStartedAt = performance.now();
+        const materialOptions = materialOptionsRef.current;
+        if (materialOptions.enableMatcap) {
+          await applyMatcap({ scene: gltf.scene }, materialOptions.matcapTint, graphicsBackendThree);
+        }
+        applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
+        // Install the committed clip before the first draw.
+        installSectionClipUnder(gltf.scene, sectionClip);
+        seedSceneMaterialAppearances(gltf.scene);
+        timings.materials = performance.now() - materialsStartedAt;
+        // Prime the canonical inventory before adding the private presentation subtree.
+        const surfaces = getComponentInventory(gltf.scene).filter((object) => isSurfaceObject(object));
+        const surfaceBatches = createGltfSurfaceBatches(gltf.scene, surfaces, {
+          sources: getComponentInventory(gltf.scene).filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
+          backend: graphicsBackendThree,
+          resolution: resolutionRef.current,
+          prepareMaterial: createSectionClipInstaller(sectionClip),
+        });
+        const bundle: PreparedGltfPresentation = {
+          revision: presentationRevision,
+          key: geometryHash ?? '',
+          unitId: requestedUnitId,
+          scene: gltf.scene,
+          manifest,
+          ownershipSignature: ownershipSignature(manifest),
+          getMeasurementFeatures,
+          parser: gltf.parser as unknown as SectionTopologyGltfParser,
+          originalMaterials,
+          surfaceBatches,
+          sourceBytes: gltfFile,
+          presentationAdmission,
+          receivedAt,
+          timings,
+          barrier: sectionBarrierRef.current,
+          sectionStatus: 'pending',
+          modelEmptyFrames: 0,
+          telemetrySent: false,
+          disposed: false,
+          dispose: disposeNothing,
+          disposeResources: disposeNothing,
+        };
+        materialSignaturesRef.current.set(
+          bundle,
+          `${materialOptions.enableMatcap}:${materialOptions.matcapTint}:${graphicsBackendThree}`,
+        );
+        bundle.disposeResources = createPresentationResourceDispose(bundle.scene, bundle.originalMaterials);
+        bundle.dispose = createPresentationDispose(bundle);
+        candidatePresentationRef.current = bundle;
+        stats.candidateBundleHighWaterMark = Math.max(stats.candidateBundleHighWaterMark, 1);
+        unpreparedDispose = undefined;
+
+        graphicsActor.send({
+          type: 'gltfDisplayReady',
+          revision: bundle.revision,
+          key: bundle.key,
+          barrier: bundle.barrier,
+        });
+        if (bundle.barrier === 'analysis-ready') {
+          const outcome = await ensureSectionAnalysis(bundle);
+          if (outcome !== 'completed' || isCancelled()) {
+            bundle.dispose();
+            presentationAdmission.release();
+            if (candidatePresentationRef.current === bundle) {
+              candidatePresentationRef.current = undefined;
+            }
+            if (!isCancelled()) {
+              graphicsActor.send({
+                type: 'gltfPresentationFailed',
+                revision: bundle.revision,
+                key: bundle.key,
+              });
+              emitTelemetry(bundle, outcome === 'discarded' ? 'stale' : 'failed');
+            }
+            return;
+          }
+        }
+
+        // Compile through the actual active render context after layout applies pose, visibility,
+        // bounds and camera. Detached compileAsync rebuilt programs for an incomplete context.
+        if (isCancelled()) {
+          bundle.dispose();
+          if (candidatePresentationRef.current === bundle) {
+            candidatePresentationRef.current = undefined;
+          }
+          return;
+        }
+
+        const previous = committedPresentationRef.current;
+        bundle.modelEmptyFrames =
+          frameProbeRef.current?.revision === bundle.revision ? frameProbeRef.current.modelEmptyFrames : 0;
+        bundle.committedAt = performance.now();
+        committedPresentationRef.current = bundle;
+        stats.committedBundleHighWaterMark = Math.max(stats.committedBundleHighWaterMark, 1);
+        if (candidatePresentationRef.current === bundle) {
+          candidatePresentationRef.current = undefined;
+        }
+        if (previous) {
+          retiredPresentationsRef.current.push(previous);
+        }
+        setPresentation(bundle);
+        invalidate();
+      } catch (error) {
+        presentationAdmission.release();
+        if (!isCancelled()) {
+          console.error('Failed to load GLTF:', error);
+          graphicsActor.send({
+            type: 'gltfPresentationFailed',
+            revision: presentationRevision,
+            key: geometryHash ?? '',
+          });
+          graphicsActor.send({
+            type: 'gltfPresentationMeasured',
+            telemetry: {
+              revision: presentationRevision,
+              key: geometryHash ?? '',
+              backend: graphicsBackendThree,
+              barrier: sectionBarrierRef.current,
+              outcome: 'failed',
+              glbBytes: gltfFile.byteLength,
+              meshCount: 0,
+              triangleCount: 0,
+              sourceLineCount: 0,
+              lineSegmentCount: 0,
+              durations: timings,
+              modelEmptyFrames:
+                frameProbeRef.current?.revision === presentationRevision ? frameProbeRef.current.modelEmptyFrames : 0,
+              ...preparationStats.current,
+              topologyJobsStarted: topologyScheduler.stats().started,
+              topologyJobsDiscarded: topologyScheduler.stats().discarded,
+            },
+          });
+        }
+        unpreparedDispose?.();
+      }
+    };
+
+    const prepareLatest = async (): Promise<void> => {
+      // One active preparation; superseded waiters drop their bytes before doing any loader work.
+      while (activePreparationRef.current) {
+        // oxlint-disable-next-line no-await-in-loop -- A new loader job waits for the sole active preparation and drops stale revisions.
+        await activePreparationRef.current;
+        if (isCancelled()) {
+          return;
+        }
+      }
+      if (isCancelled()) {
+        return;
+      }
+      const preparation = loadGltf();
+      activePreparationRef.current = preparation;
+      await preparation;
+      if (activePreparationRef.current === preparation) {
+        activePreparationRef.current = undefined;
+      }
+    };
+    void prepareLatest();
+
+    return () => {
+      cancellation.cancelled = true;
+      presentationAdmission.release();
+      const candidate = candidatePresentationRef.current;
+      if (candidate?.revision === presentationRevision) {
+        candidate.dispose();
+        candidatePresentationRef.current = undefined;
+        emitTelemetry(candidate, 'cancelled');
+      }
+      graphicsActor.send({
+        type: 'setHoveredModelComponent',
+        unitId: requestedUnitId,
+        componentId: undefined,
+        source: 'viewer',
+      });
+    };
+  }, [
+    gltfFile,
+    graphicsBackendThree,
+    invalidate,
+    graphicsActor,
+    sourceFile,
+    geometryHash,
+    requestedUnitId,
+    presentationRevision,
+    ensureSectionAnalysis,
+    emitTelemetry,
+    sectionClip,
+  ]);
+}
 
 type GltfPresentationCounts = {
   meshCount: number;
@@ -1339,7 +2029,7 @@ export function GltfMesh({
   const [presentation, setPresentation] = useState<PreparedGltfPresentation | undefined>();
   const committedPresentationRef = useRef<PreparedGltfPresentation | undefined>(undefined);
   const activePreparationRef = useRef<Promise<void> | undefined>(undefined);
-  const preparationStats = useRef({
+  const preparationStats = useRef<GltfPreparationStats>({
     activeParses: 0,
     activeParseHighWaterMark: 0,
     parsesStarted: 0,
@@ -1466,517 +2156,58 @@ export function GltfMesh({
     }
   }, [size.width, size.height, scene]);
 
-  const emitTelemetry = useCallback(
-    (bundle: PreparedGltfPresentation, outcome: GltfPresentationTelemetry['outcome']): void => {
-      if (bundle.telemetrySent || (outcome === 'presented' && bundle.firstFrameAt === undefined)) {
-        return;
-      }
-      bundle.telemetrySent = true;
-      const schedulerStats = topologyScheduler.stats();
-      graphicsActor.send({
-        type: 'gltfPresentationMeasured',
-        telemetry: {
-          revision: bundle.revision,
-          key: bundle.key,
-          backend: graphicsBackendThree,
-          barrier: bundle.barrier,
-          outcome,
-          glbBytes: bundle.sourceBytes.byteLength,
-          renderBoundary: 'submitted',
-          ...countGltfPresentation(bundle.scene),
-          durations: bundle.timings,
-          modelEmptyFrames:
-            frameProbeRef.current?.revision === bundle.revision
-              ? frameProbeRef.current.modelEmptyFrames
-              : bundle.modelEmptyFrames,
-          ...preparationStats.current,
-          topologyJobsStarted: schedulerStats.started,
-          topologyJobsDiscarded: schedulerStats.discarded,
-        },
-      });
-    },
+  const emitTelemetry = useMemo(
+    () =>
+      createPresentationTelemetry({
+        graphicsActor,
+        backend: graphicsBackendThree,
+        topologyScheduler,
+        frameProbe: frameProbeRef,
+        preparationStats,
+      }),
     [graphicsActor, graphicsBackendThree, topologyScheduler],
   );
 
-  const ensureSectionAnalysis = useCallback(
-    async (bundle: PreparedGltfPresentation): Promise<'completed' | 'discarded' | 'failed'> => {
-      if (bundle.sectionStatus === 'ready') {
-        return 'completed';
-      }
-      if (bundle.sectionStatus === 'cancelled') {
-        return 'discarded';
-      }
-      if (bundle.sectionStatus === 'unsupported') {
-        return 'failed';
-      }
-      if (bundle.analysisPromise) {
-        return bundle.analysisPromise;
-      }
-      const analyze = async (): Promise<'completed' | 'discarded' | 'failed'> => {
-        const outcome = await topologyScheduler.submit({
-          generation: bundle.revision,
-          run: async () => {
-            const analysisStartedAt = performance.now();
-            await registerGltfSectionSurfaceSources({
-              scene: bundle.scene,
-              manifest: bundle.manifest,
-              unitId: bundle.unitId,
-              parser: bundle.parser,
-              isCancelled: () => bundle.disposed,
-              onTiming: (timing: GltfSectionTopologyTiming) => {
-                bundle.timings.topologySubmit = timing.submitMilliseconds;
-                bundle.timings.topologyWorker = timing.workerMilliseconds;
-                bundle.timings.topologyPack = timing.packMilliseconds;
-                bundle.timings.topologyHydrate = timing.hydrateMilliseconds;
-                bundle.timings.topologyResolve = timing.resolveMilliseconds;
-                recordRendererSpan('renderer.section-topology', {
-                  startTime: analysisStartedAt,
-                  duration: performance.now() - analysisStartedAt,
-                  attributes: {
-                    key: bundle.key,
-                    revision: bundle.revision,
-                    backend: graphicsBackendThree,
-                    ...timing,
-                  },
-                });
-              },
-            });
-          },
-        });
-        const completedWhileDisplayed = outcome === 'discarded' && committedPresentationRef.current === bundle;
-        if ((outcome === 'completed' || completedWhileDisplayed) && !bundle.disposed) {
-          bundle.sectionStatus = 'ready';
-          graphicsActor.send({
-            type: 'gltfAnalysisReady',
-            revision: bundle.revision,
-            key: bundle.key,
-          });
-          invalidate();
-        } else {
-          bundle.sectionStatus = outcome === 'failed' ? 'unsupported' : 'cancelled';
-          setGltfSectionSurfaceRegistrationState(bundle.scene, bundle.sectionStatus);
-        }
-        if (bundle.firstFrameAt !== undefined) {
-          emitTelemetry(bundle, 'presented');
-        }
-        return outcome;
-      };
-      bundle.analysisPromise = analyze();
-      return bundle.analysisPromise;
-    },
+  const ensureSectionAnalysis = useMemo(
+    () =>
+      createSectionAnalysis({
+        graphicsActor,
+        backend: graphicsBackendThree,
+        topologyScheduler,
+        committed: committedPresentationRef,
+        invalidate,
+        emitTelemetry,
+      }),
     [emitTelemetry, graphicsActor, graphicsBackendThree, invalidate, topologyScheduler],
   );
 
-  // Parse and fully prepare one unattached candidate while the committed scene remains visible.
-  useEffect(() => {
-    // Cleanup may cancel across any awaited loader, task yield or analysis.
-    const cancellation = { cancelled: false };
-    const isCancelled = (): boolean => cancellation.cancelled;
-
-    const preparationAt = performance.now();
-    const presentationAdmission = holdGeometryPresentation(gltfFile);
-    const receivedAt = geometryReceiptAt(gltfFile) ?? preparationAt;
-    const timings: GltfPresentationTimings = {
-      receiptToPreparation: preparationAt - receivedAt,
-    };
-    frameProbeRef.current = {
-      revision: presentationRevision,
-      modelEmptyFrames: 0,
-    };
-    graphicsActor.send({
-      type: 'gltfPreparationStarted',
-      revision: presentationRevision,
-      key: geometryHash ?? '',
-    });
-
-    let candidateMetadata: ReturnType<typeof prepareGltfMetadata> | undefined;
-    const prepareMetadata = (): ReturnType<typeof prepareGltfMetadata> => {
-      if (candidateMetadata) {
-        return candidateMetadata;
-      }
-      const startedAt = performance.now();
-      candidateMetadata = prepareGltfMetadata(gltfFile, {
-        sourceFile,
-        geometryHash,
-      });
-      timings.manifest = performance.now() - startedAt;
-      return candidateMetadata;
-    };
-
-    /* D22: a result whose topology, accessor layout and materials are unchanged is written straight into
-     * the presented buffers — no reparse, no fat-line rebuild, no material recompile, no new scene graph.
-     * It is refused while a section view is armed or while the presented scene carries section topology
-     * (I11: exact-section semantics on updated buffers are unproven), and whenever any primitive fails to
-     * validate, in which case nothing has been mutated and the full path below presents the result. */
-    const presentInPlace = (): boolean => {
-      const committed = committedPresentationRef.current;
-      if (
-        !committed ||
-        committed.disposed ||
-        candidatePresentationRef.current !== undefined ||
-        committed.sectionStatus !== 'pending' ||
-        sectionBarrierRef.current !== 'display-ready'
-      ) {
-        return false;
-      }
-
-      // Validate component and mechanism metadata before touching any live buffer.
-      const { manifest, getMeasurementFeatures, parsed } = prepareMetadata();
-      if (ownershipSignature(manifest) !== committed.ownershipSignature) {
-        return false;
-      }
-      const measurementFeatures = measurementDemandRef.current ? getMeasurementFeatures() : undefined;
-      const inPlaceStartedAt = performance.now();
-      committed.inPlace ??= captureInPlaceGeometryTargets({
-        scene: committed.scene,
-        associations: committed.parser.associations,
-        bytes: committed.sourceBytes,
-      });
-      if (!committed.inPlace) {
-        return false;
-      }
-      if (!applyInPlaceGeometryUpdate(committed.inPlace, gltfFile, parsed)) {
-        return false;
-      }
-      committed.surfaceBatches.sync();
-      // Updated prototype bounds affect every placed instance, even when its matrix is unchanged.
-      for (const object of committed.surfaceBatches.group.children) {
-        if ('isInstancedMesh' in object && object.isInstancedMesh) {
-          const batch = object as InstancedMesh;
-          batch.computeBoundingBox();
-          batch.computeBoundingSphere();
-        }
-      }
-      timings.inPlace = performance.now() - inPlaceStartedAt;
-
-      const annotationStartedAt = performance.now();
-      // Component ids are unchanged with the topology, so this only re-keys them to the new unit.
-      annotateSceneComponents(committed.scene, manifest, {
-        unitId: requestedUnitId,
-        preserveInventory: true,
-        measurementFeatures,
-      });
-      timings.annotation = performance.now() - annotationStartedAt;
-
-      const bundle: PreparedGltfPresentation = {
-        ...committed,
-        revision: presentationRevision,
-        key: geometryHash ?? '',
-        unitId: requestedUnitId,
-        manifest,
-        getMeasurementFeatures,
-        sourceBytes: gltfFile,
-        presentationAdmission,
-        receivedAt,
-        timings,
-        barrier: 'display-ready',
-        sectionStatus: 'pending',
-        analysisPromise: undefined,
-        committedAt: performance.now(),
-        firstFrameAt: undefined,
-        modelEmptyFrames: 0,
-        telemetrySent: false,
-      };
-      // Both bundles describe one scene: ownership of its resources moves to the live bundle so the
-      // retirement effect cannot dispose the geometry that is still on screen.
-      const { disposeResources } = committed;
-      committed.dispose = () => undefined;
-      bundle.dispose = () => {
-        bundle.disposed = true;
-        disposeResources();
-      };
-      materialSignaturesRef.current.set(bundle, materialSignaturesRef.current.get(committed) ?? '');
-      committedPresentationRef.current = bundle;
-      preparationStats.current.committedBundleHighWaterMark = 1;
-      graphicsActor.send({
-        type: 'gltfDisplayReady',
-        revision: bundle.revision,
-        key: bundle.key,
-        barrier: bundle.barrier,
-      });
-      setPresentation(bundle);
-      invalidate();
-      return true;
-    };
-
-    const loadGltf = async (): Promise<void> => {
-      let unpreparedDispose: (() => void) | undefined;
-      try {
-        if (presentInPlace()) {
-          return;
-        }
-        const parseStartedAt = performance.now();
-        const loaderBytes =
-          gltfFile.byteOffset === 0 && gltfFile.byteLength === gltfFile.buffer.byteLength
-            ? gltfFile.buffer
-            : new Uint8Array(gltfFile).buffer;
-        const stats = preparationStats.current;
-        stats.parsesStarted += 1;
-        stats.activeParses += 1;
-        stats.activeParseHighWaterMark = Math.max(stats.activeParseHighWaterMark, stats.activeParses);
-        let gltf: GLTF;
-        try {
-          gltf = await gltfLoader.parseAsync(loaderBytes, '');
-        } finally {
-          stats.activeParses -= 1;
-        }
-        timings.parse = performance.now() - parseStartedAt;
-        unpreparedDispose = createGltfResourceDisposer(gltf.scene, undefined, true);
-
-        if (timings.parse >= 50) {
-          // A real task boundary lets input and the prior scene paint after a large loader job.
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 0);
-          });
-        }
-        if (isCancelled()) {
-          stats.parsesDiscarded += 1;
-          unpreparedDispose();
-          return;
-        }
-
-        if (gltf.scene.children.length === 0) {
-          probeGltfScene(gltf, gltfFile.byteLength);
-        }
-        // The bounds owner measures/validates the complete committed scene once, after its saved pose.
-
-        const { manifest, getMeasurementFeatures } = prepareMetadata();
-        const annotationStartedAt = performance.now();
-        annotateSceneComponents(gltf.scene, manifest, {
-          unitId: requestedUnitId,
-          associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
-          measurementFeatures: measurementDemandRef.current ? getMeasurementFeatures() : undefined,
-        });
-        timings.annotation = performance.now() - annotationStartedAt;
-        setGltfSectionSurfaceRegistrationState(gltf.scene, 'pending');
-
-        // Convert LineSegments to LineSegments2 for fat line rendering
-        const fatLinesStartedAt = performance.now();
-        const edgeColor = colorScheme === 'dark' ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
-        if (materialOptionsRef.current.enableLines) {
-          applyFatLineSegments(gltf, {
-            resolution: resolutionRef.current,
-            backend: graphicsBackendThree,
-            edgeColor,
-          });
-        }
-        if (materialOptionsRef.current.enableLines) {
-          expandedEdgeScenes.add(gltf.scene);
-        }
-        timings.fatLines = performance.now() - fatLinesStartedAt;
-
-        if (performance.now() - annotationStartedAt >= 16) {
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 0);
-          });
-          if (isCancelled()) {
-            unpreparedDispose();
-            return;
-          }
-        }
-        const originalMaterials = saveOriginalMaterials(gltf.scene);
-        unpreparedDispose = createGltfResourceDisposer(gltf.scene, originalMaterials);
-        const materialsStartedAt = performance.now();
-        const materialOptions = materialOptionsRef.current;
-        if (materialOptions.enableMatcap) {
-          await applyMatcap({ scene: gltf.scene }, materialOptions.matcapTint, graphicsBackendThree);
-        }
-        applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
-        // Install the committed clip before the first draw.
-        installSectionClipUnder(gltf.scene, sectionClip);
-        seedSceneMaterialAppearances(gltf.scene);
-        timings.materials = performance.now() - materialsStartedAt;
-        // Prime the canonical inventory before adding the private presentation subtree.
-        const surfaces = getComponentInventory(gltf.scene).filter((object) => isSurfaceObject(object));
-        const surfaceBatches = createGltfSurfaceBatches(gltf.scene, surfaces, {
-          sources: getComponentInventory(gltf.scene).filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
-          backend: graphicsBackendThree,
-          resolution: resolutionRef.current,
-          prepareMaterial: (material) => {
-            installSectionClip(material, sectionClip);
-          },
-        });
-        const bundle: PreparedGltfPresentation = {
-          revision: presentationRevision,
-          key: geometryHash ?? '',
-          unitId: requestedUnitId,
-          scene: gltf.scene,
-          manifest,
-          ownershipSignature: ownershipSignature(manifest),
-          getMeasurementFeatures,
-          parser: gltf.parser as unknown as SectionTopologyGltfParser,
-          originalMaterials,
-          surfaceBatches,
-          sourceBytes: gltfFile,
-          presentationAdmission,
-          receivedAt,
-          timings,
-          barrier: sectionBarrierRef.current,
-          sectionStatus: 'pending',
-          modelEmptyFrames: 0,
-          telemetrySent: false,
-          disposed: false,
-          dispose: () => undefined,
-          disposeResources: () => undefined,
-        };
-        materialSignaturesRef.current.set(
-          bundle,
-          `${materialOptions.enableMatcap}:${materialOptions.matcapTint}:${graphicsBackendThree}`,
-        );
-        const disposeCanonicalResources = createGltfResourceDisposer(bundle.scene, bundle.originalMaterials);
-        const disposeResources = (): void => {
-          disposeGltfSurfaceBatches(bundle.scene);
-          disposeCanonicalResources();
-        };
-        bundle.disposeResources = disposeResources;
-        bundle.dispose = () => {
-          if (bundle.disposed) {
-            return;
-          }
-          bundle.disposed = true;
-          bundle.sectionStatus = 'cancelled';
-          setGltfSectionSurfaceRegistrationState(bundle.scene, 'cancelled');
-          disposeResources();
-        };
-        candidatePresentationRef.current = bundle;
-        stats.candidateBundleHighWaterMark = Math.max(stats.candidateBundleHighWaterMark, 1);
-        unpreparedDispose = undefined;
-
-        graphicsActor.send({
-          type: 'gltfDisplayReady',
-          revision: bundle.revision,
-          key: bundle.key,
-          barrier: bundle.barrier,
-        });
-        if (bundle.barrier === 'analysis-ready') {
-          const outcome = await ensureSectionAnalysis(bundle);
-          if (outcome !== 'completed' || isCancelled()) {
-            bundle.dispose();
-            presentationAdmission.release();
-            if (candidatePresentationRef.current === bundle) {
-              candidatePresentationRef.current = undefined;
-            }
-            if (!isCancelled()) {
-              graphicsActor.send({
-                type: 'gltfPresentationFailed',
-                revision: bundle.revision,
-                key: bundle.key,
-              });
-              emitTelemetry(bundle, outcome === 'discarded' ? 'stale' : 'failed');
-            }
-            return;
-          }
-        }
-
-        // Compile through the actual active render context after layout applies pose, visibility,
-        // bounds and camera. Detached compileAsync rebuilt programs for an incomplete context.
-        if (isCancelled()) {
-          bundle.dispose();
-          if (candidatePresentationRef.current === bundle) {
-            candidatePresentationRef.current = undefined;
-          }
-          return;
-        }
-
-        const previous = committedPresentationRef.current;
-        bundle.modelEmptyFrames =
-          frameProbeRef.current?.revision === bundle.revision ? frameProbeRef.current.modelEmptyFrames : 0;
-        bundle.committedAt = performance.now();
-        committedPresentationRef.current = bundle;
-        stats.committedBundleHighWaterMark = Math.max(stats.committedBundleHighWaterMark, 1);
-        if (candidatePresentationRef.current === bundle) {
-          candidatePresentationRef.current = undefined;
-        }
-        if (previous) {
-          retiredPresentationsRef.current.push(previous);
-        }
-        setPresentation(bundle);
-        invalidate();
-      } catch (error) {
-        presentationAdmission.release();
-        if (!isCancelled()) {
-          console.error('Failed to load GLTF:', error);
-          graphicsActor.send({
-            type: 'gltfPresentationFailed',
-            revision: presentationRevision,
-            key: geometryHash ?? '',
-          });
-          graphicsActor.send({
-            type: 'gltfPresentationMeasured',
-            telemetry: {
-              revision: presentationRevision,
-              key: geometryHash ?? '',
-              backend: graphicsBackendThree,
-              barrier: sectionBarrierRef.current,
-              outcome: 'failed',
-              glbBytes: gltfFile.byteLength,
-              meshCount: 0,
-              triangleCount: 0,
-              sourceLineCount: 0,
-              lineSegmentCount: 0,
-              durations: timings,
-              modelEmptyFrames:
-                frameProbeRef.current?.revision === presentationRevision ? frameProbeRef.current.modelEmptyFrames : 0,
-              ...preparationStats.current,
-              topologyJobsStarted: topologyScheduler.stats().started,
-              topologyJobsDiscarded: topologyScheduler.stats().discarded,
-            },
-          });
-        }
-        unpreparedDispose?.();
-      }
-    };
-
-    const prepareLatest = async (): Promise<void> => {
-      // One active preparation; superseded waiters drop their bytes before doing any loader work.
-      while (activePreparationRef.current) {
-        // oxlint-disable-next-line no-await-in-loop -- A new loader job waits for the sole active preparation and drops stale revisions.
-        await activePreparationRef.current;
-        if (isCancelled()) {
-          return;
-        }
-      }
-      if (isCancelled()) {
-        return;
-      }
-      const preparation = loadGltf();
-      activePreparationRef.current = preparation;
-      await preparation;
-      if (activePreparationRef.current === preparation) {
-        activePreparationRef.current = undefined;
-      }
-    };
-    void prepareLatest();
-
-    return () => {
-      cancellation.cancelled = true;
-      presentationAdmission.release();
-      const candidate = candidatePresentationRef.current;
-      if (candidate?.revision === presentationRevision) {
-        candidate.dispose();
-        candidatePresentationRef.current = undefined;
-        emitTelemetry(candidate, 'cancelled');
-      }
-      graphicsActor.send({
-        type: 'setHoveredModelComponent',
-        unitId: requestedUnitId,
-        componentId: undefined,
-        source: 'viewer',
-      });
-    };
-  }, [
+  usePresentationPreparation({
+    activePreparationRef,
+    candidatePresentationRef,
+    colorScheme,
+    committedPresentationRef,
+    emitTelemetry,
+    ensureSectionAnalysis,
+    frameProbeRef,
+    geometryHash,
     gltfFile,
+    graphicsActor,
     graphicsBackendThree,
     invalidate,
-    graphicsActor,
-    sourceFile,
-    geometryHash,
-    requestedUnitId,
+    materialOptionsRef,
+    materialSignaturesRef,
+    measurementDemandRef,
+    preparationStats,
     presentationRevision,
-    ensureSectionAnalysis,
-    emitTelemetry,
+    requestedUnitId,
+    resolutionRef,
+    retiredPresentationsRef,
+    sectionBarrierRef,
     sectionClip,
-  ]);
+    setPresentation,
+    sourceFile,
+    topologyScheduler,
+  });
 
   useEffect(() => {
     if (scene && enableMatcap) {
@@ -2080,18 +2311,11 @@ export function GltfMesh({
     });
   }, 1.1);
 
-  useEffect(
-    () => () => {
-      topologyScheduler.dispose();
-      releaseSectionTopologyWorker();
-      candidatePresentationRef.current?.dispose();
-      committedPresentationRef.current?.dispose();
-      for (const retired of retiredPresentationsRef.current.splice(0)) {
-        retired.dispose();
-      }
-    },
-    [topologyScheduler],
-  );
+  useDisposePresentationsOnUnmount(topologyScheduler, [
+    candidatePresentationRef,
+    committedPresentationRef,
+    retiredPresentationsRef,
+  ]);
 
   // Thickness is object-space and Three scales its transmission ray with modelMatrix.
   // Absorption distance is world-space: convert only that value to this viewport's
@@ -2170,9 +2394,7 @@ export function GltfMesh({
             sources: inventory.filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
             backend: graphicsBackendThree,
             resolution: resolutionRef.current,
-            prepareMaterial: (material) => {
-              installSectionClip(material, sectionClip);
-            },
+            prepareMaterial: createSectionClipInstaller(sectionClip),
           },
         );
       }

@@ -26,6 +26,7 @@ import { WebGpuInspectorOverlay } from '#graphics/three/webgpu-inspector-overlay
 import { cn } from '@taucad/ui/utils/cn';
 import { useCameraRig } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
+import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -76,7 +77,7 @@ export function ThreeCanvasInstance({
   gizmoContainer,
   ...canvasProperties
 }: ThreeCanvasInstanceProps): React.JSX.Element {
-  const dpr = Math.min(globalThis.devicePixelRatio, 2);
+  const dpr = resolveViewerPixelRatio();
   const isInspectorEnabled = useViewerFeature('webGpuInspector');
   const { showRenderFps = true, readableCanvas = false } = useViewerEnvironment();
   const isTauDebugEnabled = useViewerFeature('tauDebug');

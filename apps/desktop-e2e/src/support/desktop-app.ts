@@ -367,6 +367,8 @@ export const launchDesktopApp = async (options: {
   readonly captureStartupNetwork?: boolean | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
   readonly fakeMicrophonePath?: string | undefined;
+  /** Launch this copy of the packaged app instead of the built one, e.g. one whose bundled closure a spec damaged. */
+  readonly packagedExecutable?: string | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -438,7 +440,9 @@ export const launchDesktopApp = async (options: {
   };
   const inheritedEnvironment = { ...(process.env as Record<string, string>) };
   const packaged = desktopE2ECompletedArtifact || options.packaged === true;
-  const packagedExecutable = desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable;
+  const packagedExecutable =
+    options.packagedExecutable ??
+    (desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable);
   if (desktopE2ECompletedArtifact) {
     delete inheritedEnvironment['NODE_OPTIONS'];
     delete inheritedEnvironment['NODE_PATH'];

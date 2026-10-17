@@ -126,12 +126,14 @@ const chooseUsdzAndDownload = async (
   const format = page.getByLabel(/\(USDZ\)$/u);
   const glbFormat = page.getByLabel(/\(GLB\)$/u);
   await format.waitFor({ state: 'visible', timeout: 60_000 });
-  if ((await format.getAttribute('data-state')) !== 'checked') {
-    await format.click();
+  /* The selection persists in a cookie and starts at STL: clear it, so USDZ alone is downloaded. */
+  const reset = page.getByRole('button', { name: 'Reset', exact: true });
+  if (await reset.isVisible()) {
+    await reset.click();
   }
-  if ((await glbFormat.getAttribute('data-state')) !== 'checked') {
-    await glbFormat.click();
-  }
+  await format.click();
+  /* A second format shows the ZIP preference, which a single USDZ must not be wrapped by. */
+  await glbFormat.click();
   const zipOption = page.getByLabel('Download as ZIP file', { exact: true });
   await zipOption.waitFor({ state: 'visible' });
   if (await zipOption.isChecked()) {

@@ -100,6 +100,7 @@ import type {
   SectionTopologyGltfParser,
 } from '#graphics/three/utils/section-surface-topology.js';
 import { createSectionTopologyScheduler } from '#graphics/three/utils/section-topology-scheduler.js';
+import { releaseSectionTopologyWorker } from '#graphics/three/utils/section-surface-topology-worker-client.js';
 import { useKinematicsViewer } from '#graphics/three/react/kinematics-viewer.js';
 import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
@@ -2082,6 +2083,7 @@ export function GltfMesh({
   useEffect(
     () => () => {
       topologyScheduler.dispose();
+      releaseSectionTopologyWorker();
       candidatePresentationRef.current?.dispose();
       committedPresentationRef.current?.dispose();
       for (const retired of retiredPresentationsRef.current.splice(0)) {

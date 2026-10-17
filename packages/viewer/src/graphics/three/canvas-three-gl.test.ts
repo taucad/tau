@@ -222,6 +222,44 @@ describe('createTauR3fGlProp', () => {
     expect(hoisted.createRenderer).toHaveBeenCalledTimes(2);
   });
 
+  it('should release the WebGL drawing buffer as soon as its canvas is removed', async () => {
+    const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
+    const forceContextLoss = vi.fn();
+    const renderer = { setPixelRatio: vi.fn(), getPixelRatio: () => 1, dispose: vi.fn(), forceContextLoss };
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    const factory = createTauR3fGlProp('webgl');
+    const canvas = document.createElement('canvas');
+    factory.bindCanvas(canvas);
+    await factory({ canvas });
+
+    factory.bindCanvas(undefined);
+    await Promise.resolve();
+
+    // R3F loses the context only 500 ms after unmount; a quick remount would hold both drawing buffers.
+    expect(factory.isRetired()).toBe(true);
+    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(forceContextLoss).toHaveBeenCalledOnce();
+    expect(renderer.dispose.mock.invocationCallOrder[0]).toBeLessThan(forceContextLoss.mock.invocationCallOrder[0]!);
+    // R3F's own loss, 500 ms after unmount, must not ask an already lost context again.
+    renderer.forceContextLoss();
+    expect(forceContextLoss).toHaveBeenCalledOnce();
+  });
+
+  it('should retire a WebGPU renderer, which has no context to lose, by disposing it', async () => {
+    const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
+    const renderer = { setPixelRatio: vi.fn(), getPixelRatio: () => 1, dispose: vi.fn() };
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    const factory = createTauR3fGlProp('webgpu');
+    const canvas = document.createElement('canvas');
+    factory.bindCanvas(canvas);
+    await factory({ canvas });
+
+    factory.bindCanvas(undefined);
+    await Promise.resolve();
+
+    expect(renderer.dispose).toHaveBeenCalledOnce();
+  });
+
   it('should suppress a retired pending failure and allow a fresh factory retry', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
     let rejectCreation: ((error: Error) => void) | undefined;

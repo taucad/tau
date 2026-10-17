@@ -1,14 +1,8 @@
 import type { GraphicsBackendPreference, ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 
-/**
- * Probe WebGPU adapter availability without creating a GPUDevice.
- *
- * Matches the Tau graphics machine probe contract.
- *
- * Returns `false` immediately when APIs are unavailable (SSR, tests, unsupported browsers).
- * @public
- */
-export async function probeWebGpuSupport(): Promise<boolean> {
+let webGpuSupportProbe: Promise<boolean> | undefined;
+
+const requestWebGpuAdapter = async (): Promise<boolean> => {
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
     return false;
   }
@@ -23,8 +17,25 @@ export async function probeWebGpuSupport(): Promise<boolean> {
     const adapter = await navigatorGpu.requestAdapter();
     return adapter !== null;
   } catch {
+    // A failed request (such as a restarting GPU process) is not remembered: the next probe asks again.
+    webGpuSupportProbe = undefined;
     return false;
   }
+};
+
+/**
+ * Probe WebGPU adapter availability without creating a GPUDevice.
+ *
+ * Matches the Tau graphics machine probe contract.
+ *
+ * The answer is requested once per page and shared by every viewer, since each adapter request makes the
+ * browser's GPU process set up state. Returns `false` immediately when APIs are unavailable (SSR, tests,
+ * unsupported browsers).
+ * @public
+ */
+export async function probeWebGpuSupport(): Promise<boolean> {
+  webGpuSupportProbe ??= requestWebGpuAdapter();
+  return webGpuSupportProbe;
 }
 
 /**

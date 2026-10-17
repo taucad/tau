@@ -131,7 +131,10 @@ export function writeEdgePlacement(geometry: InstancedBufferGeometry, slot: numb
   }
   for (let column = 0; column < 4; column++) {
     const buffer = geometry.getAttribute(`tauOccurrence${column}`) as InstancedBufferAttribute;
-    buffer.array.set(matrix.elements.slice(column * 4, column * 4 + 4), slot * 4);
+    // Copied element by element: placements are written during drags, so no per-column array is made.
+    for (let row = 0; row < 4; row++) {
+      buffer.array[slot * 4 + row] = matrix.elements[column * 4 + row]!;
+    }
     buffer.addUpdateRange(slot * 4, 4);
     buffer.needsUpdate = true;
   }

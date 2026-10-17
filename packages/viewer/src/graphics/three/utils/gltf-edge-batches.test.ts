@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Matrix4, Vector2 } from 'three';
 import {
   createEdgePrototypeGeometry,
@@ -30,6 +30,22 @@ describe('edge occurrence semantics', () => {
     } finally {
       g.dispose();
     }
+  });
+  it('should write a placement without copying the matrix columns', () => {
+    const geometry = createEdgePrototypeGeometry(new Float32Array([0, 0, 0, 1, 2, 3]), 1);
+    const matrix = new Matrix4().makeTranslation(1, 2, 3);
+    const slice = vi.spyOn(Array.prototype, 'slice');
+    try {
+      writeEdgePlacement(geometry, 0, matrix);
+      expect(slice).not.toHaveBeenCalled();
+    } finally {
+      slice.mockRestore();
+      geometry.dispose();
+    }
+    const written = Array.from({ length: 4 }, (_, column) => [
+      ...geometry.getAttribute(`tauOccurrence${column}`).array,
+    ]).flat();
+    expect(written).toEqual(matrix.elements);
   });
   it.each([8191, 8192])('should retain lossless index width for %s prototype segments', (segments) => {
     const geometry = createEdgePrototypeGeometry(new Float32Array(segments * 6), 1);

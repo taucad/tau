@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor } from 'xstate';
-import { webglContextMachine } from '#machines/webgl-context.machine.js';
+import { resolveWebglContextLimit, webglContextMachine } from '#machines/webgl-context.machine.js';
 
 function createTestActor() {
   return createActor(webglContextMachine);
@@ -18,6 +18,28 @@ describe('webglContextMachine', () => {
       const { context } = actor.getSnapshot();
       expect(context.count).toBe(0);
       expect(context.limit).toBe(8);
+      actor.stop();
+    });
+  });
+
+  describe('device-aware limit', () => {
+    it('should admit only two contexts on a touch-first device', () => {
+      expect(resolveWebglContextLimit({ coarsePointer: true })).toBe(2);
+    });
+
+    it('should admit only two contexts on a device with 4 GB of memory or less', () => {
+      expect(resolveWebglContextLimit({ coarsePointer: false, deviceMemoryGigabytes: 4 })).toBe(2);
+    });
+
+    it('should keep eight contexts on a desktop device', () => {
+      expect(resolveWebglContextLimit({ coarsePointer: false, deviceMemoryGigabytes: 8 })).toBe(8);
+      expect(resolveWebglContextLimit({ coarsePointer: false })).toBe(8);
+    });
+
+    it('should start with the limit its owner resolved for the device', () => {
+      const actor = createActor(webglContextMachine, { input: { limit: 2 } });
+      actor.start();
+      expect(actor.getSnapshot().context).toEqual({ count: 0, limit: 2 });
       actor.stop();
     });
   });

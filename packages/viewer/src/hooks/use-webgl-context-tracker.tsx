@@ -1,7 +1,7 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { useActorRef } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import { webglContextMachine } from '#machines/webgl-context.machine.js';
+import { resolveWebglContextLimit, webglContextMachine } from '#machines/webgl-context.machine.js';
 
 // ── React context ────────────────────────────────────────────────────────────
 
@@ -14,15 +14,27 @@ type WebglContextTrackerProviderProps = {
 };
 
 /**
- * Provides a shared WebGL-context tracking actor to all descendant viewers.
+ * Provides a shared WebGL-context tracking actor to all descendant viewers, admitting two contexts on
+ * touch-first or low-memory devices and eight elsewhere.
  * Mount once above the viewer dockview so every panel shares the same count.
  * @public
  */
 export function WebglContextTrackerProvider({ children }: WebglContextTrackerProviderProps): React.JSX.Element {
-  const actorRef = useActorRef(webglContextMachine);
+  const [limit] = useState(readDeviceWebglContextLimit);
+  const actorRef = useActorRef(webglContextMachine, { input: { limit } });
 
   return <WebglContextTrackerContext.Provider value={actorRef}>{children}</WebglContextTrackerContext.Provider>;
 }
+
+/** Sizes the budget once, when the provider mounts, from the pointer and memory the browser reports. */
+const readDeviceWebglContextLimit = (): number => {
+  const deviceMemory = (globalThis.navigator as (Navigator & { readonly deviceMemory?: number }) | undefined)
+    ?.deviceMemory;
+  return resolveWebglContextLimit({
+    coarsePointer: typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches,
+    ...(typeof deviceMemory === 'number' ? { deviceMemoryGigabytes: deviceMemory } : {}),
+  });
+};
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 

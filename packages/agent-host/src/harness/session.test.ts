@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '#log/event-types.js';
@@ -190,6 +191,106 @@ describe('attachment materialisation in the session (D15)', () => {
 
     expect(transport.requests[0]?.messages.at(-1)?.content).toEqual(legacy);
     expect(transport.requests[0]?.documents).toBeUndefined();
+  });
+});
+
+describe('screenshot captures as chat attachments (D-UI-04)', () => {
+  const webpBytes: Uint8Array<ArrayBuffer> = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]);
+  const webpHash = createHash('sha256').update(webpBytes).digest('hex');
+  const storedPath = `attachments/${webpHash}.webp`;
+  const capture = { images: [{ view: '3d', angle: 'isometric', dataUrl: `data:image/webp;base64,${base64(webpBytes)}` }] };
+
+  class ScreenshotTransport implements ModelTransport {
+    public readonly funding = { type: 'unfunded' } as const;
+    public readonly requests: ModelStreamRequest[] = [];
+
+    public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+      this.requests.push(structuredClone(request));
+      if (this.requests.length === 1) {
+        yield { type: 'tool-input', toolCallId: 'call-1', toolName: 'screenshot', input: {} };
+        yield { type: 'completed', stopReason: 'toolUse' };
+        return;
+      }
+      yield { type: 'text-delta', text: 'looks fine' };
+      yield { type: 'completed', stopReason: 'stop' };
+    }
+  }
+
+  const store = (): AttachmentReader & { files: Map<string, Uint8Array<ArrayBuffer>> } => {
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    return {
+      files,
+      read: async (_chatId, path) => files.get(path),
+      write: async (_chatId, path, bytes) => {
+        files.set(path, bytes);
+      },
+    };
+  };
+
+  const openScreenshotSession = async (
+    file: ReturnType<typeof createMemoryEventLogFile>,
+    runId: string,
+    transport: ModelTransport,
+    attachments: AttachmentReader,
+  ) =>
+    createAgentSession({
+      chatId: 'chat-1',
+      runId,
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 200_000, providerKind: 'anthropic' },
+      modelTransport: transport,
+      toolRegistry: {
+        list: () => [{ name: 'screenshot', description: 'Capture.', inputSchema: { type: 'object' } }],
+        invoke: async () => ({ content: structuredClone(capture), isError: false }),
+      },
+      eventLog: await file.open(),
+      attachments,
+    });
+
+  it('writes the capture bytes once to the chat attachments and keeps only the reference in the log', async () => {
+    const file = createMemoryEventLogFile();
+    const attachments = store();
+    const session = await openScreenshotSession(file, 'run-1', new ScreenshotTransport(), attachments);
+
+    await session.prompt({ id: 'user-1', role: 'user', content: 'check it' });
+
+    expect(attachments.files.get(storedPath)).toEqual(webpBytes);
+    const events = await (await file.open()).read();
+    expect(JSON.stringify(events)).not.toContain(base64(webpBytes));
+    const output = events.find(
+      (event) => event.type === 'message.appended' && event.message.role === 'tool-output',
+    );
+    expect(output?.type === 'message.appended' && output.message.content).toEqual({
+      images: [
+        {
+          view: '3d',
+          angle: 'isometric',
+          path: storedPath,
+          mimeType: 'image/webp',
+          byteLength: webpBytes.byteLength,
+          sha256: webpHash,
+        },
+      ],
+    });
+  });
+
+  it('still shows the model the capture, in the turn and when a later run rebuilds history', async () => {
+    const file = createMemoryEventLogFile();
+    const attachments = store();
+    const transport = new ScreenshotTransport();
+    const first = await openScreenshotSession(file, 'run-1', transport, attachments);
+    await first.prompt({ id: 'user-1', role: 'user', content: 'check it' });
+    await first.close();
+
+    const later = new RecordingTransport();
+    const second = await openSession({ file, runId: 'run-2', transport: later, attachments });
+    await second.prompt({ id: 'user-2', role: 'user', content: 'and now?' });
+
+    const toolOutput = (request: ModelStreamRequest | undefined) =>
+      request?.messages.find((message) => message.role === 'tool-output')?.content;
+    expect(toolOutput(transport.requests[1])).toEqual(capture);
+    expect(toolOutput(later.requests[0])).toEqual(capture);
   });
 });
 

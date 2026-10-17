@@ -5,6 +5,7 @@ import {
   chatAttachmentPath,
   createSessionRecord,
   documentSentinel,
+  hasFileRef,
   materializeAttachments,
 } from '#harness/session-record.js';
 import { createMemoryLogFile } from '#host/tau-agent-host.fixture.js';
@@ -185,6 +186,63 @@ describe('chatAttachmentPath', () => {
     ['chat-1', 'attachments/short.pdf'],
   ])('refuses chat %s path %s', (chatId, path) => {
     expect(() => chatAttachmentPath(chatId, path)).toThrow(expect.objectContaining({ code: 'STORAGE_PATH_INVALID' }));
+  });
+});
+
+describe('stored screenshot captures (D-UI-04)', () => {
+  const webpPath = `attachments/${'e'.repeat(64)}.webp`;
+  const webpBytes: Uint8Array<ArrayBuffer> = new Uint8Array([82, 73, 70, 70]);
+  const stored = (): ProviderMessage => ({
+    id: 'tool-output-1',
+    role: 'tool-output',
+    toolCallId: 'call-1',
+    toolName: 'screenshot',
+    content: {
+      images: [
+        {
+          view: '3d',
+          angle: 'front',
+          path: webpPath,
+          mimeType: 'image/webp',
+          byteLength: webpBytes.byteLength,
+          sha256: 'e'.repeat(64),
+        },
+      ],
+      message: 'No section cut.',
+    },
+    isError: false,
+  });
+
+  it('is an unresolved reference until materialised', () => {
+    expect(hasFileRef(stored())).toBe(true);
+  });
+
+  it('restores the capture bytes for the model without touching the durable row', async () => {
+    const row = stored();
+    const outcome = await materializeAttachments([row], reader({ [webpPath]: webpBytes }));
+
+    expect(outcome.messages[0]?.content).toEqual({
+      images: [{ view: '3d', angle: 'front', dataUrl: `data:image/webp;base64,${base64(webpBytes)}` }],
+      message: 'No section cut.',
+    });
+    expect(hasFileRef(outcome.messages[0]!)).toBe(false);
+    expect(row).toEqual(stored());
+  });
+
+  it('omits a capture whose bytes are not on this device and reports it absent', async () => {
+    const outcome = await materializeAttachments([stored()], reader({}));
+
+    expect(outcome.messages[0]?.content).toEqual({ images: [], message: 'No section cut.' });
+    expect(outcome.absent).toEqual([webpPath]);
+    expect(hasFileRef(outcome.messages[0]!)).toBe(false);
+  });
+
+  it('leaves an external agent capture, which names its own readable file, as it is', async () => {
+    const external = stored();
+    const content = external.content as { images: Array<Record<string, unknown>> };
+    content.images[0]!['absolutePath'] = '/tmp/capture.webp';
+
+    expect(hasFileRef(external)).toBe(false);
   });
 });
 

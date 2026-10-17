@@ -49,7 +49,7 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
-import { createMcpViewerExport } from '#mcp-viewer-export.js';
+import { createMcpViewerExport, shownModelContent } from '#mcp-viewer-export.js';
 import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
@@ -827,7 +827,8 @@ export type LocalHostMcpOptions = {
   readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
   /**
    * The project runtime `export_model` uses, per project folder. With it, the viewer page's Export pane lists the
-   * entry's formats and their options; without it, the page offers no Export pane tools.
+   * entry's formats and their options, and a shown source's GLB carries its topology wherever the route can; without
+   * it, the page offers no Export pane tools and shows the mesh alone.
    */
   readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime>) | undefined;
   /**
@@ -974,10 +975,15 @@ export const serveLocalHostMcp = async (
             },
           },
           renderGlb: async ({ root, targetFile, toolCallId, signal }) => {
+            /* The page's Kinematics pane and component menu read the GLB's topology; without it they have nothing. */
+            const glbContent =
+              options.runtimeClient === undefined
+                ? undefined
+                : await shownModelContent({ runtimeFor: options.runtimeClient, root, targetFile, signal });
             const result = await invokeIn({
               workspaceRoot: root,
               tool: toolName.exportModel,
-              args: { targetFile, to: 'glb' },
+              args: { targetFile, to: 'glb', ...(glbContent === undefined ? {} : { content: glbContent }) },
               call: { toolCallId, signal },
             });
             const content: JsonObject = isJsonObject(result.content) ? result.content : {};

@@ -323,6 +323,63 @@ const edgeContent = (includeEdges: boolean | undefined): Readonly<{ content?: Re
 
 const isOptionIssue = (issue: KernelIssue): boolean => optionIssueCodes.has(issue.code);
 
+/** The framework content keys `export_model` can ask an export for. */
+const exportContentKeys = ['includeEdges', 'includeTopology'] as const;
+type ExportContentKey = (typeof exportContentKeys)[number];
+
+/**
+ * The content keys one export asks for. Only `true` is a request: an export carries neither edge lines nor topology
+ * by default, so `false` and omission both leave a key out, and a route without a key refuses only a request for it.
+ */
+const requestedExportContent = (
+  content: Readonly<Partial<Record<ExportContentKey, boolean>>> | undefined,
+): readonly ExportContentKey[] => exportContentKeys.filter((key) => content?.[key] === true);
+
+/** Names joined as prose: `glb`, `glb or gltf`, `3mf, glb or gltf`. */
+const orList = (items: readonly string[]): string =>
+  items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`;
+
+/**
+ * What the agent can do about content an export route refused: for each requested key the route lacks, the other
+ * exports of the same source whose route carries it, from the runtime's capability manifest. The runtime's issue
+ * states the refusal only; the remedy belongs to the tool that reports it to the agent. `undefined` when the route
+ * carries every requested key: the refusal then has another cause, such as Draco compression, which the runtime's
+ * issue states.
+ */
+const contentRemedy = async (
+  runtime: RuntimeAgentClient,
+  request: Readonly<{ path: string; to: string; keys: readonly ExportContentKey[]; signal: AbortSignal | undefined }>,
+): Promise<string | undefined> => {
+  const { path, to, keys, signal } = request;
+  const omit = `Omit ${keys.join(' and ')} for this export.`;
+  try {
+    const { kernelId } = await runtime.describe({ source: { path }, signal });
+    const routes = (runtime.capabilities?.routes ?? []).filter((route) => route.kernelId === kernelId);
+    if (routes.length === 0) {
+      return omit;
+    }
+    const carries = (route: (typeof routes)[number], key: ExportContentKey): boolean =>
+      Object.hasOwn(route.content?.schema.properties ?? {}, key);
+    const lacking = keys.filter((key) => !routes.some((route) => route.targetFormat === to && carries(route, key)));
+    if (lacking.length === 0) {
+      return undefined;
+    }
+    return lacking
+      .map((key) => {
+        const formats = [...new Set(routes.filter((route) => carries(route, key)).map((route) => route.targetFormat))]
+          .filter((format) => format !== to)
+          .sort();
+        return formats.length === 0
+          ? `No other export of this source carries ${key}; omit it.`
+          : `Export to ${orList(formats)} to keep ${key}, or omit it.`;
+      })
+      .join(' ');
+  } catch {
+    /* The refusal stands on its own; only the alternatives are unknown. */
+    return omit;
+  }
+};
+
 const issueErrorCode = (issues: readonly KernelIssue[]) =>
   issues.some((issue) => issue.code === 'AUTHENTICATION_ERROR')
     ? rpcClientErrorCode.authenticationError
@@ -492,7 +549,10 @@ export const createRuntimeAgentClients = (
   };
 
   const graphics: RpcGraphicsClient = {
-    async exportModel({ targetFile, to, options, parameters }, context): Promise<RpcGraphicsExportModelResult> {
+    async exportModel(
+      { targetFile, to, options, content, parameters },
+      context,
+    ): Promise<RpcGraphicsExportModelResult> {
       const rooted = assertRootedPath(targetFile);
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
@@ -504,24 +564,34 @@ export const createRuntimeAgentClients = (
           watch: false,
           signal: context?.signal,
         });
+        const requested = requestedExportContent(content);
         const result = await document.export(to, {
           ...(options === undefined ? {} : { options }),
+          ...(requested.length === 0 ? {} : { content: Object.fromEntries(requested.map((key) => [key, true])) }),
           signal: context?.signal,
         });
         context?.signal?.throwIfAborted();
-        return result.success
-          ? {
-              success: true,
-              exportId: result.exportId,
-              files: [...result.files],
-              issues: [...result.issues],
-              ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
-            }
-          : {
-              success: false,
-              errorCode: issueErrorCode(result.issues),
-              message: issueMessage(result.issues, 'Model export failed'),
-            };
+        if (result.success) {
+          return {
+            success: true,
+            exportId: result.exportId,
+            files: [...result.files],
+            issues: [...result.issues],
+            ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
+          };
+        }
+        const message = issueMessage(result.issues, 'Model export failed');
+        const refusedContent = result.issues.some((issue) => issue.code === 'RUNTIME_CONTENT_UNSUPPORTED');
+        const remedy =
+          refusedContent && requested.length > 0
+            ? await contentRemedy(runtime, { path: rooted, to, keys: requested, signal: context?.signal })
+            : undefined;
+        context?.signal?.throwIfAborted();
+        return {
+          success: false,
+          errorCode: issueErrorCode(result.issues),
+          message: remedy === undefined ? message : `${message} ${remedy}`,
+        };
       } catch (error) {
         return input.mapRuntimeError(error, rooted);
       } finally {

@@ -14,7 +14,17 @@ type AutomaticAdapter = {
   };
 };
 
+/**
+ * A phone would keep a second WebGPU device, its 1536×1152 targets and a wasm heap resident beside
+ * the viewer for every automatic preview; manual thumbnails and captures still render there.
+ */
+const isCoarsePointerDevice = (): boolean =>
+  typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches;
+
 const automaticAdapterAvailable = async (): Promise<boolean> => {
+  if (isCoarsePointerDevice()) {
+    return false;
+  }
   const gpu = (globalThis.navigator as (Navigator & { gpu?: GpuAdapterProbe }) | undefined)?.gpu;
   if (!gpu) {
     return false;

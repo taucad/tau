@@ -36,9 +36,10 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
         )}
       >
-        {/* Main viewer - always visible */}
+        {/* Main viewer - always visible. Its box changes size in one step: an animated size
+          reallocates the canvas and every render target on each frame of the transition. */}
         <div
-          className='relative h-full transition-all duration-200 ease-linear'
+          className='relative h-full'
           style={{
             paddingBottom: isViewerTab ? 'var(--nav-height)' : `calc(${Number(activeSnapPoint)} * 100dvh)`,
           }}

@@ -51,6 +51,15 @@ type Workspace = {
   bytes: number;
 };
 
+/** Bytes one memory workspace keeps before it evicts its least recently used entries. */
+const defaultMaxBytes = 64 * 1024 * 1024;
+
+/** Options for a memory compute engine. @public */
+export type MemoryComputeEngineOptions = {
+  /** Bytes each workspace keeps; the least recently used entries are evicted past it. Defaults to 64 MiB. */
+  readonly maxBytes?: number;
+};
+
 /** A memory engine plus its authority control facet. @public */
 export type MemoryComputeEngine = {
   readonly engine: ComputeStoreEngine;
@@ -58,11 +67,60 @@ export type MemoryComputeEngine = {
 };
 
 /**
+ * Remove one entry and every entry whose required content no longer has a producer.
+ * @param workspace - The workspace that holds the entry.
+ * @param digest - The entry to remove.
+ */
+const evictEntry = (workspace: Workspace, digest: ActionDigest): void => {
+  const pending = [digest];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const entry = workspace.entries.get(next);
+    if (!entry) {
+      continue;
+    }
+    workspace.entries.delete(next);
+    workspace.bytes -= entry.bytes.byteLength;
+    for (const discovered of workspace.discovery.values()) {
+      discovered.delete(next);
+    }
+    const available = new Set([...workspace.entries.values()].map(({ contentDigest }) => contentDigest));
+    if (available.has(entry.contentDigest)) {
+      continue;
+    }
+    for (const [dependent, candidate] of workspace.entries) {
+      if (candidate.requiredContent?.includes(entry.contentDigest)) {
+        pending.push(dependent);
+      }
+    }
+  }
+};
+
+/**
+ * Evict least recently used entries until the workspace fits its bound.
+ * @param workspace - The workspace to trim.
+ * @param maxBytes - Its byte bound.
+ */
+const trimWorkspace = (workspace: Workspace, maxBytes: number): void => {
+  for (const digest of workspace.entries.keys()) {
+    if (workspace.bytes <= maxBytes) {
+      return;
+    }
+    evictEntry(workspace, digest);
+  }
+};
+
+/**
  * Create one process-local memory compute engine.
+ *
+ * Each workspace is a least-recently-used cache bounded by bytes: a read or a
+ * publication makes an entry the most recent, and an entry whose required
+ * content is evicted goes with it, so a hit is never an incomplete closure.
+ * @param options - The per-workspace byte bound.
  * @returns The engine and its authority control facet.
  * @public
  */
-export const createMemoryComputeEngine = (): MemoryComputeEngine => {
+export const createMemoryComputeEngine = (options: MemoryComputeEngineOptions = {}): MemoryComputeEngine => {
+  const maxBytes = options.maxBytes ?? defaultMaxBytes;
   const workspaces = new Map<string, Workspace>();
   const resolve = (name: string): Workspace => {
     const existing = workspaces.get(name);
@@ -132,6 +190,9 @@ export const createMemoryComputeEngine = (): MemoryComputeEngine => {
           }
           entries.push({ ...entry, bytes: new Uint8Array(entry.bytes) });
           bytes += entry.bytes.byteLength;
+          // Map order is the recency order: a hit becomes the most recently used entry.
+          workspace.entries.delete(digest);
+          workspace.entries.set(digest, entry);
         }
         return { status: 'ok', entries, omitted };
       },
@@ -175,6 +236,10 @@ export const createMemoryComputeEngine = (): MemoryComputeEngine => {
         }
         const availableContent = new Set([...workspace.entries.values()].map(({ contentDigest }) => contentDigest));
         const candidates = validated.filter((entry) => {
+          // An entry larger than the whole bound would only evict everything, itself included.
+          if (entry.bytes.byteLength > maxBytes) {
+            return false;
+          }
           if (poisonedBatchActions.has(entry.actionDigest)) {
             return false;
           }
@@ -206,7 +271,7 @@ export const createMemoryComputeEngine = (): MemoryComputeEngine => {
         }
         const handledEquivalentBatchActions = new Set<ActionDigest>();
         for (const entry of validated) {
-          if (poisonedBatchActions.has(entry.actionDigest)) {
+          if (poisonedBatchActions.has(entry.actionDigest) || entry.bytes.byteLength > maxBytes) {
             continue;
           }
           if (divergent.has(entry.actionDigest)) {
@@ -243,7 +308,10 @@ export const createMemoryComputeEngine = (): MemoryComputeEngine => {
             conflicts.push({ digest: entry.actionDigest, outcome: 'poisoned' });
             continue;
           }
-          if (!existing) {
+          if (existing) {
+            workspace.entries.delete(entry.actionDigest);
+            workspace.entries.set(entry.actionDigest, existing);
+          } else {
             workspace.entries.set(entry.actionDigest, { ...entry, bytes: new Uint8Array(entry.bytes) });
             workspace.bytes += entry.bytes.byteLength;
           }
@@ -255,8 +323,13 @@ export const createMemoryComputeEngine = (): MemoryComputeEngine => {
             workspace.discovery.set(key, index);
           }
         }
-        // The honest entries of a conflicting batch still commit (U23).
-        return { status: 'committed', published, conflicts };
+        trimWorkspace(workspace, maxBytes);
+        // The honest entries of a conflicting batch still commit (U23); a batch larger than the bound keeps its newest.
+        return {
+          status: 'committed',
+          published: published.filter((digest) => workspace.entries.has(digest)),
+          conflicts,
+        };
       },
       pin: async (request: ComputePinInput): Promise<ComputePinResult> => {
         assertOpen();

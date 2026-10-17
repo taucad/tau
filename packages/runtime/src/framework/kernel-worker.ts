@@ -217,7 +217,8 @@ type DocumentEvaluation = {
   readonly transient: boolean;
   readonly result: Evaluation;
   readonly artifact?: MaterializedRender;
-  projections?: Map<string, RenderResult>;
+  /** The latest projection of each open view, keyed by view id; views with equal requests share one. */
+  projections?: Map<string, { readonly hash: string; readonly result: RenderResult }>;
 };
 type ViewRecord = {
   readonly document: DocumentRecord;
@@ -1156,6 +1157,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
     this.documentViews.delete(view.id);
     view.document.views.delete(view.id);
+    view.document.current?.projections?.delete(view.id);
+    view.document.committed?.projections?.delete(view.id);
     for (const controller of view.operations) {
       controller.abort();
     }
@@ -1875,7 +1878,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             canonicalJson([await this.computeDependencyHash(dependencies), key]),
           );
           evaluation.projections ??= new Map();
-          let projected = evaluation.projections.get(projectionHash);
+          let projected = [...evaluation.projections.values()].find(({ hash }) => hash === projectionHash)?.result;
           if (!projected) {
             this.onDocumentProgressUpdate?.({
               documentId: document.id,
@@ -1944,8 +1947,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 ]);
               }
             }
-            evaluation.projections.set(projectionHash, projected);
           }
+          // One projection per view: a scrubbed option set replaces the view's last one instead of accumulating.
+          evaluation.projections.set(view.id, { hash: projectionHash, result: projected });
           result = projected.success
             ? {
                 success: true,

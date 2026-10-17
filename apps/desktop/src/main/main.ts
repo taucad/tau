@@ -573,21 +573,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   let computeWorker: Worker | undefined;
-  const computeConnections = new Map<string, ReturnType<typeof connectSqliteComputeStoreWorker>>();
+  /* One connection per root while some utility runs durable compute on it,
+   * counted by holder: a root nobody runs keeps no connection in main. */
+  const computeConnections = new Map<
+    string,
+    { readonly connection: ReturnType<typeof connectSqliteComputeStoreWorker>; holders: number }
+  >();
   let registeredProjectRootFor = (_executionRoot: string): string | undefined => undefined;
   const invalidateComputeWorker = (worker: Worker): void => {
     if (computeWorker !== worker) {
       return;
     }
     for (const stale of computeConnections.values()) {
-      stale.dispose();
+      stale.connection.dispose();
     }
     computeConnections.clear();
     computeWorker = undefined;
   };
-  const computeConnection = (projectRoot: string) => {
-    let connection = computeConnections.get(projectRoot);
-    if (!connection) {
+  const holdComputeConnection = (projectRoot: string) => {
+    let entry = computeConnections.get(projectRoot);
+    if (!entry) {
       if (!computeWorker) {
         const worker = new Worker(computeStoreWorkerEntry, {
           workerData: { directory: join(app.getPath('userData'), 'compute') },
@@ -601,10 +606,42 @@ const bootstrapElectronApp = async (): Promise<void> => {
         });
         computeWorker = worker;
       }
-      connection = connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot });
-      computeConnections.set(projectRoot, connection);
+      entry = {
+        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot }),
+        holders: 0,
+      };
+      computeConnections.set(projectRoot, entry);
     }
-    return connection;
+    const held = entry;
+    held.holders += 1;
+    let released = false;
+    return {
+      connection: held.connection,
+      release: (): void => {
+        if (released) {
+          return;
+        }
+        released = true;
+        held.holders -= 1;
+        /* A worker restart already disposed and replaced a stale entry. */
+        if (held.holders === 0 && computeConnections.get(projectRoot) === held) {
+          computeConnections.delete(projectRoot);
+          held.connection.dispose();
+        }
+      },
+    };
+  };
+  /* A control call holds the root's connection for its own duration only. */
+  const withComputeConnection = async <Result>(
+    projectRoot: string,
+    use: (connection: ReturnType<typeof connectSqliteComputeStoreWorker>) => Promise<Result>,
+  ): Promise<Result> => {
+    const held = holdComputeConnection(projectRoot);
+    try {
+      return await use(held.connection);
+    } finally {
+      held.release();
+    }
   };
   const baseForkResolver = createKernelForkResolver({
     registry: roots,
@@ -651,24 +688,31 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (!computeProjectRoot) {
         throw new Error('Desktop shell refused unadmitted compute project root.');
       }
-      const compute: ComputeBinding =
-        mode === 'durable' ? { mode, store: computeConnection(computeProjectRoot).store } : { mode };
+      /* Held for exactly the utility's life: the broker calls `release` when it goes. */
+      const held = mode === 'durable' ? holdComputeConnection(computeProjectRoot) : undefined;
+      const compute: ComputeBinding = held === undefined ? { mode } : { mode, store: held.connection.store };
       /* The execution root reaches the utility rooted on `fileSystemPort`, and
        * never through the process environment: an environment that varied per
        * project would give every open its own pool key, so no warm spare could
        * ever be adopted (W-L03-4). */
       const forkEnvironment = { ...resolved.env };
       delete forkEnvironment['TAU_PROJECT_ROOT'];
-      return {
-        ...resolved,
-        env: forkEnvironment,
-        compute,
-        ...(context['purpose'] === 'ephemeral'
-          ? {}
-          : {
-              fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
-            }),
-      };
+      try {
+        return {
+          ...resolved,
+          env: forkEnvironment,
+          compute,
+          ...(held === undefined ? {} : { release: held.release }),
+          ...(context['purpose'] === 'ephemeral'
+            ? {}
+            : {
+                fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
+              }),
+        };
+      } catch (error) {
+        held?.release();
+        throw error;
+      }
     },
     serviceName: 'tau-kernel-host',
     onError(error) {
@@ -737,10 +781,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return roots.canonical(services.computeProjectRoot(canonicalRoot) ?? canonicalRoot)!;
   };
   ipcMain.handle(computeControlChannels.inspect, async (event, projectRoot) =>
-    computeConnection(trustedComputeRoot(event, projectRoot)).control.inspect({}),
+    withComputeConnection(trustedComputeRoot(event, projectRoot), async (connection) => connection.control.inspect({})),
   );
   ipcMain.handle(computeControlChannels.clear, async (event, projectRoot) =>
-    computeConnection(trustedComputeRoot(event, projectRoot)).control.clear({}),
+    withComputeConnection(trustedComputeRoot(event, projectRoot), async (connection) => connection.control.clear({})),
   );
   ipcMain.handle(computeControlChannels.collect, async (event, projectRoot, input: unknown) => {
     const root = trustedComputeRoot(event, projectRoot);
@@ -751,7 +795,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 1024)) {
       throw new Error('Desktop shell refused invalid compute collection cursor.');
     }
-    return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
+    return withComputeConnection(root, async (connection) =>
+      connection.control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) }),
+    );
   });
 
   const services = createServicesBroker({
@@ -1719,7 +1765,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
               log.log('error', 'main.shutdown', error);
             }
             try {
-              for (const connection of computeConnections.values()) {
+              for (const { connection } of computeConnections.values()) {
                 connection.dispose();
               }
               computeConnections.clear();

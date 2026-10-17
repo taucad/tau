@@ -56,6 +56,9 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
       kernels: {
         default: {
           wasm: config.memoryConstrained ? 'single' : 'auto',
+          // D-RT-01: semantic reuse keeps serialized BRep per operation (measured ~10 MB per edit on the iPhone
+          // profile) up to its 64 MiB resident bound; a phone renders without it until that bound is qualified there.
+          ...(config.memoryConstrained ? { computeReuse: false } : {}),
           withSourceMapping: options.withSourceMapping === true,
         },
       },

@@ -153,6 +153,18 @@ type PendingRebase = {
 
 const textEncoder = new TextEncoder();
 
+/**
+ * How many released, clean models stay warm for a quick reopen (B-17, D-UI-03).
+ *
+ * Each model holds its text as a JS string (about 2× the file as UTF-16), a
+ * byte copy as its base, and a mirror in any language worker. Past this many,
+ * the least recently used clean, unheld model is disposed; reopening it reads
+ * the file again.
+ *
+ * @public
+ */
+export const maxBackgroundModels = 10;
+
 /* The codec every merge site in this app injects (D12): parameter records merge per key, never as text. */
 const parameterCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
 
@@ -347,6 +359,7 @@ export class MonacoModelService {
       this.syncedPaths.add(path);
       const loaded = this.contentService?.peekOutcome(path);
       this.bases.set(path, loaded?.kind === 'text' ? loaded.content : textEncoder.encode(model.getValue()));
+      this.evictBackgroundModels();
       return model;
     } catch {
       return undefined;
@@ -732,8 +745,44 @@ export class MonacoModelService {
     if (current <= 1) {
       this.editorHolds.delete(path);
       this.backgroundAccessTimes.set(path, Date.now());
+      this.evictBackgroundModels();
     } else {
       this.editorHolds.set(path, current - 1);
+    }
+  }
+
+  /**
+   * Whether a released model can go without losing anything: no hold, no save
+   * or refused edit in flight, and its text is still what it was made from.
+   */
+  private isEvictable(path: string, model: Monaco.editor.ITextModel): boolean {
+    if (this.editorHolds.has(path) || this.editorSaves.has(path) || this.rebases.has(path)) {
+      return false;
+    }
+    const base = this.bases.get(path);
+    return base === undefined || decodeTextFile(base) === model.getValue();
+  }
+
+  /** B-17: keep at most {@link maxBackgroundModels} released models, least recently used first out. */
+  private evictBackgroundModels(): void {
+    if (!this.monaco || this.backgroundAccessTimes.size <= maxBackgroundModels) {
+      return;
+    }
+    const oldestFirst = [...this.backgroundAccessTimes].sort(([, left], [, right]) => left - right);
+    let excess = this.backgroundAccessTimes.size - maxBackgroundModels;
+    for (const [path] of oldestFirst) {
+      if (excess <= 0) {
+        return;
+      }
+      const model = this.monaco.editor.getModel(this.createUri(path));
+      if (model !== null && model !== undefined && !this.isEvictable(path, model)) {
+        continue;
+      }
+      model?.dispose();
+      this.backgroundAccessTimes.delete(path);
+      this.syncedPaths.delete(path);
+      this.forget(path);
+      excess -= 1;
     }
   }
 
@@ -748,14 +797,14 @@ export class MonacoModelService {
         if (event.source === 'editor') {
           return;
         }
-        this.applyWritten(event.path, event.data, event.source);
+        this.applyWritten(event.path, event.data);
         break;
       }
       case 'batchWritten': {
         for (const path of event.paths) {
           const cached = this.contentService?.peek(path);
           if (cached) {
-            this.applyWritten(path, cached, event.source);
+            this.applyWritten(path, cached);
           }
         }
         break;
@@ -763,7 +812,7 @@ export class MonacoModelService {
       case 'fileCopied': {
         const cached = this.contentService?.peek(event.targetPath);
         if (cached) {
-          this.applyWritten(event.targetPath, cached, 'user');
+          this.applyWritten(event.targetPath, cached);
         }
         break;
       }
@@ -908,41 +957,20 @@ export class MonacoModelService {
     }
   }
 
-  private applyWritten(path: string, data: Uint8Array<ArrayBuffer>, source: string): void {
+  private applyWritten(path: string, data: Uint8Array<ArrayBuffer>): void {
     if (!this.monaco) {
       return;
     }
 
-    const uri = this.createUri(path);
-    const newContent = decodeTextFile(data);
-    const existingModel = this.monaco.editor.getModel(uri);
+    const existingModel = this.monaco.editor.getModel(this.createUri(path));
 
-    if (existingModel) {
-      /* A refused edit is merged from the outcome, which this write already published. */
-      if (!this.editorSaves.has(path) && !this.rebases.has(path)) {
-        this.adoptContent(path, existingModel, data);
-      }
-    } else if (source === 'user') {
-      const language = this.detectLanguage(path);
-      if (language) {
-        this.monaco.editor.createModel(newContent, language, uri);
-        this.trackModelCreated();
-        this.syncedPaths.add(path);
-        this.bases.set(path, data);
-
-        if (!this.editorHolds.has(path)) {
-          this.backgroundAccessTimes.set(path, Date.now());
-        }
-      }
-    } else {
-      const language = this.detectLanguage(path);
-      if (language && !path.includes('node_modules')) {
-        this.monaco.editor.createModel(newContent, language, uri);
-        this.trackModelCreated();
-        this.syncedPaths.add(path);
-        this.bases.set(path, data);
-        this.backgroundAccessTimes.set(path, Date.now());
-      }
+    /* B-17 (D-UI-03): a write updates a model an editor already made; it never
+     * creates one. Opening the file creates its model from the outcome, so an
+     * export or agent write nobody opens costs no model, no base copy and no
+     * worker mirror. A refused edit is merged from the outcome, which this
+     * write already published. */
+    if (existingModel && !this.editorSaves.has(path) && !this.rebases.has(path)) {
+      this.adoptContent(path, existingModel, data);
     }
   }
 

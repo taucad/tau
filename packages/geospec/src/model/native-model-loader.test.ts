@@ -575,9 +575,21 @@ const contentEngine = () => {
     ) => {
       if (refusals > 0) {
         refusals -= 1;
-        throw Object.assign(new Error('Engine exceeds the configured retained subject count.'), {
-          code: 'limit-exceeded',
-        });
+        throw Object.assign(
+          new Error(
+            'This admission needs 33 retained subjects; the configured retained subject limit is 32 retained subjects.',
+          ),
+          {
+            code: 'limit-exceeded',
+            capacity: {
+              code: 'GEOSPEC_RESOURCE_LIMIT',
+              limitClass: 'admission',
+              unit: 'retained subjects',
+              limit: 32,
+              required: 33,
+            },
+          },
+        );
       }
       return encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } });
     },

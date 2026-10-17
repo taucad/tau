@@ -10,6 +10,8 @@
 # asset holding the same sha256 and refuses a different one. A release is
 # published once its assets are complete: a UI or API release after verification
 # (and the UI's source kit), a desktop release after native OTA qualification.
+# A UI release also builds the serve UI layer `tau serve` downloads by digest
+# and publishes it as its own immutable release (serve-ui-layer-*).
 # Staging keeps Developer ID signing and release hardening but skips notarization;
 # production also notarizes and staples. Both retain source/relink release assets:
 # the kit is the taucad/geospec release asset for the `geospec-engine` catalog
@@ -593,6 +595,246 @@ jobs:
           done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::notice title=Tau PicoGK layer not mirrored::The payloads environment lacks the secrets PAYLOAD_R2_ACCESS_KEY_ID and PAYLOAD_R2_SECRET_ACCESS_KEY or the variable PAYLOAD_R2_ENDPOINT (missing: ${missing[*]}; go-live SEC-9). The layer is published on its GitHub Release only; rerun this job once they are set."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Write the layer once under its digest
+        if: steps.credential.outputs.available == 'true'
+        env:
+          KEY: ${{ steps.layer.outputs.key }}
+          SHA256: ${{ steps.layer.outputs.sha256 }}
+          ASSET: ${{ steps.layer.outputs.asset }}
+        run: |
+          set -euo pipefail
+          s3() { aws --endpoint-url "$PAYLOAD_R2_ENDPOINT" s3api "$@"; }
+          if s3 get-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
+            echo "$SHA256  $RUNNER_TEMP/existing" | sha256sum --check --strict
+            echo "::notice::$KEY already holds these bytes; nothing written."
+          else
+            if ! grep -Eq '\((NoSuchKey|404)\)' "$RUNNER_TEMP/get-error"; then cat "$RUNNER_TEMP/get-error" >&2; exit 1; fi
+            s3 put-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
+              --content-type application/gzip --cache-control 'public, max-age=31536000, immutable' \
+              --if-none-match '*' > /dev/null
+          fi
+      - name: Read the layer back from cdn.tau.new
+        if: steps.credential.outputs.available == 'true'
+        env:
+          KEY: ${{ steps.layer.outputs.key }}
+          SHA256: ${{ steps.layer.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/public" "$PAYLOAD_CDN_BASE$KEY"
+          echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
+
+  # The Tau UI that `tau serve` serves (charter W18, D29): the serve build,
+  # without its hidden source maps, as one deterministic tar.gz no larger than
+  # 150 MB (X2). Before anything is published the built CLI prepares it from a
+  # file:// mirror into an empty payload store and serves it from there, and the
+  # serve-build gate runs against that store path with the in-tree build moved
+  # aside. The pin is composed here and landed by a follow-up PR; until then
+  # `packages/cli/serve-ui-layer.json` is a fail-closed placeholder.
+  serve-ui-layer:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.project == 'ui'
+    name: Build and verify the Tau serve UI layer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      NX_DAEMON: 'false'
+      # The same build-time origins ci.yml and e2e-nightly.yml give every UI build.
+      TAU_API_URL: http://localhost:4000
+      TAU_WEBSOCKET_URL: ws://localhost:4001
+      TAU_FRONTEND_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Build the serve UI
+        run: pnpm nx run ui:build:serve --outputStyle=stream
+      - name: Build the layer and its record
+        run: |
+          set -euo pipefail
+          node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts build \
+            --client apps/ui/serve/build/client --out out/serve-ui-layer
+          jq . out/serve-ui-layer/tau-layer.json
+      # The pin is written into this checkout only, so the CLI built next embeds it; the mirror is
+      # the one source the preparation host may use (no fallback to the pinned URLs, which are not
+      # published yet).
+      - name: Prepare and serve the layer from an empty payload store
+        run: |
+          set -euo pipefail
+          sha256=$(jq -r .sha256 out/serve-ui-layer/tau-layer.json)
+          asset=$(jq -r .asset out/serve-ui-layer/tau-layer.json)
+          node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts pin \
+            --layer out/serve-ui-layer/tau-layer.json --archive "out/serve-ui-layer/$asset" \
+            --write packages/cli/serve-ui-layer.json
+          mkdir -p "$RUNNER_TEMP/mirror/blobs/sha256" "$RUNNER_TEMP/project"
+          cp "out/serve-ui-layer/$asset" "$RUNNER_TEMP/mirror/blobs/sha256/$sha256"
+          pnpm nx run cli:build --outputStyle=stream
+          mv apps/ui/serve/build/client apps/ui/serve/build/client.in-tree
+          TAU_CONFIG_DIR="$RUNNER_TEMP/tau-config" TAU_PAYLOAD_MIRROR="file://$RUNNER_TEMP/mirror/" \
+            TAU_PAYLOAD_MIRROR_NO_FALLBACK=1 node packages/cli/dist/bin/tau.mjs serve "$RUNNER_TEMP/project" \
+            --smoke-test --json --port=0 --no-external-agents | tee "$RUNNER_TEMP/serve.json"
+          jq -e '.kind == "serve" and .ok == true and .ui == true' "$RUNNER_TEMP/serve.json" > /dev/null
+          root=$(find "$RUNNER_TEMP/tau-config/payloads/closures/sha256" -mindepth 3 -maxdepth 3 \
+            -path '*/client/index.html' -printf '%h\n')
+          test "$(wc -l <<< "$root")" = 1
+          echo "STORE_UI_ROOT=$root" >> "$GITHUB_ENV"
+          echo "The store serves the UI from $root"
+      - name: Run the serve-build gate against the store path
+        run: |
+          set -euo pipefail
+          generated=apps/ui-e2e/src/support/serve-ui-build.store.test.ts
+          sed "s|^const uiRoot = resolvePath(repoRoot, 'apps/ui/serve/build/client');\$|const uiRoot = process.env['STORE_UI_ROOT'] ?? '';|" \
+            apps/ui-e2e/src/support/serve-ui-build.test.ts > "$generated"
+          test "$(diff apps/ui-e2e/src/support/serve-ui-build.test.ts "$generated" | grep -c '^>' || true)" = 1
+          pnpm exec vitest run --dir apps/ui-e2e "$generated" --environment=node
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: serve-ui-layer
+          path: |
+            out/serve-ui-layer/tau-serve-ui.tar.gz
+            out/serve-ui-layer/tau-layer.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # One immutable GitHub Release per serve UI layer digest, draft → upload →
+  # publish and never clobbered (I13, DEL-20), exactly as picogk-layer-release.
+  # The composed serve-ui-layer.json is the pin a follow-up PR lands.
+  serve-ui-layer-release:
+    needs: [resolve, serve-ui-layer]
+    if: needs.resolve.outputs.project == 'ui'
+    name: Publish the Tau serve UI layer release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: serve-ui-layer
+          path: out/serve-ui-layer
+      - name: Verify the layer against its record and compose the pin
+        id: layer
+        run: |
+          set -euo pipefail
+          node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts pin \
+            --layer out/serve-ui-layer/tau-layer.json --archive out/serve-ui-layer/tau-serve-ui.tar.gz \
+            --write out/serve-ui-layer/serve-ui-layer.json --outputs >> "$GITHUB_OUTPUT"
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: Create, fill and publish the layer release
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          LAYER_TAG: ${{ steps.layer.outputs.tag }}
+          LAYER_ASSET: ${{ steps.layer.outputs.asset }}
+          LAYER_SHA256: ${{ steps.layer.outputs.sha256 }}
+          LAYER_DIR: out/serve-ui-layer
+          UI_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # gh resolves a draft by its tag name too, so an interrupted run's draft is reused.
+          if ! draft=$(gh release view "$LAYER_TAG" --json isDraft --jq .isDraft 2> "$RUNNER_TEMP/release-error"); then
+            if ! grep -qi 'release not found' "$RUNNER_TEMP/release-error"; then cat "$RUNNER_TEMP/release-error" >&2; exit 1; fi
+            gh release create "$LAYER_TAG" --draft --target "$(git rev-parse HEAD)" --latest=false \
+              --title "$LAYER_TAG" \
+              --notes "Tau serve UI layer built from $UI_TAG, sha256 $LAYER_SHA256. Immutable: pinned by the serve-ui-layer.json of @taucad/cli."
+            draft=true
+          fi
+          assets=$(gh release view "$LAYER_TAG" --json assets --jq '[.assets[].name] | join(" ")')
+          for name in "$LAYER_ASSET" tau-layer.json; do
+            if [[ " $assets " != *" $name "* ]]; then
+              if [ "$draft" != true ]; then
+                echo "::error::$LAYER_TAG is published without $name; published assets are never replaced."
+                exit 1
+              fi
+              gh release upload "$LAYER_TAG" "$LAYER_DIR/$name"
+            fi
+          done
+          gh release download "$LAYER_TAG" --pattern "$LAYER_ASSET" --dir "$RUNNER_TEMP/released"
+          echo "$LAYER_SHA256  $RUNNER_TEMP/released/$LAYER_ASSET" | sha256sum --check --strict
+          if [ "$draft" = true ]; then
+            gh release edit "$LAYER_TAG" --draft=false --latest=false
+          fi
+          {
+            echo "### Tau serve UI layer"
+            echo
+            echo "- sha256 \`$LAYER_SHA256\`"
+            echo "- release \`$LAYER_TAG\`"
+            echo "- pin: the \`serve-ui-layer-pin\` artifact (\`serve-ui-layer.json\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: serve-ui-layer-pin
+          path: out/serve-ui-layer/serve-ui-layer.json
+          if-no-files-found: error
+          retention-days: 30
+
+  # The same bytes under `blobs/sha256/<hex>` of the public content bucket, the
+  # first URL the pin names; written once and never replaced, as
+  # picogk-layer-mirror. Without the payloads credential (go-live SEC-9) the
+  # job only verifies the layer and says why it skipped.
+  serve-ui-layer-mirror:
+    needs: [resolve, serve-ui-layer]
+    if: needs.resolve.outputs.project == 'ui'
+    name: Mirror the Tau serve UI layer to cdn.tau.new
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: payloads
+      deployment: false
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.PAYLOAD_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PAYLOAD_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      PAYLOAD_R2_ENDPOINT: ${{ vars.PAYLOAD_R2_ENDPOINT }}
+      PAYLOAD_R2_BUCKET: ${{ vars.PAYLOAD_R2_BUCKET || 'tau-prod-content' }}
+      PAYLOAD_CDN_BASE: https://cdn.tau.new/
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: serve-ui-layer
+          path: layer
+      - name: Verify the layer against its record
+        id: layer
+        run: |
+          set -euo pipefail
+          sha256=$(jq -r .sha256 layer/tau-layer.json)
+          asset=$(jq -r .asset layer/tau-layer.json)
+          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] && [ "$asset" = tau-serve-ui.tar.gz ]
+          echo "$sha256  layer/$asset" | sha256sum --check --strict
+          {
+            echo "sha256=$sha256"
+            echo "asset=$asset"
+            echo "key=blobs/sha256/$sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Require the payload upload credential
+        id: credential
+        run: |
+          missing=()
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY PAYLOAD_R2_ENDPOINT; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice title=Tau serve UI layer not mirrored::The payloads environment lacks the secrets PAYLOAD_R2_ACCESS_KEY_ID and PAYLOAD_R2_SECRET_ACCESS_KEY or the variable PAYLOAD_R2_ENDPOINT (missing: ${missing[*]}; go-live SEC-9). The layer is published on its GitHub Release only; rerun this job once they are set."
             echo "available=false" >> "$GITHUB_OUTPUT"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"

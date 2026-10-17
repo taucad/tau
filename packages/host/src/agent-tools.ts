@@ -52,7 +52,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@t
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
-import type { Engine as NativeGeoSpecEngine } from 'geospec-engine/node';
+import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
@@ -213,6 +213,13 @@ type NativeGeoSpecSession = {
   readonly carried: Map<string, unknown>;
 };
 
+/**
+ * Native analysis memory per subject. The entry profile's 256 MiB decides watertight claims up to about
+ * 1.3 million triangles; 1 GiB covers the 4 million triangles the entry admission limit admits. Admission
+ * limits stay at the entry profile. The browser's WASM engine keeps the entry profile.
+ */
+const nativeGeoSpecEngineLimits: HostEngineLimits = { maxMeshBytes: 1024 * 1024 * 1024 };
+
 let nativeSession: NativeGeoSpecSession | undefined;
 let nativeTail: Promise<void> = Promise.resolve();
 
@@ -230,10 +237,10 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
   const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
   let engine: NativeGeoSpecEngine;
   try {
-    engine = new Engine({ root: cacheRoot, projectRoot: canonicalRoot });
+    engine = new Engine({ root: cacheRoot, projectRoot: canonicalRoot }, undefined, nativeGeoSpecEngineLimits);
   } catch (error) {
     console.warn('GeoSpec native cache unavailable; using a resident engine:', error);
-    engine = new Engine();
+    engine = new Engine(undefined, undefined, nativeGeoSpecEngineLimits);
   }
   const session = {
     root: canonicalRoot,

@@ -93,10 +93,14 @@ describe('native host GeoSpec composition', () => {
 
     const root = await project('widget');
     const runner = await createHostGeoSpecRunner(root, runtime);
-    expect(native.engine).toHaveBeenCalledExactlyOnceWith({
-      root: join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence'),
-      projectRoot: await realpath(root),
-    });
+    expect(native.engine).toHaveBeenCalledExactlyOnceWith(
+      {
+        root: join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence'),
+        projectRoot: await realpath(root),
+      },
+      undefined,
+      { maxMeshBytes: 1024 * 1024 * 1024 },
+    );
     expect(native.filesystem).toHaveBeenCalledExactlyOnceWith(root);
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
@@ -222,7 +226,7 @@ describe('native host GeoSpec composition', () => {
     try {
       const runner = await createHostGeoSpecRunner(root, mock<GeoSpecRuntimeClient>());
       expect(native.engine).toHaveBeenCalledTimes(2);
-      expect(native.engine.mock.calls[1]).toEqual([]);
+      expect(native.engine.mock.calls[1]).toEqual([undefined, undefined, { maxMeshBytes: 1024 * 1024 * 1024 }]);
       expect(warning).toHaveBeenCalledOnce();
       expect(warning.mock.calls[0]?.[0]).toContain('using a resident engine');
       await runner.close();

@@ -1282,7 +1282,7 @@ MinimumDistanceResult: {
     readonly fact: MinimumDistanceFact;
 } | {
     readonly status: 'refused';
-    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
     readonly message: string;
 } | {
     readonly status: 'interrupted';

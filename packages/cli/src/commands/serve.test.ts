@@ -12,14 +12,27 @@ import {
   agentWorkspaceRoot,
   childArguments,
   defaultServePort,
+  parseAllowedOrigins,
+  prepareStoreUi,
   resolveServePort,
   serveNativeKernels,
+  serveUiChoice,
   shouldOpenBrowser,
 } from '#commands/serve.js';
+import type { prepareServeUi } from '#serve-ui.js';
 import { exitCodes } from '#output.js';
+
+/* Vitest's `NODE_ENV=test` drops consola to `warn`; the progress lines asserted below are `info`. */
+vi.hoisted(() => {
+  process.env['CONSOLA_LEVEL'] = '3';
+});
 
 const nativeKernels = vi.hoisted(() => ({
   composeNativeKernels: vi.fn<() => Promise<unknown>>(),
+  verifyStoreClosure: vi.fn(async (_root: string, _signal: AbortSignal) => ({
+    files: ['lib/python3.13/site-packages/build123d/__init__.pyc'],
+    remedy: 'Run `tau prepare --verify` to repair it.',
+  })),
   prepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel })),
   dispose: vi.fn(async () => undefined),
   opened: 0,
@@ -27,6 +40,7 @@ const nativeKernels = vi.hoisted(() => ({
 
 vi.mock('#native-kernels.js', () => ({
   composeNativeKernels: nativeKernels.composeNativeKernels,
+  verifyStoreClosure: nativeKernels.verifyStoreClosure,
   openNativePreparation: () => {
     nativeKernels.opened += 1;
     return { prepare: nativeKernels.prepare, dispose: nativeKernels.dispose };
@@ -152,6 +166,17 @@ describe('serveNativeKernels', () => {
     expect(nativeKernels.dispose).toHaveBeenCalledOnce();
   });
 
+  it('should re-verify a closure for a child in this process, where the store is readable (X35)', async () => {
+    const kernels = serveNativeKernels();
+    const { signal } = new AbortController();
+
+    await expect(kernels.native.verify('/store/closures/sha256/a', signal)).resolves.toEqual({
+      files: ['lib/python3.13/site-packages/build123d/__init__.pyc'],
+      remedy: 'Run `tau prepare --verify` to repair it.',
+    });
+    expect(nativeKernels.verifyStoreClosure).toHaveBeenCalledWith('/store/closures/sha256/a', signal);
+  });
+
   it('should serve without native kernels, and start nothing, when the store cannot be composed', async () => {
     nativeKernels.composeNativeKernels.mockRejectedValue(new Error('TAU_ACQUISITION is "sometimes"'));
     const kernels = serveNativeKernels();
@@ -220,5 +245,88 @@ describe('shouldOpenBrowser', () => {
 
   it('should open under --open even when printing', () => {
     expect(shouldOpenBrowser({ ...base, open: true, scripted: true, ci: true })).toBe(true);
+  });
+});
+
+describe('parseAllowedOrigins', () => {
+  it('should take exact origins, comma-separated or repeated, once each', () => {
+    expect(parseAllowedOrigins(undefined)).toEqual([]);
+    expect(parseAllowedOrigins('')).toEqual([]);
+    expect(parseAllowedOrigins(['https://tau.new, http://localhost:3000', 'app://tau', 'https://tau.new'])).toEqual([
+      'https://tau.new',
+      'http://localhost:3000',
+      'app://tau',
+    ]);
+  });
+
+  it.each(['*', 'https://tau.new/', 'https://tau.new/w/project', 'HTTPS://TAU.NEW', 'tau.new', 'null'])(
+    'should refuse %s, which no browser sends as its Origin',
+    (origin) => {
+      expect(() => parseAllowedOrigins(origin)).toThrow(expect.objectContaining({ code: 'ORIGIN_INVALID' }));
+    },
+  );
+
+  it('should exit with the usage code', () => {
+    expect(() => parseAllowedOrigins('*')).toThrow(expect.objectContaining({ exit: exitCodes.usage }));
+  });
+});
+
+describe('serveUiChoice', () => {
+  it('should serve the pinned layer by default, a directory when named, and none under --no-ui', () => {
+    expect(serveUiChoice(undefined)).toEqual({ kind: 'store' });
+    expect(serveUiChoice('')).toEqual({ kind: 'store' });
+    expect(serveUiChoice('./tau-ui')).toEqual({ kind: 'directory', directory: './tau-ui' });
+    expect(serveUiChoice(false)).toEqual({ kind: 'none' });
+    expect(serveUiChoice('false')).toEqual({ kind: 'none' });
+  });
+});
+
+describe('prepareStoreUi', () => {
+  it('should say what it downloads, every tenth of the bytes, and that it sealed the layer', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const prepare = vi.fn<typeof prepareServeUi>(async ({ onProgress }) => {
+      for (const completedBytes of [0, 5_000_000, 12_000_000, 13_000_000, 120_000_000]) {
+        onProgress?.({ completedBytes, totalBytes: 120_000_000 });
+      }
+      return { status: 'ready', root: '/store/closures/sha256/a/client', closureIntegrity: 'sha256-a' };
+    });
+    try {
+      await expect(prepareStoreUi({ prepare })).resolves.toMatchObject({ status: 'ready' });
+      const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+
+      expect(written).toContain('Downloading the Tau UI (120.0 MB, once; verified against its pinned digest)');
+      expect(written).toContain('Tau UI: 12.0 MB of 120.0 MB (10%)');
+      expect(written).not.toContain('13.0 MB');
+      expect(written).toContain('Tau UI: 120.0 MB of 120.0 MB (100%)');
+      expect(written).toContain('The Tau UI is verified and sealed in the payload store.');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('should say nothing for a layer already sealed, and hand back why there is none', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const unpublished = {
+      status: 'unavailable',
+      reason: 'unpublished',
+      message: 'This release of the Tau CLI pins no published Tau UI yet.',
+    } as const;
+    try {
+      await expect(
+        prepareStoreUi({ prepare: async () => ({ status: 'ready', root: '/r', closureIntegrity: 'sha256-a' }) }),
+      ).resolves.toMatchObject({ status: 'ready' });
+      await expect(
+        prepareStoreUi({
+          prepare: async ({ onProgress }) => {
+            onProgress?.({ completedBytes: 0, totalBytes: 0 });
+            return unpublished;
+          },
+        }),
+      ).resolves.toEqual(unpublished);
+      await expect(prepareStoreUi()).resolves.toEqual(unpublished);
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).not.toContain('sealed');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

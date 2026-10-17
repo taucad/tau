@@ -1,8 +1,12 @@
 import { parseArgs } from 'node:util';
 
-import { createRuntimeChildWorkerLauncher, serveHostRuntime } from '@taucad/host/runtime-host';
+import {
+  createRuntimeChildRuntimeVerifier,
+  createRuntimeChildWorkerLauncher,
+  serveHostRuntime,
+} from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
-import { installNativeWorkerLauncher } from '@taucad/native-process-core';
+import { installNativeRuntimeVerifier, installNativeWorkerLauncher } from '@taucad/native-process-core';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
 import type { NativeComposition } from '#native-kernels.js';
@@ -64,13 +68,15 @@ const handleMessage = async (message: unknown): Promise<void> => {
     throw new Error('Tau Host runtime child was started more than once.');
   }
   /* The daemon composed the native kernels from the payload store, which this child never reads, and starts their
-   * workers on its behalf: this child may not spawn (D37, North Star S2). */
+   * workers on its behalf: this child may not spawn (D37, North Star S2). A worker that exits before its handshake has
+   * its closure re-verified by the daemon too, so the refusal names the damaged file (D8, X35). */
   const native =
     'native' in message && typeof message.native === 'object' && message.native !== null
       ? (message.native as NativeComposition)
       : undefined;
   if (native !== undefined) {
     installNativeWorkerLauncher(createRuntimeChildWorkerLauncher());
+    installNativeRuntimeVerifier(createRuntimeChildRuntimeVerifier());
   }
   const runtime = await loadCliRuntime({
     projectRoot: process.cwd(),

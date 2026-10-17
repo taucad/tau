@@ -111,7 +111,7 @@ catalog:
   '@react-router/fs-routes': 7.18.2
   '@react-router/node': 7.18.2
   '@size-limit/file': ^12.1.0
-  '@tanstack/react-pacer': ^0.22.1
+  '@tanstack/react-pacer': ^0.24.1
   '@tanstack/react-query': ^5.101.0
   # tscircuit EDA kernel (@taucad/tscircuit): exact pins by charter D1 — every package is
   # 0.0.x with no semver guarantee. The @tscircuit/core peers are the modules its published
@@ -157,7 +157,7 @@ catalog:
   spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.191
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.3.2
+  '@testing-library/react': 16.3.3
   '@tiptap/core': ^3.30.5
   '@tiptap/extension-document': ^3.30.5
   '@tiptap/extension-hard-break': ^3.30.5
@@ -166,7 +166,7 @@ catalog:
   '@tiptap/extension-placeholder': ^3.30.5
   '@tiptap/extension-text': ^3.30.5
   '@tiptap/pm': ^3.30.5
-  '@tiptap/react': ^3.30.5
+  '@tiptap/react': ^3.32.0
   '@tiptap/suggestion': ^3.30.5
   '@traceloop/instrumentation-langchain': ^0.27.0
   '@types/express': ^5.0.0
@@ -174,8 +174,8 @@ catalog:
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
   '@types/node': ~24.0.15
-  '@types/react': 19.2.17
-  '@types/react-dom': 19.2.3
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
   '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@typescript/native-preview': 7.0.0-dev.20260223.1
@@ -256,9 +256,9 @@ catalog:
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
   radix-ui: ^1.6.0
-  react: 19.2.7
+  react: 19.3.0
   react-day-picker: ^10.0.0
-  react-dom: 19.2.7
+  react-dom: 19.3.0
   react-email: ^6.6.3
   react-router: 7.18.2
   rehype-sanitize: ^6.0.0

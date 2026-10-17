@@ -124,6 +124,7 @@ const closeReasons: ReadonlyArray<readonly [ProjectSessionCloseReason, string]> 
   ['user', 'Its files and chats are saved. Reopen it to continue where you left off.'],
   ['quit', 'Its files and chats are saved. Reopen it to continue where you left off.'],
   ['budget', 'Closed to free memory for other projects. Its files and chats are saved.'],
+  ['memory', 'Closed to save memory on this device. Its files and chats are saved.'],
 ];
 
 const recoveryFailures: ReadonlyArray<readonly [PendingProjectRecoveryReason, string, string]> = [

@@ -11,6 +11,8 @@ import { guardActors } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import {
   browserLiveProjectBudget,
+  constrainedLiveProjectBudget,
+  liveProjectBudgetFor,
   sessionsCloseSuggestions,
   sessionsIgnoredEvents,
   sessionsMachine,
@@ -384,6 +386,46 @@ describe('sessionsMachine', async () => {
     actor.stop();
   });
 
+  it('closes every idle project but the focused one when memory must be freed, and says why (B-08, D-UI-01)', async () => {
+    const { actor, stopped } = harness();
+    await openIdle(actor, 'projA');
+    await openIdle(actor, 'projB');
+    await openIdle(actor, 'projC');
+    actor.send({ type: 'open', projectId: 'projRunning' });
+    await settle();
+    report(actor, 'projRunning', { runs: 1 });
+
+    actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+    await settle();
+
+    expect(stopped.sort()).toEqual(['projA', 'projC']);
+    expect(Object.keys(actor.getSnapshot().context.refs).sort()).toEqual(['projB', 'projRunning']);
+    expect(actor.getSnapshot().context.closed['projA']?.reason).toBe('memory');
+    expect(actor.getSnapshot().context.closed['projC']?.reason).toBe('memory');
+    /* A running project is never a policy's to close (I24); its row says why. */
+    expect(actor.getSnapshot().context.refusals['projRunning']).toBe('running');
+    actor.stop();
+  });
+
+  it('releases every idle project when no project is focused (D-MEAS-05)', async () => {
+    const { actor, stopped } = harness();
+    await openIdle(actor, 'projA');
+
+    actor.send({ type: 'releaseMemory' });
+    await settle();
+
+    expect(stopped).toEqual(['projA']);
+    expect(actor.getSnapshot().context.refs).toEqual({});
+    actor.stop();
+  });
+
+  it('budgets one live project on a memory-constrained browser and none on desktop (D-UI-01)', () => {
+    expect(liveProjectBudgetFor({ desktop: false, constrained: true })).toBe(constrainedLiveProjectBudget);
+    expect(constrainedLiveProjectBudget).toBe(1);
+    expect(liveProjectBudgetFor({ desktop: false, constrained: false })).toBe(browserLiveProjectBudget);
+    expect(liveProjectBudgetFor({ desktop: true, constrained: true })).toBe(Number.POSITIVE_INFINITY);
+  });
+
   it('holds no function in context', async () => {
     const { actor } = harness();
     await openIdle(actor, 'projA');
@@ -413,6 +455,7 @@ describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
       { type: 'quit' },
       { type: 'quitAnyway' },
       { type: 'cancelPendingOpen' },
+      { type: 'releaseMemory', keepProjectId: 'a' },
     ] satisfies SessionsMachineEvent[];
     expect(
       unansweredEvents(sessionsMachine, {

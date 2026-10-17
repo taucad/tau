@@ -782,6 +782,8 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
     expect(rowOf('gearbox').detail).toBe('Closed · memory budget · reopen any time');
     closeProject('quadcopter', 'user');
     expect(rowOf('quadcopter').detail).toBeUndefined();
+    closeProject('bracket', 'memory');
+    expect(rowOf('bracket').detail).toBe('Closed to save memory · reopen any time');
   });
 
   it('keeps backup state out of the sidebar (D4)', () => {

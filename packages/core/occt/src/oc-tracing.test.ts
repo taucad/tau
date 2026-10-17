@@ -137,6 +137,25 @@ describe('wrapOcForExceptions', () => {
     expect(traced.nonFunction).toBe('string-value');
   });
 
+  it('should reuse one method wrapper per wrapped object instead of allocating one per access', () => {
+    class Shape {
+      public area(): number {
+        return 7;
+      }
+
+      public delete(): void {
+        // Emscripten records carry delete(); nothing to release here.
+      }
+    }
+    const oc = createMockOc({ getExceptionMessage: vi.fn(), Shape });
+    const traced = wrapOcForExceptions(oc) as unknown as { Shape: new () => Shape };
+
+    const shape = new traced.Shape();
+
+    expect(shape.area).toBe(shape.area);
+    expect(shape.area()).toBe(7);
+  });
+
   it('should rethrow non-WASM errors from proxied calls', () => {
     const oc = createMockOc({
       getExceptionMessage: vi.fn(),

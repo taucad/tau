@@ -129,7 +129,7 @@ The default port is `7180`; a busy port moves to the next free one unless `--str
 
 `--allowed-origins=<origin,…>` (or `TAU_HOST_ALLOWED_ORIGINS`) lets a page on another origin, such as `https://tau.new` or a local web build at `http://localhost:3000`, read `/.well-known/tau-host` and open the `/agent` socket. Origins are exact (no path, trailing slash or wildcard), and the agent token is still required.
 
-`tau open [path|url]` is the one-step launcher: a folder or file is served as above (the store's UI layer, or the build `--ui` or `TAU_HOST_UI_DIR` names) and opened in the browser, and a URL is opened as it is. `--print` and `--json` print instead of opening. `--desktop` is best effort: a `tau://` link goes to Tau Desktop, and a served folder still opens in the browser until the desktop can take one from the terminal.
+`tau open [path|url]` is the one-step launcher: a folder or file is served as above (the store's UI layer, or the build `--ui` or `TAU_HOST_UI_DIR` names) and opened in the browser, and a URL is opened as it is. `--print` and `--json` print instead of opening. `--desktop` hands a served folder to Tau Desktop: the daemon serves agents only, admits `app://tau`, and opens `tau://host/<loopback origin>?code=<one-time code>`, which the desktop redeems once (within a minute) to list the daemon under Runs on. `--ui-origin=<origin>` does the same for the Tau UI on a website such as `https://tau.new`, with the code in the link's fragment; `tau serve --hand-off=desktop|<origin>` is the same hand-off without the launcher. A `tau://` link goes to Tau Desktop as it is.
 
 ### Relay
 

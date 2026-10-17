@@ -4,9 +4,10 @@
  * directory and home, so nothing a developer machine holds is visible to it, and no scenario reaches the network
  * except where it says so.
  *
- * Scenarios owned by another surface are named here and proved there: T3's desktop hand-off and T8 in `apps/ui-e2e`
- * and `apps/desktop-e2e` (W18), T9 in `apps/ui-e2e/src/support/serve-ui-build.test.ts`, the published closure of T1 in
- * `scripts/src/check-pack-install.ts`, and the prepare-then-export half of T6 in
+ * Scenarios owned by another surface are named here and proved there: T3's renderer half (the desktop parsing the
+ * link, redeeming its code and listing the daemon) in the `apps/desktop` and `apps/ui` unit tests, T8 in
+ * `apps/ui-e2e` and `apps/desktop-e2e`, T9 in `apps/ui-e2e/src/support/serve-ui-build.test.ts`, the published
+ * closure of T1 in `scripts/src/check-pack-install.ts`, and the prepare-then-export half of T6 in
  * `build123d-export.integration.test.ts` (each payload fetched once from a no-fallback mirror).
  */
 import { spawn } from 'node:child_process';
@@ -24,6 +25,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { validateGlbData } from '@taucad/runtime-testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
+import type { RawData } from 'ws';
 
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../..');
 const cliBinPath = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
@@ -307,17 +310,77 @@ describe('T2b — tau serve --allowed-origins (S32 website cell, X32)', () => {
   });
 });
 
-describe('T3 — tau open --desktop (best effort until the W18 hand-off)', () => {
-  it('should fall back to the browser URL and say why the desktop cannot take a served folder', async () => {
-    const ui = join(scratch, 'ui');
-    await mkdir(ui, { recursive: true });
-    await writeFile(join(ui, 'index.html'), '<!doctype html><title>Tau</title>');
-    const opened = start(['open', project(), '--desktop', '--print', `--ui=${ui}`, '--port=0']);
+describe('T3 — tau open --desktop hands the served folder to Tau Desktop (X54)', () => {
+  /**
+   * Everything after the scheme handler, as the desktop renderer does it from `app://tau`: redeem the link's code at
+   * the daemon, then open `/agent` with the session as a subprotocol and receive the agent channel's hello.
+   */
+  it('should print a tau://host link whose code admits app://tau once, onto the agent channel', async () => {
+    const opened = start(['open', project(), '--desktop', '--print', '--port=0']);
     try {
-      const url = await opened.firstLine;
+      const link = await opened.firstLine;
+      const match = /^tau:\/\/host\/(http:\/\/127\.0\.0\.1:\d+)\?code=([\w-]{43})$/u.exec(link);
+      expect(match, link).not.toBeNull();
+      const [, origin, code] = match!;
+      const redeem = async (): Promise<Response> =>
+        fetch(new URL('/.well-known/tau-host/session', origin), {
+          method: 'POST',
+          headers: { origin: 'app://tau', 'content-type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
 
-      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/u);
-      expect(opened.stderr()).toContain('Tau Desktop cannot open a served folder');
+      const redeemed = await redeem();
+      expect(redeemed.status).toBe(200);
+      expect(redeemed.headers.get('access-control-allow-origin')).toBe('app://tau');
+      const { session } = (await redeemed.json()) as { readonly session: string };
+      const again = await redeem();
+      expect(again.status).toBe(401);
+
+      const socket = new WebSocket(
+        `${origin!.replace('http:', 'ws:')}/agent`,
+        ['tau-agent', `tau-session.${session}`],
+        {
+          origin: 'app://tau',
+        },
+      );
+      try {
+        const hello = await new Promise<RawData>((resolve, reject) => {
+          socket.once('message', resolve);
+          socket.once('error', reject);
+        });
+        expect(socket.protocol).toBe('tau-agent');
+        expect(Buffer.isBuffer(hello) && hello.byteLength > 0).toBe(true);
+      } finally {
+        socket.close();
+      }
+      expect(opened.stderr()).not.toContain('opening it in the browser instead');
+    } finally {
+      await opened.stop();
+    }
+  });
+
+  /* The S32 website cell's CLI half: the code rides the fragment, and only the named website may redeem it. */
+  it('should hand the folder to the Tau UI on a website with --ui-origin, the code in the fragment', async () => {
+    const opened = start(['open', project(), '--ui-origin=https://tau.new', '--print', '--port=0']);
+    try {
+      const link = new URL(await opened.firstLine);
+      const fragment = new URLSearchParams(link.hash.slice(1));
+      const origin = fragment.get('tau-host') ?? '';
+      const code = fragment.get('tau-code') ?? '';
+      expect(`${link.origin}${link.pathname}${link.search}`).toBe('https://tau.new/');
+      expect(origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
+      const redeem = async (from: string): Promise<Response> =>
+        fetch(new URL('/.well-known/tau-host/session', origin), {
+          method: 'POST',
+          headers: { origin: from, 'content-type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+
+      const foreign = await redeem('app://tau');
+      expect(foreign.status).toBe(403);
+      const website = await redeem('https://tau.new');
+      expect(website.status).toBe(200);
+      expect(website.headers.get('access-control-allow-origin')).toBe('https://tau.new');
     } finally {
       await opened.stop();
     }

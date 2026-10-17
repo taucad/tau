@@ -4736,9 +4736,11 @@ describe('document projection retention', () => {
         });
       }
 
-      const projections = (
-        worker as unknown as { documents: Map<string, { current?: { projections?: Map<string, unknown> } }> }
-      ).documents.get('test-document')?.current?.projections;
+      const projections =
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the projection map is private worker state with no public accessor; the test reads it to count retained projections.
+        (
+          worker as unknown as { documents: Map<string, { current?: { projections?: Map<string, unknown> } }> }
+        ).documents.get('test-document')?.current?.projections;
       expect(rendered.every((event) => event.success)).toBe(true);
       expect(projections?.size).toBe(1);
     } finally {

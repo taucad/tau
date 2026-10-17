@@ -90,10 +90,8 @@ export const runExactRequest = async (request: ExactRequest, signal?: AbortSigna
     pending.set(request.id, { finish });
     armIdleTimer();
     signal?.addEventListener('abort', onAbort, { once: true });
-    // Transfer only a buffer the bytes own outright; a view into a shared one is copied first.
-    const { bytes } = request.source;
-    const owned =
-      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : new Uint8Array(bytes);
+    // Transfer a copy: the export's bytes may still be held elsewhere, and a transfer would detach them.
+    const owned = new Uint8Array(request.source.bytes);
     try {
       target.postMessage({ ...request, source: { ...request.source, bytes: owned } }, [owned.buffer]);
     } catch {

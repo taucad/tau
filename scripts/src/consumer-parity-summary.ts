@@ -5,8 +5,9 @@
  * It runs no suite. Each oracle is a job in a workflow that already runs it, and this script reads that job's latest
  * conclusion through the GitHub REST API: in this run for the nightly's own jobs (falling back to the latest nightly
  * on `main` when this run skipped them, such as under `only: packaged`), on `main` for the push workflows, and the
- * latest run on any ref for the path-filtered pull-request workflows. A consumer whose oracle runs in no workflow is a
- * failing row, not an omission.
+ * latest run on any ref for the path-filtered pull-request workflows, marked stale but still deciding after seven days
+ * (ruling X62). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
+ * a failing row, not an omission.
  *
  * Usage: node scripts/src/consumer-parity-summary.ts [--summary <file>] [--detail <consumer>=<text>]…
  *   --summary <file>             Append the Markdown table (for `$GITHUB_STEP_SUMMARY`).
@@ -36,6 +37,8 @@ export type Oracle =
       /** The job name, or the prefix every matching job name starts with (a matrix). */
       readonly job: string;
       readonly match: 'exact' | 'prefix';
+      /** Judge this step of each matching job rather than the whole job, for a job that runs several oracles. */
+      readonly step?: string;
       readonly scope: OracleScope;
       /** Only runs of this trigger, for a workflow whose other runs mostly skip the job (a label-gated pull request). */
       readonly event?: string;
@@ -169,7 +172,16 @@ export const consumers: readonly Consumer[] = [
         scope: 'this-run',
         proves: '`agent-plugin:test:e2e`, the viewer page against a real `tau mcp`',
       },
-      { kind: 'missing', proves: '`pnpm plugin:dev doctor --smoke` against a pkg.pr.new preview' },
+      {
+        kind: 'job',
+        workflow: 'preview-packages.yml',
+        job: 'Install the previews (',
+        match: 'prefix',
+        step: 'Smoke the preview agent plugin with doctor',
+        scope: 'main',
+        event: 'workflow_dispatch',
+        proves: '`pnpm plugin:dev doctor --smoke` against the installed pkg.pr.new preview',
+      },
     ],
   },
   {
@@ -202,6 +214,8 @@ export type WorkflowJob = {
   readonly name: string;
   /** Absent while the job runs (the API's `null`). */
   readonly conclusion: string | undefined;
+  /** The job's steps, each with its conclusion (absent while it runs). */
+  readonly steps: ReadonlyArray<{ readonly name: string; readonly conclusion: string | undefined }>;
   readonly url: string;
 };
 
@@ -237,8 +251,26 @@ export type ConsumerResult = {
 /** Conclusions that mean the job did not run its oracle, so an older run is consulted instead. */
 const notRun = new Set(['skipped', 'cancelled']);
 
-const matching = (oracle: Extract<Oracle, { kind: 'job' }>, jobs: readonly WorkflowJob[]): WorkflowJob[] =>
-  jobs.filter(({ name }) => (oracle.match === 'exact' ? name === oracle.job : name.startsWith(oracle.job)));
+/**
+ * The jobs an oracle names; for a step oracle, each job narrowed to that step, `skipped` when the job has no such step.
+ * @param oracle - The job oracle.
+ * @param jobs - One run's jobs.
+ * @returns The matching jobs, as the oracle judges them.
+ */
+const matching = (oracle: Extract<Oracle, { kind: 'job' }>, jobs: readonly WorkflowJob[]): WorkflowJob[] => {
+  const named = jobs.filter(({ name }) =>
+    oracle.match === 'exact' ? name === oracle.job : name.startsWith(oracle.job),
+  );
+  const { step } = oracle;
+  if (step === undefined) {
+    return named;
+  }
+  return named.map((job) => ({
+    ...job,
+    name: `${job.name} › ${step}`,
+    conclusion: job.steps.find(({ name }) => name === step)?.conclusion ?? 'skipped',
+  }));
+};
 
 const ran = (jobs: readonly WorkflowJob[]): boolean =>
   jobs.length > 0 && jobs.every(({ conclusion }) => conclusion !== undefined && !notRun.has(conclusion));
@@ -258,19 +290,29 @@ const judged = (oracle: Oracle, jobs: readonly WorkflowJob[], source: Source): O
 /** How many completed runs to look back through for one that ran the job. */
 const lookback = 20;
 
+/** Days after which a path-filtered workflow's result is marked stale (ruling X62); it still decides the row. */
+export const staleAfterDays = 7;
+
+/** Milliseconds in a day. */
+const day = 24 * 60 * 60 * 1000;
+
+/** Where to read, how the evidence names it, and the time a stale result is measured from. */
+type Where = { readonly branch?: string; readonly origin: string; readonly staleFrom?: Date };
+
 /**
  * Find the newest run of a workflow whose matching jobs ran, and judge them.
  * @param oracle - The job oracle.
  * @param reader - The GitHub reader.
- * @param where - The branch to limit to (any ref when absent), and how the evidence names where the run came from.
+ * @param where - The branch to limit to (any ref when absent), how the evidence names where the run came from, and
+ *   the time from which a result older than {@link staleAfterDays} is marked stale (unmarked when absent).
  * @returns The result, failing when no run in the lookback ran the job.
  */
 const latest = async (
   oracle: Extract<Oracle, { kind: 'job' }>,
   reader: ActionsReader,
-  where: { readonly branch?: string; readonly origin: string },
+  where: Where,
 ): Promise<OracleResult> => {
-  const { branch, origin } = where;
+  const { branch, origin, staleFrom } = where;
   const runs = await reader.runs(oracle.workflow, {
     ...(branch === undefined ? {} : { branch }),
     ...(oracle.event === undefined ? {} : { event: oracle.event }),
@@ -279,7 +321,9 @@ const latest = async (
     // oxlint-disable-next-line no-await-in-loop -- newest first, stopping at the first run that ran the job.
     const jobs = matching(oracle, await reader.jobs(run.id));
     if (ran(jobs)) {
-      return judged(oracle, jobs, { run, origin });
+      const age = staleFrom === undefined ? 0 : (staleFrom.getTime() - Date.parse(run.createdAt)) / day;
+      const stale = age > staleAfterDays ? `; stale (${String(Math.floor(age))} days old)` : '';
+      return judged(oracle, jobs, { run, origin: `${origin}${stale}` });
     }
   }
   return {
@@ -293,9 +337,10 @@ const latest = async (
  * Read one oracle's latest result.
  * @param oracle - The oracle.
  * @param reader - The GitHub reader.
+ * @param now - The time a path-filtered result's age is measured from.
  * @returns Its result.
  */
-export const resolveOracle = async (oracle: Oracle, reader: ActionsReader): Promise<OracleResult> => {
+export const resolveOracle = async (oracle: Oracle, reader: ActionsReader, now = new Date()): Promise<OracleResult> => {
   if (oracle.kind === 'missing') {
     return { oracle, status: 'fail', evidence: 'no oracle: no workflow runs it' };
   }
@@ -311,7 +356,7 @@ export const resolveOracle = async (oracle: Oracle, reader: ActionsReader): Prom
       return latest(oracle, reader, { branch: 'main', origin: 'latest on `main`' });
     }
     case 'any': {
-      return latest(oracle, reader, { origin: 'latest on any ref (path-filtered workflow)' });
+      return latest(oracle, reader, { origin: 'latest on any ref (path-filtered workflow)', staleFrom: now });
     }
   }
 };
@@ -319,21 +364,25 @@ export const resolveOracle = async (oracle: Oracle, reader: ActionsReader): Prom
 /**
  * Judge every consumer.
  * @param reader - The GitHub reader.
- * @param details - Extra evidence by consumer name.
- * @param table - The consumers, {@link consumers} by default.
+ * @param options - Extra evidence by consumer name, the consumers ({@link consumers} by default) and the time
+ *   stale results are measured from (now by default).
  * @returns One result per consumer, in table order.
  */
 export const consumerParity = async (
   reader: ActionsReader,
-  details: ReadonlyMap<string, string> = new Map(),
-  table: readonly Consumer[] = consumers,
+  options: {
+    readonly details?: ReadonlyMap<string, string>;
+    readonly table?: readonly Consumer[];
+    readonly now?: Date;
+  } = {},
 ): Promise<ConsumerResult[]> => {
+  const { details = new Map<string, string>(), table = consumers, now = new Date() } = options;
   const results: ConsumerResult[] = [];
   for (const consumer of table) {
     const oracles: OracleResult[] = [];
     for (const oracle of consumer.oracles) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of API reads, kept sequential for the rate limit.
-      oracles.push(await resolveOracle(oracle, reader));
+      oracles.push(await resolveOracle(oracle, reader, now));
     }
     results.push({
       consumer,
@@ -383,7 +432,12 @@ type RawRun = {
 };
 
 /** The REST API's job fields this script reads; `conclusion` is JSON `null` while the job runs. */
-type RawJob = { readonly name: string; readonly conclusion: unknown; readonly html_url: string };
+type RawJob = {
+  readonly name: string;
+  readonly conclusion: unknown;
+  readonly html_url: string;
+  readonly steps?: ReadonlyArray<{ readonly name: string; readonly conclusion: unknown }>;
+};
 
 const optionalString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
@@ -399,6 +453,7 @@ const toJob = (raw: RawJob): WorkflowJob => ({
   name: raw.name,
   conclusion: optionalString(raw.conclusion),
   url: raw.html_url,
+  steps: (raw.steps ?? []).map((step) => ({ name: step.name, conclusion: optionalString(step.conclusion) })),
 });
 
 /** A REST reader over `fetch`, authenticated with the workflow token. */
@@ -477,7 +532,7 @@ const main = async (): Promise<void> => {
   }
   let results: ConsumerResult[];
   try {
-    results = await consumerParity(restReader(process.env), details);
+    results = await consumerParity(restReader(process.env), { details });
   } catch (error) {
     console.error(`consumer parity: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 2;

@@ -11,9 +11,10 @@ const run = (id: number, branch = 'main'): WorkflowRun => ({
   createdAt: '2026-10-17T13:23:00Z',
 });
 
-const job = (name: string, conclusion: string | undefined): WorkflowJob => ({
+const job = (name: string, conclusion: string | undefined, steps: WorkflowJob['steps'] = []): WorkflowJob => ({
   name,
   conclusion,
+  steps,
   url: `https://github.com/taucad/tau/actions/runs/1/job/${String(name.length)}`,
 });
 
@@ -143,6 +144,61 @@ describe('resolveOracle', () => {
     expect(result.evidence).toContain('no completed workflow_dispatch run');
   });
 
+  it('should judge one step of a job, and look past runs whose job lacks it', async () => {
+    const doctor: Oracle = {
+      kind: 'job',
+      workflow: 'preview-packages.yml',
+      job: 'Install the previews (',
+      match: 'prefix',
+      step: 'Smoke the preview agent plugin with doctor',
+      scope: 'main',
+      event: 'workflow_dispatch',
+      proves: 'doctor',
+    };
+    const install = { name: 'Install every preview by URL and export a GLB', conclusion: 'failure' };
+    const smoke = (conclusion: string) => ({ name: 'Smoke the preview agent plugin with doctor', conclusion });
+    const fake = reader({
+      current: run(9),
+      runs: { 'preview-packages.yml': [run(6), run(5)] },
+      jobs: {
+        6: [job('Install the previews (ubuntu-latest)', 'failure', [install])],
+        5: [
+          job('Install the previews (ubuntu-latest)', 'failure', [install, smoke('success')]),
+          job('Install the previews (macos-26)', 'failure', [install, smoke('success')]),
+        ],
+      },
+    });
+
+    const result = await resolveOracle(doctor, fake);
+
+    expect(result.status).toBe('pass');
+    expect(result.evidence).toContain('Install the previews (macos-26) › Smoke the preview agent plugin with doctor');
+    expect(result.evidence).toContain('run 5');
+  });
+
+  it('should mark a path-filtered result older than seven days stale without failing it', async () => {
+    const image: Oracle = {
+      kind: 'job',
+      workflow: 'host-image.yml',
+      job: 'Host image',
+      match: 'exact',
+      scope: 'any',
+      proves: 'image',
+    };
+    const fake = reader({
+      current: run(9),
+      runs: { 'host-image.yml': [run(4, 'dependabot/x')] },
+      jobs: { 4: [job('Host image', 'success')] },
+    });
+
+    const fresh = await resolveOracle(image, fake, new Date('2026-10-24T13:00:00Z'));
+    const stale = await resolveOracle(image, fake, new Date('2026-10-25T13:24:00Z'));
+
+    expect(fresh.evidence).not.toContain('stale');
+    expect(stale).toMatchObject({ status: 'pass' });
+    expect(stale.evidence).toContain('stale (8 days old)');
+  });
+
   it('should fail when no run in the lookback ran the job', async () => {
     const result = await resolveOracle(
       { ...thisRun, scope: 'main' },
@@ -171,8 +227,10 @@ describe('consumerParity', () => {
     ];
     const results = await consumerParity(
       reader({ current: run(9), runs: {}, jobs: { 9: [job(desktop, 'success')] } }),
-      new Map([['Packaged desktop', '33 passed (33)']]),
-      table,
+      {
+        details: new Map([['Packaged desktop', '33 passed (33)']]),
+        table,
+      },
     );
 
     expect(results.map(({ consumer, status }) => [consumer.name, status])).toEqual([
@@ -200,5 +258,6 @@ describe('consumerParity', () => {
       'Client-hosted static host',
     ]);
     expect(consumers.every(({ oracles }) => oracles.length > 0)).toBe(true);
+    expect(consumers.flatMap(({ oracles }) => oracles).filter(({ kind }) => kind === 'missing')).toEqual([]);
   });
 });

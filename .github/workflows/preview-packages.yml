@@ -4,7 +4,8 @@ name: Preview packages
 # commit, so the agent plugin and the CLI it starts can be installed without npm
 # (`pnpm plugin:dev preview --sha <commit>`), then installs what it published by
 # URL into a clean npm application on Linux and macOS and exports a GLB with the
-# installed `tau`. It rehearses the npm release train before each train.
+# installed `tau`, then runs `pnpm plugin:dev doctor --smoke` against the installed
+# agent plugin. It rehearses the npm release train before each train.
 #
 # Runs on a dispatch from `main`, and on a same-repository pull request carrying
 # the `preview` label (each push to it publishes again). The packages carry the
@@ -169,10 +170,34 @@ jobs:
           node scripts/src/check-pack-install.ts --from-urls "$RUNNER_TEMP/preview/preview.json" 2>&1 \
             | tee "$RUNNER_TEMP/consumer-${{ matrix.os }}.log"
 
+      # The agent plugins' consumer oracle (charter D33, W22): the published plugin folder, installed
+      # with every preview of this run into a clean npm application, starts its launcher as a host
+      # would, with the installed `tau` as its CLI, and `doctor --smoke` evaluates, tests,
+      # screenshots, exports and shows a block through it. It runs whether or not the install
+      # check above passed, so each oracle reports on its own. The consumer parity table in
+      # e2e-nightly.yml reads this step by name.
+      - name: Smoke the preview agent plugin with doctor
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        env:
+          PLUGIN_APP: ${{ runner.temp }}/plugin-preview
+          PREVIEW_JSON: ${{ runner.temp }}/preview/preview.json
+          LOG: ${{ runner.temp }}/doctor-${{ matrix.os }}.log
+        run: |
+          set -o pipefail
+          mkdir -p "$PLUGIN_APP"
+          (cd "$PLUGIN_APP" && npm init -y > /dev/null)
+          mapfile -t urls < <(jq -r '.packages[].url' "$PREVIEW_JSON")
+          npm install --prefix "$PLUGIN_APP" --no-audit --no-fund "${urls[@]}"
+          TAU_CLI="$PLUGIN_APP/node_modules/.bin/tau" pnpm plugin:dev doctor --smoke \
+            --plugin "$PLUGIN_APP/node_modules/@taucad/agent-plugin" 2>&1 | tee "$LOG"
+
       - name: Upload the consumer log
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pkg-pr-new-consumer-${{ matrix.os }}-${{ github.sha }}
-          path: ${{ runner.temp }}/consumer-${{ matrix.os }}.log
+          path: |
+            ${{ runner.temp }}/consumer-${{ matrix.os }}.log
+            ${{ runner.temp }}/doctor-${{ matrix.os }}.log
           if-no-files-found: ignore

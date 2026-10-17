@@ -1,4 +1,4 @@
-import { transformPrimitive } from '@gltf-transform/functions';
+import type { transformPrimitive } from '@gltf-transform/functions';
 import type { Accessor, mat4, vec4, Document, Primitive, PrimitiveTarget, Property } from '@gltf-transform/core';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import type { Volume } from '@gltf-transform/extensions';
@@ -106,7 +106,28 @@ const transformMorphDirectionAccessor = (accessor: Accessor, matrix: mat4): void
   }
 };
 
-const transformDocumentMeshes = (document: Document, matrix: mat4, directionRotation?: mat4): void => {
+type TransformPrimitive = typeof transformPrimitive;
+
+/**
+ * Load `transformPrimitive` when a transform first runs.
+ *
+ * In Node, `@gltf-transform/functions` imports `ndarray-pixels` at module load, and that imports the `sharp` native
+ * addon for the texture functions alone. Importing it here, not at the top of the module, keeps `sharp` out of the
+ * load graph of every consumer that never transforms a document, such as the `tau` CLI at startup. When `sharp`
+ * cannot load, its error rejects the transform that needed it.
+ *
+ * @returns gltf-transform's `transformPrimitive`
+ */
+const loadTransformPrimitive = async (): Promise<TransformPrimitive> => {
+  const functions = await import('@gltf-transform/functions');
+  return functions.transformPrimitive;
+};
+
+const transformDocumentMeshes = (
+  document: Document,
+  transformPrimitiveFunction: TransformPrimitive,
+  { matrix, directionRotation }: { matrix: mat4; directionRotation?: mat4 },
+): void => {
   if (
     document
       .getRoot()
@@ -198,7 +219,7 @@ const transformDocumentMeshes = (document: Document, matrix: mat4, directionRota
       }
     }
     try {
-      transformPrimitive(primitive, matrix);
+      transformPrimitiveFunction(primitive, matrix);
     } finally {
       for (const { owner, semantic, accessor } of detached) {
         owner.setAttribute(semantic, accessor);
@@ -223,8 +244,8 @@ const transformDocumentMeshes = (document: Document, matrix: mat4, directionRota
  * @param matrix - the rotation matrix to apply to mesh vertices
  * @param quaternion - the rotation quaternion to apply to node TRS
  */
-function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Quat): void {
-  transformDocumentMeshes(document, matrix, matrix);
+async function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Quat): Promise<void> {
+  transformDocumentMeshes(document, await loadTransformPrimitive(), { matrix, directionRotation: matrix });
 
   for (const node of document.getRoot().listNodes()) {
     const t = node.getTranslation();
@@ -252,8 +273,8 @@ function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Q
  * @param matrix - the scaling matrix to apply to mesh vertices
  * @param factor - the uniform scale factor to apply to node translations
  */
-function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: number): void {
-  transformDocumentMeshes(document, matrix);
+async function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: number): Promise<void> {
+  transformDocumentMeshes(document, await loadTransformPrimitive(), { matrix });
 
   for (const node of document.getRoot().listNodes()) {
     const t = node.getTranslation();
@@ -276,16 +297,16 @@ function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: n
  * Creates a gltf-transform document transform that rotates from Y-up to Z-up coordinates.
  *
  * @param shouldTransform - when `false` the returned function is a no-op (default `true`)
- * @returns A document transform function suitable for `document.transform()`.
+ * @returns An asynchronous document transform suitable for `document.transform()`.
  * @public
  */
-export function createCoordinateTransform(shouldTransform = true): (document: Document) => void {
-  return (document: Document): void => {
+export function createCoordinateTransform(shouldTransform = true): (document: Document) => Promise<void> {
+  return async (document: Document): Promise<void> => {
     if (!shouldTransform) {
       return;
     }
 
-    applyRotationToDocument(document, gltfCoordinateTransformMatrix, coordinateQuat);
+    await applyRotationToDocument(document, gltfCoordinateTransformMatrix, coordinateQuat);
   };
 }
 
@@ -293,16 +314,16 @@ export function createCoordinateTransform(shouldTransform = true): (document: Do
  * Creates a gltf-transform document transform that scales geometry from meters to millimeters.
  *
  * @param shouldTransform - when `false` the returned function is a no-op (default `true`)
- * @returns A document transform function suitable for `document.transform()`.
+ * @returns An asynchronous document transform suitable for `document.transform()`.
  * @public
  */
-export function createScalingTransform(shouldTransform = true): (document: Document) => void {
-  return (document: Document): void => {
+export function createScalingTransform(shouldTransform = true): (document: Document) => Promise<void> {
+  return async (document: Document): Promise<void> => {
     if (!shouldTransform) {
       return;
     }
 
-    applyUniformScaleToDocument(document, gltfScalingMatrix, 1000);
+    await applyUniformScaleToDocument(document, gltfScalingMatrix, 1000);
   };
 }
 
@@ -310,15 +331,15 @@ export function createScalingTransform(shouldTransform = true): (document: Docum
  * Creates a gltf-transform document transform that rotates from Z-up back to Y-up coordinates.
  *
  * @param shouldTransform - when `false` the returned function is a no-op (default `true`)
- * @returns A document transform function suitable for `document.transform()`.
+ * @returns An asynchronous document transform suitable for `document.transform()`.
  * @public
  */
-export function createReverseCoordinateTransform(shouldTransform = true): (document: Document) => void {
-  return (document: Document): void => {
+export function createReverseCoordinateTransform(shouldTransform = true): (document: Document) => Promise<void> {
+  return async (document: Document): Promise<void> => {
     if (!shouldTransform) {
       return;
     }
 
-    applyRotationToDocument(document, gltfReverseCoordinateTransformMatrix, reverseCoordinateQuat);
+    await applyRotationToDocument(document, gltfReverseCoordinateTransformMatrix, reverseCoordinateQuat);
   };
 }

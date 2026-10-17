@@ -1209,7 +1209,7 @@ describe('a project on the browser client', () => {
    * AC17 and AC21 both open with "on a second device", and until W18-b there was
    * no product path to one: no verb in `packages/cli`, no control in `apps/ui`
    * and no API route that lists a caller's projects. All three exist now —
-   * `GET /v1/projects`, the library's *From Tau Cloud* section, and `tau open` —
+   * `GET /v1/projects`, the library's *From Tau Cloud* section, and `tau clone` —
    * so this row drives the affordance rather than a link that never existed.
    *
    * What it asserts is the entry point: the second device *names* the project it
@@ -2632,7 +2632,7 @@ describe('chat attachments across two clients', () => {
 /**
  * A terminal as the third client (charter W15).
  *
- * `tau open` brings the browser's project down, and `tau revisions save` records
+ * `tau clone` brings the browser's project down, and `tau revisions save` records
  * and pushes a revision exactly as the other two clients do, through the same
  * host verbs and the same session. The browser is held in a turn, so the
  * terminal's revision is observable as what D12 says it is: *arrived*, applied
@@ -2673,7 +2673,7 @@ describe('a terminal as the third client', () => {
     }
   }, 120_000);
 
-  it('should open the browser’s backed-up project in a terminal with tau open', async () => {
+  it('should open the browser’s backed-up project in a terminal with tau clone', async () => {
     await openSyncRegion(a());
     await chooseTauCloud(a());
     await expect.poll(async () => syncRegionText(a()), { timeout: 180_000 }).toMatch(/Backed up/u);
@@ -2681,7 +2681,7 @@ describe('a terminal as the third client', () => {
 
     /* Named by the project's id: the disk host keys a project by its directory. */
     terminalRoot = join(await scratch('terminal'), projectId);
-    const opened = await runCli(['open', projectId, '--into', terminalRoot, '--json'], bearer);
+    const opened = await runCli(['clone', projectId, '--into', terminalRoot, '--json'], bearer);
     expect(opened.code, opened.stderr).toBe(0);
     expect(cliRecord(opened)).toMatchObject({ kind: 'project', ok: true, status: 'opened', id: projectId });
     expect(await gitHead(terminalRoot)).toBe(pushed);

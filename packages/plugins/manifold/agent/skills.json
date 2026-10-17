@@ -4,7 +4,7 @@
       "slug": "cad-manifold",
       "name": "Manifold authoring",
       "description": "Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.",
-      "version": "0.1.0-beta.5",
+      "version": "0.1.0-beta.6",
       "whenToUse": "Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.",
       "directory": "cad-manifold",
       "files": [

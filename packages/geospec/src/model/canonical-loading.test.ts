@@ -83,9 +83,21 @@ describe('canonical model admission', () => {
     fixture.host.ingestSubject = (_request, primary) => {
       const hash = primary[0]!.toString(16).padStart(64, '0');
       if (!resident.has(hash) && resident.size === 2) {
-        throw Object.assign(new Error('Engine exceeds the configured retained subject count.'), {
-          code: 'limit-exceeded',
-        });
+        throw Object.assign(
+          new Error(
+            'This admission needs 3 retained subjects; the configured retained subject limit is 2 retained subjects.',
+          ),
+          {
+            code: 'limit-exceeded',
+            capacity: {
+              code: 'GEOSPEC_RESOURCE_LIMIT',
+              limitClass: 'admission',
+              unit: 'retained subjects',
+              limit: 2,
+              required: 3,
+            },
+          },
+        );
       }
       resident.add(hash);
       ingested.push(primary[0]!);

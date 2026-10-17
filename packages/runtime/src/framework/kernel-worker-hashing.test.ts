@@ -394,4 +394,56 @@ describe('kernel-worker hashing', () => {
       }
     });
   });
+  describe('implementation asset relocation and first use', () => {
+    const originalFetch = globalThis.fetch;
+    const bytes = new Uint8Array([7, 8, 9]);
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    it('should keep every identity when the same bytes move to another location', async () => {
+      const digest = await sha256Bytes(bytes);
+      globalThis.fetch = vi.fn(async () => new Response(bytes));
+      const directory = await mkdtemp(join(tmpdir(), 'tau-runtime-relocated-'));
+      try {
+        const path = join(directory, 'engine.wasm');
+        await writeFile(path, bytes);
+        const locations = [
+          'https://assets.example/assets/engine-a1b2c3.wasm',
+          'https://cdn.example/tau/1.2.3/engine.wasm',
+          pathToFileURL(path).href,
+        ];
+        const identities = await Promise.all(
+          locations.map(async (url) => {
+            const harness = await createHarness({ implementationAssets: [{ id: 'engine', url, sha256: digest }] });
+            await harness.evaluate();
+            const { dependencyHash, nativeHandleKey } = artifactOf(harness.worker).identity;
+            return { dependencyHash, nativeHandleKey };
+          }),
+        );
+
+        expect(identities[1]).toEqual(identities[0]);
+        expect(identities[2]).toEqual(identities[0]);
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('should read no implementation asset until a document first selects its kernel', async () => {
+      const digest = await sha256Bytes(bytes);
+      globalThis.fetch = vi.fn(async () => new Response(bytes));
+      const harness = await createHarness({
+        implementationAssets: [{ id: 'engine', url: 'https://assets.example/engine.wasm', sha256: digest }],
+      });
+
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+
+      await harness.evaluate();
+      await harness.evaluate();
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
 });

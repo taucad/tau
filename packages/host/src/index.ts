@@ -113,6 +113,7 @@ export { prepareKernelToolName } from '#prepare-kernel-tool.js';
 export type { HostPrepareKernel, HostPrepareKernelProgress } from '#agent-tools.js';
 export type {
   RuntimeChildNativeKernels,
+  RuntimeChildRuntimeDamage,
   RuntimeChildWorker,
   RuntimeChildWorkerLaunch,
 } from '#runtime-child-supervisor.js';

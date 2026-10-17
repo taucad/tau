@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
@@ -67,6 +68,13 @@ function getNavLink(name: string): HTMLElement | undefined {
   return screen.queryByRole('link', { name }) ?? undefined;
 }
 
+/** Opens the More menu and returns its entry named `name`, if listed. */
+async function getMoreItem(name: string): Promise<HTMLElement | undefined> {
+  await userEvent.click(screen.getByRole('button', { name: 'More' }));
+  await screen.findByRole('menu');
+  return screen.queryByRole('menuitem', { name }) ?? undefined;
+}
+
 describe('AppSidebar', () => {
   beforeEach(() => {
     mockState.flags = featureFlagDefaults;
@@ -78,39 +86,52 @@ describe('AppSidebar', () => {
     vi.unstubAllEnvs();
   });
 
-  it('hides Machines by default and shows it only when enabled', () => {
+  it('should place Projects directly in the sidebar and secondary destinations under More', async () => {
+    renderSidebar();
+
+    expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
+    for (const name of ['Community', 'Convert', 'Import', 'Usage']) {
+      expect(getNavLink(name)).toBeUndefined();
+    }
+
+    await userEvent.click(screen.getByRole('button', { name: 'More' }));
+
+    expect(await screen.findByRole('menuitem', { name: 'Community' })).toHaveAttribute('href', '/community');
+    expect(screen.getByRole('menuitem', { name: 'Convert' })).toHaveAttribute('href', '/convert');
+    expect(screen.getByRole('menuitem', { name: 'Import' })).toHaveAttribute('href', '/import');
+    expect(screen.getByRole('menuitem', { name: 'Usage' })).toHaveAttribute('href', '/usage');
+  });
+
+  it('hides Machines by default and shows it only when enabled', async () => {
     const view = renderSidebar();
-    expect(getNavLink('Machines')).toBeUndefined();
+    expect(await getMoreItem('Machines')).toBeUndefined();
     view.unmount();
     mockState.flags = { ...featureFlagDefaults, machines: true };
     renderSidebar();
-    expect(getNavLink('Machines')).toHaveAttribute('href', '/machines');
+    expect(await getMoreItem('Machines')).toHaveAttribute('href', '/machines');
   });
 
-  it('should hide Parts by default and show it when enabled', () => {
+  it('should hide Parts by default and show it when enabled', async () => {
     const view = renderSidebar();
-    expect(getNavLink('Parts')).toBeUndefined();
+    expect(await getMoreItem('Parts')).toBeUndefined();
     view.unmount();
     mockState.flags = { ...featureFlagDefaults, partsWarehouse: true };
     renderSidebar();
-    expect(getNavLink('Parts')).toHaveAttribute('href', '/parts');
+    expect(await getMoreItem('Parts')).toHaveAttribute('href', '/parts');
   });
 
-  it('should hide the Plugins nav item when the Plugins Store flag is disabled', () => {
+  it('should hide the Plugins item when the Plugins Store flag is disabled', async () => {
     renderSidebar();
 
-    expect(getNavLink('Plugins')).toBeUndefined();
-    expect(getNavLink('Projects')).toBeInTheDocument();
-    expect(getNavLink('Usage')).toBeInTheDocument();
+    expect(await getMoreItem('Plugins')).toBeUndefined();
   });
 
-  it('should show the Plugins nav item when the Plugins Store flag is enabled', () => {
+  it('should show the Plugins item when the Plugins Store flag is enabled', async () => {
     mockState.flags = { ...featureFlagDefaults, pluginsStore: true };
 
     renderSidebar();
 
-    expect(getNavLink('Plugins')).toHaveAttribute('href', '/plugins');
-    expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
+    expect(await getMoreItem('Plugins')).toHaveAttribute('href', '/plugins');
   });
 
   it('uses an Allotment-owned browser pane without duplicate titlebar controls', () => {

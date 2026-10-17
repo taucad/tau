@@ -33,14 +33,15 @@ scratch. Execute the scratch script; the durable copy records what was reviewed.
    and `repository` from its `package.json` so the placeholder matches what the real
    publish will later carry. Record the GitHub `owner/repo` and the **workflow filename**
    that will publish it — npm matches a trusted publisher on organization, repository and
-   workflow filename, exactly and case-sensitively. In Tau that is `.github/workflows/publish.yml`;
-   in a fork it is whatever that repository's publish workflow is called.
+   workflow filename, exactly and case-sensitively, and on the GitHub environment when the
+   publish job declares one. In Tau that is `.github/workflows/publish.yml` with environment
+   `npm-publish`; in a fork it is whatever that repository's publish workflow and environment are.
 
 2. **Check the registry first.** `npm view <name> version` for every name. Stop on anything
    but `E404`: a name owned by someone else is a naming decision, not a bootstrap.
 
 3. **Write the spec and generate.** A JSON array of
-   `{ name, repository, workflow, license, author, description }`, then:
+   `{ name, repository, workflow, environment, license, author, description }`, then:
 
    ```bash
    node .agents/skills/bootstrap-package/scripts/prepare.mjs --spec <spec.json> --out <scratch-dir>
@@ -93,8 +94,8 @@ scratch. Execute the scratch script; the durable copy records what was reviewed.
 ## Expected end state
 
 `npm view <name>@0.0.0 dist.integrity` matches the reviewed tarball, `dist-tags` carries
-`bootstrap: 0.0.0`, and `npm trust list` reports the intended repository and workflow with
-publish allowed and no environment.
+`bootstrap: 0.0.0`, and `npm trust list` reports the intended repository, workflow and
+environment with publish allowed.
 
 npm also sets `latest: 0.0.0` on a first publish whatever `--tag` says. That is unavoidable
 and safe while nothing resolves the name yet; the first real release moves it.

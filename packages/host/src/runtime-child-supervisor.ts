@@ -68,6 +68,19 @@ export type RuntimeChildWorker = {
 };
 
 /**
+ * What a full re-verification of a native runtime root found: the shape of `NativeRuntimeDamage` in
+ * `@taucad/native-process-core`.
+ *
+ * @public
+ */
+export type RuntimeChildRuntimeDamage = {
+  /** Root-relative paths that differ, are missing or are not recorded, worst first. */
+  readonly files: readonly string[];
+  /** One sentence naming the repair, such as the command that re-verifies and repairs the runtime. */
+  readonly remedy: string;
+};
+
+/**
  * The native kernels a daemon serves through its runtime children (D37).
  *
  * The runtime child runs project code under Node's permission model and may not spawn, so the daemon starts each
@@ -102,6 +115,13 @@ export type RuntimeChildNativeKernels = {
    * daemon-created directory the sandbox grants in place of the launch's workspace and artifact paths.
    */
   readonly start: (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) => Promise<RuntimeChildWorker>;
+  /**
+   * Re-verify one closure in full against its receipt, in this process, after a worker the child ran exited before its
+   * handshake (D8, ruling X35). The child cannot read the store, so it asks; only a root inside the store is verified.
+   * Seconds, never per launch.
+   * @returns The damage found, or `undefined` when the closure is intact.
+   */
+  readonly verify: (runtimePath: string, signal: AbortSignal) => Promise<RuntimeChildRuntimeDamage | undefined>;
 };
 
 const workerLaunchMessageSchema = z.object({
@@ -122,6 +142,12 @@ const workerLaunchMessageSchema = z.object({
     artifactPath: z.string().min(1),
     commandId: z.string().min(1).max(256),
   }),
+});
+
+const verifyMessageSchema = z.object({
+  type: z.literal('native-worker:verify'),
+  id: z.string().min(1).max(128),
+  runtimePath: z.string().min(1),
 });
 
 const workerControlMessageSchema = z.discriminatedUnion('type', [
@@ -193,7 +219,8 @@ const launchRefusal = async (
 
 /**
  * Serve one child's native worker launches until it exits: refuse what {@link launchRefusal} refuses, start the
- * rest, carry each worker's pipes over the IPC channel, and stop every worker the child leaves behind.
+ * rest, carry each worker's pipes over the IPC channel, and stop every worker the child leaves behind. A child whose
+ * worker exited before its handshake asks for its closure to be re-verified here, where the store is readable.
  *
  * @param child - The forked runtime child.
  * @param native - The daemon's native kernels.
@@ -258,7 +285,45 @@ const brokerNativeWorkers = (
     })();
     return worker;
   };
+  /* One verification per closure at a time: workers of one closure that fail together share its answer. */
+  const verifications = new Map<string, Promise<Readonly<Record<string, unknown>>>>();
+  const childGone = new AbortController();
+  const verification = async (runtimePath: string): Promise<Readonly<Record<string, unknown>>> => {
+    try {
+      const real = await realpath(runtimePath).catch(() => undefined);
+      if (store === undefined || real === undefined || !isWithin(store, real)) {
+        return { message: `Tau Host refused to verify ${runtimePath}: it is not inside the payload store.` };
+      }
+      /* No timer of its own: a local re-hash of one closure, bounded by the child's wait and cancelled when the
+       * child exits. */
+      const damage = await native.verify(runtimePath, childGone.signal);
+      return damage === undefined ? {} : { files: [...damage.files], remedy: damage.remedy };
+    } catch (error) {
+      return { message: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  const verify = (id: string, runtimePath: string): void => {
+    let pending = verifications.get(runtimePath);
+    if (pending === undefined) {
+      pending = verification(runtimePath);
+      verifications.set(runtimePath, pending);
+      // async-iife: bootstrap -- the entry is dropped once settled, so a later failure verifies afresh.
+      void (async () => {
+        await pending;
+        verifications.delete(runtimePath);
+      })();
+    }
+    // async-iife: bootstrap -- the answer is sent to the child; nothing awaits it.
+    void (async () => {
+      send({ type: 'native-worker:verified', id, ...(await pending) });
+    })();
+  };
   child.on('message', (message: unknown) => {
+    const verifyRequest = verifyMessageSchema.safeParse(message);
+    if (verifyRequest.success) {
+      verify(verifyRequest.data.id, verifyRequest.data.runtimePath);
+      return;
+    }
     const requested = workerLaunchMessageSchema.safeParse(message);
     if (requested.success) {
       const { id, launch: request } = requested.data;
@@ -287,6 +352,7 @@ const brokerNativeWorkers = (
     })();
   });
   child.once('exit', () => {
+    childGone.abort();
     for (const starting of workers.values()) {
       // async-iife: bootstrap -- a worker outlives no child; nothing awaits its stop.
       void (async () => {

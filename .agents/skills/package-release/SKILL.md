@@ -116,7 +116,7 @@ NX_CLOUD=false NX_DAEMON=false pnpm nx release version prerelease --preid beta -
 
 The explicit git flags are required because `release.git` in `nx.json` is not allowed with the `version` subcommand. The command bumps every manifest in the group (plus `packages/agent-plugin/.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`), writes no changelog, and keeps the version plans for the stable release. Regenerate the agent bundles (`pnpm nx run api-extractor:generate-bundles --skip-nx-cache`), commit them with the manifests as in step 5, and continue with step 6. `publish.yml` publishes under the `beta` dist-tag.
 
-A package name that has never been published needs the operator's bootstrap first: a `0.0.0` placeholder and an `npm trust` binding to `taucad/tau` `publish.yml`, since Trusted Publishing cannot create a name.
+A package name that has never been published needs the operator's bootstrap first: a `0.0.0` placeholder and an `npm trust` binding to `taucad/tau` `publish.yml` with environment `npm-publish`, since Trusted Publishing cannot create a name.
 
 Do not publish manually from a developer machine unless the operator explicitly asks for a local-publish exception. `docs/policy/release-policy.md` owns the CI-only publishing rule.
 
@@ -165,7 +165,7 @@ For each package listed as published in `docs/policy/release-policy.md`, configu
 2. Add GitHub Actions publisher:
    - Repository: `taucad/tau`
    - Workflow: `publish.yml`
-   - Environment: leave blank unless the workflow later adds one
+   - Environment: `npm-publish` (the publish job's environment; a binding without it admits a dispatch on any ref)
 
 Read the live package list from the release policy at execution time. Do not maintain a copied bulk command in this skill.
 

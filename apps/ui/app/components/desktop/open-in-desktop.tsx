@@ -37,6 +37,17 @@ import { desktopDeepLink } from '#lib/desktop-deep-link.js';
 export const tauDesktopDownloadUrl = 'https://github.com/taucad/tau/releases/latest';
 
 /**
+ * Whether a non-prerelease desktop release exists to download (charter Q56, go-live DSK-7).
+ *
+ * `releases/latest` answers 404 until the first one is published, so every "Get Tau Desktop" offer stays hidden
+ * until the build says otherwise: `TAU_DESKTOP_RELEASED=true` at build time, substituted by `define` in
+ * `vite.config.ts`. A function, not a constant, so tests can `vi.stubEnv` both branches.
+ *
+ * @returns Whether to offer the desktop download.
+ */
+export const isTauDesktopReleased = (): boolean => import.meta.env.TAU_DESKTOP_RELEASED === 'true';
+
+/**
  * The browser's own preference, per the Figma pattern the canvas copies.
  *
  * ponytail: plain `localStorage`, not `useCookie` — this preference is
@@ -165,12 +176,14 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
             <ExternalLink aria-hidden='true' />
             Try again
           </Button>
-          <Button asChild variant='outline' className='w-full'>
-            <a href={tauDesktopDownloadUrl} target='_blank' rel='noreferrer'>
-              <Download aria-hidden='true' />
-              Get Tau Desktop
-            </a>
-          </Button>
+          {isTauDesktopReleased() && (
+            <Button asChild variant='outline' className='w-full'>
+              <a href={tauDesktopDownloadUrl} target='_blank' rel='noreferrer'>
+                <Download aria-hidden='true' />
+                Get Tau Desktop
+              </a>
+            </Button>
+          )}
           <Button
             variant='outline'
             className='w-full'

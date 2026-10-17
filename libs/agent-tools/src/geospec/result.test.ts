@@ -645,7 +645,7 @@ describe('failure categories and suggestions', () => {
     });
   });
 
-  it('should read a byte-limit refusal under the shared evidence code as an analysis limit', () => {
+  it('should read the shared evidence code as an evidence gap even when its message names a limit', () => {
     const failure = failureOf(
       refused({
         code: 'GEOSPEC_UNSUPPORTED_EVIDENCE',
@@ -653,15 +653,16 @@ describe('failure categories and suggestions', () => {
         message: 'Material exact scratch exceeds the declared analysis byte limit.',
       }),
     );
-    expect(failure.category).toBe('analysis-limit');
+    expect(failure.category).toBe('unsupported-evidence');
   });
 
-  it('should read an untyped admission limit load error as a resource limit', () => {
+  it('should read a typed admission refusal as a resource limit', () => {
     const failure = failureOf(
       refused({
-        code: 'TEST_FAILED',
+        code: 'limit-exceeded',
         severity: 'error',
-        message: 'Primary geometry exceeds the configured binary subject limit.',
+        message:
+          'Primary geometry needs 80.0 MiB (83886080 bytes); the configured binary subject limit is 64.0 MiB (67108864 bytes).',
       }),
     );
     expect(failure.category).toBe('resource-limit');

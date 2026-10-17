@@ -36,13 +36,21 @@ const lazyCommand = (name: string, description: string, load: () => Promise<Comm
   });
 
 const subCommands: Record<string, CommandDef> = {
-  serve: lazyCommand('serve', 'Run the experimental Tau Host remote-compute daemon', async () => {
+  serve: lazyCommand('serve', 'Serve a project folder to the browser on this machine', async () => {
     const { serveCommand } = await import('./commands/serve.js');
     return serveCommand as CommandDef;
   }),
   export: lazyCommand('export', 'Export a CAD file to a target format', async () => {
     const { exportCommand } = await import('./commands/export.js');
     return exportCommand as CommandDef;
+  }),
+  check: lazyCommand('check', 'Evaluate a CAD file without exporting it', async () => {
+    const { checkCommand } = await import('./commands/check.js');
+    return checkCommand as CommandDef;
+  }),
+  test: lazyCommand('test', 'Run a project’s GeoSpec suites', async () => {
+    const { testCommand } = await import('./commands/test.js');
+    return testCommand as CommandDef;
   }),
   install: lazyCommand('install', 'Lock and install a project’s npm packages', async () => {
     const { installCommand } = await import('./commands/install.js');
@@ -68,9 +76,13 @@ const subCommands: Record<string, CommandDef> = {
     const { revisionsCommand } = await import('./commands/revisions.js');
     return revisionsCommand as CommandDef;
   }),
-  open: lazyCommand('open', 'Open one of this account’s Tau Cloud projects on this machine', async () => {
+  open: lazyCommand('open', 'Open a project folder, file or Tau link in the browser', async () => {
     const { openCommand } = await import('./commands/open.js');
     return openCommand as CommandDef;
+  }),
+  clone: lazyCommand('clone', 'Clone one of this account’s Tau Cloud projects onto this machine', async () => {
+    const { cloneCommand } = await import('./commands/clone.js');
+    return cloneCommand as CommandDef;
   }),
   publish: lazyCommand('publish', 'Publish a named version of a project to Tau Cloud and print its link', async () => {
     const { publishCommand } = await import('./commands/publish.js');
@@ -94,7 +106,7 @@ const main = defineCommand({
   meta: {
     name: 'tau',
     version: packageJson.version,
-    description: 'CLI for @taucad/runtime — render and export CAD files from the terminal',
+    description: 'CLI for Tau — check, test, export and serve CAD projects from the terminal',
   },
   subCommands,
 });

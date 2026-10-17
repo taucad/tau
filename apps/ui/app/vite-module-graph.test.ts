@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { build } from 'vite';
+import { tauRuntime } from '@taucad/runtime/vite';
 // oxlint-disable-next-line no-restricted-imports -- this test exercises the application-owned Vite plugin directly.
 import { createUiSourceAliasPlugin } from '../vite.config.js';
 
@@ -17,6 +18,38 @@ afterEach(async () => {
 });
 
 describe('desktop module graph', () => {
+  it.each([false, true])('should emit the esbuild fallback only when its module is retained (%s)', async (retained) => {
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, 'esbuild-'));
+    roots.push(root);
+    const entry = path.join(root, 'entry.js');
+    const assetModule = path.join(workspaceRoot, 'packages/plugins/esbuild/src/vm/esbuild-wasm-url.ts');
+    await writeFile(
+      entry,
+      `import { esbuildWasmUrl } from ${JSON.stringify(assetModule)}; export const value = ${retained ? 'esbuildWasmUrl' : "'desktop'"};`,
+    );
+    await build({
+      configFile: false,
+      root,
+      logLevel: 'silent',
+      plugins: [
+        tauRuntime({ crossOriginIsolation: false }),
+        createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
+      ],
+      build: { lib: { entry, formats: ['es'] }, assetsInlineLimit: 0 },
+    });
+    const files = await readdir(path.join(root, 'dist'), { recursive: true });
+    const wasmFiles = files.filter((file) => file.endsWith('.wasm'));
+    expect(wasmFiles).toHaveLength(retained ? 1 : 0);
+    const manifestFile = files.find((file) => /tau-module-graph(?:-[\w-]+)?\.json$/u.test(file));
+    const manifest = JSON.parse(await readFile(path.join(root, 'dist', manifestFile ?? ''), 'utf8')) as {
+      assets: Array<{ fileName: string }>;
+    };
+    expect(manifest.assets.filter((asset) => asset.fileName.endsWith('.wasm')).map((asset) => asset.fileName)).toEqual(
+      wasmFiles,
+    );
+  });
   it('should retain rendered module and asset provenance when output names are hashed', async () => {
     const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
     await mkdir(cacheRoot, { recursive: true });

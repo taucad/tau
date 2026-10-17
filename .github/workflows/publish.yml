@@ -1,8 +1,15 @@
 name: Publish Packages
 
 # CI does not publish npm packages on its own: a pushed `v*.*.*` tag no longer
-# starts this workflow. It remains a manual, operator-dispatched path on a
-# package release tag; application releases go through release.yml instead.
+# starts this workflow. It is a manual, operator-dispatched path, run on a `v*`
+# package release tag or on `main`; application releases go through release.yml.
+#
+# The publish job runs in the `npm-publish` environment, which admits only
+# `main` and the `v*` tags (tau-cloud `stacks/repo/tau`). The `@taucad/*`
+# trusted publishers on npm name this repository, `publish.yml` and that
+# environment, so a dispatch on any other ref cannot obtain a publish token,
+# even after editing its own copy of this workflow. A binding that names no
+# environment would admit any ref; `npm trust list <name>` shows which it is.
 on:
   workflow_dispatch:
 
@@ -13,6 +20,7 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    environment: npm-publish
     permissions:
       contents: read
       id-token: write

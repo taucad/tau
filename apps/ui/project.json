@@ -66,6 +66,9 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
+          "env": "TAU_DESKTOP_RELEASED"
+        },
+        {
           "env": "TAU_BILLING_ENVIRONMENT"
         },
         {

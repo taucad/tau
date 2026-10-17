@@ -20,6 +20,7 @@ const hash = 'a'.repeat(64);
 class BudgetEngine implements GeoSpecNativeEngine {
   public readonly budgets: number[] = [];
   public row: Record<string, JSONValue> = { status: 'passed', diagnostics: [] };
+  public configurationProfile = 'geospec-entry-config-v1';
 
   public evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation {
     const plan = decode(request)['plan'] as {
@@ -42,7 +43,7 @@ class BudgetEngine implements GeoSpecNativeEngine {
       result: {
         canonicalProfile: 'geospec-jcs-v1',
         configuration: {
-          configurationProfile: 'geospec-entry-config-v1',
+          configurationProfile: this.configurationProfile,
           defaultWorkUnitBudget: 8_000_000,
         },
         protocolVersion: 3,
@@ -92,6 +93,20 @@ describe('authored work-unit budgets', () => {
       "GeoSpec expectGeo workUnitLimit must be a positive integer no greater than this host's maximum of 512000000 (the host can raise it with maximumWorkUnitLimit); received string.",
     );
     expect(engine.budgets).toEqual([]);
+  });
+
+  it('should accept a host configuration profile and refuse an unknown profile', () => {
+    const engine = new BudgetEngine();
+    engine.configurationProfile = 'geospec-host-config-v1-0123456789abcdef';
+    createGeoSpecAssertionClient({ engine }).expectGeo({ subjectHash: hash }).toBeWatertight();
+    expect(engine.budgets).toEqual([8_000_000]);
+
+    const unknown = new BudgetEngine();
+    unknown.configurationProfile = 'geospec-other-config-v1';
+    expect(() =>
+      createGeoSpecAssertionClient({ engine: unknown }).expectGeo({ subjectHash: hash }).toBeWatertight(),
+    ).toThrow('GeoSpec engine returned an unsupported configuration profile.');
+    expect(unknown.budgets).toEqual([]);
   });
 
   it('should let the host raise the authored maximum and refuse a malformed host maximum', () => {

@@ -6,9 +6,12 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
+/** Starts a project from the Home chat composer; "Build from code" there opens `/projects/new`. */
+const newProjectState = { focusChatComposer: true } as const;
+
 export function NavChat({ isCompact = false }: { readonly isCompact?: boolean }): React.JSX.Element {
   const navigate = useNavigate();
-  const isMatch = useMatch('/projects/new');
+  const isMatch = useMatch('/');
   const { formattedKeyCombination } = useKeybinding(
     {
       key: 'n',
@@ -16,13 +19,13 @@ export function NavChat({ isCompact = false }: { readonly isCompact?: boolean })
     },
     () => {
       // Already there: replace, so repeated presses do not stack history entries.
-      void navigate('/projects/new', { replace: Boolean(isMatch) });
+      void navigate('/', { replace: Boolean(isMatch), state: newProjectState });
     },
   );
   return (
     // Elevate the sidebar group above the other items to ensure the new project button is always clickable
     <SidebarGroup className={cn('z-10 px-0', isCompact && 'py-0')}>
-      <NavLink to='/projects/new'>
+      <NavLink end to='/' state={newProjectState}>
         {({ isActive, isPending }) => (
           <SidebarMenuButton
             asChild

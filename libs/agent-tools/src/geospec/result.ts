@@ -176,14 +176,6 @@ const evidenceCodes = new Set([
   'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
   geoSpecRegionWholeModelClaimCode,
 ]);
-/*
- * Engine pins before the distinct limit codes (geospec-engine 0.1.0-next.51)
- * fold byte-limit refusals into GEOSPEC_UNSUPPORTED_EVIDENCE and report
- * admission limits as an untyped load error. Their messages name the limit;
- * this bridge retires with the pin that carries the typed codes.
- */
-const limitMessage = /\bexceeds?\b[^.]*\blimit\b/iu;
-const admissionLimitMessage = /\b(?:subject|admission|retained|binary)\b[^.]*\blimit\b/iu;
 const weakeningSuggestion =
   /\b(?:update|weaken|relax|loosen|remove|delete|drop|change)\b[^.]{0,60}\b(?:assertion|expectation|expected|tolerance|test)\b/iu;
 /** Advice to reduce the design to fit a limit; a limit is met with resources, never less geometry. */
@@ -214,16 +206,13 @@ const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | u
     return 'work-budget';
   }
   if (codes.some((code) => evidenceCodes.has(code))) {
-    return limitMessage.test(diagnostic.message) ? 'analysis-limit' : 'unsupported-evidence';
+    return 'unsupported-evidence';
   }
   if (codes.some((code) => code.startsWith('GEOSPEC_NATIVE_') || code.startsWith('GEOSPEC_MODEL_'))) {
     return 'model-load';
   }
   if (codes.includes('GEOSPEC_CANONICAL_EXPORT_UNSUPPORTED')) {
     return 'model-load';
-  }
-  if (limitMessage.test(diagnostic.message) && admissionLimitMessage.test(diagnostic.message)) {
-    return 'resource-limit';
   }
   return undefined;
 };

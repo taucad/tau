@@ -12,7 +12,11 @@
  */
 import { PassThrough, Writable } from 'node:stream';
 
-import type { RuntimeChildWorker, RuntimeChildWorkerLaunch } from '#runtime-child-supervisor.js';
+import type {
+  RuntimeChildRuntimeDamage,
+  RuntimeChildWorker,
+  RuntimeChildWorkerLaunch,
+} from '#runtime-child-supervisor.js';
 
 /** The IPC channel a forked child talks to its parent over; `process` in a runtime child. @public */
 export type RuntimeChildChannel = {
@@ -137,5 +141,71 @@ export const createRuntimeChildWorkerLauncher = (
         await pending.ended.promise;
       },
     };
+  };
+};
+
+/**
+ * A native runtime verifier that asks the daemon to re-verify a closure on this child's behalf (D8, ruling X35).
+ *
+ * A native session re-verifies its runtime when its worker exits before the handshake, so the refusal names the
+ * damaged files. A runtime child cannot read the payload store, so this verifier sends the runtime root to the daemon,
+ * which verifies it against its receipt and answers with what differs. A daemon that refuses, fails or is gone leaves
+ * the bare exit standing.
+ *
+ * @param channel - The child's IPC channel; defaults to `process`.
+ * @returns The verifier, shaped as `@taucad/native-process-core`'s `NativeRuntimeVerifier`.
+ * @public
+ *
+ * @example <caption>Re-verify every failed handshake of a runtime child through its daemon</caption>
+ * ```typescript
+ * import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
+ * import { createRuntimeChildRuntimeVerifier } from '@taucad/host/runtime-host';
+ *
+ * installNativeRuntimeVerifier(createRuntimeChildRuntimeVerifier());
+ * ```
+ */
+export const createRuntimeChildRuntimeVerifier = (
+  channel: RuntimeChildChannel = process as RuntimeChildChannel,
+): ((runtimePath: string, signal: AbortSignal) => Promise<RuntimeChildRuntimeDamage | undefined>) => {
+  const pending = new Map<string, (damage: RuntimeChildRuntimeDamage | undefined) => void>();
+  let requests = 0;
+  channel.on('message', (message) => {
+    const id = field(message, 'id');
+    const answer = typeof id === 'string' ? pending.get(id) : undefined;
+    if (field(message, 'type') !== 'native-worker:verified' || answer === undefined) {
+      return;
+    }
+    const files = field(message, 'files');
+    const remedy = field(message, 'remedy');
+    answer(
+      Array.isArray(files) && files.every((file) => typeof file === 'string') && typeof remedy === 'string'
+        ? { files, remedy }
+        : undefined,
+    );
+  });
+  channel.once('disconnect', () => {
+    for (const answer of pending.values()) {
+      answer(undefined);
+    }
+  });
+  return async (runtimePath, signal) => {
+    if (!channel.connected || signal.aborted) {
+      return undefined;
+    }
+    requests += 1;
+    const id = `verify-${String(requests)}`;
+    const answered = Promise.withResolvers<RuntimeChildRuntimeDamage | undefined>();
+    const onAbort = (): void => {
+      answered.resolve(undefined);
+    };
+    pending.set(id, answered.resolve);
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      channel.send?.({ type: 'native-worker:verify', id, runtimePath });
+      return await answered.promise;
+    } finally {
+      pending.delete(id);
+      signal.removeEventListener('abort', onAbort);
+    }
   };
 };

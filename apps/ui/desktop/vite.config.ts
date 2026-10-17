@@ -50,12 +50,13 @@ export default defineConfig({
   },
   plugins: [
     mtAssets.plugin,
+    // Prune unused runtime assets before the module graph inventories them.
+    tauRuntime(),
     createUiSourceAliasPlugin({
       emitModuleGraph: true,
       target: 'desktop',
       tauCloudEnabled,
     }),
-    tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
     reactRouter(),

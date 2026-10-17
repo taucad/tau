@@ -1,7 +1,13 @@
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Ellipsis } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { NavLink } from 'react-router';
+import { Link, matchPath, NavLink, useLocation } from 'react-router';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -11,12 +17,60 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from '#components/ui/sidebar.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
+type NavMoreItem = {
+  title: string;
+  url: string;
+  icon?: LucideIcon;
+  action?: () => void;
+};
+
+/** The "More" row: secondary destinations in a menu beside the sidebar. */
+function NavMore({ items }: { readonly items: readonly NavMoreItem[] }): React.JSX.Element {
+  const { isMobile } = useSidebar();
+  const { pathname } = useLocation();
+  const isActive = items.some((item) => matchPath({ path: item.url, end: false }, pathname) !== null);
+
+  return (
+    <SidebarMenuItem>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuButton isActive={isActive}>
+            <Ellipsis className='size-4 shrink-0' />
+            <span className='flex-1 truncate'>More</span>
+          </SidebarMenuButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side={isMobile ? 'bottom' : 'right'} align='start' className='min-w-48'>
+          {items.map((item) => {
+            const content = (
+              <>
+                {item.icon ? <item.icon className='size-4 shrink-0' /> : null}
+                <span className='flex-1 truncate'>{item.title}</span>
+              </>
+            );
+            return item.action ? (
+              <DropdownMenuItem key={item.title} onSelect={item.action}>
+                {content}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem key={item.title} asChild>
+                <Link to={item.url}>{content}</Link>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuItem>
+  );
+}
+
 export function NavMain({
   items,
+  moreItems,
   groupLabel,
   className,
 }: {
@@ -31,6 +85,8 @@ export function NavMain({
       url: string;
     }>;
   }>;
+  /** Listed under a trailing "More" row; the row is omitted when empty. */
+  readonly moreItems?: readonly NavMoreItem[];
   readonly groupLabel?: string;
   readonly className?: string;
 }): React.JSX.Element {
@@ -98,6 +154,7 @@ export function NavMain({
             </Collapsible>
           );
         })}
+        {moreItems !== undefined && moreItems.length > 0 ? <NavMore items={moreItems} /> : null}
       </SidebarMenu>
     </SidebarGroup>
   );

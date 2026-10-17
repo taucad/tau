@@ -56,6 +56,17 @@ describe('OpenInDesktop', () => {
     expect(
       screen.getByText('Tau Desktop may not be installed on this computer, or the browser did not offer to open it.'),
     ).toBeInTheDocument();
+    /* No non-prerelease desktop release yet (Q56, DSK-7): `releases/latest` would answer 404. */
+    expect(screen.queryByRole('link', { name: 'Get Tau Desktop' })).not.toBeInTheDocument();
+  });
+
+  it('offers the download once the build says a non-prerelease desktop release exists', async () => {
+    vi.stubEnv('TAU_DESKTOP_RELEASED', 'true');
+    mountAt('/invitations/tok_abcdef');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open in Tau Desktop' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Tau Desktop didn’t open' }));
+
     expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute(
       'href',
       'https://github.com/taucad/tau/releases/latest',

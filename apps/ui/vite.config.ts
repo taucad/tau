@@ -433,6 +433,18 @@ export default defineConfig(({ command, mode }) => {
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
       ...(isTest ? {} : { 'import.meta.env.TAU_TARGET': '"web"' }),
       /*
+       * Whether a non-prerelease Tau Desktop exists to download (Q56, DSK-7): every "Get Tau Desktop" offer stays
+       * hidden until the release build sets `TAU_DESKTOP_RELEASED=true`. Undefined under `mode === 'test'`.
+       */
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_DESKTOP_RELEASED': JSON.stringify(
+              process.env['TAU_DESKTOP_RELEASED'] === 'true' ? 'true' : 'false',
+            ),
+          }),
+      /*
        * Offline shell seam (B5 R3). Only this config defines it, so only the
        * web bundle registers the service worker: `desktop/vite.config.ts` and
        * `serve/vite.config.ts` have their own `define` blocks and their own

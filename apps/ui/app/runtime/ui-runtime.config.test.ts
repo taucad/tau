@@ -137,4 +137,32 @@ describe('createUiRuntimeConfig', () => {
     const standard = await replicadOptions(false);
     expect(standard?.['computeReuse']).toBeUndefined();
   });
+
+  // D-RT-05 / D-GFX-10: a 2,000,000-triangle preview costs ~230 MiB steady on a phone and over 1 GiB with Section.
+  it('should give previews the phone triangle budget and PicoVoxel the phone recycle threshold on a memory-constrained device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+      memoryConstrained: true,
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ previewTriangleBudget: 400_000 });
+    expect(kernelOptions('opencascade')).toMatchObject({ previewTriangleBudget: 400_000 });
+    expect(resolvedRuntime.middleware.find(({ id }) => id === 'displaySimplification')).toMatchObject({
+      options: { maxTriangles: 400_000 },
+    });
+    expect(kernelOptions('picovoxel')).toMatchObject({ recycleHeapBytes: 512 * 2 ** 20 });
+  });
+
+  it('should keep the policy preview budgets on a standard device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')?.['previewTriangleBudget']).toBeUndefined();
+    expect(kernelOptions('opencascade')?.['previewTriangleBudget']).toBeUndefined();
+  });
 });

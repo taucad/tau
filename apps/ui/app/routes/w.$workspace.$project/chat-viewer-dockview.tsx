@@ -98,6 +98,42 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
   return existing.filter(({ id }) => !desired.has(id)).map(({ id }) => id);
 }
 
+/** A restored view whose record has not loaded yet keeps the entry its durable record names. */
+const keepDurableEntry =
+  (entryPath: string) =>
+  (current: WorkbenchView | undefined): WorkbenchView =>
+    current?.entryPath ? current : { ...(current ?? newViewRecord(entryPath)), entryPath };
+
+/**
+ * Bind a panel that has no entry path. A panel adopted from the layout record carries only its
+ * view id, so its loaded record wins; a panel seeded before the project loaded takes the main entry.
+ */
+function bindViewerPanelEntry(
+  panel: DockviewApi['panels'][number],
+  {
+    record,
+    mainEntryPath,
+    persistMainEntry,
+  }: Readonly<{
+    record: WorkbenchView | undefined;
+    mainEntryPath: string | undefined;
+    persistMainEntry: ((entryPath: string) => void) | undefined;
+  }>,
+): string | undefined {
+  if (record?.entryPath) {
+    panel.api.setTitle(viewTabTitle(record));
+    panel.api.updateParameters({ entryPath: record.entryPath });
+    return record.entryPath;
+  }
+  if (!mainEntryPath) {
+    return undefined;
+  }
+  panel.api.setTitle(mainEntryPath.split('/').pop() ?? mainEntryPath);
+  panel.api.updateParameters({ entryPath: mainEntryPath });
+  persistMainEntry?.(mainEntryPath);
+  return mainEntryPath;
+}
+
 function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
   return 'dataTransfer' in event ? (event.dataTransfer ?? undefined) : undefined;
 }
@@ -781,21 +817,16 @@ export const ViewerDockview = memo(function ({
       }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
-
-      // If the panel was created without an entry path (project was still loading),
-      // assign the main entry path now that the project is ready.
-      if (!panelEntryPath && mainEntryPath) {
-        panelEntryPath = mainEntryPath;
-        const fileName = mainEntryPath.split('/').pop() ?? mainEntryPath;
-        panel.api.setTitle(fileName);
-        panel.api.updateParameters({ entryPath: mainEntryPath });
-        if (profile === 'editor') {
-          void viewCommands.edit(panelViewId, (current) => ({
-            ...(current ?? newViewRecord(mainEntryPath)),
-            entryPath: mainEntryPath,
-          }));
-        }
-      }
+      panelEntryPath ??= bindViewerPanelEntry(panel, {
+        record: viewRecords.get(panelViewId),
+        mainEntryPath,
+        persistMainEntry:
+          profile === 'editor'
+            ? (entryPath) => {
+                void viewCommands.edit(panelViewId, keepDurableEntry(entryPath));
+              }
+            : undefined,
+      });
 
       setViewEntryPath(panelViewId, panelEntryPath ?? null);
 

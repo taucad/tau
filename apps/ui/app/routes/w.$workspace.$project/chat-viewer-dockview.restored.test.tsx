@@ -3,12 +3,17 @@ import { createElement, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkbenchView } from '@taucad/workbench';
+import { newViewRecord } from '#workbench-records/projection.js';
 
 const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),
   nextProjectSend: vi.fn(),
   editorSend: vi.fn(),
   setViewEntryPath: vi.fn(),
+  viewEdit: vi.fn(async (_viewId: string, _change: (current: WorkbenchView | undefined) => WorkbenchView) => true),
+  viewRecords: new Map<string, WorkbenchView>(),
+  addRestoredPanel: (_id: string): void => undefined,
   mainEntryPath: 'main.ts',
   availability: 'ready',
   emptyMain: false,
@@ -57,7 +62,9 @@ vi.mock('#hooks/use-project.js', () => {
     get mainEntryPath() {
       return fixture.mainEntryPath;
     },
-    viewRecords: new Map(),
+    get viewRecords() {
+      return fixture.viewRecords;
+    },
     setViewEntryPath: fixture.setViewEntryPath,
     entriesRecord: undefined,
     geometryUnits: new Map(),
@@ -72,7 +79,7 @@ vi.mock('#hooks/use-project.js', () => {
 });
 
 vi.mock('#workbench-records/view-actions.js', () => ({
-  useWorkbenchViewCommands: () => ({ edit: vi.fn(async () => true), remove: vi.fn(async () => true) }),
+  useWorkbenchViewCommands: () => ({ edit: fixture.viewEdit, remove: vi.fn(async () => true) }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer.js', () => ({
@@ -129,6 +136,27 @@ vi.mock('#components/panes/dockview.js', () => ({
         refresh((value) => value + 1);
       };
       const subscribe = () => ({ dispose: () => undefined });
+      const addListeners = new Set<(panel: (typeof panels)[number]) => void>();
+      fixture.addRestoredPanel = (id) => {
+        const params: { viewId: string; entryPath?: string } = { viewId: id };
+        const restored = {
+          id,
+          params,
+          api: {
+            isVisible: true,
+            setTitle: vi.fn(),
+            updateParameters: (next: { entryPath: string }) => {
+              Object.assign(restored.params, next);
+            },
+            onDidVisibilityChange: () => ({ dispose: () => undefined }),
+          },
+        };
+        panels.push(restored as typeof main);
+        for (const listener of addListeners) {
+          listener(restored as typeof main);
+        }
+        refresh((value) => value + 1);
+      };
       return {
         panels,
         groups: [{}],
@@ -147,7 +175,10 @@ vi.mock('#components/panes/dockview.js', () => ({
         },
         onDidLayoutChange: subscribe,
         onDidActivePanelChange: subscribe,
-        onDidAddPanel: subscribe,
+        onDidAddPanel: (listener: (panel: (typeof panels)[number]) => void) => {
+          addListeners.add(listener);
+          return { dispose: () => addListeners.delete(listener) };
+        },
         onDidRemovePanel: subscribe,
         onWillDragPanel: subscribe,
         onUnhandledDragOver: subscribe,
@@ -180,6 +211,8 @@ describe('restored viewer layout admission', () => {
     fixture.nextProjectSend.mockClear();
     fixture.editorSend.mockClear();
     fixture.setViewEntryPath.mockClear();
+    fixture.viewEdit.mockClear();
+    fixture.viewRecords = new Map();
     fixture.mainEntryPath = 'main.ts';
     fixture.emptyMain = false;
     fixture.availability = 'ready';
@@ -193,6 +226,37 @@ describe('restored viewer layout admission', () => {
     fixture.mainEntryPath = 'main.ts';
     view.rerender(<ViewerDockview profile='shared' />);
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'main.ts');
+  });
+
+  it('should keep the durable entry of a restored view whose record is still loading', () => {
+    fixture.emptyMain = true;
+    fixture.mainEntryPath = 'main.scad';
+    render(<ViewerDockview profile='editor' />);
+    const edits = fixture.viewEdit.mock.calls.filter(([viewId]) => viewId === 'main-view');
+    expect(edits).not.toHaveLength(0);
+    const restored = newViewRecord('exports/result.ply');
+    for (const [, change] of edits) {
+      expect(change(restored).entryPath).toBe('exports/result.ply');
+    }
+    expect(edits[0]?.[1](undefined).entryPath).toBe('main.scad');
+  });
+
+  it('should admit a panel adopted after readiness with its recorded entry', () => {
+    fixture.mainEntryPath = 'main.scad';
+    fixture.viewRecords = new Map([['v-ply', newViewRecord('exports/result.ply')]]);
+    render(<ViewerDockview profile='editor' />);
+    act(() => {
+      fixture.addRestoredPanel('v-ply');
+    });
+    expect(fixture.viewEdit).not.toHaveBeenCalledWith('v-ply', expect.anything());
+    expect(fixture.setViewEntryPath).toHaveBeenCalledWith('v-ply', 'exports/result.ply');
+    expect(fixture.setViewEntryPath).not.toHaveBeenCalledWith('v-ply', 'main.scad');
+    expect(fixture.projectSend).toHaveBeenCalledWith({
+      type: 'setViewerGeometryDemand',
+      viewId: 'v-ply',
+      entryPath: 'exports/result.ply',
+    });
+    expect(screen.getByTestId('content:exports/result.ply')).toBeInTheDocument();
   });
 
   it('waits for cloud materialization before binding the manifest entry', () => {

@@ -5,7 +5,7 @@
  * assigns, never a prototype accessor of the class.
  */
 export const countConstructions = <T>(
-  prototype: object,
+  prototype: Readonly<{ constructor: unknown }>,
   field: string,
   run: () => T,
 ): Readonly<{ result: T; constructions: number }> => {
@@ -14,7 +14,7 @@ export const countConstructions = <T>(
     configurable: true,
     // Never read: the constructor's write replaces this accessor with an own property first.
     get: () => undefined,
-    set(this: object, value: unknown) {
+    set(this: Record<string, unknown>, value: unknown) {
       constructions += 1;
       Object.defineProperty(this, field, { value, writable: true, enumerable: true, configurable: true });
     },

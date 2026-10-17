@@ -55,12 +55,6 @@ export function Lights({
   // Lighting operates in normalized render units; use a neutral radius only before geometry loads.
   const clampedSceneRadius = sceneRadius > 0 ? sceneRadius : 1;
 
-  // Keep clamped radius accessible in useFrame without re-subscribing
-  const radiusRef = useRef(clampedSceneRadius);
-  useLayoutEffect(() => {
-    radiusRef.current = clampedSceneRadius;
-  }, [clampedSceneRadius]);
-
   useLayoutEffect(() => {
     // oxlint-disable-next-line react/immutability -- This effect owns the external Three renderer's exposure setting.
     gl.toneMappingExposure = lighting.exposure;
@@ -71,6 +65,32 @@ export function Lights({
   const themeIntensityScale = isDark ? darkModeIntensityScale : 1;
   const themeAmbientBoost = isDark ? darkModeAmbientBoost : 1;
 
+  // One configuration per input change, so a lighting frame allocates nothing.
+  const { headlampIntensity, ambientIntensity, environmentIntensity } = lighting;
+  const config = useMemo(
+    () => ({
+      sceneRadius: clampedSceneRadius,
+      upDirection,
+      headlampIntensity,
+      ambientIntensity,
+      environmentIntensity,
+      headlampConfig: defaultHeadlampConfig,
+      themeIntensityScale,
+      themeAmbientBoost,
+      webGpuPmrem: isViewportWebGpu(gl),
+    }),
+    [
+      clampedSceneRadius,
+      upDirection,
+      headlampIntensity,
+      ambientIntensity,
+      environmentIntensity,
+      themeIntensityScale,
+      themeAmbientBoost,
+      gl,
+    ],
+  );
+
   // Per-frame updates delegated to the shared camera-relative lighting utility.
   useFrame(() => {
     applyLightingForCamera({
@@ -78,17 +98,7 @@ export function Lights({
       camera,
       headlamp: cameraLightReference.current ?? undefined,
       ambient: ambientReference.current ?? undefined,
-      config: {
-        sceneRadius: radiusRef.current,
-        upDirection,
-        headlampIntensity: lighting.headlampIntensity,
-        ambientIntensity: lighting.ambientIntensity,
-        environmentIntensity: lighting.environmentIntensity,
-        headlampConfig: defaultHeadlampConfig,
-        themeIntensityScale,
-        themeAmbientBoost,
-        webGpuPmrem: isViewportWebGpu(gl),
-      },
+      config,
     });
   });
 

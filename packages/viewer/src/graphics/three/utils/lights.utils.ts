@@ -9,6 +9,9 @@ import * as THREE from 'three';
 
 /** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call. */
 const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
+const scratchCameraRight = new THREE.Vector3();
+const scratchCameraUp = new THREE.Vector3();
+const scratchCameraForward = new THREE.Vector3();
 
 // ── Lighting constants ─────────────────────────────────────────────────────
 /**
@@ -150,8 +153,17 @@ export function computeEnvironmentRotation(
   cameraWorldQuaternion: THREE.Quaternion,
   upDirection: 'x' | 'y' | 'z',
 ): THREE.Euler {
+  return writeEnvironmentRotation(cameraWorldQuaternion, upDirection, new THREE.Euler());
+}
+
+/** {@link computeEnvironmentRotation} into an existing Euler, so a lighting frame allocates nothing. */
+function writeEnvironmentRotation(
+  cameraWorldQuaternion: THREE.Quaternion,
+  upDirection: 'x' | 'y' | 'z',
+  target: THREE.Euler,
+): THREE.Euler {
   const order: THREE.EulerOrder = upDirection === 'y' ? 'YXZ' : upDirection === 'z' ? 'ZXY' : 'XZY';
-  return new THREE.Euler().setFromQuaternion(cameraWorldQuaternion, order);
+  return target.setFromQuaternion(cameraWorldQuaternion, order);
 }
 
 /**
@@ -181,30 +193,48 @@ export function computeHeadlampTransform({
   sceneRadius: number;
   config: HeadlampConfig;
 }): { position: THREE.Vector3; targetPosition: THREE.Vector3 } {
+  const position = new THREE.Vector3();
+  const targetPosition = new THREE.Vector3();
+  writeHeadlampTransform({ cameraPosition, cameraMatrixWorld, sceneRadius, config }, position, targetPosition);
+  return { position, targetPosition };
+}
+
+/** {@link computeHeadlampTransform} into existing vectors, so a lighting frame allocates nothing. */
+function writeHeadlampTransform(
+  {
+    cameraPosition,
+    cameraMatrixWorld,
+    sceneRadius,
+    config,
+  }: {
+    cameraPosition: THREE.Vector3;
+    cameraMatrixWorld: THREE.Matrix4;
+    sceneRadius: number;
+    config: HeadlampConfig;
+  },
+  position: THREE.Vector3,
+  targetPosition: THREE.Vector3,
+): void {
   // Camera basis vectors in world space:
   // - column 0: camera-right (+X local)
   // - column 1: camera-up (+Y local)
-  const cameraRight = new THREE.Vector3().setFromMatrixColumn(cameraMatrixWorld, 0).normalize();
-  const cameraUp = new THREE.Vector3().setFromMatrixColumn(cameraMatrixWorld, 1).normalize();
+  const cameraRight = scratchCameraRight.setFromMatrixColumn(cameraMatrixWorld, 0).normalize();
+  const cameraUp = scratchCameraUp.setFromMatrixColumn(cameraMatrixWorld, 1).normalize();
 
   // Position: camera + up offset + right offset
-  const position = cameraPosition.clone();
+  position.copy(cameraPosition);
   position.addScaledVector(cameraUp, sceneRadius * config.upOffset);
   position.addScaledVector(cameraRight, sceneRadius * config.rightOffset);
 
-  // Camera forward direction
-  const cameraForward = new THREE.Vector3();
-  // Extract forward from the matrix column instead of calling getWorldDirection
+  // Camera forward direction. Extract forward from the matrix column instead of calling getWorldDirection
   // so this function remains standalone (no camera method dependency).
-  cameraForward.setFromMatrixColumn(cameraMatrixWorld, 2).normalize().negate();
+  const cameraForward = scratchCameraForward.setFromMatrixColumn(cameraMatrixWorld, 2).normalize().negate();
 
   // Target: forward of camera with skew offsets
-  const targetPosition = cameraPosition.clone();
+  targetPosition.copy(cameraPosition);
   targetPosition.addScaledVector(cameraForward, sceneRadius * 2);
   targetPosition.addScaledVector(cameraRight, -sceneRadius * config.targetRightSkew);
   targetPosition.addScaledVector(cameraUp, -sceneRadius * config.targetUpSkew);
-
-  return { position, targetPosition };
 }
 
 // ── applyLightingForCamera options ──────────────────────────────────────────
@@ -251,8 +281,7 @@ export function applyLightingForCamera({ scene, camera, headlamp, ambient, confi
     const q = scratchCameraWorldQuaternionForLighting;
     q.set(-q.x, q.y, -q.z, q.w);
   }
-  const rotation = computeEnvironmentRotation(scratchCameraWorldQuaternionForLighting, config.upDirection);
-  scene.environmentRotation.copy(rotation);
+  writeEnvironmentRotation(scratchCameraWorldQuaternionForLighting, config.upDirection, scene.environmentRotation);
 
   if (ambient) {
     ambient.intensity = config.ambientIntensity * themeScale * themeAmbientBoost;
@@ -261,15 +290,16 @@ export function applyLightingForCamera({ scene, camera, headlamp, ambient, confi
   if (headlamp) {
     headlamp.intensity = config.headlampIntensity * themeScale;
 
-    const transform = computeHeadlampTransform({
-      cameraPosition: camera.position,
-      cameraMatrixWorld: camera.matrixWorld,
-      sceneRadius: config.sceneRadius,
-      config: config.headlampConfig,
-    });
-
-    headlamp.position.copy(transform.position);
-    headlamp.target.position.copy(transform.targetPosition);
+    writeHeadlampTransform(
+      {
+        cameraPosition: camera.position,
+        cameraMatrixWorld: camera.matrixWorld,
+        sceneRadius: config.sceneRadius,
+        config: config.headlampConfig,
+      },
+      headlamp.position,
+      headlamp.target.position,
+    );
     headlamp.target.updateMatrixWorld();
   }
 }

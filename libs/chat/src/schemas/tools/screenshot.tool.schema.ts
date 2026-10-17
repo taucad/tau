@@ -93,6 +93,9 @@ export const screenshotArtifactImageSchema = z
   })
   .strict();
 
+/** A capture the agent host stored as a chat attachment; a model request restores its bytes. @public */
+export const screenshotStoredImageSchema = screenshotArtifactImageSchema.omit({ absolutePath: true }).strict();
+
 /** MCP screenshot result: full bytes live in the chat attachment, not the tool response. @public */
 export const screenshotMcpOutputSchema = z
   .object({
@@ -109,7 +112,7 @@ export const screenshotMcpOutputSchema = z
 export const screenshotOutputSchema = z
   .object({
     images: z
-      .array(z.union([screenshotImageSchema, screenshotArtifactImageSchema]))
+      .array(z.union([screenshotImageSchema, screenshotArtifactImageSchema, screenshotStoredImageSchema]))
       .min(1)
       .describe('Array of captured screenshot images'),
     sourceRevision: sourceRevisionSchema

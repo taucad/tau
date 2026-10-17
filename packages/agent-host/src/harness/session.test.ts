@@ -198,7 +198,9 @@ describe('screenshot captures as chat attachments (D-UI-04)', () => {
   const webpBytes: Uint8Array<ArrayBuffer> = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]);
   const webpHash = createHash('sha256').update(webpBytes).digest('hex');
   const storedPath = `attachments/${webpHash}.webp`;
-  const capture = { images: [{ view: '3d', angle: 'isometric', dataUrl: `data:image/webp;base64,${base64(webpBytes)}` }] };
+  const capture = {
+    images: [{ view: '3d', angle: 'isometric', dataUrl: `data:image/webp;base64,${base64(webpBytes)}` }],
+  };
 
   class ScreenshotTransport implements ModelTransport {
     public readonly funding = { type: 'unfunded' } as const;
@@ -227,12 +229,17 @@ describe('screenshot captures as chat attachments (D-UI-04)', () => {
     };
   };
 
-  const openScreenshotSession = async (
-    file: ReturnType<typeof createMemoryEventLogFile>,
-    runId: string,
-    transport: ModelTransport,
-    attachments: AttachmentReader,
-  ) =>
+  const openScreenshotSession = async ({
+    file,
+    runId,
+    transport,
+    attachments,
+  }: {
+    readonly file: ReturnType<typeof createMemoryEventLogFile>;
+    readonly runId: string;
+    readonly transport: ModelTransport;
+    readonly attachments: AttachmentReader;
+  }) =>
     createAgentSession({
       chatId: 'chat-1',
       runId,
@@ -251,16 +258,16 @@ describe('screenshot captures as chat attachments (D-UI-04)', () => {
   it('writes the capture bytes once to the chat attachments and keeps only the reference in the log', async () => {
     const file = createMemoryEventLogFile();
     const attachments = store();
-    const session = await openScreenshotSession(file, 'run-1', new ScreenshotTransport(), attachments);
+    const transport = new ScreenshotTransport();
+    const session = await openScreenshotSession({ file, runId: 'run-1', transport, attachments });
 
     await session.prompt({ id: 'user-1', role: 'user', content: 'check it' });
 
     expect(attachments.files.get(storedPath)).toEqual(webpBytes);
-    const events = await (await file.open()).read();
+    const log = await file.open();
+    const events = await log.read();
     expect(JSON.stringify(events)).not.toContain(base64(webpBytes));
-    const output = events.find(
-      (event) => event.type === 'message.appended' && event.message.role === 'tool-output',
-    );
+    const output = events.find((event) => event.type === 'message.appended' && event.message.role === 'tool-output');
     expect(output?.type === 'message.appended' && output.message.content).toEqual({
       images: [
         {
@@ -279,7 +286,7 @@ describe('screenshot captures as chat attachments (D-UI-04)', () => {
     const file = createMemoryEventLogFile();
     const attachments = store();
     const transport = new ScreenshotTransport();
-    const first = await openScreenshotSession(file, 'run-1', transport, attachments);
+    const first = await openScreenshotSession({ file, runId: 'run-1', transport, attachments });
     await first.prompt({ id: 'user-1', role: 'user', content: 'check it' });
     await first.close();
 

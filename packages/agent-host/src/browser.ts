@@ -274,19 +274,37 @@ export async function createProviderEventLog(
 /**
  * Read chat attachments through Tau's abstract filesystem provider or bridge proxy (D15).
  *
+ * Given `writeFile`, the reader also writes them, so a screenshot capture is
+ * stored beside the chat instead of inline in its log (D-UI-04).
+ *
  * @param fileSystem - The project-root filesystem that also holds `.tau/chats`.
  * @returns A reader answering `undefined` for bytes not on this device.
  * @public
  */
 export const createProviderAttachmentReader = (
-  fileSystem: Pick<ProviderEventLogOptions['fileSystem'], 'exists' | 'readFile'>,
-): AttachmentReader => ({
-  read: async (chatId, path) => {
-    // Bridge paths are root-relative, like the event log's.
-    const filePath = chatAttachmentPath(chatId, path);
-    return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : undefined;
-  },
-});
+  fileSystem: Pick<ProviderEventLogOptions['fileSystem'], 'exists' | 'readFile'> &
+    Partial<Pick<ProviderEventLogOptions['fileSystem'], 'writeFile'>>,
+): AttachmentReader => {
+  const writeFile = fileSystem.writeFile?.bind(fileSystem);
+  return {
+    read: async (chatId, path) => {
+      // Bridge paths are root-relative, like the event log's.
+      const filePath = chatAttachmentPath(chatId, path);
+      return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : undefined;
+    },
+    ...(writeFile === undefined
+      ? {}
+      : {
+          write: async (chatId: string, path: string, bytes: Uint8Array<ArrayBuffer>) => {
+            const filePath = chatAttachmentPath(chatId, path);
+            // Content-addressed: a present path already holds these bytes.
+            if (!(await fileSystem.exists(filePath))) {
+              await writeFile(filePath, bytes);
+            }
+          },
+        }),
+  };
+};
 
 // ── the browser chat store (W6 RH-S7) ─────────────────────────────────────────────────────────────
 
@@ -415,7 +433,27 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
           ? undefined
           : async (chatId, input) => options.observeLog!({ ...input, path: logPath(chatId) }),
       durability: 'exclusive-append',
-      attachments: { read: async (chatId, path) => bytesOf(chatAttachmentPath(chatId, path)) },
+      attachments: {
+        read: async (chatId, path) => bytesOf(chatAttachmentPath(chatId, path)),
+        write: async (chatId, path, bytes) => {
+          const filePath = chatAttachmentPath(chatId, path);
+          const file = (await opfsFile(directory, filePath, true)) as SyncAccessCapableFileHandle;
+          const present = await file.getFile();
+          // Content-addressed: a whole file at the path already holds these bytes; a torn one is rewritten.
+          if (present.size === bytes.byteLength) {
+            return;
+          }
+          // The sync handle, not `createWritable`, which a Safari worker lacks.
+          const handle = await file.createSyncAccessHandle!();
+          try {
+            handle.truncate(0);
+            handle.write(bytes, { at: 0 });
+            handle.flush();
+          } finally {
+            handle.close();
+          }
+        },
+      },
       readBytes: async (chatId) => (await bytesOf(logPath(chatId))) ?? new Uint8Array(),
       openWriter: async (chatId) =>
         createOpfsEventLog({ fileHandle: (await opfsFile(directory, logPath(chatId), true))!, access: 'write' }),

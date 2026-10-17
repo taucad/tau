@@ -17,6 +17,11 @@ import type {
 } from '#log/event-types.js';
 import { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
+import {
+  hasStoredScreenshot,
+  restoreScreenshotImages,
+  storeScreenshotImages,
+} from '#harness/screenshot-attachments.js';
 
 type WithoutBase<Event> = Event extends LogEventBase ? Omit<Event, Exclude<keyof LogEventBase, 'attempt'>> : never;
 
@@ -253,6 +258,37 @@ type CreateSessionRecordOptions = {
    * decides nothing: position and legality belong to whoever owns the log.
    */
   readonly append?: ((event: SessionLogEvent) => Promise<void>) | undefined;
+  /**
+   * Writes one attachment of the owning chat (D-UI-04). Given, each screenshot
+   * capture is stored as `attachments/<sha256>.<ext>` before its row is
+   * appended, and the row keeps only the reference.
+   */
+  readonly writeAttachment?: ((path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>) | undefined;
+};
+
+/**
+ * The event as it is to be stored: a message row's screenshot captures written out as attachments (D-UI-04).
+ *
+ * @param body - The event about to be appended.
+ * @param write - The chat's attachment writer, when the host has one.
+ * @returns The event, unchanged when it carries no inline capture.
+ */
+const storedBody = async (
+  body: SessionLogEvent,
+  write: ((path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>) | undefined,
+): Promise<SessionLogEvent> => {
+  if (write === undefined) {
+    return body;
+  }
+  if (body.type === 'message.appended') {
+    const message = await storeScreenshotImages(body.message, write);
+    return message === body.message ? body : { ...body, message };
+  }
+  if (body.type === 'message.envelope-replaced') {
+    const replacement = await storeScreenshotImages(body.replacement, write);
+    return replacement === body.replacement ? body : { ...body, replacement };
+  }
+  return body;
 };
 
 /** Adapt pi's append-oriented session shape directly onto the PH19 event log. @public */
@@ -271,12 +307,13 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
     pending = next.promise;
     await prior;
     try {
+      const stored = await storedBody(body, options.writeAttachment);
       if (write) {
-        await write(body);
+        await write(stored);
         return;
       }
       const event: AgentLogEvent = {
-        ...body,
+        ...stored,
         version: 1,
         leaderEpoch: options.leaderEpoch,
         sequence,
@@ -328,6 +365,16 @@ export type AttachmentReader = {
    * @returns The bytes, or `undefined` when they have not arrived on this device.
    */
   read(chatId: string, path: string): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * Write one attachment of one chat, when this host can (D-UI-04).
+   *
+   * Paths are content-addressed, so a path already present holds these bytes.
+   *
+   * @param chatId - The chat whose `.tau/chats/<chatId>` directory owns the reference.
+   * @param path - The durable path, `attachments/<sha256>.<ext>`.
+   * @param bytes - The attachment's bytes.
+   */
+  write?(chatId: string, path: string, bytes: Uint8Array<ArrayBuffer>): Promise<void>;
 };
 
 /**
@@ -482,6 +529,9 @@ export const materializeAttachments = async (
     messages.map(async (message): Promise<ProviderMessage> => {
       /* Any role: an external agent's image is recorded by reference on its own
        * assistant and tool-output rows, and hydration refuses a reference left unread. */
+      if (hasStoredScreenshot(message)) {
+        return restoreScreenshotImages(message, readOrAbsent, absent);
+      }
       if (message.role === 'tool-input' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
         return message;
       }
@@ -497,11 +547,11 @@ export const materializeAttachments = async (
  * Whether a message still carries an unresolved attachment reference.
  *
  * @param message - A provider message.
- * @returns `true` when any content block is a `file-ref`.
+ * @returns `true` when any content block is a `file-ref`, or a screenshot result names a stored capture.
  * @internal
  */
 export const hasFileRef = (message: ProviderMessage): boolean =>
-  Array.isArray(message.content) && message.content.some(isFileRef);
+  (Array.isArray(message.content) && message.content.some(isFileRef)) || hasStoredScreenshot(message);
 
 const metadataNumber = (message: ProviderMessage, key: string, fallback = 0): number => {
   const value = message.metadata?.[key];

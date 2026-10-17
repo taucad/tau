@@ -92,8 +92,8 @@ describe('screenshotOutputSchema stored captures (D-UI-04)', () => {
   });
 
   it('still refuses a stored capture with inline bytes beside its reference', () => {
-    expect(screenshotOutputSchema.safeParse({ images: [{ ...stored, dataUrl: 'data:image/webp;base64,AQID' }] }).success).toBe(
-      false,
-    );
+    expect(
+      screenshotOutputSchema.safeParse({ images: [{ ...stored, dataUrl: 'data:image/webp;base64,AQID' }] }).success,
+    ).toBe(false);
   });
 });

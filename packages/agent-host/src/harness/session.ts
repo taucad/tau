@@ -1222,6 +1222,7 @@ const runFailureDetail = async (
 export const createAgentSession = async (options: CreateAgentSessionOptions): Promise<AgentSession> => {
   const now = options.now ?? (() => new Date());
   const createId = options.createId ?? createPortableId;
+  const writeChatAttachment = options.attachments?.write?.bind(options.attachments);
   const record = await createSessionRecord({
     log: options.eventLog,
     runId: options.runId,
@@ -1229,6 +1230,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     now: () => now().toISOString(),
     ...(options.appendEvent ? { append: options.appendEvent } : {}),
+    ...(writeChatAttachment === undefined
+      ? {}
+      : {
+          writeAttachment: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
+            writeChatAttachment(options.chatId, path, bytes),
+        }),
   });
   /*
    * D15: durable rows name attachments; a model reads bytes. Each user message

@@ -875,6 +875,14 @@
       "token": "probeTimeout",
       "class": "External edge",
       "owner": "Provider permission readback"
+    },
+    {
+      "id": "HI1",
+      "bound": "Headless image worker idle release (30 s with no queued or running render)",
+      "site": "apps/ui/app/services/headless-image.service.ts",
+      "token": "this.idleTimer = setTimeout(",
+      "class": "Debounce",
+      "owner": "viewer memory"
     }
   ]
 }

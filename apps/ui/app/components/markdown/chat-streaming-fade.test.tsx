@@ -8,6 +8,15 @@ import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js
 import { createChatStreamingFadePlugin, getStreamingArrivalStart } from '#components/markdown/chat-streaming-fade.js';
 
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ isHighContrast: false, theme: 'light' }) }));
+// The code-block case would start the real highlighter, whose grammar imports outlive this file's environment.
+vi.mock('#lib/shiki.lib.js', () => ({
+  getHighlighter: vi.fn(
+    async () =>
+      new Promise(() => {
+        // Never settles: these tests assert prose fading, not highlighted tokens.
+      }),
+  ),
+}));
 
 const fadingText = (container: HTMLElement): string[] =>
   [...container.querySelectorAll<HTMLElement>('[data-chat-streaming-fade]')].map((node) => node.textContent);

@@ -34,7 +34,7 @@ export type CaptureExportOptionsInput = {
   readonly includeEdges?: boolean | undefined;
   /** Square capture edge length in pixels. */
   readonly size: number;
-  /** One axis-aligned cut, in the model's Z-up millimetre frame. */
+  /** One axis-aligned cut, in metres in `tau:root` (Z-up), the capture's own world. */
   readonly section?: ScreenshotSection | undefined;
 };
 
@@ -59,13 +59,13 @@ export const resolveCaptureSectionKeep = (section: ScreenshotSection): 'negative
  * One sentence naming what a sectioned capture kept, for the screenshot result's `message`.
  *
  * @param section - The requested cut.
- * @returns For example `Section xy: kept z ≤ 6 mm; the cut face is capped.`
+ * @returns For example `Section xy: kept z ≤ 0.006 m; the cut face is capped.`
  * @public
  */
 export const describeCaptureSection = (section: ScreenshotSection): string =>
   `Section ${section.plane}: kept ${axisNames[sectionAxes[section.plane]]} ${
     resolveCaptureSectionKeep(section) === 'negative' ? '≤' : '≥'
-  } ${section.offsetMm} mm; the cut face is capped.`;
+  } ${section.offset} m; the cut face is capped.`;
 
 /** The renderer's retained half-space for one cut, in the capture's metre world. */
 const sectionPlanes = (section: ScreenshotSection) => {
@@ -73,7 +73,7 @@ const sectionPlanes = (section: ScreenshotSection) => {
   const sign = resolveCaptureSectionKeep(section) === 'negative' ? -1 : 1;
   const point: [number, number, number] = [0, 0, 0];
   const normal: [number, number, number] = [0, 0, 0];
-  point[axis] = section.offsetMm / 1000;
+  point[axis] = section.offset;
   normal[axis] = sign;
   return { planes: [{ point, normal }] as [{ point: typeof point; normal: typeof normal }] } as const;
 };

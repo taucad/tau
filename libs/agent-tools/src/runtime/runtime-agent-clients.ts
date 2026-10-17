@@ -50,7 +50,7 @@ const withSectionGuidance = async <Result>(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `The ${section.plane} section at ${section.offsetMm} mm could not be rendered: ${reason}. A section caps the cut, which needs a closed mesh without degenerate triangles; capture without section to inspect the outside, or measure the interior with test_model.`,
+      `The ${section.plane} section at ${section.offset} m could not be rendered: ${reason}. A section caps the cut, which needs a closed mesh without degenerate triangles; capture without section to inspect the outside, or measure the interior with test_model.`,
       { cause: error },
     );
   }
@@ -708,7 +708,7 @@ export const createRuntimeAgentClients = (
           const sectionIdentity =
             captureInput.section === undefined
               ? ''
-              : `:section:${captureInput.section.plane}:${captureInput.section.offsetMm}:${resolveCaptureSectionKeep(captureInput.section)}`;
+              : `:section:${captureInput.section.plane}:${captureInput.section.offset}:${resolveCaptureSectionKeep(captureInput.section)}`;
           const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
           const names =
             captureInput.mode === 'multi_angle'

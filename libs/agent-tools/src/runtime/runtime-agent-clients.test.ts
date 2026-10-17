@@ -488,11 +488,11 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     const cut = await clients.images.captureImages({
       targetFile: 'main.ts',
       mode: 'single',
-      section: { plane: 'xy', offsetMm: 6 },
+      section: { plane: 'xy', offset: 0.006 },
     });
 
     expect(plain).not.toHaveProperty('message');
-    expect(cut).toMatchObject({ success: true, message: 'Section xy: kept z ≤ 6 mm; the cut face is capped.' });
+    expect(cut).toMatchObject({ success: true, message: 'Section xy: kept z ≤ 0.006 m; the cut face is capped.' });
     const [plainJob, cutJob] = clients.exporter.mock.calls.map(([job]) => job);
     expect(plainJob?.exportOptions).not.toHaveProperty('sections');
     expect(cutJob?.exportOptions).toMatchObject({
@@ -510,12 +510,12 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     const result = await clients.images.captureImages({
       targetFile: 'main.ts',
       mode: 'single',
-      section: { plane: 'xy', offsetMm: 6 },
+      section: { plane: 'xy', offset: 0.006 },
     });
 
     expect(result.success).toBe(false);
     expect(result.success ? undefined : result.message).toContain(
-      'The xy section at 6 mm could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
+      'The xy section at 0.006 m could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
     );
   });
 
@@ -531,7 +531,7 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
       clients.images.captureImages({
         targetFile: 'drawing.ts',
         mode: 'single',
-        section: { plane: 'xz', offsetMm: 0 },
+        section: { plane: 'xz', offset: 0 },
       }),
     ).resolves.toEqual({
       success: false,

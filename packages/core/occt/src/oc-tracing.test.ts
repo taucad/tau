@@ -147,6 +147,7 @@ describe('wrapOcForExceptions', () => {
         // Emscripten records carry delete(); nothing to release here.
       }
     }
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- embind classes are PascalCase members of the OC module.
     const oc = createMockOc({ getExceptionMessage: vi.fn(), Shape });
     const traced = wrapOcForExceptions(oc) as unknown as { Shape: new () => Shape };
 

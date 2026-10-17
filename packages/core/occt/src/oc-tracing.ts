@@ -218,11 +218,17 @@ function createEmscriptenWrapper(rethrowIfWasmException: (error: unknown) => nev
     }
 
     wrappedObjects.add(value);
+    // One wrapper per method of this object: hot loops read the same method many times.
+    const methods = new Map<PropertyKey, { readonly member: unknown; readonly wrapper: unknown }>();
     return new Proxy(value, {
       get(target, property, receiver): unknown {
         const member: unknown = Reflect.get(target, property, receiver);
         if (typeof member !== 'function') {
           return member;
+        }
+        const cached = methods.get(property);
+        if (cached?.member === member) {
+          return cached.wrapper;
         }
 
         const wrapper = function (this: unknown, ...methodArguments: unknown[]): unknown {
@@ -234,10 +240,12 @@ function createEmscriptenWrapper(rethrowIfWasmException: (error: unknown) => nev
           }
         };
 
-        return named(
+        const wrapped = named(
           `${(target as { constructor?: { name?: string } }).constructor?.name ?? 'OC'}.${String(property)}`,
           wrapper,
         );
+        methods.set(property, { member, wrapper: wrapped });
+        return wrapped;
       },
     });
   }

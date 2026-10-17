@@ -8,7 +8,7 @@ name: E2E nightly
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate.
 # `workflow_dispatch` takes an optional commit to run against instead, and `only` selects one
-# suite family (`packaged`: only the packaged desktop suite, which runs only when selected).
+# suite family (`packaged`: only the packaged desktop suite).
 
 on:
   schedule:
@@ -84,9 +84,6 @@ jobs:
           if [ "$ONLY" = packaged ]; then
             suites='[]'
             webgpu='[]'
-          else
-            # Selected only: the packaged suite is not yet green on a runner without Docker (W15 hand-back).
-            packaged='[]'
           fi
           echo "End-to-end suites: $suites"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
@@ -232,12 +229,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The packaged desktop suite (charter D30, W15): the ad-hoc signed darwin-arm64 package and every
-  # spec `test:e2e:packaged` lists. It runs only when dispatched with `only: packaged` until the
-  # suite is green on a Docker-less runner; a scheduled night skips it. Projects join by declaring
-  # the target. GitHub's macOS runners have no Docker, so PostgreSQL, Redis and
-  # MinIO run as host processes (start-macos-services.sh) and TAU_E2E_SERVICES=host tells
-  # ensure-services.sh to migrate only.
+  # The packaged desktop suite (charter D30, W15, W22's desktop consumer row): the ad-hoc signed
+  # darwin-arm64 package and every spec `test:e2e:packaged` lists, nightly and when dispatched with
+  # `only: packaged`. Projects join by declaring the target. GitHub's macOS runners have no Docker,
+  # so PostgreSQL, Redis and MinIO run as host processes (start-macos-services.sh), and
+  # TAU_E2E_SERVICES=host tells ensure-services.sh to migrate only and the account helpers to
+  # reach PostgreSQL with the host's psql.
   desktop-packaged:
     name: Packaged desktop end-to-end (darwin-arm64)
     runs-on: macos-26
@@ -274,11 +271,25 @@ jobs:
         run: apps/desktop-e2e/scripts/start-macos-services.sh
 
       - name: Run the packaged desktop suite
+        id: packaged
         timeout-minutes: 150
         env:
           PROJECTS: ${{ needs.plan.outputs.packaged }}
           TAU_E2E_SERVICES: host
-        run: pnpm nx run-many -t test:e2e:packaged --projects "$PROJECTS" --parallel=1 --outputStyle=stream
+        run: |
+          set -o pipefail
+          pnpm nx run-many -t test:e2e:packaged --projects "$PROJECTS" --parallel=1 --outputStyle=stream \
+            | tee "$RUNNER_TEMP/desktop-packaged.log"
+
+      # W22 (D33): one line per consumer in the nightly summary; this job owns the desktop's.
+      - name: Summarise the desktop consumer
+        if: always()
+        env:
+          OUTCOME: ${{ steps.packaged.outcome }}
+        run: |
+          counts=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged.log" 2>/dev/null \
+            | grep -E '^desktop-e2e: +Tests ' | tail -1 | sed -E 's/^desktop-e2e: +Tests +//')
+          echo "- Desktop consumer (packaged darwin-arm64, macos-26, desktop-e2e:test:e2e:packaged): ${OUTCOME}${counts:+, ${counts}}" >> "$GITHUB_STEP_SUMMARY"
 
       - *root-hygiene
 

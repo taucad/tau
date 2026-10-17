@@ -77,4 +77,17 @@ describe('ChatInterfaceMobile', () => {
     });
     expect(screen.getByText('Viewer controls').closest('[aria-hidden]')).toBeNull();
   });
+
+  it('should move the viewer box in one step instead of animating its size through every frame', () => {
+    // Every intermediate size reallocates the canvas and all of its render targets.
+    state.drawerOpen = false;
+    render(<ChatInterfaceMobile />);
+
+    const viewerBox = screen.getByRole('button', {
+      name: 'Viewer controls',
+    }).parentElement!;
+
+    expect(viewerBox.className).not.toMatch(/(?:^|\s)transition(?:-|\s|$)/u);
+    expect(viewerBox.style.transition).toBe('');
+  });
 });

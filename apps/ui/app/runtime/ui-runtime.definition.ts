@@ -30,16 +30,22 @@ type UiRuntimeOptions = {
   readonly withSourceMapping?: boolean;
 };
 
+/*
+ * D-RT-04: on a phone the pthread builds reserve a 4 GiB shared memory up front and spawn one worker per core with
+ * 8 MiB stacks; measured on the iPhone profile, replicad's costs +124 MB of WASM and +4 workers at load. A
+ * memory-constrained device pins the single-threaded builds (OpenCascade already defaults to one); elsewhere 'auto' keeps the pthread build where the
+ * worker is cross-origin isolated (a pinned 'multi' fails on plain-http LAN origins without SharedArrayBuffer).
+ */
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [
     esbuild({ bundlers: { default: { acquisition: config.acquisition } } }),
+    // Single-threaded 'full' build by default on every device.
     opencascade(),
     openrscad(),
     jscad(),
     manifold(),
-    // Default wasm 'auto': the pthread build for fast viewer renders only when the worker is
-    // cross-origin isolated; exact exports always run on the serial build.
-    picovoxel(),
+    // Exact exports always run on the serial build; on a phone the fast lane does too, so one runtime stays warm.
+    picovoxel(config.memoryConstrained ? { kernels: { default: { wasm: 'serial' } } } : undefined),
     gltf(),
     brep(),
     rhino(),
@@ -49,10 +55,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     replicad({
       kernels: {
         default: {
-          // 'auto' picks the pthread build only when the host is cross-origin
-          // isolated; a pinned 'multi' fails kernel binding on plain-http LAN
-          // origins where SharedArrayBuffer is unavailable.
-          wasm: 'auto',
+          wasm: config.memoryConstrained ? 'single' : 'auto',
           withSourceMapping: options.withSourceMapping === true,
         },
       },

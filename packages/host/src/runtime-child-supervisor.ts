@@ -124,9 +124,6 @@ export type RuntimeChildNativeKernels = {
   readonly verify: (runtimePath: string, signal: AbortSignal) => Promise<RuntimeChildRuntimeDamage | undefined>;
 };
 
-/** Bound on one re-verification a child asks for: the child's own bound, so it is never left waiting. Milliseconds. */
-const verificationTimeout = 300_000;
-
 const workerLaunchMessageSchema = z.object({
   type: z.literal('native-worker:launch'),
   id: z.string().min(1).max(128),
@@ -297,10 +294,9 @@ const brokerNativeWorkers = (
       if (store === undefined || real === undefined || !isWithin(store, real)) {
         return { message: `Tau Host refused to verify ${runtimePath}: it is not inside the payload store.` };
       }
-      const damage = await native.verify(
-        runtimePath,
-        AbortSignal.any([childGone.signal, AbortSignal.timeout(verificationTimeout)]),
-      );
+      /* No timer of its own: a local re-hash of one closure, bounded by the child's wait and cancelled when the
+       * child exits. */
+      const damage = await native.verify(runtimePath, childGone.signal);
       return damage === undefined ? {} : { files: [...damage.files], remedy: damage.remedy };
     } catch (error) {
       return { message: error instanceof Error ? error.message : String(error) };

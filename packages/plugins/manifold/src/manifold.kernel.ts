@@ -94,6 +94,9 @@ type NativeHandle = { delete(): void; isDeleted(): boolean };
 /** Every Manifold and CrossSection created in this realm since the last {@link cleanupManifoldRuntime}. */
 const liveHandles = new Set<NativeHandle>();
 
+const isNativeHandle = (value: unknown): value is NativeHandle =>
+  isRecordObject(value) && typeof value['delete'] === 'function' && typeof value['isDeleted'] === 'function';
+
 type ManifoldConstructors = Pick<typeof ManifoldCad, 'Manifold' | 'CrossSection'>;
 
 let trackedConstructors: Promise<ManifoldConstructors> | undefined;
@@ -126,10 +129,10 @@ async function trackManifoldHandles(manifoldCad: typeof ManifoldCad): Promise<Ma
   ];
   const record = (value: unknown): void => {
     if (
-      isRecordObject(value) &&
+      isNativeHandle(value) &&
       prototypes.some((prototype) => Object.prototype.isPrototypeOf.call(prototype, value))
     ) {
-      liveHandles.add(value as NativeHandle);
+      liveHandles.add(value);
     }
   };
   const track = (result: unknown): unknown => {

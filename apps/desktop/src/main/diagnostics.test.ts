@@ -59,7 +59,7 @@ describe('createDiagnosticsLog', () => {
     expect(file).not.toContain('\u001B');
   });
 
-  it('should hide debug and collapse consecutive duplicate terminal records without dropping file records', () => {
+  it('should hide debug and collapse consecutive duplicate terminal records without dropping file records', async () => {
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -77,6 +77,7 @@ describe('createDiagnosticsLog', () => {
       expect.stringContaining('↳ repeated ×2'),
     ]);
     expect(String(info.mock.calls[0]?.[0])).toContain('[agent-host-served]');
+    await log.flush();
     expect(readFileSync(log.filePath, 'utf8').match(/duplicate warning/gu)).toHaveLength(3);
   });
 
@@ -95,11 +96,12 @@ describe('createDiagnosticsLog', () => {
     expect(readFileSync(log.filePath, 'utf8')).toContain('untrusted project root');
   });
 
-  it('rotates once the file passes its threshold', () => {
+  it('rotates once the file passes its threshold', async () => {
     const directory = logDirectory();
     const log = createDiagnosticsLog({ directory, echo: false, maxBytes: 32 });
     writeFileSync(log.filePath, 'x'.repeat(64));
     log.log('info', 'after.rotation');
+    await log.flush();
     expect(existsSync(join(directory, 'desktop.1.log'))).toBe(true);
     expect(readFileSync(log.filePath, 'utf8')).toContain('after.rotation');
   });

@@ -10,6 +10,7 @@
  */
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { appendFile, rename, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { prettyFactory } from 'pino-pretty';
 
@@ -26,6 +27,12 @@ export type DiagnosticsLog = {
   log(level: DiagnosticLevel, event: string, detail?: unknown): void;
 };
 
+/** The rotating file log {@link createDiagnosticsLog} opens. */
+export type DiagnosticsFileLog = DiagnosticsLog & {
+  /** Write every queued record. Settles once they are on disk, or the write failed. */
+  flush(): Promise<void>;
+};
+
 /** Options for {@link createDiagnosticsLog}. */
 export type DiagnosticsLogOptions = {
   /** Directory that receives `desktop.log` (created when absent). */
@@ -39,6 +46,11 @@ export type DiagnosticsLogOptions = {
 };
 
 const defaultMaxBytes = 5 * 1024 * 1024;
+/* Coalescing window for queued records, and the queue size that writes at once:
+ * a renderer console loop or a chatty kernel then costs one append per window
+ * rather than a stat and an append per line on main's event loop. */
+const flushDelayMilliseconds = 100;
+const flushQueuedChars = 64 * 1024;
 const prettyConsoleLine = prettyFactory({
   colorize: true,
   ignore: 'pid,hostname,req,res,responseTime,context,data,trace_id,span_id,trace_flags',
@@ -92,10 +104,15 @@ const abbreviateHashes = (message: string | undefined): string | undefined =>
 /**
  * Open the rotating main-process diagnostics log.
  *
+ * Records queue and are appended off the calling thread in batches; an error
+ * record is written synchronously together with everything queued before it,
+ * and the queue is written synchronously at process exit, so a crash still
+ * leaves the lines that explain it.
+ *
  * @param options - Log directory, rotation threshold, and console echo.
  * @returns A sink that never throws.
  */
-export const createDiagnosticsLog = (options: DiagnosticsLogOptions): DiagnosticsLog => {
+export const createDiagnosticsLog = (options: DiagnosticsLogOptions): DiagnosticsFileLog => {
   const maxBytes = options.maxBytes ?? defaultMaxBytes;
   const filePath = join(options.directory, 'desktop.log');
   const previousPath = join(options.directory, 'desktop.1.log');
@@ -113,6 +130,76 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
     } catch {
       /* No file yet, or a racing writer — either way the next append creates one. */
     }
+  };
+  const rotateAsync = async (): Promise<void> => {
+    try {
+      const { size } = await stat(filePath);
+      if (size > maxBytes) {
+        await rename(filePath, previousPath);
+      }
+    } catch {
+      /* No file yet, or a racing writer — either way the next append creates one. */
+    }
+  };
+
+  let queued: string[] = [];
+  let queuedChars = 0;
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  let writing: Promise<void> = Promise.resolve();
+  const takeQueued = (): string => {
+    const text = queued.join('');
+    queued = [];
+    queuedChars = 0;
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+    process.off('exit', writeQueuedSync);
+    return text;
+  };
+  /* Exit cannot await: whatever is still queued is written synchronously. */
+  function writeQueuedSync(): void {
+    const text = takeQueued();
+    if (text === '') {
+      return;
+    }
+    try {
+      rotate();
+      appendFileSync(filePath, text);
+    } catch {
+      /* A log that cannot be written must not take the app down. */
+    }
+  }
+  /* Each batch waits for the one before it, so batches land in queue order. */
+  const writeBatch = async (previous: Promise<void>, text: string): Promise<void> => {
+    await previous;
+    try {
+      await rotateAsync();
+      await appendFile(filePath, text);
+    } catch {
+      /* A log that cannot be written must not take the app down. */
+    }
+  };
+  const flush = async (): Promise<void> => {
+    const text = takeQueued();
+    if (text !== '') {
+      writing = writeBatch(writing, text);
+    }
+    await writing;
+  };
+  const enqueue = (line: string): void => {
+    if (queued.length === 0) {
+      process.once('exit', writeQueuedSync);
+    }
+    queued.push(line);
+    queuedChars += line.length;
+    if (queuedChars >= flushQueuedChars) {
+      void flush();
+      return;
+    }
+    flushTimer ??= setTimeout(() => {
+      flushTimer = undefined;
+      void flush();
+    }, flushDelayMilliseconds);
+    flushTimer.unref();
   };
 
   const writeConsole = ([level, context, message, time]: readonly [
@@ -150,20 +237,21 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
 
   return {
     filePath,
+    flush,
     log(level, event, detail) {
       const time = Date.now();
       const line = `${new Date(time).toISOString()} ${level.toUpperCase()} ${event}${describe(detail)}\n`;
       if (echo && (level !== 'debug' || echoDebug)) {
         echoConsole([level, event, detail, time]);
       }
-      try {
-        rotate();
-        // Synchronous on purpose: main writes a handful of lines per session and a crash
-        // ponytail: must not lose the last one. Move to a queued stream if a chatty forwarder lands.
-        appendFileSync(filePath, line);
-      } catch {
-        /* A log that cannot be written must not take the app down. */
+      if (level !== 'error') {
+        enqueue(line);
+        return;
       }
+      /* An error is often the last thing a dying process says: write it, and
+       * everything queued before it, before returning. */
+      queued.push(line);
+      writeQueuedSync();
     },
   };
 };

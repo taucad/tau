@@ -57,7 +57,8 @@ export const desktopOpenrscadKernel = createOpenrscadKernel({
       engineIdentityRecorded = true;
       try {
         const definition = await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
-        createDiagnosticsLog({ directory, producer: 'kernel' }).log(
+        const engineLog = createDiagnosticsLog({ directory, producer: 'kernel' });
+        engineLog.log(
           'info',
           kernelEngineEvent,
           kernelEngineRecord({
@@ -67,6 +68,8 @@ export const desktopOpenrscadKernel = createOpenrscadKernel({
             versions: process.versions,
           }),
         );
+        /* The record is the e2e's only witness of the engine that loaded: on disk before the kernel is. */
+        await engineLog.flush();
       } catch (error) {
         // oxlint-disable-next-line no-console -- diagnostics must not prevent kernel initialization
         console.error('[kernel] engine diagnostics failed', error);

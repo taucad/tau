@@ -14,6 +14,7 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
   jscad: { '@jscad/modeling': '2.13.0' },
   manifold: { 'manifold-3d': '3.4.1' },
   picovoxel: { picovoxel: '0.1.0' },
+  smlib: { '@classcad/smlibwasm': '0.3.4' },
   tscircuit: {
     tscircuit: 'npm:@tscircuit/core@0.0.1844',
     '@tscircuit/core': '0.0.1844',

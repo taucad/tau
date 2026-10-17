@@ -15,7 +15,9 @@
       "@jscad/modeling": ["./src/generated/jscad/modules/@jscad/modeling/index.d.ts"],
       "@jscad/modeling/*": ["./src/generated/jscad/modules/@jscad/modeling/*/index.d.ts"],
       "manifold-3d": ["./src/generated/manifold/modules/manifold-3d/index.d.ts"],
-      "manifold-3d/*": ["./src/generated/manifold/modules/manifold-3d/*/index.d.ts"]
+      "manifold-3d/*": ["./src/generated/manifold/modules/manifold-3d/*/index.d.ts"],
+      "@classcad/smlibwasm": ["./src/generated/smlib/modules/@classcad/smlibwasm/index.d.ts"],
+      "@taucad/smlib/model": ["./src/generated/smlib/modules/@taucad/smlib/model.d.ts"]
     }
   },
   "include": ["src/**/*.test-d.ts", "src/**/*.d.ts", "src/**/*.ts"]

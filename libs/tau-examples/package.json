@@ -31,10 +31,12 @@
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/smlib": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {
+    "@classcad/smlibwasm": "catalog:",
     "@jscad/modeling": "catalog:",
     "@taucad/build123d": "workspace:*",
     "@taucad/geometry-core": "workspace:*",

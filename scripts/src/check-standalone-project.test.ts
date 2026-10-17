@@ -43,7 +43,7 @@ describe('standalone-project oracle', () => {
     expect(ecosystemKernels('none')).toEqual(['openscad']);
     expect(ecosystemKernels('kcl')).toEqual(['zoo']);
     expect(ecosystemKernels('npm')).toEqual(
-      expect.arrayContaining(['replicad', 'manifold', 'jscad', 'opencascadejs', 'picovoxel', 'tscircuit']),
+      expect.arrayContaining(['replicad', 'manifold', 'jscad', 'opencascadejs', 'picovoxel', 'smlib', 'tscircuit']),
     );
   });
 

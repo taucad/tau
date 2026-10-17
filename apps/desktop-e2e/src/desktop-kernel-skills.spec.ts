@@ -76,6 +76,12 @@ const kernelCases = [
     prompt: `Design a 40 mm cube filled with a gyroid lattice inside a 2 mm solid shell. ${verify}`,
   },
   {
+    kernel: 'SMLib',
+    skill: 'cad-smlib',
+    model: 'main.ts',
+    prompt: `Design a 60 × 40 × 8 mm cover plate with 5 mm filleted vertical edges, a 2 mm top chamfer and four 4 mm holes on a 48 × 28 mm grid. ${verify}`,
+  },
+  {
     kernel: 'PicoGK',
     skill: 'cad-picogk',
     model: 'main.cs',

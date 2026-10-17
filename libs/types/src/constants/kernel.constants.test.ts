@@ -67,6 +67,21 @@ describe('kernel configuration identity', () => {
     expect(ids.indexOf('picovoxel')).toBe(ids.indexOf('picogk') + 1);
   });
 
+  it('should expose SMLib as a browser TypeScript NURBS offering with its own backend', () => {
+    const smlib = kernelConfigurations.find(({ id }) => id === 'smlib');
+
+    expect(smlib).toMatchObject({
+      name: 'SMLib',
+      language: 'typescript',
+      mainFile: 'main.ts',
+      backendProvider: 'smlib',
+    });
+    // The browser runtime hosts the kernel, so no native-runtime gate applies.
+    expect(smlib).not.toHaveProperty('requiresRuntimeKernelId');
+    expect(smlib?.emptyCode).toContain("from '@classcad/smlibwasm'");
+    expect(languageFromKernel.smlib).toBe('typescript');
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 
@@ -90,6 +105,7 @@ describe('kernel configuration identity', () => {
       zoo: 'kcl',
       jscad: 'npm',
       opencascadejs: 'npm',
+      smlib: 'npm',
       tscircuit: 'npm',
     });
     for (const { language, ecosystem } of kernelConfigurations) {

@@ -139,6 +139,7 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 | `cad-jscad`         | JSCAD (`@jscad/modeling`)                                                                            |
 | `cad-manifold`      | Manifold mesh booleans (`manifold-3d`)                                                               |
 | `cad-picovoxel`     | PicoVoxel voxels, signed distance fields and lattices                                                |
+| `cad-smlib`         | SMLib NURBS BRep solids (`@classcad/smlibwasm`)                                                      |
 | `cad-tscircuit`     | tscircuit circuit boards                                                                             |
 | `geospec-authoring` | Writing `*.geospec.ts` geometry tests                                                                |
 | `workbench`         | The Tau app's workbench views and panes                                                              |

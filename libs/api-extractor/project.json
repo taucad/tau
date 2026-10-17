@@ -120,6 +120,23 @@
       ],
       "outputs": ["{projectRoot}/src/generated/picovoxel"]
     },
+    "extract-smlib": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-smlib-types.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-smlib-types.ts",
+        "{workspaceRoot}/packages/plugins/smlib/src/model.ts",
+        "{workspaceRoot}/packages/core/geometry/src/utils/glb-material.ts",
+        "{workspaceRoot}/libs/types/src/types/json-value.types.ts",
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/smlib"]
+    },
     "collect-usage": {
       "executor": "nx:run-commands",
       "options": {
@@ -175,6 +192,7 @@
         "{workspaceRoot}/packages/plugins/picogk/agent/cad-picogk",
         "{workspaceRoot}/packages/plugins/picovoxel/agent/cad-picovoxel",
         "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
+        "{workspaceRoot}/packages/plugins/smlib/agent/cad-smlib",
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
         "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit",
         "{workspaceRoot}/packages/geospec/agent/geospec-authoring",

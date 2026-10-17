@@ -64,6 +64,7 @@
     "@taucad/share": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
+    "@taucad/smlib": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/telemetry": "workspace:*",
     "@taucad/three": "workspace:*",

@@ -93,6 +93,7 @@ export const standaloneRows: Readonly<Record<string, StandaloneRow>> = {
   jscad: { tauExtension: 'glb', install: npmInstall, run: nodeRunner('native.stl'), output: 'native.stl' },
   opencascadejs: { tauExtension: 'glb', install: npmInstall, run: nodeRunner('native.stl'), output: 'native.stl' },
   picovoxel: { tauExtension: 'glb', install: npmInstall, run: nodeRunner('native.stl'), output: 'native.stl' },
+  smlib: { tauExtension: 'glb', install: npmInstall, run: nodeRunner('native.stl'), output: 'native.stl' },
   tscircuit: { tauExtension: 'json', install: npmInstall, run: nodeRunner('circuit.json'), output: 'circuit.json' },
   build123d: {
     prepare: 'build123d',

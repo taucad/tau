@@ -30,6 +30,7 @@
     "typescript": "catalog:"
   },
   "devDependencies": {
+    "@classcad/smlibwasm": "catalog:",
     "picovoxel": "catalog:"
   }
 }

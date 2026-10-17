@@ -44,6 +44,7 @@ describe('kernel-worker constants', () => {
       'jscad',
       'manifold',
       'picovoxel',
+      'smlib',
       'gltf',
       'brep',
       'rhino',

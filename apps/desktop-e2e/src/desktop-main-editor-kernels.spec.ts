@@ -19,6 +19,7 @@ import {
   expectGeometryFramed,
   expectSignedIn,
   expectVisible,
+  filterConsoleLogs,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -202,6 +203,7 @@ const expectPicovoxelMultiSession = async (page: Page, entryPath: string): Promi
     await debug.click();
   }
   await page.keyboard.press('Escape');
+  await filterConsoleLogs(page, 'PicoVoxel');
   await expectVisible(log.getByText('PicoVoxel fast-lane WASM variant: multi', { exact: false }), 60_000);
   const session = log.getByText(/PicoVoxel session variant=multi pthreads=\d+ lane=fast/u).first();
   await expectVisible(session, 60_000);

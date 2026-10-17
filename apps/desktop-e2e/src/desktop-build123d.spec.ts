@@ -803,9 +803,11 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
 
     writeFileSync(sourcePath, failingPicogkRuntimeSource, 'utf8');
-    const runtimeFailure = issues.getByText(picogkRuntimeFailure, { exact: true });
+    /* The project route remounted the viewer bar, whose issues list starts closed. */
+    const runtimeIssues = await openViewerIssues(page);
+    const runtimeFailure = runtimeIssues.getByText(picogkRuntimeFailure, { exact: true });
     await expectVisible(runtimeFailure, 120_000);
-    await expectCount(issues, 1);
+    await expectCount(runtimeIssues, 1);
     await expectCount(runtimeFailure, 1);
     writeFileSync(sourcePath, picogkSource, 'utf8');
     await expectCount(runtimeFailure, 0, 120_000);

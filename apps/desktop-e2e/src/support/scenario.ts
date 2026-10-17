@@ -349,6 +349,19 @@ export const openViewerIssues = async (page: Page): Promise<Locator> => {
   return list;
 };
 
+/**
+ * Narrow the console to the lines containing `query` (an empty query shows them all). The console is a virtualised
+ * list pinned to its newest line, so an older line is in the DOM only while the list is short enough to render it;
+ * filtering by the line's own text keeps a witness of an early log independent of how much was logged after it.
+ *
+ * @param page - The renderer, with the console open.
+ * @param query - The text to filter by.
+ * @returns Nothing.
+ */
+export const filterConsoleLogs = async (page: Page, query: string): Promise<void> => {
+  await page.getByLabel('Filter logs', { exact: true }).fill(query);
+};
+
 /** One viewer bridge's camera state, for the framing assertion and its report. */
 type ViewerBridgeState = {
   readonly actorError: string | undefined;

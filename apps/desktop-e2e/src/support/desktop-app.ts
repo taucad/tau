@@ -42,19 +42,41 @@ const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
 const execFileAsync = promisify(execFile);
 
 /**
+ * How long a process naming a fixture root may take to exit on its own: longer than the 10 s the Build123d and PicoGK
+ * rows give their workers to exit and remove their temporary roots after the app quits.
+ */
+const childExitGraceMilliseconds = 15_000;
+
+const isAnyProcessNaming = async (pattern: string): Promise<boolean> => {
+  try {
+    await execFileAsync('pgrep', ['-f', pattern]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Remove a throwaway root the app wrote into, once nothing is still writing there.
  *
  * Main's children outlive it: a packaged launch seeds the payload store under the profile with `/bin/cp -c -R`
  * (`apps/desktop/src/tau/native-store.ts`), and when the fixture stops main with `app.exit` or `SIGKILL` that copy
  * keeps adding files, so a recursive remove meets a directory it has just emptied filled again (`ENOTEMPTY`). Every
- * such process names the root in its arguments, so it is stopped by that name first; the remove then retries the
- * transient errors Node lists for `rm`.
+ * such process names the root in its arguments. Native workers do too, since a packaged worker runs from the store
+ * under the profile, and they clean their own temporary roots once their parent is gone; so each process gets
+ * {@link childExitGraceMilliseconds} to exit on its own, and only what remains is killed by that name. The remove
+ * then retries the transient errors Node lists for `rm`.
  * @param root - The profile or picked-directory parent this fixture created.
  * @returns Nothing.
  */
 export const removeDesktopRoot = async (root: string): Promise<void> => {
   if (process.platform !== 'win32') {
     const pattern = root.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+    const deadline = Date.now() + childExitGraceMilliseconds;
+    // `pgrep` exits 1 when nothing matched: every process naming the root has exited.
+    while (Date.now() < deadline && (await isAnyProcessNaming(pattern))) {
+      await wait(250);
+    }
     // `pkill` exits 1 when nothing matched, the usual case.
     await execFileAsync('pkill', ['-KILL', '-f', pattern]).catch(() => undefined);
   }

@@ -36,6 +36,7 @@ import {
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
+  filterConsoleLogs,
   renderCycleCount,
   selectChatModel,
   selectKernel,
@@ -563,9 +564,13 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       }
       const modelLog = page.getByRole('log', { name: `Console logs for ${modelEntry}` });
       await expectVisible(modelLog, 60_000);
+      await filterConsoleLogs(page, nativeBackendLog);
       await expectCount(modelLog.getByText(nativeBackendLog, { exact: true }), 1);
+      await filterConsoleLogs(page, 'Transcoding glb -> ply');
       await expectCount(modelLog.getByText('Transcoding glb -> ply', { exact: true }), 2);
+      await filterConsoleLogs(page, 'Successfully transcoded to ply');
       await expectCount(modelLog.getByText('Successfully transcoded to ply', { exact: true }), 2);
+      await filterConsoleLogs(page, '');
 
       // A nested export renders through the same project runtime as its source.
       const beforePlyOpen = await renderCycleCount(page);

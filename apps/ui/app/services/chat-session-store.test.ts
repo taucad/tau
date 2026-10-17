@@ -762,6 +762,54 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
+  it('materializes a turn logged during a foreign segment rescan once the rescan finds nothing new', async () => {
+    const projectId = 'project_foreign_rescan';
+    const chatId = 'chat_foreign_rescan';
+    const directory = `/projects/${projectId}/.tau/chats/${chatId}/events`;
+    const rows: unknown[] = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line: string) => JSON.parse(line) as unknown);
+    const client = createMemoryClient();
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe(chatId, projectId);
+    const session = store.acquire(chatId, projectId);
+    try {
+      await store.refreshRemoteSegments(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        expect(store.getProjection(chatId)?.remote).toBeDefined();
+      });
+      // The first scan found no foreign segments; a second one is still out when the local turn is logged.
+      const scan = Promise.withResolvers<string[]>();
+      const originalReadDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === directory ? scan.promise : originalReadDirectory(path),
+      );
+      const rescan = store.refreshRemoteSegments(chatId, projectId);
+      publishLogRows(store, chatId, rows);
+      await settle();
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(false);
+
+      // The rescan ends with the same (empty) foreign history, so the projection itself does not change.
+      scan.resolve([]);
+      await rescan;
+      await vi.waitFor(() => {
+        expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+      });
+    } finally {
+      store.release(chatId);
+      unobserve();
+    }
+  });
+
   it('hydrates a new project seed using the acquired project id before global project discovery', async () => {
     const chatId = 'chat_cold_project_seed';
     const projectId = 'project_cold_seed';

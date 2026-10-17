@@ -1,6 +1,6 @@
 # picovoxel API index
 
-picovoxel 0.1.0-beta.5 · 964 symbols · extracted by TypeScript 5.9.3.
+picovoxel 0.1.0-beta.6 · 964 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 

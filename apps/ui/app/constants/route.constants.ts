@@ -13,7 +13,10 @@ export type NavRoute = {
 };
 
 export const navRoutes: {
+  /** Rows shown directly below New Project. */
   navMain: NavRoute[];
+  /** Rows listed under the sidebar's More menu. */
+  navMore: NavRoute[];
 } = {
   navMain: [
     {
@@ -35,6 +38,8 @@ export const navRoutes: {
       //   },
       // ],
     },
+  ],
+  navMore: [
     {
       title: 'Machines',
       featureFlag: 'machines',

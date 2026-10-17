@@ -4,7 +4,7 @@
       "slug": "cad-picovoxel",
       "name": "PicoVoxel authoring",
       "description": "Guides PicoVoxel voxel, SDF and lattice CAD, named parts, PBR materials and mechanisms. For TypeScript geometry, appearance, textures or moving-part authoring.",
-      "version": "0.1.0-beta.5",
+      "version": "0.1.0-beta.6",
       "whenToUse": "Use for TypeScript PicoVoxel models, named parts, physical materials, textures and moving mechanisms.",
       "directory": "cad-picovoxel",
       "files": [

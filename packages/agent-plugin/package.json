@@ -1,6 +1,6 @@
 {
   "name": "@taucad/agent-plugin",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher",
   "type": "module",
   "sideEffects": [

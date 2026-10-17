@@ -107,3 +107,19 @@ describe('/projects/new creation location', () => {
     expect(mockRefresh).toHaveBeenCalledOnce();
   });
 });
+
+describe('/projects/new kernel list', () => {
+  beforeEach(() => {
+    locationState = homeOnlyState();
+  });
+
+  it('keeps kernel ids free for the icon sprite so every kernel icon resolves', async () => {
+    const { availableKernelConfigurations } = await import('#constants/available-kernel-configurations.js');
+    renderRoute();
+
+    // `<SvgIcon id='replicad'>` renders `<use href='#replicad'>`; a page element with that id shadows the sprite symbol.
+    for (const option of availableKernelConfigurations()) {
+      expect(document.querySelector(`[id="${option.id}"]`)).toBeNull();
+    }
+  });
+});

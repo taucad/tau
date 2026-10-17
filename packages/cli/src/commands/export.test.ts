@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -196,6 +196,39 @@ describe('exportCommand', () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(shutdown).toHaveBeenCalledWith();
     expect(terminate).not.toHaveBeenCalled();
+  });
+
+  it('should root a nested model at the nearest tau.json, as tau check does', async () => {
+    await writeFile(join(workspace, 'tau.json'), '{}', 'utf8');
+    const nestedDirectory = join(workspace, 'parts', 'gear');
+    await mkdir(nestedDirectory, { recursive: true });
+    const nestedInput = join(nestedDirectory, 'main.ts');
+    await writeFile(nestedInput, '/* fixture */', 'utf8');
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, { rawArgs: [nestedInput, '--ext=glb'] });
+
+    const runtime = await importedRuntime();
+    expect(runtime.createNodeClient).toHaveBeenCalledWith(expect.objectContaining({ projectPath: workspace }));
+    expect(openFunction).toHaveBeenCalledWith({
+      source: { path: 'parts/gear/main.ts' },
+      parameters: {},
+      watch: false,
+    });
+    const written = await readFile(join(nestedDirectory, 'main.glb'));
+    expect(written.byteLength).toBe(1);
+  });
+
+  it('should root a model outside every project at its own folder', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, { rawArgs: [inputPath, '--ext=glb'] });
+
+    const runtime = await importedRuntime();
+    expect(runtime.createNodeClient).toHaveBeenCalledWith(expect.objectContaining({ projectPath: workspace }));
+    expect(openFunction).toHaveBeenCalledWith({ source: { path: 'model.ts' }, parameters: {}, watch: false });
   });
 
   it('should pass 20in through and export 508', async () => {

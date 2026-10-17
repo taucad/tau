@@ -1,6 +1,6 @@
 {
   "name": "@taucad/native-process-core",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Shared native child-process lifecycle and workspace isolation primitives",
   "type": "module",
   "sideEffects": false,

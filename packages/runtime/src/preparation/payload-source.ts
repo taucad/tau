@@ -1,4 +1,5 @@
 // Where a payload's bytes come from: the store, the seed, the mirror, then the manifest's own origins, in that order.
+// A payload the package ships inside itself comes from the store, the seed or the package, never the mirror.
 // The digest is the only key; every source's bytes are verified before anything is written.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -173,7 +174,11 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
       candidates.push({ kind: 'seed', path: join(seed, 'blobs', 'sha256', key), key });
     }
   }
-  if (context.mirror !== undefined) {
+  const { origin } = payload;
+  const shippedInPackage = origin.kind === 'packagePath' || origin.kind === 'packageAsset';
+  // A payload the package ships is never asked of the mirror: the request could only miss, and a warm prepare makes
+  // none (X51, I10).
+  if (context.mirror !== undefined && !shippedInPackage) {
     const base = mirrorBase(context.mirror.baseUrl);
     const network = !base.startsWith('file:');
     if (!network || !context.offline) {
@@ -191,8 +196,7 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
       }
     }
   }
-  const { origin } = payload;
-  if (origin.kind === 'packagePath' || origin.kind === 'packageAsset') {
+  if (shippedInPackage) {
     if (context.directory === undefined) {
       throw new PreparationError(
         'MANIFEST_INVALID',

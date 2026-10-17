@@ -142,16 +142,11 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
     expect(prepared.exitCode, prepared.stderr).toBe(0);
     expect(JSON.parse(prepared.stdout.trim().split('\n').at(-1)!)).toMatchObject({ status: 'ready' });
     const blobRequests = mirror.requests.filter(({ path }) => path.startsWith('blobs/'));
-    /* Each payload is asked for once. The package's own files (`packagePath` origins) are asked for too and answered
-     * 404, then read from the package; every downloaded payload comes from the mirror, once, with 200. */
-    const requested = blobRequests.map(({ path }) => path);
-    expect(requested).toHaveLength(new Set(requested).size);
-    expect(
-      blobRequests
-        .filter(({ status }) => status === 200)
-        .map(({ path }) => path)
-        .toSorted(),
-    ).toEqual(payloadPaths.toSorted());
+    /* Each downloaded payload is asked for once and answered 200. The package's own files (`packagePath` origins)
+     * are never asked for: they are read from the package (X51, I10). */
+    expect(blobRequests.map(({ path, status }) => `${path} ${String(status)}`).toSorted()).toEqual(
+      payloadPaths.map((path) => `${path} 200`).toSorted(),
+    );
 
     const exported = await runCli(['export', input, '--ext=glb', `--output=${output}`], environment);
     expect(exported.exitCode, exported.stderr).toBe(0);

@@ -325,7 +325,7 @@ export default function ProjectsNew(): React.JSX.Element {
                     {availableKernelConfigurations().map((option) => (
                       <Label
                         key={option.id}
-                        htmlFor={option.id}
+                        htmlFor={`kernel-${option.id}`}
                         className={cn(
                           'flex h-auto cursor-action items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-accent',
                           kernel === option.id && 'bg-accent',
@@ -334,7 +334,7 @@ export default function ProjectsNew(): React.JSX.Element {
                           setSelectedKernel(option.id);
                         }}
                       >
-                        <RadioGroupItem value={option.id} id={option.id} className='mt-1' />
+                        <RadioGroupItem value={option.id} id={`kernel-${option.id}`} className='mt-1' />
                         <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                         <div className='flex w-full min-w-0 flex-col gap-1'>
                           <div className='flex w-full items-start justify-between gap-2'>

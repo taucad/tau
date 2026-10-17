@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+
 import type { IpcMain, MessagePortMain, UtilityProcess } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
@@ -1170,9 +1172,9 @@ describe('Electron main runtime helpers', () => {
 
 describe('Electron main runtime memory supervision', () => {
   it('should remove its sender lifecycle listeners once each utility is released', async () => {
-    const { EventEmitter } = await import('node:events');
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's WebContents is a Node EventEmitter.
     const sender = new EventEmitter();
     const postMessage = vi.fn<(channel: string, payload: Record<string, unknown>) => void>();
     try {
@@ -1239,9 +1241,9 @@ describe('Electron main runtime memory supervision', () => {
 
       expect(bloated.kill).toHaveBeenCalledOnce();
       expect(healthy.kill).not.toHaveBeenCalled();
-      expect(onError).toHaveBeenCalledWith(
-        expect.objectContaining({ message: expect.stringMatching(/resident memory 1001 bytes exceeds 1000/u) }),
-      );
+      expect(onError).toHaveBeenCalledOnce();
+      const [reported] = onError.mock.calls[0] as [Error];
+      expect(reported.message).toMatch(/resident memory 1001 bytes exceeds 1000/u);
     } finally {
       handle.dispose();
       vi.useRealTimers();

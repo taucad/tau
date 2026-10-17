@@ -68,6 +68,32 @@ export type ElectronRuntimeForkResolver = (context: Record<string, string>) => {
   readonly env?: Readonly<Record<string, string>>;
   /** Utility entry for this request. Defaults to the statically configured one. */
   readonly utilityEntry?: string | URL;
+  /**
+   * Releases what the resolver acquired for this fork — a compute connection,
+   * say. Called exactly once: when main releases the utility, when the utility
+   * exits on its own, or when the broker refuses the fork after resolving it.
+   */
+  readonly release?: () => void;
+};
+
+/**
+ * Resident-memory ceiling for every utility a request adopted.
+ *
+ * WebAssembly memory only grows, so one large evaluation pins a utility at its
+ * peak until the process dies. The broker samples each adopted utility on an
+ * interval and kills one whose resident set passes `maxBytes`, reporting it
+ * through `onError`; its owner observes an unreleased host exit. Idle spares
+ * are never sampled, and no timer runs while no utility is adopted.
+ *
+ * @public
+ */
+export type ElectronRuntimeResidentLimit = {
+  /** Resident bytes above which a utility is killed. */
+  readonly maxBytes: number;
+  /** Milliseconds between samples. */
+  readonly intervalMilliseconds: number;
+  /** The utility's resident set in bytes, or undefined while it has none to report (startup, exit). */
+  readonly sample: (utility: UtilityProcess) => number | undefined;
 };
 
 /**
@@ -144,6 +170,8 @@ export type RegisterElectronRuntimeMainOptions = {
    * magnitude above anything that admission can legitimately ask for.
    */
   readonly maxUtilities?: number;
+  /** Resident-memory ceiling per adopted utility. Unset, utilities are not sampled. */
+  readonly residentLimit?: ElectronRuntimeResidentLimit;
   /**
    * Electron IPC main implementation, primarily for alternate hosts and tests.
    * Also the admission seam: a view that filters before delegating to the real
@@ -282,6 +310,26 @@ type LiveUtility = {
   /** Last {@link maxStderrTailChars} characters the utility wrote to stderr. */
   stderrTail: string;
   computeServer?: { dispose(): void };
+  /** Removes the sender lifecycle listeners this lease installed. */
+  detachSender?: () => void;
+  /** The resolver's {@link ElectronRuntimeForkResolver} `release`, called once. */
+  releaseResolved?: () => void;
+};
+
+/**
+ * Release everything a leased record holds outside its process: the compute
+ * server, the sender listeners and the resolver's resources. Idempotent, so
+ * the release, exit and refusal paths may each call it.
+ *
+ * @param record - The record whose holdings go.
+ */
+const releaseHoldings = (record: LiveUtility): void => {
+  record.computeServer?.dispose();
+  const { detachSender, releaseResolved } = record;
+  record.detachSender = undefined;
+  record.releaseResolved = undefined;
+  detachSender?.();
+  releaseResolved?.();
 };
 
 /**
@@ -501,10 +549,59 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
    * environment — a thumbnail's ephemeral fork — does not spend the pool for good. */
   let spareFork: { readonly entry: string; readonly env: ForkOptions['env']; readonly key: string } | undefined;
   let disposed = false;
+  let residentTimer: ReturnType<typeof setInterval> | undefined;
   const controlFrames = new Map<string, { readonly type: string }>();
 
   const reportError = (error: unknown): void => {
     options.onError?.(toError(error));
+  };
+
+  /**
+   * Kill every adopted utility past the resident limit. The kill is not a
+   * release: the owner learns of it as an unexplained exit, with the reason
+   * reported here.
+   */
+  const sampleResidentUtilities = (): void => {
+    const limit = options.residentLimit;
+    if (limit === undefined) {
+      return;
+    }
+    for (const record of liveUtilities.values()) {
+      let bytes: number | undefined;
+      try {
+        bytes = limit.sample(record.utility);
+      } catch (error) {
+        reportError(error);
+        continue;
+      }
+      if (bytes === undefined || bytes <= limit.maxBytes) {
+        continue;
+      }
+      reportError(
+        new Error(
+          `registerElectronRuntimeMain: utility ${record.hostId ?? ''} resident memory ${String(bytes)} bytes exceeds ${String(limit.maxBytes)}; killing it`,
+        ),
+      );
+      try {
+        record.utility.kill();
+      } catch {
+        /* Best-effort */
+      }
+    }
+  };
+
+  /* One timer for the whole broker, alive only while some utility is adopted. */
+  const syncResidentSampling = (): void => {
+    const limit = options.residentLimit;
+    if (limit === undefined) {
+      return;
+    }
+    if (liveUtilities.size === 0 || disposed) {
+      clearInterval(residentTimer);
+      residentTimer = undefined;
+      return;
+    }
+    residentTimer ??= setInterval(sampleResidentUtilities, limit.intervalMilliseconds);
   };
 
   /**
@@ -543,7 +640,6 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     /* Named rather than an IIFE, and read after the drain: the tail that
      * explains a boot death only exists once the pipe has been delivered. */
     const reportExit = async (hostId: string, code: number): Promise<void> => {
-      record.computeServer?.dispose();
       await drainStream(spawnedUtility.stderr);
       const exit: ElectronRuntimeHostExit = {
         exitCode: code,
@@ -579,6 +675,8 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         return;
       }
       liveUtilities.delete(hostId);
+      releaseHoldings(record);
+      syncResidentSampling();
       void reportExit(hostId, code);
     });
     return record;
@@ -651,14 +749,14 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     /* Before `kill()`: the `'exit'` listener reads this to report a supervised
      * shutdown as such, and Electron owns when that listener runs. */
     record.released = true;
-    record.computeServer?.dispose();
+    releaseHoldings(record);
+    syncResidentSampling();
     try {
       record.utility.kill();
     } catch {
       /* Best-effort */
     }
   };
-
   const spawnRuntime = (
     context: unknown,
     onExit?: (exit: ElectronRuntimeHostExit) => void,
@@ -680,6 +778,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       if (isMessagePortMain(resolved.fileSystemPort)) {
         resolved.fileSystemPort.close();
       }
+      resolved.release?.();
       throw error;
     }
     const resolvedEntry = resolved.utilityEntry ?? options.utilityEntry;
@@ -691,11 +790,13 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       record = acquireUtility(utilityEntry, env, key);
     } catch (error) {
       resolved.fileSystemPort?.close();
+      resolved.release?.();
       throw error;
     }
     const spawnedUtility = record.utility;
     const hostId = randomUUID();
     record.hostId = hostId;
+    record.releaseResolved = resolved.release;
     if (sender !== undefined) {
       record.sender = sender;
     }
@@ -703,6 +804,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       record.onExit = onExit;
     }
     liveUtilities.set(hostId, record);
+    syncResidentSampling();
     options.onUtilityFork?.({ hostId, entry: utilityEntry });
 
     let ports: MessageChannelMain | undefined;
@@ -806,16 +908,30 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
        * bookkeeping failure, not a refusal, and must not answer it a second time. */
       refused = undefined;
 
+      const { sender } = event;
       const releaseOnce = (): void => {
         if (hostId) {
           releaseUtility(hostId);
         }
       };
-      event.sender.once('destroyed', releaseOnce);
+      sender.once('destroyed', releaseOnce);
       /* A crashed renderer never fires `pagehide` and is never `destroyed`
        * until its window closes; only main sees this. `releaseUtility` is
        * idempotent, so a later `'destroyed'` is harmless. */
-      event.sender.once('render-process-gone', releaseOnce);
+      sender.once('render-process-gone', releaseOnce);
+      /* A window outlives many leases (each preview card, each reopen), so a
+       * released lease takes its listeners with it rather than leaving one
+       * pair per request on the sender until the window closes. */
+      const record = liveUtilities.get(spawned.hostId);
+      const detach = (): void => {
+        sender.removeListener('destroyed', releaseOnce);
+        sender.removeListener('render-process-gone', releaseOnce);
+      };
+      if (record === undefined) {
+        detach();
+      } else {
+        record.detachSender = detach;
+      }
     } catch (error) {
       if (hostId) {
         releaseUtility(hostId);
@@ -875,6 +991,8 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     },
     dispose(): void {
       disposed = true;
+      clearInterval(residentTimer);
+      residentTimer = undefined;
       targetIpcMain.off(channel, listener);
       targetIpcMain.off(releaseChannel, releaseListener);
       releaseSpare();

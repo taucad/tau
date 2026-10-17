@@ -305,6 +305,12 @@ type AdmissionRecord = Readonly<{
 
 const attemptKeyOf = (key: TurnAttemptKey): string => `${key.runId}:${String(key.attempt)}`;
 
+/** The turn an admission row admitted, when the row is one. */
+const admittedTurnIdOf = (event: AgentLogEvent): string | undefined =>
+  event.type === 'run.lifecycle' && event.state === 'admitted'
+    ? (event as AgentLogEvent & { readonly admission?: AdmissionRecord }).admission?.turnId
+    : undefined;
+
 /** A reply lost in transit: the transport's own failure, or a stalled stream. Not a refusal the gateway decided. */
 const isLostReply = (ended: AgentRunOutcome): boolean => {
   const code = ended.outcome === 'failed' ? ended.failure?.code : undefined;
@@ -1241,7 +1247,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (messages.length > 0) {
           /* The rewind point is the turn the caller names; the prefix it keeps is this log's own (F2). */
           const rewindTo = messages.findIndex((message) => message.id === start.message.id);
-          const retained = start.retainedMessageIds ?? [];
+          /* A turn this log admitted whose run ended before ever recording its message (a session that could not rebuild
+           * its history) left nothing to rewind: its retry keeps the whole history. The page names its own messages
+           * (an assistant reply by its run id), so its prefix cannot be compared with this log's here. */
+          const unrecorded =
+            rewindTo === -1 &&
+            events.some((event) => admittedTurnIdOf(event) === start.message.id) &&
+            !events.some(
+              (event) =>
+                (event.type === 'message.appended' || event.type === 'turn.history-projection-committed') &&
+                event.message.id === start.message.id,
+            );
+          const retained = unrecorded ? messages.map((message) => message.id) : (start.retainedMessageIds ?? []);
           if (
             rewindTo === -1 &&
             (retained.length > messages.length || retained.some((id, index) => messages[index]?.id !== id))

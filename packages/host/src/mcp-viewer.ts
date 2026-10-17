@@ -113,7 +113,8 @@ export type LocalMcpViewerOptions = Readonly<{
   /** The project folder one call works in. */
   rootOf(meta: Readonly<Record<string, unknown>> | undefined): string;
   /**
-   * Render one CAD source to GLB under `.tau/artifacts` through the registry's `export_model`.
+   * Render one CAD source to GLB under `.tau/artifacts` through the registry's `export_model`, with its CAD topology
+   * wherever the route carries it, so the page can show the components and the mechanism.
    *
    * @returns The project-relative artifact path, or a failure.
    */

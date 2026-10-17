@@ -6,25 +6,62 @@ import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.j
 /** The axis-aligned planes a screenshot section can cut along, named as `arrange_workbench` names them. @public */
 export const screenshotSectionPlanes = ['xy', 'xz', 'yz'] as const;
 
+const sectionPlane = z
+  .enum(screenshotSectionPlanes)
+  .describe('xy is a horizontal cut (normal Z); xz has normal Y; yz has normal X.');
+const sectionOffset = z
+  .number()
+  .describe("The plane's position along its normal axis. Metres in tau:root: 0.006 is 6 mm.");
+const sectionKeep = z
+  .enum(['negative', 'positive'])
+  .describe(
+    'The side to retain along the normal axis: negative keeps coordinates at or below offset. Defaults to the side whose cut face looks at the single-mode camera.',
+  );
+
 /**
- * One axis-aligned section cut through a 3D view, in the model's Z-up millimetre frame (the frame
- * GeoSpec measures in). The renderer clips surfaces and lines and caps the cut. @public
+ * One axis-aligned section cut through a 3D view, in metres in `tau:root` (Z-up), the frame `arrange_workbench`
+ * writes its cuts in. The renderer clips surfaces and lines and caps the cut. `offsetMm`, the millimetre spelling it
+ * replaced, is still accepted and parsed into `offset` until 0.1.0-beta.8 removes it, so a parsed section always
+ * carries metres, and its output JSON Schema (`io: 'output'`) is that parsed shape.
+ * @public
  */
 export const screenshotSectionSchema = z
   .object({
-    plane: z
-      .enum(screenshotSectionPlanes)
-      .describe('xy is a horizontal cut (normal Z); xz has normal Y; yz has normal X.'),
-    offsetMm: z.number().describe("The plane's position along its normal axis, in millimetres from the model origin."),
-    keep: z
-      .enum(['negative', 'positive'])
+    plane: sectionPlane,
+    offset: sectionOffset.optional(),
+    /**
+     * @deprecated Send `offset` in metres instead: `offsetMm: 6` is `offset: 0.006`, the millimetres divided by 1000.
+     * Removed in 0.1.0-beta.8.
+     */
+    offsetMm: z
+      .number()
       .optional()
-      .describe(
-        'The side to retain along the normal axis: negative keeps coordinates at or below offsetMm. Defaults to the side whose cut face looks at the single-mode camera.',
-      ),
+      .describe('Deprecated, kept for one release: the same position in millimetres. Send offset instead.'),
+    keep: sectionKeep.optional(),
   })
-  .strict();
-/** @public */
+  .strict()
+  // oxlint-disable-next-line typescript/no-deprecated -- The alias is read only here, to parse it into offset.
+  .transform(({ offset, offsetMm, ...section }, context) => {
+    if (offsetMm === undefined && offset !== undefined) {
+      return { ...section, offset };
+    }
+    if (offset === undefined && offsetMm !== undefined) {
+      /* Fifteen significant digits make 33.3 mm the number 0.0333, as an agent writing metres would send it. */
+      return { ...section, offset: Number((offsetMm / 1000).toPrecision(15)) };
+    }
+    context.addIssue({
+      code: 'custom',
+      path: offset === undefined ? ['offset'] : ['offsetMm'],
+      message:
+        offset === undefined
+          ? "Give offset, the plane's position along its normal axis in metres (0.006 is 6 mm)."
+          : 'Give offset alone; offsetMm is its deprecated millimetre spelling.',
+    });
+    return z.NEVER;
+  })
+  /* The parsed shape, so the schema converts to JSON Schema in output mode too and a second parse is a no-op. */
+  .pipe(z.object({ plane: sectionPlane, offset: sectionOffset, keep: sectionKeep.optional() }).strict());
+/** A parsed section: its offset is always metres. @public */
 export type ScreenshotSection = z.infer<typeof screenshotSectionSchema>;
 
 /**

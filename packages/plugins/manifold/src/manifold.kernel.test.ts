@@ -431,7 +431,9 @@ describe('ManifoldWorker', () => {
             export default function main() {
               const handles = {};
               handles.constructed = new CrossSection([[[0, 0], [10, 0], [10, 10]]]);
-              handles.extruded = handles.constructed.extrude(5);
+              // manifold-3d's CrossSection is also callable without \`new\`.
+              handles.called = CrossSection([[[0, 0], [1, 0], [0, 1]]]);
+              handles.extruded = handles.constructed.add(handles.called).extrude(5);
               handles.translated = handles.extruded.translate([1, 2, 3]);
               handles.rotated = handles.translated.rotate([0, 0, 45]);
               handles.square = CrossSection.square([2, 2]).translate([20, 0]);

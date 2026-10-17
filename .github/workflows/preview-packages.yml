@@ -175,9 +175,12 @@ jobs:
       # would, with the installed `tau` as its CLI, and `doctor --smoke` evaluates, tests,
       # screenshots, exports and shows a block through it. It runs whether or not the install
       # check above passed, so each oracle reports on its own. The consumer parity table in
-      # e2e-nightly.yml reads this step by name.
+      # e2e-nightly.yml reads this step by name. macOS only: `screenshot` needs a graphics adapter,
+      # which GitHub's Ubuntu runners lack. The app then pins the CLI's own Zod, as
+      # check-pack-install.ts does: with a second, newer Zod hoisted beside the CLI's, `tau mcp`
+      # fails converting its tool schemas.
       - name: Smoke the preview agent plugin with doctor
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
         timeout-minutes: 30
         env:
           PLUGIN_APP: ${{ runner.temp }}/plugin-preview
@@ -187,8 +190,12 @@ jobs:
           set -o pipefail
           mkdir -p "$PLUGIN_APP"
           (cd "$PLUGIN_APP" && npm init -y > /dev/null)
-          mapfile -t urls < <(jq -r '.packages[].url' "$PREVIEW_JSON")
+          # A read loop, not mapfile: macOS runs bash 3.2.
+          urls=()
+          while IFS= read -r url; do urls+=("$url"); done < <(jq -r '.packages[].url' "$PREVIEW_JSON")
           npm install --prefix "$PLUGIN_APP" --no-audit --no-fund "${urls[@]}"
+          zod=$(node -p 'require(process.argv[1]).dependencies.zod' "$PLUGIN_APP/node_modules/@taucad/cli/package.json")
+          npm install --prefix "$PLUGIN_APP" --no-audit --no-fund "zod@$zod"
           TAU_CLI="$PLUGIN_APP/node_modules/.bin/tau" pnpm plugin:dev doctor --smoke \
             --plugin "$PLUGIN_APP/node_modules/@taucad/agent-plugin" 2>&1 | tee "$LOG"
 

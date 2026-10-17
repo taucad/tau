@@ -102,6 +102,14 @@ export const picovoxelOptionsSchema = z.object({
       'Artifact for the fast lane. "auto" (default) uses the multi-threaded build in a cross-origin isolated worker and the serial build otherwise; "multi" and "serial" pin one build. Exact renders and exports always use the serial build.',
     )
     .transform(resolveWasmArtifact),
+  recycleHeapBytes: z
+    .number()
+    .int()
+    .positive()
+    .default(1.5 * 2 ** 30)
+    .describe(
+      'WebAssembly heap size in bytes above which a runtime is recycled after its render, because linear memory never shrinks. Defaults to 1.5 GiB; a host on a memory-constrained device passes a lower one.',
+    ),
 });
 
 /** Validated PicoVoxel kernel options, with `wasm` resolved to a concrete artifact. @public */

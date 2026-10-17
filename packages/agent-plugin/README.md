@@ -24,7 +24,7 @@ The plugin needs Node.js 24 or later, with the npm 11 it bundles, and the Tau CL
 npm install -g @taucad/cli@beta
 ```
 
-Without a `tau` on `PATH`, the plugin runs `npx --yes --package=@taucad/cli@<this plugin's version> tau mcp`, which downloads the CLI and its kernels on first use and can take several minutes. Codex waits up to 10 minutes for that first start. Claude Code waits `MCP_TIMEOUT` milliseconds, which a plugin cannot set: install the CLI first, or start Claude with `MCP_TIMEOUT=600000 claude` the first time. To run a particular CLI, set `TAU_CLI` to its `tau` executable.
+Without a `tau` of the plugin's version on `PATH`, the plugin runs `npx --yes --package=@taucad/cli@<this plugin's version> tau mcp`, which downloads the CLI and its kernels on first use and can take several minutes. Codex waits up to 10 minutes for that first start. Claude Code waits `MCP_TIMEOUT` milliseconds, which a plugin cannot set: install the CLI first, or start Claude with `MCP_TIMEOUT=600000 claude` the first time. To run a particular CLI, set `TAU_CLI` to its `tau` executable.
 
 ### Claude Code
 
@@ -161,16 +161,28 @@ Each call works in the first of: the `--project` folder, when you run `tau mcp` 
 
 Both hosts start `node dist/launch.mjs`. The launcher starts `<tau> mcp` on its own stdio, forwards `SIGINT` and `SIGTERM`, and exits with the CLI's exit code. It runs the first of:
 
-1. `TAU_CLI`, a path to a `tau` executable.
+1. `TAU_CLI`, a path to a `tau` executable, whatever its version.
 2. `.dev/cli.json`, the workspace checkout's CLI (see [Development](#development)).
-3. `tau` on `PATH`, then `/opt/homebrew/bin/tau` and `/usr/local/bin/tau`, for desktop apps started with a minimal `PATH`.
+3. The first installed `tau` whose `tau --version` prints this package's version, searching `PATH`, then `/opt/homebrew/bin` and `/usr/local/bin` for desktop apps started with a minimal `PATH`. A `tau` of another version, or one that fails or does not answer within 2 seconds, is passed over.
 4. `npx --yes --package=@taucad/cli@<version> tau mcp`, where `<version>` is this package's version.
 
-`resolveTauCli`, the package's one export, is that resolution as a pure function.
+Before `npx`, the launcher checks what `npx` needs. When a check fails it starts nothing: it writes one line to stderr that begins with `tau:` and names the fix, and exits with the check's code.
+
+| Exit code | Cause                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------- |
+| 2         | Node.js is older than 24                                                                              |
+| 3         | npm's cache is not writable, as when `sudo npm` left it owned by root; the line gives the `chown` fix |
+| 4         | npm does not run, or is older than 11                                                                 |
+
+When the CLI cannot be started, the launcher exits 1. A host shows only that the server failed to start; run `node <plugin folder>/dist/launch.mjs </dev/null` to read the line.
+
+The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed).
+
+`resolveTauCli`, the package's one export, is that resolution as a pure function; its caller passes `versionOf`, which reads what `<path> --version` prints.
 
 ### Versions
 
-This package is released with `@taucad/cli` in one fixed version group, so `@taucad/agent-plugin@<version>` pairs with `@taucad/cli@<version>`, which the `npx` fallback pins. Both plugin manifests carry the same version: the release writes all three files. A `tau` on `PATH` runs whatever its version; keep it on the plugin's release, since older CLIs have no `tau mcp`.
+This package is released with `@taucad/cli` in one fixed version group, so `@taucad/agent-plugin@<version>` pairs with `@taucad/cli@<version>`, which the `npx` fallback pins. Both plugin manifests carry the same version: the release writes all three files. An installed `tau` runs only when it prints that version, so after a plugin update also run `npm install -g @taucad/cli@<version>`, or the launcher fetches the matching CLI with `npx`.
 
 ## Development
 
@@ -206,7 +218,7 @@ codex plugin add tau@tau-dev
 
 After changing a skill, a manifest or the launcher, rebuild, run `codex plugin add tau@tau-dev` again (or `pnpm plugin:dev install --host codex`) and start a new session or thread. CLI changes need no refresh: each copy's `.dev/cli.json` still points at this checkout.
 
-`pnpm plugin:dev preview --sha <commit>` installs a [pkg.pr.new](https://pkg.pr.new) build of a `main` commit instead, published by the `Preview packages` workflow: the plugin from a scratch catalog in `~/.cache/tau-plugin-preview` and the CLI with `npm install --global`, so nothing reads the checkout.
+`pnpm plugin:dev preview --sha <commit>` installs a [pkg.pr.new](https://pkg.pr.new) build of a `main` commit instead, published by the `Preview packages` workflow: the plugin from a scratch catalog in `~/.cache/tau-plugin-preview` and the CLI with `npm install --global`, so nothing reads the checkout. A preview's packages carry the version `0.0.0-preview-<sha>`, but its `tau --version` prints the version it was built from, so the launcher passes that `tau` over: start Claude Code with `TAU_CLI="$(command -v tau)" claude` to run it.
 
 ```bash
 pnpm nx run-many -t lint test typecheck build -p agent-plugin
@@ -218,7 +230,7 @@ claude plugin validate --strict packages/agent-plugin
 
 | Component    | Support                                                                                                         |
 | ------------ | --------------------------------------------------------------------------------------------------------------- |
-| Node.js      | 24 or later; on an older Node the launcher says so and starts the CLI anyway                                    |
+| Node.js      | 24 or later; on an older Node the launcher exits 2 rather than fetch the CLI with `npx`                         |
 | Claude Code  | Verified with 2.1.295                                                                                           |
 | Codex CLI    | Verified with 0.157.1                                                                                           |
 | Viewer       | MCP Apps hosts per the ext-apps specification 2026-01-26; covered by an ext-apps basic-host harness in Chromium |

@@ -224,7 +224,7 @@ export const buildLayer = async (options: {
 
 /** The pin's comment once a layer is published. */
 const pinnedComment =
-  'The Tau UI that tau serve serves (charter W18, Q51): a Tau-authored layer, prepared into the payload store by digest and served from <store>/closures/sha256/<hex>/client. The release-build serve-ui-layer jobs build it from ui:build:serve without source maps (ruling X2), publish it to cdn.tau.new blobs/ and an immutable serve-ui-layer-<16 hex> GitHub Release, and attach the composed pin; scripts/serve-ui-layer.mts pin rewrites this file from that release, never by hand.';
+  'Written by packages/cli/scripts/serve-ui-layer.mts pin from a serve-ui-layer release (release-build.yml); never edit by hand.';
 
 /**
  * The pin a published layer gives `serve-ui-layer.json`.

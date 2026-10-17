@@ -16,14 +16,16 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { chromium } from 'playwright';
-import type { Browser, Frame, Page } from 'playwright';
+import type { Browser, Frame, Locator, Page } from 'playwright';
 import { build } from 'vite';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import type { TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
 
 import type { HostRecord, TauHost } from '#e2e/basic-host/host.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../package.json' with { type: 'json' };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '..');
@@ -147,7 +149,7 @@ const wedgeObject = [
 ].join('\n');
 
 let project = '';
-/** Uncaught errors in any harness page; each test expects none. */
+/** Uncaught errors in the current test's harness pages; each test expects none. */
 const pageErrors: string[] = [];
 let hostScript = '';
 let browser: Browser | undefined;
@@ -217,11 +219,16 @@ const viewerFrame = (page: Page): Frame => {
   return frame;
 };
 
-/** The harness host: its display mode, and how it differs from the default (what it declares, the height it allows). */
+/**
+ * The harness host: its display mode, and how it differs from the default (what it declares, the height it allows,
+ * the replies it gives in place of the server's).
+ */
 type HarnessHost = Readonly<{
   displayMode: 'inline' | 'fullscreen';
   hostCapabilities?: Parameters<TauHost['mount']>[0]['hostCapabilities'];
   maxHeight?: number;
+  /** A reply to a call the test answers itself, or `undefined` to forward the call to the server. */
+  answer?: (name: string) => CallToolResult | undefined;
 }>;
 
 /**
@@ -245,11 +252,14 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
   const { resources } = await client.listResources();
   const listed = resources.find((resource) => resource.uri === resourceUri);
   const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+  /* Closed when its test ends, passed or failed, so it reports nothing into a later test. */
+  onTestFinished(async () => page.close());
   page.on('pageerror', (error) => {
     pageErrors.push(error.message);
   });
-  await page.exposeFunction('tauCallTool', async (name: string, args: Record<string, unknown>) =>
-    callTool(client, name, args),
+  await page.exposeFunction(
+    'tauCallTool',
+    async (name: string, args: Record<string, unknown>) => host.answer?.(name) ?? callTool(client, name, args),
   );
   await page.setContent(
     `<!doctype html><html><body style="margin:0"><script type="module">${hostScript}</script></body></html>`,
@@ -295,6 +305,22 @@ const drawn = async (root: Frame | Page, action: string): Promise<void> => {
   await expect
     .poll(async () => root.getByRole('button', { name: action }).isEnabled(), { timeout: 120_000 })
     .toBe(true);
+};
+
+/**
+ * Open a pane from the lane's tab menu.
+ *
+ * @param root - The frame or page the viewer is in.
+ * @param pane - The pane's name.
+ * @returns The pane's panel.
+ */
+const openPane = async (root: Frame | Page, pane: string): Promise<Locator> => {
+  const lane = root.getByRole('complementary', { name: 'Workbench' });
+  await lane.getByRole('button', { name: 'Open workbench tab' }).click();
+  await root.getByRole('menuitem', { name: pane }).click();
+  const panel = lane.getByRole('tabpanel', { name: pane });
+  await panel.waitFor();
+  return panel;
 };
 
 /**
@@ -370,6 +396,10 @@ afterAll(async () => {
     await client.close();
   }
   await rm(project, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  pageErrors.length = 0;
 });
 
 describe('the viewer page in an MCP Apps host', () => {
@@ -605,6 +635,56 @@ describe("the tab's panels (W10)", () => {
     },
     kernelCallLimit,
   );
+
+  it(
+    'should say why Export lists no formats: a server without the tool, or a failure it can retry',
+    async () => {
+      const shownMain = await callTool(client, 'show_model', { targetFile: 'main.ts' });
+      const { version } = packageJson;
+
+      /* A `tau` from before the formats tool: the MCP SDK's answer to a tool the server does not serve. */
+      const older = await mountInHarness(client, shownMain, {
+        displayMode: 'fullscreen',
+        answer: (name) =>
+          name === 'app_export_formats'
+            ? { isError: true, content: [{ type: 'text', text: `MCP error -32602: Tool ${name} not found` }] }
+            : undefined,
+      });
+      await drawn(viewerFrame(older), 'Add to chat');
+      const olderPanel = await openPane(viewerFrame(older), 'Export');
+      const mismatch = olderPanel.getByRole('alert', { name: 'Export formats could not be loaded' });
+      await expect
+        .poll(async () => mismatch.textContent())
+        .toContain(
+          `This Tau server has no export formats; plugin ${version} needs the same version: npm install -g @taucad/cli@${version}, then restart the Tau server or your agent`,
+        );
+      expect(await mismatch.getByRole('button').count()).toBe(0);
+      await capture(older, 'export-older-server');
+      await older.close();
+
+      /* A failure the server reports, then a retry it answers. */
+      let isFailing = true;
+      const failing = await mountInHarness(client, shownMain, {
+        displayMode: 'fullscreen',
+        answer: (name) =>
+          name === 'app_export_formats' && isFailing
+            ? { isError: true, content: [{ type: 'text', text: 'NO_KERNEL: No kernel exports main.ts.' }] }
+            : undefined,
+      });
+      await drawn(viewerFrame(failing), 'Add to chat');
+      const panel = await openPane(viewerFrame(failing), 'Export');
+      const failure = panel.getByRole('alert', { name: 'Export formats could not be loaded' });
+      await expect.poll(async () => failure.textContent()).toContain('No kernel exports main.ts.');
+      await capture(failing, 'export-retry');
+      isFailing = false;
+      await failure.getByRole('button', { name: 'Retry' }).click();
+      await panel.getByRole('region', { name: 'Formats' }).waitFor({ timeout: 60_000 });
+      expect(await panel.getByRole('checkbox', { name: 'Save to project' }).isChecked()).toBe(true);
+      expect(pageErrors).toEqual([]);
+      await failing.close();
+    },
+    kernelCallLimit,
+  );
 });
 
 describe('the live view (W6)', () => {
@@ -766,6 +846,37 @@ describe('the viewer page from a text host', () => {
       expect(await page.getByTitle('main.ts', { exact: true }).count()).toBe(1);
       await page.getByRole('group', { name: 'Viewer controls' }).waitFor();
       await capture(page, 'loopback');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should name the version mismatch when the server has no formats tool',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+      /* A `tau` from before the formats tool answers the loopback call as the server does for any tool it lacks. */
+      await page.route('**/api/tools/call', async (route) => {
+        const { name } = route.request().postDataJSON() as { name: string };
+        await (name === 'app_export_formats'
+          ? route.fulfill({ status: 404, contentType: 'application/json', body: '{"errorCode":"UNKNOWN_TOOL"}' })
+          : route.continue());
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Copy prompt');
+
+      const { version } = packageJson;
+      const panel = await openPane(page, 'Export');
+      const mismatch = panel.getByRole('alert', { name: 'Export formats could not be loaded' });
+      await expect
+        .poll(async () => mismatch.textContent())
+        .toContain(
+          `plugin ${version} needs the same version: npm install -g @taucad/cli@${version}, then restart the Tau server or your agent`,
+        );
+      expect(await mismatch.getByRole('button').count()).toBe(0);
+      await capture(page, 'loopback-older-server');
       await page.close();
     },
     kernelCallLimit,

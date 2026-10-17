@@ -245,7 +245,14 @@ export const cancelRun = async (page: Page, settled?: () => boolean): Promise<vo
   const stop = stopButtonOf(page);
   await expect.poll(async () => settled?.() === true || (await stop.count()) > 0, { timeout: 15_000 }).toBe(true);
   if (settled?.() !== true && (await stop.count()) > 0) {
-    await stop.click();
+    /* The run can settle between the count and the click, taking the button
+     * with it; that is the idle state this cancel waits for below, so only a
+     * button that is still there makes a failed click a failure. */
+    await stop.click({ timeout: 10_000 }).catch(async (error: unknown) => {
+      if ((await stop.count()) > 0) {
+        throw error;
+      }
+    });
   }
   await expectCount(stop, 0, 120_000);
 };
@@ -369,10 +376,10 @@ const renderCycleState = async (page: Page): Promise<{ readonly busy: boolean; r
     }
 
     /* `ChatViewerStatus` renders the CAD machine's own loading phase — and
-     * nothing else — as `<span>{phase}...</span>`, one per open viewer pane. */
+     * nothing else — as `<span>{phase}…</span>` (one U+2026), one per open viewer pane. */
     const isBusy = (): boolean =>
       [...document.querySelectorAll('span')].some((element) =>
-        /^(?:buffering|connecting|rendering)\.\.\.$/u.test(element.textContent.trim().toLowerCase()),
+        /^(?:buffering|connecting|rendering)…$/u.test(element.textContent.trim().toLowerCase()),
       );
     const state = { busy: isBusy(), completed: 0 };
     const observer = new MutationObserver(() => {

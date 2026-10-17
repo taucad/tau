@@ -15,6 +15,7 @@ import {
   geometryHostCpuSeconds,
   observeGeometryHost,
   probeServicesHost,
+  servicesProbeEnvironment,
   restoreGeometryHost,
 } from '#support/geometry-host-observation.js';
 import type { GeometryHostEvent } from '#support/geometry-host-observation.js';
@@ -260,7 +261,7 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   session = await launchDesktopApp({
     packaged: true,
     token,
-    env: { [disableCredentialPersistenceVariable]: '1' },
+    env: { [disableCredentialPersistenceVariable]: '1', ...servicesProbeEnvironment },
   });
   await observeGeometryHost(session);
   await session.page.addInitScript(() => {

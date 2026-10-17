@@ -417,8 +417,11 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
   fixture = await startGatewayFixture({ targetFile: 'main.py', content: build123dSource });
+  /* The package, not the workspace app: only a packaged app bundles the Build123d closure its store seeds from
+   * (`main.ts` passes no bundle when unpackaged), so the workspace app reports the closure absent and cannot build. */
   session = await launchDesktopApp({
     token,
+    packaged: true,
     env: { TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
   });
   const { page } = session;
@@ -432,9 +435,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    if (desktopE2ECompletedArtifact) {
-      await authenticatePackagedDesktop(session, token);
-    }
+    await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'Build123d');
     await connectPickedFolder(session);

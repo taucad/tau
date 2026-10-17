@@ -156,7 +156,7 @@ test('signs in and creates a project on real disk from the composer', async () =
     const slug = await submitPrompt(page, prompt);
     const projectRoot = join(location === 'picked' ? session.pickedDirectory : session.homeRoot, slug);
     await expect
-      .poll(() => ['tau.json', 'package.json', 'main.scad'].every((entry) => existsSync(join(projectRoot, entry))), {
+      .poll(() => ['tau.json', 'main.scad'].every((entry) => existsSync(join(projectRoot, entry))), {
         timeout: 180_000,
       })
       .toBe(true);

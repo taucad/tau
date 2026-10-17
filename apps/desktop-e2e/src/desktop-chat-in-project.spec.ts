@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -82,6 +82,14 @@ const recordTurnMarker = async (page: Page): Promise<() => Promise<readonly stri
   return async () =>
     page.evaluate(() => [...((globalThis as { tauTurnMarkerLabels?: string[] }).tauTurnMarkerLabels ?? [])]);
 };
+
+/** The newest turn revision marker's text, as a poll callback. */
+const lastMarkerText =
+  (markers: Locator): (() => Promise<string | undefined>) =>
+  async () => {
+    const texts = await markers.allTextContents();
+    return texts.at(-1)?.trim();
+  };
 
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
@@ -234,8 +242,11 @@ test('builds an openrscad model on disk from the project chat', async () => {
 });
 
 /* Row 18's other half: a turn whose provider call is refused must not claim a
- * save it never made. */
-test('says Save not confirmed when the gateway refuses the turn', async () => {
+ * save it never made. A refused turn that changed nothing derives the `hidden`
+ * revision state (`deriveTurnRevisionState`: "the run's own card says why"), so
+ * it adds no marker of its own and the paused-turn card names the refusal;
+ * *Save not confirmed* is reserved for a host that cannot be reached. */
+test('claims no save when the gateway refuses the turn', async () => {
   const account = tauTestAccount('in-project-failure');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
@@ -254,21 +265,21 @@ test('says Save not confirmed when the gateway refuses the turn', async () => {
     await submitPrompt(page, prompt);
     await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
 
+    const markers = page.locator('[role="status"][aria-label="Turn revision status"]');
+    await expect.poll(lastMarkerText(markers), { timeout: 120_000 }).toMatch(/^Rev \d+ saved/u);
+    const markersBefore = await markers.count();
+    const savedBefore = await lastMarkerText(markers)();
+
     fixture.setFailure({ status: 500, message: 'Provider unavailable for this test.' });
     const markerLabels = await recordTurnMarker(page);
     await sendPrompt(page, prompt);
-    await expect
-      .poll(
-        async () => {
-          const seen = await markerLabels();
-          return seen.at(-1);
-        },
-        {
-          message: 'the refused turn must end on Save not confirmed',
-          timeout: 300_000,
-        },
-      )
-      .toBe('Save not confirmed');
+    await expectVisible(page.getByText('Tau paused this turn', { exact: true }), 300_000);
+    await expectVisible(page.getByText('The model provider is unavailable.', { exact: true }), 30_000);
+    expect(await markers.count(), 'the refused turn must add no revision marker').toBe(markersBefore);
+    expect(await lastMarkerText(markers)(), 'the refused turn must not claim a new save').toBe(savedBefore);
+    expect(await markerLabels(), 'the refused turn must never say a revision is saving or saved').toEqual(
+      savedBefore === undefined ? [] : [savedBefore],
+    );
     console.info(`[desktop-e2e] refused turn marker: ${JSON.stringify(await markerLabels())}`);
   } catch (error) {
     console.info(

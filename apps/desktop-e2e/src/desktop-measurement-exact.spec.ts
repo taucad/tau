@@ -9,6 +9,7 @@ import {
   geometryHostEvents,
   observeGeometryHost,
   probeServicesHost,
+  servicesProbeEnvironment,
   restoreGeometryHost,
 } from '#support/geometry-host-observation.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
@@ -153,7 +154,7 @@ test('[completed-artifact] packaged exact AP242 host first use, held-boundary ca
   const account = tauTestAccount('measurement-exact');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ packaged: true, token });
+  session = await launchDesktopApp({ packaged: true, token, env: servicesProbeEnvironment });
   await observeGeometryHost(session, { holdSecondMinimumDistance: true });
   await authenticatePackagedDesktop(session, token);
 

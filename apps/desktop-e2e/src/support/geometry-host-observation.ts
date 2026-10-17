@@ -236,7 +236,16 @@ export const restoreGeometryHost = async (session: DesktopSession): Promise<void
   }
 };
 
-/** The machines hello is emitted by the independent real services utility. */
+/**
+ * Launch environment the services probe needs. Machines are a deployment
+ * opt-in that defaults off, and the probe asks for the machines concern, so a
+ * spec that probes the services utility opts in; the e2e package honours the
+ * override that a release build strips.
+ */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
+export const servicesProbeEnvironment = { TAU_MACHINES_ENABLED: '1' } as const;
+
+/** The machines hello is emitted by the independent real services utility; launch with {@link servicesProbeEnvironment}. */
 export const probeServicesHost = async (session: DesktopSession): Promise<number> => {
   const before = Date.now();
   const hello = await session.page.evaluate(async (requestId) => {

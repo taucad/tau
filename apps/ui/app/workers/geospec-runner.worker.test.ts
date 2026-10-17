@@ -464,6 +464,8 @@ describe('geospec-runner.worker', () => {
           tauApiUrl: 'https://api.tau.test',
           tauWebSocketUrl: 'wss://api.tau.test',
         },
+        // GeoSpec keeps no compute store of its own beside the editor's.
+        compute: { mode: 'off' },
       },
     });
     expect(workerMocks.runner.run).toHaveBeenCalledWith({

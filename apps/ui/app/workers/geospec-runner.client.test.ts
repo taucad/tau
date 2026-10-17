@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '@taucad/chat/constants';
 import { projectGeoSpecTest } from '@taucad/agent-tools/geospec';
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
@@ -836,5 +836,77 @@ describe('createGeoSpecWorkerRpcClient', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('idle lifetime', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should terminate an idle worker and its runtime after the default idle window, then start a fresh one', async () => {
+      vi.useFakeTimers();
+      const fileManagerWorker = new FakeFileManagerWorker();
+      const firstWorker = new FakeGeoSpecWorker();
+      const secondWorker = new FakeGeoSpecWorker();
+      const createWorker = vi
+        .fn<() => Worker>()
+        .mockReturnValueOnce(firstWorker as unknown as Worker)
+        .mockReturnValueOnce(secondWorker as unknown as Worker);
+      const bridges: Array<ReturnType<typeof openFileSystemBridge>> = [];
+      const client = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: () => {
+          const bridge = openFileSystemBridge(fileManagerWorker as unknown as Worker);
+          vi.spyOn(bridge, 'dispose');
+          bridges.push(bridge);
+          return bridge;
+        },
+        runtimeConfig,
+        createWorker,
+      });
+
+      await expect(client.runTests({ files: ['main.geospec.ts'] })).resolves.toEqual(
+        expect.objectContaining({ success: true }),
+      );
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(firstWorker.terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(firstWorker.terminate).toHaveBeenCalledOnce();
+      expect(bridges[0]?.dispose).toHaveBeenCalledOnce();
+      await expect(client.runTests({ files: ['main.geospec.ts'] })).resolves.toEqual(
+        expect.objectContaining({ success: true }),
+      );
+      expect(createWorker).toHaveBeenCalledTimes(2);
+      expect(secondWorker.terminate).not.toHaveBeenCalled();
+      await client.close();
+    });
+
+    it('should keep the worker while a run is in flight and arm the idle window when it settles', async () => {
+      vi.useFakeTimers();
+      const fileManagerWorker = new FakeFileManagerWorker();
+      const geoSpecWorker = new FakeGeoSpecWorker();
+      geoSpecWorker.autoResolveRuns = false;
+      const client = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+        runtimeConfig,
+        idleTimeout: 1000,
+        runnerTimeout: 60_000,
+        createWorker: () => geoSpecWorker as unknown as Worker,
+      });
+
+      const run = client.runTests({ files: ['main.geospec.ts'] });
+      await vi.advanceTimersByTimeAsync(5000);
+      const runCall = geoSpecWorker.postMessage.mock.calls.find((call) => call[0].type === 'run');
+      expect(runCall).toBeDefined();
+      expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+
+      geoSpecWorker.emitMessage(successResult(runCall![0].requestId));
+      await expect(run).resolves.toEqual(expect.objectContaining({ success: true }));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(geoSpecWorker.terminate).toHaveBeenCalledOnce();
+      await client.close();
+    });
   });
 });

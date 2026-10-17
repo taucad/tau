@@ -585,7 +585,7 @@ function PrinterSimulation({
             <select
               aria-label='Filament colour mode'
               value={appearance}
-              className='rounded border border-input bg-background px-2 py-1 focus-visible:focus-outline'
+              className='rounded border border-input bg-background px-2 py-1 focus-visible:focus-outline pointer-coarse:text-base'
               onChange={(event) => {
                 const mode = filamentModes.find((value) => value === event.target.value);
                 if (mode) {

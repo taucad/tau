@@ -162,7 +162,7 @@ export function TagsTrigger({
           value={value}
           disabled={disabled}
           placeholder={tags.length === 0 ? placeholder : ''}
-          className='w-0 flex-1 bg-transparent px-0.5 py-px text-base outline-none group-focus-within/tags-trigger:w-30 placeholder:text-muted-foreground md:text-sm'
+          className='w-0 flex-1 bg-transparent px-0.5 py-px text-sm outline-none group-focus-within/tags-trigger:w-30 placeholder:text-muted-foreground pointer-coarse:text-base'
           onChange={(event) => {
             setValue(event.target.value);
           }}

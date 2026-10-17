@@ -252,7 +252,8 @@ export type ConsumerResult = {
 const notRun = new Set(['skipped', 'cancelled']);
 
 /**
- * The jobs an oracle names; for a step oracle, each job narrowed to that step, `skipped` when the job has no such step.
+ * The jobs an oracle names; for a step oracle, each job narrowed to that step, leaving out the jobs that skipped it or
+ * have no such step (a step that runs on one leg of a matrix).
  * @param oracle - The job oracle.
  * @param jobs - One run's jobs.
  * @returns The matching jobs, as the oracle judges them.
@@ -265,11 +266,13 @@ const matching = (oracle: Extract<Oracle, { kind: 'job' }>, jobs: readonly Workf
   if (step === undefined) {
     return named;
   }
-  return named.map((job) => ({
-    ...job,
-    name: `${job.name} › ${step}`,
-    conclusion: job.steps.find(({ name }) => name === step)?.conclusion ?? 'skipped',
-  }));
+  return named
+    .map((job) => ({
+      ...job,
+      name: `${job.name} › ${step}`,
+      conclusion: job.steps.find(({ name }) => name === step)?.conclusion ?? 'skipped',
+    }))
+    .filter(({ conclusion }) => conclusion !== 'skipped');
 };
 
 const ran = (jobs: readonly WorkflowJob[]): boolean =>

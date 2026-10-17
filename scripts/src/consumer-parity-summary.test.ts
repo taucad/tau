@@ -176,6 +176,35 @@ describe('resolveOracle', () => {
     expect(result.evidence).toContain('run 5');
   });
 
+  it('should judge a step that ran on one leg of a matrix by that leg alone', async () => {
+    const doctor: Oracle = {
+      kind: 'job',
+      workflow: 'preview-packages.yml',
+      job: 'Install the previews (',
+      match: 'prefix',
+      step: 'Smoke',
+      scope: 'any',
+      proves: 'doctor',
+    };
+    const fake = reader({
+      current: run(9),
+      runs: { 'preview-packages.yml': [run(6), run(5)] },
+      jobs: {
+        6: [
+          job('Install the previews (ubuntu-latest)', 'success', [{ name: 'Smoke', conclusion: 'skipped' }]),
+          job('Install the previews (macos-26)', 'success', [{ name: 'Smoke', conclusion: 'success' }]),
+        ],
+        5: [job('Install the previews (macos-26)', 'failure', [{ name: 'Smoke', conclusion: 'failure' }])],
+      },
+    });
+
+    const result = await resolveOracle(doctor, fake);
+
+    expect(result.status).toBe('pass');
+    expect(result.evidence).toContain('run 6');
+    expect(result.evidence).not.toContain('ubuntu-latest');
+  });
+
   it('should mark a path-filtered result older than seven days stale without failing it', async () => {
     const image: Oracle = {
       kind: 'job',

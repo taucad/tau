@@ -4,7 +4,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { CreateNodesContextV2 } from '@nx/devkit';
+import type { CreateNodesContext } from '@nx/devkit';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the Nx plugin under test is workspace tooling, not a project
 import { createNodesV2 } from '../../tools/tsgo.plugin.js';
 
@@ -26,7 +26,7 @@ const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
 const context = {
   workspaceRoot,
   nxJsonConfiguration: { namedInputs: {} },
-} as unknown as CreateNodesContextV2;
+} as unknown as CreateNodesContext;
 
 type TypecheckOptions = {
   command?: string;

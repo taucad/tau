@@ -3,7 +3,7 @@
  *
  * The app ships the sealed closures of its native kernels under `Contents/Resources/payloads/closures/sha256/<hex>`,
  * the store's own layout. At startup main seeds the shared store from them: each closure the store lacks is cloned
- * (`/bin/cp -c -R`, a copy only where a clone fails) into staging, verified file by file against its receipt, checked
+ * (`/bin/cp -c -p -R`, a copy only where a clone fails) into staging, verified file by file against its receipt, checked
  * against the pins `tau-plugin.json` declares, and published by `rename`, as a preparation publishes one. A closure
  * already sealed is never copied again. Main then reads the launch indexes and posts what each kernel runs from to
  * the kernel utilities, and collects the store's garbage. Nothing here downloads.
@@ -12,7 +12,7 @@
  */
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -70,8 +70,35 @@ export const openDesktopPreparationHost = (input: {
   });
 
 /**
+ * Remove only an exclusively owned copy destination or staging tree, including sealed directories.
+ * Inspect links without following them; source trees and published closures must never be passed here.
+ * @param root - The private destination to discard, with no concurrent writers.
+ */
+const removeOwnedCopy = async (root: string): Promise<void> => {
+  const makeDirectoriesRemovable = async (path: string): Promise<void> => {
+    const entry = await lstat(path).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    });
+    if (!entry?.isDirectory()) {
+      return;
+    }
+    // Files and symlinks need no chmod: unlink permission belongs to their containing directory.
+    // oxlint-disable-next-line eslint/no-bitwise -- POSIX modes are bit fields; preserve every other mode bit while enabling owner-only cleanup.
+    await chmod(path, entry.mode | 0o700);
+    const names = await readdir(path);
+    await Promise.all(names.map(async (name) => makeDirectoriesRemovable(join(path, name))));
+  };
+  await makeDirectoriesRemovable(root);
+  await rm(root, { recursive: true, force: true });
+};
+
+/**
  * Copy a directory tree whose target does not exist yet: an APFS clone on macOS (no new blocks), a reflink where a
  * Linux filesystem has one, and a plain copy only where neither works (D24). Never Node's `copyFile`.
+ * Preserve the sealed modes even under a restrictive host umask; receipt verification still rejects mode drift.
  * @param source - The tree to copy.
  * @param target - The new tree; its parent exists.
  * @returns How the tree was copied.
@@ -82,16 +109,16 @@ export const cloneTree = async (source: string, target: string): Promise<'clone'
   }
   if (process.platform === 'darwin') {
     try {
-      await execFileAsync('/bin/cp', ['-c', '-R', source, target]);
+      await execFileAsync('/bin/cp', ['-c', '-p', '-R', source, target]);
       return 'clone';
     } catch {
       // Another volume, or a filesystem without clonefile(2): copy instead.
-      await rm(target, { recursive: true, force: true });
+      await removeOwnedCopy(target);
     }
-    await execFileAsync('/bin/cp', ['-R', source, target]);
+    await execFileAsync('/bin/cp', ['-p', '-R', source, target]);
     return 'copy';
   }
-  await execFileAsync('cp', ['-R', '--reflink=auto', source, target]);
+  await execFileAsync('cp', ['-R', '--preserve=mode', '--reflink=auto', source, target]);
   return 'clone';
 };
 
@@ -257,7 +284,7 @@ export const seedNativeStore = async (input: {
       outcomes.push({ ...row, status: 'seeded', copy });
     } finally {
       // oxlint-disable-next-line no-await-in-loop -- ditto
-      await rm(staging, { recursive: true, force: true });
+      await removeOwnedCopy(staging);
     }
   }
   return outcomes;

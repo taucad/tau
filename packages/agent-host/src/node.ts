@@ -369,6 +369,7 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
       if (observer === undefined) {
         try {
           // One binding-owned watch also sees creation of a missing chat's ancestors.
+          // oxlint-disable-next-line node-js/prefer-promises/fs -- Node 24 recursive promise watches lose Linux burst events without overflow errors; retain FSWatcher delivery and close/error ownership.
           const watching = watch(options.workspaceRoot, { recursive: true }, (_event, filename) => {
             if (observer !== watching) {
               return;

@@ -53,6 +53,43 @@ afterEach(async () => {
 });
 
 describe('runtime child permission boundary', () => {
+  it('preserves the resolved development loader when the project has no node_modules', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-development-loader-'));
+    const modulePath = join(temporaryDirectory, 'runtime-child.ts');
+    await writeFile(
+      modulePath,
+      `const version: string = 'development-loader-proof';
+process.on('disconnect', () => process.exit(0));
+process.on('message', (message: { type: string }) => {
+  if (message.type === 'start') process.send?.({ type: 'ready', url: 'ws://127.0.0.1:9', runtimeVersion: version });
+  if (message.type === 'close') process.exit(0);
+});
+`,
+    );
+    const supervisorUrl = new URL('runtime-child-supervisor.ts', import.meta.url).href;
+    const program = `import { startRuntimeChild } from ${JSON.stringify(supervisorUrl)};
+const child = await startRuntimeChild({ modulePath: ${JSON.stringify(modulePath)} });
+try { console.log(child.runtimeVersion); } finally { await child.close(); await child.closed; }`;
+    // The isolated parent retains the supervisor's five-second close-grace timer after a successful close.
+    const parent = spawn(
+      process.execPath,
+      ['--import', import.meta.resolve('tsx'), '--input-type=module', '--eval', program],
+      { cwd: temporaryDirectory, stdio: 'pipe', timeout: 10_000 },
+    );
+    let stdout = '';
+    let stderr = '';
+    parent.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      stdout += Buffer.from(chunk).toString();
+    });
+    parent.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      stderr += Buffer.from(chunk).toString();
+    });
+    await once(parent, 'close');
+    expect({ exitCode: parent.exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+    expect(stdout.trim()).toBe('development-loader-proof');
+    await expect(access(join(temporaryDirectory, 'node_modules'))).rejects.toThrow(/ENOENT/u);
+  }, 15_000);
+
   it('denies host capabilities and every worker, strips secrets, reads back its own temp files, and pins unrestricted network egress', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-permissions-'));
     const proofPath = join(temporaryDirectory, 'proof.json');

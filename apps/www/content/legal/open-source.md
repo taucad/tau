@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 751 packages, with the license each declares.
+The web and desktop apps include the following 748 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -128,7 +128,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@noble/ciphers](https://github.com/paulmillr/noble-ciphers) | 2.4.0 | MIT |
 | [@noble/hashes](https://github.com/paulmillr/noble-hashes) | 2.4.0 | MIT |
 | [@nodable/entities](https://github.com/nodable/val-parsers) | 3.1.0 | MIT |
-| [@nx/devkit](https://github.com/nrwl/nx) | 22.7.12 | MIT |
+| [@nx/devkit](https://github.com/nrwl/nx) | 23.3.0 | MIT |
 | [@openai/codex](https://github.com/openai/codex) | 0.148.0 | Apache-2.0 |
 | [@opentelemetry/api](https://github.com/open-telemetry/opentelemetry-js) | 1.9.1 | Apache-2.0 |
 | [@opentelemetry/api-logs](https://github.com/open-telemetry/opentelemetry-js) | 0.220.0 | Apache-2.0 |
@@ -303,7 +303,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@use-gesture/react](https://github.com/pmndrs/use-gesture) | 10.3.1 | MIT |
 | [@vercel/oidc](https://github.com/vercel/vercel) | 3.2.0 | Apache-2.0 |
 | [@x0k/json-schema-merge](https://github.com/x0k/json-schema-merge) | 1.1.0 | MIT |
-| [@zkochan/js-yaml](https://github.com/nodeca/js-yaml) | 0.0.7 | MIT |
 | [abort-controller](https://github.com/mysticatea/abort-controller) | 3.0.0 | MIT |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
 | [acorn](https://github.com/acornjs/acorn) | 8.19.0 | MIT |
@@ -313,7 +312,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ajv](https://github.com/ajv-validator/ajv) | 8.20.0 | MIT |
 | [ajv-formats](https://github.com/ajv-validator/ajv-formats) | 2.1.1 | MIT |
 | [ajv-formats](https://github.com/ajv-validator/ajv-formats) | 3.0.1 | MIT |
-| [ansi-colors](https://github.com/doowb/ansi-colors) | 4.1.3 | MIT |
 | [anynum](https://github.com/NaturalIntelligence/anynum) | 1.0.1 | MIT |
 | [arg](https://github.com/zeit/arg) | 4.1.3 | MIT |
 | [argparse](https://github.com/nodeca/argparse) | 2.0.1 | Python-2.0 |
@@ -424,7 +422,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [embla-carousel-reactive-utils](https://github.com/davidjerleke/embla-carousel) | 8.6.0 | MIT |
 | [encodeurl](https://github.com/pillarjs/encodeurl) | 2.0.0 | MIT |
 | [end-of-stream](https://github.com/mafintosh/end-of-stream) | 1.4.5 | MIT |
-| [enquirer](https://github.com/enquirer/enquirer) | 2.3.6 | MIT |
 | [es-define-property](https://github.com/ljharb/es-define-property) | 1.0.1 | MIT |
 | [es-errors](https://github.com/ljharb/es-errors) | 1.3.0 | MIT |
 | [es-module-lexer](https://github.com/guybedford/es-module-lexer) | 2.3.2 | MIT |

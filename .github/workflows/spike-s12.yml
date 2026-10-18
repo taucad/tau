@@ -4,6 +4,20 @@
 name: Spike S12 (serve UI layer)
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-s12.yml'
+      - 'scripts/spikes/native-deps/linux/s12/**'
+      - 'apps/ui-e2e/src/support/serve-ui-build.test.ts'
+      - 'packages/host/src/runtime-child-supervisor.ts'
+      - 'packages/host/src/runtime-child-supervisor.test.ts'
+      - 'apps/ui/project.json'
+      - 'apps/ui/serve/**'
+      - 'apps/ui/vite.config.ts'
+      - 'scripts/src/serve-ui-sourcemaps.test.ts'
+      - 'scripts/src/pack-serve-ui-layer.ts'
+      - 'scripts/src/pack-serve-ui-layer.test.ts'
+      - 'scripts/src/spike-s12-shell.test.ts'
   workflow_dispatch:
 
 permissions:
@@ -49,9 +63,9 @@ jobs:
         if: always()
         run: |
           { cat "$RUNNER_TEMP/evidence/build-time.txt"; sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/evidence/build.log" | grep -iE '^ui: (error|.*killed|.*build failed)' | tail -20; cat "$RUNNER_TEMP/evidence/measure.txt"; for f in "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt; do echo "== $(basename "$f")"; grep -E '✓|×|✗|FAIL|Test Files|Tests ' "$f"; done; } > "$RUNNER_TEMP/evidence/s12-summary.txt" 2>/dev/null || true
-      - name: Drop the layer and the build log from the evidence upload
+      - name: Drop the verbose build log from the evidence upload
         if: always()
-        run: rm -f "$RUNNER_TEMP/evidence/serve-ui-client.tar.gz" "$RUNNER_TEMP/evidence/build.log"
+        run: rm -f "$RUNNER_TEMP/evidence/build.log"
       - name: Publish the numbers as annotations
         if: always()
         run: scripts/spikes/native-deps/linux/annotate.sh 'S12' "$RUNNER_TEMP/evidence/s12-summary.txt"

@@ -1,10 +1,11 @@
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing.js';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import type { FileChange } from '@nx/devkit';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 import { pluginGenerator } from '#generators/plugin/generator.js';
 
@@ -320,9 +321,32 @@ describe('plugin generator', () => {
     expect(machine).toContain('  actions: [],');
     expect(machine).toContain('  holds: [],');
     expect(machine).toContain("  jobs: { type: 'unsupported' },");
-    expect(machine).toContain(
-      "  stop: {\n    motion: 'halts',\n    spindle: 'none',\n    heaters: 'none',\n    position: 'kept',\n    recovery: [],\n  },",
-    );
+    const parsedMachine = ts.createSourceFile('machine.ts', machine, ts.ScriptTarget.Latest, true);
+    const stopValues: Record<string, string | number> = {};
+    const visitStop = (node: ts.Node): void => {
+      if (ts.isPropertyAssignment(node) && node.name.getText(parsedMachine) === 'stop') {
+        expect(ts.isObjectLiteralExpression(node.initializer)).toBe(true);
+        if (ts.isObjectLiteralExpression(node.initializer)) {
+          for (const property of node.initializer.properties) {
+            expect(ts.isPropertyAssignment(property)).toBe(true);
+            if (!ts.isPropertyAssignment(property)) {
+              continue;
+            }
+            const value = property.initializer;
+            if (ts.isStringLiteral(value)) {
+              stopValues[property.name.getText(parsedMachine)] = value.text;
+            } else if (ts.isArrayLiteralExpression(value)) {
+              stopValues[property.name.getText(parsedMachine)] = value.elements.length;
+            } else {
+              expect.fail('The generated stop declaration must contain only strings and recovery entries');
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visitStop);
+    };
+    visitStop(parsedMachine);
+    expect(stopValues).toEqual({ motion: 'halts', spindle: 'none', heaters: 'none', position: 'kept', recovery: 0 });
     expect(machine).toContain('  protocolVersion: 2,');
     expect(machine).toContain('  manifest,\n  bindingConfiguration,');
 

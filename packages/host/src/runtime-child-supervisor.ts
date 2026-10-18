@@ -437,14 +437,14 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
   if (!modulePath.endsWith('.ts')) {
     return [];
   }
-  const hasTsxLoader = process.execArgv.some(
+  const tsxLoader = process.execArgv.find(
     (argument, index) =>
       process.execArgv[index - 1] === '--import' && (argument === 'tsx' || argument.endsWith('/tsx/dist/loader.mjs')),
   );
-  if (!hasTsxLoader) {
+  if (!tsxLoader) {
     throw new Error('Tau Host cannot execute its TypeScript runtime child without the parent tsx loader.');
   }
-  return ['--import', 'tsx'];
+  return ['--import', tsxLoader];
 };
 
 /**

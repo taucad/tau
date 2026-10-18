@@ -98,7 +98,7 @@ case "$phase" in
       shift
       "$@" >"$log" 2>&1 || { echo "step failed: $*" >&2; tail -40 "$log" >&2; return 1; }
     }
-    build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx run cli:build-deps --outputStyle=static && pnpm nx build cli --outputStyle=static"
+    build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx build cli --outputStyle=static"
     rm -rf "$work/image"
     mkdir -p "$work/image"
     # The host's optional peer `geospec@^0.1.0-beta.0` is not on npm (only 0.0.0), so a legacy deploy that auto-installs

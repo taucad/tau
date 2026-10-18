@@ -20,9 +20,9 @@
 #     :21-26: Nx's project-graph plugins load every workspace `vite.config.ts`
 #     at startup, so a `--filter` install resolves the graph to a missing-module
 #     error before any build can start.
-#   - `cli:build-deps` runs first because `pnpm deploy --prod` materialises each
-#     workspace dependency from its `files` field (`dist`), which only exists
-#     once that package has been built.
+#   - `cli:build` schedules its transitive `^build` tasks and `stage-acp` before
+#     pruning. `pnpm deploy --prod` materialises workspace dependencies from
+#     their `files` field (`dist`), so those dependency builds must finish first.
 #   - The deploy injects workspace packages (`inject-workspace-packages`): the
 #     `--legacy` deploy re-resolves `workspace:*` versions against npm under
 #     pnpm 11 and fails on unpublished ones (ruling X33). A deploy copies the
@@ -89,7 +89,7 @@ COPY . .
 ENV OXC_TSCONFIG_PATH=/app/tools/typescript/base.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
-    pnpm nx run cli:build-deps && pnpm nx build cli
+    pnpm nx build cli
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned

@@ -3356,6 +3356,9 @@ importers:
       '@taucad/smlib':
         specifier: workspace:*
         version: link:../../packages/plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../../packages/plugins/smlibpy
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../../packages/plugins/tscircuit
@@ -4916,6 +4919,52 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  packages/plugins/smlibpy:
+    dependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.5.1
+      '@gltf-transform/extensions':
+        specifier: 'catalog:'
+        version: 4.5.1
+      '@taucad/cache-core':
+        specifier: workspace:*
+        version: link:../../core/cache
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../kinematics
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../../core/native-process
+      '@taucad/occt-core':
+        specifier: workspace:*
+        version: link:../../core/occt
+      '@taucad/python-kernel-core':
+        specifier: workspace:*
+        version: link:../../core/python-kernel
+    devDependencies:
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../../core/archive
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)

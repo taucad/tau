@@ -1,0 +1,23 @@
+# Runs outside Tau with uv: `uv sync --locked`, then `uv run main.py`.
+# The dependencies are the libraries Tau's smlibpy kernel runs; keep these pins when you edit the list.
+[project]
+name = "tau-project"
+version = "0.1.0"
+requires-python = "==3.13.*"
+dependencies = [
+  "smlibpy==0.3.5",
+  "numpy==2.5.2",
+]
+
+# The platforms and versions of Tau's smlibpy runtime, so uv.lock and pylock.toml lock the same wheels' versions.
+[tool.uv]
+environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64' and implementation_name == 'cpython'",
+  "sys_platform == 'darwin' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+  "sys_platform == 'linux' and platform_machine == 'aarch64' and implementation_name == 'cpython'",
+  "sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+]
+constraint-dependencies = [
+  "numpy==2.5.2",
+  "smlibpy==0.3.5",
+]

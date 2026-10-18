@@ -1,0 +1,7 @@
+# Native SMLib runtime. Every direct dependency is pinned; uv resolves and hashes every wheel below.
+# 0.3.5 is past the workspace's one-day minimum release age (published 2026-10-17T19:10Z).
+smlibpy==0.3.5
+# smlibpy's only dependency, at the version every Tau Python closure and `tau_kernel` run.
+numpy==2.5.2
+# Test instrumentation is bundled so release-matrix tests use the exact shipped interpreter offline.
+coverage==7.10.7

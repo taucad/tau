@@ -2030,6 +2030,9 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../packages/runtime-testing
       '@taucad/xstate-testing':
         specifier: workspace:*
         version: link:../../libs/xstate-testing
@@ -2207,6 +2210,12 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../../packages/runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../../packages/runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
 
   apps/libs/fs-client:
     dependencies:
@@ -3405,6 +3414,9 @@ importers:
 
   libs/telemetry:
     devDependencies:
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -5376,6 +5388,10 @@ importers:
       geospec:
         specifier: workspace:*
         version: link:../geospec
+    devDependencies:
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../libs/telemetry
 
   packages/spatial: {}
 

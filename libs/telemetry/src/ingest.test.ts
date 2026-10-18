@@ -1,9 +1,11 @@
+import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, it, expect } from 'vitest';
 import {
   agentToolKinds,
   clientMetricEntrySchema,
   ingestPayloadSchema,
   IngestEntryName,
+  kernelIds,
   tauToolNames,
 } from '#ingest.js';
 
@@ -11,6 +13,12 @@ describe('IngestEntryName', () => {
   it('should define canonical entry name constants', () => {
     expect(IngestEntryName.KERNEL_CREATE_GEOMETRY).toBe('observability.createGeometry');
     expect(IngestEntryName.KERNEL_EXPORT_GEOMETRY).toBe('observability.exportGeometry');
+  });
+});
+
+describe('kernelIds', () => {
+  it('should pin exactly the product catalog kernel ids, in catalog order', () => {
+    expect(kernelIds).toEqual(kernelConfigurations.map(({ id }) => id));
   });
 });
 

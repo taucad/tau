@@ -7,6 +7,8 @@ import {
   UnpreparedKernelError,
 } from '@taucad/native-process-core/store';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
+import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
+import { kernelConfigurations } from '@taucad/types/constants';
 
 import { fixturePayloadStore, nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
 import { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
@@ -23,6 +25,10 @@ const resolveDesktopRuntime = async (frame: NativeKernelsFrame = nativeKernelsFi
   });
 
 describe('desktop runtime kernels', () => {
+  it('should cover the product catalog, native kernels included', async () => {
+    assertKernelRosterCoverage({ runtime: await resolveDesktopRuntime(), catalog: kernelConfigurations });
+  });
+
   it('should compose PicoVoxel after Manifold with its default wasm option', async () => {
     const { kernels } = await resolveDesktopRuntime();
     const ids = kernels.map((kernel) => kernel.id);

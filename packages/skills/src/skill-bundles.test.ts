@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -79,6 +79,40 @@ describe('@taucad/skills', () => {
     expect(await readFile(join(directory, 'cad-replicad', 'kinematics-reference.md'), 'utf8')).toContain(
       '## Joints and degree-of-freedom IDs',
     );
+  });
+
+  it('should own every plugin bundle, or name why the plugin declares none', async () => {
+    const pluginsRoot = new URL('../../plugins/', import.meta.url);
+    const plugins = await readdir(pluginsRoot, { withFileTypes: true });
+    const manifests = await Promise.all(
+      plugins
+        .filter((entry) => entry.isDirectory())
+        .map(async ({ name }) => {
+          const source = await readFile(new URL(`${name}/package.json`, pluginsRoot), 'utf8');
+          return JSON.parse(source) as {
+            readonly name: string;
+            readonly exports?: Readonly<Record<string, unknown>>;
+            readonly tau?: { readonly skills?: unknown; readonly reason?: unknown };
+          };
+        }),
+    );
+
+    /*
+     * First-party enrichment only: this walks Tau's own plugins. A third-party package's `tau.skills` reaches hosts
+     * through the plugin listing and needs no row here. `tau.skills: null` with a reason is the declared opt-out (see
+     * `skillOwners`); anything else is a forgotten row.
+     */
+    for (const manifest of manifests) {
+      const declared = manifest.tau?.skills;
+      if (typeof declared === 'string') {
+        expect(skillOwners, manifest.name).toContain(manifest.name);
+      } else {
+        expect(declared, manifest.name).toBeNull();
+        expect(manifest.tau?.reason, manifest.name).toEqual(expect.stringMatching(/\S/u));
+        expect(manifest.exports ?? {}, manifest.name).not.toHaveProperty(['./agent']);
+        expect(skillOwners, manifest.name).not.toContain(manifest.name);
+      }
+    }
   });
 
   it('should reject manifest paths that can escape their bundle', () => {

@@ -72,6 +72,7 @@
     "@electron/osx-sign": "^2.7.0",
     "@electron/packager": "^20.3.0",
     "@taucad/nx": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "electron": "^43.5.1",
     "electron-vite": "catalog:electron-vite8",
     "vite": "catalog:electron-vite8",

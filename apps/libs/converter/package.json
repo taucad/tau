@@ -41,6 +41,8 @@
     "#*": "./src/*"
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*"
   }
 }

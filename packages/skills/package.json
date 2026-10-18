@@ -80,5 +80,8 @@
     "@taucad/workbench": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "geospec": "workspace:*"
+  },
+  "devDependencies": {
+    "@taucad/telemetry": "workspace:*"
   }
 }

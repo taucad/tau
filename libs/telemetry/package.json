@@ -19,6 +19,7 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/types": "workspace:*",
     "zod": "catalog:"
   }
 }

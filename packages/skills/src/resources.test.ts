@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+import { builtInSkillSlugs } from '@taucad/telemetry';
 import { describe, expect, it } from 'vitest';
 
 import { systemSkillBundles } from '#resources.js';
@@ -18,6 +19,10 @@ describe('@taucad/skills/resources', () => {
       expect(Object.isFrozen(bundle.files)).toBe(true);
       expect(bundle.files[0]?.path).toBe('SKILL.md');
     }
+  });
+
+  it('should be the built-in skill slugs telemetry pins', () => {
+    expect([...builtInSkillSlugs].toSorted()).toEqual(systemSkillBundles.map(({ slug }) => slug).toSorted());
   });
 
   it('should resolve the published workbench body and resource', async () => {

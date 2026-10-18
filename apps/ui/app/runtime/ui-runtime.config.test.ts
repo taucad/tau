@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import type { RuntimeConfigInput } from '@taucad/runtime/worker';
+import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { runtime } from '#runtime/ui-runtime.definition.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
@@ -41,6 +43,20 @@ describe('createUiRuntimeConfig', () => {
       expect((error as Error).message).toContain('tauApiUrl');
       expect((error as Error).message).toContain('tauWebSocketUrl');
     }
+  });
+
+  it('should cover the product catalog, leaving the native kernels to the desktop runtime', async () => {
+    assertKernelRosterCoverage({
+      runtime: await resolveRuntimeDefinition(runtime, {
+        tauApiUrl: 'https://api.tau.test',
+        tauWebSocketUrl: 'wss://api.tau.test',
+      }),
+      catalog: kernelConfigurations,
+      omitted: {
+        build123d: 'native: a browser cannot run a sandboxed CPython; the desktop runtime lists build123d()',
+        picogk: 'native: a browser cannot run the .NET worker; the desktop runtime lists picogk()',
+      },
+    });
   });
 
   it('routes runtime observability to the configured Tau API', async () => {

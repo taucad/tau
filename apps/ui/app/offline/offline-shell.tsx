@@ -78,6 +78,9 @@ const afterLoadAndIdle = (start: () => void): (() => void) => {
   };
 };
 
+/** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
+const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
+
 const isOfflineShellMessage = (data: unknown): data is OfflineShellMessage =>
   typeof data === 'object' && data !== null && (data as { type?: unknown }).type === offlineShellMessageType;
 
@@ -94,6 +97,12 @@ export function OfflineShell(): React.JSX.Element | undefined {
   const online = useSyncExternalStore(subscribeConnectivity, readOnline, serverOnline);
   const { pathname } = useLocation();
 
+  /* B-27, D-UI-26: never while a project workspace is open. Installing
+   * downloads the usage shell's whole asset list, which competed with the
+   * kernel, WASM and editor downloads of an opening project; the reader's next
+   * page outside the workspace installs it instead. */
+  const inWorkspace = isWorkspacePath(pathname);
+
   useEffect(() => {
     if (!isOfflineShellBuild() || !('serviceWorker' in globalThis.navigator)) {
       return;
@@ -105,6 +114,16 @@ export function OfflineShell(): React.JSX.Element | undefined {
       }
     };
     container.addEventListener('message', onMessage);
+    return () => {
+      container.removeEventListener('message', onMessage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (inWorkspace || !isOfflineShellBuild() || !('serviceWorker' in globalThis.navigator)) {
+      return;
+    }
+    const container = globalThis.navigator.serviceWorker;
     const install = async (): Promise<void> => {
       try {
         await container.register(workerUrl);
@@ -112,15 +131,11 @@ export function OfflineShell(): React.JSX.Element | undefined {
         setStatus('failed');
       }
     };
-    const cancelInstall = afterLoadAndIdle(() => {
+    return afterLoadAndIdle(() => {
       // async-iife: bootstrap -- installing must never block the view the reader came for.
       void install();
     });
-    return () => {
-      cancelInstall();
-      container.removeEventListener('message', onMessage);
-    };
-  }, []);
+  }, [inWorkspace]);
 
   if (!isOfflineShellPath(pathname)) {
     return undefined;

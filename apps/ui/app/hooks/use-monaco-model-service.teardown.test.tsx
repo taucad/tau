@@ -21,7 +21,11 @@ const fileManager = vi.hoisted(() => ({
   contentService: { id: 'content' },
   treeService: { id: 'tree' },
 }));
-const project = vi.hoisted(() => ({ projectId: 'proj_one', editorRef: { send: () => undefined }, geometryUnits: new Map() }));
+const project = vi.hoisted(() => ({
+  projectId: 'proj_one',
+  editorRef: { send: () => undefined },
+  geometryUnits: new Map(),
+}));
 
 vi.mock('#hooks/use-monaco-configuration.js', () => ({ useMonacoIfConfigured: () => monaco }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => project }));

@@ -455,7 +455,7 @@ function transformTangents(values: number[] | undefined, instance: ReplicadTesse
 }
 
 function transformTriangles(triangles: Uint32Array, determinant: number): Uint32Array {
-  const transformed = triangles.slice();
+  const transformed = new Uint32Array(triangles);
   if (determinant < 0) {
     for (let index = 0; index + 2 < transformed.length; index += 3) {
       transformed[index + 1] = triangles[index + 2]!;

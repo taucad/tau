@@ -149,8 +149,11 @@ const presetsStamp = async (dataDirectory: string | undefined): Promise<string> 
       }
     }),
   );
-  /* A fold, not `Math.max(...modified)`: a spread of a large preset tree overflows the argument stack. */
-  const newest = modified.reduce((latest, mtimeMs) => Math.max(latest, mtimeMs), 0);
+  /* A loop, not `Math.max(...modified)`: a spread of a large preset tree overflows the argument stack. */
+  let newest = 0;
+  for (const mtimeMs of modified) {
+    newest = Math.max(newest, mtimeMs);
+  }
   return `${String(paths.length)}:${String(newest)}`;
 };
 

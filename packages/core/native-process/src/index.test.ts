@@ -1022,7 +1022,7 @@ ${keepAlive}`);
         30_000,
       );
       const operation = request(value.session);
-      const settled = operation.catch((error: unknown) => error);
+      const settled = expect(operation).rejects.toBeInstanceOf(Error);
       const pidPath = join(value.artifactPath, 'pid');
       try {
         while (!existsSync(pidPath)) {
@@ -1042,7 +1042,7 @@ ${keepAlive}`);
         const exitHooks = process.listeners('exit').filter((listener) => listener.name === 'killLiveProcessGroups');
         expect(exitHooks).toHaveLength(1);
         exitHooks[0]!(0);
-        await expect(settled).resolves.toBeInstanceOf(Error);
+        await settled;
         while (alive()) {
           await delay(5);
         }

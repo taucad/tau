@@ -469,7 +469,7 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
       this._root,
       { paths: [''], recursive: true, excludes: hostWatchExcludes },
       (events) => {
-        listener(events.map(toExternalChangeFact));
+        listener(events.map((event) => toExternalChangeFact(event)));
       },
     );
   }

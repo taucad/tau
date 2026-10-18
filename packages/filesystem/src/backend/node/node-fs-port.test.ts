@@ -1321,7 +1321,7 @@ describe('node filesystem host hardening', () => {
     const channel = new NodeFsChannel(port1);
     const provider = new NodeFsProviderClient(channel, root);
     try {
-      const batches: (readonly unknown[])[] = [];
+      const batches: Array<readonly unknown[]> = [];
       await provider.observe((facts) => batches.push(facts));
       /* What one native callback reports during a checkout: hundreds of paths at once. */
       for (let index = 0; index < 300; index += 1) {

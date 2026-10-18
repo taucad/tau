@@ -165,14 +165,15 @@ describe('NodeFsProvider atomic writes', () => {
       /* The OS never reports a subtree that would only be filtered out afterwards. */
       expect(options.ignore).toEqual([join(directory, '.tau', 'cache')]);
 
-      statted.paths.length = 0;
-      onEvents?.(null, [
+      const burst: Parameters<NonNullable<typeof onEvents>>[1] = [
         ...Array.from({ length: 50 }, (_, index) => ({
           path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
-          type: 'create' as const,
+          type: 'create',
         })),
-        { path: join(directory, 'target.txt'), type: 'update' as const },
-      ]);
+        { path: join(directory, 'target.txt'), type: 'update' },
+      ];
+      statted.paths.length = 0;
+      onEvents?.(null, burst);
       expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);
       /* A bulk change under an excluded tree costs no syscall on the services utility's event loop. */
       expect(statted.paths.filter((statPath) => statPath.includes(join('.tau', 'cache')))).toEqual([]);

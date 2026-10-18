@@ -58,3 +58,9 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
+
+- Every runtime lists `smlibpy()` before `build123d()`: `smlibpyDetectPattern` (`src/smlibpy.constants.ts`) claims a `.py` entry only when a top-level line imports `smlibpy`. The UI's catalog row comes after Build123d's so extension-only lookups still pick Build123d.
+- The worker writes a `TAUSMLB1` mesh bundle (`python/worker.py`), and `src/smlibpy-bundle.ts` reads it; `src/smlibpy-gltf.ts` builds the GLB in TypeScript, following `@taucad/smlib`'s converter. Change both sides together and bump the kernel version.
+- The model contract (`ShapeConfig`, `Model`, materials, `mechanism`) is SMLib's (`@taucad/smlib/model`) as plain Python data, normalized in `python/smlibpy_materials.py` and `python/smlibpy_mechanisms.py`.
+- `python/tests` requires 100% line and branch coverage (`nx run smlibpy:test-python`); `tau-plugin.json`, the SBOM and `project/` are generated (`generate-tau-plugin`, `generate-project-template`) and excluded from oxfmt.
+- `tau-plugin.golden.json` stays `{}` until a `smlibpy-tau-plugin.yml` dispatch records golden receipts.

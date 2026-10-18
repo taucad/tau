@@ -1,0 +1,30 @@
+# SMLibPy's registry-native closure, checked and golden-recorded by the shared Python kernel workflow: `--check` on
+# pull requests, golden receipts on dispatch. tau-plugin.golden.json stays `{}` until a dispatch records them.
+name: SMLibPy tau-plugin
+
+on:
+  pull_request:
+    paths:
+      - packages/plugins/smlibpy/python/**
+      - packages/plugins/smlibpy/tau-plugin*.json
+      - packages/plugins/smlibpy/project/**
+      - packages/core/python-kernel/python/**
+      - packages/core/python-kernel/scripts/**
+      - packages/core/python-kernel/src/{generator,template}.ts
+      - .github/workflows/smlibpy-tau-plugin.yml
+      - .github/workflows/python-kernel-tau-plugin.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smlibpy-tau-plugin-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  tau-plugin:
+    uses: ./.github/workflows/python-kernel-tau-plugin.yml
+    with:
+      package: packages/plugins/smlibpy
+      project: smlibpy

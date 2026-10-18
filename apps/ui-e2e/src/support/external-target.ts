@@ -302,7 +302,12 @@ export type UiBrowserCommands = {
   uiMouseUp(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
   uiNavigateTarget(path: string, surface?: TargetSurface): Promise<Readonly<Record<string, string>>>;
   uiOpenSecondaryTarget(path: string): Promise<void>;
-  uiOpenTarget(options?: { readonly deviceScaleFactor?: number }): Promise<void>;
+  uiOpenTarget(options?: {
+    readonly deviceScaleFactor?: number;
+    /** A phone's touch input: `(pointer: coarse)` matches and taps work. */
+    readonly hasTouch?: boolean;
+    readonly isMobile?: boolean;
+  }): Promise<void>;
   uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
   uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;

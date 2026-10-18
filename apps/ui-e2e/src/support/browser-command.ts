@@ -385,10 +385,9 @@ export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTa
   return JSON.parse(result) as TargetTauBillingOperation[];
 };
 
-export const uiOpenTarget: BrowserCommand<[options?: { deviceScaleFactor?: number }]> = async (
-  commandContext,
-  options,
-) => {
+export const uiOpenTarget: BrowserCommand<
+  [options?: { deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean }]
+> = async (commandContext, options) => {
   if (commandContext.provider.name !== 'playwright') {
     throw new TypeError(`UI E2E requires the Playwright provider, received '${commandContext.provider.name}'.`);
   }

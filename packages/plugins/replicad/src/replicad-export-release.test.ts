@@ -53,7 +53,7 @@ describe('Replicad y-up export copies', { timeout: 120_000 }, () => {
       await view.rendering();
       const rotated: AnyShape[] = [];
       const { rotate } = Shape.prototype;
-      vi.spyOn(Shape.prototype, 'rotate').mockImplementation(function (this: Shape, ...arguments_) {
+      vi.spyOn(Shape.prototype, 'rotate').mockImplementation(function (this: AnyShape, ...arguments_) {
         const result = rotate.apply(this, arguments_) as AnyShape;
         rotated.push(result);
         return result;

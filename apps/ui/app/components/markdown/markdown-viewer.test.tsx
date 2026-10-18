@@ -39,7 +39,7 @@ describe('MarkdownViewer', () => {
     );
   });
 
-  it('should forward the latest Streamdown options and install the feature plugins', () => {
+  it('should forward the latest Streamdown options and install only the plugins it renders through (D-UI-18)', () => {
     render(
       <MarkdownViewer caret='circle' lineNumbers={false} normalizeHtmlIndentation>
         content
@@ -52,12 +52,10 @@ describe('MarkdownViewer', () => {
         caret: 'circle',
         lineNumbers: false,
         normalizeHtmlIndentation: true,
-        plugins: expect.objectContaining({
-          code: expect.anything(),
+        plugins: {
           cjk: expect.anything(),
           math: expect.anything(),
-          mermaid: expect.anything(),
-        }),
+        },
       }),
     );
     /* oxlint-enable typescript/no-unsafe-assignment */

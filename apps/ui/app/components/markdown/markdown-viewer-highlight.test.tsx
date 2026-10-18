@@ -17,4 +17,17 @@ describe('MarkdownViewer syntax highlighting', () => {
     expect(code.getAttribute('style')).toMatch(/color:\s*#/u);
     expect(code.closest('[data-slot="codeblock"]')).not.toBeNull();
   });
+
+  /* D-UI-18: Tau's `code` component renders every fenced block, so Streamdown's
+   * code and mermaid plugins are never reached and are not bundled. */
+  it('should render a fenced mermaid block through the Tau code block', async () => {
+    render(
+      <TooltipProvider>
+        <MarkdownViewer>{'```mermaid\ngraph TD; A-->B;\n```'}</MarkdownViewer>
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('mermaid', { selector: '[data-slot="codeblock-title"]' })).toBeInTheDocument();
+    expect(document.querySelector('[data-streamdown^="mermaid"]')).toBeNull();
+  });
 });

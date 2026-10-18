@@ -17,8 +17,10 @@ vi.mock('#components/popover.js', () => ({
   PopoverTrigger: ({ children }: { readonly children: React.ReactNode }) => (
     <span data-testid='popover-trigger-inner'>{children}</span>
   ),
-  PopoverContent: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='popover-content-test'>{children}</div>
+  PopoverContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+    <div data-testid='popover-content-test' className={className}>
+      {children}
+    </div>
   ),
 }));
 
@@ -27,8 +29,10 @@ vi.mock('#components/drawer.js', () => ({
   DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='drawer-nested-root'>{children}</div>
   ),
-  DrawerContent: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='drawer-content-test'>{children}</div>
+  DrawerContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+    <div data-testid='drawer-content-test' className={className}>
+      {children}
+    </div>
   ),
   DrawerDescription: () => null,
   DrawerTitle: () => null,
@@ -113,6 +117,33 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.getByTestId('drawer-content-test')).toBeInTheDocument();
     expect(screen.queryByTestId('drawer-root')).not.toBeInTheDocument();
     expect(screen.queryByTestId('popover-root')).not.toBeInTheDocument();
+  });
+
+  it('should keep a caller width on the popover and span the screen in the drawer', () => {
+    const renderWithWidth = (): ReturnType<typeof render> =>
+      render(
+        <ComboBoxResponsive<Row>
+          title='Pick'
+          description='Pick one.'
+          groupedItems={[{ name: 'G', items: [a, b] }]}
+          getValue={(item) => item.id}
+          value={a}
+          renderLabel={(item) => <span>{item.id}</span>}
+          placeholder='Pick'
+          className='w-72'
+        >
+          <button type='button'>Trigger</button>
+        </ComboBoxResponsive>,
+      );
+    mobileState.current = true;
+    const { unmount } = renderWithWidth();
+    const drawerContent = screen.getByTestId('drawer-content-test');
+    expect(drawerContent).toHaveClass('w-auto');
+    expect(drawerContent).not.toHaveClass('w-72');
+    unmount();
+    mobileState.current = false;
+    renderWithWidth();
+    expect(screen.getByTestId('popover-content-test')).toHaveClass('w-72');
   });
 
   it('should filter non-virtualized options through the shared search input', async () => {

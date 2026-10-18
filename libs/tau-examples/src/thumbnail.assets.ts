@@ -109,7 +109,10 @@ import thumbnail102 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
 import thumbnail103 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
 import thumbnail104 from './kernels/replicad/wheelbarrow/thumbnail.webp?url';
 import thumbnail105 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
-import thumbnail106 from './kernels/tscircuit/led-board/thumbnail.webp?url';
+import thumbnail106 from './kernels/smlib/hinged-box/thumbnail.webp?url';
+import thumbnail107 from './kernels/smlib/parametric-plate/thumbnail.webp?url';
+import thumbnail108 from './kernels/smlib/pbr-materials/thumbnail.webp?url';
+import thumbnail109 from './kernels/tscircuit/led-board/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -219,7 +222,10 @@ export const thumbnailAssets = {
   'replicad/wedge-door-stopper': thumbnail103,
   'replicad/wheelbarrow': thumbnail104,
   'replicad/worm-gear-system': thumbnail105,
-  'tscircuit/led-board': thumbnail106,
+  'smlib/hinged-box': thumbnail106,
+  'smlib/parametric-plate': thumbnail107,
+  'smlib/pbr-materials': thumbnail108,
+  'tscircuit/led-board': thumbnail109,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

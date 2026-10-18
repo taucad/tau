@@ -1,6 +1,6 @@
 # geospec public API index
 
-geospec 0.1.0-beta.6 · 870 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.6 · 875 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
@@ -474,9 +474,10 @@ GeoSpecRuntimeSourceAdapter (type) [3 members] — Explicit source adapter for f
 
 ## Types (2) — `public-api-types-2.md`
 
-LoadModelCodeOptions (type) [13 members] — Inline code-CAD model load options
+LoadModelCodeOptions (type) [14 members] — Inline code-CAD model load options
   LoadModelCodeOptions.code (property) — Source files keyed by project-relative path
   LoadModelCodeOptions.file (property) — Entry path to render from {@link code }
+  LoadModelCodeOptions.rootDir (property) — Not accepted
   LoadModelCodeOptions.format (property) — Geometry format to export
   LoadModelCodeOptions.parameters (property) — Explicit parameters passed to the runtime
   LoadModelCodeOptions.runtime (property) — Runtime client or lazy runtime factory
@@ -488,8 +489,9 @@ LoadModelCodeOptions (type) [13 members] — Inline code-CAD model load options
   LoadModelCodeOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelCodeOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
   LoadModelCodeOptions.region (property) — Axis-aligned millimetre box the kernel crops the model to before…
-LoadModelFileOptions (type) [12 members] — Filesystem-backed model load options
-  LoadModelFileOptions.file (property) — Project-relative model file to render
+LoadModelFileOptions (type) [13 members] — Filesystem-backed model load options
+  LoadModelFileOptions.file (property) — Model file to render, as a path from the project…
+  LoadModelFileOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   LoadModelFileOptions.projectPath (property) — Project root used by runtime integrations
   LoadModelFileOptions.format (property) — Geometry format to export
   LoadModelFileOptions.parameters (property) — Explicit parameters passed to the runtime
@@ -501,7 +503,8 @@ LoadModelFileOptions (type) [12 members] — Filesystem-backed model load option
   LoadModelFileOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelFileOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
   LoadModelFileOptions.region (property) — Axis-aligned millimetre box the kernel crops the model to before…
-LoadModelOptions (type) [7 members] — Options accepted by {@link import ('./load-model.js').loadModel}
+LoadModelOptions (type) [8 members] — Options accepted by {@link import ('./load-model.js').loadModel}
+  LoadModelOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   LoadModelOptions.format (property) — Geometry format to export
   LoadModelOptions.parameters (property) — Explicit parameters passed to the runtime
   LoadModelOptions.stepStreaming (property) — STEP reader strategy used for STEP exports
@@ -509,9 +512,10 @@ LoadModelOptions (type) [7 members] — Options accepted by {@link import ('./lo
   LoadModelOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   LoadModelOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
-LoadModelSourceOptions (type) [12 members] — Direct geometry-source model load options
+LoadModelSourceOptions (type) [13 members] — Direct geometry-source model load options
   LoadModelSourceOptions.source (property) — Geometry bytes, path, browser file/blob, or in-memory mesh buffer
   LoadModelSourceOptions.resources (property) — Named external resources consumed alongside the direct geometry bytes
+  LoadModelSourceOptions.rootDir (property) — Project-relative folder a path `source` and each resource path resolve…
   LoadModelSourceOptions.format (property) — Source geometry format
   LoadModelSourceOptions.path (property) — Source path recorded in provenance
   LoadModelSourceOptions.name (property) — Human-readable source name recorded in provenance
@@ -621,7 +625,8 @@ CreateGeoSpecNativeModelLoaderOptions (type) [8 members] — Defaults and host d
   CreateGeoSpecNativeModelLoaderOptions.sourceAdapters (property)
   CreateGeoSpecNativeModelLoaderOptions.carried (property) — Subject handles carried between the release scopes of loaders that…
   CreateGeoSpecNativeModelLoaderOptions.maximumWorkUnitLimit (property) — The largest `loadModel` `workUnitLimit` a spec may author
-GeoSpecNativeLoadModelOptions (type) [9 members] — Native additions accepted by the injected `geospec/runner/native` loader
+GeoSpecNativeLoadModelOptions (type) [10 members] — Native additions accepted by the injected `geospec/runner/native` loader
+  GeoSpecNativeLoadModelOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   GeoSpecNativeLoadModelOptions.format (property) — Geometry format to export
   GeoSpecNativeLoadModelOptions.parameters (property) — Explicit parameters passed to the runtime
   GeoSpecNativeLoadModelOptions.stepStreaming (property) — STEP reader strategy used for STEP exports
@@ -810,6 +815,9 @@ GeoSpecPmiQueryValue (type) [3 members] — Complete inventory value
   GeoSpecPmiQueryValue.inventory (property)
   GeoSpecPmiQueryValue.subjectHash (property)
   GeoSpecPmiQueryValue.provenance (property)
+
+## Types (3) — `public-api-types-3.md`
+
 GeoSpecCanonicalClaimReport (type) [10 members] — Full native assertion result with the exact core-owned bytes retained
   GeoSpecCanonicalClaimReport.canonicalClaim (property)
   GeoSpecCanonicalClaimReport.canonicalPlan (property)
@@ -829,9 +837,6 @@ GeoSpecNativeEngine (type) [2 members] — Byte-only engine surface consumed by 
   GeoSpecNativeEngine.evaluateClaim (method)
   GeoSpecNativeEngine.processRequest (method)
 GeoSpecNativeEvidenceProfile (type) — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-
-## Types (3) — `public-api-types-3.md`
-
 GeoSpecNativeSubject (type) [2 members] — Content-addressed subject accepted by a protocol-3 assertion plan
   GeoSpecNativeSubject.contentHash (property)
   GeoSpecNativeSubject.subjectHash (property)

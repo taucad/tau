@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 750 packages, with the license each declares.
+The web and desktop apps include the following 751 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -91,6 +91,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
 | [@date-fns/tz](https://github.com/date-fns/date-fns) | 1.5.0 | MIT |
 | [@dimforge/rapier3d-compat](https://github.com/dimforge/rapier.js) | 0.12.0 | Apache-2.0 |

@@ -1575,7 +1575,7 @@ export class ChatSessionStore {
     const session = this.#sessions.get(chatId);
     const projection = this.#projectionContext(chatId);
     if (session === undefined || projection === undefined || !selectCaughtUp(projection)) {
-      throw new Error('Wait for this chat to reconnect before steering.');
+      throw new Error('Wait for this chat to reconnect before sending.');
     }
     const run = selectCurrentRun(projection);
     await session.messageQueueStore.exclusive(async () =>
@@ -4023,7 +4023,13 @@ export class ChatSessionStore {
       (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
     ) {
       this.#remoteReadCompletedVersions.set(chatId, version);
+      const before = this.#projectionContext(chatId);
       this.#projectionOf(chatId).send({ type: 'remote', segments });
+      // A rescan that finds the same foreign history leaves the reducer unchanged, yet it is what makes the local
+      // log displayable again: a turn logged while it was out was held back, and nothing else would present it.
+      if (this.#projectionContext(chatId) === before) {
+        this.#syncProjection(chatId, 'none');
+      }
       const session = this.#sessions.get(chatId);
       if (session?.pendingSeedGesture !== undefined) {
         session.seedRemoteReadVersion = version;

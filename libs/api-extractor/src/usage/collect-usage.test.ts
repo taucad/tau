@@ -93,6 +93,8 @@ describe('collect-usage', () => {
       ['main.ts', "import Module from 'manifold-3d';", ['cad-manifold']],
       ['main.ts', "import init from 'libcascade';", ['cad-opencascadejs']],
       ['main.mjs', "import { Pico } from 'picovoxel';", ['cad-picovoxel']],
+      ['main.ts', "import { Box } from '@classcad/smlibwasm';", ['cad-smlib']],
+      ['main.ts', "import type { ShapeConfig } from '@taucad/smlib/model';", ['cad-smlib']],
       ['main.tsx', "import { Resistor } from '@tscircuit/core';", ['cad-tscircuit']],
       ['circuit.tsx', 'export default () => <board width="10mm" />;', ['cad-tscircuit']],
       ['main.ts', "import { x } from 'replicad';\nimport { y } from 'manifold-3d';", ['cad-manifold', 'cad-replicad']],

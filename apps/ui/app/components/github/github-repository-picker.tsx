@@ -866,7 +866,7 @@ function Picker<Item>({
         searchPlaceHolder={`Search ${label.toLowerCase()}…`}
         emptyListMessage={emptyListMessage ?? `No ${label.toLowerCase()} found`}
         withVirtualization={items.some((group) => group.items.length > 20)}
-        className='w-[min(28rem,calc(100vw-2rem))]'
+        className="data-[slot='popover-content']:w-[min(28rem,calc(100vw-2rem))]"
         onLoadMore={onLoadMore}
         isLoadingMore={isLoadingMore}
         onSelect={onSelect}

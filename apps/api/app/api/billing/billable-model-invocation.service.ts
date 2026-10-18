@@ -415,6 +415,7 @@ export class BillableModelInvocationService {
         row,
         generation,
         collector.failed(signal.aborted ? (intent.signal.aborted ? 'client_abort' : 'deadline') : 'malformed_response'),
+        intent.signal.aborted,
       );
       throw classified(
         new LlmGatewayError(
@@ -558,7 +559,7 @@ export class BillableModelInvocationService {
       resolveCompletion = resolve;
       rejectCompletion = reject;
     });
-    const finish = async (evidence: TerminalEvidence): Promise<void> => {
+    const finish = async (evidence: TerminalEvidence, clientLeft = false): Promise<void> => {
       if (done) {
         return;
       }
@@ -570,7 +571,7 @@ export class BillableModelInvocationService {
         evidence.kind === 'final_usage' ? '' : streamErrorType(evidence.normalizationEvidence?.terminalReason),
       );
       try {
-        await this.finish(qualification, row, generation, evidence);
+        await this.finish(qualification, row, generation, evidence, clientLeft);
         resolveCompletion();
       } catch (error) {
         rejectCompletion(error);
@@ -659,6 +660,7 @@ export class BillableModelInvocationService {
         controller.error(error);
         await finish(
           collector.failed(intent.signal.aborted ? 'client_abort' : signal.aborted ? 'deadline' : 'malformed_response'),
+          intent.signal.aborted,
         );
       }
     };
@@ -678,7 +680,7 @@ export class BillableModelInvocationService {
             requestDigest: row.requestDigest,
           });
         }
-        await finish(collector.failed('client_abort'));
+        await finish(collector.failed('client_abort'), true);
       },
     });
     return { body, completion };
@@ -690,6 +692,7 @@ export class BillableModelInvocationService {
     row: InvocationRow,
     generation: bigint,
     observed: TerminalEvidence,
+    clientLeft = false,
   ): Promise<void> {
     /* A stream the process cut because it is stopping (a deploy) is settled here, at
      * zero, rather than left pending for recovery: the supplier stream is severed, so
@@ -697,6 +700,10 @@ export class BillableModelInvocationService {
      * outcome only after `due_at` plus its grace, while an automatic retry of the step
      * waits on it. A person who leaves during the stop is counted the same way. */
     const cutByStop = observed.kind === 'absorbed_unknown' && this.shutdown?.signal.aborted === true;
+    /* A person who stopped the turn severed it the same way, and the chat's next step
+     * asks about this attempt before it starts: holding it until recovery paused that
+     * step for up to `due_at`. Its evidence keeps the client's own reason. */
+    const cutByClient = observed.kind === 'absorbed_unknown' && clientLeft;
     const evidence: TerminalEvidence = cutByStop
       ? {
           ...observed,
@@ -727,7 +734,7 @@ export class BillableModelInvocationService {
             ? 'none'
             : 'other',
     });
-    if (evidence.kind === 'absorbed_unknown' && !cutByStop) {
+    if (evidence.kind === 'absorbed_unknown' && !cutByStop && !cutByClient) {
       return;
     }
     const receipt = await this.ledger.terminalizeOperation({

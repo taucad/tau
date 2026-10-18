@@ -249,6 +249,57 @@ describe('createRuntimeAgentClients', () => {
     expect(result).not.toHaveProperty('tessellation');
   });
 
+  it('should summarize the default view mesh against the admission limits the host supplies', async () => {
+    const text = JSON.stringify({
+      nodes: [{ mesh: 0 }],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics are uppercase by specification.
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [{ componentType: 5126, type: 'VEC3', count: 3, min: [0, 0, 0], max: [0.02, 0.01, 0.03] }],
+    });
+    const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
+    const content = new Uint8Array(20 + json.byteLength);
+    const header = new DataView(content.buffer);
+    header.setUint32(0, 0x46_54_6c_67, true);
+    header.setUint32(4, 2, true);
+    header.setUint32(8, content.byteLength, true);
+    header.setUint32(12, json.byteLength, true);
+    header.setUint32(16, 0x4e_4f_53_4a, true);
+    content.set(json, 20);
+    const admissionLimits = vi.fn(async () => ({ maxTriangles: 4, maxVertices: 2, maxSubjectBytes: 64 }));
+    const fixture = runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content }) });
+    const clients = createRuntimeAgentClients({
+      runtime: fixture.runtime,
+      exportImage: async () => undefined,
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+      admissionLimits,
+    });
+
+    const result = await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    if (!result.success) {
+      expect.fail(result.message);
+    }
+
+    expect(result.status).toBe('ready');
+    expect(result.summary).toEqual({
+      bounds: { min: { x: 0, y: -30, z: 0 }, max: { x: 20, y: 0, z: 10 }, size: { x: 20, y: 30, z: 10 }, unit: 'mm' },
+      componentCount: 1,
+      triangles: 1,
+      vertices: 3,
+      admission: {
+        triangles: { estimated: 1, limit: 4 },
+        vertices: { estimated: 3, limit: 2 },
+        subjectBytes: { estimated: 72, limit: 64 },
+        warning: expect.stringContaining(
+          "the engine's admission limits (subject bytes about 72, limit 64; vertices about 3, limit 2).",
+        ) as string,
+      },
+    });
+    expect(admissionLimits).toHaveBeenCalledOnce();
+
+    const headerOnly = await clientsFor(runtimeFixture()).kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    expect(headerOnly).not.toHaveProperty('summary');
+  });
+
   it('should open every request-scoped document unwatched', async () => {
     const fixture = runtimeFixture();
     const clients = clientsFor(fixture);
@@ -488,11 +539,11 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     const cut = await clients.images.captureImages({
       targetFile: 'main.ts',
       mode: 'single',
-      section: { plane: 'xy', offsetMm: 6 },
+      section: { plane: 'xy', offset: 0.006 },
     });
 
     expect(plain).not.toHaveProperty('message');
-    expect(cut).toMatchObject({ success: true, message: 'Section xy: kept z ≤ 6 mm; the cut face is capped.' });
+    expect(cut).toMatchObject({ success: true, message: 'Section xy: kept z ≤ 0.006 m; the cut face is capped.' });
     const [plainJob, cutJob] = clients.exporter.mock.calls.map(([job]) => job);
     expect(plainJob?.exportOptions).not.toHaveProperty('sections');
     expect(cutJob?.exportOptions).toMatchObject({
@@ -510,12 +561,12 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     const result = await clients.images.captureImages({
       targetFile: 'main.ts',
       mode: 'single',
-      section: { plane: 'xy', offsetMm: 6 },
+      section: { plane: 'xy', offset: 0.006 },
     });
 
     expect(result.success).toBe(false);
     expect(result.success ? undefined : result.message).toContain(
-      'The xy section at 6 mm could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
+      'The xy section at 0.006 m could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
     );
   });
 
@@ -531,7 +582,7 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
       clients.images.captureImages({
         targetFile: 'drawing.ts',
         mode: 'single',
-        section: { plane: 'xz', offsetMm: 0 },
+        section: { plane: 'xz', offset: 0 },
       }),
     ).resolves.toEqual({
       success: false,

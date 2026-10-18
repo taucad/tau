@@ -95,11 +95,13 @@ export const writeSectionCapOutlineFaces = (
 
 /*
  * A fragment of a cut surface is on the outline when it lies on the kept side of a face's plane, within the line width
- * of it, and inside the face's bound. The width is the smaller of two measures: the screen gradient of the plane
- * distance, so the line is one width across on a surface at a shallow angle to the plane, and the world size of a
- * pixel at the fragment's depth, so a wall seen edge-on or at a silhouette, whose gradient is unbounded, draws one
- * width and not a smear. A surface lying in the plane (no gradient) draws no line. The section clip composes after the
- * clipping chunk and discards what the cuts remove.
+ * of it in screen pixels, and inside the face's bound. Its distance in pixels is the plane distance over the length of
+ * the distance's screen gradient, so the line is one width across at any angle, edge-on walls included. Coverage is the
+ * part of the pixel's footprint inside the width, so the line is antialiased like a model edge instead of cut off at
+ * whole pixels, which broke a thin line into dashes; the fragment blends at that coverage. A back face whose view ray
+ * crosses the plane before reaching it is a wall seen from inside, through the cut: it takes the depth of that
+ * crossing, so the line draws on the cap's rim instead of hiding behind the cap. A surface lying in the plane (no
+ * gradient) draws no line. The section clip composes after the clipping chunk and discards what the cuts remove.
  */
 const vertexShader = /* glsl */ `
 #include <common>
@@ -118,6 +120,7 @@ const fragmentShader = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
 #include <clipping_planes_pars_fragment>
+uniform mat4 projectionMatrix;
 uniform vec3 tauOutlineColor;
 uniform vec2 tauOutline;
 uniform vec4 tauOutlineEye;
@@ -131,33 +134,73 @@ void main() {
   vec3 tauDy = dFdy( vTauOutlineWorld );
   float tauPixelWorld = tauOutlineEye.w *
     ( tauOutlineForward.w > 0.5 ? 1.0 : dot( vTauOutlineWorld - tauOutlineEye.xyz, tauOutlineForward.xyz ) );
-  bool tauIsOutline = false;
+  bool tauIsOrthographic = tauOutlineForward.w > 0.5;
+  vec3 tauRay = tauIsOrthographic ? tauOutlineForward.xyz : vTauOutlineWorld - tauOutlineEye.xyz;
+  float tauCoverage = 0.0;
+  float tauCrossing = 0.0;
   for ( int i = 0; i < ${maxSectionCapOutlineFaces}; i ++ ) {
     if ( float( i ) >= tauOutline.x ) break;
     vec4 tauPlane = tauOutlinePlanes[ i ];
     vec4 tauBound = tauOutlineBounds[ i ];
-    float tauSlope = abs( dot( tauDx, tauPlane.xyz ) ) + abs( dot( tauDy, tauPlane.xyz ) );
+    float tauSlope = length( vec2( dot( tauDx, tauPlane.xyz ), dot( tauDy, tauPlane.xyz ) ) );
     float tauDistance = dot( vTauOutlineWorld, tauPlane.xyz ) - tauPlane.w;
     if ( tauSlope > tauPixelWorld * 0.02 && tauDistance <= 0.0 &&
-      tauDistance > - min( tauSlope, tauPixelWorld ) * tauOutline.y &&
       dot( vTauOutlineWorld, tauBound.xyz ) - tauBound.w >= 0.0 ) {
-      tauIsOutline = true;
-      break;
+      float tauPixels = -tauDistance / tauSlope;
+      float tauFaceCoverage = clamp( min( tauPixels + 0.5, tauOutline.y ) - max( tauPixels - 0.5, 0.0 ), 0.0, 1.0 );
+      if ( tauFaceCoverage > 0.0 ) {
+        tauCoverage = max( tauCoverage, tauFaceCoverage );
+        float tauAlong = dot( tauRay, tauPlane.xyz );
+        if ( ! gl_FrontFacing && tauAlong < 0.0 ) tauCrossing = min( tauCrossing, -tauDistance / tauAlong );
+      }
     }
   }
-  if ( ! tauIsOutline ) discard;
+  if ( tauCoverage <= 0.0 ) discard;
   #include <logdepthbuf_fragment>
-  gl_FragColor = vec4( tauOutlineColor, 1.0 );
+  #if defined( USE_LOGARITHMIC_DEPTH_BUFFER )
+  float tauDepth = gl_FragDepth;
+  #else
+  float tauDepth = gl_FragCoord.z;
+  #endif
+  if ( tauCrossing < 0.0 ) {
+    vec4 tauView = viewMatrix * vec4( vTauOutlineWorld + tauCrossing * tauRay, 1.0 );
+    #if defined( USE_LOGARITHMIC_DEPTH_BUFFER )
+    if ( ! tauIsOrthographic ) {
+      tauDepth = log2( 1.0 - tauView.z ) * logDepthBufFC * 0.5;
+    } else
+    #endif
+    {
+      vec4 tauClip = projectionMatrix * tauView;
+      tauDepth = tauClip.z / tauClip.w * 0.5 + 0.5;
+    }
+  }
+  gl_FragDepth = tauDepth;
+  gl_FragColor = vec4( tauOutlineColor, tauCoverage );
   #include <colorspace_fragment>
 }`;
+
+/**
+ * Straight-alpha blending that both backends apply to a material outside the transparent pass, which normal blending
+ * is not: the outline must keep its place after the caps in the one cap render.
+ */
+export const sectionCapOutlineBlending = {
+  transparent: false,
+  blending: THREE.CustomBlending,
+  blendEquation: THREE.AddEquation,
+  blendSrc: THREE.SrcAlphaFactor,
+  blendDst: THREE.OneMinusSrcAlphaFactor,
+  blendEquationAlpha: THREE.AddEquation,
+  blendSrcAlpha: THREE.OneFactor,
+  blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+} as const;
 
 export type SectionCapOutlineMaterial = THREE.ShaderMaterial & {
   uniforms: { tauOutlineColor: { value: THREE.Color } };
 };
 
 /**
- * The WebGL cap outline in one colour, drawn over the cut model's own surfaces at their geometric depth: opaque,
- * depth-tested, never writing depth.
+ * The WebGL cap outline in one colour, drawn over the cut model's own surfaces at their geometric depth: depth-tested,
+ * never writing depth, and blended at its coverage while staying in the opaque pass, after the caps.
  */
 export const createSectionCapOutlineMaterial = (
   faces: SectionCapOutlineFaces,
@@ -176,7 +219,7 @@ export const createSectionCapOutlineMaterial = (
     vertexShader,
     fragmentShader,
     side: THREE.DoubleSide,
-    transparent: false,
+    ...sectionCapOutlineBlending,
     depthTest: true,
     depthWrite: false,
     toneMapped: false,

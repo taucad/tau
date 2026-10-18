@@ -22,6 +22,7 @@ import { picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { smlib } from '@taucad/smlib';
 import { slicer } from '@taucad/slicer';
 import { tscircuit } from '@taucad/tscircuit';
 import { zoo } from '@taucad/zoo';
@@ -106,6 +107,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
           // Kernels run in Node utility processes, where shared WebAssembly memory is available, so 'auto'
           // serves the fast lane multi-threaded.
           picovoxel(),
+          smlib(),
           gltf(),
           brep(),
           rhino(),

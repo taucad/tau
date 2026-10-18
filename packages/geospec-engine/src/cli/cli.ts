@@ -270,7 +270,11 @@ export const formatRunReport = (result: GeoSpecRunnerResult): string[] => {
   for (const issue of result.issues ?? []) {
     lines.push(`${issue.code}: ${issue.message}`);
   }
-  lines.push(`${result.passed} passed, ${result.failed} failed, ${result.selectedTests} selected`);
+  // An inconclusive test is neither passed nor failed, so the totals name it.
+  const inconclusive = result.accounting?.inconclusive ?? 0;
+  lines.push(
+    `${result.passed} passed, ${result.failed} failed, ${result.selectedTests} selected${inconclusive === 0 ? '' : `, ${inconclusive} inconclusive`}`,
+  );
   return lines;
 };
 

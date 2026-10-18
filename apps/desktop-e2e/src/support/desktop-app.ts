@@ -716,6 +716,11 @@ export const launchDesktopApp = async (options: {
       ].join('\n'),
       'utf8',
     );
+    /* The durable chat logs at the moment of failure: what the agent host wrote is
+     * the only account of a turn the renderer did not show. */
+    const failureChatLogs = join(directory, 'chat-logs');
+    await captureChatLogs(userData, failureChatLogs).catch(() => []);
+    await captureChatLogs(pickedParent, failureChatLogs).catch(() => []);
     // Main observation is best-effort and never delays the original renderer failure or trace collection.
     const navigationPath = join(directory, 'main-navigation.json');
     await writeFile(

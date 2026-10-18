@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-13'
+updated: '2026-10-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -199,6 +199,7 @@ With the single-worker-per-geometry-unit architecture, only the backend for the 
 - manifold file: ~14 MB (Manifold WASM)
 - openrscad file: ~14 MB (Manifold WASM)
 - jscad file: ~5 MB
+- smlib file: ~6.5 MB (SMLib NURBS WASM from `@classcad/smlibwasm`, loaded by the library's own Emscripten glue; selected only for files importing `@classcad/smlibwasm`)
 - kcl file: ~3 MB (KCL WASM)
 - STEP/STL/3DM/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/rhino`, `@taucad/gltf` after the converter dissolution)
 
@@ -378,7 +379,7 @@ Hard `terminate()` and non-draining `shutdown()` reject pending work and close t
 2. Pass 1: Extension + regex fast path
    - Try each kernel config's detectImport regex against the entry path
    - Extension-only kernels (openrscad, zoo) match immediately
-   - Regex kernels (replicad, manifold, jscad) test entry path content
+   - Regex kernels (replicad, manifold, jscad, picovoxel, smlib) test entry path content
 
 3. Pass 2: Bundler-assisted detection (transitive)
    - If no kernel matched AND a bundler handles this file's extension:

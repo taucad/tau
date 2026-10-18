@@ -7,7 +7,15 @@ import type { CodeLanguage } from '#types/code.types.js';
 export type KernelDimensions = 2 | 3;
 
 /** @public */
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d' | 'picogk' | 'tscircuit';
+export type KernelBackend =
+  | 'manifold'
+  | 'opencascade'
+  | 'zoo'
+  | 'jscad'
+  | 'build123d'
+  | 'picogk'
+  | 'smlib'
+  | 'tscircuit';
 
 /**
  * The package ecosystem a kernel's projects belong to, which picks the project files Tau writes at creation:
@@ -274,6 +282,27 @@ export default function main(p = defaultParams) {}
       'Advanced boolean operations',
       'Precise tolerancing',
     ],
+  },
+  {
+    id: 'smlib',
+    name: 'SMLib',
+    dimensions: [2, 3],
+    language: 'typescript',
+    ecosystem: 'npm',
+    description: 'TypeScript NURBS CAD with a build123d-style API',
+    mainFile: 'main.ts',
+    backendProvider: 'smlib',
+    longDescription:
+      "The SMLib NURBS kernel compiled to WebAssembly by ClassCAD's smlibwasm: smlibpy's build123d-style modeling API in TypeScript. Build exact B-rep parts with sketches, extrusions, fillets and booleans in the browser, the desktop app or the CLI, and export STEP, STL and glTF.",
+    emptyCode: `import {} from '@classcad/smlibwasm';
+
+export const defaultParams = {};
+
+export default function main(p = defaultParams) {}
+`,
+    recommended: 'NURBS Modeling in TypeScript',
+    tags: ['TypeScript', 'SMLib', 'NURBS', 'Boundary Representation', 'Exact Geometry'],
+    features: ['build123d-style API', 'Exact NURBS geometry', 'STEP export', 'Interactive parameters'],
   },
   {
     id: 'tscircuit',

@@ -5,14 +5,16 @@ import kinematicsTypes from '#generated/kinematics/kinematics.bundled.json' with
 import picovoxelTypes from '#generated/picovoxel/picovoxel.bundled.json' with { type: 'json' };
 import replicadTypes from '#generated/replicad/replicad.bundled.json' with { type: 'json' };
 import replicadModelTypes from '#generated/replicad/model.bundled.json' with { type: 'json' };
+import smlibTypes from '#generated/smlib/smlib.bundled.json' with { type: 'json' };
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 import { buildKinematicsTypeBundle } from '#extract-kinematics-types.js';
 
 /** Check consumer diagnostics against mounted bundles; dependency declarations have their own extraction gates. */
-const checkAuthoredModule = (source: string, kernel?: 'picovoxel' | 'replicad'): readonly string[] => {
+const checkAuthoredModule = (source: string, kernel?: 'picovoxel' | 'replicad' | 'smlib'): readonly string[] => {
   const bundle: BundledTypesPackageMap = {
     ...kinematicsTypes,
     ...(kernel === 'picovoxel' ? picovoxelTypes : {}),
+    ...(kernel === 'smlib' ? smlibTypes : {}),
     ...(kernel === 'replicad' ? { ...replicadModelTypes, replicad: { content: replicadTypes.replicad } } : {}),
   };
   const files = new Map<string, string>([['/project/main.ts', source]]);
@@ -78,7 +80,7 @@ describe('kinematics authoring type extraction', () => {
     expect(diagnostics).toStrictEqual([]);
   }, 20_000);
 
-  it.each(['picovoxel', 'replicad'] as const)(
+  it.each(['picovoxel', 'replicad', 'smlib'] as const)(
     'should compile the complete %s skill mechanism against mounted declarations',
     (kernel) => {
       const reference = readFileSync(

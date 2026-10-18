@@ -8,7 +8,7 @@ import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import { loadCliRuntime } from '#runtime-options.js';
 import { nativeKernelFor } from '#native-kernels.js';
-import { findProjectRoot } from '#project-root.js';
+import { resolveProjectRoot } from '#project-root.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
@@ -177,7 +177,7 @@ export const exportCommand = defineCommand({
 
     // The project is rooted at the nearest `tau.json`, as `tau check` roots it, so a sibling import above the model's
     // folder resolves (S11 F2). Plugins still load from the invoking project.
-    const projectRoot = findProjectRoot(inputPath);
+    const { root: projectRoot } = resolveProjectRoot({ file: inputPath, cwd: process.cwd() });
     const sourcePath = relative(projectRoot, inputPath).split(sep).join('/');
     // The native kernel for this input, from the payload store's receipts; nothing is downloaded.
     const native = await nativeKernelFor(extname(inputPath).slice(1));

@@ -236,7 +236,9 @@ function Folder({
             : (closeIcon ?? <FolderIcon className='size-4 shrink-0 text-muted-foreground' />)}
           <span className='truncate text-muted-foreground group-hover:text-foreground'>{element}</span>
         </AccordionPrimitive.Trigger>
-        <span className='text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground'>{actions}</span>
+        <span className='text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground pointer-coarse:opacity-100'>
+          {actions}
+        </span>
       </div>
       <AccordionPrimitive.Content className='relative h-full overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down'>
         {element && indicator ? <TreeIndicator aria-hidden='true' /> : undefined}
@@ -308,7 +310,9 @@ function File({
         {fileIcon ?? <FileExtensionIcon filename={filename} className='size-4 shrink-0' />}
         <span className='truncate text-muted-foreground group-hover:text-foreground'>{children}</span>
       </button>
-      <span className='text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground'>{actions}</span>
+      <span className='text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground pointer-coarse:opacity-100'>
+        {actions}
+      </span>
     </div>
   );
 }

@@ -545,13 +545,17 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
             const compact = oversized
               ? {
                   ...summary,
-                  failures: failures.slice(0, 20).map(({ id, requirement, reason, suggestion, targetFile }) => ({
-                    id: id.slice(0, 512),
-                    requirement: requirement.slice(0, 512),
-                    reason: reason.slice(0, 512),
-                    suggestion: suggestion.slice(0, 512),
-                    targetFile,
-                  })),
+                  failures: failures
+                    .slice(0, 20)
+                    .map(({ id, requirement, reason, suggestion, category, limit, targetFile }) => ({
+                      id: id.slice(0, 512),
+                      requirement: requirement.slice(0, 512),
+                      reason: reason.slice(0, 512),
+                      suggestion: suggestion.slice(0, 512),
+                      ...(category === undefined ? {} : { category }),
+                      ...(limit === undefined ? {} : { limit }),
+                      targetFile,
+                    })),
                   passes: [],
                   omittedFailures: failures.length - Math.min(failures.length, 20),
                   omittedPasses: passes.length,

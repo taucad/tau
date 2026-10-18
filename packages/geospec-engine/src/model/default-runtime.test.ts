@@ -14,6 +14,7 @@ describe('default runtime', () => {
       'jscad',
       'manifold',
       'picovoxel',
+      'smlib',
       'gltf',
       'brep',
       'rhino',

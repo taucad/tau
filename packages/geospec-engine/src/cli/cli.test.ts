@@ -317,6 +317,35 @@ describe('formatRunReport', () => {
       '1 passed, 2 failed, 3 selected',
     ]);
   });
+
+  it('should name the inconclusive tests from the accounting, since they are neither passed nor failed', () => {
+    const lines = formatRunReport({
+      success: false,
+      passed: 0,
+      failed: 0,
+      selectedTests: 4,
+      files: [],
+      accounting: {
+        discovered: 4,
+        selected: 4,
+        completed: 4,
+        passed: 0,
+        failed: 0,
+        unsupported: 0,
+        inconclusive: 4,
+        skipped: 0,
+        notRun: 0,
+        requestedFiles: ['a.geospec.ts'],
+        completedFiles: ['a.geospec.ts'],
+        notRunFiles: [],
+        discoveryComplete: true,
+        cancelled: false,
+        bailed: false,
+      },
+    });
+
+    expect(lines).toStrictEqual(['0 passed, 0 failed, 4 selected, 4 inconclusive']);
+  });
 });
 
 describe('runReportJson', () => {

@@ -24,6 +24,7 @@ const skillSlugs = [
   'cad-openscad',
   'cad-picovoxel',
   'cad-replicad',
+  'cad-smlib',
   'cad-tscircuit',
   'geospec-authoring',
   'tau',

@@ -815,6 +815,32 @@ describe('serializeMessage', () => {
       );
     });
 
+    it.each<[string, NonNullable<EvaluateModelOutput['mechanism']>, string]>([
+      [
+        'an admitted mechanism',
+        { declared: true, admitted: true, links: 6, joints: 5, couplings: 4, animations: ['four-sun-turns'] },
+        'Mechanism: 6 links, 5 joints, 4 couplings, animations four-sun-turns',
+      ],
+      [
+        'a dropped mechanism',
+        { declared: true, admitted: false, links: 0, joints: 0, couplings: 0, animations: [] },
+        'Mechanism: declared, not admitted',
+      ],
+    ])('serializes the evaluate_model mechanism of %s', (_case, mechanism, line) => {
+      const message = baseMessage([
+        {
+          type: 'tool-evaluate_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready', mechanism },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        `<tool_call name="evaluate_model">\ntargetFile: main.ts\n</tool_call>\n<tool_result>\nStatus: ready\n${line}\n</tool_result>`,
+      );
+    });
+
     it('serializes tool in input-available state as Pending', () => {
       const message = baseMessage([
         {

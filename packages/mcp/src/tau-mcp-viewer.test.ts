@@ -184,6 +184,28 @@ describe('Tau MCP viewer', () => {
     await client.close();
   });
 
+  it('should say in the text what the shown GLB carries of a mechanism', async () => {
+    const viewer = createViewer();
+    vi.mocked(viewer.show)
+      .mockResolvedValueOnce({ model, mechanism: { preserved: true, joints: 5, animations: ['four-sun-turns'] } })
+      .mockResolvedValueOnce({ model, mechanism: { preserved: false, joints: 0, animations: [] } });
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const kept = await client.callTool({ name: 'show_model', arguments: {} });
+    const lost = await client.callTool({ name: 'show_model', arguments: {} });
+
+    expect(kept.content).toEqual([
+      {
+        type: 'text',
+        text: 'Showing src/bracket.ts in the Tau viewer.\nMechanism: 5 joints, animations four-sun-turns.',
+      },
+    ]);
+    expect(lost.content).toEqual([
+      { type: 'text', text: 'Showing src/bracket.ts in the Tau viewer.\nThis GLB carries no mechanism.' },
+    ]);
+    await client.close();
+  });
+
   it('should treat the Codex CLI as a text host', async () => {
     const client = await connect(clients.codexCli);
 

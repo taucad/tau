@@ -84,6 +84,29 @@ export const modelSummarySchema = z
   );
 
 /** @public */
+export const modelMechanismSchema = z
+  .object({
+    declared: z.boolean().describe('The source exports a mechanism.'),
+    admitted: z
+      .boolean()
+      .describe("It was admitted against the delivered parts, so the default view's GLB carries it."),
+    links: count,
+    joints: count,
+    couplings: count,
+    animations: z.array(z.string()).describe('Animation ids, in authored order.'),
+    issues: z
+      .array(z.object({ code: z.string(), path: z.string() }).strict())
+      .optional()
+      .describe(
+        'Each mechanism diagnostic once, by code and its path in the mechanism; kernelIssues gives the message.',
+      ),
+  })
+  .strict()
+  .describe(
+    "The source's mechanism as the default view delivers it. Present when that view carries Tau topology or a mechanism diagnostic was reported.",
+  );
+
+/** @public */
 export const evaluateModelOutputSchema = z.object({
   status: z.enum(['ready', 'error']).describe('The current status of the model evaluation and default view.'),
   kernelIssues: z.array(kernelIssueSchema).optional().describe('Issues encountered during evaluation or rendering.'),
@@ -94,6 +117,7 @@ export const evaluateModelOutputSchema = z.object({
   exports: z.record(z.string(), z.string()).optional().describe('Export ID to extension; present when ready.'),
   tessellation: tessellationReportSchema.optional(),
   summary: modelSummarySchema.optional(),
+  mechanism: modelMechanismSchema.optional(),
   capabilities: z
     .object({
       views: z.record(z.string(), optionMetadataSchema),
@@ -112,3 +136,6 @@ export type EvaluateModelOutput = z.infer<typeof evaluateModelOutputSchema>;
 
 /** @public */
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
+
+/** @public */
+export type ModelMechanism = z.infer<typeof modelMechanismSchema>;

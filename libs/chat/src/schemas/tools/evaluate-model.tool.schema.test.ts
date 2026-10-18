@@ -133,3 +133,44 @@ describe('evaluateModelOutputSchema summary', () => {
     }
   });
 });
+
+describe('evaluateModelOutputSchema mechanism', () => {
+  const mechanism = {
+    declared: true,
+    admitted: true,
+    links: 6,
+    joints: 5,
+    couplings: 4,
+    animations: ['four-sun-turns'],
+  };
+
+  it('should keep the declared and admitted mechanism and its diagnostics', () => {
+    const dropped = {
+      ...mechanism,
+      admitted: false,
+      links: 0,
+      joints: 0,
+      couplings: 0,
+      animations: [],
+      issues: [{ code: 'UNKNOWN_JOINT', path: '/couplings/0/joint' }],
+    };
+
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', mechanism })).toEqual({ status: 'ready', mechanism });
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', mechanism: dropped })).toEqual({
+      status: 'ready',
+      mechanism: dropped,
+    });
+  });
+
+  it('should refuse a mechanism with a count it cannot hold or a field it does not name', () => {
+    for (const refused of [
+      { ...mechanism, joints: -1 },
+      { ...mechanism, links: 1.5 },
+      { ...mechanism, loaded: true },
+      { ...mechanism, issues: [{ path: '' }] },
+      { ...mechanism, issues: [{ code: 'UNKNOWN_JOINT', path: '', message: 'In kernelIssues.' }] },
+    ]) {
+      expect(evaluateModelOutputSchema.safeParse({ status: 'ready', mechanism: refused }).success).toBe(false);
+    }
+  });
+});

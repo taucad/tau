@@ -309,8 +309,19 @@ const describeView = (view: TauViewerViewState): string =>
     `Section view ${view.sectionActive ? 'on' : 'off'}; ${String(view.measurementCount)} measurements.`,
   ].join('\n');
 
+/**
+ * What the shown GLB carries of a mechanism, as the model reads it; the structured result carries the same facts.
+ *
+ * @param mechanism - The show result's mechanism facts.
+ * @returns One sentence.
+ */
+const describeMechanism = (mechanism: NonNullable<TauViewerShowResult['mechanism']>): string =>
+  mechanism.preserved
+    ? `Mechanism: ${String(mechanism.joints)} joints${mechanism.animations.length > 0 ? `, animations ${mechanism.animations.join(', ')}` : ''}.`
+    : 'This GLB carries no mechanism.';
+
 const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation): CallToolResult => {
-  const { model, viewerUrl } = result;
+  const { model, viewerUrl, mechanism } = result;
   const name = model.sourceFile ?? model.path;
   const text =
     presentation === 'text'
@@ -318,7 +329,10 @@ const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation)
         ? `Rendered ${name} for the Tau viewer, but this session runs no viewer page. Use screenshot to look at it.`
         : `Open ${name} in the Tau viewer: ${viewerUrl}`
       : `Showing ${name} in the Tau viewer.`;
-  return { content: [{ type: 'text', text }], structuredContent: result };
+  return {
+    content: [{ type: 'text', text: mechanism === undefined ? text : `${text}\n${describeMechanism(mechanism)}` }],
+    structuredContent: result,
+  };
 };
 
 /**

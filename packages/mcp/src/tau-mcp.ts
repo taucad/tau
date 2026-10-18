@@ -25,7 +25,7 @@ import {
   screenshotInputSchema,
   screenshotMcpOutputSchema,
 } from '@taucad/chat/schemas/tools/screenshot';
-import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
+import { tauLaunchSchema, testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../package.json' with { type: 'json' };
 import { registerTauMcpViewer } from '#tau-mcp-viewer.js';
@@ -118,32 +118,27 @@ const serverVersion = (): string => {
 };
 
 /**
- * Which Tau CLI the agent plugin's launcher started, and why: the `TAU_LAUNCH` JSON the launcher hands the CLI
- * (agent plugin install hardening, section 4.3). `tau mcp` names it in its `initialize` instructions.
- */
-const tauLaunchSchema = z.object({
-  source: z
-    .enum(['explicit', 'workspace', 'installed', 'npx'])
-    .describe('TAU_CLI (explicit), a checkout build (workspace), a tau on PATH (installed), or npx'),
-  path: z.string().min(1).max(4096).optional().describe('The tau the launcher ran, for explicit and installed'),
-  cli: z.string().min(1).max(64).optional().describe('That CLI version, when known'),
-  plugin: z.string().min(1).max(64).describe('The agent plugin version'),
-  node: z.string().min(1).max(64).describe('The Node.js version running the launcher'),
-  skipped: z
-    .array(
-      z.object({
-        path: z.string().min(1).max(4096),
-        /* What a passed-over tau printed, which the launcher keeps up to 128 bytes of; it need not be a version. */
-        version: z.string().min(1).max(128).optional(),
-      }),
-    )
-    .describe('Installed tau executables passed over, with what each printed for --version'),
-});
-/**
- * Inferred launcher descriptor.
+ * Which Tau CLI the agent plugin's launcher started, and why: the `TAU_LAUNCH` descriptor (agent plugin install
+ * hardening, section 4.3). The same shape as `@taucad/chat`'s `tauLaunchSchema`, declared here because a published
+ * declaration cannot name a private library; {@link parseTauMcpLaunch} and the `test_model` runtime check the two
+ * agree.
+ *
  * @public
  */
-export type TauLaunch = z.infer<typeof tauLaunchSchema>;
+export type TauLaunch = {
+  /** `TAU_CLI` (explicit), a checkout build (workspace), a tau on PATH (installed), or npx. */
+  source: 'explicit' | 'workspace' | 'installed' | 'npx';
+  /** The tau the launcher ran, for explicit and installed. */
+  path?: string | undefined;
+  /** That CLI version, when known. */
+  cli?: string | undefined;
+  /** The agent plugin version. */
+  plugin: string;
+  /** The Node.js version running the launcher. */
+  node: string;
+  /** Installed tau executables passed over, with what each printed for `--version`. */
+  skipped: Array<{ path: string; version?: string | undefined }>;
+};
 
 /** Which CLI serves, and how it was started: the identity `initialize` names (INS-2). @public */
 export type TauMcpRuntime = Readonly<{
@@ -241,7 +236,7 @@ export type TauMcpDispatchOptions = {
    */
   confirm?: TauMcpConfirm | undefined;
   /**
-   * Report progress on this call as `notifications/progress`. Present only on a host tool's call whose client sent a
+   * Report progress on this call as `notifications/progress`. Present only on a call whose client sent a
    * `progressToken`; best-effort, since a client may drop a report that races the result, and it never rejects.
    * `progress` must increase with every report.
    */
@@ -435,6 +430,8 @@ export type TauMcpCall = {
   toolCallId: string;
   signal?: AbortSignal;
   meta?: Readonly<Record<string, unknown>> | undefined;
+  /** Reports the call's progress, when its client sent a `progressToken`. */
+  progress?: TauMcpProgress | undefined;
 };
 
 /** MCP adapter backed by a browser or headless Tau RPC authority. @public */
@@ -579,7 +576,12 @@ export const createTauMcpAdapter = (
 ): TauMcpAdapter => ({
   async call(input) {
     input.signal?.throwIfAborted();
-    const dispatchOptions = { toolCallId: input.toolCallId, signal: input.signal, meta: input.meta };
+    const dispatchOptions = {
+      toolCallId: input.toolCallId,
+      signal: input.signal,
+      meta: input.meta,
+      progress: input.progress,
+    };
 
     switch (input.name) {
       case toolName.evaluateModel: {
@@ -739,7 +741,13 @@ const progressFor = (
   if (progressToken === undefined) {
     return undefined;
   }
+  /* `progress` must rise with every notification; a report that does not is dropped. */
+  let last: number | undefined;
   return async ({ progress, total, message }) => {
+    if (last !== undefined && progress <= last) {
+      return;
+    }
+    last = progress;
     try {
       await extra.sendNotification({
         method: 'notifications/progress',
@@ -785,7 +793,14 @@ const registerTools = (
         _meta: alwaysLoad,
       },
       async (args, extra) =>
-        adapter.call({ name, arguments: args, toolCallId: randomUUID(), signal: extra.signal, meta: extra._meta }),
+        adapter.call({
+          name,
+          arguments: args,
+          toolCallId: randomUUID(),
+          signal: extra.signal,
+          meta: extra._meta,
+          progress: progressFor(extra),
+        }),
     );
   }
   for (const { tool, inputSchema } of hostTools) {

@@ -814,6 +814,51 @@ describe('progress on a host tool (D7)', () => {
     expect(result.structuredContent).toEqual({ status: 'ready' });
   });
 
+  it('should send a CAD tool’s reports as notifications/progress too (VER-3)', async () => {
+    const client = await connect({
+      dispatch: async (_call, options) => {
+        await options.progress?.({ progress: 0, message: 'Running 1 GeoSpec file' });
+        await options.progress?.({ progress: 1, message: 'cube > is 20 mm wide (cube.geospec.ts)' });
+        return { success: true, failures: [], passes: [], passed: 0, total: 0 };
+      },
+    });
+    const heard: Array<{ progress: number; total?: number; message?: string }> = [];
+    try {
+      await client.callTool({ name: toolName.testModel, arguments: {} }, undefined, {
+        onprogress: (report) => heard.push(report),
+      });
+    } finally {
+      await client.close();
+    }
+
+    expect(heard).toEqual([
+      { progress: 0, message: 'Running 1 GeoSpec file' },
+      { progress: 1, message: 'cube > is 20 mm wide (cube.geospec.ts)' },
+    ]);
+  });
+
+  it('should drop a report whose progress does not rise', async () => {
+    const client = await connect({
+      dispatch: async (_call, options) => {
+        for (const progress of [0, 2, 2, 1, 3]) {
+          // oxlint-disable-next-line no-await-in-loop -- reports go out in order.
+          await options.progress?.({ progress });
+        }
+        return { success: true, failures: [], passes: [], passed: 0, total: 0 };
+      },
+    });
+    const heard: number[] = [];
+    try {
+      await client.callTool({ name: toolName.testModel, arguments: {} }, undefined, {
+        onprogress: (report) => heard.push(report.progress),
+      });
+    } finally {
+      await client.close();
+    }
+
+    expect(heard).toEqual([0, 2, 3]);
+  });
+
   it('should give the dispatch no reporter when the client sent no progressToken', async () => {
     const { heard, offered } = await callWithProgress(false);
 

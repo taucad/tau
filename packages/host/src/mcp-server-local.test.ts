@@ -255,6 +255,48 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
+  it('should name the engine and the runtime on every GeoSpec report, shortened or not (VER-3)', async () => {
+    const engine = {
+      name: 'geospec-engine',
+      version: '0.2.0',
+      protocol: 3,
+      numericProfile: 'geospec-demand-v6',
+      qualification: 'experimental',
+    };
+    const runtime: TauMcpServerOptions['runtime'] = {
+      version: '0.1.0-beta.7',
+      launch: {
+        source: 'installed',
+        path: '/opt/homebrew/bin/tau',
+        plugin: '0.1.0-beta.7',
+        node: '24.20.0',
+        skipped: [],
+      },
+    };
+    for (const reason of ['Too small', 'x'.repeat(140_000)]) {
+      const verdict = {
+        failures: [
+          { id: 'main.geospec.ts:size', requirement: 'Size', reason, suggestion: 'Fix', targetFile: 'main.ts' },
+        ],
+        passes: [],
+        passed: 0,
+        total: 1,
+        engine,
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one server per report size.
+      const { dispatch, local } = await serve({ content: { success: true, ...verdict }, isError: false }, { runtime });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        const result = await dispatch({ rpcName: rpcName.runGeoSpecTests, args: {} }, { toolCallId: 'tests' });
+
+        expect(result).toMatchObject({ success: true, engine, runtime });
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await local.close();
+      }
+    }
+  });
+
   it('should serve the viewer only with a page, rendering a shown source through export_model', async () => {
     const { local: withoutPage } = await serve(ready);
     expect(served.options?.viewer).toBeUndefined();

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -292,6 +292,75 @@ describe('native host GeoSpec composition', () => {
       expect(native.runner.mock.calls[0]?.[0].model?.runtime).toBe(client);
       expect(sdkRunner.run).toHaveBeenCalledExactlyOnceWith({ files: ['cube.geospec.ts'] });
       expect(sdkRunner.close).toHaveBeenCalledOnce();
+    });
+
+    it('should name its native engine and report progress as each test starts (VER-3)', async () => {
+      const createHostToolRegistry = await freshRegistry();
+      const workspaceRoot = await project('identity');
+      await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
+      const base = native.engine.getMockImplementation();
+      const answer = {
+        requestId: 'configuration',
+        result: { protocolVersion: 3, numericProfile: 'geospec-demand-v6', qualification: 'experimental' },
+      };
+      native.engine.mockImplementation(function () {
+        return { ...base!(), processRequest: vi.fn(() => new TextEncoder().encode(JSON.stringify(answer))) };
+      });
+      const listeners = new Map<string, (event: unknown) => void>();
+      const sdkRunner = mock<GeoSpecRunner>();
+      sdkRunner.on.mockImplementation(((type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+        return () => undefined;
+      }) as GeoSpecRunner['on']);
+      sdkRunner.run.mockImplementation(async ({ files }) => {
+        listeners.get('run-start')?.({ type: 'run-start', files });
+        for (const name of ['is 20 mm wide', 'is watertight']) {
+          listeners.get('test-start')?.({
+            type: 'test-start',
+            file: 'cube.geospec.ts',
+            test: { suite: ['cube'], name },
+          });
+        }
+        return { success: true, passed: 0, failed: 0, selectedTests: 0, files: [], issues: [] };
+      });
+      native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+      native.runner.mockReturnValue(sdkRunner);
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const updates: unknown[] = [];
+      try {
+        const registry = createHostToolRegistry({
+          workspaceRoot,
+          runtimeClient: async () => mock<HostRuntimeClient>(),
+        });
+        const result = await registry.invoke({
+          toolCallId: 'test-model',
+          toolName: 'test_model',
+          input: {},
+          signal: new AbortController().signal,
+          onUpdate: ({ content }) => updates.push(content),
+        });
+
+        const manifest = JSON.parse(
+          await readFile(new URL(import.meta.resolve('geospec-engine/package.json')), 'utf8'),
+        ) as { version: string };
+        expect(result.content).toMatchObject({
+          engine: {
+            name: 'geospec-engine',
+            version: manifest.version,
+            protocol: 3,
+            numericProfile: 'geospec-demand-v6',
+            qualification: 'experimental',
+          },
+        });
+        expect(updates).toEqual([
+          { progress: 0, message: 'Running 1 GeoSpec file' },
+          { progress: 1, message: 'cube > is 20 mm wide (cube.geospec.ts)' },
+          { progress: 2, message: 'cube > is watertight (cube.geospec.ts)' },
+        ]);
+      } finally {
+        warning.mockRestore();
+        native.engine.mockImplementation(base!);
+      }
     });
 
     it('should not offer test_model without an attached runtime', async () => {

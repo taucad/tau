@@ -39,6 +39,7 @@
 // EVAL(project-root-reported): pending benchmark-2026-10-17 — tau mcp CAD results carry projectRoot; a loadModel file the root lacks refuses as GEOSPEC_MODEL_SOURCE_NOT_FOUND naming the root and rootDir. Validates the agent fixes the suite's path or passes rootDir instead of editing the model or its export route.
 // EVAL(evaluate-model-summary): pending benchmark-2026-10-17 — evaluate_model returns summary { bounds, componentCount, triangles, vertices, admission }. Validates the agent checks size and part count before writing GeoSpec and reports an over-admission load as not decided rather than shrinking the model.
 // EVAL(mcp-identity-sentence): pending benchmark-2026-10-18 — tau mcp's initialize instructions end with one sentence naming the serving CLI, its launcher rung, the plugin and Node.js versions and the server version (INS-2). Validates the agent names the CLI and rung when asked what serves it, and reads the sentence as proof the chat has the Tau tools rather than searching for them.
+// EVAL(test-model-identity-progress): pending benchmark-2026-10-18 — test_model results carry engine { name, version, protocol, numericProfile, qualification } and, over tau mcp, runtime { version, launch? }; tau mcp sends notifications/progress as the run and each test start. Validates the agent reports which engine and CLI decided a verdict and waits on a long run instead of re-calling test_model.
 
 import { toolName } from '#constants/index.js';
 import type { ChatMode } from '#constants/index.js';

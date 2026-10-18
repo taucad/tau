@@ -373,6 +373,52 @@ export const testModelResultArtifactSchema = z
   .strict();
 
 /**
+ * Which Tau CLI the agent plugin's launcher started, and why: the `TAU_LAUNCH` JSON the launcher hands the CLI
+ * (agent plugin install hardening, section 4.3). `tau mcp` names it in its `initialize` instructions and every
+ * `test_model` result carries it; `@taucad/mcp` declares the same shape as its public `TauLaunch`.
+ *
+ * @public
+ */
+export const tauLaunchSchema = z.object({
+  source: z
+    .enum(['explicit', 'workspace', 'installed', 'npx'])
+    .describe('TAU_CLI (explicit), a checkout build (workspace), a tau on PATH (installed), or npx'),
+  path: z.string().min(1).max(4096).optional().describe('The tau the launcher ran, for explicit and installed'),
+  cli: z.string().min(1).max(64).optional().describe('That CLI version, when known'),
+  plugin: z.string().min(1).max(64).describe('The agent plugin version'),
+  node: z.string().min(1).max(64).describe('The Node.js version running the launcher'),
+  skipped: z
+    .array(
+      z.object({
+        path: z.string().min(1).max(4096),
+        /* What a passed-over tau printed, which the launcher keeps up to 128 bytes of; it need not be a version. */
+        version: z.string().min(1).max(128).optional(),
+      }),
+    )
+    .describe('Installed tau executables passed over, with what each printed for --version'),
+});
+/**
+ * Inferred launcher descriptor.
+ * @public
+ */
+export type TauLaunch = z.infer<typeof tauLaunchSchema>;
+
+/** The GeoSpec engine that decided a run's claims, as its `initialize` answer names itself (VER-3). @public */
+export const geoSpecEngineIdentitySchema = z.object({
+  name: z.string().min(1).describe('Engine package, e.g. geospec-engine'),
+  version: z.string().min(1).describe('Engine package version'),
+  protocol: z.number().int().positive().describe('Engine protocol version'),
+  numericProfile: z.string().min(1).describe('Numeric profile the engine decides claims under'),
+  qualification: z.string().min(1).describe('How far the engine is qualified, e.g. experimental'),
+});
+
+/** The Tau runtime that served a run: its CLI version and, when the agent plugin started it, the launch. @public */
+export const testModelRuntimeSchema = z.object({
+  version: z.string().min(1).describe('The serving Tau CLI version'),
+  launch: tauLaunchSchema.optional(),
+});
+
+/**
  * Output schema for test_model tool.
  * Includes both failures (with detailed feedback) and passes (for UI display).
  * @public
@@ -418,6 +464,8 @@ export const testModelOutputSchema = z.object({
     .min(1)
     .optional()
     .describe('Absolute project root every targetFile and loadModel file resolved against.'),
+  engine: geoSpecEngineIdentitySchema.optional(),
+  runtime: testModelRuntimeSchema.optional(),
   fullResult: testModelResultArtifactSchema
     .optional()
     .describe('Full result artifact when inline details were reduced'),

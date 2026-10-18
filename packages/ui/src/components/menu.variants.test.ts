@@ -20,6 +20,13 @@ describe('menu variants', () => {
     expect(classes).toEqual(expect.arrayContaining(['hover:bg-menu-highlight', 'hover:text-foreground']));
   });
 
+  it('gives items a 44px touch target only on a coarse pointer', () => {
+    const classes = menuItemVariants().split(' ');
+
+    expect(classes).toContain('pointer-coarse:min-h-10');
+    expect(classes).not.toContain('min-h-10');
+  });
+
   it('keeps animation opt-in', () => {
     expect(menuContentVariants().split(' ')).not.toContain('data-[state=open]:animate-in');
     expect(menuContentVariants({ animated: true }).split(' ')).toContain('data-[state=open]:animate-in');

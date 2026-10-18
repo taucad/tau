@@ -119,28 +119,31 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.queryByTestId('popover-root')).not.toBeInTheDocument();
   });
 
-  it('should give drawer rows a 44px touch height and leave popover rows compact', () => {
-    const rowHeight = '[&_[data-slot=command-item]]:min-h-10';
+  it('should keep a caller width on the popover and span the screen in the drawer', () => {
+    const renderWithWidth = (): ReturnType<typeof render> =>
+      render(
+        <ComboBoxResponsive<Row>
+          title='Pick'
+          description='Pick one.'
+          groupedItems={[{ name: 'G', items: [a, b] }]}
+          getValue={(item) => item.id}
+          value={a}
+          renderLabel={(item) => <span>{item.id}</span>}
+          placeholder='Pick'
+          className='w-72'
+        >
+          <button type='button'>Trigger</button>
+        </ComboBoxResponsive>,
+      );
     mobileState.current = true;
-    const { unmount } = render(
-      <ComboBoxResponsive<Row>
-        title='Pick'
-        description='Pick one.'
-        groupedItems={[{ name: 'G', items: [a, b] }]}
-        getValue={(item) => item.id}
-        value={a}
-        renderLabel={(item) => <span>{item.id}</span>}
-        placeholder='Pick'
-        className='w-full'
-      >
-        <button type='button'>Trigger</button>
-      </ComboBoxResponsive>,
-    );
-    expect(screen.getByTestId('drawer-content-test')).toHaveClass(rowHeight, 'w-full');
+    const { unmount } = renderWithWidth();
+    const drawerContent = screen.getByTestId('drawer-content-test');
+    expect(drawerContent).toHaveClass('w-auto');
+    expect(drawerContent).not.toHaveClass('w-72');
     unmount();
     mobileState.current = false;
-    renderResponsive();
-    expect(screen.getByTestId('popover-content-test')).not.toHaveClass(rowHeight);
+    renderWithWidth();
+    expect(screen.getByTestId('popover-content-test')).toHaveClass('w-72');
   });
 
   it('should filter non-virtualized options through the shared search input', async () => {

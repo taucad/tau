@@ -401,9 +401,18 @@ describe('native host GeoSpec composition', () => {
 
     describe('evaluate_model admission limits', () => {
       const limits = { maxTriangles: 3_999_999, maxVertices: 1_999_999, maxSubjectBytes: 65_536 };
+      /** The engine's `initialize` answer with these limits, naming its identity as the real engine does. */
       const configuration = (binaryAdmissionLimits: unknown): Uint8Array<ArrayBuffer> =>
         new TextEncoder().encode(
-          JSON.stringify({ requestId: 'configuration', result: { configuration: { binaryAdmissionLimits } } }),
+          JSON.stringify({
+            requestId: 'configuration',
+            result: {
+              protocolVersion: 3,
+              numericProfile: 'geospec-demand-v6',
+              qualification: 'experimental',
+              configuration: { binaryAdmissionLimits },
+            },
+          }),
         );
       /** An engine that answers every request with `response`, built as the default mock builds one. */
       const engineAnswering = (response: Uint8Array<ArrayBuffer>, close?: Mock<() => void>) => {

@@ -298,6 +298,10 @@ const nativeEngineFacts = async (): Promise<NativeEngineFacts> => {
       );
     }
     const identity = engineIdentitySchema.safeParse(answer);
+    if (configuration.success && !identity.success) {
+      // A failed probe already warned above; this names an engine that answered without its identity.
+      console.warn('GeoSpec engine identity unavailable; test_model names no engine:', identity.error);
+    }
     let engine: GeoSpecEngineIdentity | undefined;
     try {
       const manifest = engineManifestSchema.parse(

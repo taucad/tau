@@ -338,6 +338,7 @@ const present = async (
           ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
           ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
           ...(verdict.projectRoot === undefined ? {} : { projectRoot: verdict.projectRoot }),
+          ...(verdict.engine === undefined ? {} : { engine: verdict.engine }),
           failures,
           passes: [],
           omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
@@ -854,15 +855,6 @@ export type LocalHostMcp = {
 };
 
 /**
- * The engine a `test_model` answer names, so a shortened report keeps it as the full one does (VER-3).
- *
- * @param content - The registry's answer.
- * @returns `{ engine }`, or nothing when the answer names none.
- */
-const identityOf = (content: JsonValue): { readonly engine?: JsonValue } =>
-  isJsonObject(content) && content['engine'] !== undefined ? { engine: content['engine'] } : {};
-
-/**
  * The project folder one call names, if any.
  *
  * Codex advertises no MCP roots; it names the thread's folder per call in
@@ -978,12 +970,8 @@ export const serveLocalHostMcp = async (
     const presented = await present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch(
       (error: unknown) => hostFault(route.tool, error),
     );
-    return route.tool === toolName.testModel && presented.success === true
-      ? {
-          ...presented,
-          ...identityOf(result.content),
-          ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
-        }
+    return route.tool === toolName.testModel && presented.success === true && options.runtime !== undefined
+      ? { ...presented, runtime: options.runtime }
       : presented;
   };
   const viewer =

@@ -12,8 +12,11 @@ const row = (path: string, digit: string): ReceiptFile => ({
   mode: 0o755,
 });
 
+/** The payload store the fixture's frame names. */
+export const fixturePayloadStore = '/store';
+
 /** Where the fixture's closures claim to live. */
-export const fixtureStore = '/store/closures/sha256';
+export const fixtureStore = `${fixturePayloadStore}/closures/sha256`;
 
 const picogkSlot: NativeKernelSlot = {
   kernel: 'picogk',
@@ -42,6 +45,7 @@ const picogkSlot: NativeKernelSlot = {
  */
 export const nativeKernelsFixture = (options: { readonly picogk: boolean }): NativeKernelsFrame => ({
   type: nativeKernelsFrameType,
+  store: fixturePayloadStore,
   kernels: [
     {
       kernel: 'build123d',

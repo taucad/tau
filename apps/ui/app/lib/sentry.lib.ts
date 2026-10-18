@@ -53,7 +53,7 @@ const describeLogged = (value: unknown): string => {
     return truncate(`${value.name}: ${value.message}`);
   }
   if (typeof value === 'object' && value !== null) {
-    return `[${value.constructor?.name ?? 'Object'}]`;
+    return `[${(value as { constructor?: { name?: string } }).constructor?.name ?? 'Object'}]`;
   }
   return truncate(String(value));
 };

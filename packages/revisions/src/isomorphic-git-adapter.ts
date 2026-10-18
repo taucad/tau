@@ -179,8 +179,11 @@ export type IsomorphicGitRevisionPortOptions = Readonly<{
 
 const defaultGitDirectory = '.git';
 
-/** How long the object cache outlives its last read. Milliseconds. */
-const objectCacheIdleMs = 2000;
+/**
+ * How long the object cache outlives its last read.
+ * Milliseconds.
+ */
+const objectCacheIdle = 2000;
 const defaultBranch = 'main';
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
@@ -545,15 +548,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * a packed object reloaded the pack and re-hashed it, and a tree walk did so
    * once per entry, concurrently. The cache is dropped once reads go quiet, so
    * the pack's bytes are not held for the session. */
-  let objectCacheValue: object | undefined;
+  let objectCacheValue: Record<string, unknown> | undefined;
   let objectCacheExpiry: ReturnType<typeof setTimeout> | undefined;
-  const objectCache = (): object => {
+  const objectCache = (): Record<string, unknown> => {
     objectCacheValue ??= {};
     clearTimeout(objectCacheExpiry);
     objectCacheExpiry = setTimeout(() => {
       objectCacheValue = undefined;
       objectCacheExpiry = undefined;
-    }, objectCacheIdleMs);
+    }, objectCacheIdle);
     (objectCacheExpiry as { unref?: () => void }).unref?.();
     return objectCacheValue;
   };

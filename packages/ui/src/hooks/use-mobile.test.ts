@@ -63,10 +63,8 @@ describe('useIsMobile', () => {
   });
 
   it('renders as desktop on the server', () => {
-    function Probe(): React.JSX.Element {
-      return createElement('span', undefined, String(useIsMobile()));
-    }
+    const probe = (): React.JSX.Element => createElement('span', undefined, String(useIsMobile()));
 
-    expect(renderToString(createElement(Probe))).toBe('<span>false</span>');
+    expect(renderToString(createElement(probe))).toBe('<span>false</span>');
   });
 });

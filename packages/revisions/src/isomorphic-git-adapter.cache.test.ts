@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type * as IsomorphicGit from 'isomorphic-git';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -9,9 +10,12 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 const reads = vi.hoisted((): Array<{ name: string; cache: unknown }> => []);
 
 vi.mock('isomorphic-git', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('isomorphic-git')>();
+  const actual = await importOriginal<typeof IsomorphicGit>();
   const recorded =
-    <Arguments extends { cache?: object }, Result>(name: string, read: (input: Arguments) => Promise<Result>) =>
+    <Arguments extends { cache?: Record<string, unknown> }, Result>(
+      name: string,
+      read: (input: Arguments) => Promise<Result>,
+    ) =>
     async (input: Arguments): Promise<Result> => {
       reads.push({ name, cache: input.cache });
       return read(input);
@@ -19,6 +23,7 @@ vi.mock('isomorphic-git', async (importOriginal) => {
   return {
     ...actual,
     readBlob: recorded('readBlob', actual.readBlob),
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- the adapter reads raw commits through it.
     readObject: recorded('readObject', actual.readObject),
     readTree: recorded('readTree', actual.readTree),
   };

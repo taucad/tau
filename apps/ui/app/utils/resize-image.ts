@@ -93,7 +93,7 @@ function compressWithCanvas(img: HTMLImageElement, origW: number, origH: number)
 
   const canvas = document.createElement('canvas');
   try {
-    return compressOnCanvas(canvas, img, width, height);
+    return compressOnCanvas(canvas, img, { width, height });
   } finally {
     /* D-UI-22: release the backing store now. iOS caps a page's total canvas
      * memory, and a detached canvas holds its pixels until it is collected. */
@@ -105,11 +105,9 @@ function compressWithCanvas(img: HTMLImageElement, origW: number, origH: number)
 function compressOnCanvas(
   canvas: HTMLCanvasElement,
   img: HTMLImageElement,
-  fitWidth: number,
-  fitHeight: number,
+  fit: Readonly<{ width: number; height: number }>,
 ): string {
-  let width = fitWidth;
-  let height = fitHeight;
+  let { width, height } = fit;
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d');

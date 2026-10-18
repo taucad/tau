@@ -162,6 +162,34 @@ export const subscribeMonacoConfiguration = (listener: () => void): (() => void)
 export const observeMonacoConfiguration = (listener: () => void): (() => void) =>
   configurationTopic.subscribe(listener);
 
+/**
+ * The live TypeScript-family worker per Monaco mode (`typescript`, `javascript`).
+ *
+ * Monaco's `WorkerManager` asks for a worker only after disposing its previous
+ * one, so a worker still live for the same mode is one that outlived its
+ * manager's restart. Each holds a full TypeScript program (tens of MB) and its
+ * own language-host attachment, and the file manager serves one attachment at
+ * a time, so the stale one is terminated before the new one starts (B-16,
+ * D-UI-19).
+ */
+const liveTypescriptWorkers = new Map<string, Worker>();
+
+const replaceTypescriptWorker = (label: string, worker: Worker): Worker => {
+  const previous = liveTypescriptWorkers.get(label);
+  if (previous !== undefined && previous !== worker) {
+    previous.terminate();
+  }
+  liveTypescriptWorkers.set(label, worker);
+  const terminate = worker.terminate.bind(worker);
+  worker.terminate = (): void => {
+    if (liveTypescriptWorkers.get(label) === worker) {
+      liveTypescriptWorkers.delete(label);
+    }
+    terminate();
+  };
+  return worker;
+};
+
 const initializeMonaco = async (): Promise<typeof Monaco> => {
   // Prime Geist Mono before Monaco's first DomCharWidthReader pass.
   //
@@ -209,11 +237,11 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
             [init.port],
           );
           performance.measure('ts-worker:cold-start', 'ts-worker:create');
-          return worker;
+          return replaceTypescriptWorker(label, worker);
         }
         const worker = new TsWorker();
         performance.measure('ts-worker:cold-start', 'ts-worker:create');
-        return worker;
+        return replaceTypescriptWorker(label, worker);
       }
 
       return new EditorWorker();

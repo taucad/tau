@@ -46,6 +46,10 @@ try {
   assert.equal(missing.status, 404);
   const sitemap = await fetch(`${origin}/sitemap.xml`);
   assert.match(await sitemap.text(), /https:\/\/tau.new\/pricing\//u);
+  const agentPage = await fetch(`${origin}/llms.txt`);
+  assert.equal(agentPage.status, 200);
+  assert.equal(agentPage.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.match(await agentPage.text(), /^# Tau\n/u);
   const serverFiles = await readdir(resolve(appRoot, 'build/server/_www/bundles'));
   assert.equal(
     serverFiles.some((file) => /live-|scene-|\.map$/u.test(file)),

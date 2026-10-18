@@ -15,6 +15,7 @@ export type {
   RpcDependencies,
   RpcHandlerError,
   RpcInvocationContext,
+  RpcProgressReport,
 } from '#rpc/rpc-dependencies.js';
 export { createRpcDispatcher, type RpcDispatcher } from '#rpc/rpc-dispatcher.js';
 export {

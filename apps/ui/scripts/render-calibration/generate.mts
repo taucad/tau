@@ -459,7 +459,7 @@ const outputControls = async (): Promise<{ bytes: Uint8Array<ArrayBuffer>; regio
           (value, axis) => value + (axis % 3 === 0 ? (index - 3) * 22 : axis % 3 === 1 ? 45 : 8),
         ),
       },
-      edges: { lines: [], edgeGroups: [] },
+      edges: { lines: new Float32Array(0), edgeGroups: [] },
     });
   }
   geometries.push(
@@ -473,7 +473,7 @@ const outputControls = async (): Promise<{ bytes: Uint8Array<ArrayBuffer>; regio
         ...surface,
         vertices: surface.vertices.map((value, axis) => value + (axis % 3 === 0 ? -22 : axis % 3 === 1 ? 70 : 8)),
       },
-      edges: { lines: [], edgeGroups: [] },
+      edges: { lines: new Float32Array(0), edgeGroups: [] },
     },
     {
       format: 'replicad',
@@ -485,7 +485,7 @@ const outputControls = async (): Promise<{ bytes: Uint8Array<ArrayBuffer>; regio
         ...surface,
         vertices: surface.vertices.map((value, axis) => value + (axis % 3 === 0 ? 22 : axis % 3 === 1 ? 70 : 8)),
       },
-      edges: { lines: [], edgeGroups: [] },
+      edges: { lines: new Float32Array(0), edgeGroups: [] },
     },
   );
   sphere.delete();

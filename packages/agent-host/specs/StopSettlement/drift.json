@@ -1,0 +1,13 @@
+{
+  "alphabet": [],
+  "sources": {
+    "src/harness/session.ts#pendingAttemptWaits": "ee80ddcf01eee2bba2b1c3dbc3ec1b048ee261e26f957fa1327a7fe95a1a33e6",
+    "src/harness/session.ts#prepareInvocation": "b679fdd5aaeaa48d1926ec69239fa8d8007971d3e6502cae862fe92f6d998072",
+    "src/harness/session.ts#settledInvocation": "a44f1fe60e64d7b6bf6ba1b1e1f498589ac8d3cda47a54fd3d2353fd5143596b",
+    "src/host/tau-agent-host.ts#resolveInvocations": "a1fcbdeef80641ab5c4276cb98e8aace07832ac60e31843dd4554b2f56df1604"
+  },
+  "specs": {
+    "StopSettlement.tla": "7ff492bf5536ed686603563a58698ee2dc0039646318ef1b90853457485ba07c"
+  },
+  "tables": {}
+}

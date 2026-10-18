@@ -14,7 +14,13 @@ import type {
   ViewUpdateOutcome,
   WideViewRequest,
 } from '@taucad/runtime';
-import type { ExportRoute, RuntimeCapabilities, RuntimeContentKey, TessellationReport } from '@taucad/runtime/types';
+import type {
+  ExportRoute,
+  KernelIssue,
+  RuntimeCapabilities,
+  RuntimeContentKey,
+  TessellationReport,
+} from '@taucad/runtime/types';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
@@ -298,6 +304,46 @@ describe('createRuntimeAgentClients', () => {
 
     const headerOnly = await clientsFor(runtimeFixture()).kernelClient.evaluateModel({ targetFile: 'main.ts' });
     expect(headerOnly).not.toHaveProperty('summary');
+  });
+
+  it('should report a mechanism the default view rendering dropped, from its diagnostics', async () => {
+    const issue: KernelIssue = {
+      code: 'INVALID_REFERENCE',
+      severity: 'warning',
+      type: 'kernel',
+      message: 'Mechanism /couplings/0/joint: Coupling names unknown joint "ring". Name a declared joint.',
+      details: {
+        producer: { kernelId: 'replicad' },
+        mechanism: {
+          code: 'UNKNOWN_JOINT',
+          path: '/couplings/0/joint',
+          message: 'Coupling names unknown joint "ring".',
+          recovery: 'Name a declared joint.',
+        },
+      },
+    };
+    const fixture = runtimeFixture({
+      render: () => ({ ...rendering({ mimeType: 'model/gltf-binary', content: glb() }), issues: [issue] }),
+    });
+
+    const result = await clientsFor(fixture).kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    if (!result.success) {
+      expect.fail(result.message);
+    }
+
+    expect(result.kernelIssues).toEqual([issue]);
+    expect(result.mechanism).toEqual({
+      declared: true,
+      admitted: false,
+      links: 0,
+      joints: 0,
+      couplings: 0,
+      animations: [],
+      issues: [{ code: 'UNKNOWN_JOINT', path: '/couplings/0/joint' }],
+    });
+    expect(await clientsFor(runtimeFixture()).kernelClient.evaluateModel({ targetFile: 'main.ts' })).not.toHaveProperty(
+      'mechanism',
+    );
   });
 
   it('should open every request-scoped document unwatched', async () => {

@@ -44,12 +44,17 @@ type IndexLine = {
 /** One entry's index lines: the symbol, then each of its members indented. */
 const indexLines = (
   entry: ApiEntry,
-  context: { readonly parent?: string; readonly depth?: number; readonly parentCategory?: string } = {},
+  context: {
+    readonly parent?: string;
+    readonly depth?: number;
+    readonly parentCategory?: string;
+    readonly range?: readonly [number, number] | undefined;
+  } = {},
 ): readonly IndexLine[] => {
-  const { parent = '', depth = 0, parentCategory } = context;
+  const { parent = '', depth = 0, parentCategory, range } = context;
   const summary = indexSummary(entry);
   const members = memberCount(entry);
-  const suffix = `${members === 0 ? '' : ` [${members} members]`}${entry.category === undefined || entry.category === parentCategory ? '' : ` [category: ${entry.category}]`}`;
+  const suffix = `${range === undefined ? '' : ` [lines ${String(range[0])}-${String(range[1])}]`}${members === 0 ? '' : ` [${members} members]`}${entry.category === undefined || entry.category === parentCategory ? '' : ` [category: ${entry.category}]`}`;
   const path = entry.path ?? (parent === '' ? undefined : parent);
   const name = path === undefined ? entry.name : `${path}.${entry.name}`;
   const lines: IndexLine[] = [
@@ -90,11 +95,14 @@ export const renderIndex = (
     '',
     `${corpus.metadata.packageName} ${corpus.metadata.packageVersion} · ${corpus.metadata.totalEntries} symbols · extracted by ${corpus.metadata.extractor}.`,
     '',
-    'Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.',
+    'Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.',
     '',
   ];
 
-  const blocks = shards.map((shard) => ({ shard, rows: shard.entries.flatMap((entry) => indexLines(entry)) }));
+  const blocks = shards.map((shard) => {
+    const { ranges } = layoutShard(shard, corpus);
+    return { shard, rows: shard.entries.flatMap((entry) => indexLines(entry, { range: ranges.get(entry.id) })) };
+  });
   const keyCount = new Map<string, number>();
   for (const { rows } of blocks) {
     for (const row of rows) {
@@ -212,6 +220,26 @@ const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string
   return lines;
 };
 
+/** One shard's lines, and the 1-based inclusive line range each top-level entry's block occupies in them. */
+const layoutShard = (
+  shard: ShardPlanEntry,
+  corpus: ApiCorpus,
+): { readonly lines: readonly string[]; readonly ranges: ReadonlyMap<string, readonly [number, number]> } => {
+  const lines: string[] = [
+    `# ${corpus.metadata.packageName} — ${shard.title}`,
+    '',
+    `${shard.entries.length} top-level symbols. Signatures are verbatim ${corpus.metadata.language}.`,
+    '',
+  ];
+  const ranges = new Map<string, readonly [number, number]>();
+  for (const entry of shard.entries) {
+    const body = nativeComments(renderEntryBody(entry, 0), corpus.metadata.language);
+    ranges.set(entry.id, [lines.length + 1, lines.length + body.length]);
+    lines.push(...body, '');
+  }
+  return { lines, ranges };
+};
+
 /**
  * T3 — one shard. Signatures and member detail for one group.
  *
@@ -220,20 +248,8 @@ const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string
  * @returns Markdown.
  * @public
  */
-export const renderShard = (shard: ShardPlanEntry, corpus: ApiCorpus): string => {
-  const lines: string[] = [
-    `# ${corpus.metadata.packageName} — ${shard.title}`,
-    '',
-    `${shard.entries.length} top-level symbols. Signatures are verbatim ${corpus.metadata.language}.`,
-    '',
-  ];
-
-  for (const entry of shard.entries) {
-    lines.push(...nativeComments(renderEntryBody(entry, 0), corpus.metadata.language), '');
-  }
-
-  return `${lines.join('\n').trimEnd()}\n`;
-};
+export const renderShard = (shard: ShardPlanEntry, corpus: ApiCorpus): string =>
+  `${layoutShard(shard, corpus).lines.join('\n').trimEnd()}\n`;
 
 /**
  * The reference map a `SKILL.md` body carries: where to look, and for what.
@@ -256,7 +272,7 @@ export const renderReferenceMap = (
   const lines = [
     '## API reference',
     '',
-    `To read any other signature, grep the skill directory for the name followed by \`(\` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. \`${options.indexFile}\` lists all ${options.totalSymbols} symbols by file.`,
+    `To read any other signature, find its name in \`${options.indexFile}\`, which lists all ${options.totalSymbols} symbols by file with the lines that hold each, and read that range of the named file.`,
     '',
   ];
   if (eager.length <= 12) {

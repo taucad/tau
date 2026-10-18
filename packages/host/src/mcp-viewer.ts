@@ -41,10 +41,12 @@ import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
 import type {
   TauViewerFile,
+  TauViewerMechanism,
   TauViewerMimeType,
   TauViewerModel,
   TauViewerShowResult,
 } from '@taucad/mcp/viewer-protocol';
+import { readGlbMechanism } from '@taucad/agent-tools/runtime';
 
 /** The page's own formats by extension; every other file is a CAD source the runtime renders (blueprint D3). */
 const drawnFormats: Readonly<Record<string, TauViewerMimeType>> = {
@@ -319,6 +321,21 @@ const pageHeaders = {
 } as const;
 
 /**
+ * What a GLB carries of its source's mechanism: the page's Kinematics pane plays only what the GLB holds.
+ *
+ * @param bytes - The GLB.
+ * @returns Whether a mechanism survived, its joint count and its animation ids.
+ */
+const mechanismOf = (bytes: Uint8Array<ArrayBuffer>): TauViewerMechanism => {
+  const carried = readGlbMechanism(bytes)?.mechanism;
+  return {
+    preserved: carried !== undefined,
+    joints: carried?.joints ?? 0,
+    animations: [...(carried?.animations ?? [])],
+  };
+};
+
+/**
  * Create the viewer port `serveLocalHostMcp` hands to `@taucad/mcp`.
  *
  * @param options - The page, how to find the project folder, and how to render a source.
@@ -343,7 +360,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     root: string,
     absolutePath: string,
     sourceFile: string | undefined,
-  ): Promise<TauViewerShowResult['model'] | TauMcpViewerFailure> => {
+  ): Promise<Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure> => {
     const mimeType = drawnFormats[extname(absolutePath).toLowerCase()];
     if (mimeType === undefined) {
       return failure(
@@ -369,7 +386,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       sha256,
     };
     shown.set(id, { model, absolutePath, root, identity });
-    return model;
+    return mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(bytes) } : { model };
   };
 
   const startLoopback = async (): Promise<{ server: Server; origin: string }> => {
@@ -418,14 +435,14 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
     const relativePath = posix(relative(root, absolute));
     const isDrawn = extname(absolute).toLowerCase() in drawnFormats;
-    let model: TauViewerModel | TauMcpViewerFailure;
+    let described: Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure;
     if (isDrawn) {
       /* A GLB the agent exported still has its source's parameters, kinematics and exports (viewer parity V8). */
       const sourceFile =
         extname(absolute).toLowerCase() === '.glb'
           ? (renderedFrom.get(absolute) ?? (await exportedSourceOf(root, relativePath)))
           : undefined;
-      model = await describe(root, absolute, sourceFile);
+      described = await describe(root, absolute, sourceFile);
     } else {
       const exists = await stat(absolute).then(
         (stats) => stats.isFile(),
@@ -447,14 +464,15 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       if (artifactPath !== undefined) {
         renderedFrom.set(artifactPath, relativePath);
       }
-      model =
+      described =
         artifactPath === undefined
           ? failure('RENDER_FAILED', `The rendered model for ${relativePath} landed outside the project.`)
           : await describe(root, artifactPath, relativePath);
     }
-    if (isFailure(model)) {
-      return model;
+    if (isFailure(described)) {
+      return described;
     }
+    const { model } = described;
     const scope = conversationOf(callOptions.meta);
     lastShown.set(lastShownKey(root, scope), model.sourceFile ?? model.path);
     if (scope !== undefined) {
@@ -469,6 +487,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const url = await viewerUrl(model, callOptions.presentation);
     const result: TauViewerShowResult = {
       model,
+      ...(described.mechanism === undefined ? {} : { mechanism: described.mechanism }),
       ...(url === undefined ? {} : { viewerUrl: url }),
       ...(select === undefined || select.length === 0 ? {} : { select }),
     };

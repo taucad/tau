@@ -7,6 +7,7 @@ import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import { replicadKernel } from '#replicad.kernel.js';
+import type { GeometryReplicad } from '#replicad.types.js';
 import { measureShapesDiagonal, renderWithinBudget } from '#utils/render-output.js';
 
 const sphere = (radius: number): string =>
@@ -178,6 +179,38 @@ describe('Replicad preview budget (P4)', () => {
       }),
     ]);
     shape.delete();
+  });
+
+  it('keeps every tessellated mesh in typed arrays, instanced copies included', async () => {
+    const replicad = await import('replicad');
+    const original = replicad.makeBox([0, 0, 0], [10, 10, 10]);
+    const copy = original.clone().translate([20, 0, 0]);
+    const { geometries } = renderWithinBudget(
+      [
+        { name: 'original', shape: original },
+        { name: 'copy', shape: copy },
+      ],
+      {
+        request: { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview },
+        budget: Number.POSITIVE_INFINITY,
+        openCascade: replicad.getOC(),
+        collectBrepEdges: true,
+        tessellationInstancing: true,
+      },
+    );
+
+    const meshes = geometries.filter((geometry): geometry is GeometryReplicad => geometry.format === 'replicad');
+    expect(meshes).toHaveLength(2);
+    for (const { faces, edges } of meshes) {
+      expect(faces.vertices).toBeInstanceOf(Float32Array);
+      expect(faces.normals).toBeInstanceOf(Float32Array);
+      expect(faces.triangles).toBeInstanceOf(Uint32Array);
+      expect(edges.lines).toBeInstanceOf(Float32Array);
+      expect(faces.triangles.length).toBeGreaterThan(0);
+      expect(edges.lines.length).toBeGreaterThan(0);
+    }
+    original.delete();
+    copy.delete();
   });
 
   it('measures the diagonal of every meshable shape together', async () => {

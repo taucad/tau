@@ -213,7 +213,7 @@ declare class BRepBuilderAPI_MakeEdge extends BRepBuilderAPI_MakeShape
   constructor(L: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number);
   Edge(): TopoDS_Edge;
   delete(): void;
-  // … 6 more members in the API reference
+  // … 6 more members in the API reference: Init, IsDone, Error, Vertex1, Vertex2, [Symbol.dispose]
 
 declare class BRepBuilderAPI_MakeWire extends BRepBuilderAPI_MakeShape
   constructor();
@@ -233,34 +233,6 @@ declare class BRepBuilderAPI_MakeWire extends BRepBuilderAPI_MakeShape
   Vertex(): TopoDS_Vertex;
   delete(): void;
   [Symbol.dispose](): void;
-
-declare class BRepBuilderAPI_MakeFace extends BRepBuilderAPI_MakeShape
-  constructor();
-  constructor(F: TopoDS_Face);
-  constructor(P: gp_Pln);
-  constructor(C: gp_Cylinder);
-  constructor(C: gp_Cone);
-  constructor(S: gp_Sphere);
-  constructor(C: gp_Torus);
-  constructor(S: Geom_Surface, TolDegen: number);
-  constructor(W: TopoDS_Wire, OnlyPlane?: boolean);
-  constructor(F: TopoDS_Face, W: TopoDS_Wire);
-  constructor(P: gp_Pln, W: TopoDS_Wire, Inside?: boolean);
-  constructor(C: gp_Cylinder, W: TopoDS_Wire, Inside?: boolean);
-  constructor(C: gp_Cone, W: TopoDS_Wire, Inside?: boolean);
-  constructor(S: gp_Sphere, W: TopoDS_Wire, Inside?: boolean);
-  constructor(C: gp_Torus, W: TopoDS_Wire, Inside?: boolean);
-  constructor(S: Geom_Surface, W: TopoDS_Wire, Inside?: boolean);
-  constructor(P: gp_Pln, UMin: number, UMax: number, VMin: number, VMax: number);
-  constructor(C: gp_Cylinder, UMin: number, UMax: number, VMin: number, VMax: number);
-  constructor(C: gp_Cone, UMin: number, UMax: number, VMin: number, VMax: number);
-  constructor(S: gp_Sphere, UMin: number, UMax: number, VMin: number, VMax: number);
-  constructor(C: gp_Torus, UMin: number, UMax: number, VMin: number, VMax: number);
-  constructor(S: Geom_Surface, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number);
-  Add(W: TopoDS_Wire): void;
-  Face(): TopoDS_Face;
-  delete(): void;
-  // … 4 more members in the API reference
 ```
 
 ### BRepFilletAPI
@@ -276,7 +248,7 @@ declare class BRepFilletAPI_MakeFillet extends BRepFilletAPI_LocalOperation
   Edge(I: number, J: number): TopoDS_Edge;
   Build(theRange?: Message_ProgressRange): void;
   delete(): void;
-  // … 42 more members in the API reference
+  // … 42 more members in the API reference: SetParams, SetContinuity, SetRadius, ResetContour, IsConstant, Radius, GetBounds, GetLaw, SetLaw, SetFilletShape, GetFilletShape, NbContours, Contour, NbEdges, Remove, Length, FirstVertex, LastVertex, Abscissa, RelativeAbscissa, ClosedAndTangent, Closed, Reset, Builder, Generated, Modified, IsDeleted, NbSurfaces, NewFaces, Simulate, NbSurf, Sect, and 10 more
 
 declare class BRepFilletAPI_MakeChamfer extends BRepFilletAPI_LocalOperation
   constructor(S: TopoDS_Shape);
@@ -286,7 +258,7 @@ declare class BRepFilletAPI_MakeChamfer extends BRepFilletAPI_LocalOperation
   Edge(I: number, J: number): TopoDS_Edge;
   Build(theRange?: Message_ProgressRange): void;
   delete(): void;
-  // … 32 more members in the API reference
+  // … 32 more members in the API reference: SetDist, GetDist, SetDists, Dists, AddDA, SetDistAngle, GetDistAngle, SetMode, IsSymetric, IsTwoDistances, IsDistanceAngle, ResetContour, NbContours, Contour, NbEdges, Remove, Length, FirstVertex, LastVertex, Abscissa, RelativeAbscissa, ClosedAndTangent, Closed, Reset, Builder, Generated, Modified, IsDeleted, Simulate, NbSurf, Sect, [Symbol.dispose]
 ```
 
 ### TopExp
@@ -322,7 +294,7 @@ TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
 declare class TopExp
   static FirstVertex(E: TopoDS_Edge, CumOri?: boolean): TopoDS_Vertex;
   static LastVertex(E: TopoDS_Edge, CumOri?: boolean): TopoDS_Vertex;
-  // … 8 more members in the API reference
+  // … 8 more members in the API reference: constructor, MapShapes, MapShapesAndAncestors, MapShapesAndUniqueAncestors, Vertices, CommonVertex, delete, [Symbol.dispose]
 ```
 
 ### TopoDS
@@ -343,7 +315,7 @@ declare class TopoDS
 ```ts
 declare class BRep_Tool
   static Pnt(V: TopoDS_Vertex): gp_Pnt;
-  // … 28 more members in the API reference
+  // … 28 more members in the API reference: constructor, IsClosed, Surface, Triangulation, Triangulations, Tolerance, NaturalRestriction, IsGeometric, Curve, Polygon3D, CurveOnSurface, CurveOnPlane, PolygonOnSurface, PolygonOnTriangulation, SameParameter, SameRange, Degenerated, Range, UVPoints, SetUVPoints, HasContinuity, Continuity, MaxContinuity, Parameter, Parameters, MaxTolerance, delete, and 1 more
 ```
 
 ### gp
@@ -356,7 +328,7 @@ declare class gp_Pnt
   X(): number;
   Y(): number;
   Z(): number;
-  // … 24 more members in the API reference
+  // … 24 more members in the API reference: SetCoord, SetX, SetY, SetZ, SetXYZ, Coord, XYZ, ChangeCoord, BaryCenter, IsEqual, Distance, SquareDistance, Mirror, Mirrored, Rotate, Rotated, Scale, Scaled, Transform, Transformed, Translate, Translated, delete, [Symbol.dispose]
 
 declare class gp_Dir
   constructor();
@@ -365,7 +337,7 @@ declare class gp_Dir
   constructor(theCoord: gp_XYZ);
   constructor(a0: gp_Dir);
   constructor(theXv: number, theYv: number, theZv: number);
-  // … 32 more members in the API reference
+  // … 32 more members in the API reference: SetCoord, SetX, SetY, SetZ, SetXYZ, Coord, X, Y, Z, XYZ, IsEqual, IsNormal, IsOpposite, IsParallel, Angle, AngleWithRef, Cross, Crossed, CrossCross, CrossCrossed, Dot, DotCross, Reverse, Reversed, Mirror, Mirrored, Rotate, Rotated, Transform, Transformed, delete, [Symbol.dispose]
 
 declare class gp_Vec
   constructor();
@@ -374,14 +346,14 @@ declare class gp_Vec
   constructor(theP1: gp_Pnt, theP2: gp_Pnt);
   constructor(theXv: number, theYv: number, theZv: number);
   Add(theOther: gp_Vec): void;
-  // … 48 more members in the API reference
+  // … 48 more members in the API reference: SetCoord, SetX, SetY, SetZ, SetXYZ, Coord, X, Y, Z, XYZ, IsEqual, IsNormal, IsOpposite, IsParallel, Angle, AngleWithRef, Magnitude, SquareMagnitude, Added, Subtract, Subtracted, Multiply, Multiplied, Divide, Divided, Cross, Crossed, CrossMagnitude, CrossSquareMagnitude, CrossCross, CrossCrossed, Dot, DotCross, Normalize, Normalized, Reverse, Reversed, and 11 more
 
 declare class gp_Ax1
   constructor();
   constructor(theDir: gp_Dir_D);
   constructor(theP: gp_Pnt, theV: gp_Dir);
   constructor(theP: gp_Pnt, theDir: gp_Dir_D);
-  // … 23 more members in the API reference
+  // … 23 more members in the API reference: SetDirection, SetLocation, Direction, Location, IsCoaxial, IsNormal, IsOpposite, IsParallel, Angle, Reverse, Reversed, Mirror, Mirrored, Rotate, Rotated, Scale, Scaled, Transform, Transformed, Translate, Translated, delete, [Symbol.dispose]
 
 declare class gp_Ax2
   constructor();
@@ -390,7 +362,7 @@ declare class gp_Ax2
   constructor(theP: gp_Pnt, theV: gp_Dir_D);
   constructor(P: gp_Pnt, N: gp_Dir, Vx: gp_Dir);
   constructor(theP: gp_Pnt, theN: gp_Dir_D, theVx: gp_Dir_D);
-  // … 24 more members in the API reference
+  // … 24 more members in the API reference: SetAxis, SetDirection, SetLocation, SetXDirection, SetYDirection, Angle, Axis, Direction, Location, XDirection, YDirection, IsCoplanar, Mirror, Mirrored, Rotate, Rotated, Scale, Scaled, Transform, Transformed, Translate, Translated, delete, [Symbol.dispose]
 
 declare class gp_Trsf
   constructor();
@@ -399,12 +371,12 @@ declare class gp_Trsf
   SetRotation(theR: gp_Quaternion): void;
   SetTranslation(theV: gp_Vec): void;
   SetTranslation(theP1: gp_Pnt, theP2: gp_Pnt): void;
-  // … 27 more members in the API reference
+  // … 27 more members in the API reference: SetMirror, SetRotationPart, SetScale, SetDisplacement, SetTransformation, SetTranslationPart, SetScaleFactor, SetForm, SetValues, IsNegative, Form, ScaleFactor, TranslationPart, GetRotation, VectorialPart, HVectorialPart, Value, Invert, Inverted, Multiplied, Multiply, PreMultiply, Power, Powered, Transforms, delete, [Symbol.dispose]
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 77875 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 77875 symbols by file with the lines that hold each, and read that range of the named file.
 
 - 22 reference files, named in `api-index.md`
 - 357 further files are fetched on demand; `api-index.md` names them.

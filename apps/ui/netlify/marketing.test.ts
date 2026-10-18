@@ -54,6 +54,14 @@ describe('resolveMarketingUrl', () => {
     expect(resolve('/sitemap-marketing.xml')).toBe(`${origin}/sitemap.xml`);
   });
 
+  it('should serve the agent page from the marketing origin, leaving the other LLM indexes to the docs redirects', () => {
+    expect(resolve('/llms.txt')).toBe(`${origin}/llms.txt`);
+    expect(resolve('/llms.txt?ref=hn')).toBe(`${origin}/llms.txt`);
+    for (const path of ['/llms-full.txt', '/llms.mdx', '/llms.txt/x', '/docs/runtime/llms.txt']) {
+      expect(resolve(path)).toBeUndefined();
+    }
+  });
+
   it('should drop the query when proxying a marketing page', () => {
     expect(resolve('/pricing/?utm_source=x')).toBe(`${origin}/pricing/`);
   });
@@ -86,6 +94,7 @@ describe('config', () => {
     expect(config.path).toContain('/legal');
     expect(config.path).toContain('/legal/*');
     expect(config.path).toContain('/vision');
+    expect(config.path).toContain('/llms.txt');
   });
 });
 

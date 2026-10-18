@@ -363,7 +363,7 @@ Shape3DLike: export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT
 
 ShapeEdgeMesh: export declare interface ShapeEdgeMesh
 
-  lines: number[]
+  lines: Float32Array
 
   edgeGroups: {
           start: number;
@@ -373,11 +373,11 @@ ShapeEdgeMesh: export declare interface ShapeEdgeMesh
 
 ShapeMesh: export declare interface ShapeMesh
 
-  triangles: number[]
+  triangles: Uint32Array
 
-  vertices: number[]
+  vertices: Float32Array
 
-  normals: number[]
+  normals: Float32Array
 
   faceGroups: {
           start: number;

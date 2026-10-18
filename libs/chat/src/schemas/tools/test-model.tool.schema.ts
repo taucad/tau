@@ -294,6 +294,21 @@ const geoSpecLimitSchema = z
   })
   .strict();
 
+/** The status of a requirement row that did not pass, as its test reports it. */
+const geoSpecNonPassingStatusSchema = z.enum(['failed', 'inconclusive', 'unsupported', 'not-run']);
+
+/** One `expectGeo` claim of a requirement, in assertion order. */
+const geoSpecAssertionRowSchema = z
+  .object({
+    ordinal: observedCountSchema,
+    status: z.enum(['passed', 'failed', 'inconclusive', 'unsupported']),
+    matcher: z.string(),
+    code: z.string().optional().describe('The first diagnostic code of a claim that did not pass.'),
+    message: z.string().optional(),
+    limit: geoSpecLimitSchema.optional(),
+  })
+  .strict();
+
 /**
  * A browser run that outlived its run budget. The run is reported with the
  * requirements it completed; the rest are not run, never passed.
@@ -325,6 +340,9 @@ const testFailureSchema = z.object({
   requirement: z.string().describe('Description of the requirement that failed'),
   reason: z.string().describe('Why the test failed'),
   suggestion: z.string().describe('Actionable suggestion to fix the issue'),
+  status: geoSpecNonPassingStatusSchema
+    .optional()
+    .describe('The requirement status: only failed is a failure; inconclusive, unsupported and not-run are undecided.'),
   category: geoSpecFailureCategorySchema.optional(),
   limit: geoSpecLimitSchema.optional(),
   targetFile: rootedFilePathSchema.describe('Source file whose geometry produced this failure'),
@@ -373,6 +391,52 @@ export const testModelResultArtifactSchema = z
   .strict();
 
 /**
+ * Which Tau CLI the agent plugin's launcher started, and why: the `TAU_LAUNCH` JSON the launcher hands the CLI
+ * (agent plugin install hardening, section 4.3). `tau mcp` names it in its `initialize` instructions and every
+ * `test_model` result carries it; `@taucad/mcp` declares the same shape as its public `TauLaunch`.
+ *
+ * @public
+ */
+export const tauLaunchSchema = z.object({
+  source: z
+    .enum(['explicit', 'workspace', 'installed', 'npx'])
+    .describe('TAU_CLI (explicit), a checkout build (workspace), a tau on PATH (installed), or npx'),
+  path: z.string().min(1).max(4096).optional().describe('The tau the launcher ran, for explicit and installed'),
+  cli: z.string().min(1).max(64).optional().describe('That CLI version, when known'),
+  plugin: z.string().min(1).max(64).describe('The agent plugin version'),
+  node: z.string().min(1).max(64).describe('The Node.js version running the launcher'),
+  skipped: z
+    .array(
+      z.object({
+        path: z.string().min(1).max(4096),
+        /* What a passed-over tau printed, which the launcher keeps up to 128 bytes of; it need not be a version. */
+        version: z.string().min(1).max(128).optional(),
+      }),
+    )
+    .describe('Installed tau executables passed over, with what each printed for --version'),
+});
+/**
+ * Inferred launcher descriptor.
+ * @public
+ */
+export type TauLaunch = z.infer<typeof tauLaunchSchema>;
+
+/** The GeoSpec engine that decided a run's claims, as its `initialize` answer names itself (VER-3). @public */
+export const geoSpecEngineIdentitySchema = z.object({
+  name: z.string().min(1).describe('Engine package, e.g. geospec-engine'),
+  version: z.string().min(1).describe('Engine package version'),
+  protocol: z.number().int().positive().describe('Engine protocol version'),
+  numericProfile: z.string().min(1).describe('Numeric profile the engine decides claims under'),
+  qualification: z.string().min(1).describe('How far the engine is qualified, e.g. experimental'),
+});
+
+/** The Tau runtime that served a run: its CLI version and, when the agent plugin started it, the launch. @public */
+export const testModelRuntimeSchema = z.object({
+  version: z.string().min(1).describe('The serving Tau CLI version'),
+  launch: tauLaunchSchema.optional(),
+});
+
+/**
  * Output schema for test_model tool.
  * Includes both failures (with detailed feedback) and passes (for UI display).
  * @public
@@ -404,6 +468,10 @@ export const testModelOutputSchema = z.object({
           status: geoSpecTestStatusSchema,
           ordinal: observedCountSchema.optional(),
           limit: geoSpecLimitSchema.optional(),
+          assertions: z
+            .array(geoSpecAssertionRowSchema)
+            .optional()
+            .describe('Each claim the test made, in order, with its own status.'),
         })
         .strict(),
     )
@@ -418,6 +486,8 @@ export const testModelOutputSchema = z.object({
     .min(1)
     .optional()
     .describe('Absolute project root every targetFile and loadModel file resolved against.'),
+  engine: geoSpecEngineIdentitySchema.optional(),
+  runtime: testModelRuntimeSchema.optional(),
   fullResult: testModelResultArtifactSchema
     .optional()
     .describe('Full result artifact when inline details were reduced'),

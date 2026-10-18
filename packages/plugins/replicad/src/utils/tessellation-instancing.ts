@@ -160,22 +160,13 @@ function shapeHandle(shape: Meshable): unknown {
   return shape.wrapped;
 }
 
-function readFloat64Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
-  if (size === 0) {
-    return [];
-  }
-
-  const heap = new Float64Array(openCascade.wasmMemory.buffer);
-  return [...heap.subarray(pointer / 8, pointer / 8 + size)];
+/* Copies, not views: a later memory.grow() would detach a view. Kept at double precision so each instance transform rounds once. */
+function readFloat64Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): Float64Array {
+  return new Float64Array(openCascade.wasmMemory.buffer).slice(pointer / 8, pointer / 8 + size);
 }
 
-function readUint32Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
-  if (size === 0) {
-    return [];
-  }
-
-  const heap = new Uint32Array(openCascade.wasmMemory.buffer);
-  return [...heap.subarray(pointer / 4, pointer / 4 + size)];
+function readUint32Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): Uint32Array {
+  return new Uint32Array(openCascade.wasmMemory.buffer).slice(pointer / 4, pointer / 4 + size);
 }
 
 function readInt32Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
@@ -413,16 +404,22 @@ function transformVector(matrix: readonly number[], [x, y, z]: Point3): [number,
   return [nx / length, ny / length, nz / length];
 }
 
-function transformTriplets(values: number[], matrix: readonly number[], transform: MatrixTransform): number[] {
-  const transformed: number[] = [];
-  for (let index = 0; index < values.length; index += 3) {
-    const [x, y, z] = transform(matrix, [values[index] ?? 0, values[index + 1] ?? 0, values[index + 2] ?? 0]);
-    transformed.push(Math.fround(x), Math.fround(y), Math.fround(z));
+function transformTriplets(
+  values: ArrayLike<number>,
+  matrix: readonly number[],
+  transform: MatrixTransform,
+): Float32Array {
+  const transformed = new Float32Array(values.length - (values.length % 3));
+  for (let index = 0; index < transformed.length; index += 3) {
+    const [x, y, z] = transform(matrix, [values[index]!, values[index + 1]!, values[index + 2]!]);
+    transformed[index] = x;
+    transformed[index + 1] = y;
+    transformed[index + 2] = z;
   }
   return transformed;
 }
 
-function transformNormals(values: number[], matrix: readonly number[]): number[] {
+function transformNormals(values: ArrayLike<number>, matrix: readonly number[]): Float32Array {
   const normals = normalMatrix(matrix);
   if (
     normals[0] === 1 &&
@@ -435,7 +432,7 @@ function transformNormals(values: number[], matrix: readonly number[]): number[]
     normals[7] === 0 &&
     normals[8] === 1
   ) {
-    return values.map((value) => Math.fround(value));
+    return Float32Array.from(values);
   }
 
   return transformTriplets(values, normals, transformVector);
@@ -457,14 +454,13 @@ function transformTangents(values: number[] | undefined, instance: ReplicadTesse
   return output;
 }
 
-function transformTriangles(triangles: number[], determinant: number): number[] {
-  if (determinant >= 0) {
-    return [...triangles];
-  }
-
-  const transformed: number[] = [];
-  for (let index = 0; index < triangles.length; index += 3) {
-    transformed.push(triangles[index] ?? 0, triangles[index + 2] ?? 0, triangles[index + 1] ?? 0);
+function transformTriangles(triangles: Uint32Array, determinant: number): Uint32Array {
+  const transformed = new Uint32Array(triangles);
+  if (determinant < 0) {
+    for (let index = 0; index + 2 < transformed.length; index += 3) {
+      transformed[index + 1] = triangles[index + 2]!;
+      transformed[index + 2] = triangles[index + 1]!;
+    }
   }
   return transformed;
 }

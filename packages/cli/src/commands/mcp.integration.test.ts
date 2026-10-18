@@ -269,6 +269,8 @@ const launch = (
   if (viewerPage !== undefined) {
     env['TAU_VIEWER_PAGE'] = viewerPage;
   }
+  /* Each server keeps its durable compute store here, so no test reuses another's builds or the user's own. */
+  env['TAU_CONFIG_DIR'] = join(scratch, 'config', String(launches));
   Object.assign(env, extra.env);
   const child = spawn(
     process.execPath,
@@ -471,8 +473,8 @@ describe('tau mcp over stdio', () => {
       `initialize answered in ${String(Math.round(initializeTime))} ms (load ${String(loadavg()[0])} on ${String(availableParallelism())} cores)`,
     );
     expect(client.getServerVersion()?.name).toBe('@taucad/mcp');
-    /* Codex sends the project folder only to a server that declares this. */
-    expect(client.getServerCapabilities()?.experimental).toHaveProperty(['codex/sandbox-state-meta']);
+    /* Codex's capability goes to Codex only (INS-2); 'tau mcp identity' checks that Codex receives it. */
+    expect(client.getServerCapabilities()).not.toHaveProperty('experimental');
 
     const { tools } = await client.listTools();
     expect(tools.map(({ name }) => name)).toEqual(
@@ -510,6 +512,11 @@ describe('tau mcp over stdio', () => {
         },
       });
       expect(result.structuredContent).not.toHaveProperty('summary.admission.warning');
+      expect(result.structuredContent).toMatchObject({ mechanism: { declared: false, admitted: false } });
+      /* The build went to the durable compute store a restarted server reads it back from. */
+      expect(await readdir(join(scratch, 'config'), { recursive: true })).toContainEqual(
+        expect.stringMatching(/compute\/[0-9a-f]+\.sqlite$/u),
+      );
       expect(served.stderr()).toContain(`tau mcp: project root ${join(scratch, 'block')} (CLAUDE_PROJECT_DIR)`);
       /* The first call loads the runtime, which proves the module log sees kernels at all. */
       expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/replicad\.kernel\.ts$/u));
@@ -760,6 +767,55 @@ const hostShapes = {
     },
   },
 } as const;
+
+describe('tau mcp identity (INS-2)', () => {
+  it(
+    'should name the rung TAU_LAUNCH reports and declare the Codex capability to Codex only',
+    async () => {
+      const cliVersion = (
+        JSON.parse(readFileSync(join(repoRoot, 'packages/cli/package.json'), 'utf8')) as {
+          version: string;
+        }
+      ).version;
+      const descriptor = {
+        source: 'installed',
+        path: '/opt/homebrew/bin/tau',
+        cli: cliVersion,
+        plugin: cliVersion,
+        node: process.versions.node,
+        skipped: [{ path: '/usr/local/bin/tau', version: '0.1.0-beta.2' }],
+      };
+      await mkdir(join(scratch, 'identity'), { recursive: true });
+      /* Built by assignment so no environment key is a source literal. */
+      const env: Record<string, string> = {};
+      env['TAU_LAUNCH'] = JSON.stringify(descriptor);
+      const seen: Array<{
+        instructions: string | undefined;
+        capabilities: ReturnType<Client['getServerCapabilities']>;
+      }> = [];
+      for (const shape of [hostShapes.claudeCode, hostShapes.codexCli]) {
+        const served = launch(join(scratch, 'identity'), undefined, { env });
+        disposers.push(stopIfRunning(served));
+        const client = new Client(shape.clientInfo, { capabilities: shape.capabilities });
+        // oxlint-disable-next-line no-await-in-loop -- one server per host shape.
+        await connect(client, served);
+        seen.push({ instructions: client.getInstructions(), capabilities: client.getServerCapabilities() });
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await client.close();
+      }
+      const [claude, codex] = seen;
+
+      expect(claude?.instructions).toMatch(/^Use your native filesystem/u);
+      expect(claude?.instructions).toContain(
+        `Tau CLI ${cliVersion} (installed tau at /opt/homebrew/bin/tau; installed tau 0.1.0-beta.2 at /usr/local/bin/tau skipped) started by plugin ${cliVersion} on Node.js ${process.versions.node}; server @taucad/mcp `,
+      );
+      expect(claude?.instructions?.length).toBeLessThan(2048);
+      expect(claude?.capabilities).not.toHaveProperty('experimental');
+      expect(codex?.capabilities?.experimental).toEqual({ 'codex/sandbox-state-meta': {} });
+    },
+    kernelCallLimit,
+  );
+});
 
 describe('tau mcp viewer presentation', () => {
   const page = '<!doctype html><title>Tau viewer fixture</title>';

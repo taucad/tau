@@ -5,6 +5,14 @@
       "expect": "pass",
       "ref": "GI-A5 one-key graph for the credit operation oracle"
     },
+    "GatewayInvocation.cut-absorbs-NoLiveAbsorb.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLiveAbsorb"
+      },
+      "kind": "witness",
+      "ref": "CutSettles: a client cut absorbs a live step at once under the admitting generation (taucad/tau#851)"
+    },
     "GatewayInvocation.failure-message-ChargeAfterRecordedLoss-3.cfg": {
       "tier": "nightly",
       "expect": {
@@ -77,13 +85,22 @@
       "kind": "witness",
       "ref": "RV5-F1 HostDiscard: the overflow retry drops a completed reply and sends again (KeepCompleted off); W0.20 lands first (RV6-F3)"
     },
+    "GatewayInvocation.pending-cut-ClientCutSettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ClientCutSettled"
+      },
+      "kind": "defect",
+      "ref": "A client cut stayed pending until recovery, so the chat's next step waited on it (agent-host StopSettlement)",
+      "fixedBy": "taucad/tau#851"
+    },
     "GatewayInvocation.service-stop-NoLiveAbsorb.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "NoLiveAbsorb"
       },
       "kind": "witness",
-      "ref": "API graceful-shutdown R10: a stopping API absorbs a live step at once under the admitting generation"
+      "ref": "API graceful-shutdown R10: a stopping API absorbs a live step at once under the admitting generation (CutSettles FALSE isolates the stop)"
     },
     "GatewayInvocation.target-2workers-refunds.cfg": {
       "tier": "nightly",

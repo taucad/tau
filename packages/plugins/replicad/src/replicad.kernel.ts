@@ -312,7 +312,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.1.0-taulabs.1' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -992,7 +992,7 @@ export const replicadKernel = defineKernel({
               ? shapes3d
               : shapes3d.map((geometry) => ({
                   ...geometry,
-                  edges: { ...geometry.edges, lines: [] },
+                  edges: { ...geometry.edges, lines: new Float32Array(0) },
                 })),
             format: 'glb',
             includeTauTopology: includeTopology,
@@ -1099,7 +1099,7 @@ export const replicadKernel = defineKernel({
                     ? temporaryShapes
                     : temporaryShapes.map((geometry) => ({
                         ...geometry,
-                        edges: { ...geometry.edges, lines: [] },
+                        edges: { ...geometry.edges, lines: new Float32Array(0) },
                       })),
                 format: exportId,
                 includeTauTopology: content?.includeTopology === true,

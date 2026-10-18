@@ -2,11 +2,11 @@
 
 @jscad/modeling 2.13.0 · 729 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
+Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
 ## colors — `api-colors.md`
 
-colors (namespace) [16 members]
+colors (namespace) [lines 5-355] [16 members]
   colors.colorize (function)
   colors.colorNameToRgb (function)
   colors.cssColors (namespace) [147 members]
@@ -173,7 +173,7 @@ colors (namespace) [16 members]
 
 ## curves — `api-curves.md`
 
-curves (namespace) [1 members]
+curves (namespace) [lines 5-37] [1 members]
   curves.bezier (namespace) [7 members]
     curves.bezier.create (function)
     curves.bezier.tangentAt (function)
@@ -190,7 +190,7 @@ curves (namespace) [1 members]
 
 ## geometries — `api-geometries.md`
 
-geometries (namespace) [5 members]
+geometries (namespace) [lines 5-270] [5 members]
   geometries.geom2 (namespace) [14 members]
     geometries.geom2.clone (function)
     geometries.geom2.create (function)
@@ -294,7 +294,7 @@ geometries (namespace) [5 members]
 
 ## maths — `api-maths.md`
 
-maths (namespace) [9 members]
+maths (namespace) [lines 5-501] [9 members]
   maths.constants (namespace) [3 members]
     maths.constants.EPS (constant)
     maths.constants.NEPS (constant)
@@ -468,7 +468,7 @@ maths (namespace) [9 members]
 
 ## measurements — `api-measurements.md`
 
-measurements (namespace) [13 members]
+measurements (namespace) [lines 5-55] [13 members]
   measurements.measureAggregateArea (function)
   measurements.measureAggregateBoundingBox (function)
   measurements.measureAggregateEpsilon (function)
@@ -485,7 +485,7 @@ measurements (namespace) [13 members]
 
 ## primitives — `api-primitives.md`
 
-primitives (namespace) [41 members]
+primitives (namespace) [lines 5-268] [41 members]
   primitives.arc (function)
   primitives.ArcOptions (interface) [6 members]
     primitives.ArcOptions.center (property)
@@ -610,7 +610,7 @@ primitives (namespace) [41 members]
 
 ## text — `api-text.md`
 
-text (namespace) [6 members]
+text (namespace) [lines 5-57] [6 members]
   text.vectorChar (function)
   text.VectorChar (interface) [3 members]
     text.VectorChar.width (property)
@@ -636,7 +636,7 @@ text (namespace) [6 members]
 
 ## utils — `api-utils.md`
 
-utils (namespace) [7 members]
+utils (namespace) [lines 5-26] [7 members]
   utils.areAllShapesTheSameType (function)
   utils.degToRad (function)
   utils.flatten (function)
@@ -647,7 +647,7 @@ utils (namespace) [7 members]
 
 ## booleans — `api-booleans.md`
 
-booleans (namespace) [5 members]
+booleans (namespace) [lines 5-24] [5 members]
   booleans.intersect (function)
   booleans.minkowski (function)
   booleans.subtract (function)
@@ -656,7 +656,7 @@ booleans (namespace) [5 members]
 
 ## expansions — `api-expansions.md`
 
-expansions (namespace) [4 members]
+expansions (namespace) [lines 5-31] [4 members]
   expansions.expand (function)
   expansions.ExpandOptions (interface) [3 members]
     expansions.ExpandOptions.delta (property)
@@ -670,7 +670,7 @@ expansions (namespace) [4 members]
 
 ## extrusions — `api-extrusions.md`
 
-extrusions (namespace) [13 members]
+extrusions (namespace) [lines 5-131] [13 members]
   extrusions.extrudeFromSlices (function)
   extrusions.ExtrudeFromSlicesOptions (interface) [5 members]
     extrusions.ExtrudeFromSlicesOptions.numberOfSlices (property)
@@ -725,7 +725,7 @@ extrusions (namespace) [13 members]
 
 ## hulls — `api-hulls.md`
 
-hulls (namespace) [4 members]
+hulls (namespace) [lines 5-21] [4 members]
   hulls.hull (function)
   hulls.hullChain (function)
   hulls.hullPoints2 (function)
@@ -733,17 +733,17 @@ hulls (namespace) [4 members]
 
 ## minkowski — `api-minkowski.md`
 
-minkowski (namespace) [1 members]
+minkowski (namespace) [lines 5-9] [1 members]
   minkowski.minkowskiSum (function)
 
 ## modifiers — `api-modifiers.md`
 
-modifiers (namespace) [1 members]
+modifiers (namespace) [lines 5-8] [1 members]
   modifiers.retessellate (function)
 
 ## transforms — `api-transforms.md`
 
-transforms (namespace) [26 members]
+transforms (namespace) [lines 5-137] [26 members]
   transforms.align (function)
   transforms.AlignOptions (interface) [3 members]
     transforms.AlignOptions.modes (property)

@@ -4,6 +4,7 @@
 EXTENDS Integers, FiniteSets
 CONSTANTS Keys, Workers, Crashes, MaxTime, Due, Grace, MaxRecovery, LostReplyRetries,
           VoidOnLookup, LookupFailed, Reconcile, AutoProceed, KeepCompleted, RefundHolds, ServiceStops,
+          CutSettles,
           FenceGen, DeferGrace, CountRetries
 VARIABLES now, row, acctHeld, refundHeld, voided, req, fin, conn, sup, dispatches, claims,
           host, prepared, bound, shown, marker, settledRow, reprepares, runRetries, runLosses,

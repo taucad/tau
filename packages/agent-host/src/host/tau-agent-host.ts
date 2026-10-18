@@ -13,7 +13,7 @@ import type { ClientContext } from '#harness/cad-middleware.js';
 import { codedFailureDetail } from '#harness/coded-failure.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
-import { createAgentSession, fundingPrincipal, settledRowOf } from '#harness/session.js';
+import { createAgentSession, fundingPrincipal, settledInvocation, settledRowOf } from '#harness/session.js';
 import type {
   AgentRunOutcome,
   AgentSession,
@@ -1101,9 +1101,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   /**
    * Resolve every unresolved model attempt in the chat before a Resume prepares anything (RA-S11, EQ1): each terminal
-   * or voided answer becomes a settled row; a pending one refuses `MODEL_ATTEMPT_PENDING`; an attempt another account
-   * funded (or any, on an unfunded transport) refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` before any lookup, and is neither
-   * voided nor recorded (RV5-F2).
+   * or voided answer becomes a settled row; a pending one is asked again within the run's waits (a Resume right after
+   * Stop finds the cut call still settling, StopSettlement), then refuses `MODEL_ATTEMPT_PENDING`; an attempt another
+   * account funded (or any, on an unfunded transport) refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` before any lookup, and is
+   * neither voided nor recorded (RV5-F2).
    */
   const resolveInvocations = async (ledger: ChatLedger): Promise<LogRowBody[]> => {
     const open = unresolvedInvocations(ledger);
@@ -1130,7 +1131,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const rows: LogRowBody[] = [];
     for (const attemptId of open) {
       // oxlint-disable-next-line no-await-in-loop -- one lookup at a time, in preparation order.
-      const resolution = await funding.resolveInvocation({ attemptId, signal: new AbortController().signal });
+      const resolution = await settledInvocation({
+        funding,
+        attemptId,
+        clock: options.clock ?? globalThis,
+        signal: new AbortController().signal,
+      });
       if (resolution.status === 'pending' || resolution.status === 'unavailable') {
         throw coded(
           'MODEL_ATTEMPT_PENDING' satisfies RefusalCode,

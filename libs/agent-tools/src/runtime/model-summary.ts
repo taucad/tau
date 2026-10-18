@@ -1,6 +1,9 @@
 import type { ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
 import type { KernelIssue } from '@taucad/runtime/types';
 
+import { isObject, renderedGlb } from '#runtime/glb-chunks.js';
+import type { JsonObject, RenderedArtifact } from '#runtime/glb-chunks.js';
+
 /**
  * The admission limits the GeoSpec engine checks one subject against, as its `initialize`
  * configuration reports them.
@@ -17,13 +20,12 @@ export type ModelAdmissionLimits = Readonly<{
 
 /** What {@link summarizeRenderedModel} reads: the default view's artifact and issues, and the engine limits. */
 type SummarizeRenderedModelInput = Readonly<{
-  artifact: Readonly<{ mimeType: string; content: Uint8Array<ArrayBuffer> | string }>;
+  artifact: RenderedArtifact;
   issues: readonly KernelIssue[];
   /** Resolves the engine's limits, or `undefined` when this host cannot say; read only for a GLB. */
   admissionLimits?: (() => Promise<ModelAdmissionLimits | undefined>) | undefined;
 }>;
 
-type JsonObject = Readonly<Record<string, unknown>>;
 type Matrix = readonly number[];
 type Point = readonly [number, number, number];
 type Estimate = NonNullable<ModelSummary['admission']>['subjectBytes'];
@@ -34,8 +36,6 @@ type MeshFacts = Readonly<{
   bounds?: ModelSummary['bounds'];
 }>;
 
-const glbMagic = 0x46_54_6c_67;
-const jsonChunkType = 0x4e_4f_53_4a;
 /**
  * A subject's bytes per triangle at three vertices per triangle, each a float32 position and normal:
  * exact for the mesh imports the glTF kernel de-indexes, more than an indexed export needs.
@@ -54,9 +54,6 @@ const normalizedDivisors: ReadonlyMap<number, number> = new Map([
   [5123, 65_535],
 ]);
 const identity: Matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
-const isObject = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -91,33 +88,6 @@ const numbersOf = (object: JsonObject | undefined, key: string, length: number):
   return entries.length === length && entries.every((entry): entry is number => isFiniteNumber(entry))
     ? entries
     : undefined;
-};
-
-/**
- * The JSON chunk of a GLB, or `undefined` for bytes that are not one.
- *
- * @param content - GLB bytes.
- * @returns The parsed glTF JSON.
- */
-const gltfJson = (content: Uint8Array<ArrayBuffer>): JsonObject | undefined => {
-  if (content.byteLength < 20) {
-    return undefined;
-  }
-  const view = new DataView(content.buffer, content.byteOffset, content.byteLength);
-  const length = view.getUint32(12, true);
-  if (view.getUint32(0, true) !== glbMagic || view.getUint32(16, true) !== jsonChunkType) {
-    return undefined;
-  }
-  if (20 + length > content.byteLength) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(content.subarray(20, 20 + length)));
-    return isObject(parsed) ? parsed : undefined;
-  } catch {
-    // A display GLB whose JSON does not parse has no facts to report; the viewer reports it.
-    return undefined;
-  }
 };
 
 /** Column-major `left × right`: a child's local matrix under its parent's world matrix. */
@@ -359,11 +329,7 @@ const admissionOf = (
  * @returns The summary, or `undefined` when the artifact is not a GLB.
  */
 export const summarizeRenderedModel = async (input: SummarizeRenderedModelInput): Promise<ModelSummary | undefined> => {
-  const { artifact } = input;
-  if (artifact.mimeType !== 'model/gltf-binary' || typeof artifact.content === 'string') {
-    return undefined;
-  }
-  const json = gltfJson(artifact.content);
+  const json = renderedGlb(input.artifact)?.json;
   if (json === undefined) {
     return undefined;
   }

@@ -16,4 +16,9 @@ a non-secret authority key supplied by that host.
 `serveTauMcpStdio()` serves the same tools to a local agent that launched the
 process (a Codex or Claude Code plugin). With `screenshotImages: 'inline'`,
 `screenshot` returns MCP image blocks the client shows its model, with the
-saved file paths in text.
+saved file paths in text. It declares Codex's `codex/sandbox-state-meta`
+capability to Codex (`clientInfo.name` `codex-mcp-client`) only. With
+`runtime`, the `initialize` instructions end with one sentence naming the
+serving CLI's version, how it was started (the agent plugin's `TAU_LAUNCH`
+descriptor, which `parseTauMcpLaunch` reads, or "started directly"), and this
+server's version.

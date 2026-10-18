@@ -45,12 +45,19 @@ vi.mock('#components/chat/requirement-indicator.js', () => ({
   RequirementIndicator({
     failedCount,
     passedCount,
+    undecidedCount = 0,
   }: {
     readonly failedCount: number;
     readonly passedCount: number;
+    readonly undecidedCount?: number;
   }): React.JSX.Element {
     return (
-      <span data-testid='requirement-indicator' data-failed={failedCount} data-passed={passedCount}>
+      <span
+        data-testid='requirement-indicator'
+        data-failed={failedCount}
+        data-passed={passedCount}
+        data-undecided={undecidedCount}
+      >
         {passedCount}/{passedCount + failedCount}
       </span>
     );
@@ -134,6 +141,85 @@ describe('ChatMessageToolTestModel — full report', () => {
 
     expect(screen.getByTestId('report-card').textContent).toBe('geospec-report.json');
     expect(screen.getByText(/All 2 requirements \(1 passed, 1 failed\).*2\.0 KB/)).toBeTruthy();
+  });
+});
+
+describe('ChatMessageToolTestModel — undecided requirements', () => {
+  const accounting = {
+    discovered: 10,
+    selected: 10,
+    completed: 10,
+    passed: 5,
+    failed: 0,
+    unsupported: 0,
+    inconclusive: 5,
+    skipped: 0,
+    notRun: 0,
+    requestedFiles: ['main.geospec.ts'],
+    completedFiles: ['main.geospec.ts'],
+    notRunFiles: [],
+    discoveryComplete: true,
+    cancelled: false,
+    bailed: false,
+  };
+  const undecided = (
+    index: number,
+    category: 'analysis-limit' | 'unsupported-evidence',
+  ): TestModelOutputAvailable['output']['failures'][number] => ({
+    id: `main.geospec.ts:undecided ${index}`,
+    requirement: `undecided ${index}`,
+    reason: 'The engine could not decide this claim.',
+    suggestion: 'Keep the assertion and report the claim as not decided.',
+    status: 'inconclusive',
+    category,
+    targetFile: 'main.ts',
+  });
+  const part = buildPart({
+    passed: 5,
+    total: 10,
+    runStatus: 'inconclusive',
+    accounting,
+    passes: Array.from({ length: 5 }, (_, index) => ({
+      id: `p${index}`,
+      requirement: `pass ${index}`,
+      targetFile: 'main.ts',
+    })),
+    failures: [
+      undecided(1, 'analysis-limit'),
+      undecided(2, 'analysis-limit'),
+      undecided(3, 'analysis-limit'),
+      undecided(4, 'unsupported-evidence'),
+      undecided(5, 'unsupported-evidence'),
+    ],
+    fullResult: {
+      path: `attachments/${'a'.repeat(64)}.json`,
+      mimeType: 'application/json',
+      byteLength: 2048,
+      sha256: 'b'.repeat(64),
+    },
+  });
+
+  it('should count inconclusive rows as undecided, never as failed', () => {
+    render(<ChatMessageToolTestModel part={part} />);
+
+    const indicator = screen.getByTestId('requirement-indicator');
+    expect(indicator.dataset).toMatchObject({ passed: '5', failed: '0', undecided: '5' });
+    expect(screen.getAllByText('Not decided')).toHaveLength(5);
+    expect(screen.queryByText('Failed')).toBeNull();
+  });
+
+  it('should flag an undecided run with the warning tone, not the error tone', () => {
+    render(<ChatMessageToolTestModel part={part} />);
+
+    expect(screen.getByTestId('chat-tool-card-icon').dataset['tone']).toBe('warning');
+  });
+
+  it('should name the inconclusive count in the report caption', () => {
+    enabledFeatures.add('tauDebug');
+    render(<ChatMessageToolTestModel part={part} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+
+    expect(screen.getByText(/All 10 requirements \(5 passed, 0 failed, 5 inconclusive\)/)).toBeTruthy();
   });
 });
 

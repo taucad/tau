@@ -163,7 +163,7 @@ primitives
     innerRotation?: number
     outerRotation?: number
     startAngle?: number
-  // … 15 more members in the API reference
+  // … 15 more members in the API reference: arc, cylinderElliptic, ellipse, ellipsoid, geodesicSphere, line, polyhedron, roundedCuboid, roundedCylinder, roundedRectangle, sphere, square, star, triangle, TriangleOptions
 ```
 
 ### booleans
@@ -209,7 +209,7 @@ transforms
   export function translate<T extends Geometry>(offset: Vec, geometry: T): T
   export function translate<T extends Geometry>(offset: Vec, ...geometries: RecursiveArray<T>): Array<T>
   export function translate(offset: Vec, ...geometries: RecursiveArray<Geometry>): Array<Geometry>
-  // … 18 more members in the API reference
+  // … 18 more members in the API reference: align, AlignOptions, centerX, centerY, centerZ, CenterOptions, mirror, mirrorX, mirrorY, MirrorOptions, scaleX, scaleY, scaleZ, transform, translateX, translateY, translateZ, Vec
 ```
 
 ### extrusions
@@ -251,7 +251,7 @@ extrusions
     declare function transform(matrix: Mat4, slice: Slice): Slice
     interface Slice
       edges: Array<[Vec3, Vec3]>
-  // … 8 more members in the API reference
+  // … 8 more members in the API reference: extrudeFromSlices, ExtrudeFromSlicesOptions, extrudeRectangular, extrudeRotate, ExtrudeRotateOptions, extrudeHelical, project, ProjectOptions
 ```
 
 ### maths
@@ -270,7 +270,7 @@ maths
     export function cos(radians: number): number
   vec2
   vec3
-  // … 4 more members in the API reference
+  // … 4 more members in the API reference: constants, mat4, plane, vec4
 ```
 
 ### geometries
@@ -298,7 +298,7 @@ colors
   declare function colorize<T extends Geometry>(color: RGB | RGBA, ...objects: RecursiveArray<T>): Array<T & Colored>
   declare function colorize(color: RGB | RGBA, ...objects: RecursiveArray<Geometry>): Array<Geometry & Colored>
   cssColors
-  // … 14 more members in the API reference
+  // … 14 more members in the API reference: colorNameToRgb, hexToRgb, hslToRgb, hsvToRgb, hueToColorComponent, rgbToHex, rgbToHsl, rgbToHsv, RGB, RGBA, HSL, HSLA, HSV, HSVA
 ```
 
 ### text
@@ -324,7 +324,7 @@ text
     align?: 'left' | 'center' | 'right'
     extrudeOffset?: number
     input?: string
-  // … 3 more members in the API reference
+  // … 3 more members in the API reference: vectorChar, vectorText, VectorText
 ```
 
 ### utils
@@ -359,19 +359,9 @@ curves
       tangentPermutations: Array<number>
 ```
 
-### measurements
-
-```ts
-measurements
-  declare function measureBoundingBox(geometry: Geometry): BoundingBox
-  declare function measureBoundingBox(geometry: any): [[0, 0, 0], [0, 0, 0]]
-  declare function measureBoundingBox(...geometries: RecursiveArray<Geometry | any>): Array<BoundingBox>
-  // … 12 more members in the API reference
-```
-
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 729 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 729 symbols by file with the lines that hold each, and read that range of the named file.
 
 - 15 reference files, named in `api-index.md`
 

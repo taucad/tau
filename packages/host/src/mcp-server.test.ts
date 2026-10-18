@@ -621,6 +621,7 @@ describe('the mounted /mcp route', () => {
                     requirement: 'Mesh is sound',
                     reason: 'Failed',
                     suggestion: 'Inspect details',
+                    status: 'inconclusive',
                     category: 'analysis-limit',
                     limit: compactLimit,
                     targetFile: 'main.cs',
@@ -674,7 +675,12 @@ describe('the mounted /mcp route', () => {
           omittedTests: 1,
           omittedLineage: 0,
         });
-        expect(summary.failures[0]).toMatchObject({ id: 'large-1', category: 'analysis-limit', limit: compactLimit });
+        expect(summary.failures[0]).toMatchObject({
+          id: 'large-1',
+          status: 'inconclusive',
+          category: 'analysis-limit',
+          limit: compactLimit,
+        });
         expect(JSON.stringify(tests).length).toBeLessThan(128 * 1024);
         expect(summary.fullResult).toBeDefined();
         if (alreadyRetained) {

@@ -7,7 +7,7 @@ import type { KernelProvider } from '@taucad/runtime';
  */
 export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<string, string>>>> = {
   replicad: {
-    replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0',
+    replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.1',
     'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0',
   },
   opencascadejs: { libcascade: '3.1.0' },

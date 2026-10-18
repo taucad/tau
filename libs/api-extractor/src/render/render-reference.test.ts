@@ -88,8 +88,21 @@ describe('renderIndex', () => {
       { name: 'loadModel', path: 'geospec/model', kind: 'function', category: 'authoring' },
     ]);
     const rendered = renderIndex(qualified, planShards(qualified, { groupBy }), { title: 'GeoSpec API index' });
-    expect(rendered).toContain('geospec/model.loadModel (function) [category: authoring]');
+    expect(rendered).toContain('geospec/model.loadModel (function) [lines 5-6] [category: authoring]');
     expect(rendered).not.toContain('[id:');
+  });
+
+  it('should name the lines of its shard that hold each top-level entry', () => {
+    for (const shard of shards) {
+      const lines = renderShard(shard, corpus).split('\n');
+      for (const entry of shard.entries) {
+        const row = index.split('\n').find((line) => line.startsWith(`${entry.name} (`));
+        const [, start, end] = /\[lines (\d+)-(\d+)\]/u.exec(row ?? '') ?? [];
+        const block = lines.slice(Number(start) - 1, Number(end)).join('\n');
+        expect(block).toContain(entry.name);
+        expect(lines[Number(end)]).toBe('');
+      }
+    }
   });
 
   it('should list every addressable entry exactly once, without redundant ids', () => {
@@ -143,7 +156,7 @@ describe('renderIndex', () => {
     const line = index.split('\n').find((entry) => entry.startsWith('drawCircle ('));
 
     expect(line).toBe(
-      'drawCircle (function) [category: sketching] — Draw a circle of the given radius on the current…',
+      'drawCircle (function) [lines 5-8] [category: sketching] — Draw a circle of the given radius on the current…',
     );
   });
 
@@ -261,7 +274,8 @@ describe('renderSkill', () => {
 
     expect(markdown.startsWith('---\nname: cad-replicad\n')).toBe(true);
     expect(markdown).toContain('1. Author `main.ts` with ES module imports.');
-    expect(markdown).toContain('grep the skill directory for the name followed by `(`');
+    expect(markdown).toContain('find its name in `api-index.md`');
+    expect(markdown).not.toContain('grep');
     expect(bodyTokens).toBeLessThanOrEqual(maxSkillBodyTokens);
   });
 

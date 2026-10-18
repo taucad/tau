@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TauMcpViewerCallOptions } from '@taucad/mcp';
 import type { TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
+import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
 import { createLocalMcpViewer } from '#mcp-viewer.js';
 import type { LocalMcpViewer, LocalMcpViewerOptions } from '#mcp-viewer.js';
@@ -105,6 +106,51 @@ describe('createLocalMcpViewer', () => {
 
     expect(renderGlb).toHaveBeenCalledWith(expect.objectContaining({ root, targetFile: 'src/bracket.ts' }));
     expect(model).toMatchObject({ title: 'bracket', path: '.tau/artifacts/bracket.glb', sourceFile: 'src/bracket.ts' });
+  });
+
+  it('should report whether the shown GLB preserved its source mechanism', async () => {
+    const payload = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        components: [],
+        mechanism: {
+          links: { frame: {}, sun: {} },
+          joints: { sun: {} },
+          animations: [{ id: 'four-sun-turns' }],
+        },
+      }),
+    );
+    const bin = new Uint8Array(Math.ceil(payload.byteLength / 4) * 4);
+    bin.set(payload);
+    const text = JSON.stringify({
+      asset: { version: '2.0' },
+      extensions: { [tauCadTopologyExtension]: { topologyBufferView: 0 } },
+      buffers: [{ byteLength: bin.byteLength }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: payload.byteLength }],
+    });
+    const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
+    const topology = new Uint8Array(28 + json.byteLength + bin.byteLength);
+    const view = new DataView(topology.buffer);
+    view.setUint32(0, 0x46_54_6c_67, true);
+    view.setUint32(4, 2, true);
+    view.setUint32(8, topology.byteLength, true);
+    view.setUint32(12, json.byteLength, true);
+    view.setUint32(16, 0x4e_4f_53_4a, true);
+    topology.set(json, 20);
+    view.setUint32(20 + json.byteLength, bin.byteLength, true);
+    view.setUint32(24 + json.byteLength, 0x00_4e_49_42, true);
+    topology.set(bin, 28 + json.byteLength);
+    renderGlb.mockImplementationOnce(async () => {
+      await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+      await writeFile(join(root, '.tau', 'artifacts', 'bracket.glb'), topology);
+      return '.tau/artifacts/bracket.glb';
+    });
+
+    const rendered = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const bare = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+
+    expect(rendered.mechanism).toEqual({ preserved: true, joints: 1, animations: ['four-sun-turns'] });
+    expect(bare.mechanism).toEqual({ preserved: false, joints: 0, animations: [] });
   });
 
   it('should show the main entry, then the model shown last, when no target is named', async () => {

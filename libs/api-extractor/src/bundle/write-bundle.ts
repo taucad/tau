@@ -17,8 +17,8 @@ import { apiIndexFile, skillBodyFile } from '#bundle/bundle.types.js';
 import type { CoreApiOptions, UsageRanking } from '#render/render-core.js';
 import { renderCoreApi } from '#render/render-core.js';
 import { renderIndex, renderReferenceMap, renderShard } from '#render/render-reference.js';
-import { maxSkillBodyLines, renderSkill } from '#render/render-skill.js';
-import { planShards } from '#render/shard-plan.js';
+import { maxSkillBodyLines, maxSkillBodyTokens, renderSkill } from '#render/render-skill.js';
+import { estimateTokens, planShards } from '#render/shard-plan.js';
 
 /** Everything one bundle needs that cannot be derived from the corpus. @public */
 export type BundleOptions = {
@@ -105,6 +105,12 @@ export const writeCorpusBundle = async (
             // The core takes whatever 500 lines leave after the frontmatter, title, doctrine and reference map.
             budgetLines: maxSkillBodyLines - lineCount(options.doctrine) - lineCount(referenceMap) - 12,
             ...options.core.options,
+            // Nor may it spend more tokens than the body ceiling leaves after the title, doctrine and reference map.
+            budgetTokens: Math.min(
+              options.core.options.budgetTokens,
+              maxSkillBodyTokens -
+                estimateTokens(`# ${options.title}\n\n${options.doctrine.trim()}\n\n\n\n${referenceMap}`),
+            ),
           },
         );
   const skill = renderSkill({

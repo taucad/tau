@@ -562,8 +562,8 @@ catalogs:
       specifier: ^1.7.2
       version: 1.7.2
     geospec-engine:
-      specifier: 0.2.0
-      version: 0.2.0
+      specifier: 0.2.1
+      version: 0.2.1
     graphics-debug:
       specifier: 0.0.100
       version: 0.0.100
@@ -924,7 +924,7 @@ overrides:
   nx@22.7.12>smol-toml: 1.9.1
   oxfmt@0.36.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
-  replicad: npm:@taulabs/replicad@1.1.0-taulabs.0
+  replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   sockjs@0.3.24>uuid: 11.1.1
   vitest: 4.1.11
@@ -1368,8 +1368,8 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4(react-router@7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
       replicad:
-        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
-        version: '@taulabs/replicad@1.1.0-taulabs.0'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
+        version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -1649,7 +1649,7 @@ importers:
         version: link:packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3
@@ -1842,7 +1842,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       pino-pretty:
         specifier: 'catalog:'
         version: 13.2.0
@@ -1992,7 +1992,7 @@ importers:
         version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       libassimp:
         specifier: 'catalog:'
         version: 0.3.0
@@ -2558,7 +2558,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       ws:
         specifier: 'catalog:'
         version: 8.22.0
@@ -2804,7 +2804,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       isbot:
         specifier: 'catalog:'
         version: 5.2.2
@@ -3403,8 +3403,8 @@ importers:
         specifier: 'catalog:'
         version: 0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
       replicad:
-        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
-        version: '@taulabs/replicad@1.1.0-taulabs.0'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
+        version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -3709,7 +3709,7 @@ importers:
         version: link:../geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.2.7)
@@ -4022,7 +4022,7 @@ importers:
         version: link:../geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
     devDependencies:
       '@taucad/build123d':
         specifier: workspace:*
@@ -4159,7 +4159,7 @@ importers:
         version: link:../geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.2.0
+        version: 0.2.1
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4770,8 +4770,8 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2
       replicad:
-        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
-        version: '@taulabs/replicad@1.1.0-taulabs.0'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
+        version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -4851,8 +4851,8 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(playwright@1.64.0)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
-        version: '@taulabs/replicad@1.1.0-taulabs.0'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
+        version: '@taulabs/replicad@1.1.0-taulabs.1'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -5686,8 +5686,8 @@ importers:
         specifier: workspace:*
         version: link:../geospec
       replicad:
-        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
-        version: '@taulabs/replicad@1.1.0-taulabs.0'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
+        version: '@taulabs/replicad@1.1.0-taulabs.1'
 
   packages/workbench:
     devDependencies:
@@ -13396,8 +13396,8 @@ packages:
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0':
     resolution: {integrity: sha512-f1odv1vpJNAsgYFzxaoF12fOzbGHsYA0J0tio/GrqVYoc/Pt+hx0l1o25aEZv0JTx+01WJIhyvVYAmG6hE9ZKg==}
 
-  '@taulabs/replicad@1.1.0-taulabs.0':
-    resolution: {integrity: sha512-HuaPu2gpo5kmDHGFwG97He0pTAnlSeGy40dQU0GaRiLI3CrINXP06lEvFFrFvGi05gjTJlVotz+vifnR5uXtlQ==}
+  '@taulabs/replicad@1.1.0-taulabs.1':
+    resolution: {integrity: sha512-lyCe6PKiZ1BIVQ0NZShUsJQxmfQc1jZyx15WXcGMivzCBWuZQwFqFw38DqaKBz8xRC2Ir8tECGjpeiTVLiSMCA==}
 
   '@taulabs/three-viewport-gizmo@2.2.4':
     resolution: {integrity: sha512-vqvgsi4oTyaKf19useCAZBSV929cZWum/pVny5xHTUDOV8GwrP89OpKeF18Ui4rJ7/b5cLMKmoAZRBvAMDKf9w==}
@@ -18215,21 +18215,21 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  geospec-engine-darwin-arm64@0.2.0:
-    resolution: {integrity: sha512-tenfXunH0Std1lZVvgc/ymJ5vqtd1n9hvMfKOSa5rUywT5d4FpWWzMtu2TmGARUmtrS7WDS3bmAY05igCcHfLg==}
+  geospec-engine-darwin-arm64@0.2.1:
+    resolution: {integrity: sha512-I9bSSvwMzXyZljjpkVsaQ/2gj7cTtH5k722TEfsydN8N6o3MbyFUjaF5rjdC60EsYFns7Kmm1hFxId9bnUryRQ==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  geospec-engine-linux-x64-gnu@0.2.0:
-    resolution: {integrity: sha512-sZ+7bgHw9POFOejzSeePJ5uG4oQ0t71ZTotYF62ATIZf3mS/OeVVJvtD7OM+F9J5+56AfeRfshShdEIhOtWV3g==}
+  geospec-engine-linux-x64-gnu@0.2.1:
+    resolution: {integrity: sha512-JNMkf0wCQX92ygBVqhn0gSLBFwQMXmHKsNIe51wUcs7xMW1G04OGJgy39ixmtfqyCh3bNllchmRhRIg/PobnOA==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine@0.2.0:
-    resolution: {integrity: sha512-qd+eAlB3mEYGgSFfrHDkmgYpGsQooclzhXXmDXMp5Y1A1D43eMtVtaL48ak2km1vLQH+RyUPMEqRYbk545ZvLA==}
+  geospec-engine@0.2.1:
+    resolution: {integrity: sha512-ki/QQe/VRqvcvws/hrREkxbcA4xNpReO3TG9Yg0ErKJw1KaLe8OaxXeQUn+K0S0b6yw0fiV5228DA57+y1zcQg==}
     engines: {node: '>=24.0.0'}
 
   get-amd-module-type@6.0.2:
@@ -33864,7 +33864,7 @@ snapshots:
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0': {}
 
-  '@taulabs/replicad@1.1.0-taulabs.0':
+  '@taulabs/replicad@1.1.0-taulabs.1':
     dependencies:
       '@types/opentype.js': 1.3.10
       flatbush: 4.6.2
@@ -39344,16 +39344,16 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  geospec-engine-darwin-arm64@0.2.0:
+  geospec-engine-darwin-arm64@0.2.1:
     optional: true
 
-  geospec-engine-linux-x64-gnu@0.2.0:
+  geospec-engine-linux-x64-gnu@0.2.1:
     optional: true
 
-  geospec-engine@0.2.0:
+  geospec-engine@0.2.1:
     optionalDependencies:
-      geospec-engine-darwin-arm64: 0.2.0
-      geospec-engine-linux-x64-gnu: 0.2.0
+      geospec-engine-darwin-arm64: 0.2.1
+      geospec-engine-linux-x64-gnu: 0.2.1
 
   get-amd-module-type@6.0.2:
     dependencies:

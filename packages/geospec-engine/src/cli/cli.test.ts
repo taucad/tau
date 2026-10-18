@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import {
   formatFileReport,
+  formatRunHeadline,
   formatRunReport,
   geoSpecCliUsage,
   jsonChunks,
@@ -293,6 +294,32 @@ describe('formatFileReport', () => {
     ]);
   });
 
+  it('should label an undecided test by its status, never fail', () => {
+    const refusal: GeometryDiagnostic = {
+      code: 'GEOSPEC_ANALYSIS_LIMIT',
+      severity: 'error',
+      message: 'Connected components need 9 MiB; the analysis limit is 8 MiB.',
+    };
+    const result: GeoSpecRunResult = {
+      success: true,
+      passed: false,
+      bundle,
+      tests: [
+        { suite: ['knot'], name: 'one solid', status: 'inconclusive', diagnostics: [refusal], assertions: [] },
+        { suite: ['knot'], name: 'step only', status: 'unsupported', diagnostics: [], assertions: [] },
+        { suite: ['knot'], name: 'later', status: 'not-run', diagnostics: [], assertions: [] },
+      ],
+    };
+
+    expect(formatFileReport('knot.geospec.ts', result)).toStrictEqual([
+      'FAIL knot.geospec.ts',
+      '  inconclusive knot > one solid',
+      `    GEOSPEC_ANALYSIS_LIMIT: ${refusal.message}`,
+      '  unsupported knot > step only',
+      '  not-run knot > later',
+    ]);
+  });
+
   it('should print PASS for a green file', () => {
     expect(formatFileReport('a.geospec.ts', { success: true, passed: true, tests: [], bundle })).toStrictEqual([
       'PASS a.geospec.ts',
@@ -314,7 +341,7 @@ describe('formatRunReport', () => {
     expect(lines).toStrictEqual([
       'PASS a.geospec.ts',
       'GEOSPEC_RUNNER_BAILED: stopped',
-      '1 passed, 2 failed, 3 selected',
+      'GeoSpec failed: 1 passed, 2 failed of 3.',
     ]);
   });
 
@@ -344,7 +371,67 @@ describe('formatRunReport', () => {
       },
     });
 
-    expect(lines).toStrictEqual(['0 passed, 0 failed, 4 selected, 4 inconclusive']);
+    expect(lines).toStrictEqual(['GeoSpec inconclusive: 0 passed, 0 failed, 4 inconclusive of 4.']);
+  });
+
+  // The same counts give the same line as `summarizeTestModelOutput` in @taucad/chat (test-model-summary.test.ts).
+  it('should print the planetary headline that test_model prints over MCP', () => {
+    expect(
+      formatRunHeadline({
+        success: false,
+        passed: 5,
+        failed: 0,
+        selectedTests: 10,
+        files: [],
+        accounting: {
+          discovered: 10,
+          selected: 10,
+          completed: 10,
+          passed: 5,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 5,
+          skipped: 0,
+          notRun: 0,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: [],
+          discoveryComplete: true,
+          cancelled: false,
+          bailed: false,
+        },
+      }),
+    ).toBe('GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.');
+  });
+
+  // The test-model-summary.test.ts suite in @taucad/chat qualifies the same counts the same way.
+  it('should qualify a cancelled run with an unsupported requirement as inconclusive', () => {
+    expect(
+      formatRunHeadline({
+        success: false,
+        passed: 0,
+        failed: 0,
+        selectedTests: 2,
+        files: [],
+        accounting: {
+          discovered: 2,
+          selected: 2,
+          completed: 1,
+          passed: 0,
+          failed: 0,
+          unsupported: 1,
+          inconclusive: 0,
+          skipped: 0,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: [],
+          notRunFiles: ['main.geospec.ts'],
+          discoveryComplete: true,
+          cancelled: true,
+          bailed: false,
+        },
+      }),
+    ).toBe('GeoSpec inconclusive: 0 passed, 0 failed, 1 unsupported, 1 not run of 2.');
   });
 });
 

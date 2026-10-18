@@ -372,7 +372,8 @@ const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
               aria-label='Add section'
               // `aria-disabled` rather than `disabled`, so the reason stays reachable by hover and focus.
               aria-disabled={isFull || undefined}
-              className='size-7 aria-disabled:cursor-not-allowed aria-disabled:opacity-50'
+              // `ml-auto` holds Add against Done at the row's end, however many chips precede it.
+              className='ml-auto size-7 aria-disabled:cursor-not-allowed aria-disabled:opacity-50'
             >
               <Plus />
             </Button>
@@ -418,14 +419,14 @@ const areIdsEqual = (left: readonly string[], right: readonly string[]): boolean
   left.length === right.length && left.every((id, index) => id === right[index]);
 
 /**
- * The cuts in play, one chip each, then Add. Re-renders only when a cut comes or goes.
+ * The cuts in play, one chip each, then Add at the row's end. Re-renders only when a cut comes or goes.
  *
  * @public
  */
 export function SectionOptions(): React.JSX.Element {
   const cutIds = useSelector(useGraphics(), selectCutIds, areIdsEqual);
   return (
-    <div role='group' aria-label='Sections' className='flex min-w-0 flex-wrap items-center gap-1'>
+    <div role='group' aria-label='Sections' className='flex min-w-0 flex-1 flex-wrap items-center gap-1'>
       {cutIds.map((id) => (
         <SectionChip key={id} cutId={id} />
       ))}

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { resolve as resolvePath } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Worker } from 'node:worker_threads';
 import type { WorkerOptions } from 'node:worker_threads';
 
 import {
+  defaultConfigDirectory,
   defaultMachineProviders,
   keyedResource,
   openLocalMachines,
@@ -18,9 +19,11 @@ import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
+import type { ComputeBinding } from '@taucad/runtime/types';
 import { defineCommand } from 'citty';
 
 import { childEnvironment } from '#child-environment.js';
+import type { ComputeStoreHost } from '#compute-store.js';
 import { exitNow } from '#exit-now.js';
 import { installedVersion } from '#installed-version.js';
 import { exitCodeFor } from '#output.js';
@@ -39,6 +42,8 @@ import packageJson from '../../package.json' with { type: 'json' };
  * was still terminating when the grace ran out.
  */
 const shutdownGrace = 4000;
+/** Milliseconds the compute store may take to open a project's store file before builds stay in memory. */
+const computeStoreOpenLimit = 10_000;
 
 /**
  * One project's client. Its thread composes the CLI runtime from `--plugin` and `--config` at run time, so the
@@ -169,6 +174,11 @@ export const mcpCommand = defineCommand({
       description:
         'Single-file viewer page to serve with show_model (default: TAU_VIEWER_PAGE; none disables the viewer)',
     },
+    computeMode: {
+      type: 'string',
+      description: 'Compute reuse mode: off, memory, or durable (kept across restarts, shared with tau serve)',
+      default: 'durable',
+    },
   },
   async run({ args }) {
     if (args.machines && !/^(1|true)$/iu.test(process.env['TAU_MACHINES_ENABLED'] ?? '')) {
@@ -176,6 +186,10 @@ export const mcpCommand = defineCommand({
     }
     const operationTimeout = seconds('operation-timeout', args['operation-timeout'], defaultOperationTimeout) * 1000;
     const idleRelease = seconds('idle-release', args['idle-release'], defaultIdleRelease) * 1000;
+    if (args.computeMode !== 'off' && args.computeMode !== 'memory' && args.computeMode !== 'durable') {
+      throw new TypeError('--compute-mode must be off, memory, or durable');
+    }
+    const { computeMode } = args;
 
     try {
       /* Stdout belongs to the protocol. The transport keeps the original writer;
@@ -244,6 +258,46 @@ export const mcpCommand = defineCommand({
           super(url, { ...options, env: environment });
         }
       }
+      /* The durable compute store Tau Desktop and tau serve use: a model built once, by any Tau process, is reused
+       * after a restart. Loaded and started with the first project's runtime, never before `initialize`. */
+      let computeStore: Promise<ComputeStoreHost | undefined> | undefined;
+      const openComputeStore = async (): Promise<ComputeStoreHost | undefined> => {
+        try {
+          const { createComputeStoreHost } = await import('#compute-store.js');
+          return createComputeStoreHost({
+            directory: join(defaultConfigDirectory(), 'compute'),
+            onError: (error) => {
+              process.stderr.write(`tau mcp: the compute store failed: ${error.message}\n`);
+            },
+          });
+        } catch (error) {
+          process.stderr.write(`tau mcp: keeping builds in memory; the compute store did not load: ${String(error)}\n`);
+          return undefined;
+        }
+      };
+      /* A store that cannot open or connect leaves this runtime with in-memory reuse; the next one tries again. */
+      const computeFor = async (projectPath: string): Promise<ComputeBinding> => {
+        if (computeMode !== 'durable') {
+          return { mode: computeMode };
+        }
+        computeStore ??= openComputeStore();
+        const host = await computeStore;
+        if (host === undefined) {
+          computeStore = undefined;
+          return { mode: 'memory' };
+        }
+        try {
+          const connection = host.connect(projectPath);
+          /* The runtime fails every evaluation on a store that cannot open (an unwritable folder), so ask it first. */
+          await connection.control.inspect({ signal: AbortSignal.timeout(computeStoreOpenLimit) });
+          return { mode: 'durable', store: connection.store };
+        } catch (error) {
+          process.stderr.write(`tau mcp: keeping builds in memory; the compute store did not open: ${String(error)}\n`);
+          computeStore = undefined;
+          await host.close().catch(() => undefined);
+          return { mode: 'memory' };
+        }
+      };
       /* One realm per project (kernel-realm-shared-state blueprint, I8): each
        * project's kernels run in their own thread, which loads every kernel
        * module there — never in this process, never before `initialize`. */
@@ -268,6 +322,7 @@ export const mcpCommand = defineCommand({
               native,
             } satisfies RuntimeWorkerData,
             fileSystem: fromNodeFs(projectPath),
+            compute: await computeFor(projectPath),
           }),
           operationTimeout,
         });
@@ -533,6 +588,12 @@ export const mcpCommand = defineCommand({
           process.stderr.write(`tau mcp: the printer store did not close: ${String(error)}\n`);
         });
         await clients.closeAll();
+        try {
+          const store = await computeStore;
+          await store?.close();
+        } catch (error) {
+          process.stderr.write(`tau mcp: the compute store did not close: ${String(error)}\n`);
+        }
         if (preparation !== undefined) {
           const opened = await preparation;
           await opened.dispose();

@@ -269,6 +269,8 @@ const launch = (
   if (viewerPage !== undefined) {
     env['TAU_VIEWER_PAGE'] = viewerPage;
   }
+  /* Each server keeps its durable compute store here, so no test reuses another's builds or the user's own. */
+  env['TAU_CONFIG_DIR'] = join(scratch, 'config', String(launches));
   Object.assign(env, extra.env);
   const child = spawn(
     process.execPath,
@@ -510,6 +512,11 @@ describe('tau mcp over stdio', () => {
         },
       });
       expect(result.structuredContent).not.toHaveProperty('summary.admission.warning');
+      expect(result.structuredContent).toMatchObject({ mechanism: { declared: false, admitted: false } });
+      /* The build went to the durable compute store a restarted server reads it back from. */
+      expect(await readdir(join(scratch, 'config'), { recursive: true })).toContainEqual(
+        expect.stringMatching(/compute\/[0-9a-f]+\.sqlite$/u),
+      );
       expect(served.stderr()).toContain(`tau mcp: project root ${join(scratch, 'block')} (CLAUDE_PROJECT_DIR)`);
       /* The first call loads the runtime, which proves the module log sees kernels at all. */
       expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/replicad\.kernel\.ts$/u));

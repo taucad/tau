@@ -1128,18 +1128,22 @@ export const replicadKernel = defineKernel({
 
             const { coordinateSystem } = options;
 
-            const shapes =
-              coordinateSystem === 'y-up' ? entries.map((entry) => rotateNativeEntryToYup(entry)) : entries;
+            // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
+            // model in the OCCT heap until a finalizer runs.
+            const rotated =
+              coordinateSystem === 'y-up' ? entries.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
 
             let stepBlob: Blob;
             try {
               stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
-                exportSTEP(context.openCascade, shapes, {
+                exportSTEP(context.openCascade, rotated ?? entries, {
                   phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
                 }),
               );
             } catch (error) {
               return stepExportError(error);
+            } finally {
+              deleteExportCopies(rotated);
             }
             const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
             return { files: [createExportFile('step', 'assembly', stepBytes)] as const };
@@ -1159,16 +1163,16 @@ export const replicadKernel = defineKernel({
             const angularToleranceRad = angularTolerance * (Math.PI / 180);
             const { coordinateSystem } = options;
 
-            const shapes =
+            const rotated =
               coordinateSystem === 'y-up'
                 ? entries.map((s) => ({
                     ...s,
                     shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
                   }))
-                : entries;
+                : undefined;
 
             const result = await Promise.all(
-              shapes.map(async ({ shape, name }, index) => {
+              (rotated ?? entries).map(async ({ shape, name }, index) => {
                 const bytes = await buildExportBytes(shape, {
                   tolerance: linearTolerance,
                   angularTolerance: angularToleranceRad,
@@ -1176,7 +1180,9 @@ export const replicadKernel = defineKernel({
                 });
                 return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
               }),
-            );
+            ).finally(() => {
+              deleteExportCopies(rotated);
+            });
             assertWithinExportBudget(
               requested,
               result.reduce((total, file) => total + countStlTriangles(file.bytes, options.binary), 0),
@@ -1221,6 +1227,17 @@ export const replicadKernel = defineKernel({
     context.occt.release();
   },
 });
+
+/**
+ * Delete the shape copies an export made, as soon as the export no longer reads them (D-RT-20).
+ *
+ * @param copies - The export's own rotated entries; `undefined` when it exported the handle's shapes as they are.
+ */
+const deleteExportCopies = (copies: ReadonlyArray<{ readonly shape: AnyShape }> | undefined): void => {
+  for (const { shape } of copies ?? []) {
+    shape.delete();
+  }
+};
 
 const serializeReplicadHandle = (nativeHandle: NativeHandle) => ({
   images: nativeHandle.images,

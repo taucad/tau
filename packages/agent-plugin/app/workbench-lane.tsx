@@ -38,7 +38,6 @@ type WorkbenchLaneProps = Readonly<{
   onSelect: (reference: GeometryComponentReference | undefined) => void;
   /** Show the model again after a parameter edit is written. */
   onParametersWritten: () => void;
-  onHide: () => void;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
@@ -59,7 +58,6 @@ export function WorkbenchLane({
   graphicsRef,
   onSelect,
   onParametersWritten,
-  onHide,
   reveal,
   componentActions,
   openPaneRequest,
@@ -107,7 +105,6 @@ export function WorkbenchLane({
       <PaneLane
         panes={offeredPanes}
         initialOpen={openingPanes}
-        onHide={onHide}
         openRequest={openPaneRequest}
         renderPane={(pane) => {
           switch (pane) {

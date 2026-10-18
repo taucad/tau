@@ -110,8 +110,8 @@ describe('PaneLane', () => {
     expect(edge).toHaveAttribute('aria-valuenow', '260');
   });
 
-  it('should name each tab in full and show its whole title as a tooltip beside the header buttons', () => {
-    renderLane({ initialOpen: ['parameters', 'model', 'kinematics'], onHide: () => undefined });
+  it('should name each tab in full and show its whole title as a tooltip beside the + button', () => {
+    renderLane({ initialOpen: ['parameters', 'model', 'kinematics'] });
 
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map((tab) => [tab.textContent, tab.getAttribute('title')])).toEqual([
@@ -120,23 +120,11 @@ describe('PaneLane', () => {
       ['Kinematics', 'Kinematics'],
     ]);
     expect(screen.getByRole('button', { name: 'Open workbench tab' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Hide workbench' })).toBeVisible();
   });
 
-  it('should offer hiding only when the host can hide it', async () => {
-    const user = userEvent.setup();
-    let hidden = false;
-    const { unmount } = renderLane();
+  it('should leave hiding the lane to its host', () => {
+    renderLane();
+
     expect(screen.queryByRole('button', { name: 'Hide workbench' })).toBeNull();
-    unmount();
-
-    renderLane({
-      onHide: () => {
-        hidden = true;
-      },
-    });
-    await user.click(screen.getByRole('button', { name: 'Hide workbench' }));
-
-    expect(hidden).toBe(true);
   });
 });

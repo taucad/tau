@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { DockviewTabsComboBox } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
-import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
+import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
 
 type WorkbenchToggleProperties = {
   readonly isOpen: boolean;
@@ -11,29 +11,6 @@ type WorkbenchToggleProperties = {
   readonly api?: DockviewApi;
   readonly getIcon?: DockviewTabIconRenderer;
 };
-
-/**
- * Codex's rounded side-panel frame, 15×14 px: split down the middle, or
- * holding the tab count. An SVG stroke rather than a CSS border: Chrome snaps
- * border widths to whole device pixels and draws small border radii coarsely,
- * while a 1 px stroke on half-pixel coordinates stays crisp and smoothly
- * rounded at every density. The odd width puts the divider on a pixel
- * boundary; `mr-px` keeps the frame on whole pixels when the 28 px button
- * centres it.
- */
-const WorkbenchFrame = ({ count }: { readonly count?: number }): React.JSX.Element => (
-  <span aria-hidden className='relative mr-px flex items-center justify-center'>
-    <svg width='15' height='14' viewBox='0 0 15 14' fill='none' stroke='currentColor' className='size-auto'>
-      <rect x='0.5' y='0.5' width='14' height='13' rx='3.5' />
-      {count === undefined ? <path d='M7.5 0.5v13' /> : null}
-    </svg>
-    {count === undefined ? null : (
-      <span className='absolute inset-0 flex items-center justify-center text-[9px] leading-none font-medium tabular-nums'>
-        {count > 9 ? '9+' : count}
-      </span>
-    )}
-  </span>
-);
 
 type Point = { readonly x: number; readonly y: number };
 type Box = Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
@@ -215,14 +192,11 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
         onOpenChange(true);
       }}
     >
-      <PaneButton
+      <WorkbenchToggleButton
         ref={triggerRef}
-        className='aria-pressed:text-foreground'
-        aria-label='Toggle Workbench lane'
-        aria-pressed={isOpen}
+        isOpen={isOpen}
+        count={canList ? panels.length : undefined}
         aria-description={canList ? `${panels.length} open tabs. Press Down Arrow to list them.` : undefined}
-        tooltip={isOpen ? 'Close workbench' : 'Open workbench'}
-        tooltipSide='left'
         onPointerEnter={(event) => {
           if (event.pointerType === 'touch' || isSuppressed.current || !canList) {
             return;
@@ -249,9 +223,7 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
             setIsMenuOpen(true);
           }
         }}
-      >
-        <WorkbenchFrame count={canList ? panels.length : undefined} />
-      </PaneButton>
+      />
     </DockviewTabsComboBox>
   );
 }

@@ -45,11 +45,11 @@ Start a new thread or session after installing.
 - Claude Desktop: an inline card with Add to chat and Open full view.
 - Claude Code and Codex CLI: a link to the viewer on `127.0.0.1`; screenshots stay inline.
 
-The tab, full view and browser page add grid, section, measure and fit. Add to chat gives the agent the model or a right-clicked part; the browser page copies it instead.
+The tab, full view and browser page add Share, Export and a workbench toggle at the top, and grid, section, measure and fit. Add to chat gives the agent the card's model or a right-clicked part; the browser page copies it instead.
 
 A tab or full view follows each model the agent shows, and the agent can select parts in it. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
 
-**Panels** in a tab or full view lists the parts, parameters, selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
+The **workbench** lists the parts, parameters, selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
 
 The viewer makes no network request. Model files reach it through a tool only the page can call, a few megabytes at a time and compressed where that helps, so a large mesh loads without the host dropping the connection. The browser link answers only on your machine, with a session token.
 

@@ -3,18 +3,20 @@
  *
  * Inline (a card in the conversation) draws the canvas and two actions; the
  * tab (Codex's thread tab, fullscreen on any host, the loopback page) is the
- * Tau workbench: a file tab, the app's viewer bar over the canvas with the view
- * cube top-right, and the workbench panes beside it (viewer parity R1).
+ * Tau workbench: a header with the file tab and the app's Share, Export and
+ * workbench toggle, the app's viewer bar over the canvas with the view cube
+ * top-right, and the workbench panes beside it (viewer parity R1).
  * Everything the page shows comes through the host bridge.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { FileCode2, Maximize2, MessageSquarePlus, PanelRight } from 'lucide-react';
+import { FileCode2, Maximize2, MessageSquarePlus } from 'lucide-react';
 import type { TauViewerCamera, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
 import type { GeometryComponentReference } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import { Separator } from '@taucad/ui/components/separator';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { ViewerControls } from '@taucad/viewer/cad/viewer-controls';
@@ -33,12 +35,15 @@ import { chatReferenceOf } from '#app/chat-reference.js';
 import { captureLiveView, startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
 import type { LiveLink } from '#app/live-link.js';
 import { createModelComponentActionMenus } from '@taucad/workbench-panes/component-menu/component-action-menu';
+import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
+import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
+import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
+import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
 import {
   createComponentReveal,
   createPageComponentActions,
   useViewerComponentMenu,
 } from '#app/sources/component-menu.jsx';
-import type { ComponentMenuPane } from '#app/sources/component-menu.jsx';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
@@ -165,31 +170,79 @@ function Notice({ text }: Readonly<{ text: string }>): React.JSX.Element {
   );
 }
 
-/** The shown file as the workbench's one editor tab: its name, then its path, and the selected component. */
-function FileTab({
-  model,
-  selected,
-}: Readonly<{ model: TauViewerModel; selected: GeometryComponentReference | undefined }>): React.JSX.Element {
-  const path = model.sourceFile ?? model.path;
+/** The header's labels fold to their icons in a narrow tab, as the desktop's fold below its viewer width. */
+const foldClasses = {
+  className: '@max-[520px]/viewer:w-7 @max-[520px]/viewer:px-0',
+  labelClassName: 'hidden @min-[520px]/viewer:inline',
+};
+
+type PageHeaderProps = Readonly<{
+  model: TauViewerModel | undefined;
+  selected: GeometryComponentReference | undefined;
+  isPanelOpen: boolean;
+  onOpenPane: (pane: WorkbenchPaneId) => void;
+  onTogglePanel: () => void;
+}>;
+
+/**
+ * The tab's header, as the app's viewer header: the shown file as the workbench's one editor tab (its name, then its
+ * path, and the selected component), then the app's top-right cluster: Share and Export, which open their panes, and
+ * the one workbench toggle (viewer chrome D4, D5).
+ *
+ * @param props - The shown model and selection, whether the lane is open, and what the actions do.
+ * @returns The header.
+ */
+function PageHeader({ model, selected, isPanelOpen, onOpenPane, onTogglePanel }: PageHeaderProps): React.JSX.Element {
+  const path = model === undefined ? undefined : (model.sourceFile ?? model.path);
   return (
-    <div className='flex h-9 shrink-0 items-center border-b px-0.5'>
-      <div
-        title={path}
-        className='mx-0.5 flex h-7 max-w-full min-w-28 items-center gap-1.5 rounded-sm bg-accent px-2 text-[13px] text-foreground'
-      >
-        <FileCode2 aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-        <span className='truncate'>{basenameOf(path)}</span>
+    <div className='flex h-9 shrink-0 items-center gap-1 border-b px-0.5'>
+      {path === undefined ? null : (
+        <>
+          <div
+            title={path}
+            className='mx-0.5 flex h-7 max-w-full min-w-28 items-center gap-1.5 rounded-sm bg-accent px-2 text-[13px] text-foreground'
+          >
+            <FileCode2 aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+            <span className='truncate'>{basenameOf(path)}</span>
+          </div>
+          {/* The folder only when the file is not at the project root, so the name shows once. */}
+          <p className='ml-1 min-w-0 truncate text-xs text-muted-foreground'>
+            {path === basenameOf(path) ? null : path}
+            {selected === undefined ? null : (
+              <span>
+                {path === basenameOf(path) ? '' : ' · '}
+                {selected.label}
+              </span>
+            )}
+          </p>
+        </>
+      )}
+      <div role='group' aria-label='Workbench actions' className='ml-auto flex shrink-0 items-center gap-1 pr-0.5'>
+        {/* What Export can do for the shown file is the Export pane's to say, so the button stays live (LRP-6). */}
+        <PaneAction
+          icon={workbenchPanes.share.icon}
+          label='Share'
+          tooltip='Share project'
+          disabled={model === undefined}
+          onClick={() => {
+            onOpenPane('share');
+          }}
+          {...foldClasses}
+        />
+        <PaneAction
+          icon={workbenchPanes.export.icon}
+          label='Export'
+          tooltip='Open exporter'
+          disabled={model === undefined}
+          onClick={() => {
+            onOpenPane('export');
+          }}
+          {...foldClasses}
+        />
+        {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
+        <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
+        <WorkbenchToggleButton isOpen={isPanelOpen} onClick={onTogglePanel} />
       </div>
-      {/* The folder only when the file is not at the project root, so the name shows once. */}
-      <p className='ml-2 min-w-0 truncate text-xs text-muted-foreground'>
-        {path === basenameOf(path) ? null : path}
-        {selected === undefined ? null : (
-          <span>
-            {path === basenameOf(path) ? '' : ' · '}
-            {selected.label}
-          </span>
-        )}
-      </p>
     </div>
   );
 }
@@ -454,11 +507,14 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   /* The app's part menu (viewer parity V13): right-click a part on the canvas, or a row's menu in the Model pane. */
   const reveal = useMemo(() => createComponentReveal(), []);
   const [openPaneRequest, setOpenPaneRequest] = useState<
-    Readonly<{ pane: ComponentMenuPane; requestId: number }> | undefined
+    Readonly<{ pane: WorkbenchPaneId; requestId: number }> | undefined
   >(undefined);
-  const openPane = useCallback((pane: ComponentMenuPane) => {
+  /* Request ids only grow, so a request made after the lane closed still reads as new. */
+  const paneRequests = useRef(0);
+  const openPane = useCallback((pane: WorkbenchPaneId) => {
+    paneRequests.current += 1;
     setIsPanelOpen(true);
-    setOpenPaneRequest((request) => ({ pane, requestId: (request?.requestId ?? 0) + 1 }));
+    setOpenPaneRequest({ pane, requestId: paneRequests.current });
   }, []);
   const addPartToChat = useCallback(
     (reference: GeometryComponentReference) => {
@@ -500,48 +556,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     };
   }, [notice]);
 
-  /* In a card the conversation owns the wheel and vertical pan (E5, G21);
-   * controls are 44 pt there and the card keeps one height under the host's cap. */
-  const actions = (
-    <>
-      <Button
-        variant='ghost'
-        size={isInline ? 'default' : 'xs'}
-        className={cn(isInline && 'min-h-11')}
-        disabled={shown === undefined}
-        onClick={addToChat}
-      >
-        <MessageSquarePlus className='size-4' />
-        {chatAction[view.chatRoute]}
-      </Button>
-      {isInline ? null : (
-        <Button
-          variant='ghost'
-          size='xs'
-          aria-pressed={isPanelOpen}
-          aria-label={isPanelOpen ? 'Hide panes' : 'Show panes'}
-          onClick={() => {
-            setIsPanelOpen((open) => !open);
-          }}
-        >
-          <PanelRight className='size-4' />
-          <span className='hidden @min-[520px]/viewer:inline'>Panes</span>
-        </Button>
-      )}
-      {isInline && view.canRequestFullscreen ? (
-        <Button
-          variant='ghost'
-          className='min-h-11'
-          onClick={() => {
-            void bridge.requestFullscreen();
-          }}
-        >
-          <Maximize2 className='size-4' />
-          Open full view
-        </Button>
-      ) : null}
-    </>
-  );
+  /* Closing drops the last pane request, so the lane reopens on its opening tabs instead of replaying it. */
+  const togglePanel = useCallback(() => {
+    if (isPanelOpen) {
+      setOpenPaneRequest(undefined);
+    }
+    setIsPanelOpen(!isPanelOpen);
+  }, [isPanelOpen]);
 
   return (
     <ViewerEnvironmentProvider value={environment}>
@@ -563,7 +584,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 paddingLeft: view.safeArea.left,
               }}
             >
-              {isInline || shown === undefined ? null : <FileTab model={shown.model} selected={selected} />}
+              {isInline ? null : (
+                <PageHeader
+                  model={shown?.model}
+                  selected={selected}
+                  isPanelOpen={isPanelOpen}
+                  onOpenPane={openPane}
+                  onTogglePanel={togglePanel}
+                />
+              )}
               <div className='flex min-h-0 flex-1'>
                 <div
                   id={canvasRegionId}
@@ -619,7 +648,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                   {isInline ? null : (
                     <div className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'>
                       {notice === undefined ? null : <Notice text={notice} />}
-                      <ViewerControls actions={actions} />
+                      <ViewerControls />
                     </div>
                   )}
                   {isInline && notice !== undefined ? (
@@ -635,17 +664,33 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     graphicsRef={graphicsRef}
                     onSelect={setSelected}
                     onParametersWritten={showAgain}
-                    onHide={() => {
-                      setIsPanelOpen(false);
-                    }}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}
                   />
                 )}
               </div>
+              {/* In a card the conversation owns the wheel and vertical pan (E5, G21); its two actions are 44 pt and
+               * the card keeps one height under the host's cap. The tab's part menu adds parts instead (D1). */}
               {isInline ? (
-                <div className='flex items-center justify-end gap-1 border-t px-2 py-1'>{actions}</div>
+                <div className='flex items-center justify-end gap-1 border-t px-2 py-1'>
+                  <Button variant='ghost' className='min-h-11' disabled={shown === undefined} onClick={addToChat}>
+                    <MessageSquarePlus className='size-4' />
+                    {chatAction[view.chatRoute]}
+                  </Button>
+                  {view.canRequestFullscreen ? (
+                    <Button
+                      variant='ghost'
+                      className='min-h-11'
+                      onClick={() => {
+                        void bridge.requestFullscreen();
+                      }}
+                    >
+                      <Maximize2 className='size-4' />
+                      Open full view
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
             </main>
             {isInline ? null : componentMenu.menu}

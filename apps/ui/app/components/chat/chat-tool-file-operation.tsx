@@ -311,7 +311,7 @@ export function CollapsibleFileOperation({
                 <ChangeIndicator linesAdded={diffStats.linesAdded} linesRemoved={diffStats.linesRemoved} />
               ) : undefined}
               {isStreaming ? undefined : (
-                <div className='ml-auto flex shrink-0 items-center gap-1 opacity-0 group-focus-within/file-op:opacity-100 group-hover/file-op:opacity-100'>
+                <div className='ml-auto flex shrink-0 items-center gap-1 opacity-0 group-focus-within/file-op:opacity-100 group-hover/file-op:opacity-100 pointer-coarse:opacity-100'>
                   {canOpenFile && shouldShowOpenRenderButton(targetFile) ? (
                     <OpenRenderButton
                       aria-label='Open in viewer'

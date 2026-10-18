@@ -112,7 +112,7 @@ export function DockviewTabsComboBox({
       value={activePanel}
       getValue={getPanelSearchValue}
       renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
-      className='w-72'
+      className="data-[slot='popover-content']:w-72"
       popoverProperties={{ align: 'end', ...popoverProperties }}
       searchPlaceHolder='Search open tabs…'
       emptyListMessage='No open tabs found.'

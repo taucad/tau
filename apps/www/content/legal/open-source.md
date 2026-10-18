@@ -261,7 +261,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.191 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
-| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.0 | MIT |
+| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 2.2.4 | MIT |
 | [@tscircuit/manifold-2d](https://github.com/tscircuit/manifold-2d) | 0.0.6 | Apache-2.0 |

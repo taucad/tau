@@ -152,9 +152,7 @@ export const checkCommand = defineCommand({
       projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
-      ...(native.build123d === undefined ? {} : { build123d: native.build123d }),
-      ...(native.picogk === undefined ? {} : { picogk: native.picogk }),
-      unavailableKernels: native.unavailable,
+      native,
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     const client = await createNodeClient({ runtime, projectPath: projectRoot });

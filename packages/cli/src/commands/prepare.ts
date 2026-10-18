@@ -34,7 +34,7 @@ import {
   writeSeedIndex,
 } from '#commands/prepare-seed.js';
 import type { ClosureAudit, SeedClosure } from '#commands/prepare-seed.js';
-import { nativePreparationPlugins, readManaged } from '#native-kernels.js';
+import { nativePreparationPlugins, preparableKernels, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
 /** Progress lines on stderr are written at most this often. Milliseconds. */
@@ -100,7 +100,9 @@ export type PrepareCommandOptions = {
 const prepareArgs = {
   kernel: {
     type: 'positional',
-    description: 'Kernel to prepare, such as build123d or picogk',
+    description: `Kernel to prepare: ${preparableKernels()
+      .map(({ kernel }) => kernel)
+      .join(', ')}`,
     required: false,
   },
   offline: {
@@ -567,7 +569,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
       const output = await createOutput();
       const managed = readManaged();
       const seedDirectory = args.seed === undefined ? managed.seed : resolve(args.seed);
-      const plugins = await (options.plugins ?? nativePreparationPlugins)();
+      const plugins = options.plugins === undefined ? nativePreparationPlugins() : await options.plugins();
       const store = defaultPayloadStore();
       const indicators = detectHostIndicators();
       const host = createPreparationHost({

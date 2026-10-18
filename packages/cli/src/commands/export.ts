@@ -49,7 +49,6 @@ export const parseJsonObject = (flag: string, input: string | undefined): Record
  */
 const capabilityMissingCodes = new Set(['KERNEL_CAPABILITY_MISSING', 'TRANSCODER_CAPABILITY_MISSING']);
 
-/** Why the PicoGK kernel was left out of the runtime for an input it would have handled. */
 /**
  * `tau export` command.
  *
@@ -187,7 +186,7 @@ export const exportCommand = defineCommand({
       projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
-      ...(native !== undefined && !('code' in native) && native),
+      ...(native !== undefined && 'kernels' in native ? { native } : {}),
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     profileLedger?.checkpoint('cli.load-configured-plugins');

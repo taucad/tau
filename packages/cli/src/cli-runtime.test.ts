@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 import { definePlugin, deriveImportExtensions } from '@taucad/runtime/plugin';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
+import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { createCliRuntime } from '#cli-runtime.js';
 import type { CliRuntimeOptions, DefaultInvocablePluginFactory } from '#cli-runtime.js';
 
@@ -43,9 +45,11 @@ const taucadImports = (source: string): string[] => [
 ];
 
 const picogkOptions = {
-  workerExecutable: '/picogk/Tau.PicoGK.Worker',
+  workerExecutable: '/picogk/dotnet/dotnet',
   workerSha256: 'a'.repeat(64),
-  resourceFiles: [{ path: '/picogk/PicoGK.dll', sha256: 'b'.repeat(64), label: 'PicoGK' }],
+  workerArguments: ['/picogk/tau-worker/Tau.PicoGK.Worker.dll'],
+  resourceFiles: [{ path: '/picogk/tau-worker/PicoGK.dll', sha256: 'b'.repeat(64), label: 'PicoGK' }],
+  runtimePath: '/picogk',
   requestTimeout: 120_000,
   maxArtifactBytes: 512 * 1024 * 1024,
 };
@@ -170,8 +174,50 @@ describe('createCliRuntime', () => {
     expect(extensions).toContain('obj');
   });
 
-  it('registers PicoGK when the host supplies its native resources', async () => {
-    const runtime = await composeCli({ picogk: picogkOptions });
+  it('covers the product catalog, composing native kernels from the payload store', async () => {
+    assertKernelRosterCoverage({
+      runtime: await composeCli(),
+      catalog: kernelConfigurations,
+      omitted: {
+        build123d: 'native: composed from the payload store once `tau prepare build123d` seals its closure',
+        picogk: 'native: composed from the payload store once `tau prepare picogk` seals its closure',
+      },
+    });
+  });
+
+  it('answers an unavailable native kernel’s files with the stand-in, before assimp', async () => {
+    const runtime = await composeCli({
+      native: {
+        kernels: [],
+        unavailable: [
+          {
+            kernel: 'build123d',
+            package: '@taucad/build123d',
+            extensions: ['py'],
+            reason: 'not-prepared',
+            byteLength: 1,
+          },
+        ],
+        closureRoots: [],
+      },
+    });
+
+    expect(runtime.kernels.map(({ id }) => id)).toEqual([
+      ...builtInKernelIds.slice(0, -1),
+      'build123d',
+      builtInKernelIds.at(-1),
+    ]);
+    expect(runtime.kernels.find(({ id }) => id === 'build123d')?.extensions).toEqual(['py']);
+  });
+
+  it('registers PicoGK when the payload store holds its sealed closure', async () => {
+    const runtime = await composeCli({
+      native: {
+        kernels: [{ package: '@taucad/picogk', kernel: 'picogk', closureRoot: '/picogk', options: picogkOptions }],
+        unavailable: [],
+        closureRoots: ['/picogk'],
+      },
+    });
 
     expect(runtime.kernels.map(({ id }) => id)).toEqual([
       ...builtInKernelIds.slice(0, -1),
@@ -182,7 +228,20 @@ describe('createCliRuntime', () => {
   });
 
   it('registers Build123d when the payload store holds its sealed closure', async () => {
-    const runtime = await composeCli({ build123d: build123dOptions });
+    const runtime = await composeCli({
+      native: {
+        kernels: [
+          {
+            package: '@taucad/build123d',
+            kernel: 'build123d',
+            closureRoot: build123dOptions.runtimePath,
+            options: build123dOptions,
+          },
+        ],
+        unavailable: [],
+        closureRoots: [build123dOptions.runtimePath],
+      },
+    });
 
     expect(runtime.kernels.map(({ id }) => id)).toEqual([
       ...builtInKernelIds.slice(0, -1),

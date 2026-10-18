@@ -12,16 +12,17 @@ import { nodeWorkerHost } from '@taucad/runtime/transport/node';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 import { z } from 'zod';
 
+import { nativeCompositionSchema } from '@taucad/native-kernels';
+
 import { loadCliRuntime } from '#runtime-options.js';
-import type { NativeComposition } from '#native-kernels.js';
 
 const runtimeWorkerDataSchema = z.object({
   projectRoot: z.string().min(1),
   plugin: z.array(z.string()).optional(),
   config: z.string().optional(),
   zooProxyUrl: z.string().optional(),
-  /* Composed by the parent from sealed receipts; structured-cloned, so only its shape is checked here. */
-  native: z.custom<NativeComposition>((value) => typeof value === 'object' && value !== null).optional(),
+  /* Composed by the parent from sealed receipts and structured-cloned; each row is checked against its adopter. */
+  native: nativeCompositionSchema.optional(),
 });
 
 /**
@@ -40,8 +41,6 @@ const runtime = await loadCliRuntime({
   plugin: options.data.plugin,
   ...(options.data.config === undefined ? {} : { config: options.data.config }),
   ...(options.data.zooProxyUrl === undefined ? {} : { zooProxyUrl: options.data.zooProxyUrl }),
-  ...(options.data.native?.build123d === undefined ? {} : { build123d: options.data.native.build123d }),
-  ...(options.data.native?.picogk === undefined ? {} : { picogk: options.data.native.picogk }),
-  ...(options.data.native === undefined ? {} : { unavailableKernels: options.data.native.unavailable }),
+  ...(options.data.native === undefined ? {} : { native: options.data.native }),
 });
 await nodeWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();

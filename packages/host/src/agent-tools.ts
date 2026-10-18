@@ -406,6 +406,14 @@ export type HostPrepareKernel = (
   context: Readonly<{ signal: AbortSignal; onProgress: (progress: HostPrepareKernelProgress) => void }>,
 ) => Promise<JsonObject & Readonly<{ status: string }>>;
 
+/**
+ * A native kernel the host's `prepare_kernel` takes, with the extensions it handles: one row of a native kernel
+ * package's `tau-plugin.json`, which the tool's description names.
+ *
+ * @public
+ */
+export type HostPreparableKernel = Readonly<{ kernel: string; extensions: readonly string[] }>;
+
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -493,6 +501,8 @@ export type HostToolRegistryOptions = {
    * in their own process. Omit it and the tool is not offered, and an unprepared kernel's refusal names `tau prepare`.
    */
   readonly prepareKernel?: HostPrepareKernel | undefined;
+  /** The kernels `prepareKernel` takes, which `prepare_kernel`'s description and input schema name. */
+  readonly preparableKernels?: readonly HostPreparableKernel[] | undefined;
   /**
    * The managed acquisition profile (D25) `install_packages` runs under. Under `locked` it refuses with a
    * `registry-unavailable` issue, contacts no registry and writes nothing. Defaults to `TAU_ACQUISITION` in this
@@ -892,8 +902,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
             ...live.list(),
             {
               name: prepareKernelToolName,
-              description: prepareKernelDescription,
-              inputSchema: prepareKernelInputSchema,
+              description: prepareKernelDescription(options.preparableKernels ?? []),
+              inputSchema: prepareKernelInputSchema(options.preparableKernels ?? []),
               /* It writes the shared store, outside every workspace. */
               executionMode: 'sequential',
             },

@@ -17,6 +17,8 @@ import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
+import type { NativeKernelComposition } from '@taucad/native-kernels';
+import type { NativePreparation } from '@taucad/native-kernels/node';
 import { defineCommand } from 'citty';
 
 import { childEnvironment } from '#child-environment.js';
@@ -24,7 +26,6 @@ import { exitNow } from '#exit-now.js';
 import { exitCodeFor } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 import type * as NativeKernels from '#native-kernels.js';
-import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /**
@@ -94,7 +95,7 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * in. The store has one writer, so the flag is off by default: a server holding it keeps the desktop app from its
  * printers until the agent closes, and a server whose one folder holds no `tau.json` does not take it.
  *
- * Native kernels (Build123d for `.py`, PicoGK for `.cs`) run from closures in the payload store that `tau prepare`
+ * Native kernels (each kernel in the `@taucad/native-kernels` roster) run from closures in the payload store that `tau prepare`
  * and the `prepare_kernel` tool fill (D7). The CAD tools never download: a file whose kernel is not prepared answers
  * `KERNEL_NOT_PREPARED`, naming `prepare_kernel` and its input. The store is read again on every such refusal, so a
  * closure another process prepared is used at once; after a preparation, each project's runtime is replaced, and the
@@ -212,23 +213,24 @@ export const mcpCommand = defineCommand({
       );
       /* The native kernels every new runtime thread composes, read from the store's receipts once per generation; a
        * profile no host can honour leaves the native kernels out rather than every CAD tool. */
-      let composition: Promise<NativeComposition> | undefined;
-      /* Loaded on first use: the native packages' entries import their kernels, which `initialize` must not wait for. */
+      let composition: Promise<NativeKernelComposition> | undefined;
+      /* Loaded on first use: the roster reads the payload store's launch indexes, which `initialize` must not wait for;
+       * its adopters import their kernels only when a runtime thread composes one. */
       let nativeModule: Promise<typeof NativeKernels> | undefined;
       const native = async (): Promise<typeof NativeKernels> => {
         nativeModule ??= import('#native-kernels.js');
         return nativeModule;
       };
-      const composeOrNone = async (): Promise<NativeComposition> => {
+      const composeOrNone = async (): Promise<NativeKernelComposition> => {
         try {
           const { composeNativeKernels } = await native();
           return await composeNativeKernels();
         } catch (error) {
           process.stderr.write(`tau mcp: serving without native kernels: ${String(error)}\n`);
-          return { unavailable: [] };
+          return { kernels: [], unavailable: [], closureRoots: [] };
         }
       };
-      const nativeKernels = async (): Promise<NativeComposition> => {
+      const nativeKernels = async (): Promise<NativeKernelComposition> => {
         composition ??= composeOrNone();
         return composition;
       };
@@ -308,7 +310,7 @@ export const mcpCommand = defineCommand({
        * @param next - The composition the next clients use; omitted, the store is read again on next use.
        * @returns Once every old client is evicted, before they drain.
        */
-      const retireClients = async (next?: NativeComposition): Promise<void> => {
+      const retireClients = async (next?: NativeKernelComposition): Promise<void> => {
         composition = next === undefined ? undefined : Promise.resolve(next);
         await Promise.all(
           clients.keys().map(async (projectPath) => {
@@ -406,6 +408,8 @@ export const mcpCommand = defineCommand({
         preparation ??= startPreparation();
         return preparation;
       };
+      /* `prepare_kernel` names the roster's kernels and their extensions; reading the manifests runs no kernel code. */
+      const { preparableKernels } = await native();
       const tools = createHostToolRegistry({
         workspaceRoot,
         checkouts,
@@ -413,6 +417,7 @@ export const mcpCommand = defineCommand({
         parameterActor: parameters.parameterActor,
         systemSkillBundles,
         ...(machines === undefined ? {} : { machines: machines.facet, projectIdOf: machines.projectOf }),
+        preparableKernels: preparableKernels(),
         /* In this process, with its unrestricted fetch (D4); a ready kernel is composed by every later call. */
         prepareKernel: async ({ kernel }, { signal, onProgress }) => {
           const opened = await openPreparation();
@@ -431,16 +436,12 @@ export const mcpCommand = defineCommand({
        */
       const invokeComposed: typeof tools.invoke = async (invocation) => {
         const result = await tools.invoke(invocation);
-        /* A refusal can only come from a runtime thread, which loaded the module already. */
-        if (nativeModule === undefined) {
-          return result;
-        }
         const { composeNativeKernels, refusedKernels } = await native();
         const refused = refusedKernels(result.content);
         if (refused.size === 0) {
           return result;
         }
-        let fresh: NativeComposition;
+        let fresh: NativeKernelComposition;
         try {
           fresh = await composeNativeKernels();
         } catch {

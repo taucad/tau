@@ -19,9 +19,12 @@ import type { ComputeBinding } from '@taucad/runtime/types';
 import type {
   HostDaemonAgentOptions,
   HostDaemonEvent,
+  HostPreparableKernel,
   HostPrepareKernel,
   RuntimeChildNativeKernels,
 } from '@taucad/host';
+import type { NativeKernelComposition } from '@taucad/native-kernels';
+import type { NativePreparation } from '@taucad/native-kernels/node';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { createConsola } from 'consola';
@@ -36,7 +39,6 @@ import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 import type * as NativeKernels from '#native-kernels.js';
-import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 
 /* Every report goes to stderr: stdout carries only the served URL or its record (`--print`, `--json`). */
 const consola = createConsola({
@@ -395,18 +397,20 @@ export const acpAdapterResolveFrom = (from: string = import.meta.url): string =>
 };
 
 /**
- * The native kernels this daemon serves (D37): Build123d for `.py`, PicoGK for `.cs`.
+ * The native kernels this daemon serves (D37): every kernel in the `@taucad/native-kernels` roster.
  *
  * Every runtime child composes them from the payload store's receipts, which this process reads and hands over; a
  * kernel that is not prepared answers `KERNEL_NOT_PREPARED`. `prepare_kernel` prepares in this process, with its
  * unrestricted network (D4). The child may not spawn, so this process starts each native worker on its behalf, from
  * a closure sealed in the store and through the OS sandbox (North Star S2). The native packages load on first use.
  *
- * @returns The children's native kernels, the preparation behind `prepare_kernel`, and its disposal.
+ * @returns The children's native kernels, the preparation behind `prepare_kernel`, the kernels it takes, and its
+ *   disposal.
  */
 export const serveNativeKernels = (): {
   readonly native: RuntimeChildNativeKernels;
   readonly prepareKernel: HostPrepareKernel;
+  readonly preparableKernels: () => Promise<readonly HostPreparableKernel[]>;
   readonly dispose: () => Promise<void>;
 } => {
   let loaded: Promise<typeof NativeKernels> | undefined;
@@ -414,13 +418,13 @@ export const serveNativeKernels = (): {
     loaded ??= import('#native-kernels.js');
     return loaded;
   };
-  const compose = async (): Promise<NativeComposition> => {
+  const compose = async (): Promise<NativeKernelComposition> => {
     try {
       const { composeNativeKernels } = await nativeKernels();
       return await composeNativeKernels();
     } catch (error) {
       consola.warn(`Serving without native kernels: ${error instanceof Error ? error.message : String(error)}`);
-      return { unavailable: [] };
+      return { kernels: [], unavailable: [], closureRoots: [] };
     }
   };
   let preparation: Promise<NativePreparation> | undefined;
@@ -436,7 +440,7 @@ export const serveNativeKernels = (): {
       compose,
       closureRoots: async () => {
         const { closureRoots } = await compose();
-        return closureRoots ?? [];
+        return closureRoots;
       },
       start: startNativeWorker,
       /* A runtime child cannot read the store, so a failed handshake is re-verified here (D8, X35). */
@@ -444,6 +448,11 @@ export const serveNativeKernels = (): {
         const { verifyStoreClosure } = await nativeKernels();
         return verifyStoreClosure(runtimePath, signal);
       },
+    },
+    /* Read from the roster's manifests; no kernel code runs. */
+    preparableKernels: async () => {
+      const { preparableKernels } = await nativeKernels();
+      return preparableKernels();
     },
     prepareKernel: async ({ kernel }, { signal, onProgress }) => {
       preparation ??= openPreparation();
@@ -1040,6 +1049,7 @@ export const serveCommand = defineCommand({
       ? {
           ...agent,
           prepareKernel: kernels.prepareKernel,
+          preparableKernels: await kernels.preparableKernels(),
           ...(machines ? { machines } : {}),
           compute: compute!,
           ...(args.computeMode === 'durable'

@@ -29,7 +29,12 @@ import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
-import type { HostPrepareKernel, HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
+import type {
+  HostPreparableKernel,
+  HostPrepareKernel,
+  HostSystemSkillBundle,
+  HostToolFileSystem,
+} from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import {
@@ -190,6 +195,8 @@ export type HostDaemonAgentOptions = {
    * it and the tool is not offered.
    */
   readonly prepareKernel?: HostPrepareKernel | undefined;
+  /** The kernels `prepareKernel` takes, which `prepare_kernel`'s description names. */
+  readonly preparableKernels?: readonly HostPreparableKernel[] | undefined;
   /**
    * Offer the `test_model` tool. Defaults to `true`, which still yields the
    * tool only where the native GeoSpec engine resolves — `false` withholds it
@@ -964,6 +971,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(agent.testModel === false ? { geospecRunner: false } : {}),
       /* A child composes the native kernels once, at its start: a prepared kernel reaches a root on its next call
        * only through a new child, so every root's child is replaced once the preparation is ready (D7, D37). */
+      ...(agent.preparableKernels === undefined ? {} : { preparableKernels: agent.preparableKernels }),
       ...(agent.prepareKernel === undefined
         ? {}
         : {

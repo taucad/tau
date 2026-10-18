@@ -280,10 +280,21 @@ describe('exportCommand', () => {
       expect(preparation.inspectLaunch).toHaveBeenCalledWith({ package: '@taucad/picogk', dependencies: ['runtime'] });
       const { createCliRuntime } = await importedCliRuntime();
       expect(createCliRuntime.mock.calls.at(-1)?.[0]).toMatchObject({
-        picogk: {
-          workerExecutable: `${closureRoot}/dotnet/dotnet`,
-          workerArguments: [`${closureRoot}/tau-worker/Tau.PicoGK.Worker.dll`],
-          runtimePath: closureRoot,
+        native: {
+          kernels: [
+            {
+              package: '@taucad/picogk',
+              kernel: 'picogk',
+              closureRoot,
+              options: {
+                workerExecutable: `${closureRoot}/dotnet/dotnet`,
+                workerArguments: [`${closureRoot}/tau-worker/Tau.PicoGK.Worker.dll`],
+                runtimePath: closureRoot,
+              },
+            },
+          ],
+          unavailable: [],
+          closureRoots: [closureRoot],
         },
       });
     });
@@ -302,7 +313,7 @@ describe('exportCommand', () => {
         message: expect.stringContaining('tau prepare picogk') as unknown,
       });
       const { createCliRuntime } = await importedCliRuntime();
-      expect(createCliRuntime.mock.calls.at(-1)?.[0]).not.toHaveProperty('picogk');
+      expect(createCliRuntime.mock.calls.at(-1)?.[0]).not.toHaveProperty('native');
     });
 
     it('reports a host no PicoGK closure supports', async () => {

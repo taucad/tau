@@ -3602,9 +3602,6 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../plugins/brep
-      '@taucad/build123d':
-        specifier: workspace:*
-        version: link:../plugins/build123d
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../core/bundler
@@ -3638,6 +3635,9 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../plugins/middleware
+      '@taucad/native-kernels':
+        specifier: workspace:*
+        version: link:../native-kernels
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../core/native-process
@@ -3650,9 +3650,6 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
-      '@taucad/picogk':
-        specifier: workspace:*
-        version: link:../plugins/picogk
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../plugins/picovoxel
@@ -3720,12 +3717,21 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../plugins/build123d
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
+      '@taucad/picogk':
+        specifier: workspace:*
+        version: link:../plugins/picogk
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils

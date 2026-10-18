@@ -7,9 +7,9 @@ import {
 } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
 import { installNativeRuntimeVerifier, installNativeWorkerLauncher } from '@taucad/native-process-core';
+import { nativeCompositionSchema } from '@taucad/native-kernels';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
-import type { NativeComposition } from '#native-kernels.js';
 import { acquisitionOf } from '#acquisition.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { installSandboxModuleHooks } from '#sandbox-modules.js';
@@ -72,7 +72,7 @@ const handleMessage = async (message: unknown): Promise<void> => {
    * its closure re-verified by the daemon too, so the refusal names the damaged file (D8, X35). */
   const native =
     'native' in message && typeof message.native === 'object' && message.native !== null
-      ? (message.native as NativeComposition)
+      ? nativeCompositionSchema.parse(message.native)
       : undefined;
   if (native !== undefined) {
     installNativeWorkerLauncher(createRuntimeChildWorkerLauncher());
@@ -84,9 +84,7 @@ const handleMessage = async (message: unknown): Promise<void> => {
     config: values.config,
     ...(values['zoo-proxy-url'] ? { zooProxyUrl: values['zoo-proxy-url'] } : {}),
     acquisition: acquisitionOf(values.acquisition),
-    ...(native?.build123d === undefined ? {} : { build123d: native.build123d }),
-    ...(native?.picogk === undefined ? {} : { picogk: native.picogk }),
-    ...(native === undefined ? {} : { unavailableKernels: native.unavailable }),
+    ...(native === undefined ? {} : { native }),
   });
   host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
   process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });

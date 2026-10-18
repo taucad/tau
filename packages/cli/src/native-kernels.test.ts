@@ -11,6 +11,7 @@ import {
   nativeKernelFor,
   nativePreparationPlugins,
   openNativePreparation,
+  preparableKernels,
   refusedKernels,
   verifyStoreClosure,
 } from '#native-kernels.js';
@@ -45,23 +46,19 @@ describe('native kernels from the payload store', () => {
     await rm(configDirectory, { recursive: true, force: true });
   });
 
-  it('should give Build123d its seal step in the preparation roster', async () => {
-    const plugins = await nativePreparationPlugins();
-    const build123d = plugins.find((plugin) => plugin.package === '@taucad/build123d');
-    const picogk = plugins.find((plugin) => plugin.package === '@taucad/picogk');
+  it('should prepare the roster with each package directory, so payloads shipped inside a package resolve', () => {
+    const plugins = nativePreparationPlugins();
 
-    expect(build123d?.deployment.kernels).toHaveProperty('build123d');
-    expect(build123d?.seal).toBeTypeOf('function');
-    expect(picogk).not.toHaveProperty('seal');
-    expect(build123d?.launchSet?.([])).toEqual([
-      'python/bin/python3',
-      'tau-worker/worker.py',
-      'tau-worker/analyzer.py',
-      'tau-worker/glb.py',
-      'tau-worker/native_materials.py',
-      'tau-worker/mechanisms.py',
+    expect(plugins.map((plugin) => plugin.package)).toEqual(['@taucad/build123d', '@taucad/picogk']);
+    expect(plugins.every((plugin) => typeof plugin.directory === 'string')).toBe(true);
+    expect(plugins.find((plugin) => plugin.package === '@taucad/build123d')?.seal).toBeTypeOf('function');
+  });
+
+  it('should list every kernel prepare_kernel takes, with its extensions', () => {
+    expect(preparableKernels()).toEqual([
+      { kernel: 'build123d', extensions: ['py'] },
+      { kernel: 'picogk', extensions: ['cs'] },
     ]);
-    expect(picogk?.launchSet).toBeTypeOf('function');
   });
 
   it('should name what differs when a worker exits before its handshake, and the repair', async () => {
@@ -120,7 +117,7 @@ describe('native kernels from the payload store', () => {
   it('should compose every declared kernel as unavailable on a cold store, with the bytes preparing downloads', async () => {
     vi.stubEnv('TAU_PAYLOAD_TARGET', 'linux-x64-glibc');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const plugins = await nativePreparationPlugins();
+    const plugins = nativePreparationPlugins();
     const build123d = plugins.find((plugin) => plugin.package === '@taucad/build123d');
     const variant = build123d?.deployment.dependencies['engine']?.find(
       ({ target }) => target.runtime === 'native' && target.os === 'linux' && target.arch === 'x64',
@@ -130,7 +127,8 @@ describe('native kernels from the payload store', () => {
     const composition = await composeNativeKernels();
 
     expect(expectedBytes).toBeGreaterThan(0);
-    expect(composition).not.toHaveProperty('build123d');
+    expect(composition.kernels).toEqual([]);
+    expect(composition.closureRoots).toEqual([]);
     expect(composition.unavailable).toEqual([
       {
         kernel: 'build123d',
@@ -176,7 +174,7 @@ describe('native kernels from the payload store', () => {
     expect(refusedKernels('KERNEL_NOT_PREPARED')).toEqual(new Set());
   });
 
-  it('should refuse to prepare an unknown kernel, naming the kernels that can be prepared', async () => {
+  it('should refuse to prepare an unknown kernel as a usage error, naming the kernels that can be prepared', async () => {
     const preparation = openNativePreparation({
       fetch: async () => {
         throw new Error('no request expected');
@@ -185,6 +183,7 @@ describe('native kernels from the payload store', () => {
     try {
       await expect(preparation.prepare('nope', { signal: new AbortController().signal })).rejects.toMatchObject({
         code: 'UNKNOWN_KERNEL',
+        exit: 2,
         message: "No native kernel is called 'nope'. Kernels that can be prepared: build123d, picogk.",
       });
     } finally {

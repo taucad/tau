@@ -470,7 +470,7 @@ describe('tau serve native kernels (W11, W22 daemon row)', () => {
 registerHooks({
   resolve: (specifier, context, next) =>
     specifier === '@taucad/picogk/tau-plugin.json'
-      ? { url: ${JSON.stringify(pathToFileURL(manifest).href)}, shortCircuit: true }
+      ? { url: ${JSON.stringify(pathToFileURL(manifest).href)}, format: "json", shortCircuit: true }
       : next(specifier, context),
 });
 `,

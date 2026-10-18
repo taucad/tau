@@ -1,11 +1,10 @@
 import type { PluginFactory, PluginInstance } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
-import type { Build123dClosureOptions } from '@taucad/build123d';
-import type { PicogkKernelOptions } from '@taucad/picogk';
+import { unavailableKernelsPlugin } from '@taucad/native-kernels';
+import type { NativeKernelComposition } from '@taucad/native-kernels';
+import { composeNativePlugins } from '@taucad/native-kernels/node';
 import { cliZooCloseErrors } from '#zoo-proxy.js';
-import { unavailableKernelsPlugin } from '#unprepared-kernels.js';
-import type { UnavailableNativeKernel } from '#unprepared-kernels.js';
 import type { Acquisition } from '#acquisition.js';
 
 /** A plugin factory whose default invocation is valid for `--plugin`. @public */
@@ -18,14 +17,12 @@ export type DefaultInvocablePluginFactory = {
 export type CliRuntimeOptions = {
   readonly explicitFactories?: readonly DefaultInvocablePluginFactory[];
   readonly configuredPlugins?: readonly PluginInstance[];
-  readonly picogk?: PicogkKernelOptions;
-  /** Build123d's options from the closure `tau prepare build123d` sealed; absent, no Build123d kernel is composed. */
-  readonly build123d?: Build123dClosureOptions;
   /**
-   * Native kernels declared but not composed (not prepared, or no runtime for this host); their files answer the
-   * typed refusal instead of "no kernel handles this extension" (D7).
+   * The native kernels composed from the payload store: each sealed closure's kernel is composed, and each declared
+   * kernel that is not (not prepared, or no runtime for this host) answers its files with the typed refusal instead
+   * of "no kernel handles this extension" (D7). Absent, no native kernel is composed.
    */
-  readonly unavailableKernels?: readonly UnavailableNativeKernel[];
+  readonly native?: NativeKernelComposition;
   /** The Zoo proxy the KCL kernel connects to; defaults to Tau Cloud's (see `cliZooProxyUrl`). */
   readonly zooProxyUrl?: string;
   /** `locked` (`TAU_ACQUISITION=locked`): the bundler refuses every import it would download (`package-not-locked`). */
@@ -58,14 +55,13 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, picogkModule, build123dModule] = await Promise.all([
+  const [{ assimp }, { image }, { zoo }, nativePlugins] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
     import('@taucad/zoo'),
-    options.picogk ? import('@taucad/picogk') : undefined,
-    options.build123d ? import('@taucad/build123d') : undefined,
+    composeNativePlugins(options.native?.kernels ?? []),
   ]);
-  const unavailable = unavailableKernelsPlugin(options.unavailableKernels ?? []);
+  const unavailable = unavailableKernelsPlugin(options.native?.unavailable ?? []);
   const builtIns = [
     middlewareModule.plugin(),
     esbuildModule.plugin(
@@ -81,10 +77,8 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
         },
       },
     }),
-    ...(picogkModule && options.picogk ? [picogkModule.picogk({ kernels: { default: options.picogk } })] : []),
-    ...(build123dModule && options.build123d
-      ? [build123dModule.build123d({ kernels: { default: options.build123d } })]
-      : []),
+    /* Native kernels in roster order, each loaded only when its closure is sealed. */
+    ...nativePlugins,
     ...(unavailable ? [unavailable] : []),
     assimp({ preset: 'all' }),
     image(),

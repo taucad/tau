@@ -43,6 +43,7 @@ const nativeKernels = vi.hoisted(() => ({
 vi.mock('#native-kernels.js', () => ({
   composeNativeKernels: nativeKernels.composeNativeKernels,
   verifyStoreClosure: nativeKernels.verifyStoreClosure,
+  preparableKernels: () => [{ kernel: 'build123d', extensions: ['py'] }],
   openNativePreparation: () => {
     nativeKernels.opened += 1;
     return { prepare: nativeKernels.prepare, dispose: nativeKernels.dispose };
@@ -183,7 +184,7 @@ describe('serveNativeKernels', () => {
     nativeKernels.composeNativeKernels.mockRejectedValue(new Error('TAU_ACQUISITION is "sometimes"'));
     const kernels = serveNativeKernels();
 
-    await expect(kernels.native.compose()).resolves.toEqual({ unavailable: [] });
+    await expect(kernels.native.compose()).resolves.toEqual({ kernels: [], unavailable: [], closureRoots: [] });
     await expect(kernels.native.closureRoots()).resolves.toEqual([]);
   });
 });

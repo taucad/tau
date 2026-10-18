@@ -62,6 +62,7 @@ type ChatTextareaDesktopProperties = {
   readonly isSubmitDisabled?: boolean;
   /** Which composer this is: the edit box speaks as one and owns shortcuts only while focused (F6, F19). */
   readonly mode?: 'main' | 'edit';
+  readonly taskMailbox?: boolean;
   /** Rest as one row on a phone until focused or drafted; see `ChatTextareaProperties`. */
   readonly enableMobileCollapse?: boolean;
   /** Whether focus is inside the composer or its portalled menus. */
@@ -206,6 +207,7 @@ export const ChatTextareaDesktop = memo(function ({
   creationLocationControl,
   isSubmitDisabled = false,
   mode = 'main',
+  taskMailbox = false,
   enableMobileCollapse,
   isFocused,
 
@@ -260,10 +262,12 @@ export const ChatTextareaDesktop = memo(function ({
   const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
     (): SlashCommandItem[] =>
-      acpAgentId === undefined
-        ? skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata))
-        : (commands ?? []).map((command) => acpCommandToSlashCommand(command, acpAgentId)),
-    [acpAgentId, commands, skillsCatalog],
+      taskMailbox
+        ? []
+        : acpAgentId === undefined
+          ? skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata))
+          : (commands ?? []).map((command) => acpCommandToSlashCommand(command, acpAgentId)),
+    [acpAgentId, commands, skillsCatalog, taskMailbox],
   );
   /* Keyed by content: the skills catalog re-reads on every tree change, and a new
    * identity must not re-run rehydration when the offered tokens are the same. */
@@ -559,9 +563,15 @@ export const ChatTextareaDesktop = memo(function ({
         data-collapsed={isCollapsed ? '' : undefined}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        onDragOver={taskMailbox ? undefined : handleDragOver}
+        onDragLeave={taskMailbox ? undefined : handleDragLeave}
+        onDrop={
+          taskMailbox
+            ? (event) => {
+                event.preventDefault();
+              }
+            : handleDrop
+        }
       >
         {acpAgentId === undefined && (catalog.status === 'closed' || catalog.status === 'error') ? (
           <div role='status' className='flex items-center justify-between gap-2 px-3 pb-2 text-xs'>
@@ -615,6 +625,7 @@ export const ChatTextareaDesktop = memo(function ({
           dictationButton={dictationButton}
           dictationRecording={dictationRecording}
           composerMode={mode}
+          taskMailbox={taskMailbox}
           containerReference={containerReference}
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
@@ -756,6 +767,7 @@ export const ChatTextareaBar = memo(function ({
   dictationButton,
   dictationRecording,
   composerMode,
+  taskMailbox = false,
   containerReference,
   enableContextActions,
   enableKernelSelector,
@@ -780,6 +792,7 @@ export const ChatTextareaBar = memo(function ({
   readonly dictationButton?: React.ReactNode;
   readonly dictationRecording?: React.ReactNode;
   readonly composerMode: 'main' | 'edit';
+  readonly taskMailbox?: boolean;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
   readonly enableContextActions: boolean;
@@ -840,26 +853,36 @@ export const ChatTextareaBar = memo(function ({
     >
       {dictationRecording === undefined ? (
         <div data-slot='composer-left' className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5'>
-          <ChatAddMenu
-            enableContextActions={enableContextActions}
-            isAttachmentSupported={attachmentInputSupported}
-            handleAtButtonClick={handleAtButtonClick}
-            handleFileSelect={handleFileSelect}
-            focusEditor={focusEditor}
-          />
+          {taskMailbox ? null : (
+            <ChatAddMenu
+              enableContextActions={enableContextActions}
+              isAttachmentSupported={attachmentInputSupported}
+              handleAtButtonClick={handleAtButtonClick}
+              handleFileSelect={handleFileSelect}
+              focusEditor={focusEditor}
+            />
+          )}
           <div data-slot='composer-collapsible' className={cn(collapsibleControlsClassName, 'gap-0.5')}>
-            <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
+            {taskMailbox ? null : (
+              <ChatAgentModeControl
+                agentConfig={agentConfig}
+                focusEditor={focusEditor}
+                enableShortcut={ownsShortcuts}
+              />
+            )}
             {creationLocationControl}
-            {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
+            {enableKernelSelector && !taskMailbox ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
           </div>
-          <input
-            ref={fileInputReference}
-            multiple
-            type='file'
-            accept={attachmentAccept}
-            className='hidden'
-            onChange={handleFileChange}
-          />
+          {taskMailbox ? null : (
+            <input
+              ref={fileInputReference}
+              multiple
+              type='file'
+              accept={attachmentAccept}
+              className='hidden'
+              onChange={handleFileChange}
+            />
+          )}
         </div>
       ) : (
         <div data-slot='composer-left' className='pointer-events-auto flex min-w-0 flex-1 flex-row items-center gap-2'>
@@ -869,13 +892,15 @@ export const ChatTextareaBar = memo(function ({
       <div data-slot='composer-right' className='pointer-events-auto flex min-w-0 flex-row items-center gap-1'>
         {dictationRecording === undefined ? (
           <div data-slot='composer-collapsible' className={cn(collapsibleControlsClassName, 'gap-1')}>
-            <ChatContextIndicator />
-            <ChatAgentSheet
-              agentConfig={agentConfig}
-              placements={placements}
-              focusEditor={focusEditor}
-              enableShortcut={ownsShortcuts}
-            />
+            {taskMailbox ? null : <ChatContextIndicator />}
+            {taskMailbox ? null : (
+              <ChatAgentSheet
+                agentConfig={agentConfig}
+                placements={placements}
+                focusEditor={focusEditor}
+                enableShortcut={ownsShortcuts}
+              />
+            )}
           </div>
         ) : null}
         {dictationButton}

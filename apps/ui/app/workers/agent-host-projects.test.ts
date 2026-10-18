@@ -24,6 +24,7 @@ const provideOf = (hostId: string): AgentHostProjectProvide =>
     projectRootPort: undefined,
     computeStorePort: undefined,
     revisionsPort: undefined,
+    taskRevisionsPort: undefined,
     placementPort: undefined,
   });
 
@@ -98,19 +99,26 @@ describe('createProjectHosts', () => {
   /* W6.r1 round 3: a provide whose host fails to open closes every port it transferred. */
   it('should close every transferred port when the host fails to open', async () => {
     const { hosts, settleOpen } = registry();
-    const channels = [new MessageChannel(), new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const channels = [
+      new MessageChannel(),
+      new MessageChannel(),
+      new MessageChannel(),
+      new MessageChannel(),
+      new MessageChannel(),
+    ];
     const closes = channels.map(({ port1 }) => vi.spyOn(port1, 'close'));
     const provide = hosts.provide({
       ...provideOf('host-1'),
       fileSystemPort: channels[0]!.port1,
       projectRootPort: channels[1]!.port1,
       revisionsPort: channels[2]!.port1,
-      placementPort: channels[3]!.port1,
+      taskRevisionsPort: channels[3]!.port1,
+      placementPort: channels[4]!.port1,
     });
     await settleOpen('fail');
 
     await expect(provide).rejects.toMatchObject({ code: 'STORAGE_NOT_WRITABLE' });
-    expect(closes.map((close) => close.mock.calls.length)).toEqual([1, 1, 1, 1]);
+    expect(closes.map((close) => close.mock.calls.length)).toEqual([1, 1, 1, 1, 1]);
   });
 
   it('should replace hosts provided concurrently in order and close every replaced one', async () => {
@@ -153,6 +161,24 @@ describe('createProjectHosts', () => {
 
     expect(hosts.hostOf('project-1')).toBeUndefined();
     expect(opened[0]?.close).toHaveBeenCalledOnce();
+  });
+
+  it('retains a failed task close and retries release without opening another host', async () => {
+    const { hosts, opened, settleOpen, drained } = registry();
+    const provided = hosts.provide(provideOf('host-1'));
+    await settleOpen('open');
+    await provided;
+    const host = opened[0]!;
+    host.close.mockRejectedValueOnce(new Error('task lease is still retiring'));
+    drained.resolve();
+
+    await expect(hosts.release({ projectId: 'project-1', hostId: host.hostId })).rejects.toMatchObject({
+      code: 'PROJECT_HOST_CLOSE_RETRY',
+    });
+    expect(host.close).toHaveBeenCalledTimes(1);
+    await expect(hosts.release({ projectId: 'project-1', hostId: host.hostId })).resolves.toBeUndefined();
+    expect(host.close).toHaveBeenCalledTimes(2);
+    expect(opened).toHaveLength(1);
   });
 
   /* T3: the last client's release never stops a live run; the host drains, then closes. */

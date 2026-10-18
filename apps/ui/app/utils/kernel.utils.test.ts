@@ -10,6 +10,25 @@ import { kernelLibraries } from '#utils/kernel-libraries.js';
 import { getKernelDependencies, kernelsWithLibraries } from '#utils/kernel.utils.js';
 
 describe('getKernelDependencies', () => {
+  it.each([
+    ['replicad', replicadKernel],
+    ['jscad', jscadKernel],
+    ['manifold', manifoldKernel],
+    ['picovoxel', picovoxelKernel],
+    ['tscircuit', tscircuitKernel],
+  ] as const)(
+    'should keep the dependency-only %s projection equal to the real kernel metadata',
+    async (kernelId, factory) => {
+      expect(await getKernelDependencies(kernelId)).toEqual(factory().builtinDependencies);
+    },
+  );
+
+  it('should return independent dependency records without mutating the checked projection', async () => {
+    const first = await getKernelDependencies('replicad');
+    first['replicad'] = 'caller-edited';
+    expect(await getKernelDependencies('replicad')).toEqual(replicadKernel().builtinDependencies);
+  });
+
   it('should match every kernel without loading executable plugins into the renderer', () => {
     expect(kernelLibraries).toEqual({
       replicad: replicadKernel().builtinDependencies,

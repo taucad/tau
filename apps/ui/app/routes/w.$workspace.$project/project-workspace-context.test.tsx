@@ -2,11 +2,34 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
-const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
+vi.mock('#hooks/use-project-tasks.js', () => ({
+  ProjectTasksProvider: ({ children }: { readonly children: React.JSX.Element }) => children,
+}));
+vi.mock('#routes/w.$workspace.$project/thread-navigation-context.js', () => ({
+  ThreadNavigationProvider: ({
+    children,
+    isLayoutControllerReady,
+  }: {
+    readonly children: React.JSX.Element;
+    readonly isLayoutControllerReady: boolean;
+  }) => (
+    <>
+      <span data-testid='layout-owner-ready'>{String(isLayoutControllerReady)}</span>
+      {children}
+    </>
+  ),
+}));
+
+const state = vi.hoisted(() => ({
+  isMobile: false,
+  isEditorReady: true,
+  appliedWorkbenchRevisions: new Map<string, `sha256:${string}`>(),
+}));
 const route = vi.hoisted<{
   key: string;
   search: string;
@@ -38,13 +61,19 @@ const editorRef = {
 };
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
+  useProject: () => ({
+    editorRef,
+    mainEntryPath: 'main.ts',
+    appliedWorkbenchRevisions: state.appliedWorkbenchRevisions,
+  }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
 vi.mock('react-router', () => ({ useLocation: () => route }));
 vi.mock('@xstate/react', () => ({
-  useSelector: (_actor: unknown, selector: (snapshot: { matches: () => boolean }) => unknown) =>
-    selector({ matches: () => state.isEditorReady }),
+  useSelector: (
+    _actor: unknown,
+    selector: (snapshot: { matches: () => boolean; context: { focusedChatId: string } }) => unknown,
+  ) => selector({ matches: () => state.isEditorReady, context: { focusedChatId: 'chat-1' } }),
 }));
 const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
 const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));
@@ -71,12 +100,110 @@ describe('ProjectWorkspaceProvider', () => {
   beforeEach(() => {
     state.isMobile = false;
     state.isEditorReady = true;
+    state.appliedWorkbenchRevisions.clear();
     route.key = 'initial';
     route.search = '';
     route.state = undefined;
     send.mockClear();
     listeners.clear();
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
+  });
+
+  it('should wait for a usable layout read and reset readiness when the owner leaves', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(screen.getByTestId('layout-owner-ready')).toHaveTextContent('false');
+    let ready = false;
+    let notify: () => void = () => undefined;
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => undefined,
+      isReady: () => ready,
+      subscribe: (listener) => {
+        notify = listener;
+        return () => undefined;
+      },
+      restorePreviousArrangement: async () => false,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: () => undefined,
+    };
+    let release: () => void = () => undefined;
+    act(() => {
+      release = workspace.registerLayoutController(controller);
+    });
+    expect(screen.getByTestId('layout-owner-ready')).toHaveTextContent('false');
+    act(() => {
+      ready = true;
+      notify();
+    });
+    expect(screen.getByTestId('layout-owner-ready')).toHaveTextContent('true');
+    act(() => {
+      release();
+    });
+    expect(screen.getByTestId('layout-owner-ready')).toHaveTextContent('false');
+  });
+
+  it('should send pane intent through the layout owner until its saved layout is applied', () => {
+    const view = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const layout: WorkbenchLayout = {
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [] },
+    };
+    const digest = 'sha256:fixture';
+    const ownerChange = vi.fn<WorkbenchLayoutController['personWorkbenchChanged']>();
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => ({ layout, layoutDigest: digest, refused: [] }),
+      isReady: () => true,
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => false,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: ownerChange,
+    };
+    const opener = vi.fn();
+    act(() => {
+      workspace.registerLayoutController(controller);
+      workspace.connectWorkbench(opener);
+      workspace.openPanel('agents');
+    });
+    expect(opener).not.toHaveBeenCalled();
+    expect(ownerChange).toHaveBeenCalledOnce();
+    const change = ownerChange.mock.calls[0]?.[0];
+    expect(typeof change).toBe('function');
+    if (typeof change !== 'function') {
+      throw new TypeError('Expected a layout update.');
+    }
+    expect(change(layout.workbench)).toEqual({
+      kind: 'group',
+      tabs: [{ kind: 'pane', pane: 'agents' }],
+      active: 0,
+    });
+    act(() => {
+      workspace.openPanel('files');
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+
+    state.appliedWorkbenchRevisions.set(workbenchPaths.layout, digest);
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    act(() => {
+      workspace.openPanel('revisions');
+    });
+    expect(opener).toHaveBeenNthCalledWith(2, 'revisions');
   });
 
   it.each(['replace', 'gap', 'moved'] as const)(
@@ -497,6 +624,7 @@ describe('ProjectWorkspaceProvider', () => {
     let workbench: WorkbenchLaneNode = layout.workbench;
     const controller: WorkbenchLayoutController = {
       snapshot: () => ({ layout: { ...layout, workbench }, layoutDigest: 'missing', refused: [] }),
+      isReady: () => true,
       subscribe: () => () => undefined,
       restorePreviousArrangement: async () => true,
       registerViewer: () => () => undefined,

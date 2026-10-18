@@ -419,6 +419,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
   const controller = useMemo<WorkbenchLayoutController>(
     () => ({
       snapshot: () => snapshotRef.current,
+      isReady: () => store.ready() && store.snapshot().refusal === undefined,
       subscribe: (listener) => changes.subscribe(listener),
       restorePreviousArrangement: async (expected) => {
         const previous = editorRef.getSnapshot().context.previousLayout;

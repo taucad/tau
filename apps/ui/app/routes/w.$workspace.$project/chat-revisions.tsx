@@ -49,7 +49,8 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { useThreadNavigation } from '#routes/w.$workspace.$project/thread-navigation-context.js';
+import { RevisionRow, FileRows } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -61,7 +62,7 @@ import {
   useRevisionFacts,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { StripVerb } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import { useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
@@ -974,7 +975,19 @@ function RevisionAlerts(): React.JSX.Element | undefined {
  *
  * @returns The pane body.
  */
+function CandidateRevisionFiles({ revisionId }: { readonly revisionId: string }): React.JSX.Element | undefined {
+  const revision = useRevisionCards([revisionId]).get(revisionId);
+  return revision ? (
+    <div className='space-y-2'>
+      <p className='text-xs text-muted-foreground'>Latest revision</p>
+      <FileRows revision={revision} compareAgainst='parent' />
+    </div>
+  ) : undefined;
+}
+
 export function RevisionsPanelBody(): React.JSX.Element {
+  const threadNavigation = useThreadNavigation({ enableNoContext: true });
+  const candidate = threadNavigation?.candidateReview;
   const { projectId, projectRef } = useProject();
   const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
   const { updateProject } = useProjectManager();
@@ -995,6 +1008,9 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const activeChatId = projectChatIdFromSearch(useLocation().search);
   const authority = useOptionalChatWorkspaceAuthority();
   const branches = status?.branches ?? [];
+  const candidateBranch =
+    candidate === undefined ? undefined : branches.find((branch) => branch.checkoutId === candidate.checkoutId);
+
   const isSyncOpen = status !== undefined && (status.remote.kind !== 'none' || isConnectOpen);
   const conflicts = status?.conflicts ?? [];
   const conflictTexts = useConflictTexts();
@@ -1015,6 +1031,61 @@ export function RevisionsPanelBody(): React.JSX.Element {
           from both sides (round 11). No `min-h-0` on the regions: this column owns the scroll (C36). */}
       <div className='flex min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-gutter:stable] flex-col gap-2 overflow-y-auto py-2 pl-2 *:w-[min(100%,calc(100cqw-1rem))]'>
         <RevisionAlerts />
+        {candidate ? (
+          <RevisionRegion id='thread-candidate-heading' title={candidate.title}>
+            <div className='flex flex-col gap-2'>
+              <div className='flex items-center justify-between gap-2'>
+                <Button
+                  size='xs'
+                  variant='ghost'
+                  onClick={() => {
+                    threadNavigation.openThreads(candidate.taskId);
+                  }}
+                >
+                  Back to thread
+                </Button>
+                <Button
+                  size='icon-xs'
+                  variant='ghost'
+                  aria-label='Close thread review'
+                  onClick={threadNavigation.closeReview}
+                >
+                  <XIcon />
+                </Button>
+              </div>
+              {candidateBranch === undefined ? (
+                <p className='text-xs text-muted-foreground'>
+                  {status === undefined || !status.registrySettled
+                    ? 'Loading thread changes…'
+                    : 'This thread’s revision is no longer available.'}
+                </p>
+              ) : (
+                <>
+                  <RevisionBranches
+                    branches={[candidateBranch]}
+                    currentBranch={currentBranch}
+                    liveCheckoutId={status?.liveCheckoutId}
+                    chatNames={chatNames}
+                    chatCheckoutIds={chatCheckoutIds}
+                    branchFacts={branchFacts}
+                    conflicts={conflicts}
+                    isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+                    isWritable={canWrite}
+                    onSwitch={commands.switchTo}
+                    onMerge={commands.mergeBranch}
+                    onDiscard={commands.discardBranch}
+                    onRename={commands.renameBranch}
+                  />
+                  {candidateBranch.head === candidate.sourceRevisionId ? (
+                    <p className='text-xs text-muted-foreground'>No saved changes in this attempt.</p>
+                  ) : candidateBranch.head ? (
+                    <CandidateRevisionFiles revisionId={candidateBranch.head} />
+                  ) : null}
+                </>
+              )}
+            </div>
+          </RevisionRegion>
+        ) : null}
 
         {/* A sync divergence records its conflict on the same line, so a
             one-branch project still has somewhere to decide (C35). */}

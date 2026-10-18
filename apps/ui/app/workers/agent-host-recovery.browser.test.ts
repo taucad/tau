@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import type { RevisionFileSystem } from '@taucad/revisions/revision-effects';
 import { createProjectRevisionsActor } from '@taucad/revisions/revision-effects';
+import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import { createAgentChannelClient, serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -39,12 +40,26 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
       checkouts: { projectId: options.authority.projectId, root: () => root },
     });
     await revisions.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await root.writeFile('source.txt', 'Recovery source revision.\n');
     let tree = createProjectRevisionsActor({
       port: revisions,
       projectId: options.authority.projectId,
       filesystem: () => root,
     });
     tree.actor.start();
+    await vi.waitFor(() => {
+      expect(selectRevisionStatus(tree.actor.getSnapshot()).checkoutId).toBeDefined();
+    });
+    tree.actor.send({
+      type: 'cut',
+      requestId: 'recovery-source',
+      trigger: 'save',
+      checkoutId: selectRevisionStatus(tree.actor.getSnapshot()).checkoutId,
+      leaseIds: [],
+    });
+    await vi.waitFor(() => {
+      expect(selectRevisionStatus(tree.actor.getSnapshot()).headRevisionId).toBeDefined();
+    });
     let session: ReturnType<typeof createTurnPlacementPort<{ port: MessagePort }>> | undefined;
     const servers: MessagePort[] = [];
     const bridges: Array<ReturnType<typeof createFileSystemBridgePort>> = [];

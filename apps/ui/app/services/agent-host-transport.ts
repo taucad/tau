@@ -4,6 +4,8 @@ import type {
   CatchUpInput,
   CommandAnswer,
   HostCommand,
+  ProjectTaskChannelRequest,
+  ProjectTaskChannelAnswer,
   ReadAnswer,
   ReadInput,
 } from '@taucad/agent-host/wire';
@@ -38,6 +40,8 @@ export type AgentHostTransport = {
    * it with the same key on the replacement, so the owner answers it once.
    */
   execute(command: HostCommand, signal?: AbortSignal): Promise<CommandAnswer>;
+  /** Read or act on tasks at this same execution authority. */
+  projectTasks?(request: ProjectTaskChannelRequest, signal?: AbortSignal): Promise<ProjectTaskChannelAnswer>;
   /** One long-poll read of a chat's durable rows: a batch, or a refusal the reader resets on. */
   read(input: ReadInput): Promise<ReadAnswer>;
   /** Capture bounded provisional pages and validate their exact source before publication. */

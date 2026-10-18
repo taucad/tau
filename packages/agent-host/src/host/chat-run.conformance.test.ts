@@ -242,6 +242,7 @@ describe('chatRun conforms to ChatRunSlot.tla', () => {
         versions: Object.fromEntries(machines.map((machine) => [machine.id, String(machine.version)])),
         tables: {},
         actions: machineActions(machines),
+        sources: hashFiles(path.resolve(specs, '..'), ['src/host/chat-run.machine.ts']),
         specs: hashFiles(specs, ['ChatRunSlot.tla', 'ChatRunSlotGraph.tla']),
       }),
     ).toEqual([]);

@@ -272,7 +272,7 @@ function ProjectSessionBinding({
       if (!capabilities.writable || !capabilities.durability) {
         throw new Error('The project filesystem cannot hold a readable host log.');
       }
-      const openRevisionSession = (kind: 'placement' | 'reader') => () =>
+      const openRevisionSession = (kind: 'placement' | 'reader' | 'task') => () =>
         fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
       if (!connectorActive) {
         throw new Error(`Project ${projectId}'s host connector closed before chat ${chatId} attached.`);
@@ -281,6 +281,7 @@ function ProjectSessionBinding({
         openFileSystemBridge: openProjectRootBridge,
         openProjectRootBridge,
         openRevisionsPort: openRevisionSession('reader'),
+        openTaskRevisionsPort: openRevisionSession('task'),
         openPlacementPort: openRevisionSession('placement'),
         computeMode: reuse,
         openComputeStorePort: () => {

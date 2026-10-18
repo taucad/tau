@@ -88,6 +88,9 @@ CONSTANTS
     CloseBarrier, ResolveFirst, OrphanCoded
 
 Has(f) == f \in Features
+
+(* Unsafe witness feature reproduces closing before placement acknowledgement. *)
+CloseSettlement == ~Has("skip-close-settlement")
 None == "none"
 T == "r1"
 X == "r2"
@@ -362,6 +365,8 @@ placed(k) ==   \* W8's admit answered (trivially without "placement"); the drive
                    completes, acked, lockFree, gw, call, callState, closeVars>>
 
 placementRefused(k) ==   \* no lease remains: [failed{executed: false}, turn.failed], no complete
+    \* Refusal code/message/details are durable diagnostic data, abstracted by H("failed").
+    \* Preserving upstream placement failure details changes no control state, lease or answer action.
     /\ Has("placement") /\ alive /\ CanAppend
     /\ \/ k = T /\ pc[T] = "placing"
        \/ k = Resume /\ pc[Resume] = "bind"
@@ -768,10 +773,23 @@ close ==
     /\ UNCHANGED <<log, claimed, revoked, res, drivers, steerQ, waiters, tools, pc, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeAt>>
 
+(* The existing shutdown bound may give up settlement without inventing an ack.
+   opened FALSE abstracts fault/authority loss: the unresolved lease is retained. *)
+closeSettlementFailed ==
+    /\ Has("close-settlement-fault")
+    /\ hostState = "closing" /\ alive /\ opened /\ lease # {}
+    /\ res = None /\ drivers = {} /\ tools = {}
+    /\ opened' = FALSE
+    /\ UNCHANGED <<log, res, drivers, steerQ, ending, waiters, tools, pc, answered,
+                    alive, crashes, epoch, readLen, claimed, ghost, revoked, lease,
+                    started, completes, acked, lockFree, gw, call, callState,
+                    lostCount, hostState, closeAt>>
+
 logClosed ==
     /\ hostState = "closing"
     /\ CloseBarrier => \/ ~alive
                        \/ /\ res = None /\ drivers = {} /\ tools = {}
+                          /\ (CloseSettlement /\ opened) => lease = {}
                           /\ \A k \in Sendable : pc[k] \in {"idle", "done", "resend"}
     /\ hostState' = "closed" /\ closeAt' = Len(log)
     /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars, gwVars>>
@@ -791,7 +809,7 @@ Next ==
     \/ crash \/ restart \/ freeze \/ staleAppend \/ relinquish
     \/ complete \/ settlementPublished \/ acknowledge \/ quiescent
     \/ modelCall \/ gatewaySettles \/ replyShown \/ replyLost \/ invocationResolved
-    \/ close \/ logClosed
+    \/ close \/ closeSettlementFailed \/ logClosed
 
 \* Weak fairness on live host, driver, gateway and page-resend steps; none on a person's
 \* gesture, crash, freeze, relinquish, close or the stale writer (FM-R17).
@@ -865,6 +883,9 @@ NoRowAfterEnding ==
     \A i, j \in DOMAIN log :
         ~(i < j /\ EndingRow(i) /\ log[j].t \in {"tool", "steer", "commit", "prepared", "reply"}
           /\ log[j].r = log[i].r /\ log[j].a = log[i].a)
+
+(* Authority loss (dead or fenced/relinquished) must not acquire write duties. *)
+GracefulCloseSettled == hostState = "closed" /\ alive /\ opened => lease = {}
 
 NothingAfterClose == hostState = "closed" => Len(log) = closeAt                               \* L2a D14
 

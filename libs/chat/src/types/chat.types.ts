@@ -2,6 +2,7 @@ import type { ConstantRecord, ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import type { messageRole, messageStatus } from '#constants/message.constants.js';
 import type { CadAgentExecution } from '#schemas/agent-config.schema.js';
+import type { ChatTaskLineage } from '#schemas/chat-record.schema.js';
 import type { MyUIMessage } from '#types/message.types.js';
 
 /** @public */
@@ -44,6 +45,8 @@ export type Chat = {
   checkoutId?: string;
   /** Product recency for chat ordering, in Unix epoch milliseconds. */
   recencyAt?: number;
+  /** Immutable descendant ancestry, projected from the durable task journal. */
+  taskLineage?: ChatTaskLineage;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number; // Soft delete support

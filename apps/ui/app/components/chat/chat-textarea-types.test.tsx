@@ -172,6 +172,20 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(chatActionsMock.setDraftText).not.toHaveBeenCalled();
   });
 
+  it('should not expose generic chat resume or attachment admission in a task mailbox', async () => {
+    mockResume = vi.fn();
+    mockStatus = 'streaming';
+    draftState = { ...defaultDraftState, draftAttachments: [storedPdf] };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit, taskMailbox: true }));
+    expect(result.current.status).toBe('ready');
+    expect(result.current.canResume).toBe(false);
+    expect(result.current.attachmentInputSupported).toBe(false);
+    expect(result.current.sendBlockReason).toContain('text only');
+    await act(async () => result.current.handleSubmit());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it.each([
     { name: 'text', draftText: 'Keep this draft', draftAttachments: [] },
     {

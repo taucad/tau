@@ -175,33 +175,36 @@ export const createChatEffects = (
       }
     })();
     return Promise.all(
-      chats.map(async (chatId): Promise<SyncRefOutcome> => {
-        const name = chatRefName(chatId);
-        try {
-          const result = await writeChatRef({
-            ...context,
-            chatId,
-            syncChats,
-            actorId,
-            ...(person === undefined ? {} : { actor: person }),
-            now: now(),
-            remote,
-          });
-          return {
-            name,
-            status: result.status === 'conflicted' ? 'rejected' : 'upToDate',
-            head: result.head,
-            ...(result.status === 'conflicted' ? { reason: 'The local chat ref moved while it was recorded.' } : {}),
-          };
-        } catch (error) {
-          return {
-            name,
-            status: 'rejected',
-            head: await port.readRef(name).catch(() => undefined),
-            reason: error instanceof Error ? error.message : 'This chat could not be recorded.',
-          };
-        }
-      }),
+      // Project task sidecars are protected project records, never chat refs.
+      chats
+        .filter((chatId) => chatId.toLowerCase() !== '.project-tasks')
+        .map(async (chatId): Promise<SyncRefOutcome> => {
+          const name = chatRefName(chatId);
+          try {
+            const result = await writeChatRef({
+              ...context,
+              chatId,
+              syncChats,
+              actorId,
+              ...(person === undefined ? {} : { actor: person }),
+              now: now(),
+              remote,
+            });
+            return {
+              name,
+              status: result.status === 'conflicted' ? 'rejected' : 'upToDate',
+              head: result.head,
+              ...(result.status === 'conflicted' ? { reason: 'The local chat ref moved while it was recorded.' } : {}),
+            };
+          } catch (error) {
+            return {
+              name,
+              status: 'rejected',
+              head: await port.readRef(name).catch(() => undefined),
+              reason: error instanceof Error ? error.message : 'This chat could not be recorded.',
+            };
+          }
+        }),
     );
   };
 

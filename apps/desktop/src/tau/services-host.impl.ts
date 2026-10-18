@@ -81,6 +81,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 
 import { canonicalPath } from '#main/project-roots.js';
 import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
+import { createProjectModelResolver } from '#tau/project-model-resolver.js';
 import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runtime-clients.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
@@ -940,6 +941,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
       },
+      resolveModel: createProjectModelResolver({
+        apiBaseUrl: config.tauApiUrl,
+        authToken: () => authToken,
+      }),
       systemPrompt: config.systemPrompt,
       /* The build defines this; a missing define must fail loudly rather than
        * quietly running a Cloud build on the self-host transport. The bearer is
@@ -1031,6 +1036,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           build: packageVersion,
           sessionKey: agentSessionKey,
           revisions: host.revisions.channel,
+          projectTasks: host.projectTasks,
         });
         log('agent-host-served', { workspaceRoot, reused: servedHost === host });
         servedHost = host;

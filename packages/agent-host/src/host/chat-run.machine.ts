@@ -1074,6 +1074,11 @@ export const chatRunMachine = setup({
         choosing: {
           type: 'choice',
           choice: ({ context }) => {
+            /* Own graceful close retains its writer through placement acknowledgement. Authority loss still closes
+             * immediately without another write; it cannot settle a replacement owner's lease. */
+            if (context.cause === 'close' && unsettled(context) !== undefined) {
+              return { target: '#finishing', context: { settle: unsettled(context) } };
+            }
             if (context.cause !== undefined) {
               return { target: '#closing' };
             }
@@ -2116,6 +2121,11 @@ export const chatRunMachine = setup({
                   return undefined;
                 }
                 if (event.code === 'CUT_FAILED') {
+                  /* A failed cut during shutdown is an uncertain fault, not a released attempt. The composition
+                   * retains its task reservation and reports the failure instead of retrying close indefinitely. */
+                  if (context.cause === 'close') {
+                    return { target: '#closing', context: { ...context, cause: 'fault' } };
+                  }
                   return { target: '#backingOff' };
                 }
                 if (event.code === 'TURN_UNKNOWN') {

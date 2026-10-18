@@ -420,6 +420,8 @@ export type RevisionActors = Readonly<{
 export type TurnStore = Readonly<{
   /** Every lease record in `.tau/runs`, read now, never from a cached list (TS-R17). */
   leases: () => Promise<readonly TurnLease[]>;
+  /** The immutable source admitted for this attempt, recovered from its lease and base cut after a root restart. */
+  sourceRevision: (key: TurnAttemptKey) => Promise<string | undefined>;
   /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
   open: (
     checkoutId: string,
@@ -2696,6 +2698,31 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     settled,
     turns: {
       leases: readLeases,
+      sourceRevision: async (key) => {
+        const lease = await leaseOf(key.runId);
+        if (lease === undefined || !namesAttempt(lease, key)) {
+          return undefined;
+        }
+        return withCheckoutFence(lease.checkoutId, async () => {
+          let cursor = await headOf(await placeOf(lease.checkoutId));
+          while (cursor !== undefined && cursor !== lease.headRevisionId) {
+            // oxlint-disable-next-line no-await-in-loop -- the first-parent walk must preserve revision order.
+            const record = await port.readRevision(revisionId(cursor));
+            if (record === undefined) {
+              return undefined;
+            }
+            if (
+              record.provenance.runId === key.runId &&
+              (record.provenance.attempt ?? 0) === key.attempt &&
+              record.provenance.turnCut === 'base'
+            ) {
+              return record.id;
+            }
+            cursor = record.parents[0];
+          }
+          return cursor === lease.headRevisionId ? lease.headRevisionId : undefined;
+        });
+      },
       open: async (checkoutId) => {
         const places = await listPlaces();
         const checkout = places.find((candidate) => candidate.id === checkoutId);

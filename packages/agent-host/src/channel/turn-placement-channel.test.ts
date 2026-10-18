@@ -61,7 +61,15 @@ const session = (facts: readonly TurnPlacementFact[] = []): TurnPlacementSession
 const connect = (served: TurnPlacementSession) => {
   const { port1, port2 } = new MessageChannel();
   const handle = serveTurnPlacementChannel({ port: port1, projectId: 'project-1', session: served });
-  const toolsFor = vi.fn((_tools: { readonly port: MessagePort }) => registry);
+  const toolsFor = vi.fn(
+    (_tools: {
+      readonly port: MessagePort;
+      readonly checkoutId: string;
+      readonly mode: 'direct' | 'candidate';
+      readonly root: string;
+      readonly key: typeof key;
+    }) => registry,
+  );
   const client = connectTurnPlacementChannel({ port: port2, projectId: 'project-1', toolsFor });
   closers.push(() => {
     client.close();
@@ -79,7 +87,13 @@ describe('the placement session channel', () => {
       status: 'applied',
       placement: { checkoutId: 'live', mode: 'direct', root: '/project', tools: registry },
     });
-    expect(toolsFor).toHaveBeenCalledWith({ port: expect.any(MessagePort) as unknown });
+    expect(toolsFor).toHaveBeenCalledWith({
+      port: expect.any(MessagePort) as unknown,
+      checkoutId: 'live',
+      mode: 'direct',
+      root: '/project',
+      key,
+    });
     await expect(client.admit({ requestId: 'admit-2', key, checkoutId: 'gone' })).resolves.toMatchObject({
       status: 'refused',
       code: 'CHECKOUT_UNKNOWN',

@@ -66,6 +66,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'apps/ui/app/machines/chat-session.machine.ts',
           'apps/ui/app/services/chat-session-store.ts',
           'apps/ui/app/chat-clients/chat-turn-host.tsx',
+          'apps/ui/app/chat-clients/_internal/project-thread-grant.ts',
           'apps/ui/app/chat-clients/_internal/use-turn-admission.ts',
           'apps/ui/app/chat-clients/use-cad-chat-client.ts',
           'apps/ui/app/components/chat/chat-message-queue.tsx',

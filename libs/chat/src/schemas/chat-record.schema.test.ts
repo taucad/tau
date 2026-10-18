@@ -35,6 +35,20 @@ describe('chat record', () => {
     });
   });
 
+  it('validates and preserves descendant task lineage while ordinary roots omit it', () => {
+    const taskLineage = {
+      taskId: 'task_child',
+      parentTaskId: 'task_parent',
+      parentChatId: 'chat_parent',
+      rootChatId: 'chat_root',
+    };
+    expect(parseChatRecord(serializeChatRecord({ ...chat, taskLineage }))).toMatchObject({ taskLineage });
+    expect(parseChatRecord(serializeChatRecord(chat))?.taskLineage).toBeUndefined();
+    for (const invalid of [{ ...taskLineage, rootChatId: '' }, { taskId: 'task_child' }, null]) {
+      expect(chatRecordSchema.safeParse({ ...chat, taskLineage: invalid }).success).toBe(false);
+    }
+  });
+
   /* P26/D25: the transcript is the log's, and a copy in the record would be a
    * second history of the same turns — over the one path two devices both
    * claim, where the loser's copy overwrites the winner's. */

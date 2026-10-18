@@ -28,6 +28,12 @@ export const toolName = {
   getPrintProfiles: 'get_print_profiles',
   requestJob: 'request_job',
   checkJob: 'check_job',
+  taskSpawn: 'task_spawn',
+  taskRead: 'task_read',
+  taskSend: 'task_send',
+  taskWait: 'task_wait',
+  taskCancel: 'task_cancel',
+  taskResume: 'task_resume',
 } as const satisfies Record<string, string>;
 
 /** @public */

@@ -33,6 +33,7 @@ import {
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { toast } from '#components/ui/sonner.js';
+import { rootChatRecords } from '#utils/root-chat-records.js';
 
 const chatsPerPage = 5;
 /** Joins chat ids into one effect key; ids never contain it. */
@@ -79,7 +80,8 @@ export function ProjectChatList({
     };
   }, [observations]);
   const [visibleCount, setVisibleCount] = useState(chatsPerPage);
-  const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
+  const roots = useMemo(() => rootChatRecords(chats), [chats]);
+  const sortedChats = useMemo(() => sortProjectChats(roots), [roots]);
   const visibleChats = sortedChats.slice(0, visibleCount);
   /*
    * D-UI-06 (B-20): observing a chat loads its whole transcript into this page
@@ -148,7 +150,7 @@ export function ProjectChatList({
       return;
     }
 
-    const nextChatId = pickNextFocusedChatId(chats, chat.id, activeChatId);
+    const nextChatId = pickNextFocusedChatId(roots, chat.id, activeChatId);
     await navigate(nextChatId ? projectChatUrl(project.slugs, nextChatId) : projectUrl(project.slugs), {
       replace: true,
     });
@@ -179,7 +181,7 @@ export function ProjectChatList({
           />
         </SidebarMenuSubItem>
       ) : null}
-      {!isLoading && !isOpening && !isLoadingCloudChats && !error && chats.length === 0 ? (
+      {!isLoading && !isOpening && !isLoadingCloudChats && !error && roots.length === 0 ? (
         <SidebarMenuSubItem>
           <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>

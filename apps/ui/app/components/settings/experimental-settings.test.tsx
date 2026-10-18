@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
@@ -18,6 +18,14 @@ describe('ExperimentalSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.flags = featureFlagDefaults;
+  });
+
+  it('should expose the Project threads toggle and save its disabled state', () => {
+    render(<ExperimentalSettings />);
+    const toggle = screen.getByRole('switch', { name: 'Project threads' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(mockState.setFlag).toHaveBeenCalledExactlyOnceWith('projectThreads', false);
   });
 
   it('should render only the exposed feature flags from the registry', () => {

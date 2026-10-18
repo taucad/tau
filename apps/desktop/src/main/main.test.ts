@@ -11,7 +11,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
-import type { DesktopUpdaterOptions } from '#main/updater.js';
+import type { DesktopUpdaterOptions, startDesktopUpdater } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -123,18 +123,24 @@ vi.mock('#tau/native-store.js', () => ({
   }),
 }));
 
-vi.mock('#main/updater.js', () => ({
-  startDesktopUpdater: (options: DesktopUpdaterOptions) => {
-    state.prepareToRestart = options.prepareToRestart;
-    return {
-      check: state.updaterCheck,
-      install: state.updaterInstall,
-      status: () => 'Update ready',
-      snapshot: () => ({ phase: 'ready' }),
-      download: vi.fn(),
-    };
-  },
-}));
+vi.mock('#main/updater.js', async (importOriginal) => {
+  const actual = await importOriginal<{ startDesktopUpdater: typeof startDesktopUpdater }>();
+  return {
+    startDesktopUpdater: (options: DesktopUpdaterOptions) => {
+      state.prepareToRestart = options.prepareToRestart;
+      if (options.channel === 'staging') {
+        return actual.startDesktopUpdater({ ...options, schedule: () => undefined });
+      }
+      return {
+        check: state.updaterCheck,
+        install: state.updaterInstall,
+        status: () => 'Update ready',
+        snapshot: () => ({ phase: 'ready' }),
+        download: vi.fn(),
+      };
+    },
+  };
+});
 
 vi.mock('node:worker_threads', async (importOriginal) => {
   const actual = await importOriginal<typeof WorkerThreads>();
@@ -151,6 +157,7 @@ vi.mock('node:worker_threads', async (importOriginal) => {
 
 const app = {
   isPackaged: false,
+  commandLine: { getSwitchValue: vi.fn(() => '') },
   dock: { setIcon: vi.fn() },
   requestSingleInstanceLock: vi.fn(() => true),
   whenReady: vi.fn(async () => state.ready),
@@ -159,6 +166,11 @@ const app = {
     return true;
   }),
   getPath: vi.fn((name: string) => (name === 'userData' ? state.userData : join(state.userData, name))),
+  setPath: vi.fn((name: string, path: string) => {
+    if (name === 'userData') {
+      state.userData = path;
+    }
+  }),
   getVersion: vi.fn(() => 'test'),
   /* No `package.json` here, so a packaged case boots locked, like a release. */
   getAppPath: vi.fn(() => state.userData),
@@ -1752,4 +1764,65 @@ describe('desktop main machine store', () => {
   );
 });
 
+describe('packaged staging profile initialization', () => {
+  it('should select a separate profile before acquiring the single-instance lock', async () => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    const root = await mkdtemp(join(tmpdir(), 'tau-staging-main-'));
+    state.userData = root;
+    app.isPackaged = true;
+    await writeFile(join(root, 'package.json'), JSON.stringify({ tauDesktop: { channel: 'staging' } }));
+    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: root });
+    const staging = join(root, 'appData', 'Tau Staging');
+    app.requestSingleInstanceLock.mockImplementationOnce(() => {
+      expect(state.userData).toBe(staging);
+      expect(app.setPath).toHaveBeenCalledWith('sessionData', staging);
+      return true;
+    });
+    try {
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.ipcListeners.has(servicesPortRelayTag)).toBe(true);
+      });
+      expect(app.requestSingleInstanceLock).toHaveBeenCalledOnce();
+      expect(app.setName).toHaveBeenCalledWith('Tau Staging');
+      expect(app.setName).not.toHaveBeenCalledWith('Tau');
+      const { net } = await import('electron');
+      await vi.waitFor(() => {
+        expect(net.fetch).toHaveBeenCalledWith(
+          `https://downloads.taucad.dev/latest/desktop-update-${process.platform}-${process.arch}.json`,
+        );
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should keep automatic updates disabled for an ad-hoc staging preview', async () => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    const root = await mkdtemp(join(tmpdir(), 'tau-staging-preview-'));
+    state.userData = root;
+    app.isPackaged = true;
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ tauDesktop: { channel: 'staging', environmentOverrides: true } }),
+    );
+    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: root });
+    try {
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith(
+          'info',
+          'updater.disabled',
+          expect.objectContaining({ packaged: true, channel: 'staging' }),
+        );
+      });
+      const { net } = await import('electron');
+      expect(net.fetch).not.toHaveBeenCalledWith(
+        `https://downloads.taucad.dev/latest/desktop-update-${process.platform}-${process.arch}.json`,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 /* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */

@@ -255,30 +255,41 @@ describe('Node event log', () => {
     /* Defect (reported to the filesystem owners, RV8-F3): the kernel lock taken from a worker thread does not hold on
      * Darwin, so a main-thread writer is admitted while the worker's writer is open. The pid marker names this live
      * process, so after the worker terminates without closing, the chat stays WRITER_LOCKED until the process exits.
-     * `it.fails` pins today's behaviour; it turns red when the helper holds the lock from a worker. */
-    it.fails('should admit a writer after the holding worker thread terminates', async () => {
-      const filePath = await temporaryLogPath();
-      const worker = new Worker(
-        `import(${JSON.stringify(nodeEntry)}).then(async ({ createNodeEventLog }) => {
+     * Darwin's expected failure turns red when the helper holds from a worker. Linux's flock holds the retained
+     * descriptor, so exclusion followed by termination and readmission is an ordinary positive regression. */
+    it(
+      'should admit a writer after the holding worker thread terminates',
+      {
+        fails: process.platform === 'darwin',
+        timeout: 30_000,
+      },
+      async () => {
+        const filePath = await temporaryLogPath();
+        const worker = new Worker(
+          `import(${JSON.stringify(nodeEntry)}).then(async ({ createNodeEventLog }) => {
           // Held for the worker's life: an unreachable log's handles would be closed by the collector.
           globalThis.held = await createNodeEventLog({ filePath: ${JSON.stringify(filePath)}, access: 'write' });
-          require('node:worker_threads').parentPort.postMessage('ready');
+          const { parentPort } = require('node:worker_threads');
+          // File handles do not keep an isolate alive: retain a message listener until the explicit termination.
+          parentPort.on('message', () => undefined);
+          parentPort.postMessage('ready');
         });`,
-        { eval: true, execArgv: ['--import', 'tsx'] },
-      );
-      await once(worker, 'message');
-      await rm(`${filePath}.lock`, { force: true });
+          { eval: true, execArgv: ['--import', 'tsx'] },
+        );
+        await once(worker, 'message');
+        await rm(`${filePath}.lock`, { force: true });
 
-      try {
-        await expect(createNodeEventLog({ filePath, access: 'write' })).rejects.toMatchObject({
-          code: 'WRITER_LOCKED',
-        });
-      } finally {
-        await worker.terminate();
-      }
-      const next = await createNodeEventLog({ filePath, access: 'write' });
-      await next.close();
-    }, 30_000);
+        try {
+          await expect(createNodeEventLog({ filePath, access: 'write' })).rejects.toMatchObject({
+            code: 'WRITER_LOCKED',
+          });
+        } finally {
+          await worker.terminate();
+        }
+        const next = await createNodeEventLog({ filePath, access: 'write' });
+        await next.close();
+      },
+    );
 
     it('should not create a log when opened for reading', async () => {
       const filePath = await temporaryLogPath();

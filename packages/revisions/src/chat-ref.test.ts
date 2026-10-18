@@ -513,6 +513,61 @@ describe.each([
   });
 
   it.runIf(enabled)(
+    'retains task lineage when an older client renames from a lineage-bearing base',
+    async () => {
+      const id = `lineage_rename_${_engine}`;
+      const taskLineage = {
+        taskId: 'task_child',
+        parentTaskId: 'task_root',
+        parentChatId: 'chat_root',
+        rootChatId: 'chat_root',
+      };
+      const { target, project } = await twoSidedRecord(id, {
+        base: { id, name: 'Chat', createdAt: 1, updatedAt: 10, taskLineage },
+        incoming: { id, name: 'Old client rename', createdAt: 1, updatedAt: 20 },
+        local: { id, name: 'Chat', createdAt: 1, updatedAt: 12, taskLineage },
+      });
+      await expect(project()).resolves.toEqual([id]);
+      expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toMatchObject({
+        name: 'Old client rename',
+        taskLineage,
+      });
+      const fastPathId = `lineage_base_${_engine}`;
+      const base = { id: fastPathId, name: 'Chat', createdAt: 1, updatedAt: 10, taskLineage };
+      const fastPath = await twoSidedRecord(fastPathId, {
+        base,
+        incoming: { id: fastPathId, name: 'Old client rename', createdAt: 1, updatedAt: 20 },
+        local: base,
+      });
+      await expect(fastPath.project()).resolves.toEqual([fastPathId]);
+      expect(JSON.parse((await readChatFile(fastPath.target, 'chat.json', fastPathId)) ?? '{}')).toMatchObject({
+        name: 'Old client rename',
+        taskLineage,
+      });
+    },
+    15_000,
+  );
+
+  it.runIf(enabled)('rejects conflicting established ancestry while still projecting the remote log', async () => {
+    const id = `lineage_conflict_${_engine}`;
+    const base = { id, name: 'Chat', createdAt: 1, updatedAt: 10 };
+    const lineage = {
+      taskId: 'task_child',
+      parentTaskId: 'task_root',
+      parentChatId: 'chat_root',
+      rootChatId: 'chat_root',
+    };
+    const { target, project } = await twoSidedRecord(id, {
+      base,
+      incoming: { ...base, updatedAt: 20, taskLineage: { ...lineage, rootChatId: 'chat_other' } },
+      local: { ...base, updatedAt: 12, taskLineage: lineage },
+    });
+    await expect(project()).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe('{"leaderEpoch":"a","sequence":0}\n');
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toMatchObject({ taskLineage: lineage });
+  });
+
+  it.runIf(enabled)(
     'writes the other device’s log even when both renamed the chat, and reports the rename (CH1 b)',
     async () => {
       const id = `renamed_${_engine}`;

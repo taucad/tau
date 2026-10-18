@@ -242,6 +242,48 @@ describe('ProjectChatList', () => {
     expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
   });
 
+  it('excludes child and grandchild rows before pagination and observes only visible roots', () => {
+    const taskLineage = {
+      taskId: 'task_child',
+      parentTaskId: 'task_root',
+      parentChatId: 'chat_1',
+      rootChatId: 'chat_1',
+    };
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        chat(1),
+        { ...chat(20, 1000), taskLineage },
+        {
+          ...chat(21, 2000),
+          taskLineage: {
+            ...taskLineage,
+            taskId: 'task_grandchild',
+            parentTaskId: 'task_child',
+            parentChatId: 'chat_20',
+          },
+        },
+        ...Array.from({ length: 6 }, (_, index) => chat(index + 2)),
+      ],
+    });
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.getAllByRole('link')).toHaveLength(5);
+    expect(screen.queryByRole('link', { name: 'Chat 20' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Chat 21' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more chats' }));
+    expect(screen.getAllByRole('link')).toHaveLength(7);
+    expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
+    expect(mockObserve.mock.calls.map(([chatId]) => chatId)).toEqual([
+      'chat_7',
+      'chat_6',
+      'chat_5',
+      'chat_4',
+      'chat_3',
+      'chat_2',
+      'chat_1',
+    ]);
+  });
+
   /* D-UI-06 (B-20): observing a chat loads its whole transcript into the page
    * and the agent-host worker. A row can only show the newest page of chats, and
    * the project row's status only needs those plus any unread one. */
@@ -364,6 +406,28 @@ describe('ProjectChatList', () => {
     expect(mockObserve.mock.calls.map(([chatId]) => chatId).sort()).toEqual([...newestPage, 'chat_1'].sort());
   });
 
+  it('observes an unread child task without showing it in the project chat rows', () => {
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        ...defaultChatsResult.chats,
+        {
+          ...chat(20, 1000),
+          taskLineage: {
+            taskId: 'task_child',
+            parentTaskId: 'task_root',
+            parentChatId: 'chat_1',
+            rootChatId: 'chat_1',
+          },
+        },
+      ],
+    });
+    mockUnread.add('chat_20');
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.queryByRole('link', { name: 'Chat 20' })).not.toBeInTheDocument();
+    expect(mockObserve.mock.calls.map(([chatId]) => chatId)).toEqual([...newestPage, 'chat_20']);
+  });
+
   it('observes each further page as it is revealed', () => {
     render(<ProjectChatList project={project} isProjectActive />);
     fireEvent.click(screen.getByRole('button', { name: 'Show more chats' }));
@@ -421,6 +485,34 @@ describe('ProjectChatList', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
     await vi.waitFor(() => {
       expect(deleteChat).toHaveBeenCalledWith('chat_1');
+      expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
+    });
+  });
+
+  it('chooses another root after deleting the focused root even when its child is newer', async () => {
+    const deleteChat = vi.fn().mockResolvedValue(undefined);
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        { ...chat(1, 20), recencyAt: 20 },
+        { ...chat(2, 10), recencyAt: 10 },
+        {
+          ...chat(3, 100),
+          recencyAt: 100,
+          taskLineage: {
+            taskId: 'task_child',
+            parentTaskId: 'task_root',
+            parentChatId: 'chat_1',
+            rootChatId: 'chat_1',
+          },
+        },
+      ],
+    });
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, deleteChat });
+    search = '?chat=chat_1';
+    render(<ProjectChatList project={project} isProjectActive />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
+    await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
     });
   });

@@ -15,6 +15,7 @@ import { createAgentChannelClient } from '#channel/agent-channel-client.js';
 import { agentChannelPort } from '#channel/endpoint.js';
 import { serveAgentChannel } from '#launchers/agent-channel.js';
 import { followChat } from '#log/follow-chat.js';
+import { unsettledAttempts } from '#log/chat-ledger.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import { createAgentLauncher, credentialPrincipal } from '#launchers/agent-launcher.js';
@@ -26,6 +27,7 @@ import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixtur
 import type {
   HostRunSnapshot,
   ModelStreamEvent,
+  ModelTransport,
   SourceLiveEvent,
   ToolRegistry,
   TurnPlacementFact,
@@ -1166,6 +1168,58 @@ describe('createAgentLauncher', () => {
     const runs = launcher.admittedRuns();
     await expect(refusing).resolves.toMatchObject({ status: 'refused', code: 'CHAT_RUN_LIVE' });
     expect(await runs).toEqual(new Map([['chat-fwd', new Set(['run-fwd'])]]));
+  });
+
+  it('should settle a delayed native cancellation before relinquishing its writer on close', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const entered = Promise.withResolvers<void>();
+    const aborted = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const placement = fakePlacement({ registry: emptyTools });
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        request.signal.addEventListener(
+          'abort',
+          () => {
+            aborted.resolve();
+          },
+          { once: true },
+        );
+        entered.resolve();
+        await aborted.promise;
+        await release.promise;
+        yield { type: 'completed', stopReason: 'aborted' };
+      },
+    };
+    launcher = createAgentLauncher({
+      chats: createNodeChatStore({ workspaceRoot }),
+      modelTransport: transport,
+      credential: () => ({ mode: 'session' }),
+      systemPrompt: 'You are Tau.',
+      model,
+      toolRegistry: emptyTools,
+      turnPlacement: placement.port,
+    });
+    await start(launcher, { chatId: 'chat-closing-settlement', runId: 'run-closing-settlement' });
+    await entered.promise;
+    const cancellation = launcher.execute({
+      type: 'cancel',
+      commandId: 'cancel-before-close',
+      payload: { chatId: 'chat-closing-settlement', runId: 'run-closing-settlement' },
+    });
+    await aborted.promise;
+    const closing = launcher.close();
+    expect(placement.calls.some(({ verb }) => verb === 'complete')).toBe(false);
+    release.resolve();
+    await cancellation;
+    await closing;
+    const final = await launcher.host.ledger('chat-closing-settlement');
+    expect(final.runs['run-closing-settlement']?.lifecycle).toBe('cancelled');
+    expect(final.runs['run-closing-settlement']?.settlements).toHaveLength(1);
+    expect(unsettledAttempts(final)).toEqual([]);
+    expect(placement.calls.map(({ verb }) => verb)).toEqual(expect.arrayContaining(['complete', 'acknowledge']));
   });
 
   /* W6.r1 round 4: a close that failed is let go, so the owner's next close tries again instead of re-reading it. */

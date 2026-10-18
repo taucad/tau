@@ -44,6 +44,7 @@ export const closeProvidedPorts = (provide: Partial<AgentHostProjectProvide>): v
     provide.projectRootPort,
     provide.computeStorePort,
     provide.revisionsPort,
+    provide.taskRevisionsPort,
     provide.placementPort,
   ]) {
     port?.close();
@@ -124,20 +125,52 @@ export const createProjectHosts = <Host extends ProjectHostIncarnation>(
    */
   const retiring = new Map<
     string,
-    { readonly host: Host; readonly closed: Promise<void>; closing: boolean; readonly rebridges: Set<Promise<void>> }
+    {
+      readonly host: Host;
+      closed: Promise<void>;
+      closing: boolean;
+      failed: boolean;
+      readonly rebridges: Set<Promise<void>>;
+    }
   >();
+
+  const closeRetiring = async (entry: NonNullable<ReturnType<typeof retiring.get>>): Promise<void> => {
+    entry.closing = true;
+    entry.failed = false;
+    const closed = (async (): Promise<void> => {
+      await Promise.allSettled(entry.rebridges);
+      try {
+        await entry.host.close();
+        retiring.delete(entry.host.hostId);
+      } catch (error) {
+        entry.closing = false;
+        entry.failed = true;
+        throw Object.assign(
+          new Error('The project task host still has resources to settle; retry release.', { cause: error }),
+          {
+            code: 'PROJECT_HOST_CLOSE_RETRY',
+          },
+        );
+      }
+    })();
+    entry.closed = closed;
+    return closed;
+  };
 
   /** Drain the host's runs, then close it, outside every project's order. */
   const retire = async (host: Host): Promise<void> => {
-    const entry = { host, closing: false, rebridges: new Set<Promise<void>>(), closed: Promise.resolve() };
+    const entry = {
+      host,
+      closing: false,
+      failed: false,
+      rebridges: new Set<Promise<void>>(),
+      closed: Promise.resolve(),
+    };
     entry.closed = (async (): Promise<void> => {
       /* T3: a release or replacement never stops a live run; the bound cuts it short, and the close still records
        * it. */
       await host.drain(AbortSignal.timeout(options?.drainBound ?? drainBound)).catch(logDrainFailure);
-      entry.closing = true;
-      await Promise.allSettled(entry.rebridges);
-      await host.close().catch(logCloseFailure);
-      retiring.delete(host.hostId);
+      await closeRetiring(entry);
     })();
     retiring.set(host.hostId, entry);
     return entry.closed;
@@ -177,7 +210,9 @@ export const createProjectHosts = <Host extends ProjectHostIncarnation>(
         }
         /* The replaced incarnation drains, then closes; the page releases it by `hostId` and disposes only its
          * bridges once that release answers (I31). */
-        void retire(previous);
+        // async-iife: bootstrap -- the retiring registry owns the drain, outside this project's serial queue.
+        // oxlint-disable-next-line promise/prefer-await-to-then -- awaiting here would block the new incarnation.
+        void retire(previous).catch(logCloseFailure);
         return { replaced: previous.hostId };
       }),
     rebridge: async (args) =>
@@ -207,7 +242,8 @@ export const createProjectHosts = <Host extends ProjectHostIncarnation>(
       const { closed } = await serial(projectId, async () => {
         const registered = hosts.get(projectId);
         if (registered?.hostId !== hostId) {
-          return { closed: retiring.get(hostId)?.closed };
+          const entry = retiring.get(hostId);
+          return { closed: entry?.failed ? closeRetiring(entry) : entry?.closed };
         }
         /* A host leaves the registry as its drain begins, so a later provide opens a fresh one (RH-R4). */
         hosts.delete(projectId);

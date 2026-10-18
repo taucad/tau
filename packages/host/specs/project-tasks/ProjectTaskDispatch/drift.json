@@ -1,0 +1,20 @@
+{
+  "actions": {
+    "projectTaskDispatch.executing.cancel": "Cancel",
+    "projectTaskDispatch.executing.xstate.done.actor": "Settled",
+    "projectTaskDispatch.executing.xstate.error.actor": "Failed",
+    "projectTaskDispatch.xstate.error.*": "Failed"
+  },
+  "alphabet": ["cancel"],
+  "sources": {
+    "src/project-tasks/dispatch.machine.ts": "8e39520c27ec9cf74c135f18f173d9c0314ebcc890f9b08d50e1dfd92f682a82",
+    "src/project-tasks/dispatch.ts": "ad5ba10274152166a063f536d6c235ae85b74685c13aebf76c28c2fc3a44525c"
+  },
+  "specs": {
+    "ProjectTaskDispatch.tla": "8ed21192aeb61cdd534c7f1412608c16cdf52108f9f928e247cc9c8b603ab3e6"
+  },
+  "tables": {},
+  "versions": {
+    "projectTaskDispatch": "1"
+  }
+}

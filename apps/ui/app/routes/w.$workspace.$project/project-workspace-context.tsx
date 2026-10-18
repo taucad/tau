@@ -1,4 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useLayoutEffect,
+  useSyncExternalStore,
+} from 'react';
 import { useProject } from '#hooks/use-project.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -7,8 +17,11 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import { workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { ProjectTasksProvider } from '#hooks/use-project-tasks.js';
+import { ThreadNavigationProvider } from '#routes/w.$workspace.$project/thread-navigation-context.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 
 export const projectWorkspaceKeyCombinations = {
@@ -148,6 +161,7 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   share: 'share',
   details: 'details',
   revisions: 'revisions',
+  agents: 'agents',
 };
 
 export function ProjectWorkspaceProvider({
@@ -159,7 +173,7 @@ export function ProjectWorkspaceProvider({
   readonly workbenchMode?: 'responsive' | 'pane';
   readonly onWorkbenchOpen?: () => void;
 }): React.JSX.Element {
-  const { editorRef, mainEntryPath } = useProject();
+  const { appliedWorkbenchRevisions, editorRef, mainEntryPath, projectId } = useProject();
   const providerActiveRef = useRef(true);
   const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
   const pendingRecordRecoveryFocus = useRef(false);
@@ -205,6 +219,7 @@ export function ProjectWorkspaceProvider({
   const location = useLocation();
   const routeKey = location.key;
   const isMobile = useIsMobile();
+  const focusedChatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const pendingFilesRef = useRef<string | undefined>(undefined);
@@ -236,6 +251,7 @@ export function ProjectWorkspaceProvider({
   const layoutController = useMemo<WorkbenchLayoutController>(
     () => ({
       snapshot: () => layoutControllerRef.current?.snapshot(),
+      isReady: () => layoutControllerRef.current?.isReady() ?? false,
       subscribe: (listener) => {
         layoutListenersRef.current.add(listener);
         return () => {
@@ -251,6 +267,12 @@ export function ProjectWorkspaceProvider({
     }),
     [],
   );
+  const hasLayoutController = useCallback(() => layoutControllerRef.current !== undefined, []);
+  const isLayoutControllerReady = useSyncExternalStore(
+    layoutController.subscribe,
+    layoutController.isReady,
+    () => false,
+  );
   const registerLayoutController = useCallback((controller: WorkbenchLayoutController) => {
     layoutControllerRef.current = controller;
     const unsubscribe = controller.subscribe(() => {
@@ -264,6 +286,9 @@ export function ProjectWorkspaceProvider({
     return () => {
       if (layoutControllerRef.current === controller) {
         layoutControllerRef.current = undefined;
+        for (const listener of layoutListenersRef.current) {
+          listener();
+        }
       }
       unsubscribe();
     };
@@ -337,7 +362,12 @@ export function ProjectWorkspaceProvider({
         return;
       }
       setWorkbenchOpen(true);
-      if (openerRef.current) {
+      const layout = layoutController.snapshot();
+      const isLayoutApplied =
+        layout?.layoutDigest !== undefined &&
+        layout.layoutDigest !== 'missing' &&
+        appliedWorkbenchRevisions.get(workbenchPaths.layout) === layout.layoutDigest;
+      if (openerRef.current && (panelId === 'files' || !hasLayoutController() || isLayoutApplied)) {
         openerRef.current(panelId);
       } else if (panelId === 'files') {
         pendingFilesRef.current = routeKey;
@@ -345,7 +375,17 @@ export function ProjectWorkspaceProvider({
         layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
       }
     },
-    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],
+    [
+      appliedWorkbenchRevisions,
+      editorRef,
+      hasLayoutController,
+      isMobile,
+      layoutController,
+      setWorkbenchOpen,
+      routeKey,
+      workbenchMode,
+      onWorkbenchOpen,
+    ],
   );
 
   const connectWorkbench = useCallback(
@@ -501,7 +541,13 @@ export function ProjectWorkspaceProvider({
   );
   return (
     <ProjectWorkspaceContext.Provider value={value}>
-      <FileReturnContext.Provider value={fileReturn}>{children}</FileReturnContext.Provider>
+      <FileReturnContext.Provider value={fileReturn}>
+        <ProjectTasksProvider rootChatId={focusedChatId} projectId={projectId} enabled={workbenchMode !== 'pane'}>
+          <ThreadNavigationProvider openPanel={openPanel} isLayoutControllerReady={isLayoutControllerReady}>
+            {children}
+          </ThreadNavigationProvider>
+        </ProjectTasksProvider>
+      </FileReturnContext.Provider>
     </ProjectWorkspaceContext.Provider>
   );
 }

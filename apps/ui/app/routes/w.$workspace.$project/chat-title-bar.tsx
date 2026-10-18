@@ -19,6 +19,7 @@ import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { ChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
 import { useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { ProjectInstructions } from '#components/project-tasks/project-instructions.js';
 
 const newChatKeyCombination = {
   key: 'c',
@@ -114,6 +115,7 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
         )}
         <FloatingPanelContentHeaderActions className={cn(!isRenaming && 'md:absolute md:inset-y-0 md:right-0')}>
           <FloatingPanelButtonGroup>
+            <ProjectInstructions />
             <ChatHistorySettings onRename={startRename} />
           </FloatingPanelButtonGroup>
           {isMobile ? closeButton : null}

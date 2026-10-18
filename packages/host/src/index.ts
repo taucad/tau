@@ -69,6 +69,7 @@ export type {
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';
+export type { TauAgentAcpOptions } from '#acp/tau-agent.js';
 export type {
   ProjectFileSystem,
   ProjectHost,
@@ -77,6 +78,7 @@ export type {
   ProjectHostCommand,
   ProjectHostOptions,
   ProjectHostRuntimeClient,
+  ResolveProjectModelInput,
 } from '#project-host.js';
 export { keyedResource } from '#keyed-resource.js';
 export { openLocalParameterActors } from '#local-parameters.js';

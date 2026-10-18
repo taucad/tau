@@ -1,9 +1,10 @@
 import type { KernelProvider } from '@taucad/runtime';
 
 /**
- * Project manifest dependencies, kept separate from executable kernel plugins so the
- * desktop renderer never bundles CAD execution just to create a package.json.
- * The parity test checks these exact package identities against each plugin.
+ * Dependency-only projection of the kernel plugins' `builtinDependencies` for project creation.
+ * `kernel.utils.test.ts` checks every entry against its actual public kernel factory. This module must not import
+ * the factories: their executable graphs and native assets belong to the runtime host, including on desktop.
+ * Tau-only modules (`@taucad/replicad/annotations`) have no npm identity and are not listed.
  */
 export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<string, string>>>> = {
   replicad: {

@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -153,6 +153,7 @@ const revisionsSpy = vi.spyOn(revisions, 'createProjectRevisions');
 /* Observe the launcher the daemon serves on its agent channel, without changing it. */
 const agentServerSpy = vi.spyOn(agentServer, 'startAgentServer');
 /* Observe the credential port and model transport the daemon gives its project host. */
+const realCreateProjectHost = projectHosts.createProjectHost;
 const projectHostSpy = vi.spyOn(projectHosts, 'createProjectHost');
 
 let temporaryDirectory: string | undefined;
@@ -365,7 +366,11 @@ const startRelay = async (
 };
 
 /** An offer carrying all three routes, exactly as the API mints one for an agent-capable device. */
-const agentOffer = (relayUrl: URL, sessionId: string, lifetimeMs = 60_000): Record<string, unknown> => {
+const agentOffer = (
+  relayUrl: URL,
+  sessionId: string,
+  lifetimeMs = 60_000,
+): Record<string, unknown> & { expiresAt: string } => {
   const route = (name: string): string =>
     new URL(`/v1/agents/sessions/${sessionId}/host/${name}`, relayUrl).href.replace('http:', 'ws:');
   return {
@@ -830,7 +835,7 @@ describe('startHostDaemon', () => {
     }
   }, 30_000);
 
-  it('should fail to start when the workspace store refuses to open', async () => {
+  it('should preserve a refused open when cleanup also fails', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-refused-open-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
     process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -852,12 +857,27 @@ describe('startHostDaemon', () => {
       'A',
     ]);
     execFileSync('git', ['-C', main, 'worktree', 'add', '--quiet', '-b', 'side', linked]);
+    /* A recognized project activates the task journal before the daemon awaits
+     * revision open. Refusal must leave that journal unopened. */
+    await writeFile(join(linked, 'tau.json'), JSON.stringify({ id: 'proj_000000000000000000001' }));
     const events: HostDaemonEvent[] = [];
     const relay = await startRelay();
     await writeHostCredential({
       v: 1,
       deviceId: 'device-1',
       credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    let revisionReleased = false;
+    projectHostSpy.mockImplementationOnce((options) => {
+      const project = realCreateProjectHost(options);
+      return {
+        ...project,
+        close: async () => {
+          await project.close();
+          revisionReleased = true;
+          throw new Error('injected cleanup failure');
+        },
+      };
     });
     const daemon = startHostDaemon({
       relayUrl: relay.url,
@@ -868,7 +888,16 @@ describe('startHostDaemon', () => {
     try {
       /* R3: refused at start, never served and then refused at close. */
       await expect(daemon.ready).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      expect(revisionReleased).toBe(true);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'warning',
+          code: 'REVISION_UNAVAILABLE',
+          message: expect.stringContaining('injected cleanup failure') as string,
+        }),
+      );
       expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent', state: 'ready' }));
+      await expect(stat(join(linked, '.tau', 'chats', '.project-tasks'))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(daemon.close()).resolves.toBeUndefined();
     } finally {
       await daemon.close().catch(() => undefined);
@@ -1997,12 +2026,16 @@ describe('startHostDaemon', () => {
     await vi.waitFor(() => {
       expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
     });
-    control.send(JSON.stringify(agentOffer(relay.url, 'session-1', 400)));
+    const offer = agentOffer(relay.url, 'session-1', 5000);
+    control.send(JSON.stringify(offer));
     await vi.waitFor(() => {
       expect(events).toContainEqual({ type: 'session', sessionId: 'session-1', state: 'connected' });
     });
 
-    await delay(900);
+    /* The session must have spliced before the offer's deadline for this case
+     * to test the post-accept lifetime rather than startup expiry. */
+    expect(Date.now()).toBeLessThan(Date.parse(offer.expiresAt));
+    await delay(Date.parse(offer.expiresAt) - Date.now() + 500);
     expect(events.filter((event) => event.type === 'session' && event.state === 'disconnected')).toEqual([]);
     const agentSocket = await relay.route(routePath('session-1', 'agent'));
     expect(agentSocket.readyState).toBe(WebSocket.OPEN);

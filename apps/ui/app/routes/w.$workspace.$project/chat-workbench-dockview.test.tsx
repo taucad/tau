@@ -27,7 +27,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError, mockPrintBody, mockExportBody } =
   vi.hoisted(() => ({
-    featureState: { value: false, machines: true },
+    featureState: { value: false, projectThreads: true, machines: true },
     mobileState: { value: false },
     mockOpenPanel: vi.fn(),
     mockProjectSend: vi.fn(),
@@ -35,6 +35,14 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
     mockPrintBody: vi.fn(),
     mockExportBody: vi.fn(),
   }));
+
+vi.mock('#hooks/use-project-tasks.js', () => ({
+  ProjectTasksProvider: ({ children }: { readonly children: React.JSX.Element }) => children,
+}));
+vi.mock('#routes/w.$workspace.$project/thread-navigation-context.js', () => ({
+  ThreadNavigationProvider: ({ children }: { readonly children: React.JSX.Element }) => children,
+  useThreadNavigation: () => ({}),
+}));
 
 vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 
@@ -218,7 +226,7 @@ vi.mock('#hooks/use-kernel-diagnostics.js', () => ({
 
 vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => featureState.machines }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => featureState.value,
+  useFeature: (flag: string) => (flag === 'projectThreads' ? featureState.projectThreads : featureState.value),
 }));
 
 vi.mock('#hooks/use-monaco-configuration.js', () => ({ useConfiguredMonaco: () => undefined }));
@@ -1343,7 +1351,25 @@ describe('normalizeFilePaneState', () => {
 describe('Workbench file reconciliation', () => {
   beforeEach(() => {
     featureState.value = false;
-    featureState.machines = true;
+    featureState.projectThreads = true;
+  });
+
+  it('should hide Threads from new-tab choices when disabled and restore them when enabled', () => {
+    featureState.projectThreads = false;
+    const launcher = panel('workbench-tab-test', { mode: 'launcher' });
+    const dockview = createTestDockview([launcher]);
+    Object.assign(launcher.api, { id: launcher.id, group: dockview.group });
+    const props = {
+      api: launcher.api as unknown as IDockviewPanelProps['api'],
+      containerApi: dockview.api,
+      params: { mode: 'launcher' } as const,
+    };
+    const view = render(<WorkbenchPlaceholderPanel {...props} />);
+    expect(screen.queryByRole('button', { name: /Threads/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Revisions/ })).toBeVisible();
+    featureState.projectThreads = true;
+    view.rerender(<WorkbenchPlaceholderPanel {...props} />);
+    expect(screen.getByRole('button', { name: /Threads/ })).toBeVisible();
   });
 
   it('creates a real New tab panel in the invoking group', () => {
@@ -1478,7 +1504,7 @@ describe('Workbench file reconciliation', () => {
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Revisions/ }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Agents/ }),
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Threads/ }),
     ).toBeVisible();
     expect(within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Jobs/ })).toBeVisible();
     expect(
@@ -1628,7 +1654,7 @@ describe('Workbench file reconciliation', () => {
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Revisions/ }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Agents/ }),
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Threads/ }),
     ).toBeVisible();
     expect(
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Jobs/ }),

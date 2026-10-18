@@ -462,6 +462,15 @@ const mergeRecordField = ({
   incoming,
   bases,
 }: Readonly<{ key: string; local: unknown; incoming: unknown; bases: readonly unknown[] }>): unknown => {
+  if (key === 'taskLineage') {
+    // Older clients can rename a chat without knowing this journal-projected
+    // field. Absence cannot undo established ancestry; two distinct ancestries
+    // cannot be reconciled by timestamp or writer order.
+    if (local !== undefined && incoming !== undefined && !sameValue(local, incoming)) {
+      throw recordConflict();
+    }
+    return local ?? incoming;
+  }
   if (sameValue(local, incoming)) {
     return local;
   }
@@ -493,6 +502,36 @@ const mergeRecordField = ({
 };
 
 /**
+ * Keep established ancestry when a whole-record fast path selects an older writer.
+ *
+ * @param selected - The record selected by the ordinary merge fast path.
+ * @param other - The other device's record.
+ * @returns The selected record with established ancestry retained.
+ */
+const preserveTaskLineage = (
+  selected: Uint8Array<ArrayBuffer> | undefined,
+  other: Uint8Array<ArrayBuffer> | undefined,
+): Uint8Array<ArrayBuffer> | undefined => {
+  if (selected === undefined || other === undefined) {
+    return selected;
+  }
+  const selectedRecord = parseRecordFields(selected);
+  const otherRecord = parseRecordFields(other);
+  if (selectedRecord === undefined || otherRecord === undefined) {
+    return selected;
+  }
+  const lineage = mergeRecordField({
+    key: 'taskLineage',
+    local: selectedRecord['taskLineage'],
+    incoming: otherRecord['taskLineage'],
+    bases: [],
+  });
+  return lineage === undefined || sameValue(selectedRecord['taskLineage'], lineage)
+    ? selected
+    : serializeRecord({ ...selectedRecord, taskLineage: lineage });
+};
+
+/**
  * Three-way `chat.json` without local fields, against every ancestor both sides
  * are known to share (D40), field by field (CH1).
  *
@@ -519,10 +558,10 @@ const reconcileShared = (
   const isBase = (bytes: Uint8Array<ArrayBuffer>): boolean =>
     bases.some((base) => base !== undefined && equalBytes(bytes, base));
   if (local === undefined || isBase(local)) {
-    return incoming;
+    return preserveTaskLineage(incoming, local);
   }
   if (incoming === undefined || equalBytes(local, incoming) || isBase(incoming)) {
-    return local;
+    return preserveTaskLineage(local, incoming);
   }
   const localFieldsOf = parseRecordFields(local);
   const incomingFieldsOf = parseRecordFields(incoming);

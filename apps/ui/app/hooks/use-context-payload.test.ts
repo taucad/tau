@@ -50,8 +50,35 @@ const mockContentService = {
   }),
 };
 
+const project = vi.hoisted(() => ({ id: 'project-a' as string | undefined }));
+const recordListeners = new Map<string, () => void>();
+let recordClosed = Promise.withResolvers<void>();
+const recordFiles = {
+  exists: async (path: string) => {
+    const entry = await mockGetEntry(path);
+    return entry?.type === 'file';
+  },
+  stat: async () => ({ type: 'file', size: 100, contentKind: 'text' }),
+  readFile: mockReadFile,
+};
+const watchRecordFile = (path: string, listener: () => void) => {
+  recordListeners.set(path, listener);
+  return {
+    ready: Promise.resolve(),
+    closed: recordClosed.promise,
+    dispose: () => {
+      recordListeners.delete(path);
+    },
+  };
+};
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => (project.id === undefined ? undefined : { projectId: project.id }),
+}));
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
+    recordFiles,
+    watchRecordFile,
     readFile: mockReadFile,
     treeService: mockTreeService,
     contentService: mockContentService,
@@ -93,6 +120,9 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 
 describe('useContextPayload', () => {
   beforeEach(() => {
+    project.id = 'project-a';
+    recordListeners.clear();
+    recordClosed = Promise.withResolvers<void>();
     contentObservations.clear();
     vi.clearAllMocks();
     catalogClosed = Promise.withResolvers<void>();
@@ -184,11 +214,66 @@ describe('useContextPayload', () => {
     );
   });
 
+  it('loads canonical memory despite a candidate selection and refreshes existing-file edits through its canonical watch', async () => {
+    let text = 'Current canonical instructions';
+    mockGetEntry.mockResolvedValue(makeFileEntry('.tau/AGENTS.md'));
+    mockReadFile.mockImplementation(async (path) =>
+      encoder.encode(path === '/projects/project-a/.tau/AGENTS.md' ? text : 'Old candidate instructions'),
+    );
+    const view = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(view.result.current?.memory?.['.tau/AGENTS.md']).toBe(text);
+    });
+    expect(recordListeners.has('/projects/project-a/.tau/AGENTS.md')).toBe(true);
+    text = 'Updated same file';
+    await act(async () => {
+      recordListeners.get('/projects/project-a/.tau/AGENTS.md')?.();
+    });
+    await waitFor(() => {
+      expect(view.result.current?.memory?.['.tau/AGENTS.md']).toBe(text);
+    });
+    view.unmount();
+    expect(recordListeners.size).toBe(0);
+  });
+
+  it('drops previous project memory on project switch and clears unavailable watched memory', async () => {
+    mockGetEntry.mockResolvedValue(makeFileEntry('.tau/AGENTS.md'));
+    mockReadFile.mockImplementation(async (path) =>
+      encoder.encode(path.includes('/project-b/') ? 'Project B' : 'Project A'),
+    );
+    const view = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(view.result.current?.memory?.['.tau/AGENTS.md']).toBe('Project A');
+    });
+    project.id = 'project-b';
+    view.rerender();
+    expect(view.result.current?.memory).toBeUndefined();
+    await waitFor(() => {
+      expect(view.result.current?.memory?.['.tau/AGENTS.md']).toBe('Project B');
+    });
+    await act(async () => {
+      recordClosed.resolve();
+    });
+    await waitFor(() => {
+      expect(view.result.current?.memory).toBeUndefined();
+    });
+  });
+
+  it('keeps skills available outside project context without acquiring canonical memory', async () => {
+    project.id = undefined;
+    const view = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(view.result.current?.skills?.length).toBeGreaterThan(0);
+    });
+    expect(view.result.current?.memory).toBeUndefined();
+    expect(recordListeners.size).toBe(0);
+  });
+
   it('should read AGENTS.md content into memory payload', async () => {
     const agentsContent = '# AGENTS\n\nPrefer early returns.';
     mockGetEntry.mockResolvedValue(makeFileEntry('.tau/AGENTS.md'));
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '.tau/AGENTS.md') {
+      if (path === '/projects/project-a/.tau/AGENTS.md') {
         return encoder.encode(agentsContent);
       }
       throw new Error('not found');
@@ -257,7 +342,7 @@ describe('useContextPayload', () => {
       if (path.includes('SKILL.md')) {
         return makeSkillMd('my-skill', 'A skill');
       }
-      if (path === '.tau/AGENTS.md') {
+      if (path === '/projects/project-a/.tau/AGENTS.md') {
         return encoder.encode('Memory content');
       }
       throw new Error('not found');
@@ -357,6 +442,13 @@ describe('useContextPayload', () => {
 });
 
 describe('CH-10 memory head truncation', () => {
+  it('bounds non-ASCII content by UTF-8 bytes without splitting a code point', () => {
+    const result = truncateMemoryHead('漢🙂'.repeat(contextMemoryMaxBytes));
+    const content = result.split('\n[AGENTS.md truncated')[0]!;
+    expect(new TextEncoder().encode(content).byteLength).toBeLessThanOrEqual(contextMemoryMaxBytes);
+    expect(content).not.toContain('�');
+  });
+
   it('keeps the head and appends a notice past the line cap', () => {
     const text = Array.from({ length: contextMemoryMaxLines + 50 }, (_, index) => `line ${String(index)}`).join('\n');
     const out = truncateMemoryHead(text);

@@ -8,16 +8,25 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 
 import { followChat, unsettledAttempts } from '@taucad/agent-host';
-import type { ChatLedger, ToolRegistry, TurnPlacementPort } from '@taucad/agent-host';
+import type {
+  AgentSessionModel,
+  ChatLedger,
+  ToolRegistry,
+  TurnPlacementPort,
+  TauClientContextInput,
+} from '@taucad/agent-host';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { chatIdSchema } from '@taucad/agent-host/wire';
+import type { ProjectTaskChannelPort } from '@taucad/agent-host/wire';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
-import { createNodeChatStore } from '@taucad/agent-host/node';
+import { createNodeChatStore, createNodeExclusiveRecordStorage } from '@taucad/agent-host/node';
 import type { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import type { RuntimeFileSystemBase } from '@taucad/runtime/types';
 import { createActor } from 'xstate';
+import { z } from 'zod';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 
 import { createAcpExternalAgentPort } from '#acp/index.js';
@@ -32,6 +41,10 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
+import { readProjectTaskContext } from '#project-task-context.js';
+import { createTauAgentAcpTransport } from '#acp/tau-agent.js';
+import { createProjectTaskComposition } from '#project-tasks/core.js';
+import type { TauAgentAcpOptions } from '#acp/tau-agent.js';
 
 /**
  * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the
@@ -74,6 +87,9 @@ export type ProjectFileSystem = Readonly<{
 /** The runtime client a project host's tools and parameter actors run on, for one root. @public */
 export type ProjectHostRuntimeClient = HostRuntimeClient;
 
+/** The selected Tau catalog id and cancellation of one child attempt. @public */
+export type ResolveProjectModelInput = Readonly<{ modelId: string; signal: AbortSignal }>;
+
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
   ProjectRevisionsOptions,
@@ -87,6 +103,10 @@ export type ProjectHostOptions = Pick<
     fileSystem: ProjectFileSystem;
     /** The runtime client for the root the calling turn works in, which the caller memoizes. */
     runtimeClient: (root: string) => Promise<ProjectHostRuntimeClient>;
+    /** Reporting only: observe the actual Tau agent-side ACP boundary. */
+    tauAcp?: TauAgentAcpOptions | undefined;
+    /** Resolve an explicit Tau child model to the portable admission row. Called once per new attempt. */
+    resolveModel?: ((input: ResolveProjectModelInput) => Promise<AgentSessionModel | undefined>) | undefined;
     /** The adapters this machine discovered; the host builds the ACP port over its own checkouts. */
     externalAgents?: Readonly<{ agents: readonly AcpAdapter[]; mcpUrl: () => string }> | undefined;
     /** Each revision fact; reporting only, never fatal. */
@@ -112,6 +132,8 @@ export type ProjectHostOptions = Pick<
 export type ProjectHost = Readonly<{
   launcher: AgentLauncher;
   revisions: ProjectRevisions;
+  /** Project-bound controls for the existing agent channel. */
+  projectTasks: ProjectTaskChannelPort;
   /** Present when external agents were given; the caller mounts it on its loopback server. */
   mcp: HostMcpEndpoint | undefined;
   /**
@@ -161,6 +183,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   /* The runs a client sent while this host served, by chat: counted before anything is awaited, so a drain that begins
    * while one is still being placed follows it, and the launcher admits it though it arrives during the drain (T3). */
   const entered = new Map<string, Set<string>>();
+  let tasks: Promise<unknown> | undefined;
   /* The counted starts and resumes not yet answered: a drain waits for them, so it never follows a run it is still
    * unknown whether the launcher admitted (W6.r1 round 5). */
   const answering = new Set<Promise<unknown>>();
@@ -241,6 +264,25 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     events: options.onRevisionEvent,
   });
 
+  const projectTask =
+    options.projectId === undefined
+      ? undefined
+      : createProjectTaskComposition({
+          projectId: options.projectId,
+          filesystem: asHostToolFileSystem(fileSystem.open(workspaceRoot)),
+          createCandidate: async ({ requestId, name, from, signal }) => {
+            signal.throwIfAborted();
+            const answer = await revisions.channel.request({ command: 'createBranch', requestId, name, from });
+            return z.object({ checkoutId: z.string().min(1), checkoutRoot: z.string().min(1) }).parse(answer.result);
+          },
+          systemPrompt: options.systemPrompt,
+          model: options.model,
+          resolveModel: options.resolveModel,
+          agentIds: options.externalAgents?.agents.map((agent) => agent.id) ?? [],
+          placementToolsAlreadyDecorated: true,
+          admitting,
+        });
+
   /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. */
   const registryOptions = {
     revisions: revisions.history,
@@ -256,15 +298,18 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* `prepare_kernel` (D7, D37): offered to Tau's agent and, through the host-local MCP endpoint, to ACP agents. */
     ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
   };
-  const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
+  const decorateTools = (registry: ToolRegistry): ToolRegistry => projectTask?.decorateTools(registry) ?? registry;
+  const toolRegistry = decorateTools(createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts }));
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>
-    createHostToolRegistry({
-      ...registryOptions,
-      workspaceRoot: root,
-      ...(filesystem === undefined ? {} : { filesystem: () => filesystem }),
-    });
+    decorateTools(
+      createHostToolRegistry({
+        ...registryOptions,
+        workspaceRoot: root,
+        ...(filesystem === undefined ? {} : { filesystem: () => filesystem }),
+      }),
+    );
   /* The host process is the placement session (TS-R6 holds trivially); no Node host runs an attempt unplaced (D13). */
-  const turnPlacement = (
+  const placement = (
     options.turnPlacement ??
     ((input) =>
       input.revisions.placement(({ root, filesystem }) =>
@@ -282,17 +327,29 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       ? undefined
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
+  const turnPlacement = projectTask?.wrapPlacement(placement) ?? placement;
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
     modelTransport: options.modelTransport,
     credential: options.credential,
     systemPrompt: options.systemPrompt,
+    ...(options.projectId === undefined
+      ? {}
+      : {
+          clientContext: async (_input: TauClientContextInput) =>
+            readProjectTaskContext(asHostToolFileSystem(fileSystem.open(workspaceRoot)), AbortSignal.timeout(30_000)),
+        }),
+    ...(options.projectId === undefined ? {} : { tauTurnTransport: createTauAgentAcpTransport(options.tauAcp) }),
     ...(options.model === undefined ? {} : { model: options.model }),
     toolRegistry,
     turnPlacement,
     ...(admitting === undefined
       ? {}
-      : { admitting: (run) => admitting() || entered.get(run.chatId)?.has(run.runId) === true }),
+      : {
+          admitting: (run) =>
+            admitting() ||
+            (projectTask?.hasEntered(run.chatId, run.runId) ?? entered.get(run.chatId)?.has(run.runId) === true),
+        }),
     ...(externalAgents === undefined || mcp === undefined
       ? {}
       : {
@@ -312,6 +369,25 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
           }),
         }),
   });
+  projectTask?.bindLauncher(launcher);
+  if (projectTask !== undefined) {
+    const storage = (async () => {
+      await revisions.opened();
+      return createNodeExclusiveRecordStorage({
+        filePath: join(workspaceRoot, '.tau', 'chats', '.project-tasks', 'records.jsonl'),
+      });
+    })();
+    tasks = projectTask.initialize(storage);
+    const ready = tasks;
+    // async-iife: bootstrap -- initialization failure is reported while calls retain the same rejected authority.
+    void (async () => {
+      try {
+        await ready;
+      } catch (error) {
+        console.error('[project tasks] project task authority unavailable', error);
+      }
+    })();
+  }
 
   let mcpClosed = false;
   /* A second close waits for the first; one after a close that failed tries again. */
@@ -325,7 +401,25 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
         failures.push(error);
       }
     };
-    await settle(async () => launcher.close());
+    if (tasks !== undefined) {
+      try {
+        await tasks;
+      } catch {
+        /* A refused revision open has no task owner. Recovery may reject after
+         * opening one, in which case that owner still needs the close below. */
+      }
+    }
+    const retryProjectTaskClose = (await projectTask?.closeBeforeLauncher()) ?? false;
+    const launcherClosed = await launcher.close().then(
+      () => true,
+      (error: unknown) => {
+        failures.push(error);
+        return false;
+      },
+    );
+    if (launcherClosed) {
+      await settle(async () => projectTask?.closeAfterLauncher(retryProjectTaskClose));
+    }
     /* After the launcher: its attempts are settled, so the tree records what is on disk and stops. */
     await settle(async () => revisions.release());
     await settle(async () => parameters.closeAll());
@@ -346,11 +440,13 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     launcher: {
       ...launcher,
       execute: async (command) => {
+        if (projectTask !== undefined) {
+          return projectTask.execute(command);
+        }
         if (command.type !== 'start' && command.type !== 'resume') {
           return launcher.execute(command);
         }
         const { chatId, runId } = command.payload;
-        /* A chat id no log could live under is refused before anything counts or records it (W6.r1 round 5). */
         if (!chatIdSchema.safeParse(chatId).success) {
           return {
             commandId: command.commandId,
@@ -367,31 +463,38 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
         const runs = entered.get(chatId) ?? new Set<string>();
         const counted = !runs.has(runId);
         entered.set(chatId, runs.add(runId));
-        /* A run that was refused, or whose placement threw, is no run to drain. */
-        const answered = (async () => {
-          let admitted = false;
-          try {
-            const answer = await launcher.execute(command);
-            admitted = answer.status !== 'refused';
-            return answer;
-          } finally {
-            if (counted && !admitted) {
-              runs.delete(runId);
-              if (runs.size === 0 && entered.get(chatId) === runs) {
-                entered.delete(chatId);
-              }
-            }
-          }
-        })();
+        const answered = launcher.execute(command);
         answering.add(answered);
         try {
-          return await answered;
+          const answer = await answered;
+          if (counted && answer.status === 'refused') {
+            runs.delete(runId);
+            if (runs.size === 0) {
+              entered.delete(chatId);
+            }
+          }
+          return answer;
+        } catch (error) {
+          if (counted) {
+            runs.delete(runId);
+            if (runs.size === 0) {
+              entered.delete(chatId);
+            }
+          }
+          throw error;
         } finally {
           answering.delete(answered);
         }
       },
     },
     revisions,
+    projectTasks: projectTask?.projectTasks ?? {
+      request: async () => ({
+        kind: 'refused',
+        code: 'TASK_UNAVAILABLE',
+        message: 'This host has no durable project identity.',
+      }),
+    },
     mcp,
     close: async () => {
       closing ??= closeHost();
@@ -410,6 +513,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   return {
     host,
     drained: async (signal) => {
+      if (projectTask !== undefined) {
+        return projectTask.drain(signal);
+      }
       /* Every run a client sent while this host served, re-read until a pass adds none: one sent while the last pass
        * followed is followed too (W6.r1 round 4). */
       const ended = new Promise<void>((resolve) => {

@@ -439,8 +439,12 @@ describe('live workbench record host', () => {
     // A bounded retry is not a problem yet: the header stays empty.
     await act(async () => undefined);
     expect(readRecordIssues('p')).toEqual([]);
+    expect(host.controller.isReady()).toBe(false);
     act(() => {
       host.readyService();
+    });
+    await waitFor(() => {
+      expect(host.controller.isReady()).toBe(true);
     });
     act(() => {
       host.controller.personWorkbenchChanged((node) =>

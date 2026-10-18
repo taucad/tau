@@ -74,9 +74,9 @@ import { grokPromptUsageOf } from '#acp/grok-usage.js';
 
 const execFileAsync = promisify(execFile);
 
-/** A bounded prompt that must exercise the adapter's real filesystem tool. */
+/** Codex may expose only a native command tool; a read-only command still proves real file access. */
 const prompt =
-  'Open main.scad in the current directory with your file-reading tool, then report the cube dimension. You must read the file. Do not use shell commands or search tools.';
+  'Read main.scad in the current directory with an available native tool, then report the cube dimension. A shell command that only reads this file is allowed if there is no dedicated file-reading tool. You must read the file. Do not use search tools.';
 
 /**
  * The adapters this host may actually bill against.
@@ -332,6 +332,10 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
       }
       expect(toolMessages.some((message) => message.role === 'tool-input')).toBe(true);
       expect(toolMessages.some((message) => message.role === 'tool-output')).toBe(true);
+      expect(
+        toolMessages.some((message) => message.role === 'tool-input' && JSON.stringify(message).includes('main.scad')),
+        'the real tool invocation must read the fixture file',
+      ).toBe(true);
       const liveTypes = live.map((event) => event.type);
       expect(liveTypes).not.toContain('tool-input-start');
       expect(liveTypes).not.toContain('tool-input-end');

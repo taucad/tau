@@ -78,6 +78,8 @@ export type AgentLauncherOptions = Readonly<{
   toolRegistry: ToolRegistry;
   /** External agents; omit and a `start` naming one is refused `EXTERNAL_AGENT_UNAVAILABLE`. */
   externalAgents?: ExternalAgentPort | undefined;
+  /** Transport around the existing admitted Tau execution. */
+  tauTurnTransport?: CreateTauAgentHostOptions['tauTurnTransport'];
   createId?: (() => string) | undefined;
   clientContext?: CreateTauAgentHostOptions['clientContext'];
   /**
@@ -592,6 +594,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     createId,
     ...(options.clientContext === undefined ? {} : { clientContext: options.clientContext }),
     ...(options.externalAgents ? { externalRunners: { acp: options.externalAgents } } : {}),
+    ...(options.tauTurnTransport ? { tauTurnTransport: options.tauTurnTransport } : {}),
     ...(options.turnPlacement === undefined ? {} : { placement: options.turnPlacement }),
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -702,6 +705,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       if ('refused' in claim && claim.refused.status === 'refused' && claim.refused.code !== 'HOST_CLOSED') {
         console.error('[agent-launcher] a claim was refused', chatId, claim.refused.code, claim.refused.message);
       }
+      return 'refused' in claim && claim.refused.status === 'refused' ? claim.refused.code : undefined;
     },
     relinquish: async (chatId) => {
       await host.relinquish(chatId);
@@ -1306,8 +1310,10 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         replay.clear();
         writerGenerations.clear();
         placing.abort();
-        await port.close();
         await host.close();
+        /* Graceful close settles the actor while this process still holds leadership. Closing the port first
+         * relinquishes/fences it instead, preserving an orphan lease without its terminal settlement row. */
+        await port.close();
         const unclaimed = [...views.values()];
         views.clear();
         await Promise.allSettled(

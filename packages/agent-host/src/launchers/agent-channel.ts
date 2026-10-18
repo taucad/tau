@@ -24,9 +24,17 @@ import type { CommandVerb, HostCommand } from '#wire/commands.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import type { JsonValue } from '#log/event-types.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
+import type { ProjectTaskChannelPort } from '#wire/project-task-channel.schema.js';
+import { projectTaskChannelRequestSchema } from '#wire/project-task-channel.schema.js';
+
+/** The asynchronous projections consumed by V1 and V2 channels. @public */
+export type AgentChannelSource = Pick<AgentLauncher, 'execute' | 'read' | 'catchUp' | 'liveEvents'> &
+  Readonly<{ host: Pick<AgentLauncher['host'], 'ledger' | 'snapshot' | 'waitForAdmission'> }>;
 
 /** Options for {@link serveAgentChannel}. @public */
 export type ServeAgentChannelOptions = {
+  /** Project-bound task authority; absent on browser/older hosts. */
+  readonly projectTasks?: ProjectTaskChannelPort | undefined;
   /** This owner's build, sent in the hello and compared for equality by the client (I32). */
   readonly build: string;
   /** Send `lk` at this interval, so a client's liveness bound can tell slow from dead (T9 E3). Milliseconds. */
@@ -53,7 +61,7 @@ const defaultKeepaliveInterval = 2000;
  * runs the client started keep executing, because always-on lives in the launcher, never on a connection (D17).
  *
  * @param endpoint - Socket, message port, or already-wrapped port.
- * @param launcher - The always-on host answering the vocabulary.
+ * @param launcher - The always-on source answering the vocabulary.
  * @param options - The owner's build, keepalive and revision root.
  * @returns The channel handle for this one connection. The agent wire notifies nothing, so the handle names no
  * protocol (and not the internal v1 compatibility one).
@@ -73,7 +81,7 @@ const defaultKeepaliveInterval = 2000;
  */
 export const serveAgentChannel = (
   endpoint: AgentChannelEndpoint,
-  launcher: AgentLauncher,
+  launcher: AgentChannelSource,
   options: ServeAgentChannelOptions,
 ): ChannelServerHandle => {
   /* I32: the compatibility window is open, so this connection also answers a v1 client (`request`, `events`, and
@@ -87,6 +95,11 @@ export const serveAgentChannel = (
       }
       if (name === 'read') {
         return launcher.read({ ...(args as AgentWireProtocol['calls']['read']['args']), signal });
+      }
+      if (name === 'projectTasks') {
+        return options.projectTasks === undefined
+          ? { kind: 'refused', code: 'TASK_UNAVAILABLE', message: 'This host does not support project tasks.' }
+          : options.projectTasks.request(projectTaskChannelRequestSchema.parse(args), signal);
       }
       if (name === 'revision') {
         if (options.revisions === undefined) {
@@ -122,7 +135,11 @@ export const serveAgentChannel = (
   const handle = createChannelServer<AgentWireCompatProtocol>({
     port: agentChannelPort(endpoint),
     sessionKey: options.sessionKey ?? 'tau-agent',
-    hello: { wire: agentWireVersion, build: options.build },
+    hello: {
+      wire: agentWireVersion,
+      build: options.build,
+      ...(options.projectTasks === undefined ? {} : { projectTasks: true }),
+    },
     keepaliveInterval: options.keepaliveInterval ?? defaultKeepaliveInterval,
     protocolSchemas: agentWireCompatSchemas,
     impl: implementation,

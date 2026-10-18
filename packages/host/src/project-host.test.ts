@@ -3,7 +3,7 @@
  * project id, a private checkouts directory, a GeoSpec runner and no external agents.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -11,7 +11,7 @@ import { MessageChannel } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 import { createGatewayModelTransport, emptyChatLedger } from '@taucad/agent-host';
-import type { ChatLedger, RunEntry, ToolRegistry, TurnPlacementPort } from '@taucad/agent-host';
+import type { ChatLedger, ModelStreamEvent, RunEntry, ToolRegistry, TurnPlacementPort } from '@taucad/agent-host';
 import type * as AgentHost from '@taucad/agent-host';
 import type * as Launcher from '@taucad/agent-host/launcher';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
@@ -263,6 +263,78 @@ const desktopProjectHost = async (
   return { project, registry: result.value };
 };
 
+/** Real root turn whose revision owner retains its lease until the test permits acknowledgement. */
+const heldRootHost = async (
+  suffix: string,
+): Promise<{
+  host: ProjectHost;
+  workspaceRoot: string;
+  releaseAck: () => void;
+}> => {
+  const chatId = `root-ack-${suffix}`;
+  const runId = `run-ack-${suffix}`;
+  const permitAck = Promise.withResolvers<void>();
+  const observedHeld = Promise.withResolvers<void>();
+  const options = await desktopProjectHostOptions({
+    turnPlacement: ({ revisions, toolRegistryFor }) => {
+      const placement = revisions.placement(({ root }) => toolRegistryFor(root));
+      return {
+        ...placement,
+        reconcile: async (input) => {
+          const answer = await placement.reconcile(input);
+          if (
+            input.requestId === `task-release-${runId}` &&
+            answer.status === 'applied' &&
+            answer.held.some((entry) => entry.key.runId === runId)
+          ) {
+            observedHeld.resolve();
+          }
+          return answer;
+        },
+        acknowledge: async (input) => {
+          if (input.key.runId === runId) {
+            await permitAck.promise;
+          }
+          return placement.acknowledge(input);
+        },
+      };
+    },
+  });
+  const host = createProjectHost({
+    ...options,
+    model: { id: 'scripted-root-ack', contextWindow: 200_000 },
+    modelTransport: {
+      funding: { type: 'unfunded' },
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    },
+  });
+  cleanups.push(async () => {
+    permitAck.resolve();
+    await host.close();
+  });
+  const answer = await host.launcher.execute(startOf(chatId, runId));
+  expect(answer.status).toBe('applied');
+  await expect
+    .poll(
+      async () => {
+        const ledger = await host.launcher.host.ledger(chatId);
+        return ledger.runs[runId]?.lifecycle;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe('completed');
+  await observedHeld.promise;
+  return {
+    host,
+    workspaceRoot: options.workspaceRoot,
+    releaseAck: () => {
+      permitAck.resolve();
+    },
+  };
+};
+
 /* An actor whose write never settles, and one whose write is uncertain before the close arrives, so the close finds
  * it there. */
 const stuck = createMachine({ initial: 'open', states: { open: { initial: 'writing', states: { writing: {} } } } });
@@ -274,6 +346,52 @@ const parameterActor = (onClose?: 'uncertain'): ParameterSetActor =>
   (onClose === 'uncertain' ? createActor(uncertain) : createActor(stuck)).start() as unknown as ParameterSetActor;
 
 describe('createProjectHost', () => {
+  it('keeps a finalized root reserved beyond one second until its lease acknowledgement is observed', async () => {
+    const { host, releaseAck } = await heldRootHost('eventual');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 1250);
+    });
+    const held = await host.projectTasks.request({ operation: 'read', input: {} });
+    expect(held.kind).toBe('snapshot');
+    if (held.kind !== 'snapshot') {
+      throw new Error('Root task snapshot missing.');
+    }
+    expect(held.snapshot.tasks[0]?.attempts[0]?.status).toBe('running');
+    releaseAck();
+    await expect
+      .poll(
+        async () => {
+          const answer = await host.projectTasks.request({ operation: 'read', input: {} });
+          return answer.kind === 'snapshot' ? answer.snapshot.tasks[0]?.attempts[0]?.status : undefined;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe('completed');
+  }, 30_000);
+
+  it('stops the held root follower before closing the task journal without recording a false completion', async () => {
+    const { host, workspaceRoot, releaseAck } = await heldRootHost('close');
+    const closing = host.close();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    releaseAck();
+    try {
+      await closing;
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'TASK_BUSY' });
+    }
+    const content = await readFile(join(workspaceRoot, '.tau', 'chats', '.project-tasks', 'records.jsonl'), 'utf8');
+    const records = content
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { tasks: Array<{ attempts: Array<{ status: string }> }> });
+    expect(records.flatMap((record) => record.tasks).map((task) => task.attempts.at(-1)?.status)).not.toContain(
+      'completed',
+    );
+    releaseAck();
+  }, 30_000);
+
   /* RH-S11 (W8 TS-S4): the host builds the placement port over its own revisions and hands it to the launcher. */
   /* W6.r1 finding 10: a drain waits for the runs this host admitted, not for an attempt a previous process left. */
   it('should drain the runs this host admitted, whatever an earlier process left unsettled', async () => {
@@ -645,6 +763,7 @@ describe('createProjectHost', () => {
   /* W6.r2 H5: a second close while the first runs waits for it; the host's resources close once. */
   it('should close once when two closes run together', async () => {
     const { project } = await desktopProjectHost();
+    await project.revisions.opened();
     seams.closes = 0;
     seams.closed = 0;
 

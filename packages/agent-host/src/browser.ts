@@ -11,6 +11,11 @@ import { createBrowserLeadership } from '#browser/leadership.js';
 import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 
+// oxlint-disable-next-line import/no-cycle, no-barrel-files/no-barrel-files -- the browser entrypoint owns the public binding; project module only calls these initialized functions later.
+export { browserProjectTasks } from '#browser/project-tasks.js';
+// oxlint-disable-next-line no-barrel-files/no-barrel-files -- public browser entrypoint type.
+export type { BrowserProjectTasksOptions } from '#browser/project-tasks.js';
+
 type SyncAccessHandle = {
   getSize(): number;
   read(buffer: Uint8Array<ArrayBuffer>, options?: { at?: number }): number;

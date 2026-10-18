@@ -49,7 +49,7 @@ assert.ok(
   packageSource.slice(licenceGate).startsWith(`if (zip) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
 );
-assert.ok(licenceGate < packageSource.indexOf('let geospecAssemblyInput'));
+assert.ok(licenceGate < packageSource.indexOf('const geospecSourceRelinkArchive'));
 
 /* Security assessment 2026-10 desktop F-3: the hardening fuses are on in every mode,
  * RunAsNode is never touched (ACP adapters need it), and only a release refuses --inspect. */

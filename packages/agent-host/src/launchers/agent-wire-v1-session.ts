@@ -12,7 +12,7 @@ import { replayedStartOutcome } from '#log/chat-ledger.js';
 import type { AgentLiveEvent, HostRunSnapshot } from '#waist/ports.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 import { iterateStream } from '#launchers/agent-launcher.js';
-import type { AgentLauncher } from '#launchers/agent-launcher.js';
+import type { AgentChannelSource } from '#launchers/agent-channel.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer } from '#wire/frames.schema.js';
 import type { V1Addressed, V1Batch, V1Request, V1Response } from '#channel/wire-v1.js';
@@ -81,7 +81,7 @@ const refusal = (answer: CommandAnswer): Error | undefined =>
  * @internal
  */
 export const createV1Session = (
-  launcher: AgentLauncher,
+  launcher: AgentChannelSource,
   revisions:
     | Readonly<{ request(input: JsonValue): Promise<Readonly<{ result: JsonValue; status: JsonValue }>> }>
     | undefined,

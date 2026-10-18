@@ -124,6 +124,75 @@ describe('ensureFocusedChatForProject', () => {
     expect(newestActivity.focusedChatId).toBe('chat_newer_activity');
     expect(deterministicTie.focusedChatId).toBe('chat_a');
   });
+
+  it('repairs focus to a root even when descendant chats are more recent', async () => {
+    const root = makeChat({ id: 'chat_root', recencyAt: 1 });
+    const child = makeChat({
+      id: 'chat_child',
+      recencyAt: 20,
+      taskLineage: {
+        taskId: 'task_child',
+        parentTaskId: 'task_root',
+        parentChatId: 'chat_root',
+        rootChatId: 'chat_root',
+      },
+    });
+    const result = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: undefined,
+      persistedChatId: child.id,
+      worker: {
+        getChatRecordsForResource: async () => [child, root],
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
+      },
+    });
+    expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: root.id });
+  });
+
+  it('resolves a requested grandchild directly to its root without focusing the child', async () => {
+    const root = makeChat({ id: 'chat_root' });
+    const grandchild = makeChat({
+      id: 'chat_grandchild',
+      taskLineage: {
+        taskId: 'task_grandchild',
+        parentTaskId: 'task_child',
+        parentChatId: 'chat_child',
+        rootChatId: root.id,
+      },
+    });
+    const result = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: grandchild.id,
+      persistedChatId: undefined,
+      worker: {
+        getChatRecordsForResource: async () => [grandchild, root],
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
+      },
+    });
+    expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: root.id });
+  });
+
+  it('uses durable root identity before the root record has finished syncing', async () => {
+    const child = makeChat({
+      id: 'chat_child',
+      taskLineage: {
+        taskId: 'task_child',
+        parentTaskId: 'task_root',
+        parentChatId: 'chat_root',
+        rootChatId: 'chat_root',
+      },
+    });
+    const result = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: child.id,
+      persistedChatId: undefined,
+      worker: {
+        getChatRecordsForResource: async () => [child],
+        createNavigationRepairChat: vi.fn<ChatStorage['createNavigationRepairChat']>(),
+      },
+    });
+    expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: 'chat_root' });
+  });
 });
 
 /* Focusing a chat the client already holds must skip the ensure round trip —
@@ -133,7 +202,7 @@ describe('isKnownChatId', () => {
 
   const clientWithChats = (chats: Chat[]): QueryClient => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(['chats', 'project_test', { includeDeleted: false }], chats);
+    queryClient.setQueryData(['chats', 'project_test', 'records', { includeDeleted: false }], chats);
     return queryClient;
   };
 
@@ -143,6 +212,14 @@ describe('isKnownChatId', () => {
     expect(
       isKnownChatId({ chatId: 'chat_listed', createdChatId: undefined, projectId: 'project_test', queryClient }),
     ).toBe(true);
+  });
+
+  it('waits for authoritative navigation metadata when a full-chat cache cannot classify legacy lineage', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['chats', 'project_test', { includeDeleted: false }], [knownChat]);
+    expect(
+      isKnownChatId({ chatId: knownChat.id, createdChatId: undefined, projectId: 'project_test', queryClient }),
+    ).toBe(false);
   });
 
   it('recognises metadata lists while refusing deleted-only and invalidated lists', async () => {
@@ -169,6 +246,23 @@ describe('isKnownChatId', () => {
     expect(
       isKnownChatId({ chatId: 'chat_created', createdChatId: 'chat_created', projectId: 'project_test', queryClient }),
     ).toBe(true);
+  });
+
+  it('does not synchronously focus a cached descendant', () => {
+    const queryClient = clientWithChats([
+      makeChat({
+        id: 'chat_child',
+        taskLineage: {
+          taskId: 'task_child',
+          parentTaskId: 'task_root',
+          parentChatId: 'chat_root',
+          rootChatId: 'chat_root',
+        },
+      }),
+    ]);
+    expect(
+      isKnownChatId({ chatId: 'chat_child', createdChatId: undefined, projectId: 'project_test', queryClient }),
+    ).toBe(false);
   });
 
   it('should reject an unlisted chat and a chat cached under another project', () => {

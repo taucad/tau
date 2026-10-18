@@ -23,6 +23,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost } from '#host/tau-agent-host.js';
+export type { TauTurnProjection, TauTurnTransport, TauTurnTransportInput } from '#host/tau-turn-transport.js';
 export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 export {
   emptyChatLedger,
@@ -172,7 +173,13 @@ export type {
   ExternalTurnOutcome,
   TauAgentAdmissionConfig,
 } from '#host/external-agent.js';
-export type { CommandKey, CreateTauAgentHostOptions, TauAgentHost, TauAgentTurnRequest } from '#host/tau-agent-host.js';
+export type {
+  CommandKey,
+  CreateTauAgentHostOptions,
+  TauAgentHost,
+  TauAgentTurnRequest,
+  TauClientContextInput,
+} from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
   GatewayModelErrorCode,

@@ -16,7 +16,10 @@ const id = z.string().min(1);
  *
  * @public
  */
-export const chatIdSchema = z.string().regex(/^(?!\.\.?$)[^/\\]+$/u, 'chatId must be one storage path segment.');
+export const chatIdSchema = z
+  .string()
+  .regex(/^(?!\.\.?$)[^/\\]+$/u, 'chatId must be one storage path segment.')
+  .refine((value) => value.toLowerCase() !== '.project-tasks', 'chatId is reserved for protected project records.');
 /** 1 to 94 printable ASCII characters, so W7's attempt key `${runId}:${attempt}:${position}` fits the gateway's 128. */
 const runId = z.string().regex(/^[!-~]{1,94}$/u);
 

@@ -7,6 +7,8 @@ import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
+import { useChatRecords } from '#hooks/use-chat-records.js';
+import { resolveThreadRoute } from '#routes/w.$workspace.$project/thread-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
@@ -403,7 +405,14 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
   }, [resolvedProjectId, routePath]);
   const projectId = resolvedProjectId ?? (retainedRoute?.path === routePath ? retainedRoute?.projectId : undefined);
   const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
-  const requestedChatId = projectId === undefined ? undefined : projectChatIdFromSearch(location.search);
+  const requestedUrlChatId = projectId === undefined ? undefined : projectChatIdFromSearch(location.search);
+  const {
+    chats: routeChats,
+    isLoading: isLoadingRouteChats,
+    error: routeChatError,
+  } = useChatRecords(projectId ?? '', { enabled: projectId !== undefined });
+  const threadRoute = resolveThreadRoute(requestedUrlChatId, routeChats);
+  const requestedChatId = threadRoute.rootChatId;
   const createdChatId = location.state?.focusChatComposer === true ? requestedChatId : undefined;
   /*
    * W7 tier 3: `cloudOpen` is a consume-once marker. It used to be stripped
@@ -425,6 +434,10 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
     (chatId: string) => {
       const parameters = new URLSearchParams(currentUrl.split('?')[1] ?? '');
       parameters.set('chat', chatId);
+      if (threadRoute.taskId !== undefined) {
+        parameters.set(searchParameterName.thread, threadRoute.taskId);
+        parameters.set(searchParameterName.workbench, 'agents');
+      }
       const path = projectUrl(canonicalSlugs ?? { workspaceSlug: workspace, projectSlug: project });
       const target = `${path}?${parameters.toString()}`;
       if (currentUrl !== target) {
@@ -433,7 +446,7 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
         });
       }
     },
-    [canonicalSlugs, currentUrl, navigate, project, workspace],
+    [canonicalSlugs, currentUrl, navigate, project, workspace, threadRoute.taskId],
   );
   /*
    * W2: the shell is no longer swapped out here either. An unresolvable slug is
@@ -445,7 +458,7 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
         requestedProjectId={projectId}
         requestedChatId={requestedChatId}
         createdChatId={createdChatId}
-        onFocusedChatResolved={handleFocusedChatResolved}
+        onFocusedChatResolved={isLoadingRouteChats || routeChatError ? undefined : handleFocusedChatResolved}
         slugs={match === null ? undefined : { workspaceSlug: workspace, projectSlug: project }}
         isResolvingSlugs={resolution.status === 'resolving'}
       >

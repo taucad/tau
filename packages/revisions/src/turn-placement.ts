@@ -662,10 +662,11 @@ export const createTurnPlacementPort = <Tools>(
       revocable(opened.filesystem, opened.versioned, () => {
         push({ kind: 'changed', key, checkoutId: opened.checkout.id });
       });
+    const baseRevisionId = known?.placement.baseRevisionId ?? event.baseRevisionId ?? (await turns.sourceRevision(key));
     const placement: Omit<Placement<Tools>, 'tools'> = known?.placement ?? {
       checkoutId: opened.checkout.id,
       ...(event.branch === undefined ? {} : { branch: event.branch }),
-      ...(event.baseRevisionId === undefined ? {} : { baseRevisionId: event.baseRevisionId }),
+      ...(baseRevisionId === undefined ? {} : { baseRevisionId }),
       /* From the checkout's kind, never from the client (HD-9). */
       mode: opened.checkout.kind === 'live' ? 'direct' : 'candidate',
       root: options.root?.(opened.checkout) ?? opened.checkout.root,

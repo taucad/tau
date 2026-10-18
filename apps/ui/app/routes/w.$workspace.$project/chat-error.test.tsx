@@ -353,6 +353,24 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
 
+  it('routes a closed delegated task to Agents instead of offering native Resume', async () => {
+    projected({
+      category: errorCategory.rateLimit,
+      title: 'Rate limit exceeded',
+      message: 'The model provider asked Tau to wait.',
+      code: 'RATE_LIMITED',
+      httpStatus: 429,
+    });
+    const onOpenAgents = vi.fn();
+    render(<ChatErrorBanner isClosedDelegatedTask onOpenAgents={onOpenAgents} />);
+
+    expect(screen.getByText('Open Threads to review the task and available actions.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Open Threads' }));
+    expect(onOpenAgents).toHaveBeenCalledOnce();
+    expect(continueChat).not.toHaveBeenCalled();
+  });
+
   it('should keep Try again for a service refusal the host rules unrecoverable', () => {
     persisted({
       category: errorCategory.overloaded,

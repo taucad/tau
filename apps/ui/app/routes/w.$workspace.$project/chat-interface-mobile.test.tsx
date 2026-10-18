@@ -4,6 +4,12 @@ import { useSyncExternalStore } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ setChatOpen: vi.fn() }),
+}));
+vi.mock('#components/project-tasks/threads-panel.js', () => ({ ThreadsPanelBody: () => null }));
+vi.mock('#routes/w.$workspace.$project/thread-navigation-context.js', () => ({ useThreadNavigation: () => ({}) }));
+
 const state = vi.hoisted(() => ({ drawerOpen: false, listeners: new Set<() => void>() }));
 const setDrawerOpen = (open: boolean): void => {
   act(() => {

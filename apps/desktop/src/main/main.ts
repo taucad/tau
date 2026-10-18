@@ -111,6 +111,7 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { configureDesktopProfile } from '#main/profile.js';
 import { startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
@@ -153,11 +154,7 @@ if (environmentLocked) {
 /* A staging package (`TAU_DESKTOP_CHANNEL=staging` at packaging time) defaults
  * to taucad.dev and never follows the production update feed. */
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
-app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
-if (desktopChannel === 'staging') {
-  app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
-  app.setPath('sessionData', app.getPath('userData'));
-}
+configureDesktopProfile(app, desktopChannel);
 const otaProbe = prepareOtaProbe({
   arguments: process.argv,
   profile: app.getPath('userData'),
@@ -460,10 +457,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   mkdirSync(homeRoot, { recursive: true });
   const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
   mkdirSync(authorityDirectory, { recursive: true });
-  /* The per-user machine store every Tau host on this computer shares
-   * (`tau serve` opens it too), never under an authored root. The app's old
-   * `userData/machines` is imported from once, and only when it is another
-   * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
+  /* Production shares its per-user machine store with `tau serve`; staging
+   * keeps one in its separate profile. Neither is under an authored root.
+   * The app's old `userData/machines` is imported from once, and only when it
+   * is another directory: on a case-insensitive volume `…/Tau` and `…/tau`
+   * are one. */
   const tauConfigDirectory =
     desktopChannel === 'staging' ? join(app.getPath('userData'), 'config') : defaultConfigDirectory();
   const machinesEnabled = isMachinesFeatureEnabled(environment['TAU_MACHINES_ENABLED']);
@@ -1928,6 +1926,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     arch: process.arch,
     currentVersion: app.getVersion(),
     packaged: app.isPackaged,
+    updatesEnabled: environmentLocked,
     channel: desktopChannel,
     environment,
     autoUpdater,

@@ -33,6 +33,20 @@
           "TAU_ACP_LIVE": "1"
         }
       }
+    },
+    "test:project-tasks-live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Actual Codex parent, child and grandchild project-task tools against the operator login; spends quota and fails explicitly when unavailable."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/host",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/acp/project-tasks-live.integration.test.ts",
+        "env": {
+          "TAU_PROJECT_TASKS_LIVE": "1"
+        }
+      }
     }
   }
 }

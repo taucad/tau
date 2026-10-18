@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentHostClient } from '#services/agent-host-client.js';
+import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
+import { selectRunPhase } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow, publishLogRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
 const visible = (messages: readonly MyUIMessage[]): Array<{ id: string; text: string }> =>
@@ -46,6 +48,131 @@ const createStore = (
 };
 
 describe('ChatSessionStore with the pinned real SDK', () => {
+  it('should replace a paused approval with the next approval after the same run resumes across navigation', async () => {
+    const store = createStore();
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    const unpublish = store.publishProjectHostConnector('project', async () => ({
+      hostCommand,
+      catchUp: writerOwnedCatchUp,
+      read: vi.fn<AgentHostClient['read']>(),
+      subscribe: vi.fn<AgentHostClient['subscribe']>(() => vi.fn()),
+      close: vi.fn(async () => undefined),
+    }));
+    const { chat } = store.acquire('chat', 'project');
+    const approvals = (): Array<{ id: string; prompt: string; state: string }> =>
+      chat.messages.flatMap((message) =>
+        message.parts.flatMap((part) =>
+          part.type === 'dynamic-tool' && part.toolName === agentApprovalToolName
+            ? [
+                {
+                  id: part.toolCallId,
+                  prompt:
+                    typeof part.input === 'object' && part.input !== null && 'prompt' in part.input
+                      ? String(part.input.prompt)
+                      : '',
+                  state: part.state,
+                },
+              ]
+            : [],
+        ),
+      );
+    const interrupt = (
+      sequence: number,
+      id: string,
+      { phase, prompt }: Readonly<{ phase: 'requested' | 'resolved'; prompt: string }>,
+    ) =>
+      logRow(sequence, {
+        type: 'interrupt.recorded',
+        interruptId: id,
+        phase,
+        reason: phase === 'requested' ? prompt : 'approved',
+        payload: phase === 'requested' ? { kind: 'approval', prompt, agentId: 'codex' } : { outcome: 'approved' },
+      });
+    try {
+      await vi.waitFor(() => {
+        expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      publishLogRows(store, 'chat', [
+        {
+          ...lifecycleRow(0, 'admitted'),
+          admission: {
+            kind: 'tau',
+            turnId: 'user',
+            message: { id: 'user', role: 'user', content: 'Build a model' },
+          },
+        },
+        lifecycleRow(1, 'running'),
+        logRow(2, {
+          type: 'message.appended',
+          message: { id: 'initial', role: 'assistant', content: [{ type: 'text', text: 'Starting task.' }] },
+        }),
+      ]);
+      await vi.waitFor(() => {
+        expect(chat.status).toBe('streaming');
+        expect(visible(chat.messages).map((message) => message.text)).toContain('Starting task.');
+      });
+      publishLogRows(
+        store,
+        'chat',
+        [interrupt(3, 'approval-a', { phase: 'requested', prompt: 'Spawn a task?' }), lifecycleRow(4, 'paused')],
+        3,
+      );
+      await vi.waitFor(() => {
+        expect(chat.status).toBe('ready');
+        expect(approvals()).toEqual([{ id: 'approval-a', prompt: 'Spawn a task?', state: 'approval-requested' }]);
+      });
+
+      store.release('chat');
+      expect(store.acquire('chat', 'project').chat).toBe(chat);
+      publishLogRows(
+        store,
+        'chat',
+        [
+          interrupt(5, 'approval-a', { phase: 'resolved', prompt: 'Spawn a task?' }),
+          lifecycleRow(6, 'running'),
+          logRow(7, {
+            type: 'message.appended',
+            message: { id: 'continued', role: 'assistant', content: [{ type: 'text', text: 'Task finished.' }] },
+          }),
+        ],
+        5,
+      );
+      expect(selectRunPhase(store.getProjection('chat')!)).toBe('running');
+      await vi.waitFor(() => {
+        expect(
+          visible(chat.messages)
+            .map((message) => message.text)
+            .join('|'),
+        ).toContain('Task finished.');
+        expect(approvals()).toEqual([{ id: 'approval-a', prompt: 'Spawn a task?', state: 'output-available' }]);
+      });
+
+      publishLogRows(
+        store,
+        'chat',
+        [interrupt(8, 'approval-b', { phase: 'requested', prompt: 'Send the result?' }), lifecycleRow(9, 'paused')],
+        8,
+      );
+      await vi.waitFor(() => {
+        expect(chat.status).toBe('ready');
+        expect(approvals()).toEqual([
+          { id: 'approval-a', prompt: 'Spawn a task?', state: 'output-available' },
+          { id: 'approval-b', prompt: 'Send the result?', state: 'approval-requested' },
+        ]);
+        expect(
+          visible(chat.messages)
+            .map((message) => message.text)
+            .join('|'),
+        ).toContain('Task finished.');
+      });
+      expect(hostCommand).not.toHaveBeenCalled();
+    } finally {
+      publishLogRows(store, 'chat', [lifecycleRow(10, 'completed')], 10);
+      store.release('chat');
+      unpublish();
+    }
+  });
+
   it.each(['running', 'paused'] as const)(
     'should defer foreign storage refresh during %s until the host settles while preserving active local output',
     async (phase) => {

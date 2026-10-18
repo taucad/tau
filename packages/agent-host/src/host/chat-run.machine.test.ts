@@ -22,7 +22,7 @@ import type { ChatRunInput } from '#host/chat-run.machine.js';
 import { chatRunIgnoredEvents, chatRunMachine } from '#host/chat-run.machine.js';
 import { chatId, commands, createChatLog, createChatRunHarness, lifecycle } from '#host/chat-run.fixture.js';
 import type { ChatRunHarness } from '#host/chat-run.fixture.js';
-import type { ChatRunRow, ChatRunOutcomeEvent } from '#host/chat-run-events.js';
+import type { ChatRunRow, ChatRunOutcomeEvent, ChatRunEffectArgs } from '#host/chat-run-events.js';
 import { chatRunState, emptyChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { TurnAttemptKey, TurnPlacementPort } from '#waist/ports.js';
@@ -463,6 +463,72 @@ describe('chatRun placement paths (W7.r1)', () => {
   const step = (snapshot: AnyMachineSnapshot, event: AnyEventObject) =>
     transition(walked, snapshot, event) as unknown as readonly [AnyMachineSnapshot, readonly Effect[]];
 
+  it.each(['answered', 'unknown'] as const)(
+    'should preserve %s placement diagnostics through the actual effect and ending row',
+    async (mode) => {
+      const placing = at((snapshot) => snapshot.matches({ reserving: 'placing' }));
+      const { key } = contextOf(placing).slot!;
+      const details = { reason: 'placement-channel-closed' };
+      const unused = async (): Promise<never> => {
+        throw new Error('Unexpected service call');
+      };
+      const placement: TurnPlacementPort = {
+        admit: async ({ requestId }) => {
+          if (mode === 'unknown') {
+            throw Object.assign(new Error('Placement closed'), { code: 'CHANNEL_CLOSED', details });
+          }
+          return { requestId, status: 'refused', code: 'SESSION_FENCED', message: 'Placement closed', details };
+        },
+        complete: unused,
+        abandon: unused,
+        acknowledge: unused,
+        reconcile: unused,
+        async *settlements() {
+          /* This test drives an admission answer, not a settlement subscription. */
+        },
+      };
+      const received = Promise.withResolvers<ChatRunOutcomeEvent>();
+      const effects = createChatRunEffects(
+        inputs[0]!,
+        {
+          services: {
+            placement,
+            openLog: unused,
+            append: unused,
+            prepareAdmission: unused,
+            prepareResume: unused,
+            closeLog: unused,
+            startDriver: () => {
+              throw new Error('Unexpected driver');
+            },
+          },
+          answer: () => undefined,
+          redeliver: () => undefined,
+        },
+        (event) => {
+          received.resolve(event);
+        },
+      );
+      effects.admitPlacement({ key });
+      const event = await received.promise;
+      expect(event).toMatchObject({
+        type: 'placementRefused',
+        details: mode === 'answered' ? details : { phase: 'placement.admit', code: 'CHANNEL_CLOSED', cause: details },
+      });
+      const [, writes] = step(placing, event);
+      const written = writes.find(({ type }) => type === 'appendRows')?.args?.[0] as
+        | ChatRunEffectArgs['appendRows']
+        | undefined;
+      expect(written?.rows[0]?.body).toMatchObject({
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: {
+          details: mode === 'answered' ? details : { phase: 'placement.admit', code: 'CHANNEL_CLOSED', cause: details },
+        },
+      });
+    },
+  );
+
   it('should close, writing no ending row, when an abandon fails', () => {
     const fencing = at((snapshot) => snapshot.matches({ ending: 'fencing' }));
     const [next] = step(fencing, { type: 'abandoned', key: contextOf(fencing).slot!.key, unknown: true });
@@ -475,6 +541,33 @@ describe('chatRun placement paths (W7.r1)', () => {
     const [next] = step(retiring, { type: 'acknowledged', key: contextOf(retiring).settle!.key, unknown: true });
 
     expect(next.value).toBe('closing');
+  });
+
+  it('should retain an uncertain settlement on a failed shutdown cut instead of retrying close forever', () => {
+    const finishing = at((snapshot) => snapshot.matches({ settling: 'finishing' }));
+    const refused = {
+      type: 'completeAnswered',
+      key: contextOf(finishing).settle!.key,
+      status: 'refused',
+      code: 'CUT_FAILED',
+    };
+    const [ordinary] = step(finishing, refused);
+    expect(ordinary.matches({ settling: 'backingOff' })).toBe(true);
+
+    const [closing] = step(finishing, { type: 'close' });
+    const [faulted, effects] = step(closing, refused);
+    expect(faulted.value).toBe('closing');
+    expect(faulted.context.cause).toBe('fault');
+    expect(effects.map(({ type }) => type)).not.toContain('acknowledgePlacement');
+    expect(effects.map(({ type }) => type)).not.toContain('appendRows');
+  });
+
+  it('should relinquish an unsettled attempt without issuing a settlement write', () => {
+    const finishing = at((snapshot) => snapshot.matches({ settling: 'finishing' }));
+    const [next, effects] = step(finishing, { type: 'relinquish' });
+    expect(next.value).toBe('closing');
+    expect(effects.map(({ type }) => type)).not.toContain('appendRows');
+    expect(effects.map(({ type }) => type)).not.toContain('acknowledgePlacement');
   });
 
   it('should abandon the placement when a fence ends a running attempt', () => {

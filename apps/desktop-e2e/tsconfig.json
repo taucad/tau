@@ -17,6 +17,7 @@
   },
   "include": [
     "vitest.config.ts",
+    "vitest.packaged-native.config.ts",
     "vitest.unit.config.ts",
     "global-setup.ts",
     "scripts/**/*.mts",

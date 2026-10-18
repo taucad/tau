@@ -33,6 +33,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent-tools": "./src/agent-tools.ts",
+    "./project-tasks": "./src/project-tasks.ts",
     "./runtime-host": "./src/runtime-host.ts",
     "./package.json": "./package.json"
   },
@@ -48,6 +49,11 @@
         "types": "./dist/agent-tools.d.mts",
         "import": "./dist/agent-tools.mjs",
         "default": "./dist/agent-tools.mjs"
+      },
+      "./project-tasks": {
+        "types": "./dist/project-tasks.d.mts",
+        "import": "./dist/project-tasks.mjs",
+        "default": "./dist/project-tasks.mjs"
       },
       "./runtime-host": {
         "types": "./dist/runtime-host.d.mts",

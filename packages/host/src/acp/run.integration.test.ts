@@ -27,7 +27,7 @@ import type { Agent, Client, SessionConfigOption, SessionUpdate, StopReason } fr
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
-import { reduceEventLog } from '@taucad/agent-host';
+import { parseLogEvent, reduceEventLog } from '@taucad/agent-host';
 import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
@@ -2533,41 +2533,75 @@ describe('restoring a session a cold start lost', () => {
     await first.close();
   }, 30_000);
 
-  it('opens a fresh session and says so when neither rung can restore one', async () => {
-    const adapter = await withoutCapabilities({ load: true });
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-lost-'));
-    roots.push(workspaceRoot);
-    const port = createAcpExternalAgentPort({ agents: [adapter], workspaceRoot, createId: () => randomUUID() });
-    const appended: AgentLogEvent[] = [];
+  it.each([
+    { name: 'lost session', previousCwd: false, notice: 'could not restore' },
+    { name: 'changed checkout', previousCwd: true, notice: 'moved to a different Tau checkout' },
+  ])(
+    'opens a fresh session with a valid $name notice before prompting',
+    async ({ previousCwd, notice }) => {
+      const adapter = await withoutCapabilities({ load: true });
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-lost-'));
+      roots.push(workspaceRoot);
+      const frames: AcpWireFrame[] = [];
+      const port = createAcpExternalAgentPort({
+        agents: [adapter],
+        workspaceRoot,
+        createId: () => randomUUID(),
+        onFrame: (frame) => frames.push(frame),
+      });
+      const appended: AgentLogEvent[] = [];
 
-    await port.run({
-      agentId: 'codex',
-      agent: { kind: 'acp', id: 'codex' },
-      chatId: 'chat-lost',
-      runId: 'run-lost',
-      attempt: 1,
-      message: { id: 'user-1', role: 'user', content: 'noask' },
-      state: { agentId: 'codex', acpSessionId: 'a-session-this-vendor-forgot' },
-      history: [],
-      signal: new AbortController().signal,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log fills every base field; this stub only records bodies.
-      append: async (events) => {
-        appended.push(...(events as readonly AgentLogEvent[]));
-      },
-      remember: async () => undefined,
-      approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
-    });
-    await port.closeChat?.('chat-lost');
+      await port.run({
+        agentId: 'codex',
+        agent: { kind: 'acp', id: 'codex' },
+        chatId: 'chat-lost',
+        runId: 'run-lost',
+        attempt: 1,
+        message: { id: 'user-1', role: 'user', content: 'noask' },
+        state: {
+          agentId: 'codex',
+          acpSessionId: 'a-session-this-vendor-forgot',
+          ...(previousCwd ? { cwd: join(workspaceRoot, 'previous-checkout') } : {}),
+        },
+        history: [],
+        signal: new AbortController().signal,
+        append: async (events) => {
+          for (const event of events) {
+            appended.push(
+              parseLogEvent({
+                version: 1,
+                leaderEpoch: 'test',
+                sequence: appended.length,
+                recordedAt: new Date().toISOString(),
+                runId: 'run-lost',
+                ...event,
+              }),
+            );
+          }
+        },
+        remember: async () => undefined,
+        approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+      });
+      await port.closeChat?.('chat-lost');
 
-    /* Never a silent fresh start: exactly one durable note says the context is gone. */
-    const notes = appended.filter(
-      (event) =>
-        event.type === 'message.appended' &&
-        event.message.role === 'assistant' &&
-        textOfMessage(event.message).includes('could not restore'),
-    );
-    expect(notes).toHaveLength(1);
-  }, 30_000);
+      /* Never a silent fresh start: exactly one durable note says the context is gone. */
+      const notes = appended.filter(
+        (event) =>
+          event.type === 'message.appended' &&
+          event.message.role === 'assistant' &&
+          textOfMessage(event.message).includes(notice),
+      );
+      expect(notes).toHaveLength(1);
+      const note = notes[0];
+      expect(note?.type).toBe('message.appended');
+      if (note?.type !== 'message.appended') {
+        throw new Error('Expected one appended assistant note.');
+      }
+      expect(note.message.metadata?.tauInternal?.['kind']).toBe('external-agent-session');
+      expect(sent(frames, 'session/prompt')).toBe(1);
+    },
+    30_000,
+  );
 });
 
 /** Every event of one kind, narrowed, in log order. */

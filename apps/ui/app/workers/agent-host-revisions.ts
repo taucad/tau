@@ -14,6 +14,12 @@ type RevisionStatus = Extract<WorkerRevisionResponse, { type: 'status' }>['statu
 /** A revisions client over one revision port, and the close that lets the root go. @internal */
 export type PortRevisionsClient = RpcRevisionsClient &
   Readonly<{
+    /** Allocate one private checkout from an immutable task source revision. */
+    createCandidate: (
+      name: string,
+      sourceRevisionId: string,
+      requestId: string,
+    ) => Promise<Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>>;
     fetchGeoSpecCandidates: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
     publishGeoSpecCandidate: (candidate: Uint8Array<ArrayBuffer>) => Promise<'updated' | 'upToDate' | 'rejected'>;
     close: () => void;
@@ -81,6 +87,10 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
   };
 
   return {
+    createCandidate: async (name, sourceRevisionId, requestId) => {
+      const result = await ask({ command: 'createBranch', name, from: sourceRevisionId, requestId }, 'branch');
+      return { branch: result.branch, checkoutId: result.checkoutId, checkoutRoot: result.checkoutRoot };
+    },
     fetchGeoSpecCandidates: async () => {
       const result = await ask({ command: 'fetchGeoSpecCandidates' }, 'geoSpecCandidates');
       return result.candidates;

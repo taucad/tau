@@ -164,6 +164,10 @@ export type ChatTextareaProperties = {
   /** Blocks every submit path while external prerequisites are unresolved. */
   readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';
+  /** Text-only host mailbox: retains this chat's draft while hiding unsupported execution and attachment controls. */
+  readonly taskMailbox?: boolean;
+  /** Whether an active session may present actionable run approvals above this composer. */
+  readonly enableApprovals?: boolean;
   /**
    * Below the `md` breakpoint, rest as one row — +, the editor, dictation and
    * Send — until the composer is focused or holds a draft; the rest of the bar
@@ -186,7 +190,7 @@ export const cancelChatStreamKeyCombination = {
  */
 export type ChatTextareaLogicOptions = Pick<
   ChatTextareaProperties,
-  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode' | 'isSubmitDisabled'
+  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode' | 'isSubmitDisabled' | 'taskMailbox'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
   readonly onViewerScreenshotDrop?: (entryPath: string) => void;
@@ -206,6 +210,7 @@ export function useChatTextareaLogic({
   onBlur,
   mode = 'main',
   isSubmitDisabled = false,
+  taskMailbox = false,
   onViewerScreenshotDrop,
   onAddContextChips,
 }: ChatTextareaLogicOptions): {
@@ -290,11 +295,12 @@ export function useChatTextareaLogic({
   const {
     model: { model: selectedModel },
     execution: { execution },
-    status,
+    status: composerStatus,
     stop,
     resume,
     attachmentSource,
   } = useChatComposer();
+  const status = taskMailbox ? 'ready' : composerStatus;
   const attachmentModel = useMemo(
     () => attachmentModelForExecution(execution, selectedModel),
     [execution, selectedModel],
@@ -302,7 +308,7 @@ export function useChatTextareaLogic({
   const { support } = attachmentModel;
   const imageInputSupported = modelSupportsInput(support, 'image');
   const pdfInputSupported = modelSupportsInput(support, 'pdf');
-  const attachmentInputSupported = imageInputSupported || pdfInputSupported;
+  const attachmentInputSupported = !taskMailbox && (imageInputSupported || pdfInputSupported);
   const attachmentAccept = useMemo(
     () =>
       supportedAttachmentMediaTypes
@@ -326,10 +332,14 @@ export function useChatTextareaLogic({
   const attachments = useDraftSelector((state) =>
     mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
   );
-  const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
+  const sendBlockReason =
+    taskMailbox && attachments.length > 0
+      ? 'Thread messages support text only. Remove attachments to send.'
+      : attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const canResume =
     mode === 'main' &&
+    !taskMailbox &&
     resume !== undefined &&
     status !== 'streaming' &&
     status !== 'submitted' &&
@@ -377,6 +387,10 @@ export function useChatTextareaLogic({
    */
   const addAttachment = useCallback(
     (source: DraftAttachmentSource, options?: ChatAttachmentAddOptions) => {
+      if (taskMailbox) {
+        toast.error('Thread messages support text only');
+        return;
+      }
       if (typeof source === 'string' && source.startsWith('data:image/') && !imageInputSupported) {
         rejectUnsupportedImageInput();
         return;
@@ -387,6 +401,7 @@ export function useChatTextareaLogic({
     },
     [
       mode,
+      taskMailbox,
       addDraftAttachment,
       addEditDraftAttachment,
       attachmentModel,

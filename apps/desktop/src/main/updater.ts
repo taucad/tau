@@ -152,6 +152,8 @@ export type DesktopUpdaterOptions = {
   readonly arch: string;
   readonly currentVersion: string;
   readonly packaged: boolean;
+  /** False for ad-hoc packages whose manifest permits environment overrides. */
+  readonly updatesEnabled?: boolean;
   readonly channel?: DesktopChannel;
   readonly environment: NodeJS.ProcessEnv;
   readonly autoUpdater: SquirrelUpdater;
@@ -194,7 +196,7 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     snapshot = { ...snapshot, revision: snapshot.revision + 1, phase };
     options.onState?.(snapshot);
   };
-  if (!options.packaged || source.kind === 'disabled') {
+  if (!options.packaged || options.updatesEnabled === false || source.kind === 'disabled') {
     const reason =
       options.packaged && source.kind === 'disabled' ? source.reason : 'Automatic updates are disabled for this build.';
     log('info', 'updater.disabled', { packaged: options.packaged, channel, reason });

@@ -31,8 +31,8 @@ export type LeadershipHost = Readonly<{
   dropView: (chatId: string) => Promise<void>;
   /** Name the epoch the chat's next incarnation claims at (D5). */
   assume: (chatId: string, epoch: number) => void;
-  /** Open the chat's M1 incarnation, which abandons a driverless run and reconciles before it serves (RH-R9). */
-  claim: (chatId: string) => Promise<void>;
+  /** Open M1 and reconcile; only a locked legacy writer is a refusal leadership may wait on (RH-R9). */
+  claim: (chatId: string) => Promise<void | string>;
   /** Stop the chat's M1 and close its writer, which frees the binding's lock (RH-R8). */
   relinquish: (chatId: string) => Promise<void>;
   /** Run a command in this process at the epoch this worker leads (a claim's write, or another tab's forward). */
@@ -130,7 +130,14 @@ export const chatStoreBinding = (store: ChatStore): ChatStoreBinding => {
 
 /** One storage path segment, never a path: a chat id is a directory name under `.tau/chats`. @internal */
 export const requireChatPathSegment = (value: string, label = 'chatId'): string => {
-  if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\')) {
+  if (
+    !value ||
+    value.toLowerCase() === '.project-tasks' ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('/') ||
+    value.includes('\\')
+  ) {
     throw Object.assign(new Error(`${label} must be one storage path segment.`), { code: 'STORAGE_PATH_INVALID' });
   }
   return value;

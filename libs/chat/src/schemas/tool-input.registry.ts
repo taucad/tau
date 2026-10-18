@@ -1,3 +1,13 @@
+import {
+  projectTaskSpawnSchema,
+  projectTaskReadSchema,
+  projectTaskSendSchema,
+  projectTaskWaitSchema,
+  projectTaskActionSchema,
+  projectTaskSchema,
+  projectTaskMessageSchema,
+  projectTaskSnapshotSchema,
+} from '@taucad/agent-host/wire';
 import type { z } from 'zod';
 import {
   arrangeWorkbenchInputSchema,
@@ -71,6 +81,12 @@ export type ToolPartType = `tool-${ToolName}`;
  * @public
  */
 export const uiMessageTools = {
+  [toolName.taskSpawn]: { inputSchema: projectTaskSpawnSchema, outputSchema: projectTaskSchema },
+  [toolName.taskRead]: { inputSchema: projectTaskReadSchema, outputSchema: projectTaskSnapshotSchema },
+  [toolName.taskSend]: { inputSchema: projectTaskSendSchema, outputSchema: projectTaskMessageSchema },
+  [toolName.taskWait]: { inputSchema: projectTaskWaitSchema, outputSchema: projectTaskSnapshotSchema },
+  [toolName.taskCancel]: { inputSchema: projectTaskActionSchema, outputSchema: projectTaskSchema },
+  [toolName.taskResume]: { inputSchema: projectTaskActionSchema, outputSchema: projectTaskSchema },
   [toolName.webSearch]: {
     inputSchema: webSearchInputSchema,
     outputSchema: webSearchOutputSchema,
@@ -180,7 +196,7 @@ export const uiMessageTools = {
     inputSchema: checkJobInputSchema,
     outputSchema: checkJobOutputSchema,
   },
-} as const;
+} as const satisfies Record<ToolName, { inputSchema: z.ZodType; outputSchema: z.ZodType }>;
 
 /** Static tool-part input schemas used by lifecycle normalization. @public */
 export const toolInputSchemas = Object.fromEntries(

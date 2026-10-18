@@ -183,7 +183,19 @@ describe('createPythonSession', () => {
   });
 
   it.skipIf(!sandboxAvailable)('settles a cancelled request as the caller abort', async () => {
-    const { options } = fixture();
+    // Cooperative cancellation: the worker answers the cancel notification for the request it is running.
+    const { options } = fixture(`${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+let running;
+readline.on('line',(line)=>{
+ const frame=JSON.parse(line);
+ if(frame.method==='cancel'){
+  process.stdout.write(JSON.stringify({protocolVersion:1,requestId:running,error:{issues:[{message:'cancelled',code:'CANCELLED',type:'runtime',severity:'error'}]}})+'\\n');
+  return;
+ }
+ running=frame.requestId;
+});
+${keepAlive}`);
     const session = createPythonSession({ ...options, runtimePath: join(options.workerPath, '..') });
     const controller = new AbortController();
     const reason = new Error('caller cancelled');

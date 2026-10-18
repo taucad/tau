@@ -166,13 +166,12 @@ describe('NodeFsProvider atomic writes', () => {
       /* The OS never reports a subtree that would only be filtered out afterwards. */
       expect(options.ignore).toEqual([join(directory, '.tau', 'cache')]);
 
-      const burst: ParcelEvent[] = [
-        ...Array.from({ length: 50 }, (_, index) => ({
-          path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
-          type: 'create',
-        })),
-        { path: join(directory, 'target.txt'), type: 'update' },
-      ];
+      const created = (index: number): ParcelEvent => ({
+        path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
+        type: 'create',
+      });
+      const updated: ParcelEvent = { path: join(directory, 'target.txt'), type: 'update' };
+      const burst = [...Array.from({ length: 50 }, (_, index) => created(index)), updated];
       statted.paths.length = 0;
       onEvents?.(null, burst);
       expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);

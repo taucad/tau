@@ -17,7 +17,13 @@ import { IntoServer } from '#lib/kcl-language/lsp/codec/into-server.js';
 import { createFromServer } from '#lib/kcl-language/lsp/codec/from-server.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
-import type { KclLspWorkerOptions, LspWorkerEvent } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import type {
+  KclLspWorkerOptions,
+  KclSymbolCall,
+  KclSymbolRequest,
+  KclSymbolResponse,
+  LspWorkerEvent,
+} from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { encodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
 import { serveLanguageFileSystemRequests } from '@taucad/lsp/language-fs-bridge';
 import type { FileManagerApi } from '#machines/file-manager.machine.types.js';
@@ -109,6 +115,11 @@ export class KclLspClient {
   private serverCapabilities: LSP.ServerCapabilities = {};
   private readonly notificationHandler: NotificationHandler | undefined;
   private isReady = false;
+  private nextSymbolRequestId = 0;
+  private readonly pendingSymbolRequests = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
+  >();
   private readonly readyPromise: Promise<void>;
   private resolveReady: () => void;
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- TS erasableSyntaxOnly forbids constructor parameter properties
@@ -290,6 +301,28 @@ export class KclLspClient {
     return this.request('textDocument/codeAction', parameters);
   }
 
+  /**
+   * Parse KCL source on the LSP worker's WASM instance, for the symbol service.
+   *
+   * @param code - KCL source.
+   * @returns `parse_wasm`'s `[program, issues]` result.
+   */
+  public async parseKcl(code: string): Promise<unknown> {
+    return this.symbolRequest({ operation: 'parse', code });
+  }
+
+  /**
+   * Mock-execute a parsed KCL program on the LSP worker's WASM instance, for the symbol service.
+   * Rejects with the value the execution threw, which may carry partial variables and source files.
+   *
+   * @param program - The program as JSON.
+   * @param path - The program's workspace path.
+   * @returns The execution's variables, issues and source files.
+   */
+  public async executeKclMock(program: string, path: string): Promise<unknown> {
+    return this.symbolRequest({ operation: 'executeMock', program, path });
+  }
+
   public async initialize(): Promise<void> {
     log.debug('Creating worker...');
     this.languageFsServer = new JSONRPCServer();
@@ -309,6 +342,11 @@ export class KclLspClient {
         const workerEvent = event.data as LspWorkerEvent;
         if (workerEvent.eventType === lspWorkerEventType.languageFsJsonRpc) {
           void this.handleLanguageFsWorkerMessage(workerEvent);
+          return;
+        }
+
+        if (workerEvent.eventType === lspWorkerEventType.symbolResponse) {
+          this.settleSymbolRequest(workerEvent.eventData as KclSymbolResponse);
           return;
         }
 
@@ -390,8 +428,41 @@ export class KclLspClient {
     this.languageFsServer = undefined;
     this.worker?.terminate();
     this.worker = undefined;
+    for (const pending of this.pendingSymbolRequests.values()) {
+      pending.reject(new Error('KCL LSP client disposed'));
+    }
+    this.pendingSymbolRequests.clear();
     this.jsonRpcClient = undefined;
     this.isReady = false;
+  }
+
+  private async symbolRequest(call: KclSymbolCall): Promise<unknown> {
+    const { worker } = this;
+    if (!worker) {
+      throw new Error('LSP client not initialized');
+    }
+    const id = this.nextSymbolRequestId++;
+    return new Promise((resolve, reject) => {
+      this.pendingSymbolRequests.set(id, { resolve, reject });
+      worker.postMessage({
+        worker: kclWorkerType,
+        eventType: lspWorkerEventType.symbolRequest,
+        eventData: { id, ...call } satisfies KclSymbolRequest,
+      });
+    });
+  }
+
+  private settleSymbolRequest(response: KclSymbolResponse): void {
+    const pending = this.pendingSymbolRequests.get(response.id);
+    if (!pending) {
+      return;
+    }
+    this.pendingSymbolRequests.delete(response.id);
+    if (response.ok) {
+      pending.resolve(response.value);
+    } else {
+      pending.reject(response.error);
+    }
   }
 
   private async handleLanguageFsWorkerMessage(workerEvent: LspWorkerEvent): Promise<void> {

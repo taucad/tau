@@ -37,27 +37,6 @@ let isRegistered = false;
 /** Global marker service reference (injected by activation) */
 let globalMarkerService: MonacoMarkerService | undefined;
 
-class MockKclEngineConnection {
-  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
-  public fireModelingCommandFromWasm(_id: string, _range: string, _command: string, _idToRange: string): never {
-    throw new Error('Mock execution should not require modeling commands');
-  }
-
-  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
-  public async sendModelingCommandFromWasm(
-    _id: string,
-    _range: string,
-    _command: string,
-    _idToRange: string,
-  ): Promise<Uint8Array<ArrayBuffer>> {
-    throw new Error('Mock execution should not require modeling commands');
-  }
-
-  public async startNewSession(): Promise<void> {
-    // Mock execution has no engine session state to reset.
-  }
-}
-
 /**
  * Get the symbol service instance.
  */
@@ -205,11 +184,8 @@ async function initializeLsp(monaco: typeof Monaco): Promise<void> {
   // Create diagnostics handler (uses marker service if available)
   const diagnosticsHandler = createDiagnosticsHandler(monaco, globalMarkerService);
 
-  // Initialize symbol service
+  // Initialize symbol service; it parses on the LSP worker's WASM once the client is ready.
   symbolService = getKclSymbolService();
-
-  // Initialize WASM for symbol service (async, non-blocking)
-  void initializeSymbolServiceWasm();
 
   // Create and initialize LSP client
   lspClient = new KclLspClient({
@@ -240,6 +216,9 @@ async function initializeLsp(monaco: typeof Monaco): Promise<void> {
   await lspClient.waitForReady();
 
   const client = lspClient;
+
+  // Symbol parsing and mock execution run on the worker's KCL WASM instance (D-RT-14).
+  void connectSymbolService(client);
 
   // Register Monaco language providers
   const languageId = codeLanguages.kcl;
@@ -316,24 +295,17 @@ async function initializeLsp(monaco: typeof Monaco): Promise<void> {
 }
 
 /**
- * Initialize WASM for the symbol service.
- * This loads the KCL WASM module and hooks it up to the symbol service.
+ * Connect the symbol service to the LSP worker's KCL WASM instance.
+ *
+ * The worker already instantiates the module for the language server, so the main thread no longer loads a
+ * second copy of it for symbol parsing and mock execution (D-RT-14).
  */
-async function initializeSymbolServiceWasm(): Promise<void> {
+async function connectSymbolService(client: KclLspClient): Promise<void> {
   if (!symbolService) {
     return;
   }
 
   try {
-    // Dynamically import the WASM module, path, and mock connections
-    const [wasmModule, wasmPathModule] = await Promise.all([
-      import('@taucad/kcl-wasm-lib'),
-      import('@taucad/kcl-wasm-lib/kcl.wasm?url'),
-    ]);
-
-    // Initialize WASM
-    await wasmModule.default(wasmPathModule.default);
-
     // Set up parse function with error resilience
     // The WASM parser returns [program, errors] even when there are parse errors,
     // but may throw on catastrophic failures (e.g., invalid UTF-8)
@@ -342,7 +314,7 @@ async function initializeSymbolServiceWasm(): Promise<void> {
 
     symbolService.setParseFunction(async (code: string) => {
       try {
-        const result = wasmModule.parse_wasm(code) as ParseResult;
+        const result = (await client.parseKcl(code)) as ParseResult;
         const allErrors = result[1];
         const errors = allErrors.filter((error) => error.severity !== 'Warning');
         const warnings = allErrors.filter((warning) => warning.severity === 'Warning');
@@ -358,24 +330,6 @@ async function initializeSymbolServiceWasm(): Promise<void> {
         throw error;
       }
     });
-
-    // Set up mock execution function for variable values
-    // Create a minimal mock file system that throws on file operations
-    // (mock execution for single-file hover/intellisense doesn't need real file access)
-    const mockEngine = new MockKclEngineConnection();
-    const mockFileSystem = {
-      async readFile(): Promise<Uint8Array<ArrayBuffer>> {
-        throw new Error('Mock file system does not support file reads');
-      },
-      exists: async (): Promise<boolean> => false,
-      getAllFiles: async (): Promise<string[]> => [],
-    };
-
-    // oxlint-disable-next-line @typescript-eslint/await-thenable -- WASM Context constructor may return thenable
-    const mockContext = (await new wasmModule.Context(mockEngine, mockFileSystem)) as {
-      // oxlint-disable-next-line max-params -- External WASM API contract
-      executeMock: (program: string, path: string, settings: string, capture: boolean) => Promise<unknown>;
-    };
 
     type MockExecutionResult = {
       variables: Partial<Record<string, KclValueView>>;
@@ -397,12 +351,7 @@ async function initializeSymbolServiceWasm(): Promise<void> {
 
     service.setMockExecuteFunction(async (program, path) => {
       try {
-        const result = (await mockContext.executeMock(
-          JSON.stringify(program),
-          path,
-          '{}',
-          false,
-        )) as MockExecutionResult;
+        const result = (await client.executeKclMock(JSON.stringify(program), path)) as MockExecutionResult;
 
         // Process stdlib from successful result if available and not already done
         const successSourceFiles = result.sourceFiles;
@@ -447,12 +396,12 @@ async function initializeSymbolServiceWasm(): Promise<void> {
       }
     });
 
-    log.debug(' Symbol service WASM initialized with mock execution');
+    log.debug(' Symbol service connected to the LSP worker');
 
     // Re-parse any documents that were opened before WASM was ready
     await symbolService.reparseAllDocuments();
   } catch (error) {
-    log.warn('Failed to initialize symbol service WASM:', error);
+    log.warn('Failed to connect the symbol service:', error);
   }
 }
 

@@ -18,6 +18,25 @@ const codeViewerClassName =
 /** Milliseconds. */
 const highlightThrottle = 150;
 
+/**
+ * Longest text, in UTF-16 code units, that is syntax highlighted (D-UI-28).
+ *
+ * Shiki's HTML is 5 to 15 times the source and is held beside it, so a large
+ * file shown highlighted cost several times its size. Longer text is shown
+ * plain.
+ */
+export const maxHighlightedCodeLength = 100_000;
+
+function PlainCode({ text, className }: { readonly text: string; readonly className?: ClassValue }): React.JSX.Element {
+  return (
+    <div className={cn(codeViewerClassName, className)}>
+      <pre className='m-0 bg-transparent p-0 leading-[1.45]'>
+        <code>{text}</code>
+      </pre>
+    </div>
+  );
+}
+
 export function CodeViewer({ text, language, className }: CodeViewerProps): React.JSX.Element {
   const { theme, isHighContrast } = useTheme();
   const [highlighter, setHighlighter] = useState<HighlighterCore | undefined>();
@@ -29,14 +48,8 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): Reac
     void loadHighlighter();
   }, []);
 
-  if (!highlighter) {
-    return (
-      <div className={cn(codeViewerClassName, className)}>
-        <pre className='m-0 bg-transparent p-0 leading-[1.45]'>
-          <code>{text}</code>
-        </pre>
-      </div>
-    );
+  if (!highlighter || text.length > maxHighlightedCodeLength) {
+    return <PlainCode text={text} className={className} />;
   }
 
   const resolvedLanguage = resolveHighlightLanguage(language);
@@ -87,13 +100,7 @@ function HighlightedCode({
   }, [highlighter, language, text, theme]);
 
   if (html === undefined) {
-    return (
-      <div className={cn(codeViewerClassName, className)}>
-        <pre className='m-0 bg-transparent p-0 leading-[1.45]'>
-          <code>{text}</code>
-        </pre>
-      </div>
-    );
+    return <PlainCode text={text} className={className} />;
   }
 
   return (

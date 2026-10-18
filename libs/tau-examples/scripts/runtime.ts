@@ -1,13 +1,14 @@
 import { basename, dirname, extname, resolve } from 'node:path';
+import { build123d } from '@taucad/build123d';
 import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
 import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
-import type { NativeKernelComposition } from '@taucad/native-kernels';
-import { composeNativeKernels, composeNativePlugins, defaultPayloadStore } from '@taucad/native-kernels/node';
+import { defaultPayloadStore, inspectNativeKernels, nativeDeploymentsOf } from '@taucad/native-process-core/store';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
+import { picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { smlib } from '@taucad/smlib';
@@ -15,62 +16,83 @@ import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
 import { readManagedPreparation } from '@taucad/runtime/preparation/node';
-import { defineRuntime } from '@taucad/runtime/worker';
+import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import { defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 
-/*
- * The native kernels whose closures this machine's payload store holds sealed (`tau prepare <kernel>`), read from
- * launch indexes only: nothing is downloaded, and an empty store composes none.
- */
-const nativeComposition: NativeKernelComposition = await composeNativeKernels({
-  store: defaultPayloadStore(),
-  managed: readManagedPreparation(process.env),
-});
-
-/*
- * Per-host omission: Build123d's examples ship no checked-in thumbnails yet, so the example-thumbnail runtime leaves
- * it out even when it is prepared; the workspace runtime composes it.
- */
-const exampleNativeKernels = nativeComposition.kernels.filter(({ kernel }) => kernel !== 'build123d');
-
-const examplePlugins = async (native: NativeKernelComposition['kernels']) => [
-  replicad(),
-  opencascade(),
-  manifold(),
-  picovoxel(),
-  smlib(),
-  jscad(),
-  openrscad(),
-  esbuild(),
-  image(),
-  ...(await composeNativePlugins(native)),
-  tscircuit(),
-];
 const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()];
+
+/*
+ * The native kernels are listed like any other: each binds its own sealed closure from this machine's payload store
+ * when it initialises (`tau prepare <kernel>`) and refuses with `KERNEL_NOT_PREPARED` until then. Per-host omission:
+ * Build123d's examples ship no checked-in thumbnails yet, so only the workspace runtime lists it.
+ */
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
 export const exampleRuntime = defineRuntime({
-  plugins: await examplePlugins(exampleNativeKernels),
+  plugins: [
+    replicad(),
+    opencascade(),
+    manifold(),
+    picovoxel(),
+    smlib(),
+    jscad(),
+    openrscad(),
+    esbuild(),
+    image(),
+    picogk(),
+    tscircuit(),
+  ],
   middleware: exampleMiddleware(),
 });
 
-/** The example kernels plus every native kernel the payload store holds: regenerates thumbnails for user projects. @public */
+/** The example kernels plus Build123d: regenerates thumbnails for user projects. @public */
 export const workspaceRuntime = defineRuntime({
-  plugins: await examplePlugins(nativeComposition.kernels),
+  plugins: [
+    replicad(),
+    opencascade(),
+    manifold(),
+    picovoxel(),
+    smlib(),
+    jscad(),
+    openrscad(),
+    esbuild(),
+    image(),
+    build123d(),
+    picogk(),
+    tscircuit(),
+  ],
   middleware: exampleMiddleware(),
 });
 
-/** Kernel ids the workspace runtime can evaluate. @public */
-export const workspaceKernelIds = new Set(workspaceRuntime.kernels.map((kernel) => kernel.id));
+/**
+ * The kernels a runtime can evaluate on this machine: every kernel it lists, less each native kernel whose closure the
+ * payload store does not hold sealed. Read from launch indexes only: nothing is downloaded.
+ * @param runtime - The runtime.
+ * @returns The runnable kernel ids, in list order.
+ */
+const runnableKernelIds = async (runtime: AnyRuntimeDefinition): Promise<ReadonlySet<string>> => {
+  const resolved = await resolveRuntimeDefinition(runtime, undefined);
+  const inspection = await inspectNativeKernels({
+    deployments: nativeDeploymentsOf(resolved).map(({ deployment }) => deployment),
+    store: defaultPayloadStore(),
+    managed: readManagedPreparation(process.env),
+  });
+  const unprepared = new Set(inspection.filter(({ answer }) => answer.status !== 'ready').map(({ kernel }) => kernel));
+  return new Set(resolved.kernels.map(({ id }) => id).filter((id) => !unprepared.has(id)));
+};
+
+/** Kernel ids the workspace runtime can evaluate on this machine. @public */
+export const workspaceKernelIds = await runnableKernelIds(workspaceRuntime);
 
 /** Create an isolated Node client rooted at one user project. @public */
 export const createWorkspaceRuntimeClient = async (
   projectPath: string,
 ): Promise<RuntimeClient<typeof workspaceRuntime>> => createNodeClient({ runtime: workspaceRuntime, projectPath });
 
-/** Kernel ids supported by the example-thumbnail runtime. @public */
-export const exampleKernelIds = new Set(exampleRuntime.kernels.map((kernel) => kernel.id));
+/** Kernel ids the example-thumbnail runtime can evaluate on this machine. @public */
+export const exampleKernelIds = await runnableKernelIds(exampleRuntime);
 
 /** Create an isolated Node client for one example-corpus operation. @public */
 export const createExampleRuntimeClient = async (projectPath: string): Promise<RuntimeClient<typeof exampleRuntime>> =>

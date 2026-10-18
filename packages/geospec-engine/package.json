@@ -85,7 +85,9 @@
     "geospec-engine": "catalog:"
   },
   "devDependencies": {
-    "@taucad/native-kernels": "workspace:*",
+    "@taucad/build123d": "workspace:*",
+    "@taucad/native-process-core": "workspace:*",
+    "@taucad/picogk": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",
     "vitest": "catalog:"
@@ -94,10 +96,18 @@
     "prepack": "node scripts/generate-provenance.mjs"
   },
   "peerDependencies": {
-    "@taucad/native-kernels": "^0.1.0-beta.0"
+    "@taucad/build123d": "^0.1.0-beta.0",
+    "@taucad/native-process-core": "^0.1.0-beta.0",
+    "@taucad/picogk": "^0.1.0-beta.0"
   },
   "peerDependenciesMeta": {
-    "@taucad/native-kernels": {
+    "@taucad/build123d": {
+      "optional": true
+    },
+    "@taucad/native-process-core": {
+      "optional": true
+    },
+    "@taucad/picogk": {
       "optional": true
     }
   }

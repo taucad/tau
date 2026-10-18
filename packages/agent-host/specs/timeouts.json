@@ -845,6 +845,14 @@
       "owner": "tau mcp"
     },
     {
+      "id": "E37",
+      "bound": "tau runtime describe: the runtime worker thread must report its resolved kernels and native deployments within 120 s, else prepare/describe fails",
+      "site": "packages/cli/src/native-kernels.ts",
+      "token": "describeTimeout",
+      "class": "Liveness",
+      "owner": "tau prepare"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

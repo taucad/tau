@@ -95,6 +95,7 @@
     "./graphics/three/utils/section-cap-polygon-types": "./src/graphics/three/utils/section-cap-polygon-types.ts",
     "./graphics/three/utils/section-cap-region": "./src/graphics/three/utils/section-cap-region.ts",
     "./graphics/three/utils/section-cap-render-parts": "./src/graphics/three/utils/section-cap-render-parts.ts",
+    "./graphics/three/utils/section-cap-stencil-debug": "./src/graphics/three/utils/section-cap-stencil-debug.ts",
     "./graphics/three/utils/three-shader-debug": "./src/graphics/three/utils/three-shader-debug.ts",
     "./graphics/three/utils/tsl-node-graph-snapshot": "./src/graphics/three/utils/tsl-node-graph-snapshot.ts",
     "./hooks/use-graphics": "./src/hooks/use-graphics.tsx",
@@ -424,6 +425,11 @@
         "types": "./dist/graphics/three/utils/section-cap-render-parts.d.mts",
         "import": "./dist/graphics/three/utils/section-cap-render-parts.mjs",
         "default": "./dist/graphics/three/utils/section-cap-render-parts.mjs"
+      },
+      "./graphics/three/utils/section-cap-stencil-debug": {
+        "types": "./dist/graphics/three/utils/section-cap-stencil-debug.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-stencil-debug.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-stencil-debug.mjs"
       },
       "./graphics/three/utils/three-shader-debug": {
         "types": "./dist/graphics/three/utils/three-shader-debug.d.mts",

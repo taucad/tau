@@ -2,32 +2,21 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
-type SectionCapPerformanceFrame = Readonly<{
+/** The bridge's stencil cap counts: each depends on the cut pieces and the sources' meshes, never on triangles. */
+type SectionCapStencilDiagnostics = Readonly<{
   sequence: number;
-  timestamp: number;
-  topologyKey?: string;
-  styleKey?: string;
-  baseCapTopologyKey?: string;
-  baseCapFrameTopologyKey?: string;
-  baseCapIsCurrent?: boolean;
-  exactDiagnosticTopologyKey?: string;
-  exactDiagnosticIsCurrent?: boolean;
-  committedTopologyKey?: string;
-  pendingTopologyKey?: string;
-  pendingReason?: string;
-  timings: Record<string, number>;
-  counters: Record<string, number>;
-  booleanOperations: Record<string, { count: number; total: number }>;
-  packing: Record<string, number>;
-}>;
-
-type SectionCapPerformanceDiagnostics = Readonly<{
-  latestFrame: SectionCapPerformanceFrame;
-  history: readonly SectionCapPerformanceFrame[];
-  aggregates: {
-    frameTotal: { count: number; p50: number; p95: number; max: number };
-    phases: Record<string, { count: number; p50: number; p95: number; max: number }>;
-  };
+  latest:
+    | Readonly<{
+        pieceCount: number;
+        drawnPieceCount: number;
+        crossingSourceCount: number;
+        overlapCandidateSourceCount: number;
+        outlineSourceCount: number;
+        meshDrawCount: number;
+        polygonDrawCount: number;
+        submitMilliseconds: number;
+      }>
+    | undefined;
 }>;
 
 type SectionPlaneCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
@@ -43,7 +32,7 @@ type SectionViewBridgeWindow = Window & {
       fov?: number;
       zoom?: number;
     }): void;
-    getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDiagnostics | undefined;
+    getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
     getRenderFrame(): { metersPerRenderUnit: number };
   };
 };
@@ -150,32 +139,31 @@ const driveSectionView = async (fixture: SectionCapDiagnosticsFixture, offset: n
   );
 };
 
-const getPerformanceDiagnostics = async (): Promise<SectionCapPerformanceDiagnostics | undefined> =>
+const getPerformanceDiagnostics = async (): Promise<SectionCapStencilDiagnostics | undefined> =>
   target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
 
-    return bridge.getSectionCapPerformanceDiagnostics();
+    return bridge.getSectionCapStencilDiagnostics();
   });
 
 const driveAndReadPerformance = async (
   fixture: SectionCapDiagnosticsFixture,
   offset: number,
-): Promise<SectionCapPerformanceDiagnostics> => {
+): Promise<SectionCapStencilDiagnostics> => {
   const previousSequence = await target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    return bridge?.getSectionCapPerformanceDiagnostics()?.latestFrame.sequence ?? 0;
+    return bridge?.getSectionCapStencilDiagnostics()?.sequence ?? 0;
   });
 
   await driveSectionView(fixture, offset);
-  // Settled: the worker answered these cuts, or no cap reaches the worker because the plane misses the solids.
+  // A cap frame drew these cuts.
   await target.waitFor(
     (sequence) => {
       const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-      const latestFrame = bridge?.getSectionCapPerformanceDiagnostics()?.latestFrame;
-      return (latestFrame?.sequence ?? 0) > sequence && latestFrame?.pendingReason === 'none';
+      return (bridge?.getSectionCapStencilDiagnostics()?.sequence ?? 0) > sequence;
     },
     previousSequence,
     { timeout: 30_000 },
@@ -186,56 +174,33 @@ const driveAndReadPerformance = async (
   return diagnostics!;
 };
 
-const expectFiniteNonNegativeValues = (values: Record<string, number>, label: string): void => {
-  for (const [key, value] of Object.entries(values)) {
+const expectStencilShape = (diagnostics: SectionCapStencilDiagnostics, label: string): void => {
+  expect(diagnostics.sequence, `${label}: sequence`).toBeGreaterThan(0);
+  expect(diagnostics.latest, `${label}: latest frame`).toBeDefined();
+  for (const [key, value] of Object.entries(diagnostics.latest ?? {})) {
     expect(Number.isFinite(value), `${label}.${key} should be finite`).toBe(true);
     expect(value, `${label}.${key} should be non-negative`).toBeGreaterThanOrEqual(0);
-  }
-};
-
-const expectPerformanceShape = (diagnostics: SectionCapPerformanceDiagnostics, label: string): void => {
-  expect(diagnostics.history.length, `${label}: history should not be empty`).toBeGreaterThan(0);
-  expect(diagnostics.aggregates.frameTotal.count, `${label}: frame aggregate count`).toBe(diagnostics.history.length);
-  expect(diagnostics.latestFrame.sequence, `${label}: latest sequence`).toBeGreaterThan(0);
-  expect(diagnostics.latestFrame.topologyKey, `${label}: topology key`).toEqual(expect.any(String));
-  expect(diagnostics.latestFrame.styleKey, `${label}: style key`).toEqual(expect.any(String));
-  expect(diagnostics.latestFrame.baseCapTopologyKey, `${label}: base cap topology key`).toEqual(expect.any(String));
-  expect(diagnostics.latestFrame.baseCapFrameTopologyKey, `${label}: base cap frame topology key`).toEqual(
-    expect.any(String),
-  );
-  expect(diagnostics.latestFrame.baseCapIsCurrent, `${label}: base cap currentness`).toBe(true);
-  expect(diagnostics.latestFrame.exactDiagnosticIsCurrent, `${label}: exact diagnostic currentness`).toEqual(
-    expect.any(Boolean),
-  );
-  expect(diagnostics.latestFrame.pendingReason, `${label}: pending reason`).toEqual(expect.any(String));
-  expectFiniteNonNegativeValues(diagnostics.latestFrame.timings, `${label}.timings`);
-  expectFiniteNonNegativeValues(diagnostics.latestFrame.counters, `${label}.counters`);
-  expectFiniteNonNegativeValues(diagnostics.latestFrame.packing, `${label}.packing`);
-  for (const [operation, stats] of Object.entries(diagnostics.latestFrame.booleanOperations)) {
-    expect(stats.count, `${label}.${operation}.count`).toBeGreaterThanOrEqual(0);
-    expect(Number.isFinite(stats.total), `${label}.${operation}.total`).toBe(true);
-    expect(stats.total, `${label}.${operation}.total`).toBeGreaterThanOrEqual(0);
   }
 };
 
 type WriteDiagnosticsOptions = Readonly<{
   backend: string;
   diagnostics: Readonly<{
-    overlap: readonly SectionCapPerformanceDiagnostics[];
-    noOverlap: readonly SectionCapPerformanceDiagnostics[];
+    overlap: readonly SectionCapStencilDiagnostics[];
+    noOverlap: readonly SectionCapStencilDiagnostics[];
   }>;
   fixture: SectionCapDiagnosticsFixture;
 }>;
 
 const writeDiagnostics = async ({ backend, diagnostics, fixture }: WriteDiagnosticsOptions): Promise<void> => {
   await target.writeArtifact(
-    `section-cap-performance-diagnostics-${fixture.id}-${backend}.json`,
+    `section-cap-stencil-diagnostics-${fixture.id}-${backend}.json`,
     `${JSON.stringify(diagnostics, null, 2)}\n`,
   );
 };
 
 type PerformanceSweepOptions = Readonly<{
-  diagnostics?: readonly SectionCapPerformanceDiagnostics[];
+  diagnostics?: readonly SectionCapStencilDiagnostics[];
   fixture: SectionCapDiagnosticsFixture;
   index?: number;
   offsets: readonly number[];
@@ -246,7 +211,7 @@ const collectPerformanceSweep = async ({
   fixture,
   index = 0,
   offsets,
-}: PerformanceSweepOptions): Promise<SectionCapPerformanceDiagnostics[]> => {
+}: PerformanceSweepOptions): Promise<SectionCapStencilDiagnostics[]> => {
   const offset = offsets[index];
   if (offset === undefined) {
     return [...diagnostics];
@@ -283,35 +248,19 @@ const collectFixtureDiagnostics = async ({ backend, fixture }: FixtureDiagnostic
   await writeDiagnostics({ backend, diagnostics: { overlap, noOverlap }, fixture });
 
   for (const [index, diagnostics] of overlap.entries()) {
-    expectPerformanceShape(diagnostics, `${backend}.${fixture.id}.overlap[${index}]`);
+    expectStencilShape(diagnostics, `${backend}.${fixture.id}.overlap[${index}]`);
   }
   for (const [index, diagnostics] of noOverlap.entries()) {
-    expectPerformanceShape(diagnostics, `${backend}.${fixture.id}.noOverlap[${index}]`);
+    expectStencilShape(diagnostics, `${backend}.${fixture.id}.noOverlap[${index}]`);
   }
 
   expect(
-    overlap.some((diagnostics) => (diagnostics.latestFrame.counters['positiveAreaPairCount'] ?? 0) > 0),
-    `${backend}.${fixture.id}: overlap sweep should include positive-area overlap work`,
+    overlap.some((diagnostics) => (diagnostics.latest?.overlapCandidateSourceCount ?? 0) > 0),
+    `${backend}.${fixture.id}: overlap sweep should mark overlap candidates`,
   ).toBe(true);
   expect(
-    overlap.some((diagnostics) => (diagnostics.latestFrame.booleanOperations['intersection']?.count ?? 0) > 0),
-    `${backend}.${fixture.id}: overlap sweep should report exact intersection calls`,
-  ).toBe(true);
-  expect(
-    overlap.some((diagnostics) => (diagnostics.latestFrame.packing['packedVertexCount'] ?? 0) > 0),
-    `${backend}.${fixture.id}: overlap sweep should report packed cap vertices`,
-  ).toBe(true);
-  expect(
-    overlap.every((diagnostics) => (diagnostics.latestFrame.counters['styleInvalidatedWorkerRequestCount'] ?? 0) === 0),
-    `${backend}.${fixture.id}: style changes should not invalidate topology worker requests`,
-  ).toBe(true);
-  expect(
-    overlap.every((diagnostics) => diagnostics.latestFrame.pendingReason !== 'style-change'),
-    `${backend}.${fixture.id}: style changes should not be reported as pending exact topology`,
-  ).toBe(true);
-  expect(
-    noOverlap.every((diagnostics) => diagnostics.latestFrame.counters['positiveAreaPairCount'] === 0),
-    `${backend}.${fixture.id}: no-overlap sweep should report zero positive-area pairs`,
+    overlap.every((diagnostics) => (diagnostics.latest?.drawnPieceCount ?? 0) > 0),
+    `${backend}.${fixture.id}: every overlap offset should draw a cap`,
   ).toBe(true);
 };
 

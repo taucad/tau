@@ -1,8 +1,8 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@earendil-works/pi-ai';
-import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
 import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#waist/ports.js';
+import { encodeBase64 } from '#harness/base64.js';
 import { EventLogError } from '#log/event-log-error.js';
 import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
 import type {
@@ -511,7 +511,7 @@ export const materializeAttachments = async (
       absent.push(reference.path);
       return [];
     }
-    const data = uint8ArrayToBase64(bytes);
+    const data = encodeBase64(bytes);
     if (reference.mimeType.startsWith('image/')) {
       return [{ type: 'image', mimeType: reference.mimeType, data }];
     }

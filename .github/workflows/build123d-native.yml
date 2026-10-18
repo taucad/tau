@@ -1,0 +1,107 @@
+name: Build123d native qualification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build123d-native.yml'
+      - '.github/actions/setup-nx/**'
+      - 'packages/plugins/build123d/**'
+      - 'libs/tau-examples/src/kernels/build123d/planetary-gear-system/**'
+      - 'packages/core/geometry/**'
+      - 'packages/kinematics/**'
+      - 'packages/core/native-process/**'
+      - 'packages/runtime/src/preparation/**'
+      - 'apps/desktop/resources/python/manifest.json'
+      - 'apps/desktop/scripts/prepare-build123d-python.mts'
+      - 'apps/desktop/scripts/build123d-wheel-integrity.mts'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: build123d-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  native:
+    name: Build123d native (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: windows-latest
+            target: win32-x64
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Setup Python for the dependency installer
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Setup Linux sandbox prerequisites
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Check native target
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) process.exit(1)'
+      - name: Seal this native target and record its golden receipt
+        if: runner.os != 'Windows'
+        run: pnpm nx run build123d:golden-tau-plugin --skip-nx-cache
+      - name: Retain the receipt sealed by this runner
+        if: runner.os != 'Windows'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: |
+          case "$NATIVE_TARGET" in linux-*) NATIVE_TARGET="${NATIVE_TARGET}-glibc" ;; esac
+          mkdir -p out/reports/coverage/packages/plugins/build123d-python
+          jq -e --arg target "$NATIVE_TARGET" 'if .[$target] == null then error("Missing native receipt") else {($target): .[$target]} end' \
+            packages/plugins/build123d/tau-plugin.golden.json \
+            > "out/reports/coverage/packages/plugins/build123d-python/golden-${NATIVE_TARGET}.json"
+      - name: Test the sealed registry Python runtime
+        if: runner.os != 'Windows'
+        run: pnpm nx run build123d:test-python --skip-nx-cache
+      - name: Prepare and test the Windows desktop Python runtime
+        if: runner.os == 'Windows'
+        run: pnpm nx run build123d:test-python-desktop --skip-nx-cache
+      - name: Qualify the native worker subprocess and sandbox
+        if: runner.os != 'Windows'
+        run: pnpm nx test build123d --watch=false --coverage --maxWorkers=1 --skip-nx-cache
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build123d-native-${{ matrix.target }}
+          path: |
+            out/reports/coverage/packages/plugins/build123d-python/
+            out/reports/coverage/packages/plugins/build123d/
+            apps/desktop/resources/python/${{ matrix.target }}/tau-runtime-manifest.json
+            apps/desktop/resources/python/${{ matrix.target }}/tau-python-sbom.cdx.json
+          if-no-files-found: warn

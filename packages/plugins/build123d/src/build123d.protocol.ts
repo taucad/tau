@@ -164,12 +164,32 @@ export const build123dBuildSchema = z.object({
 export const build123dArtifactSchema = z.object({
   artifactPath: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
+  mechanism: z.unknown().optional(),
+  mechanismIntent: z
+    .object({
+      connections: z.array(z.object({ playbackCoordinates: z.record(z.string(), z.string()).optional() })),
+      couplings: z.unknown().optional(),
+      animations: z.unknown().optional(),
+    })
+    .optional(),
+  mechanismDiagnostics: z
+    .array(
+      z.object({
+        code: z.string(),
+        path: z.string(),
+        message: z.string(),
+        recovery: z.string(),
+      }),
+    )
+    .optional(),
 });
 
+/** Native output artifact and optional preserved-mechanism diagnostics. */
+export type Build123dArtifact = z.infer<typeof build123dArtifactSchema>;
 /**
  * What the worker answers `mesh` with. Over the request's `maxTriangles` it writes no GLB and answers the counts alone.
  */
-export const build123dMeshSchema = z.object({
+export const build123dMeshSchema = build123dArtifactSchema.partial().extend({
   artifactPath: z.string().min(1).optional(),
   byteLength: z.number().int().nonnegative().optional(),
   triangles: z.number().int().nonnegative(),

@@ -17,9 +17,25 @@ class Vertex(Shape)
   # volume - the volume of this Vertex, which is always zero
   volume: float
 
-  # Returns the right type of wrapper, given a OCCT object
-  # build123d.topology.zero_d.Vertex.cast (method)
-  cast(obj: TopoDS_Shape) -> Self
+  # mass - the mass of this Vertex, which is always zero
+  # build123d.topology.zero_d.Vertex.mass (method)
+  mass(mass_unit: Unit = Unit.G, length_unit: Unit = Unit.MM) -> float
+
+  # How the shape this vertex was selected from sits around it
+  # Remarks: Selected through a face, as ``face.vertices()`` or ``face.edges()[0].vertices()`` does, the vertex is a corner of that face: ``CONVEX`` at the corner of a plate, ``CONCAVE`` at the corner of a slot or the step in an L, ``SMOOTH`` where two edges meet in line. The corner is read in the face's own parameters, so a corner on a curved face classifies the same way as one on a flat face. Selected straight off a solid or shell, the vertex is classified by the edges meeting there: ``CONVEX`` where every crease is convex, as at the corner of a box, ``CONCAVE`` where every crease is concave, as at the bottom corner of a pocket, and ``SADDLE`` where both kinds meet, as at the inner corner of a step. Smooth edges do not count. See :class:`~build_enums.Convexity`.
+  # Throws: ValueError: the vertex has no ``topo_parent``, or its face or edges
+  # Throws: cannot be classified - a seam vertex has no single corner in
+  # Throws: its face's parameters, for instance
+  convexity: Convexity
+
+  # The X coordinate of this Vertex, including its current Location
+  X: float
+
+  # The Y coordinate of this Vertex, including its current Location
+  Y: float
+
+  # The Z coordinate of this Vertex, including its current Location
+  Z: float
 
   # extrude - invalid operation for Vertex
   # build123d.topology.zero_d.Vertex.extrude (method)
@@ -51,10 +67,6 @@ class Vertex(Shape)
   # build123d.topology.zero_d.Vertex.split (method)
   split(tool: TrimmingTool, keep: Keep = Keep.TOP)
 
-  # Return vertex as three tuple of floats
-  # build123d.topology.zero_d.Vertex.to_tuple (method)
-  to_tuple() -> tuple[float, float, float]
-
   # Apply affine transform without changing type
   # Remarks: Transforms a copy of this Vertex by the provided 3D affine transformation matrix. Note that not all transformation are supported - primarily designed for translation and rotation. See :transform_geometry: for more comprehensive transformations. Returns: Vertex: copy of transformed shape with all objects keeping their type
   # build123d.topology.zero_d.Vertex.transform_shape (method)
@@ -67,7 +79,7 @@ class Vertex(Shape)
 
   # vertices - all the vertices in this Shape
   # build123d.topology.zero_d.Vertex.vertices (method)
-  vertices() -> ShapeList[Vertex]
+  vertices(select: Select = Select.ALL) -> ShapeList[Vertex]
 
 # Category: zero_d
 # Given two edges, find the common vertex

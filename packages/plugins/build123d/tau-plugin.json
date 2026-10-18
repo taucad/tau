@@ -54,46 +54,60 @@
             "unpackedByteLength": 80904
           },
           {
-            "name": "build123d",
-            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
-            "byteLength": 368081,
+            "name": "bd-materials",
+            "integrity": "sha256-J6Q7p15OsRXAOwo84YjuhIIijQGZZdLn2JL/nArTh0I=",
+            "byteLength": 74803,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 1444029
+            "unpackedByteLength": 311049
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-F38RTl8FFAVBiRNDRtOGxwBASPjlhDC5uEt0oE+8lP4=",
+            "byteLength": 387753,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1480661
           },
           {
             "name": "cadquery-ocp-novtk",
-            "integrity": "sha256-IoeBLyE69wIPi7xpsH1gOeUp9eDhVMAZIiGv8/2sZnY=",
-            "byteLength": 62295929,
+            "integrity": "sha256-czyXayEC2WhOTNP3+62KuocmQmMi8rHVR6XMas6w1vs=",
+            "byteLength": 63040335,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/f7/80/dc46dac2ebb6ae6bcce27bc7f717438b99897199be25323cda559a76e0a1/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
+                "https://files.pythonhosted.org/packages/65/4d/a2536f16fc299c51b8b196fcca010a0720dd9080eee0fdf90f3653871815/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_arm64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 227882951
+            "unpackedByteLength": 232502027
           },
           {
             "name": "cadquery-ocp-proxy",
-            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
-            "byteLength": 3322,
+            "integrity": "sha256-1qaQmnPSMAykWB/3YszwE3mTrHXFei3ILhK/+joStoA=",
+            "byteLength": 3249,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 5915
+            "unpackedByteLength": 5412
           },
           {
             "name": "certifi",
@@ -150,6 +164,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 749537
+          },
+          {
+            "name": "dataclasses-json",
+            "integrity": "sha256-Db8z8myNUwW+/WGznSs0FOikB77cKDTeqbjWQmZvtAo=",
+            "byteLength": 28686,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 92719
+          },
+          {
+            "name": "deprecated",
+            "integrity": "sha256-WCBM9Kf2Jw1UevXCeO56a7VgRaSz2EQaHNEWYPQbeTk=",
+            "byteLength": 21912,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68879
           },
           {
             "name": "executing",
@@ -278,6 +320,20 @@
             "unpackedByteLength": 8669900
           },
           {
+            "name": "marshmallow",
+            "integrity": "sha256-AT+oo8TCdsJNJthM6TTclk4qp5Q0Wg+MflpxkUgsinM=",
+            "byteLength": 50964,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 197850
+          },
+          {
             "name": "matplotlib-inline",
             "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
             "byteLength": 9534,
@@ -304,6 +360,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 1950197
+          },
+          {
+            "name": "mypy-extensions",
+            "integrity": "sha256-G+TMzbDySCM3xHQ+YEId46NWzZdQirrdV9R0A+lPVQU=",
+            "byteLength": 4963,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 10550
           },
           {
             "name": "narwhals",
@@ -335,31 +405,45 @@
           },
           {
             "name": "ocp-gordon",
-            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
-            "byteLength": 54077,
+            "integrity": "sha256-XfFMOAMtzKWCuniOU/jS6LOaZGpep4agMJ6ElLMGGoE=",
+            "byteLength": 52347,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 205203
+            "unpackedByteLength": 199150
           },
           {
             "name": "ocpsvg",
-            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
-            "byteLength": 20847,
+            "integrity": "sha256-pHa7SLay4tnx86Y1b95Xk3PWgWGLOaatnJmoCKAROZc=",
+            "byteLength": 20946,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 71116
+            "unpackedByteLength": 71490
+          },
+          {
+            "name": "packaging",
+            "integrity": "sha256-1xk/fI5Ok/RE/eAmK/kK8w4W+grQrUTLVTyHM5sjzRw=",
+            "byteLength": 129956,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 499179
           },
           {
             "name": "parso",
@@ -388,6 +472,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 191354
+          },
+          {
+            "name": "pillow",
+            "integrity": "sha256-VrJTNvUCtu0C6In07OiUpyYS/ohYiaboxMgCOf9uX18=",
+            "byteLength": 4695402,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/71/43/905a14a8b17fdb1ccb58d282454490662d2cb89a6bfec26af6d3520da5ec/pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 13178885
+          },
+          {
+            "name": "platformdirs",
+            "integrity": "sha256-Pbz0zXCPIc+HbE6qkOWEErxPAz2HFD9BsUk/93wlt+E=",
+            "byteLength": 32724,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 152393
           },
           {
             "name": "prompt-toolkit",
@@ -444,6 +556,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygltflib",
+            "integrity": "sha256-QdM0nFnc8Vhvrq7inJZ74HrCv3zs24ritSfaHyWv2qw=",
+            "byteLength": 27557,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 96776
           },
           {
             "name": "pygments",
@@ -600,6 +726,20 @@
             "unpackedByteLength": 66556
           },
           {
+            "name": "threejs-materials",
+            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
+            "byteLength": 89793013,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 90053685
+          },
+          {
             "name": "traitlets",
             "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
             "byteLength": 86211,
@@ -640,6 +780,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 182767
+          },
+          {
+            "name": "typing-inspect",
+            "integrity": "sha256-nub8WQYjEe+FR1lqtrlV4biqRiQthUv8ePT2sO/zX58=",
+            "byteLength": 8827,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 31427
           },
           {
             "name": "urllib3",
@@ -684,9 +838,23 @@
             "unpackedByteLength": 45995
           },
           {
+            "name": "wrapt",
+            "integrity": "sha256-q2230qGNNmzFfCIoJTzyZEMZCroKbdCTmzweisbiniw=",
+            "byteLength": 106190,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/01/b9/41642877fe741db56d240833c8822188b663c4c5d52beb087964774035d4/wrapt-2.5.1-cp313-cp313-macosx_11_0_arm64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 507170
+          },
+          {
             "name": "worker.py",
-            "integrity": "sha256-XK4Q5rjSo/dkKv1SvXyt0oGXDpaUgf1V0H9STVpDZkw=",
-            "byteLength": 50251,
+            "integrity": "sha256-m7TLpKxCTIVy3kpSbJGegtuqEE06M7nvQW3ujZLtVEs=",
+            "byteLength": 51509,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -696,8 +864,8 @@
           },
           {
             "name": "analyzer.py",
-            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
-            "byteLength": 24322,
+            "integrity": "sha256-Y+pXyESCFyxScIf3wBSlyEgyEkOX0ljNOxIblXdKixQ=",
+            "byteLength": 24701,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -707,12 +875,34 @@
           },
           {
             "name": "glb.py",
-            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
-            "byteLength": 9907,
+            "integrity": "sha256-H8i6ajq+meKl8oSLF12xTBO4tHXiycWojAOTHWBdiHc=",
+            "byteLength": 11861,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "native_materials.py",
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/native_materials.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "mechanisms.py",
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/mechanisms.py"
             },
             "destination": "tau-worker"
           }
@@ -770,46 +960,60 @@
             "unpackedByteLength": 80904
           },
           {
-            "name": "build123d",
-            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
-            "byteLength": 368081,
+            "name": "bd-materials",
+            "integrity": "sha256-J6Q7p15OsRXAOwo84YjuhIIijQGZZdLn2JL/nArTh0I=",
+            "byteLength": 74803,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 1444029
+            "unpackedByteLength": 311049
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-F38RTl8FFAVBiRNDRtOGxwBASPjlhDC5uEt0oE+8lP4=",
+            "byteLength": 387753,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1480661
           },
           {
             "name": "cadquery-ocp-novtk",
-            "integrity": "sha256-4padISm/IQZ/RJUxF8wY8UJvWqyu2LzAdCKOtQ8xebI=",
-            "byteLength": 67126917,
+            "integrity": "sha256-dXc5MhrmuZ+NRUEijOVYTLLtttiX6QodEFYia5El00s=",
+            "byteLength": 67881048,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/97/55/93f76eb2a1874b2d51c98e6cad1b55ae7562fc9b6eb36365e3b0597d25c4/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl"
+                "https://files.pythonhosted.org/packages/e5/bb/090f501d57bbe1b64efc2bc0ec260b3283bdf3658b3db3e4af49cd368495/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 225560950
+            "unpackedByteLength": 229804331
           },
           {
             "name": "cadquery-ocp-proxy",
-            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
-            "byteLength": 3322,
+            "integrity": "sha256-1qaQmnPSMAykWB/3YszwE3mTrHXFei3ILhK/+joStoA=",
+            "byteLength": 3249,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 5915
+            "unpackedByteLength": 5412
           },
           {
             "name": "certifi",
@@ -866,6 +1070,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 732763
+          },
+          {
+            "name": "dataclasses-json",
+            "integrity": "sha256-Db8z8myNUwW+/WGznSs0FOikB77cKDTeqbjWQmZvtAo=",
+            "byteLength": 28686,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 92719
+          },
+          {
+            "name": "deprecated",
+            "integrity": "sha256-WCBM9Kf2Jw1UevXCeO56a7VgRaSz2EQaHNEWYPQbeTk=",
+            "byteLength": 21912,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68879
           },
           {
             "name": "executing",
@@ -994,6 +1226,20 @@
             "unpackedByteLength": 8669900
           },
           {
+            "name": "marshmallow",
+            "integrity": "sha256-AT+oo8TCdsJNJthM6TTclk4qp5Q0Wg+MflpxkUgsinM=",
+            "byteLength": 50964,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 197850
+          },
+          {
             "name": "matplotlib-inline",
             "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
             "byteLength": 9534,
@@ -1020,6 +1266,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 1950197
+          },
+          {
+            "name": "mypy-extensions",
+            "integrity": "sha256-G+TMzbDySCM3xHQ+YEId46NWzZdQirrdV9R0A+lPVQU=",
+            "byteLength": 4963,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 10550
           },
           {
             "name": "narwhals",
@@ -1051,31 +1311,45 @@
           },
           {
             "name": "ocp-gordon",
-            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
-            "byteLength": 54077,
+            "integrity": "sha256-XfFMOAMtzKWCuniOU/jS6LOaZGpep4agMJ6ElLMGGoE=",
+            "byteLength": 52347,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 205203
+            "unpackedByteLength": 199150
           },
           {
             "name": "ocpsvg",
-            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
-            "byteLength": 20847,
+            "integrity": "sha256-pHa7SLay4tnx86Y1b95Xk3PWgWGLOaatnJmoCKAROZc=",
+            "byteLength": 20946,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 71116
+            "unpackedByteLength": 71490
+          },
+          {
+            "name": "packaging",
+            "integrity": "sha256-1xk/fI5Ok/RE/eAmK/kK8w4W+grQrUTLVTyHM5sjzRw=",
+            "byteLength": 129956,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 499179
           },
           {
             "name": "parso",
@@ -1104,6 +1378,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 191354
+          },
+          {
+            "name": "pillow",
+            "integrity": "sha256-XS/Q+mtdnR3kFQYDY0M/KNqLFSbBwSkCBDXhhnlLN5U=",
+            "byteLength": 5308094,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/34/46/6c717baadcd62bc8ed51d238d521ab651eaa74838291bda1f86fe1f864c9/pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 14155523
+          },
+          {
+            "name": "platformdirs",
+            "integrity": "sha256-Pbz0zXCPIc+HbE6qkOWEErxPAz2HFD9BsUk/93wlt+E=",
+            "byteLength": 32724,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 152393
           },
           {
             "name": "prompt-toolkit",
@@ -1160,6 +1462,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygltflib",
+            "integrity": "sha256-QdM0nFnc8Vhvrq7inJZ74HrCv3zs24ritSfaHyWv2qw=",
+            "byteLength": 27557,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 96776
           },
           {
             "name": "pygments",
@@ -1316,6 +1632,20 @@
             "unpackedByteLength": 66556
           },
           {
+            "name": "threejs-materials",
+            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
+            "byteLength": 89793013,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 90053685
+          },
+          {
             "name": "traitlets",
             "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
             "byteLength": 86211,
@@ -1356,6 +1686,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 182767
+          },
+          {
+            "name": "typing-inspect",
+            "integrity": "sha256-nub8WQYjEe+FR1lqtrlV4biqRiQthUv8ePT2sO/zX58=",
+            "byteLength": 8827,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 31427
           },
           {
             "name": "urllib3",
@@ -1400,9 +1744,23 @@
             "unpackedByteLength": 45995
           },
           {
+            "name": "wrapt",
+            "integrity": "sha256-+Y6veEzRK8acd685gIQXRTEAfNgYScliFjzPxueR8+o=",
+            "byteLength": 106068,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/e4/6d/cfe55762435f36107815d56a2cfbebe7e3129b593c47a670c6eb1d7917d3/wrapt-2.5.1-cp313-cp313-macosx_10_13_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 465459
+          },
+          {
             "name": "worker.py",
-            "integrity": "sha256-XK4Q5rjSo/dkKv1SvXyt0oGXDpaUgf1V0H9STVpDZkw=",
-            "byteLength": 50251,
+            "integrity": "sha256-m7TLpKxCTIVy3kpSbJGegtuqEE06M7nvQW3ujZLtVEs=",
+            "byteLength": 51509,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1412,8 +1770,8 @@
           },
           {
             "name": "analyzer.py",
-            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
-            "byteLength": 24322,
+            "integrity": "sha256-Y+pXyESCFyxScIf3wBSlyEgyEkOX0ljNOxIblXdKixQ=",
+            "byteLength": 24701,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1423,12 +1781,34 @@
           },
           {
             "name": "glb.py",
-            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
-            "byteLength": 9907,
+            "integrity": "sha256-H8i6ajq+meKl8oSLF12xTBO4tHXiycWojAOTHWBdiHc=",
+            "byteLength": 11861,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "native_materials.py",
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/native_materials.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "mechanisms.py",
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/mechanisms.py"
             },
             "destination": "tau-worker"
           }
@@ -1440,7 +1820,7 @@
           "os": "linux",
           "arch": "arm64",
           "libc": "glibc",
-          "minimumLibcVersion": "2.31"
+          "minimumLibcVersion": "2.28"
         },
         "payloads": [
           {
@@ -1487,46 +1867,60 @@
             "unpackedByteLength": 80904
           },
           {
-            "name": "build123d",
-            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
-            "byteLength": 368081,
+            "name": "bd-materials",
+            "integrity": "sha256-J6Q7p15OsRXAOwo84YjuhIIijQGZZdLn2JL/nArTh0I=",
+            "byteLength": 74803,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 1444029
+            "unpackedByteLength": 311049
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-F38RTl8FFAVBiRNDRtOGxwBASPjlhDC5uEt0oE+8lP4=",
+            "byteLength": 387753,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1480661
           },
           {
             "name": "cadquery-ocp-novtk",
-            "integrity": "sha256-2PaLBcKRf7D16lae2IxpfUfMV6eyk5KdhjtSyZrOkxI=",
-            "byteLength": 61978120,
+            "integrity": "sha256-OTi8sbxgLGUZIsig9dKiVbneVbQ2sp7LPLAjBuiaAm4=",
+            "byteLength": 61443554,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/6a/bc/3eb58a3b7513309d665e0a65c00da93fc825dc930744cd8ab23626cd2e1f/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl"
+                "https://files.pythonhosted.org/packages/a8/06/ae17a2b53b8193941e7c73cc79d20ab5aedd2994f40976a31e304e9f0961/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_aarch64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 252641390
+            "unpackedByteLength": 264671787
           },
           {
             "name": "cadquery-ocp-proxy",
-            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
-            "byteLength": 3322,
+            "integrity": "sha256-1qaQmnPSMAykWB/3YszwE3mTrHXFei3ILhK/+joStoA=",
+            "byteLength": 3249,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 5915
+            "unpackedByteLength": 5412
           },
           {
             "name": "certifi",
@@ -1583,6 +1977,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 1001446
+          },
+          {
+            "name": "dataclasses-json",
+            "integrity": "sha256-Db8z8myNUwW+/WGznSs0FOikB77cKDTeqbjWQmZvtAo=",
+            "byteLength": 28686,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 92719
+          },
+          {
+            "name": "deprecated",
+            "integrity": "sha256-WCBM9Kf2Jw1UevXCeO56a7VgRaSz2EQaHNEWYPQbeTk=",
+            "byteLength": 21912,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68879
           },
           {
             "name": "executing",
@@ -1697,6 +2119,20 @@
             "unpackedByteLength": 921902
           },
           {
+            "name": "marshmallow",
+            "integrity": "sha256-AT+oo8TCdsJNJthM6TTclk4qp5Q0Wg+MflpxkUgsinM=",
+            "byteLength": 50964,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 197850
+          },
+          {
             "name": "matplotlib-inline",
             "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
             "byteLength": 9534,
@@ -1723,6 +2159,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 1950197
+          },
+          {
+            "name": "mypy-extensions",
+            "integrity": "sha256-G+TMzbDySCM3xHQ+YEId46NWzZdQirrdV9R0A+lPVQU=",
+            "byteLength": 4963,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 10550
           },
           {
             "name": "narwhals",
@@ -1754,31 +2204,45 @@
           },
           {
             "name": "ocp-gordon",
-            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
-            "byteLength": 54077,
+            "integrity": "sha256-XfFMOAMtzKWCuniOU/jS6LOaZGpep4agMJ6ElLMGGoE=",
+            "byteLength": 52347,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 205203
+            "unpackedByteLength": 199150
           },
           {
             "name": "ocpsvg",
-            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
-            "byteLength": 20847,
+            "integrity": "sha256-pHa7SLay4tnx86Y1b95Xk3PWgWGLOaatnJmoCKAROZc=",
+            "byteLength": 20946,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 71116
+            "unpackedByteLength": 71490
+          },
+          {
+            "name": "packaging",
+            "integrity": "sha256-1xk/fI5Ok/RE/eAmK/kK8w4W+grQrUTLVTyHM5sjzRw=",
+            "byteLength": 129956,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 499179
           },
           {
             "name": "parso",
@@ -1807,6 +2271,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 191354
+          },
+          {
+            "name": "pillow",
+            "integrity": "sha256-XN/r11LsUr9btONdnGS0CCa8W0ChPffDzaIKLAOg9e0=",
+            "byteLength": 6395194,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/4b/6e/3ccb54ce8ec4ddd1accd2d89004308b7b0b21c4ac3d20fa70af4760a4330/pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 22481087
+          },
+          {
+            "name": "platformdirs",
+            "integrity": "sha256-Pbz0zXCPIc+HbE6qkOWEErxPAz2HFD9BsUk/93wlt+E=",
+            "byteLength": 32724,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 152393
           },
           {
             "name": "prompt-toolkit",
@@ -1877,6 +2369,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 6843065
+          },
+          {
+            "name": "pygltflib",
+            "integrity": "sha256-QdM0nFnc8Vhvrq7inJZ74HrCv3zs24ritSfaHyWv2qw=",
+            "byteLength": 27557,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 96776
           },
           {
             "name": "pygments",
@@ -2033,6 +2539,20 @@
             "unpackedByteLength": 66556
           },
           {
+            "name": "threejs-materials",
+            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
+            "byteLength": 89793013,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 90053685
+          },
+          {
             "name": "traitlets",
             "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
             "byteLength": 86211,
@@ -2073,6 +2593,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 182767
+          },
+          {
+            "name": "typing-inspect",
+            "integrity": "sha256-nub8WQYjEe+FR1lqtrlV4biqRiQthUv8ePT2sO/zX58=",
+            "byteLength": 8827,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 31427
           },
           {
             "name": "urllib3",
@@ -2117,9 +2651,23 @@
             "unpackedByteLength": 45995
           },
           {
+            "name": "wrapt",
+            "integrity": "sha256-2ADHaJFUYisLopIs7KRKPPLvYcO5pMTusdizBQ1+3to=",
+            "byteLength": 248488,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/3d/e9/8d81185bc9a40cfb43d91fc70a1e80ecde752c95dc98f5452cae82037976/wrapt-2.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1138478
+          },
+          {
             "name": "worker.py",
-            "integrity": "sha256-XK4Q5rjSo/dkKv1SvXyt0oGXDpaUgf1V0H9STVpDZkw=",
-            "byteLength": 50251,
+            "integrity": "sha256-m7TLpKxCTIVy3kpSbJGegtuqEE06M7nvQW3ujZLtVEs=",
+            "byteLength": 51509,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2129,8 +2677,8 @@
           },
           {
             "name": "analyzer.py",
-            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
-            "byteLength": 24322,
+            "integrity": "sha256-Y+pXyESCFyxScIf3wBSlyEgyEkOX0ljNOxIblXdKixQ=",
+            "byteLength": 24701,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2140,12 +2688,34 @@
           },
           {
             "name": "glb.py",
-            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
-            "byteLength": 9907,
+            "integrity": "sha256-H8i6ajq+meKl8oSLF12xTBO4tHXiycWojAOTHWBdiHc=",
+            "byteLength": 11861,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "native_materials.py",
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/native_materials.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "mechanisms.py",
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/mechanisms.py"
             },
             "destination": "tau-worker"
           }
@@ -2157,7 +2727,7 @@
           "os": "linux",
           "arch": "x64",
           "libc": "glibc",
-          "minimumLibcVersion": "2.31"
+          "minimumLibcVersion": "2.28"
         },
         "payloads": [
           {
@@ -2204,46 +2774,60 @@
             "unpackedByteLength": 80904
           },
           {
-            "name": "build123d",
-            "integrity": "sha256-TpX6fMvcg+YkMTvkkufE9fDrLqHfNhMOtxi7DCWonhA=",
-            "byteLength": 368081,
+            "name": "bd-materials",
+            "integrity": "sha256-J6Q7p15OsRXAOwo84YjuhIIijQGZZdLn2JL/nArTh0I=",
+            "byteLength": 74803,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 1444029
+            "unpackedByteLength": 311049
+          },
+          {
+            "name": "build123d",
+            "integrity": "sha256-F38RTl8FFAVBiRNDRtOGxwBASPjlhDC5uEt0oE+8lP4=",
+            "byteLength": 387753,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1480661
           },
           {
             "name": "cadquery-ocp-novtk",
-            "integrity": "sha256-/80E1O+gh9OqlCNgAgJloawOEkB717z+s35wtNHuct8=",
-            "byteLength": 67466562,
+            "integrity": "sha256-FwLfyPW9y5Fs5l6gxjFP5FPMeKaj1JoET7MGLUew758=",
+            "byteLength": 66755109,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
+                "https://files.pythonhosted.org/packages/83/a8/752777f38c5bd8cb6e239f4639f3a64a704b5812f3247b0a11f2ecb48900/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 261332561
+            "unpackedByteLength": 394584211
           },
           {
             "name": "cadquery-ocp-proxy",
-            "integrity": "sha256-ykFk7EtUlW2fw+aMZ9VVtUhsuWPC9x4Y3wBboWuSHJE=",
-            "byteLength": 3322,
+            "integrity": "sha256-1qaQmnPSMAykWB/3YszwE3mTrHXFei3ILhK/+joStoA=",
+            "byteLength": 3249,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 5915
+            "unpackedByteLength": 5412
           },
           {
             "name": "certifi",
@@ -2300,6 +2884,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 820798
+          },
+          {
+            "name": "dataclasses-json",
+            "integrity": "sha256-Db8z8myNUwW+/WGznSs0FOikB77cKDTeqbjWQmZvtAo=",
+            "byteLength": 28686,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 92719
+          },
+          {
+            "name": "deprecated",
+            "integrity": "sha256-WCBM9Kf2Jw1UevXCeO56a7VgRaSz2EQaHNEWYPQbeTk=",
+            "byteLength": 21912,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 68879
           },
           {
             "name": "executing",
@@ -2428,6 +3040,20 @@
             "unpackedByteLength": 6053441
           },
           {
+            "name": "marshmallow",
+            "integrity": "sha256-AT+oo8TCdsJNJthM6TTclk4qp5Q0Wg+MflpxkUgsinM=",
+            "byteLength": 50964,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 197850
+          },
+          {
             "name": "matplotlib-inline",
             "integrity": "sha256-PIIc8cIJ9Z+y0tZKu/WyO2e8siENZj+ZGN2FHG2h/PY=",
             "byteLength": 9534,
@@ -2454,6 +3080,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 1950197
+          },
+          {
+            "name": "mypy-extensions",
+            "integrity": "sha256-G+TMzbDySCM3xHQ+YEId46NWzZdQirrdV9R0A+lPVQU=",
+            "byteLength": 4963,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 10550
           },
           {
             "name": "narwhals",
@@ -2485,31 +3125,45 @@
           },
           {
             "name": "ocp-gordon",
-            "integrity": "sha256-ZBTpAaEQZaVug5yBtW9BgQC00Lgetaojux+Pcvl/8Jk=",
-            "byteLength": 54077,
+            "integrity": "sha256-XfFMOAMtzKWCuniOU/jS6LOaZGpep4agMJ6ElLMGGoE=",
+            "byteLength": 52347,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 205203
+            "unpackedByteLength": 199150
           },
           {
             "name": "ocpsvg",
-            "integrity": "sha256-XPxt6y9gLe2EVZZAnkH+j14bOJ4U6MxyfbCVXw6I3ns=",
-            "byteLength": 20847,
+            "integrity": "sha256-pHa7SLay4tnx86Y1b95Xk3PWgWGLOaatnJmoCKAROZc=",
+            "byteLength": 20946,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 71116
+            "unpackedByteLength": 71490
+          },
+          {
+            "name": "packaging",
+            "integrity": "sha256-1xk/fI5Ok/RE/eAmK/kK8w4W+grQrUTLVTyHM5sjzRw=",
+            "byteLength": 129956,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 499179
           },
           {
             "name": "parso",
@@ -2538,6 +3192,34 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 191354
+          },
+          {
+            "name": "pillow",
+            "integrity": "sha256-7t9LdO2itaSysvtMAG1ild878p5FnhmMkOpI4TDcdcM=",
+            "byteLength": 7082423,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/67/ee/21d4e8536afd1a328f01b359b4d3997b291ffd35a237c877b331c1c3b71c/pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 19517482
+          },
+          {
+            "name": "platformdirs",
+            "integrity": "sha256-Pbz0zXCPIc+HbE6qkOWEErxPAz2HFD9BsUk/93wlt+E=",
+            "byteLength": 32724,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 152393
           },
           {
             "name": "prompt-toolkit",
@@ -2594,6 +3276,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 32912
+          },
+          {
+            "name": "pygltflib",
+            "integrity": "sha256-QdM0nFnc8Vhvrq7inJZ74HrCv3zs24ritSfaHyWv2qw=",
+            "byteLength": 27557,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 96776
           },
           {
             "name": "pygments",
@@ -2750,6 +3446,20 @@
             "unpackedByteLength": 66556
           },
           {
+            "name": "threejs-materials",
+            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
+            "byteLength": 89793013,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 90053685
+          },
+          {
             "name": "traitlets",
             "integrity": "sha256-93VhgWbKoDlsjjNwmSQPK9Pl6RfSA7Lm++IaWNPLH2s=",
             "byteLength": 86211,
@@ -2790,6 +3500,20 @@
             },
             "destination": "python/lib/python3.13/site-packages",
             "unpackedByteLength": 182767
+          },
+          {
+            "name": "typing-inspect",
+            "integrity": "sha256-nub8WQYjEe+FR1lqtrlV4biqRiQthUv8ePT2sO/zX58=",
+            "byteLength": 8827,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 31427
           },
           {
             "name": "urllib3",
@@ -2834,9 +3558,23 @@
             "unpackedByteLength": 45995
           },
           {
+            "name": "wrapt",
+            "integrity": "sha256-8WMCAbDiqWuyYwS3rfvZGk70hqu1pMSDd0RKC+10nzc=",
+            "byteLength": 248519,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/37/62/20edad100b93552ec5c172e509a9db898a73d5043ae701fcb6e9986f9d33/wrapt-2.5.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+              ]
+            },
+            "destination": "python/lib/python3.13/site-packages",
+            "unpackedByteLength": 1007862
+          },
+          {
             "name": "worker.py",
-            "integrity": "sha256-XK4Q5rjSo/dkKv1SvXyt0oGXDpaUgf1V0H9STVpDZkw=",
-            "byteLength": 50251,
+            "integrity": "sha256-m7TLpKxCTIVy3kpSbJGegtuqEE06M7nvQW3ujZLtVEs=",
+            "byteLength": 51509,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2846,8 +3584,8 @@
           },
           {
             "name": "analyzer.py",
-            "integrity": "sha256-BYx4uNEpU9JfUkKY0yhRPQReIjg4RdaUgATfoRCtoYs=",
-            "byteLength": 24322,
+            "integrity": "sha256-Y+pXyESCFyxScIf3wBSlyEgyEkOX0ljNOxIblXdKixQ=",
+            "byteLength": 24701,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2857,12 +3595,34 @@
           },
           {
             "name": "glb.py",
-            "integrity": "sha256-mQkknjslU8/IP552/gUA/Bqd/e3gGGyToFv9G/ojICQ=",
-            "byteLength": 9907,
+            "integrity": "sha256-H8i6ajq+meKl8oSLF12xTBO4tHXiycWojAOTHWBdiHc=",
+            "byteLength": 11861,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
               "path": "python/glb.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "native_materials.py",
+            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
+            "byteLength": 4171,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/native_materials.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "mechanisms.py",
+            "integrity": "sha256-HNWR/kqnnzxIBIh3maZS/n/eEpc7waP/ceVTABWcB5M=",
+            "byteLength": 26677,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/mechanisms.py"
             },
             "destination": "tau-worker"
           }

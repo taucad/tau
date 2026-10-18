@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createMcpViewerExport, listKernelExportFormats } from '#mcp-viewer-export.js';
+import { createMcpViewerExport, listKernelExportFormats, shownModelContent } from '#mcp-viewer-export.js';
 import type { ViewerExportRoute, ViewerExportRuntime } from '#mcp-viewer-export.js';
 import type { HostRuntimeClient } from '#agent-tools.js';
 
@@ -100,6 +100,57 @@ describe('listKernelExportFormats', () => {
       'k',
     );
     expect(formats).toEqual([{ format: 'step', fidelity: 'brep', direct: false, provider: 'k+t' }]);
+  });
+});
+
+describe('shownModelContent', () => {
+  const topology: ViewerExportRoute['content'] = {
+    schema: { type: 'object', properties: { includeEdges: { type: 'boolean' }, includeTopology: { type: 'boolean' } } },
+  };
+  const edgesOnly: ViewerExportRoute['content'] = {
+    schema: { type: 'object', properties: { includeEdges: { type: 'boolean' } } },
+  };
+  const glbRoute = (route: Partial<ViewerExportRoute>): ViewerExportRoute => ({
+    targetFormat: 'glb',
+    kernelId: 'k',
+    fidelity: 'mesh',
+    exportOptions: none,
+    ...route,
+  });
+  const contentFor = async (kernelId: string | undefined, glbRoutes: readonly ViewerExportRoute[]) =>
+    shownModelContent({
+      runtimeFor: async () => ({
+        capabilities: { routes: [...routes, ...glbRoutes] },
+        connect: async () => undefined,
+        describe: async () => ({ kernelId }),
+      }),
+      root: '/project',
+      targetFile: 'main.ts',
+    });
+
+  it("should ask for topology when the kernel's own GLB route carries it", async () => {
+    expect(await contentFor('k', [glbRoute({ content: topology })])).toEqual({ includeTopology: true });
+  });
+
+  it('should follow the route the runtime takes: the direct one first, else a transcoded one', async () => {
+    const transcoded = glbRoute({ transcoderId: 't', content: topology });
+    expect(await contentFor('k', [transcoded, glbRoute({ content: edgesOnly })])).toBeUndefined();
+    expect(await contentFor('k', [transcoded])).toEqual({ includeTopology: true });
+  });
+
+  it('should ask for nothing on a route without topology, for an entry without a kernel, or when describing fails', async () => {
+    expect(await contentFor('k', [glbRoute({})])).toBeUndefined();
+    expect(await contentFor('other', [glbRoute({ content: topology })])).toBeUndefined();
+    expect(await contentFor(undefined, [glbRoute({ content: topology })])).toBeUndefined();
+    expect(
+      await shownModelContent({
+        runtimeFor: async () => {
+          throw new Error('runtime unavailable');
+        },
+        root: '/project',
+        targetFile: 'main.ts',
+      }),
+    ).toBeUndefined();
   });
 });
 

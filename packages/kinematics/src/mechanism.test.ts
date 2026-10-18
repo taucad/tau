@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { admitMechanism, findLinkByComponent, listDegreesOfFreedom } from '@taucad/kinematics';
+import { admitMechanism, findLinkByComponent, listDegreesOfFreedom, validateMechanismMotion } from '@taucad/kinematics';
 import type { IssueCode, Mechanism } from '@taucad/kinematics';
 import { unitScale } from '#mechanism.js';
 import {
@@ -621,5 +621,88 @@ describe('unitScale', () => {
     ['incompatible dimensions', 'mm', 'rad'],
   ])('should throw for %s', (_name, from, to) => {
     expect(() => unitScale(from, to)).toThrow(`@taucad/kinematics: cannot convert ${from} to ${to}.`);
+  });
+});
+
+describe('one-sided travel', () => {
+  it('should preserve a finite lower bound and unbounded upper travel through JSON admission', () => {
+    const mechanism = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: [] }, slide: { components: ['slide'] } },
+      joints: {
+        rail: {
+          type: 'prismatic',
+          parent: 'base',
+          child: 'slide',
+          origin: [0, 0, 0],
+          axis: [1, 0, 0],
+          limits: { lower: -0.01 },
+        },
+      },
+    };
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- Exercise the portable JSON wire boundary.
+    const admitted = admitMechanism(JSON.parse(JSON.stringify(mechanism)));
+    expect(admitted.status).toBe('admitted');
+    if (admitted.status !== 'admitted') {
+      throw new Error('Expected admitted one-sided bounds');
+    }
+    expect(listDegreesOfFreedom(admitted.mechanism)[0]?.limits).toEqual({ lower: -0.01, upper: Infinity });
+  });
+});
+
+describe('validateMechanismMotion', () => {
+  it('should validate reusable motion intent without admitting its physical graph', () => {
+    expect(
+      validateMechanismMotion({
+        coordinates: ['drive', 'follower'],
+        couplings: [{ driver: 'drive', follower: 'follower', ratio: -2 }],
+        animations: [
+          {
+            id: 'turn',
+            duration: 1,
+            keyframes: [
+              { time: 0, coordinates: { drive: 0 } },
+              { time: 1, coordinates: { drive: 90 } },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(validateMechanismMotion({ coordinates: [] })).toEqual([]);
+  });
+
+  it.each([
+    [{ couplings: [{ driver: 'drive', follower: 'follower', ratio: 0 }] }, 'INVALID_VALUE'],
+    [{ couplings: [{ driver: 'missing', follower: 'follower', ratio: 1 }] }, 'UNKNOWN_DEGREE_OF_FREEDOM'],
+    [
+      {
+        couplings: [
+          { driver: 'drive', follower: 'follower', ratio: 1 },
+          { driver: 'follower', follower: 'drive', ratio: 1 },
+        ],
+      },
+      'CYCLIC_COUPLING',
+    ],
+    [
+      { animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 2, coordinates: { drive: 0 } }] }] },
+      'INVALID_ANIMATION',
+    ],
+    [
+      { animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 0, coordinates: { missing: 0 } }] }] },
+      'UNKNOWN_DEGREE_OF_FREEDOM',
+    ],
+    [
+      {
+        couplings: [{ driver: 'drive', follower: 'follower', ratio: 1 }],
+        animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 0, coordinates: { follower: 0 } }] }],
+      },
+      'DRIVEN_FOLLOWER',
+    ],
+  ])('should reject invalid motion declarations independent of playback: %s', (motion, code) => {
+    expect(validateMechanismMotion({ coordinates: ['drive', 'follower'], ...motion })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code })]),
+    );
   });
 });

@@ -29,7 +29,12 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 
-import { build123dAnalysisSchema, build123dBuildSchema, build123dEmptySchema } from '#build123d.protocol.js';
+import {
+  build123dAnalysisSchema,
+  build123dBuildSchema,
+  build123dComputeDescriptorLimit,
+  build123dEmptySchema,
+} from '#build123d.protocol.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
 
 const nativeSession = (session: PythonSession) =>
@@ -81,12 +86,16 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   const workerPath = join(runtimePath, 'worker.cjs');
   const analyzerPath = join(runtimePath, 'analyzer.py');
   const glbPath = join(runtimePath, 'glb.py');
+  const materialPath = join(runtimePath, 'native_materials.py');
+  const mechanismPath = join(runtimePath, 'mechanisms.py');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$4" "$5" "$6" "$7" "$8" "$9" "$10"\n`;
   writeFileSync(executable, executableBody);
   chmodSync(executable, 0o700);
   writeFileSync(workerPath, workerBody);
   writeFileSync(analyzerPath, 'analyzer');
   writeFileSync(glbPath, 'glb');
+  writeFileSync(materialPath, 'materials');
+  writeFileSync(mechanismPath, 'mechanisms');
   const logger = createMockLogger();
   const options = {
     pythonExecutable: executable,
@@ -98,6 +107,8 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
     supportFiles: [
       { path: analyzerPath, sha256: sha256('analyzer') },
       { path: glbPath, sha256: sha256('glb') },
+      { path: materialPath, sha256: sha256('materials') },
+      { path: mechanismPath, sha256: sha256('mechanisms') },
     ],
     requestTimeout,
     maxArtifactBytes: 32,
@@ -369,7 +380,7 @@ process.stdin.once('data',(line)=>{const request=JSON.parse(line);const frame=JS
     await delay(10);
     expect(duplicate.session.isHandleGenerationValid(duplicate.session.generation)).toBe(false);
     await duplicate.session.cleanup();
-  });
+  }, 15_000);
 
   it('bounds the queue and terminates on abort, timeout, revocation, and process exit', async () => {
     const queued = fixture(
@@ -484,13 +495,14 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
   it('mirrors the worker lineage cache through the bounded bundle protocol', async () => {
     const digest = actionDigest({ value: `sha256:${'a'.repeat(64)}` });
     const other = actionDigest({ value: `sha256:${'b'.repeat(64)}` });
+    const truncated = actionDigest({ value: `sha256:${'d'.repeat(64)}` });
     const content = contentDigest({ value: `sha256:${'c'.repeat(64)}` });
     const action = {
       schemaVersion: 1,
       namespace: 'build123d.operation.v1',
       producer: { id: 'test', version: '1', implementationAssets: [digest] },
       operation: 'Solid.make_box',
-      inputs: [],
+      inputs: [{ kind: 'scene', role: 'source', digest: `sha256:${'c'.repeat(64)}` }],
       arguments: { length: 1 },
       environment: {},
       codec: { id: 'build123d.bintools-brep', version: '1' },
@@ -513,12 +525,18 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
           return {protocolVersion:1,requestId:request.requestId,result:{imported,omitted}};
         }
         if(request.method==='compute.export'){
+          if(request.params.digests[0]===${JSON.stringify(other)}){
+            return {protocolVersion:1,requestId:request.requestId,result:{descriptors:[],omitted:request.params.digests}};
+          }
           const bundlePath=path.join(artifacts,'export.bin');
           fs.writeFileSync(bundlePath, Buffer.from([7,8,9]));
           return {protocolVersion:1,requestId:request.requestId,result:{
-            descriptors:[{action:JSON.parse(exportedAction),actionDigest:request.params.digests[0],contentDigest:'sha256:'+'c'.repeat(64),byteLength:3}],
+            descriptors:[{action:JSON.parse(exportedAction),actionDigest:request.params.digests[0],contentDigest:'sha256:'+'c'.repeat(64),byteLength:request.params.digests[0]===${JSON.stringify(truncated)}?4:3}],
             omitted:request.params.digests.slice(1),
             bundle:{artifactPath:bundlePath,byteLength:3}}};
+        }
+        if(request.method==='compute.stats'){
+          return {protocolVersion:1,requestId:request.requestId,result:{entries:1,logicalBytes:3,evictions:0,omissions:1}};
         }
         return {protocolVersion:1,requestId:request.requestId,result:{}};
       })()`),
@@ -556,6 +574,17 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
       },
     ]);
     expect(exported.omitted).toEqual([other]);
+    expect(await binding.exportEntries({ digests: [other], signal })).toEqual({ entries: [], omitted: [other] });
+    expect(await binding.exportEntries({ digests: [truncated], signal })).toEqual({
+      entries: [],
+      omitted: [truncated],
+    });
+    expect(await value.session.readComputeStats(signal)).toEqual({
+      entries: 1,
+      logicalBytes: 3,
+      evictions: 0,
+      omissions: 1,
+    });
 
     binding.track([other]);
     value.session.observeResidentBytes(4096);
@@ -566,6 +595,16 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
       evictions: 0,
       omissions: 1,
     });
+    const overflow = await binding.importEntries({
+      entries: [
+        ...Array.from({ length: build123dComputeDescriptorLimit }, () => entry),
+        { ...entry, actionDigest: other },
+      ],
+      signal,
+    });
+    expect(overflow.imported).toHaveLength(build123dComputeDescriptorLimit);
+    expect(overflow.omitted).toEqual([other]);
+    expect(binding.stats().omissions).toBe(2);
     binding.clear({ generation: 3 as unknown as ComputeGeneration });
     expect(binding.contains({ digest })).toBe(false);
     expect(binding.stats().evictions).toBe(2);

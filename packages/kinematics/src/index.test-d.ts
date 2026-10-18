@@ -35,6 +35,7 @@ describe('@taucad/kinematics public surface', () => {
       | 'sampleAnimation'
       | 'solvePose'
       | 'transformMechanism'
+      | 'validateMechanismMotion'
     >();
   });
 

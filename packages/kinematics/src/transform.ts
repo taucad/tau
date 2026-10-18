@@ -166,8 +166,8 @@ export const transformMechanism = ({
     return [x + matrix[12], y + matrix[13], z + matrix[14]];
   };
   const scaleLimits = (limits: JointLimits, scale: number): JointLimits => ({
-    lower: limits.lower * scale,
-    upper: limits.upper * scale,
+    ...(limits.lower === undefined || !Number.isFinite(limits.lower) ? {} : { lower: limits.lower * scale }),
+    ...(limits.upper === undefined || !Number.isFinite(limits.upper) ? {} : { upper: limits.upper * scale }),
   });
   // Spherical coordinates are components along the frame axes: a signed axis permutation renames them to the
   // new frame's axes with a sign. Any other rotation would mix them, which the check above rules out.

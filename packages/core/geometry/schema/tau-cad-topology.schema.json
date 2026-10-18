@@ -12,9 +12,163 @@
       "items": { "$ref": "#/$defs/component" },
       "maxItems": 1000000
     },
-    "mechanism": { "$ref": "#/$defs/mechanism" }
+    "mechanism": { "$ref": "#/$defs/mechanism" },
+    "mechanismIntent": { "$ref": "#/$defs/mechanismIntent" },
+    "mechanismDiagnostics": { "type": "array", "items": { "$ref": "#/$defs/mechanismDiagnostic" } }
   },
   "$defs": {
+    "rigidFrame": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 16,
+      "maxItems": 16
+    },
+    "jointInterface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "frame"],
+      "properties": {
+        "kind": {
+          "enum": ["fixed", "revolute", "prismatic", "cylindrical", "spherical"]
+        },
+        "frame": {
+          "$ref": "#/$defs/rigidFrame"
+        },
+        "chart": {
+          "const": "intrinsic-xyz"
+        },
+        "referenceFrame": {
+          "$ref": "#/$defs/rigidFrame"
+        },
+        "angleReference": {
+          "$ref": "#/$defs/vector3"
+        },
+        "ranges": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jointLimits"
+          }
+        }
+      }
+    },
+    "jointEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["componentId", "interfaceId"],
+      "properties": {
+        "componentId": {
+          "type": "string"
+        },
+        "interfaceId": {
+          "type": "string"
+        }
+      }
+    },
+    "mechanismConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parent", "child"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/$defs/jointEndpoint"
+        },
+        "child": {
+          "$ref": "#/$defs/jointEndpoint"
+        },
+        "referenceCoordinates": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "coordinateChart": {
+          "enum": ["axis", "intrinsic-xyz"]
+        },
+        "playbackCoordinates": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mechanismIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "units", "connections"],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "units": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length", "angle"],
+          "properties": {
+            "length": {
+              "enum": ["m", "mm"]
+            },
+            "angle": {
+              "enum": ["rad", "deg"]
+            }
+          }
+        },
+        "ground": {
+          "type": "string"
+        },
+        "rigidBodies": {
+          "description": "Known physical rigid-body component IDs mapped to their geometry component IDs; excludes virtual playback factors. May be partial for diagnosed unresolved ownership. Listed membership agrees with the corresponding compiled link when playback is present.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mechanismConnection"
+          }
+        },
+        "couplings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/coupling"
+          }
+        },
+        "animations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/animation"
+          }
+        }
+      }
+    },
+    "mechanismDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "path", "message", "recovery"],
+      "properties": {
+        "code": {
+          "const": "UNSUPPORTED_MECHANISM"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        }
+      }
+    },
     "nonNegativeInteger": { "type": "integer", "minimum": 0 },
     "mechanism": {
       "description": "A @taucad/kinematics Mechanism in this glTF's vertex space: lengths in the vertices' unit, origins and axes in their frame, link components as components[].id values. This schema checks shape only; validateTauCadTopology also runs admitMechanism (joint tree, known link and degree-of-freedom ids, lower <= upper, perpendicular planar axes, sorted keyframes, acyclic couplings) and checks link components against components[].id.",
@@ -51,7 +205,6 @@
     "jointLimits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lower", "upper"],
       "properties": {
         "lower": { "type": "number" },
         "upper": { "type": "number" }
@@ -235,6 +388,9 @@
         "primitiveRefs": { "type": "array", "items": { "$ref": "#/$defs/primitiveRef" } },
         "faceGroups": { "type": "array", "items": { "$ref": "#/$defs/faceGroup" } },
         "edgeGroups": { "type": "array", "items": { "$ref": "#/$defs/edgeGroup" } },
+        "placement": { "$ref": "#/$defs/rigidFrame" },
+        "jointInterfaces": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jointInterface" } },
+        "jointInterfaceAliases": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jointEndpoint" } },
         "sourceRefs": { "type": "object" },
         "capabilities": {
           "type": "object",

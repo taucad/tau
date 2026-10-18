@@ -4,21 +4,20 @@
 
 # Category: build_line
 # BuildLine
-# Remarks: The BuildLine class is a subclass of Builder for building lines (objects with length but not area or volume). It has an _obj property that returns the current line being built. The class overrides the faces and solids methods of Builder since they don't apply to lines. BuildLine only works with a single workplane which is used to convert tuples as inputs to global coordinates. For example: .. code:: with BuildLine(Plane.YZ) as radius_arc: RadiusArc((1, 2), (2, 1), 1) creates an arc from global points (0, 1, 2) to (0, 2, 1). Note that points entered as Vector(x, y, z) are considered global and are not localized. The workplane is also used to define planes parallel to the workplane that arcs are created on.
+# Remarks: The BuildLine class is a subclass of Builder for building lines (objects with length but not area or volume). It has an _obj property that returns the current line being built. The class overrides the faces and solids methods of Builder since they don't apply to lines. BuildLine constructs geometry on local Plane.XY and publishes the completed curve to a single placement. For example: .. code:: with BuildLine(Plane.YZ) as radius_arc: RadiusArc((1, 2), (2, 1), 1) constructs an arc from local points (1, 2, 0) to (2, 1, 0), then publishes it to Plane.YZ.
 # build123d.build_line.BuildLine (class)
 class BuildLine(Builder)
 
   # build123d.build_line.BuildLine.__init__ (constructor)
-  BuildLine(workplane: Face | Plane | Location = Plane.XY, mode: Mode = Mode.ADD)
-  #   workplane: plane used when local coordinates are used and when creating arcs
+  BuildLine(placement: Face | Plane | Location = Plane.XY, mode: Mode = Mode.ADD)
+  #   placement: output placement
   #   mode: combination mode
 
-  # Get the current line
+  # Get the placed line
   line: Curve | None
 
-  # Upon exiting restore context and send object to parent
-  # build123d.build_line.BuildLine.__exit__ (method)
-  __exit__(exception_type, exception_value, traceback)
+  # Get the line in the Builder's local construction coordinates
+  line_local: Curve | None
 
   # faces() not implemented
   # build123d.build_line.BuildLine.faces (method)

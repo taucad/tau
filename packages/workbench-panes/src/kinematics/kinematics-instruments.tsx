@@ -51,7 +51,9 @@ export function AngleDial({
   readonly limits: JointLimits | undefined;
   readonly className?: string;
 }): React.JSX.Element {
-  const isFullTurn = limits === undefined || limits.upper - limits.lower >= 360;
+  const lower = limits?.lower ?? -Infinity;
+  const upper = limits?.upper ?? Infinity;
+  const isFullTurn = !Number.isFinite(lower) || !Number.isFinite(upper) || upper - lower >= 360;
   const swept = Math.min(Math.abs(value), 360);
   return (
     <svg viewBox='0 0 16 16' aria-hidden className={cn('size-4 shrink-0 overflow-visible', className)}>
@@ -62,7 +64,7 @@ export function AngleDial({
         {...lineStroke}
         className={isFullTurn ? pathClass : 'fill-none stroke-border'}
       />
-      {isFullTurn ? null : <path d={dialArc(limits.lower, limits.upper)} {...lineStroke} className={pathClass} />}
+      {isFullTurn ? null : <path d={dialArc(lower, upper)} {...lineStroke} className={pathClass} />}
       {swept >= 360 ? (
         <circle cx='8' cy='8' r={dialRadius} {...lineStroke} className={trailClass} />
       ) : swept > 0 ? (
@@ -91,7 +93,7 @@ export function TravelTrack({
   className,
 }: {
   readonly value: number;
-  readonly range: JointLimits;
+  readonly range: Required<JointLimits>;
   readonly className?: string;
 }): React.JSX.Element {
   const span = range.upper - range.lower;
@@ -116,7 +118,7 @@ const sparkPad = 2.5;
  * @param curve - The coupling's samples over one driver period.
  * @returns Its lowest and highest sample, in the follower's mechanism units.
  */
-export const curveRange = (curve: CouplingCurve): JointLimits => ({
+export const curveRange = (curve: CouplingCurve): Required<JointLimits> => ({
   lower: Math.min(...curve.values),
   upper: Math.max(...curve.values),
 });

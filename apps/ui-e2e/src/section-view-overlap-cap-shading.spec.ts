@@ -20,29 +20,16 @@ type SectionViewBridgeWindow = Window & {
       y: number;
       visible: boolean;
     };
-    getSectionCapOverlapDiagnostics():
+    getSectionCapStencilDiagnostics():
       | {
-          sourceCount: number;
-          sourcePairCount: number;
-          broadphaseCandidatePairCount: number;
-          exactIntersectionPairCount: number;
-          positiveAreaPairCount: number;
-          renderedOverlapArea: number;
-          splitFailed: boolean;
-          diagnostics: ReadonlyArray<{ code: string; message: string }>;
-        }
-      | undefined;
-    getSectionCapPerformanceDiagnostics?():
-      | {
-          latestFrame: {
-            topologyKey?: string;
-            styleKey?: string;
-            baseCapTopologyKey?: string;
-            baseCapIsCurrent?: boolean;
-            exactDiagnosticIsCurrent?: boolean;
-            pendingReason?: string;
-            counters: Record<string, number>;
-          };
+          sequence: number;
+          latest:
+            | {
+                drawnPieceCount: number;
+                crossingSourceCount: number;
+                overlapCandidateSourceCount: number;
+              }
+            | undefined;
         }
       | undefined;
     getRenderFrame(): { metersPerRenderUnit: number };
@@ -152,12 +139,8 @@ const overlapRegionForCanvas = async (): Promise<CanvasRegion> => {
   };
 };
 
-const getOverlapDiagnostics = async (): Promise<
-  NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']> extends infer Bridge
-    ? Bridge extends { getSectionCapOverlapDiagnostics(): infer Result }
-      ? Result
-      : never
-    : never
+const getStencilDiagnostics = async (): Promise<
+  ReturnType<NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getSectionCapStencilDiagnostics']>
 > =>
   target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
@@ -165,53 +148,23 @@ const getOverlapDiagnostics = async (): Promise<
       throw new Error('Section view e2e bridge is not installed.');
     }
 
-    return bridge.getSectionCapOverlapDiagnostics();
+    return bridge.getSectionCapStencilDiagnostics();
   });
 
-const getPerformanceDiagnostics = async (): Promise<
-  | {
-      latestFrame: {
-        topologyKey?: string;
-        styleKey?: string;
-        baseCapTopologyKey?: string;
-        baseCapIsCurrent?: boolean;
-        exactDiagnosticIsCurrent?: boolean;
-        pendingReason?: string;
-        counters: Record<string, number>;
-      };
-    }
-  | undefined
-> =>
-  target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!bridge) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
-
-    return bridge.getSectionCapPerformanceDiagnostics?.();
-  });
-
-const waitForExactOverlapDiagnostics = async (): Promise<void> => {
+const waitForOverlapCandidates = async (): Promise<void> => {
   try {
     await target.waitFor(
       () => {
         const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-        const diagnostics = bridge?.getSectionCapOverlapDiagnostics();
-        return Boolean(
-          diagnostics &&
-          diagnostics.positiveAreaPairCount > 0 &&
-          diagnostics.renderedOverlapArea > 0 &&
-          !diagnostics.splitFailed,
-        );
+        return (bridge?.getSectionCapStencilDiagnostics()?.latest?.overlapCandidateSourceCount ?? 0) > 0;
       },
       undefined,
       { timeout: 15_000 },
     );
   } catch (error) {
-    const [events, overlap, performance, scene] = await Promise.all([
+    const [events, stencil, scene] = await Promise.all([
       target.events(),
-      getOverlapDiagnostics(),
-      getPerformanceDiagnostics(),
+      getStencilDiagnostics(),
       target.evaluate(() => {
         const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
         return {
@@ -222,12 +175,9 @@ const waitForExactOverlapDiagnostics = async (): Promise<void> => {
         };
       }),
     ]);
-    throw new Error(
-      `Exact overlap diagnostics did not settle: ${JSON.stringify({ events, overlap, performance, scene })}`,
-      {
-        cause: error,
-      },
-    );
+    throw new Error(`Stencil caps marked no overlap candidates: ${JSON.stringify({ events, stencil, scene })}`, {
+      cause: error,
+    });
   }
 };
 
@@ -410,28 +360,9 @@ test.describe('Section view overlap cap shading', () => {
       await target.expectGeometryFramed();
 
       await driveOverlapSectionView(0);
-      await waitForExactOverlapDiagnostics();
+      await waitForOverlapCandidates();
       await target.delay(250);
       const region = await overlapRegionForCanvas();
-      const overlapDiagnostics = await getOverlapDiagnostics();
-      expect(overlapDiagnostics, `${backend}: exact overlap diagnostics should be published`).toBeDefined();
-      expect(overlapDiagnostics?.splitFailed, `${backend}: exact source splitting should succeed`).toBe(false);
-      expect(
-        overlapDiagnostics?.exactIntersectionPairCount,
-        `${backend}: every broadphase candidate should run exact intersection`,
-      ).toBe(overlapDiagnostics?.broadphaseCandidatePairCount);
-      expect(overlapDiagnostics?.positiveAreaPairCount).toBeGreaterThan(0);
-      expect(overlapDiagnostics?.renderedOverlapArea).toBeGreaterThan(0);
-      expect(Object.keys(overlapDiagnostics ?? {}).sort()).toEqual([
-        'broadphaseCandidatePairCount',
-        'diagnostics',
-        'exactIntersectionPairCount',
-        'positiveAreaPairCount',
-        'renderedOverlapArea',
-        'sourceCount',
-        'sourcePairCount',
-        'splitFailed',
-      ]);
       const overlap = await captureAndSampleCanvas({
         fileName: `section-overlap-cap-${backend}.png`,
         region,
@@ -471,7 +402,6 @@ test.describe('Section view overlap cap shading', () => {
       if (!canvasBox) {
         throw new Error('3D preview canvas bounding box is unavailable.');
       }
-      const beforeHoverPerformance = await getPerformanceDiagnostics();
       await target.mouseMove(
         canvasBox.x + canvasBox.width * (region.x + region.width / 2),
         canvasBox.y + canvasBox.height * (region.y + region.height / 2),
@@ -499,33 +429,15 @@ test.describe('Section view overlap cap shading', () => {
         await assertHoverFrame(frameIndex + 1);
       };
       await assertHoverFrame(0);
-      const afterHoverPerformance = await getPerformanceDiagnostics();
-      if (beforeHoverPerformance && afterHoverPerformance) {
-        expect(afterHoverPerformance.latestFrame.pendingReason).not.toBe('style-change');
-        expect(afterHoverPerformance.latestFrame.counters['styleInvalidatedWorkerRequestCount'] ?? 0).toBe(0);
-        expect(afterHoverPerformance.latestFrame.topologyKey).toBeTruthy();
-        expect(afterHoverPerformance.latestFrame.styleKey).toBeTruthy();
-      }
 
       await driveOverlapSectionView(14);
       await target.delay(80);
-      const pendingMovePerformance = await getPerformanceDiagnostics();
+      const movedDiagnostics = await getStencilDiagnostics();
       expect(
-        pendingMovePerformance?.latestFrame.baseCapIsCurrent,
-        `${backend}: base caps should stay current immediately after a topology-changing plane move`,
-      ).toBe(true);
-      expect(
-        pendingMovePerformance?.latestFrame.counters['baseFillVertexCount'] ?? 0,
-        `${backend}: moving beyond the solids should not retain stale cap triangles`,
-      ).toBe(0);
-      expect(
-        pendingMovePerformance?.latestFrame.counters['baseBoundarySegmentCount'] ?? 0,
-        `${backend}: moving beyond the solids should not retain stale cap outlines`,
+        movedDiagnostics?.latest?.overlapCandidateSourceCount ?? 0,
+        `${backend}: moving beyond the solids should leave no overlap candidates`,
       ).toBe(0);
       await target.delay(750);
-      const disjointDiagnostics = await getOverlapDiagnostics();
-      expect(disjointDiagnostics?.positiveAreaPairCount).toBe(0);
-      expect(disjointDiagnostics?.renderedOverlapArea).toBe(0);
       const disjoint = await captureAndSampleCanvas({
         fileName: `section-overlap-cap-disjoint-${backend}.png`,
         region,

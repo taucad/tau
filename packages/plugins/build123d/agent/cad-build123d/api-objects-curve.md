@@ -1,6 +1,6 @@
 # build123d — objects_curve
 
-31 top-level symbols. Signatures are verbatim python.
+27 top-level symbols. Signatures are verbatim python.
 
 # Category: objects_curve
 # Create an airfoil described by a 4-digit (or fractional) NACA airfoil
@@ -24,36 +24,6 @@ class Airfoil(BaseLineObject)
 
 # Category: objects_curve
 # Line Object
-# Remarks: Create an arc tangent to two arcs and a radius. keep specifies tangent arc position with a Keep pair: (placement, type) - placement: start_arc is tangent INSIDE or OUTSIDE the tangent arc. BOTH is a special case for overlapping arcs with type INSIDE - type: tangent arc is INSIDE or OUTSIDE start_arc and end_arc
-# build123d.objects_curve.ArcArcTangentArc (class)
-class ArcArcTangentArc(BaseEdgeObject)
-
-  # build123d.objects_curve.ArcArcTangentArc.__init__ (constructor)
-  ArcArcTangentArc(start_arc: Curve | Edge | Wire, end_arc: Curve | Edge | Wire, radius: float, side: Side = Side.LEFT, keep: Keep | tuple[Keep, Keep] = (Keep.INSIDE, Keep.INSIDE), short_sagitta: bool = True, mode: Mode = Mode.ADD)
-  #   start_arc: starting arc, must be GeomType.CIRCLE
-  #   end_arc: ending arc, must be GeomType.CIRCLE
-  #   radius: radius of tangent arc
-  #   side: side of arcs to place tangent arc center, LEFT or RIGHT
-  #   keep: which tangent arc to keep, INSIDE or OUTSIDE
-  #   short_sagitta: If True selects the short sagitta (height of arc from chord), else the long sagitta crossing the center
-  #   mode: combination mode
-
-# Category: objects_curve
-# Line Object
-# Remarks: Create a straight line tangent to two arcs.
-# build123d.objects_curve.ArcArcTangentLine (class)
-class ArcArcTangentLine(BaseEdgeObject)
-
-  # build123d.objects_curve.ArcArcTangentLine.__init__ (constructor)
-  ArcArcTangentLine(start_arc: Curve | Edge | Wire, end_arc: Curve | Edge | Wire, side: Side = Side.LEFT, keep: Keep = Keep.INSIDE, mode: Mode = Mode.ADD)
-  #   start_arc: starting arc, must be GeomType.CIRCLE
-  #   end_arc: ending arc, must be GeomType.CIRCLE
-  #   side: side of arcs to place tangent arc center, LEFT or RIGHT
-  #   keep: which tangent arc to keep, INSIDE or OUTSIDE
-  #   mode: combination mode
-
-# Category: objects_curve
-# Line Object
 # Remarks: An exact B-spline edge defined directly from control points and knot data. BSpline creates an exact B-spline from control points, a knot sequence, and optional weights. Control points define the control polygon that pulls the curve, but the curve does not generally pass through them. Knots define the parameter-space structure of the spline: they determine where polynomial spans begin and end and how smoothly those spans join. Repeated knot values indicate knot multiplicity. For a spline of degree p, a knot with multiplicity m has continuity C^(p-m) at that location, so increasing multiplicity reduces smoothness. Repeating the first and last knots degree + 1 times creates a clamped spline that starts and ends at the first and last control points. Optional weights create a rational B-spline, allowing some control points to pull more strongly than others and enabling exact representation of conic sections.` Unlike :class:`~build123d.objects_curve.Spline`, which creates an interpolated curve through a set of points using ``GeomAPI_Interpolate``, ``BSpline`` preserves the supplied spline definition by building the underlying OCCT ``Geom_BSplineCurve`` from its poles, knot vector, optional weights, degree, and periodic flag.
 # build123d.objects_curve.BSpline (class)
 class BSpline(BaseEdgeObject)
@@ -68,9 +38,29 @@ class BSpline(BaseEdgeObject)
   #   mode: Builder combination mode
 
 # Category: objects_curve
+# BaseCurveObject specialized for Curve
+# build123d.objects_curve.BaseCurveObject (class)
+class BaseCurveObject(Curve, BaseObject)
+
+  # build123d.objects_curve.BaseCurveObject.__init__ (constructor)
+  BaseCurveObject(curve: Curve, mode: Mode = Mode.ADD)
+  #   curve: wire to create
+  #   mode: combination mode
+
+# Category: objects_curve
+# BaseEdgeObject specialized for Edge
+# build123d.objects_curve.BaseEdgeObject (class)
+class BaseEdgeObject(Edge, BaseObject)
+
+  # build123d.objects_curve.BaseEdgeObject.__init__ (constructor)
+  BaseEdgeObject(curve: Edge, mode: Mode = Mode.ADD)
+  #   curve: edge to create
+  #   mode: combination mode
+
+# Category: objects_curve
 # BaseLineObject specialized for Wire
 # build123d.objects_curve.BaseLineObject (class)
-class BaseLineObject(Wire)
+class BaseLineObject(Wire, BaseObject)
 
   # build123d.objects_curve.BaseLineObject.__init__ (constructor)
   BaseLineObject(curve: Wire, mode: Mode = Mode.ADD)
@@ -130,7 +120,7 @@ class ConstrainedArcs(BaseCurveObject)
   # build123d.objects_curve.ConstrainedArcs.__init__ (constructor)
   ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, tangency_two: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, *, radius: float, sagitta: Sagitta = Sagitta.SHORT, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
   ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, tangency_two: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, *, center_on: Axis | Edge, sagitta: Sagitta = Sagitta.SHORT, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
-  ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, tangency_two: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, tangency_three: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, *, sagitta: Sagitta = Sagitta.SHORT, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
+  ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge, tangency_two: tuple[Axis | Edge, Tangency] | Axis | Edge, tangency_three: tuple[Axis | Edge, Tangency] | Axis | Edge, *, sagitta: Sagitta = Sagitta.SHORT, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
   ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, *, center: VectorLike, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
   ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, *, radius: float, center_on: Edge, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
   #   radius: arc radius
@@ -144,8 +134,8 @@ class ConstrainedArcs(BaseCurveObject)
 # build123d.objects_curve.ConstrainedLines (class)
 class ConstrainedLines(BaseCurveObject)
 
-  # Create planar line(s) on XY subject to tangency/contact constraints
-  # Remarks: Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point
+  # Create planar line(s) on XY subject to tangency, point-incidence, or
+  # Remarks: orientation constraints. Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point 3. Tangent to one curve with a fixed orientation
   # build123d.objects_curve.ConstrainedLines.__init__ (constructor)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Axis | Edge, tangency_two: tuple[Edge, Tangency] | Axis | Edge, *, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Edge, tangency_two: VectorLike, *, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
@@ -175,15 +165,13 @@ class DoubleTangentArc(BaseEdgeObject)
 class EllipticalCenterArc(BaseEdgeObject)
 
   # build123d.objects_curve.EllipticalCenterArc.__init__ (constructor)
-  EllipticalCenterArc(center: VectorLike, x_radius: float, y_radius: float, start_angle: float = 0.0, end_angle: float | None = None, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, angular_direction: AngularDirection | None = None, mode: Mode = Mode.ADD) -> None
+  EllipticalCenterArc(center: VectorLike, x_radius: float, y_radius: float, start_angle: float = 0.0, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, mode: Mode = Mode.ADD) -> None
   #   center: ellipse center
   #   x_radius: x radius of the ellipse (along the x-axis of plane)
   #   y_radius: y radius of the ellipse (along the y-axis of plane)
   #   start_angle: arc start angle from x-axis
-  #   end_angle: arc end angle from x-axis
   #   arc_size: angular size of arc (negative to change direction) or an arc limit
   #   rotation: angle to rotate arc
-  #   angular_direction: arc direction
   #   mode: combination mode
 
 # Category: objects_curve
@@ -242,15 +230,13 @@ class Helix(BaseEdgeObject)
 class HyperbolicCenterArc(BaseEdgeObject)
 
   # build123d.objects_curve.HyperbolicCenterArc.__init__ (constructor)
-  HyperbolicCenterArc(center: VectorLike, x_radius: float, y_radius: float, start_angle: float = 0.0, end_angle: float | None = None, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, angular_direction: AngularDirection | None = None, mode: Mode = Mode.ADD)
+  HyperbolicCenterArc(center: VectorLike, x_radius: float, y_radius: float, start_angle: float = 0.0, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, mode: Mode = Mode.ADD)
   #   center: hyperbola center
   #   x_radius: x radius of the ellipse (along the x-axis of plane)
   #   y_radius: y radius of the ellipse (along the y-axis of plane)
   #   start_angle: arc start angle from x-axis
-  #   end_angle: arc end angle from x-axis
   #   arc_size: angular size of arc (negative to change direction) or an arc limit
   #   rotation: angle to rotate arc
-  #   angular_direction: arc direction
   #   mode: combination mode
 
 # Category: objects_curve
@@ -299,44 +285,12 @@ class Line(BaseEdgeObject)
 class ParabolicCenterArc(BaseEdgeObject)
 
   # build123d.objects_curve.ParabolicCenterArc.__init__ (constructor)
-  ParabolicCenterArc(vertex: VectorLike, focal_length: float, start_angle: float = 0.0, end_angle: float | None = None, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, angular_direction: AngularDirection | None = None, mode: Mode = Mode.ADD)
+  ParabolicCenterArc(vertex: VectorLike, focal_length: float, start_angle: float = 0.0, *, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, mode: Mode = Mode.ADD)
   #   vertex: parabola vertex
   #   focal_length: focal length the parabola (distance from the vertex to focus along the x-axis of plane)
   #   start_angle: arc start angle
-  #   end_angle: arc end angle
   #   arc_size: angular size of arc (negative to change direction) or an arc limit
   #   rotation: angle to rotate arc
-  #   angular_direction: arc direction
-  #   mode: combination mode
-
-# Category: objects_curve
-# Line Object
-# Remarks: Create an arc defined by a point/tangent pair and another line which the other end is tangent to.
-# Throws: ValueError: Arc must have GeomType.CIRCLE
-# Throws: ValueError: Point is already tangent to arc
-# Throws: RuntimeError: No tangent arc found
-# build123d.objects_curve.PointArcTangentArc (class)
-class PointArcTangentArc(BaseEdgeObject)
-
-  # build123d.objects_curve.PointArcTangentArc.__init__ (constructor)
-  PointArcTangentArc(point: VectorLike, direction: VectorLike, arc: Curve | Edge | Wire, side: Side = Side.LEFT, mode: Mode = Mode.ADD)
-  #   point: starting point of tangent arc
-  #   direction: direction at starting point of tangent arc
-  #   arc: ending arc, must be GeomType.CIRCLE
-  #   side: select which arc to keep Defaults to Side.LEFT
-  #   mode: combination mode
-
-# Category: objects_curve
-# Line Object
-# Remarks: Create a straight, tangent line from a point to a circular arc.
-# build123d.objects_curve.PointArcTangentLine (class)
-class PointArcTangentLine(BaseEdgeObject)
-
-  # build123d.objects_curve.PointArcTangentLine.__init__ (constructor)
-  PointArcTangentLine(point: VectorLike, arc: Curve | Edge | Wire, side: Side = Side.LEFT, mode: Mode = Mode.ADD)
-  #   point: intersection point for tangent
-  #   arc: circular arc to tangent, must be GeomType.CIRCLE
-  #   side: side of arcs to place tangent arc center, LEFT or RIGHT
   #   mode: combination mode
 
 # Category: objects_curve
@@ -435,24 +389,4 @@ class ThreePointArc(BaseEdgeObject)
   # build123d.objects_curve.ThreePointArc.__init__ (constructor)
   ThreePointArc(*pts: VectorLike | Iterable[VectorLike], mode: Mode = Mode.ADD)
   #   pts: sequence of three points
-  #   mode: combination mode
-
-# Category: objects_curve
-# BaseEdgeObject specialized for Edge
-# build123d.objects_curve.BaseEdgeObject (class)
-class BaseEdgeObject(Edge)
-
-  # build123d.objects_curve.BaseEdgeObject.__init__ (constructor)
-  BaseEdgeObject(curve: Edge, mode: Mode = Mode.ADD)
-  #   curve: edge to create
-  #   mode: combination mode
-
-# Category: objects_curve
-# BaseCurveObject specialized for Curve
-# build123d.objects_curve.BaseCurveObject (class)
-class BaseCurveObject(Curve)
-
-  # build123d.objects_curve.BaseCurveObject.__init__ (constructor)
-  BaseCurveObject(curve: Curve, mode: Mode = Mode.ADD)
-  #   curve: wire to create
   #   mode: combination mode

@@ -1,6 +1,6 @@
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
-import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, Info } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, Info, OctagonAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
@@ -49,6 +49,7 @@ import type {
   ExportPreferencesState,
   ExportSchema,
   ExportSource,
+  ExportUnavailable,
 } from '#export/export-source.js';
 
 // Shared static fields for export form context (no search; nested groups start collapsed)
@@ -744,6 +745,52 @@ function DestinationSection({
 }
 
 /**
+ * What the pane shows while an entry with geometry offers no formats: that they are still loading, or why they could
+ * not be listed, with a retry when asking again can help.
+ *
+ * @param props - The entry and why its formats are missing, when that is known.
+ * @returns The notice.
+ */
+function FormatsNotice({
+  entryPath,
+  unavailable,
+}: Readonly<{ entryPath: string; unavailable: ExportUnavailable | undefined }>): ReactElement {
+  if (unavailable === undefined) {
+    return (
+      <PanelEmptyState
+        icon={Info}
+        title='Export formats are still loading'
+        description={
+          <>Formats for {entryPath === '' ? 'this file' : entryPath} will appear when its kernel is ready.</>
+        }
+        role='status'
+        aria-label='Export formats are still loading'
+        aria-busy='true'
+        className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
+      />
+    );
+  }
+  const { message, retry } = unavailable;
+  return (
+    <PanelEmptyState
+      icon={OctagonAlert}
+      iconClassName='text-feature'
+      title='Export formats could not be loaded'
+      description={message}
+      role='alert'
+      aria-label='Export formats could not be loaded'
+      className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
+    >
+      {retry === undefined ? null : (
+        <Button variant='outline' size='sm' onClick={retry}>
+          Retry
+        </Button>
+      )}
+    </PanelEmptyState>
+  );
+}
+
+/**
  * Preferences kept for as long as the pane is mounted, for a host that keeps none.
  *
  * @returns The preferences and their writer.
@@ -1078,20 +1125,7 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
                 />
               </>
             ) : (
-              <PanelEmptyState
-                icon={Info}
-                title='Export formats are still loading'
-                description={
-                  <>
-                    Formats for {selectedEntryPath === '' ? 'this file' : selectedEntryPath} will appear when its kernel
-                    is ready.
-                  </>
-                }
-                role='status'
-                aria-label='Export formats are still loading'
-                aria-busy='true'
-                className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
-              />
+              <FormatsNotice entryPath={selectedEntryPath} unavailable={entryState.unavailable} />
             )
           ) : (
             <PanelEmptyState

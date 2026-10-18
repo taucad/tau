@@ -393,6 +393,38 @@
       "metadata": {
         "description": "Offline simulator storage failure and automatically decoded camera still in a built desktop; accepts the completed-artifact executable to verify an unsigned package."
       }
+    },
+    "test:e2e:build123d-adoption": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Opt-in real Codex authoring of native Build123D materials, textured reusable assemblies and motion in the completed unsigned macOS arm64 package. The app seeds its fresh profile from bundled native closures. Uses operator Codex quota."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "package-macos-unsigned"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d-adoption.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014",
+          "TAU_E2E_BUILD123D_ADOPTION": "true",
+          "TAU_E2E_ACP_PACKAGED": "true",
+          "TAU_E2E_API_SELF_HOST": "true"
+        }
+      }
     }
   }
 }

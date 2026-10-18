@@ -274,6 +274,24 @@ class AnalyzerTest(unittest.TestCase):
             unresolved = analyzer.analyze_project(root, "main.py")
             self.assertEqual(unresolved["unresolved"], ["missing.py"])
 
+    def test_imported_parts_carry_their_declared_texture_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.py").write_text(model() + "\nimport part\n")
+            (root / "part.py").write_text("__tau__ = {'dependencies': ['finish.png']}\n")
+            (root / "finish.png").write_bytes(b"image-v1")
+            self.assertEqual(analyzer.analyze_project(root, "main.py")["resolved"], ["finish.png", "main.py", "part.py"])
+            # Explicitly declaring an imported module must not suppress parsing its own imports/resources.
+            (root / "main.py").write_text(model(metadata="__tau__ = {'dependencies': ['part.py']}") + "\nimport part\n")
+            (root / "part.py").write_text("import detail\n__tau__ = {'dependencies': ['finish.png']}\n")
+            (root / "detail.py").write_text("size = 1\n")
+            self.assertEqual(analyzer.analyze_project(root, "main.py")["resolved"], ["detail.py", "finish.png", "main.py", "part.py"])
+            (root / "finish.png").unlink()
+            self.assertEqual(analyzer.analyze_project(root, "main.py")["unresolved"], ["finish.png"])
+            (root / "part.py").write_text("__tau__ = {'dependencies': 1}\n")
+            with self.assertRaisesRegex(analyzer.AnalysisIssue, "must be a list"):
+                analyzer.analyze_project(root, "main.py")
+
     def test_dependency_path_and_dynamic_import_rejections(self) -> None:
         for path in ("", "../secret", "/absolute", "a\\b", "bad\0path"):
             with self.subTest(path=path), self.assertRaises(analyzer.AnalysisIssue):

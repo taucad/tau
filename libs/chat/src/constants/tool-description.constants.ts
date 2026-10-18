@@ -73,7 +73,7 @@ Modes (\`mode\`, default \`single\`):
 - single: one deterministic perspective isometric image for a 3D view
 - multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
 
-Section (\`section\`, 3D views only) cuts the model with one axis plane to show its inside, e.g. { plane: 'xy', offsetMm: 6 } for a horizontal cut 6 mm above the origin. The kept half defaults to the one whose cut face looks at the single-mode camera; \`keep\` names the side to retain instead, and the result \`message\` states what was kept. Cuts are capped.
+Section (\`section\`, 3D views only) cuts the model with one axis plane to show its inside, e.g. { plane: 'xy', offset: 0.006 } for a horizontal cut 6 mm above the origin. The kept half defaults to the one whose cut face looks at the single-mode camera; \`keep\` names the side to retain instead, and the result \`message\` states what was kept. Cuts are capped.
 
 ${parameterOverrideRule}
 

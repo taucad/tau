@@ -25,6 +25,7 @@ export default defineConfig({
       'src/graphics/three/utils/measurement-features-worker-client.browser.test.ts',
       'src/graphics/three/utils/bvh-worker-client.browser.test.ts',
       'src/graphics/three/utils/model-gpu-pick.browser.test.ts',
+      'src/graphics/three/utils/section-stencil-caps.browser.test.ts',
     ],
     fileParallelism: false,
     reporters: ['verbose'],

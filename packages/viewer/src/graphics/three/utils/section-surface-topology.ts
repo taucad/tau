@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { INTERSECTED, NOT_INTERSECTED } from 'three-mesh-bvh';
-import { ensureBvh, getBvh, getBvhStatus } from '#graphics/three/utils/bvh-cache.js';
+import { getBvh, maxSynchronousBvhTriangles } from '#graphics/three/utils/bvh-cache.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { getModelComponentId, getModelComponentOwnerInHierarchy } from '#graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
@@ -27,7 +27,7 @@ export type SectionTopologyFailure = Readonly<{
     | 'non-manifold-vertex'
     | 'partial-visibility'
     | 'slice-invariant'
-    | 'bvh-unavailable';
+    | 'topology-unavailable';
   message: string;
   sourceKey: string;
 }>;
@@ -271,6 +271,31 @@ const topologyFailure = (
   },
 });
 
+/** Records a source the section view refuses because its topology could not be built where it is allowed to be. */
+const recordSourceUnsupported = (failure: SectionTopologyFailure, reason: string): void => {
+  recordRendererSpan('renderer.section-source-unsupported', {
+    startTime: performance.now(),
+    duration: 0,
+    attributes: { sourceKey: failure.sourceKey, code: failure.code, reason },
+  });
+};
+
+/**
+ * The most triangles a topology may build from on the main thread, when no worker can: the BVH's synchronous limit,
+ * one bound for both per-geometry builds a frame may meet.
+ */
+const maxSynchronousTopologyTriangles = maxSynchronousBvhTriangles;
+
+/** A topology that could not be built in its worker: refused with a span, never rebuilt on the main thread. */
+const unavailableTopology = (
+  sourceKey: string,
+  reason: string,
+): Readonly<{ status: 'unsupported'; failure: SectionTopologyFailure }> => {
+  const result = topologyFailure(sourceKey, 'topology-unavailable', `no topology (${reason})`);
+  recordSourceUnsupported(result.failure, reason);
+  return result;
+};
+
 const orderedPair = (left: number, right: number): readonly [number, number] =>
   left <= right ? [left, right] : [right, left];
 
@@ -362,6 +387,19 @@ const spatialClusters = (vertices: readonly number[], positions: Float64Array, e
     clusters[vertex] = sets.representative(index);
   }
   return clusters;
+};
+
+/** The seam's edges that run from its low cluster to its high one, then the rest, in one pass. */
+const splitSeamEdges = (
+  edges: readonly number[],
+  isForward: (edge: number) => boolean,
+): readonly [forward: number[], reverse: number[]] => {
+  const forward: number[] = [];
+  const reverse: number[] = [];
+  for (const edge of edges) {
+    (isForward(edge) ? forward : reverse).push(edge);
+  }
+  return [forward, reverse];
 };
 
 const pairKey = (left: number, right: number): string => {
@@ -588,10 +626,10 @@ const buildCanonicalTopologyRecipe = (input: {
     for (const edges of bySeam.values()) {
       const first = edges[0]!;
       const [lowCluster, highCluster] = orderedPair(clusters[start(first)]!, clusters[end(first)]!);
-      const forward = edges.filter(
+      const [forward, reverse] = splitSeamEdges(
+        edges,
         (edge) => clusters[start(edge)] === lowCluster && clusters[end(edge)] === highCluster,
       );
-      const reverse = edges.filter((edge) => !forward.includes(edge));
       for (const left of forward) {
         for (const right of reverse) {
           const key = pairKey(patches[halfEdgeTriangle(left)]!, patches[halfEdgeTriangle(right)]!);
@@ -606,10 +644,10 @@ const buildCanonicalTopologyRecipe = (input: {
       if (lowCluster === highCluster) {
         return topologyFailure(sourceKey, 'collapsed-triangle', 'has a seam edge collapsed by topology tolerance');
       }
-      const forward = edges.filter(
+      const [forward, reverse] = splitSeamEdges(
+        edges,
         (edge) => clusters[start(edge)] === lowCluster && clusters[end(edge)] === highCluster,
       );
-      const reverse = edges.filter((edge) => !forward.includes(edge));
       if (edges.length === 1) {
         return topologyFailure(sourceKey, 'open-surface', 'has an open material seam');
       }
@@ -753,6 +791,11 @@ export const buildSectionCanonicalTopologyWorkerResult = (
   input: SectionCanonicalTopologyWorkerInput,
 ): SectionCanonicalTopologyWorkerResult => buildCanonicalTopologyRecipe(input);
 
+/**
+ * Builds the topology's recipe in the worker. Without a worker, a small topology builds here and a large one is
+ * refused. A worker that fails is replaced and asked once more; a second failure refuses the topology with a span.
+ * Neither reruns a large build on the main thread.
+ */
 const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<SectionSurfaceTopologyResult> => {
   const packStartedAt = performance.now();
   const request: SectionCanonicalTopologyWorkerInput = {
@@ -763,14 +806,24 @@ const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<S
   };
   const pending = buildSectionTopologyRecipeInWorker(request);
   if (!pending) {
-    return buildCanonicalTopology(input);
+    return input.triangleVertices.length / 3 <= maxSynchronousTopologyTriangles
+      ? buildCanonicalTopology(input)
+      : unavailableTopology(input.sourceKey, 'no topology worker');
   }
   input.onPack?.(performance.now() - packStartedAt);
-  try {
-    return assembleCanonicalTopology(input, await pending);
-  } catch {
-    return buildCanonicalTopology(input);
+  let recipe: SectionCanonicalTopologyWorkerResult | undefined;
+  let failure = 'the topology worker failed';
+  // The client terminates a failed worker, so the retry runs in a fresh one.
+  for (const attempt of [pending, undefined]) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- the retry follows the first attempt's failure.
+      recipe = await (attempt ?? buildSectionTopologyRecipeInWorker(request));
+      break;
+    } catch (error) {
+      failure = error instanceof Error && error.message ? error.message : failure;
+    }
   }
+  return recipe ? assembleCanonicalTopology(input, recipe) : unavailableTopology(input.sourceKey, failure);
 };
 
 /** The render material slot of one geometry triangle, from the geometry's groups. */
@@ -1053,6 +1106,86 @@ const createStandaloneSource = (mesh: SectionSurfaceMesh): SectionSurfaceSource 
     revision: builtRevision,
   };
   standaloneSourceCache.set(mesh, source);
+  return source;
+};
+
+const geometryTriangleCount = (geometry: THREE.BufferGeometry): number =>
+  Math.floor((geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3);
+
+type PendingStandaloneSource = Readonly<{ revision: string; ready: Promise<SectionSurfaceSource> }>;
+
+const pendingStandaloneSources = new WeakMap<SectionSurfaceMesh, PendingStandaloneSource>();
+
+/**
+ * A standalone mesh's source: built here up to the synchronous limit, and above it in the topology worker, returning
+ * the build to wait on until it lands.
+ */
+const getStandaloneSource = (mesh: SectionSurfaceMesh): SectionSurfaceSource | Promise<SectionSurfaceSource> => {
+  const revision = geometryRevision(mesh.geometry);
+  const cached = standaloneSourceCache.get(mesh);
+  if (cached?.revision === revision) {
+    return cached;
+  }
+  if (geometryTriangleCount(mesh.geometry) <= maxSynchronousTopologyTriangles) {
+    return createStandaloneSource(mesh);
+  }
+  const pending = pendingStandaloneSources.get(mesh);
+  if (pending?.revision === revision) {
+    return pending.ready;
+  }
+  mesh.updateWorldMatrix(true, true);
+  const participant = createParticipant({
+    mesh,
+    rootInverse: new THREE.Matrix4().copy(mesh.matrixWorld).invert(),
+    order: 0,
+  });
+  const build = async (): Promise<SectionSurfaceSource> => {
+    const source: SectionSurfaceSource = {
+      key: mesh.uuid,
+      root: mesh,
+      owner: getModelComponentOwnerInHierarchy(mesh),
+      participants: [participant],
+      topology: await buildFallbackTopologyAsync({ sourceKey: mesh.uuid, participants: [participant] }),
+      revision,
+    };
+    // A newer revision may have replaced this build meanwhile; only the current one is kept.
+    if (pendingStandaloneSources.get(mesh)?.revision === revision) {
+      pendingStandaloneSources.delete(mesh);
+      standaloneSourceCache.set(mesh, source);
+    }
+    return source;
+  };
+  const ready = build();
+  pendingStandaloneSources.set(mesh, { revision, ready });
+  return ready;
+};
+
+const refusedRegistrationSources = new WeakMap<THREE.Object3D, Map<SectionSurfaceMesh, SectionSurfaceSource>>();
+
+/** A mesh of a glTF whose registration failed: refused, so the cut set that crosses it is refused too. */
+const getRefusedRegistrationSource = (root: THREE.Object3D, mesh: SectionSurfaceMesh): SectionSurfaceSource => {
+  const sources = refusedRegistrationSources.get(root) ?? new Map<SectionSurfaceMesh, SectionSurfaceSource>();
+  refusedRegistrationSources.set(root, sources);
+  const revision = geometryRevision(mesh.geometry);
+  const cached = sources.get(mesh);
+  if (cached?.revision === revision) {
+    return cached;
+  }
+  const owner = getModelComponentOwnerInHierarchy(mesh);
+  const key = owner ? `${owner.unitId}:${owner.componentId}:${mesh.uuid}` : mesh.uuid;
+  const failure = topologyFailure(key, 'topology-unavailable', 'its model could not be prepared for section views');
+  if (!cached) {
+    recordSourceUnsupported(failure.failure, 'the registration failed');
+  }
+  const source: SectionSurfaceSource = {
+    key,
+    root,
+    owner,
+    participants: [createParticipant({ mesh, rootInverse: new THREE.Matrix4(), order: 0 })],
+    topology: failure,
+    revision,
+  };
+  sources.set(mesh, source);
   return source;
 };
 
@@ -1504,35 +1637,6 @@ const createRegisteredSource = async (options: {
   };
 };
 
-/** Standalone geometries whose failed tree was already reported: collection runs every frame, the span once. */
-const reportedStandaloneTreeFailures = new WeakSet<THREE.BufferGeometry>();
-
-const recordSourceUnsupported = (sourceKey: string, reason: string): void => {
-  recordRendererSpan('renderer.section-source-unsupported', {
-    startTime: performance.now(),
-    duration: 0,
-    attributes: { sourceKey, code: 'bvh-unavailable', reason },
-  });
-};
-
-/**
- * A source whose participant has no tree cannot be sliced: the BVH worker failed for it. It resolves unsupported,
- * which section views skip, so a span records it.
- */
-const withoutMissingTrees = (
-  source: SectionSurfaceSource,
-  missingTrees: ReadonlySet<THREE.BufferGeometry>,
-): SectionSurfaceSource => {
-  const missing = source.participants.find(({ mesh }) => missingTrees.has(mesh.geometry));
-  if (!missing) {
-    return source;
-  }
-  const status = getBvhStatus(missing.mesh.geometry);
-  const reason = status.status === 'failed' ? status.reason : 'its tree is unavailable';
-  recordSourceUnsupported(source.key, reason);
-  return { ...source, topology: topologyFailure(source.key, 'bvh-unavailable', `no BVH (${reason})`) };
-};
-
 /** Builds and registers the private topology owned by one loaded glTF scene. @internal */
 export const registerGltfSectionSurfaceSources = async (options: {
   scene: THREE.Group;
@@ -1564,11 +1668,6 @@ export const registerGltfSectionSurfaceSources = async (options: {
       order,
       association: getAssociation(mesh, options.parser.associations),
     }),
-  );
-  // Slicing needs every participant's tree. The ones above the synchronous threshold build in the BVH worker
-  // while the topology recipes build in theirs; registration stays pending until both land.
-  const trees = new Map(
-    [...new Set(meshes.map((mesh) => mesh.geometry))].map((geometry) => [geometry, ensureBvh(geometry)] as const),
   );
   const participantsByComponent = new Map<string, SectionSurfaceParticipant[]>();
   for (const participant of participants) {
@@ -1668,13 +1767,10 @@ export const registerGltfSectionSurfaceSources = async (options: {
       sliceStartedAt = performance.now();
     }
   }
-  const built = await Promise.all(pending);
-  const landed = await Promise.all([...trees].map(async ([geometry, tree]) => ({ geometry, tree: await tree })));
-  const missingTrees = new Set(landed.filter(({ tree }) => !tree).map(({ geometry }) => geometry));
+  const sources = await Promise.all(pending);
   if (options.isCancelled?.()) {
     throw new DOMException('Section preparation superseded', 'AbortError');
   }
-  const sources = built.map((source) => withoutMissingTrees(source, missingTrees));
   sectionSourceRegistry.set(options.scene, { status: 'ready', sources });
   const completedAt = performance.now();
   const workerMilliseconds = sources.reduce(
@@ -1699,6 +1795,7 @@ export const collectSectionSurfaceSources = (
   const registered: SectionSurfaceSource[] = [];
   const coveredMeshes = new Set<SectionSurfaceMesh>();
   const blockedRoots = new Set<THREE.Object3D>();
+  const refusedRoots = new Set<THREE.Object3D>();
   root.traverse((object) => {
     const registration = sectionSourceRegistry.get(object);
     if (!registration) {
@@ -1710,6 +1807,7 @@ export const collectSectionSurfaceSources = (
       return;
     }
     if (registration.status === 'unsupported') {
+      refusedRoots.add(object);
       return;
     }
     registered.push(...registration.sources);
@@ -1729,25 +1827,18 @@ export const collectSectionSurfaceSources = (
       hasPositionAttribute(object.geometry) &&
       !hasSceneTag(object, sceneTag.sectionViewHelper)
     ) {
-      // A standalone surface above the synchronous threshold has no cut until its worker tree lands.
-      if (getBvh(object.geometry)) {
-        standalone.push(createStandaloneSource(object));
+      // A glTF whose registration failed is refused as a whole; its meshes never build here one by one.
+      const refusedRoot = findAncestorInSet(object, refusedRoots);
+      if (refusedRoot) {
+        standalone.push(getRefusedRegistrationSource(refusedRoot, object));
         return;
       }
-      const tree = getBvhStatus(object.geometry);
-      if (tree.status === 'failed') {
-        const source = createStandaloneSource(object);
-        if (!reportedStandaloneTreeFailures.has(object.geometry)) {
-          reportedStandaloneTreeFailures.add(object.geometry);
-          recordSourceUnsupported(source.key, tree.reason);
-        }
-        standalone.push({
-          ...source,
-          topology: topologyFailure(source.key, 'bvh-unavailable', `no BVH (${tree.reason})`),
-        });
+      const source = getStandaloneSource(object);
+      if (source instanceof Promise) {
+        onBlocked?.(source);
         return;
       }
-      onBlocked?.(ensureBvh(object.geometry));
+      standalone.push(source);
     }
   });
 
@@ -1763,6 +1854,20 @@ export const collectSectionSurfaceSources = (
       } as const,
     ];
   });
+};
+
+const findAncestorInSet = (
+  object: THREE.Object3D,
+  candidates: ReadonlySet<THREE.Object3D>,
+): THREE.Object3D | undefined => {
+  let current: THREE.Object3D | undefined = object;
+  while (current) {
+    if (candidates.has(current)) {
+      return current;
+    }
+    current = current.parent ?? undefined;
+  }
+  return undefined;
 };
 
 const hasAncestorInSet = (object: THREE.Object3D, candidates: ReadonlySet<THREE.Object3D>): boolean => {
@@ -1921,10 +2026,10 @@ export const sliceSectionSurfaceSource = (options: {
   const { topology } = source.topology;
   const sourcePlane = options.worldPlane.clone().applyMatrix4(getSectionSourceWorldMatrix(source).invert());
   const broadphaseStartedAt = performance.now();
-  const candidates = candidateTopologyTriangles(source, options.worldPlane);
-  if (!candidates) {
-    return topologyFailure(source.key, 'bvh-unavailable', 'a participant has no ready tree');
-  }
+  // Without every participant's tree, every triangle is a candidate: the exact slice never waits on one.
+  const candidates =
+    candidateTopologyTriangles(source, options.worldPlane) ??
+    Array.from({ length: topology.triangleVertices.length / 3 }, (_unused, triangle) => triangle);
   const candidateBroadphaseMilliseconds = performance.now() - broadphaseStartedAt;
   const { positions, triangleVertices, triangleEdges, edges, distanceTolerance } = topology;
   const onPlane = (vertex: number): boolean =>

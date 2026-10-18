@@ -95,26 +95,33 @@ class WorkerTest(unittest.TestCase):
             self.assertFalse(worker._parent_is_alive(42))
 
         with (
+            patch("worker.os.name", "posix"),
+            patch("worker.signal.SIGKILL", 9, create=True),
             patch("worker.shutil.rmtree") as remove_tree,
-            patch("worker.os.killpg") as kill_group,
-            patch("worker.os.getpgrp", return_value=7),
+            patch("worker.os.killpg", create=True) as kill_group,
+            patch("worker.os.getpgrp", return_value=7, create=True),
             patch("worker.os._exit") as exit_process,
         ):
             worker._terminate_orphaned_process_tree(temporary_root)
         remove_tree.assert_called_once_with(temporary_root, ignore_errors=True)
-        kill_group.assert_called_once_with(7, worker.signal.SIGKILL)
+        kill_group.assert_called_once_with(7, 9)
         exit_process.assert_called_once_with(1)
 
-        with patch("worker.shutil.rmtree"), patch("worker.os.killpg", side_effect=OSError), patch(
-            "worker.os._exit"
-        ) as exit_process:
+        with (
+            patch("worker.os.name", "posix"),
+            patch("worker.signal.SIGKILL", 9, create=True),
+            patch("worker.os.getpgrp", return_value=7, create=True),
+            patch("worker.shutil.rmtree"),
+            patch("worker.os.killpg", side_effect=OSError, create=True),
+            patch("worker.os._exit") as exit_process,
+        ):
             worker._terminate_orphaned_process_tree(temporary_root)
         exit_process.assert_called_once_with(1)
 
         with (
             patch("worker.shutil.rmtree"),
             patch.object(worker.os, "name", "nt"),
-            patch("worker.os.killpg") as kill_group,
+            patch("worker.os.killpg", create=True) as kill_group,
             patch("worker.os._exit") as exit_process,
         ):
             worker._terminate_orphaned_process_tree(temporary_root)
@@ -307,13 +314,6 @@ class WorkerTest(unittest.TestCase):
                 (MODEL.replace("def main", "async def main"), "Async"),
                 (MODEL.replace("def main(params: Params):", "not_main = 1\ndef other(params: Params):"), "callable main"),
                 (MODEL.replace("@dataclass(frozen=True)", "@dataclass"), "frozen"),
-                (
-                    MODEL.replace(
-                        "return Box(params.width, 3, 4)",
-                        "left = Box(1, 1, 1); right = Box(1, 1, 1); left.label = right.label = 'same'; return [left, right]",
-                    ),
-                    "Duplicate",
-                ),
             )
             for source, message in cases:
                 entry.write_text(source, encoding="utf-8")
@@ -352,6 +352,32 @@ class WorkerTest(unittest.TestCase):
                     self.assertRaisesRegex(TypeError, message),
                 ):
                     worker._load_model(root, "main.py", {})
+
+    def test_duplicate_root_labels_have_distinct_stable_occurrence_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = root / "main.py"
+            entry.write_text(MODEL.replace("return Box(params.width, 3, 4)",
+                "from build123d import Compound; left = Box(1, 1, 1); right = Box(1, 1, 1); left.label = right.label = 'same'; return Compound(children=[left, right])"))
+            declarations = []
+            shapes, _ = worker._load_model(root, "main.py", {}, motion=declarations.append)
+            components, meshes = worker._topology(shapes, 0.1, 0.1)
+            worker.project_mechanism(shapes, components, declarations[0], meshes=meshes)
+            self.assertEqual([item["name"] for item in components[1:]], ["same", "same"])
+            self.assertEqual([item["id"] for item in components[1:]], ["occurrence:path/0/0", "occurrence:path/0/1"])
+            self.assertEqual(set(meshes), {"occurrence:path/0/0", "occurrence:path/0/1"})
+
+    def test_motion_hook_is_evaluated_with_the_native_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = root / "main.py"
+            entry.write_text(MODEL + "\ndef motion(model): return {'ground': model}\n")
+            captured = []
+            shapes, _ = worker._load_model(root, "main.py", {}, motion=captured.append)
+            self.assertIs(captured[0]["ground"], shapes[0])
+            entry.write_text(MODEL + "\nmotion = 42\n")
+            with self.assertRaisesRegex(TypeError, "motion must be a callable"):
+                worker._load_model(root, "main.py", {}, motion=captured.append)
 
     def test_project_module_memo_is_invalidated_by_an_edited_dependency(self) -> None:
         """W14: the per-interpreter memo evicts the modules the previous build imported, failed builds included."""
@@ -397,8 +423,6 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(worker._component_id("!!!", "fallback"), "fallback")
         point = types.SimpleNamespace(X=1000, Y=2000, Z=3000)
         self.assertEqual(worker._point(point), (1.0, 3.0, -2.0))
-        self.assertEqual(worker._normal((0, 0, 0), (1, 0, 0), (0, 1, 0)), (0, 0, 1))
-        self.assertEqual(worker._normal((0, 0, 0), (0, 0, 0), (0, 0, 0)), (0, 1, 0))
 
         left = Box(1, 2, 3)
         left.label = "Part"
@@ -408,23 +432,15 @@ class WorkerTest(unittest.TestCase):
         assembly.label = "Assembly"
         curved = Cylinder(1, 2)
         curved.label = "Curved"
-        with patch.object(
-            OCP.BRepMesh,
-            "BRepMesh_IncrementalMesh",
-            wraps=OCP.BRepMesh.BRepMesh_IncrementalMesh,
-        ) as mesher:
-            components, meshes = worker._topology((assembly, curved), 0.05, 0.1)
-        self.assertEqual(mesher.call_count, 3)
-
-        expected_meshes = (
-            (Box(1, 2, 3), "dd048e009580e5949fa0594ce451430b1b18ba3b5e4c90ac5df0e8c2b11d0da1"),
-            (Cylinder(1, 2), "bf6edd7f1145fa7bd324815e3d7eaad8e8bd3eb5fbb5a83d3e804ee8a9cfa360"),
-            (Sphere(1).rotate(Axis.X, 37), "fe39af035cbf1d1d46a2321640cbe0ed49102512669bf8b1656999023b67009e"),
-        )
-        for shape, expected in expected_meshes:
+        components, meshes = worker._topology((assembly, curved), 0.05, 0.1)
+        for shape in (Box(1, 2, 3), Cylinder(1, 2), Sphere(1).rotate(Axis.X, 37)):
             mesh = worker._mesh_shape(shape, 0.05, 0.1)
-            encoded = json.dumps(mesh, sort_keys=True, separators=(",", ":")).encode()
-            self.assertEqual(hashlib.sha256(encoded).hexdigest(), expected)
+            self.assertEqual(len(mesh["positions"]), len(mesh["normals"]))
+            self.assertEqual(len(mesh["uvs"]) * 3, len(mesh["positions"]) * 2)
+            self.assertEqual(len(mesh["faceGroups"]), len(shape.faces()))
+            self.assertEqual(len(mesh["edgeGroups"]), len(shape.edges()))
+            self.assertEqual(sum(group["count"] for group in mesh["faceGroups"]), len(mesh["indices"]))
+            self.assertTrue(all(0 <= index < len(mesh["positions"]) // 3 for index in mesh["indices"]))
         self.assertEqual(components[0]["kind"], "assembly")
         self.assertEqual(components[1]["id"], "component:part")
         self.assertEqual(components[2]["id"], "component:part#2")
@@ -492,25 +508,18 @@ class WorkerTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "limit"):
                 runtime.dispatch("build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config()})
 
-    def test_mesh_shape_reads_the_component_triangulation_directly(self) -> None:
-        from build123d import Cylinder, Face
-        from OCP.Poly import Poly_Triangulation
-
-        with (
-            patch.object(Face, "tessellate", side_effect=AssertionError("per-face tessellation")),
-            patch.object(Poly_Triangulation, "Triangles", side_effect=AssertionError("bulk triangle wrapper")),
-        ):
-            mesh = worker._mesh_shape(Cylinder(1, 2), 0.05, 0.1)
-        self.assertGreater(len(mesh["positions"]), 0)
-        self.assertEqual(len(mesh["positions"]), len(mesh["normals"]))
-        self.assertEqual(len(mesh["positions"]), len(mesh["indices"]) * 3)
-
-        from OCP.BRep import BRep_Tool
-
-        with patch.object(BRep_Tool, "Triangulation_s", return_value=None), self.assertRaisesRegex(
-            AttributeError, "NbNodes"
-        ):
-            worker._mesh_shape(Cylinder(1, 2), 0.05, 0.1)
+    def test_native_compound_copies_keep_exactly_34_leaf_occurrences(self) -> None:
+        from copy import copy
+        from build123d import Box, Compound, Location
+        template = Box(1, 2, 3)
+        children = [copy(template).moved(Location((index * 2, 0, 0))) for index in range(34)]
+        model = Compound(label="Planetary parts", children=children)
+        for authored in (model, copy(model)):
+            self.assertEqual(len(authored.solids()), 34)
+            components, meshes = worker._topology((authored,), 0.1, 0.1)
+            self.assertEqual(len(components), 35)
+            self.assertEqual(len(meshes), 34)
+            self.assertEqual(len(components[0]["childIds"]), 34)
 
     def test_mesh_tolerances_do_not_change_a_retained_shape(self) -> None:
         from build123d import Cylinder
@@ -558,12 +567,21 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual((linear, relative, parallel), (0.05, False, True))
             self.assertAlmostEqual(angular, math.radians(20))
             self.assertGreater(small["triangles"], 0)
-            self.assertEqual(small["vertices"], small["triangles"] * 3)
+            self.assertGreater(small["vertices"], 0)
+            self.assertLessEqual(small["vertices"], small["triangles"] * 3)
             glb.validate_glb(Path(small["artifactPath"]).read_bytes())
 
             # The same absolute tolerance on a sphere a hundred times larger needs many more triangles.
             large = runtime.dispatch("mesh", {"handleId": "large", "linearTolerance": 0.05, "angularTolerance": 20})
             self.assertGreater(large["triangles"], small["triangles"] * 10)
+            # Native UV extraction must reuse the absolute triangulation that the
+            # budget counted, including when OCCT achieved deflection exceeds its request.
+            for name, emitted in (("small", small), ("large", large)):
+                located, counted = worker._triangulate(runtime.handles[name][0], 0.05, math.radians(20))
+                arrays = worker._mesh_arrays(runtime.handles[name][0], located, 0.05, math.radians(20))
+                self.assertEqual(counted, emitted["triangles"])
+                self.assertEqual(len(arrays["indices"]) // 3, counted)
+                self.assertEqual(len(arrays["uvs"]) // 2, emitted["vertices"])
 
             before = set(artifacts.iterdir())
             refused = runtime.dispatch(
@@ -596,8 +614,8 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(cold.hits, 1)
             operations = [entry["action"]["operation"] for entry in cold.announcements]
             self.assertEqual(operations[0], "Solid.make_box")
-            self.assertIn("Shape.cut", operations)
-            cut_digest = cold.announcements[-1]["actionDigest"]
+            self.assertNotIn("Shape.cut", operations)
+            primitive_digest = cold.announcements[-1]["actionDigest"]
             self.assertGreater(cold.announcements[-1]["estimatedBytes"], worker.COMPUTE_BASE_CHARGE_BYTES)
 
             with (
@@ -609,10 +627,10 @@ class WorkerTest(unittest.TestCase):
             ):
                 restored_cut = Box(10, 10, 10) - Cylinder(2, 12)
         self.assertEqual(warm.announcements, [])
-        self.assertGreaterEqual(warm.hits, 3)
+        self.assertGreaterEqual(warm.hits, 2)
         self.assertIsNot(restored_cut, cut)
-        resident = cache.residents[cut_digest]
-        clone = cache.get(cut_digest)
+        resident = cache.residents[primitive_digest]
+        clone = cache.get(primitive_digest)
         self.assertIsNot(clone.wrapped, resident.wrapped)
         self.assertTrue(clone.wrapped.IsSame(resident.wrapped))
         self.assertEqual(restored_cut.volume, cut.volume)
@@ -628,6 +646,55 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(cheap.announcements, [])
         self.assertEqual(floored.stats()["entries"], 0)
         self.assertIsNotNone(cheap.lineage(tracked))
+
+    def test_native_metadata_and_history_survive_resident_and_restored_primitive_reuse(self) -> None:
+        from bd_materials import metals
+        from build123d import Box, Cylinder, RigidJoint, Select, Solid
+
+        def model(label):
+            body = Box(10, 10, 10)
+            body.label = label
+            body.material = metals.brass()
+            RigidJoint("mount", body)
+            return body - Cylinder(2, 12)
+
+        native = model("native")
+        cache = worker._ComputeCache()
+        with patch.object(worker, "COMPUTE_ADMISSION_FLOOR", 0.0):
+            for label in ("cold", "warm"):
+                with worker._ComputeAdapter(cache, compute_config()) as adapter:
+                    result = model(label)
+                self.assertEqual(result.label, label)
+                self.assertEqual(result.material.material, native.material.material)
+                self.assertEqual(len(result.edges(Select.NEW)), 2)
+                self.assertEqual(len(result.faces(Select.LAST)), 1)
+                self.assertEqual(result.volume, native.volume)
+                self.assertIs(result.joints["mount"].parent, result)
+                self.assertTrue(all(item["action"]["operation"].startswith("Solid.make_") for item in adapter.announcements))
+            self.assertEqual(adapter.hits, 2)
+            restored = worker._ComputeCache()
+            for digest, shape in cache.residents.items():
+                self.assertTrue(restored.adopt(cache.actions[digest], digest, worker._brep_bytes(shape)))
+            with worker._ComputeAdapter(restored, compute_config()) as adapter:
+                result = model("restored")
+            self.assertEqual(adapter.hits, 2)
+            self.assertEqual(result.label, "restored")
+            self.assertEqual(result.material.material, native.material.material)
+            self.assertIs(result.joints["mount"].parent, result)
+            self.assertEqual(len(result.edges(Select.NEW)), 2)
+            self.assertEqual(len(result.faces(Select.LAST)), 1)
+
+            class NamedSolid(Solid):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.label = "native subclass"
+
+            with worker._ComputeAdapter(cache, compute_config()) as adapter:
+                subclass = NamedSolid.make_box(1, 2, 3)
+            self.assertIsInstance(subclass, NamedSolid)
+            self.assertEqual(subclass.label, "native subclass")
+            self.assertEqual(adapter.hits, 0)
+            self.assertEqual(adapter.announcements, [])
 
     def test_lineage_stamps_bypass_mutated_and_unstamped_operands(self) -> None:
         """G-F1/I9/U5: in-place mutation and unknown operands bypass; they never produce a hit."""
@@ -815,7 +882,7 @@ class WorkerTest(unittest.TestCase):
 
         cache = worker._ComputeCache()
         cancelled = threading.Event()
-        with worker._ComputeAdapter(cache, compute_config(), cancelled) as adapter:
+        with patch.object(worker, "COMPUTE_ADMISSION_FLOOR", 0.0), worker._ComputeAdapter(cache, compute_config(), cancelled) as adapter:
             Solid.make_box(30, 30, 30).cut(Solid.make_cylinder(4, 40))
             prefix = cache.stats()["entries"]
             cancelled.set()
@@ -827,7 +894,7 @@ class WorkerTest(unittest.TestCase):
         cancelled.clear()
         with worker._ComputeAdapter(cache, compute_config(), cancelled) as resumed:
             Solid.make_box(30, 30, 30).cut(Solid.make_cylinder(4, 40))
-        self.assertEqual(resumed.hits, 1)
+        self.assertEqual(resumed.hits, 2)
 
     def test_compute_bundle_protocol_is_bounded_confined_and_integrity_checked(self) -> None:
         """G-F10: real binary framing with count/byte caps, confined artifacts and no partial import."""

@@ -17,7 +17,7 @@ import type {
 } from '@taucad/occt-core';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 
-import type { Build123dMesh } from '#build123d.protocol.js';
+import type { Build123dArtifact, Build123dMesh } from '#build123d.protocol.js';
 
 const producer = 'build123d';
 
@@ -45,7 +45,7 @@ type TessellationLane = Readonly<{
 
 /** A mesh the worker wrote, with what it cost. */
 type MeshedArtifact = Readonly<{
-  artifact: Readonly<{ artifactPath: string; byteLength: number }>;
+  artifact: Build123dArtifact;
   tessellation: TessellationReport;
   issues: KernelIssue[];
 }>;
@@ -89,11 +89,11 @@ const resolveLane = async (
   };
 };
 
-const delivered = (mesh: Build123dMesh): Readonly<{ artifactPath: string; byteLength: number }> => {
+const delivered = (mesh: Build123dMesh): Build123dArtifact => {
   if (mesh.artifactPath === undefined || mesh.byteLength === undefined) {
     throw new Error('Build123d worker answered an unbounded mesh request without a GLB.');
   }
-  return { artifactPath: mesh.artifactPath, byteLength: mesh.byteLength };
+  return { ...mesh, artifactPath: mesh.artifactPath, byteLength: mesh.byteLength };
 };
 
 /**

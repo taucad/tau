@@ -12,27 +12,13 @@
  */
 import { base64ToUint8Array } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
+import { encodeBase64 } from '#harness/base64.js';
 import { attachmentPathPattern } from '#log/event-schema.js';
 import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
 
 const dataUrlPattern = /^data:(image\/(?:png|webp));base64,(.+)$/u;
 
 const extensionOf: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/webp': 'webp' };
-
-/**
- * Code points per `String.fromCodePoint` call: a megabyte view spread at once
- * overflows the argument limit deep in a worker stack.
- */
-const argumentChunk = 8192;
-
-const encodeBase64 = (bytes: Uint8Array<ArrayBuffer>): string => {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += argumentChunk) {
-    binary += String.fromCodePoint(...bytes.subarray(index, index + argumentChunk));
-  }
-  // oxlint-disable-next-line no-restricted-globals -- the suggested library spreads 65 535 arguments per call, which overflows a worker stack.
-  return btoa(binary);
-};
 
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
   Array.from(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes)), (byte) =>

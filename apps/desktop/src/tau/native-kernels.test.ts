@@ -41,10 +41,17 @@ describe('desktop native kernels', () => {
   it('should map each sealed closure to its kernel options and stand in for none', () => {
     const frame = nativeKernelsFixture({ picogk: true });
     const native = desktopNativeKernels(frame);
+    const build123dRoot = frame.kernels[0]!.closure!.root;
     const picogkRoot = frame.kernels[1]!.closure!.root;
 
     expect(native.unavailable).toBeUndefined();
     expect(native.build123d).toMatchObject({ pythonSha256: '1'.repeat(64) });
+    expect(native.build123d?.supportFiles).toEqual([
+      { path: `${build123dRoot}/tau-worker/analyzer.py`, sha256: '2'.repeat(64) },
+      { path: `${build123dRoot}/tau-worker/glb.py`, sha256: '3'.repeat(64) },
+      { path: `${build123dRoot}/tau-worker/native_materials.py`, sha256: 'b'.repeat(64) },
+      { path: `${build123dRoot}/tau-worker/mechanisms.py`, sha256: 'c'.repeat(64) },
+    ]);
     expect(native.picogk).toMatchObject({
       workerExecutable: `${picogkRoot}/dotnet/dotnet`,
       workerSha256: '5'.repeat(64),

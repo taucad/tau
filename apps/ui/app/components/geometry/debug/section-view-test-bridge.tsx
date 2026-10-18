@@ -7,7 +7,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
 import { perspectiveVerticalSpan } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
-import { toThreeRenderPoint } from '@taucad/three/spatial';
+import { fromThreeRenderBounds, fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { graphicsSettingsForView } from '#workbench-records/projection.js';
@@ -33,10 +33,8 @@ import { getModelComponentIdInHierarchy } from '@taucad/viewer/graphics/three/ut
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getControlsDistance, resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
-import { sectionCapOverlapDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-overlap-debug';
-import type { SectionCapOverlapDebugSummary } from '@taucad/viewer/graphics/three/utils/section-cap-overlap-debug';
-import { sectionCapPerformanceDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
-import type { SectionCapPerformanceDebugSummary } from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
+import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { useViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
 import type { ViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
@@ -50,8 +48,18 @@ import {
  * unflipped; a 90° cutaway from angle zero). A cutaway passes through the bounds centre.
  */
 export type SectionViewTestCut =
-  | Readonly<{ kind: 'plane'; plane: SectionPlane; offset?: number; isFlipped?: boolean }>
-  | Readonly<{ kind: 'revolution'; axis: SectionAxis; start?: number; sweep?: number }>;
+  | Readonly<{
+      kind: 'plane';
+      plane: SectionPlane;
+      offset?: number;
+      isFlipped?: boolean;
+    }>
+  | Readonly<{
+      kind: 'revolution';
+      axis: SectionAxis;
+      start?: number;
+      sweep?: number;
+    }>;
 
 export type SectionViewTestSectionState = Readonly<{
   isActive: boolean;
@@ -80,7 +88,10 @@ export type SectionViewTestCameraState = Readonly<{
   projection: 'orthographic' | 'perspective';
   requestedFov: number;
   requestedPerspectiveZoom: number;
-  bounds: Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }>;
+  bounds: Readonly<{
+    min: readonly [number, number, number];
+    max: readonly [number, number, number];
+  }>;
   handoffFov?: number;
   verticalSpan: number;
   position: readonly [number, number, number];
@@ -159,11 +170,6 @@ export type SectionViewTestCapCompleteness =
   | Readonly<{
       status: 'complete';
       admittedSourceCount: number;
-      extensionSourceCount: number;
-      fallbackSourceCount: number;
-      trueCutComponentCount: number;
-      cappedTrueCutComponentCount: number;
-      unresolvedTrueCutEdgeCount: number;
       unsupportedSourceCount: number;
     }>
   | Readonly<{
@@ -201,7 +207,11 @@ export type SectionViewTestMeasureState = Readonly<{
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
   /** Identity from this viewport's renderer, never a separately created probe context. */
-  getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
+  getRendererIdentity(): Readonly<{
+    api: 'webgl' | 'webgpu';
+    name: string;
+    frame: number;
+  }>;
   /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
   measureRenderFrames(options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean }>): Promise<
     Readonly<{
@@ -245,6 +255,15 @@ export type SectionViewTestBridgeApi = Readonly<{
   getModelComponents(): SectionViewTestModelComponent[];
   getModelVisibility(): SectionViewTestModelVisibility;
   getRenderedModelComponentState(componentId: string): SectionViewTestRenderedModelComponentState;
+  /** Actual triangle bounds in anchor-frame metres, including the live mechanism pose. */
+  getRenderedModelComponentSurfaceBounds(componentId: string):
+    | Readonly<{
+        min: readonly [number, number, number];
+        max: readonly [number, number, number];
+      }>
+    | undefined;
+  /** Actual triangle vertices in anchor-frame metres, independent of joint metadata. */
+  getRenderedModelComponentSurfacePoints(componentId: string): Array<readonly [number, number, number]>;
   projectModelComponent(componentId: string): SectionViewTestProjectedPoint[];
   hideModelComponent(componentId: string): void;
   isolateModelComponent(componentId: string): void;
@@ -262,8 +281,7 @@ export type SectionViewTestBridgeApi = Readonly<{
   getMeasureState(): SectionViewTestMeasureState;
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
-  getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
-  getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDebugSummary | undefined;
+  getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
 }>;
 
 type SectionViewTestGlobal = typeof globalThis & {
@@ -315,6 +333,62 @@ export function getSectionViewTestRenderedModelComponentState(
     surfaceMaterialOpacities,
     edgeMaterialOpacities,
   };
+}
+
+/** Visit triangle vertices in render-world coordinates, excluding fat-line proxy geometry. */
+function visitRenderedSurfacePoints(
+  scene: THREE.Object3D,
+  componentId: string,
+  visit: (point: THREE.Vector3) => void,
+): void {
+  const point = new THREE.Vector3();
+  scene.updateWorldMatrix(true, true);
+  scene.traverse((object) => {
+    if (
+      !(object instanceof THREE.Mesh) ||
+      object.type === 'LineSegments2' ||
+      getModelComponentIdInHierarchy(object) !== componentId
+    ) {
+      return;
+    }
+    const geometry = object.geometry as THREE.BufferGeometry;
+    if (!('position' in geometry.attributes)) {
+      return;
+    }
+    const position = geometry.getAttribute('position');
+    for (let index = 0; index < position.count; index++) {
+      visit(point.fromBufferAttribute(position, index).applyMatrix4(object.matrixWorld));
+    }
+  });
+}
+
+/** Read actual surface bounds in physical metres, including the live mechanism pose. */
+export function getRenderedModelComponentSurfaceBounds(
+  scene: THREE.Object3D,
+  componentId: string,
+  renderFrame: RenderFrame,
+):
+  | Readonly<{
+      min: readonly [number, number, number];
+      max: readonly [number, number, number];
+    }>
+  | undefined {
+  const bounds = new THREE.Box3();
+  visitRenderedSurfacePoints(scene, componentId, (point) => bounds.expandByPoint(point));
+  return bounds.isEmpty() ? undefined : fromThreeRenderBounds({ renderFrame, bounds });
+}
+
+/** Read actual triangle positions in physical metres for independent geometric observations. */
+export function getRenderedModelComponentSurfacePoints(
+  scene: THREE.Object3D,
+  componentId: string,
+  renderFrame: RenderFrame,
+): Array<readonly [number, number, number]> {
+  const points: Array<readonly [number, number, number]> = [];
+  visitRenderedSurfacePoints(scene, componentId, (point) => {
+    points.push(fromThreeRenderPoint({ renderFrame, point }));
+  });
+  return points;
 }
 
 export const getSectionViewTestControlState = ({
@@ -374,7 +448,9 @@ function getLineSegments2SegmentCount(object: THREE.Object3D): number {
 }
 
 function getObjectMaterials(object: THREE.Object3D): THREE.Material[] {
-  const { material } = object as { material?: THREE.Material | THREE.Material[] };
+  const { material } = object as {
+    material?: THREE.Material | THREE.Material[];
+  };
   if (!material) {
     return [];
   }
@@ -459,34 +535,19 @@ export const projectSectionViewTestHandle = ({
   return bounds.isEmpty() ? undefined : toProjectedPoint(bounds.getCenter(new THREE.Vector3()).project(camera), rect);
 };
 
-export const getSectionViewTestCapOverlapDiagnostics = (
+export const getSectionViewTestCapStencilDiagnostics = (
   scene: THREE.Object3D,
-): SectionCapOverlapDebugSummary | undefined => {
-  let summary: SectionCapOverlapDebugSummary | undefined;
+): SectionCapStencilDiagnostics | undefined => {
+  let diagnostics: SectionCapStencilDiagnostics | undefined;
 
   scene.traverse((child) => {
-    const candidate = (child.userData as Record<string, unknown>)[sectionCapOverlapDebugUserDataKey];
+    const candidate = (child.userData as Record<string, unknown>)[sectionCapStencilDebugUserDataKey];
     if (candidate && typeof candidate === 'object') {
-      summary = candidate as SectionCapOverlapDebugSummary;
+      diagnostics = candidate as SectionCapStencilDiagnostics;
     }
   });
 
-  return summary;
-};
-
-export const getSectionViewTestCapPerformanceDiagnostics = (
-  scene: THREE.Object3D,
-): SectionCapPerformanceDebugSummary | undefined => {
-  let summary: SectionCapPerformanceDebugSummary | undefined;
-
-  scene.traverse((child) => {
-    const candidate = (child.userData as Record<string, unknown>)[sectionCapPerformanceDebugUserDataKey];
-    if (candidate && typeof candidate === 'object') {
-      summary = candidate as SectionCapPerformanceDebugSummary;
-    }
-  });
-
-  return summary;
+  return diagnostics;
 };
 
 export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometryFramed: boolean }): React.ReactNode {
@@ -546,8 +607,14 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     const setFovAngle = (angle: number): void => {
       const expectedCamera = angle === 0 ? cameraRig.orthographicCamera : cameraRig.perspectiveCamera;
       const requestedAt = performance.now();
-      pendingCameraTransitionRef.current = { camera: expectedCamera, requestedAt };
-      cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: angle });
+      pendingCameraTransitionRef.current = {
+        camera: expectedCamera,
+        requestedAt,
+      };
+      cameraRig.actorRef.send({
+        type: 'setVerticalFieldOfView',
+        verticalFieldOfView: angle,
+      });
       const elapsed = performance.now() - requestedAt;
       const diagnostics = cameraTransitionDiagnosticsRef.current;
       const requests = diagnostics.requests + 1;
@@ -572,7 +639,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       const added = graphicsActor.getSnapshot().context.sectionCuts[count];
       if (added) {
         // The cut is its own patch: a patch ignores `kind`, and a value left out keeps the default.
-        graphicsActor.send({ type: 'updateSectionCut', payload: { id: added.id, patch: cut } });
+        graphicsActor.send({
+          type: 'updateSectionCut',
+          payload: { id: added.id, patch: cut },
+        });
       }
       return added?.id;
     };
@@ -593,7 +663,9 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             : undefined;
       },
       getGraphicsBackend() {
-        const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };
+        const renderer = get().gl as unknown as {
+          readonly backend?: { readonly isWebGPUBackend?: boolean };
+        };
         return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
       },
       getRendererIdentity() {
@@ -744,7 +816,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       addSectionCut,
       updateSectionCut(id, patch) {
-        graphicsActor.send({ type: 'updateSectionCut', payload: { id, patch } });
+        graphicsActor.send({
+          type: 'updateSectionCut',
+          payload: { id, patch },
+        });
       },
       removeSectionCut(id) {
         graphicsActor.send({ type: 'removeSectionCut', payload: id });
@@ -778,11 +853,20 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         });
       },
       setPresentation(presentation) {
-        graphicsActor.send({ type: 'setSurfaceVisibility', payload: presentation.surfaces });
-        graphicsActor.send({ type: 'setLinesVisibility', payload: presentation.lines });
+        graphicsActor.send({
+          type: 'setSurfaceVisibility',
+          payload: presentation.surfaces,
+        });
+        graphicsActor.send({
+          type: 'setLinesVisibility',
+          payload: presentation.lines,
+        });
       },
       setPostProcessingEnabled(enabled) {
-        graphicsActor.send({ type: 'setPostProcessingVisibility', payload: enabled });
+        graphicsActor.send({
+          type: 'setPostProcessingVisibility',
+          payload: enabled,
+        });
       },
       setGridPresentationClipPolicy(policy) {
         const { upDirection } = graphicsActor.getSnapshot().context;
@@ -790,7 +874,11 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           policy.far || policy.near
             ? {
                 farPaddingVerticalSpans: policy.far ? infiniteGridFadeEndVisibleSpans : 0,
-                ...(policy.near ? { presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection] } : {}),
+                ...(policy.near
+                  ? {
+                      presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
+                    }
+                  : {}),
               }
             : undefined,
         );
@@ -801,7 +889,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const unit = activeUnitId ? getModelInteractionUnitState(context, activeUnitId) : undefined;
         return (unit?.manifest?.nodeOrder ?? [])
           .filter((id) => id !== unit?.manifest?.rootId)
-          .map((id) => ({ id, name: unit?.manifest?.nodesById[id]?.name ?? id }));
+          .map((id) => ({
+            id,
+            name: unit?.manifest?.nodesById[id]?.name ?? id,
+          }));
       },
       getModelVisibility() {
         const { context } = modelInteractionRef.getSnapshot();
@@ -814,6 +905,12 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getRenderedModelComponentState(componentId) {
         return getSectionViewTestRenderedModelComponentState(scene, componentId);
+      },
+      getRenderedModelComponentSurfaceBounds(componentId) {
+        return getRenderedModelComponentSurfaceBounds(scene, componentId, cameraRig.renderFrame);
+      },
+      getRenderedModelComponentSurfacePoints(componentId) {
+        return getRenderedModelComponentSurfacePoints(scene, componentId, cameraRig.renderFrame);
       },
       projectModelComponent(componentId) {
         const { camera, gl } = get();
@@ -849,7 +946,12 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       hideModelComponent(componentId) {
         const activeUnitId = getActiveUnitId();
         if (activeUnitId) {
-          graphicsActor.send({ type: 'hideModelComponent', unitId: activeUnitId, componentId, source: 'screenshot' });
+          graphicsActor.send({
+            type: 'hideModelComponent',
+            unitId: activeUnitId,
+            componentId,
+            source: 'screenshot',
+          });
         }
       },
       isolateModelComponent(componentId) {
@@ -866,8 +968,16 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       resetModelVisibility() {
         const activeUnitId = getActiveUnitId();
         if (activeUnitId) {
-          graphicsActor.send({ type: 'showHiddenModelComponents', unitId: activeUnitId, source: 'screenshot' });
-          graphicsActor.send({ type: 'clearModelComponentIsolation', unitId: activeUnitId, source: 'screenshot' });
+          graphicsActor.send({
+            type: 'showHiddenModelComponents',
+            unitId: activeUnitId,
+            source: 'screenshot',
+          });
+          graphicsActor.send({
+            type: 'clearModelComponentIsolation',
+            unitId: activeUnitId,
+            source: 'screenshot',
+          });
         }
       },
       setCamera(nextCamera) {
@@ -914,7 +1024,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const cameraContext = actorSnapshot.context;
         const cameraView = cameraContext.view;
         const physicalCamera = cameraRig.readState();
-        const controlState = getSectionViewTestControlState({ controls, interactionLock });
+        const controlState = getSectionViewTestControlState({
+          controls,
+          interactionLock,
+        });
         const state: SectionViewTestCameraState = {
           actorStatus: actorSnapshot.status,
           actorError:
@@ -975,9 +1088,10 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       projectWorldPoint(point) {
         const { camera, gl } = get();
         const rect = gl.domElement.getBoundingClientRect();
-        const projected = toThreeRenderPoint({ renderFrame: cameraRig.renderFrame, pointMeters: point }).project(
-          camera,
-        );
+        const projected = toThreeRenderPoint({
+          renderFrame: cameraRig.renderFrame,
+          pointMeters: point,
+        }).project(camera);
 
         return toProjectedPoint(projected, rect);
       },
@@ -1031,11 +1145,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         });
         return completeness;
       },
-      getSectionCapOverlapDiagnostics() {
-        return getSectionViewTestCapOverlapDiagnostics(scene);
-      },
-      getSectionCapPerformanceDiagnostics() {
-        return getSectionViewTestCapPerformanceDiagnostics(scene);
+      getSectionCapStencilDiagnostics() {
+        return getSectionViewTestCapStencilDiagnostics(scene);
       },
     };
 

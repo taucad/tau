@@ -44,7 +44,17 @@ describe('Python language contribution', () => {
       cancellationToken,
     );
     expect(completion?.suggestions.map(({ label }) => label)).toEqual(
-      expect.arrayContaining(['Shape', 'Box', 'Compound', 'Color', 'export_step']),
+      expect.arrayContaining([
+        'Shape',
+        'Box',
+        'Compound',
+        'Color',
+        'RevoluteJoint',
+        'BallJoint',
+        'Select',
+        'export_step',
+        'export_gltf',
+      ]),
     );
 
     const unrelated = {

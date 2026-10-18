@@ -1,6 +1,6 @@
 # build123d — other
 
-13 top-level symbols. Signatures are verbatim python.
+15 top-level symbols. Signatures are verbatim python.
 
 # 10
 CM: int
@@ -10,6 +10,9 @@ FT: float
 
 # 1
 G: int
+
+# 453.59237
+G_PER_LB: float
 
 # 25.4
 IN: float
@@ -33,6 +36,8 @@ RotationLike: build123d.geometry.Rotation | tuple[float, float, float]
 
 # 0.0254
 THOU: float
+
+UNITS_PER_KILOGRAM: {<Unit.G>: 1000.0, <Unit.KG>: 1, <Unit.LB>: 2.2046226218487757}
 
 UNITS_PER_METER: {<Unit.IN>: 39.37007874015748, <Unit.FT>: 3.280839895013124, <Unit.MC>: 1000000.0, <Unit.MM>: 1000.0, <Unit.CM>: 100.0, <Unit.M>: 1}
 

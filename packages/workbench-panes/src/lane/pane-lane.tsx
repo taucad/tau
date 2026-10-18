@@ -162,24 +162,34 @@ export function PaneLane({
         ),
       )}
       <div className='flex h-9 shrink-0 items-center gap-1 px-1'>
-        <div role='tablist' aria-label='Open panes' className='flex min-w-0 items-center gap-0.5 overflow-x-auto'>
+        <div
+          role='tablist'
+          aria-label='Open panes'
+          className='flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto'
+        >
           {open.map((pane) => {
             const { icon: Icon, title } = workbenchPanes[pane];
             const isActive = pane === active;
             return (
+              /* As the app's dock tabs do, tabs share the header equally up to 144 px and their titles dissolve at
+               * the end, under the close glyph when it shows. A tab stops at 48 px, where its centre still clears the
+               * glyph; past that the tablist scrolls, never under the header's buttons. */
               <div
                 key={pane}
                 className={cn(
-                  'group/tab flex h-7 shrink-0 items-center gap-1.5 rounded-sm pr-1 pl-2 text-[13px]',
-                  isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  'group/tab fade-row flex h-7 w-36 min-w-12 shrink items-center rounded-sm text-[13px]',
+                  isActive
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground [--fade-scrim-into:var(--background)] hover:text-foreground',
                 )}
               >
                 <button
                   type='button'
                   role='tab'
+                  title={title}
                   aria-selected={isActive}
                   aria-keyshortcuts='Delete'
-                  className='flex items-center gap-1.5'
+                  className='flex size-full min-w-0 items-center gap-1.5 pr-1 pl-2'
                   onClick={() => {
                     setActive(pane);
                   }}
@@ -191,14 +201,21 @@ export function PaneLane({
                   }}
                 >
                   <Icon aria-hidden className='size-3.5 shrink-0' />
-                  <span>{title}</span>
+                  <span
+                    className={cn(
+                      'fade-label flex-1 text-left',
+                      isActive && '[--fade-label-size:var(--fade-label-size-actions)]',
+                    )}
+                  >
+                    {title}
+                  </span>
                 </button>
                 <button
                   type='button'
                   tabIndex={-1}
                   aria-label={`Close ${title}`}
                   className={cn(
-                    'flex size-4 items-center justify-center rounded-xs opacity-0 group-hover/tab:opacity-100 hover:bg-background/60',
+                    'fade-action absolute right-1 flex size-4 items-center justify-center rounded-xs opacity-0 group-focus-within/tab:opacity-100 group-hover/tab:opacity-100 hover:bg-background/60',
                     isActive && 'opacity-100',
                   )}
                   onClick={() => {

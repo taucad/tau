@@ -26,12 +26,13 @@ export type Link = Readonly<{ components: readonly string[] }>;
 export type LinkSource<ShapeName extends string = string> = Readonly<{ shapes: readonly ShapeName[] }>;
 
 /**
- * Inclusive travel bounds for one degree of freedom, in mechanism units. Limits are deltas from
+ * Inclusive travel bounds for one degree of freedom; omit either bound for unbounded travel.
+ * Bounds are finite when present. An empty object is unlimited. Limits are deltas from
  * the as-built pose and must contain the degree of freedom's value there (0 for a driver).
  *
  * @public
  */
-export type JointLimits = Readonly<{ lower: number; upper: number }>;
+export type JointLimits = Readonly<{ lower?: number; upper?: number }>;
 
 /**
  * The part of every joint that connects two links: the joint origin is a point in the
@@ -220,7 +221,7 @@ export type DegreeOfFreedom = Readonly<{
   jointId: string;
   kind: 'angle' | 'distance';
   role: 'driver' | 'follower';
-  limits: JointLimits | undefined;
+  limits: Readonly<{ lower: number; upper: number }> | undefined;
   coupling: Coupling | undefined;
 }>;
 
@@ -249,6 +250,19 @@ export type IssueCode =
 
 /** A diagnostic with a JSON-pointer-style `path` into the offending input. @public */
 export type Issue = Readonly<{ code: IssueCode; path: string; message: string; recovery: string }>;
+
+/**
+ * Validate motion relationships independently of physical graph playback support.
+ * @public
+ */
+export type ValidateMechanismMotionInput = Readonly<{
+  /** Known coordinate identities from physical connections or an admitted mechanism. */
+  coordinates: readonly string[];
+  /** Untrusted coupling declarations, checked with the mechanism admission rules. */
+  couplings?: unknown;
+  /** Untrusted animation declarations, checked with the mechanism admission rules. */
+  animations?: unknown;
+}>;
 
 /** Outcome of admitting unknown input as a {@link Mechanism}. @public */
 export type AdmitMechanismOutcome =

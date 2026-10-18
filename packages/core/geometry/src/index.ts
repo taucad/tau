@@ -89,3 +89,11 @@ export type {
   OutputCoordinateSystem,
   OutputLengthUnit,
 } from '#geometry-transform.utils.js';
+
+export type {
+  JointInterface,
+  JointEndpoint,
+  MechanismConnection,
+  MechanismIntent,
+  MechanismDiagnostic,
+} from '#extensions/mechanism-intent.types.js';

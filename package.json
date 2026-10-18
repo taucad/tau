@@ -273,6 +273,7 @@
     "@vitest/coverage-v8": "catalog:",
     "@vitest/ui": "catalog:",
     "@vvago/vale": "3.17.1",
+    "ajv": "catalog:",
     "axe-core": "catalog:",
     "canvas": "^3.2.3",
     "chrome-launcher": "catalog:",

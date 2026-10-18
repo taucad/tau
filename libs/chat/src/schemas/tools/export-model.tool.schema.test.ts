@@ -14,4 +14,17 @@ describe('exportModelInputSchema', () => {
       expect(exportModelInputSchema.safeParse(request).success).toBe(false);
     }
   });
+
+  it('should accept framework content keys and refuse any other content', () => {
+    expect(
+      exportModelInputSchema.parse({
+        targetFile: 'main.ts',
+        to: 'glb',
+        content: { includeTopology: true, includeEdges: false },
+      }),
+    ).toEqual({ targetFile: 'main.ts', to: 'glb', content: { includeTopology: true, includeEdges: false } });
+    for (const content of [{ includeMesh: true }, { includeTopology: 'yes' }, true]) {
+      expect(exportModelInputSchema.safeParse({ targetFile: 'main.ts', to: 'glb', content }).success).toBe(false);
+    }
+  });
 });

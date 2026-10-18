@@ -52,6 +52,24 @@ export type HostView = Readonly<{
   safeArea: Readonly<{ top: number; right: number; bottom: number; left: number }>;
 }>;
 
+/**
+ * A failed Tau tool call: the code its failure named, if any (`UNKNOWN_TOOL` for a tool the server does not serve, as
+ * an older `tau` answers a newer page), and its message. In an MCP Apps host every failed call throws one, the host's
+ * own rejections (a refused call, a timeout, a lost connection) with the rejection as `cause`. On the loopback page a
+ * JSON reply that is not OK throws one; a request that gets no reply, or a reply that is not JSON, throws the `fetch`
+ * or parse error as it is.
+ */
+export class ToolCallError extends Error {
+  /** The server's code, such as `NO_KERNEL`, or `undefined` when it named none. */
+  public readonly code: string | undefined;
+
+  public constructor(code: string | undefined, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.code = code;
+    this.name = 'ToolCallError';
+  }
+}
+
 /** Events the bridge reports. */
 export type HostEvent =
   | Readonly<{ type: 'show'; result: TauViewerShowResult }>
@@ -62,7 +80,10 @@ export type HostEvent =
 export type HostBridge = Readonly<{
   view(): HostView;
   subscribe(listener: (event: HostEvent) => void): () => void;
-  /** Call a Tau tool and return its structured result, or throw its error text. */
+  /**
+   * Call a Tau tool and return its structured result. A failure the server reports, and in an MCP Apps host any
+   * rejected call, throws a {@link ToolCallError}.
+   */
   callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown>;
   /**
    * Hand the person's reference to the conversation (E8) along the view's
@@ -147,6 +168,64 @@ const errorText = (result: CallToolResult): string =>
   result.content.map((block) => (block.type === 'text' ? block.text : '')).join('\n') || 'The Tau tool failed.';
 
 /**
+ * Whether a failure says the server does not serve the tool: the MCP SDK's `Tool <name> not found`, or the MCP
+ * specification's `Unknown tool: <name>`.
+ *
+ * @param name - The tool that was called.
+ * @param text - The failure's text.
+ * @returns Whether the text names the tool as unknown.
+ */
+const namesUnknownTool = (name: string, text: string): boolean =>
+  text.includes(`Tool ${name} not found`) || text.includes(`Unknown tool: ${name}`);
+
+/**
+ * The failure an MCP Apps host's tool result reports, in the loopback route's terms: `UNKNOWN_TOOL` for a tool the
+ * server does not serve, and the code of a Tau failure, which `@taucad/mcp` writes as `CODE: message`.
+ *
+ * @param name - The tool that was called.
+ * @param result - Its failed result.
+ * @returns The failure.
+ */
+const toolCallErrorOf = (name: string, result: CallToolResult): ToolCallError => {
+  const text = errorText(result);
+  if (namesUnknownTool(name, text)) {
+    return new ToolCallError('UNKNOWN_TOOL', text);
+  }
+  const [, code, message] = /^([A-Z][A-Z\d_]+): (.+)$/su.exec(text) ?? [];
+  return code === undefined || message === undefined
+    ? new ToolCallError(undefined, text)
+    : new ToolCallError(code, message);
+};
+
+/**
+ * The failure of a call the host rejected instead of answering, as a host that checks calls against its tool list
+ * rejects a tool an older `tau` does not serve: `UNKNOWN_TOOL` when the rejection says so, else no code.
+ *
+ * @param name - The tool that was called.
+ * @param error - What the call threw.
+ * @returns The failure.
+ */
+const rejectionErrorOf = (name: string, error: unknown): ToolCallError => {
+  const text = error instanceof Error ? error.message : String(error);
+  return new ToolCallError(namesUnknownTool(name, text) ? 'UNKNOWN_TOOL' : undefined, text, { cause: error });
+};
+
+/**
+ * The failure a loopback reply reports in its body, `{ errorCode, message }`.
+ *
+ * @param body - The parsed body.
+ * @param status - The reply's HTTP status, the message when the body has none.
+ * @returns The failure.
+ */
+const loopbackErrorOf = (body: unknown, status: number): ToolCallError => {
+  const failure = typeof body === 'object' && body !== null ? body : {};
+  return new ToolCallError(
+    'errorCode' in failure && typeof failure.errorCode === 'string' ? failure.errorCode : undefined,
+    'message' in failure && typeof failure.message === 'string' ? failure.message : `HTTP ${String(status)}`,
+  );
+};
+
+/**
  * The bridge for a page inside an MCP Apps host.
  *
  * @returns The connected bridge.
@@ -227,11 +306,16 @@ const connectMcpApp = async (): Promise<HostBridge> => {
   applyContext(app.getHostContext());
 
   const callTool = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
-    const result = await app.callServerTool({ name, arguments: { ...args } });
+    let result: CallToolResult;
+    try {
+      result = await app.callServerTool({ name, arguments: { ...args } });
+    } catch (error) {
+      throw rejectionErrorOf(name, error);
+    }
     if (!result.isError) {
       return result.structuredContent;
     }
-    throw new Error(errorText(result));
+    throw toolCallErrorOf(name, result);
   };
 
   /* A thread tab or a sidebar opened by the person has no tool result to
@@ -318,11 +402,7 @@ const connectLoopback = (): HostBridge => {
     });
     const body: unknown = await response.json();
     if (!response.ok) {
-      const message =
-        typeof body === 'object' && body !== null && 'message' in body
-          ? String(body.message)
-          : `HTTP ${String(response.status)}`;
-      throw new Error(message);
+      throw loopbackErrorOf(body, response.status);
     }
     return body;
   };

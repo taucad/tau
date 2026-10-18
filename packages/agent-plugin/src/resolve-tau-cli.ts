@@ -104,17 +104,18 @@ const workspaceCliArgv = (input: ResolveTauCliInput, path: PlatformPath): readon
  *
  * @param input - The launching process.
  * @param path - Path functions for the host platform.
- * @returns Each `tau` (`tau.cmd` on Windows) that exists, in search order, each folder once.
+ * @returns Each `tau` (`tau.cmd` on Windows) that exists, in search order, each path once: joining normalizes the
+ *   folder, so `/usr/local/bin` and `/usr/local/bin/` name one `tau`.
  */
 const installedClis = (input: ResolveTauCliInput, path: PlatformPath): string[] => {
   const windows = input.platform === 'win32';
-  const directories = new Set([
-    ...(input.env['PATH'] ?? '').split(path.delimiter).filter((directory) => directory !== ''),
-    ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']),
-  ]);
-  return [...directories]
-    .map((directory) => path.join(directory, windows ? 'tau.cmd' : 'tau'))
-    .filter((candidate) => input.fileExists(candidate));
+  const candidates = new Set(
+    [
+      ...(input.env['PATH'] ?? '').split(path.delimiter).filter((directory) => directory !== ''),
+      ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']),
+    ].map((directory) => path.join(directory, windows ? 'tau.cmd' : 'tau')),
+  );
+  return [...candidates].filter((candidate) => input.fileExists(candidate));
 };
 
 /**
@@ -148,7 +149,13 @@ const installedClis = (input: ResolveTauCliInput, path: PlatformPath): string[] 
  *   readFile: (path) => readFileSync(path, 'utf8'),
  *   versionOf: (path) => {
  *     try {
- *       return execFileSync(path, ['--version'], { encoding: 'utf8', timeout: 2000 }).trim();
+ *       return execFileSync(path, ['--version'], {
+ *         encoding: 'utf8',
+ *         killSignal: 'SIGKILL',
+ *         maxBuffer: 128,
+ *         stdio: ['ignore', 'pipe', 'ignore'],
+ *         timeout: 2000,
+ *       }).trim();
  *     } catch {
  *       return undefined;
  *     }

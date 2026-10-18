@@ -202,10 +202,17 @@ describe('Turbofan mechanism', () => {
     if (ring?.type !== 'revolute' || ring.limits === undefined) {
       return;
     }
+    const { lower, upper } = ring.limits;
+    if (
+      lower === undefined ||
+      upper === undefined ||
+      !Number.isFinite(lower) ||
+      !Number.isFinite(upper)
+    ) {
+      throw new Error('the IGV ring requires two finite travel limits');
+    }
     const vaneAt = (ringTurn: number) => ringTurn * vanePerRing(igv);
-    const reach = [vaneAt(ring.limits.lower), vaneAt(ring.limits.upper)].sort(
-      (a, b) => a - b,
-    );
+    const reach = [vaneAt(lower), vaneAt(upper)].sort((a, b) => a - b);
     check(
       Math.abs(reach[0]! - vsv.vaneLimits.lower) < 1e-9 &&
         Math.abs(reach[1]! - vsv.vaneLimits.upper) < 1e-9,

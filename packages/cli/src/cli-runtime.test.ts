@@ -57,6 +57,8 @@ const build123dOptions = {
   supportFiles: [
     { path: '/store/closures/sha256/abc/tau-worker/analyzer.py', sha256: 'c'.repeat(64) },
     { path: '/store/closures/sha256/abc/tau-worker/glb.py', sha256: 'd'.repeat(64) },
+    { path: '/store/closures/sha256/abc/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
+    { path: '/store/closures/sha256/abc/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
   ],
   runtimePath: '/store/closures/sha256/abc',
 };

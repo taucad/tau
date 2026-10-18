@@ -192,6 +192,28 @@
         "{workspaceRoot}/packages/geospec/agent/skills.json",
         "{workspaceRoot}/packages/geospec/agent/skills.d.cts"
       ]
+    },
+    "extract-build123d": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "prepare-build123d-python"
+        }
+      ],
+      "options": {
+        "command": "tsx src/languages/python/extract-python-api.ts build123d",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/languages/python/**/*",
+        "{projectRoot}/src/model/**/*",
+        "{workspaceRoot}/packages/plugins/build123d/python/requirements.lock",
+        "{workspaceRoot}/apps/desktop/resources/python/manifest.json",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/build123d"]
     }
   }
 }

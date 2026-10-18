@@ -37,9 +37,10 @@ export type {
   SphericalJoint,
   TransformMechanismInput,
   TransformMechanismOutcome,
+  ValidateMechanismMotionInput,
 } from '#types.js';
 export { mechanismSchemaVersion } from '#types.js';
-export { admitMechanism, findLinkByComponent, listDegreesOfFreedom } from '#mechanism.js';
+export { admitMechanism, findLinkByComponent, listDegreesOfFreedom, validateMechanismMotion } from '#mechanism.js';
 export { evaluatePose, sampleAnimation } from '#pose.js';
 export { solvePose } from '#solver.js';
 export { resolveMechanismComponents, transformMechanism } from '#transform.js';

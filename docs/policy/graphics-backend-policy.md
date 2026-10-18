@@ -68,6 +68,8 @@ GLTF lines retain their geometric depth. Resolve coplanar separation on the owni
 
 Synchronous render decisions may use manifest and broad-phase capability data. Exact section intersections and overlap diagnostics remain asynchronous and may refine diagnostic output. Do not block ordinary rendering on exact analysis or present a broad-phase candidate as an exact result.
 
+Draw section caps with the stencil buffer (`graphics/three/utils/section-stencil-caps.ts`), never with per-frame CPU slicing, polygon booleans or triangulation. Each source's meshes count their crossings of the cut in the stencil, a polygon on the cut plane fills where the count is odd, and a stencil overlap bit marks the pixels where two owners' solids hold the cut, so overlap equals what the exact boolean would find. The cap's main-thread cost follows the cut pieces and the sources' meshes, never their triangles. Stencil operations live only in the cap owners that `section-view-cleanup.ratchet.test.ts` names. WebGPU post-processing passes carry no stencil, so the caps draw as an overlay pass on the canvas after the post owner restores depth, on both backends; they are not tone-mapped or ambient-occluded. Exact contours, cap regions and overlap areas are built in a worker only when a consumer asks for them; certification refuses a cut it cannot vouch for (open shells, unsupported topology, partial visibility) with a span and the safe view, and never falls back to a main-thread build above `maxSynchronousBvhTriangles`.
+
 ### 7. Preserve one viewport lifecycle
 
 Keep one camera, controls, gizmo, and renderer lifecycle per canvas. Camera replacement, fit-to-view, controls listeners, and gizmo synchronization must use the owning graphics state and clean up the prior instance.

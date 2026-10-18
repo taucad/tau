@@ -33,7 +33,6 @@ import_stl(file_name: PathLike | str | bytes, model_unit: Unit = Unit.MM) -> Fac
 # Throws: ValueError: unexpected shape type
 # build123d.importers.import_svg (function)
 import_svg(svg_file: str | Path | TextIO, *, flip_y: bool = True, align: Align | tuple[Align, Align] | None = Align.MIN, ignore_visibility: bool = False, label_by: Literal['id', 'class', 'inkscape:label'] | str = 'id') -> ShapeList[Wire | Face]
-import_svg(svg_file: str | Path | TextIO, *, flip_y: bool = True, align: Align | tuple[Align, Align] | None = Align.MIN, ignore_visibility: bool = False, label_by: Literal['id', 'class', 'inkscape:label'] | str = 'id', is_inkscape_label: bool | None = None) -> ShapeList[Wire | Face]
 #   svg_file: svg file
 #   flip_y: flip objects to compensate for svg orientation
 #   align: alignment of the SVG's viewbox, if None, the viewbox's origin will be at `(0,0,0)`

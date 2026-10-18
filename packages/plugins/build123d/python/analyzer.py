@@ -481,27 +481,35 @@ def analyze_project(workspace: Path, entry_path: str, observed: list[str] | None
     entry = _canonical_relative(entry_path)
     pending = [entry]
     resolved: set[str] = set()
+    analyzed: set[str] = set()
     unresolved: set[str] = set()
     entry_analysis: dict[str, Any] | None = None
     while pending:
         relative_path = pending.pop()
-        if relative_path in resolved:
+        if relative_path in analyzed:
             continue
         absolute = workspace / relative_path
         if not absolute.is_file():
             unresolved.add(relative_path)
             continue
         resolved.add(relative_path)
+        analyzed.add(relative_path)
         source = absolute.read_text(encoding="utf-8")
-        analysis = analyze_source(source) if relative_path == entry else {"imports": _imports(_parse(source))}
         if relative_path == entry:
+            analysis = analyze_source(source)
             entry_analysis = analysis
-            for dependency in analysis["dependencies"]:
-                canonical = _canonical_relative(dependency)
-                if (workspace / canonical).is_file():
-                    resolved.add(canonical)
-                else:
-                    unresolved.add(canonical)
+        else:
+            tree = _parse(source)
+            analysis = {"imports": _imports(tree), "dependencies": _metadata(tree).get("dependencies", [])}
+        dependencies = analysis["dependencies"]
+        if not isinstance(dependencies, list) or any(not isinstance(path, str) for path in dependencies):
+            raise AnalysisIssue("__tau__.dependencies must be a list of paths", "PYTHON_DEPENDENCIES")
+        for dependency in dependencies:
+            canonical = _canonical_relative(dependency)
+            if (workspace / canonical).is_file():
+                resolved.add(canonical)
+            else:
+                unresolved.add(canonical)
         for import_node in analysis["imports"]:
             candidates, relative = _module_candidates(relative_path, import_node)
             found = [candidate for candidate in candidates if (workspace / candidate).is_file()]

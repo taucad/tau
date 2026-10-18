@@ -173,6 +173,7 @@
             "filesystem",
             "revisions",
             "picogk",
+            "dotnet-kernel-core",
             "native-process-core"
           ]
         }

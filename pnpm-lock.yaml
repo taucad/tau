@@ -3777,6 +3777,22 @@ importers:
 
   packages/core/cache: {}
 
+  packages/core/dotnet-kernel:
+    dependencies:
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../native-process
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/core/geometry:
     dependencies:
       '@gltf-transform/core':
@@ -4637,6 +4653,9 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../../core/cache
+      '@taucad/dotnet-kernel-core':
+        specifier: workspace:*
+        version: link:../../core/dotnet-kernel
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

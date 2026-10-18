@@ -1,7 +1,7 @@
 import { contentDigest } from '@taucad/cache-core';
 import { createComputeWorkerTransport } from '#compute-worker-transport.js';
 import { transformGltfExportBytes } from '@taucad/geometry-core';
-import { createWorkspaceMirror } from '@taucad/native-process-core';
+import { createDotnetWorkspaceMirror } from '@taucad/dotnet-kernel-core';
 import {
   asBuffer,
   createKernelError,
@@ -95,11 +95,9 @@ export const picogkKernel = defineKernel({
   },
 
   async initialize(options, services) {
-    const mirror = await createWorkspaceMirror({
+    const mirror = await createDotnetWorkspaceMirror({
       temporaryPrefix: 'tau-picogk-',
       displayName: 'PicoGK',
-      excludedDirectories: ['bin', 'obj', '.vs'],
-      excludedFileSuffixes: ['.dll', '.exe', '.pdb'],
       excludedPaths: ['thumbnail.webp'],
     });
     const session = new PicogkSession({

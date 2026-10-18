@@ -9,6 +9,7 @@ import type { Manifest } from '#check-pack-install.js';
 import {
   assetUrlSpecifiers,
   consumerZodVersion,
+  fallbackZodFloor,
   packageAssetUrlSpecifiers,
   importableSpecifiers,
   isToleratedImportFailure,
@@ -260,8 +261,8 @@ describe('consumerZodVersion', () => {
       consumerZodVersion([
         { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '4.4.3' } },
         { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.1.0' } },
-      ]).version,
-    ).toBe('4.4.3');
+      ]),
+    ).toMatchObject({ version: '4.4.3', exact: true });
   });
 
   it('rejects an exact pin below another floor, and two different pins', () => {
@@ -279,13 +280,29 @@ describe('consumerZodVersion', () => {
     ).toThrow('different zod versions');
   });
 
-  it('keeps the declared floor when no package depends on a newer Zod', () => {
+  it('pins the highest declared peer floor when no package depends on a newer Zod', () => {
     expect(
       consumerZodVersion([
-        { name: '@taucad/runtime', version: '1.0.0', peerDependencies: { zod: '^4.0.0' } },
+        { name: '@taucad/runtime', version: '1.0.0', peerDependencies: { zod: '^4.1.0' } },
+        { name: '@taucad/viewer', version: '1.0.0', peerDependencies: { zod: '^4.2.0' } },
         { name: '@taucad/units', version: '1.0.0', dependencies: { zod: '^4.0.0' } },
       ]),
-    ).toStrictEqual({ version: '4.0.0', raisedBy: [] });
+    ).toStrictEqual({ version: '4.2.0', floor: '4.2.0', raisedBy: [], exact: false });
+  });
+
+  it('falls back to the default floor when no package peers Zod', () => {
+    expect(consumerZodVersion([{ name: 'x', version: '1.0.0' }])).toStrictEqual({
+      version: fallbackZodFloor,
+      floor: fallbackZodFloor,
+      raisedBy: [],
+      exact: false,
+    });
+  });
+
+  it('refuses a Zod peer that is not a caret range', () => {
+    expect(() => consumerZodVersion([{ name: 'x', version: '1.0.0', peerDependencies: { zod: '4.1.0' } }])).toThrow(
+      'a Zod peer is a caret range',
+    );
   });
 
   it('raises the pin to the highest dependency floor and names who raised it', () => {
@@ -294,7 +311,12 @@ describe('consumerZodVersion', () => {
         { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '^4.4.3' } },
         { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.10.0' } },
       ]),
-    ).toStrictEqual({ version: '4.10.0', raisedBy: ['@taucad/cli (zod ^4.4.3)', 'geospec (zod ^4.10.0)'] });
+    ).toStrictEqual({
+      version: '4.10.0',
+      floor: fallbackZodFloor,
+      raisedBy: ['@taucad/cli (zod ^4.4.3)', 'geospec (zod ^4.10.0)'],
+      exact: false,
+    });
   });
 
   it('refuses a Zod dependency range it cannot read a floor from', () => {

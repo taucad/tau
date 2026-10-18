@@ -194,6 +194,7 @@ describe('Replicad preview budget (P4)', () => {
         request: { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview },
         budget: Number.POSITIVE_INFINITY,
         openCascade: replicad.getOC(),
+        collectBrepEdges: true,
         tessellationInstancing: true,
       },
     );
@@ -206,6 +207,7 @@ describe('Replicad preview budget (P4)', () => {
       expect(faces.triangles).toBeInstanceOf(Uint32Array);
       expect(edges.lines).toBeInstanceOf(Float32Array);
       expect(faces.triangles.length).toBeGreaterThan(0);
+      expect(edges.lines.length).toBeGreaterThan(0);
     }
     original.delete();
     copy.delete();

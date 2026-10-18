@@ -25,30 +25,10 @@ npm i @taucad/dotnet-kernel-core @taucad/runtime zod
 
 `@taucad/runtime` and `zod` are required peers. Node.js 24 or later.
 
-## Quick start: a second C# kernel
+## Quick start
 
-A kernel's sealed `runtime` closure holds Microsoft's runtime archive under `dotnet/` and the kernel's Tau layer
-under `tau-worker/`. Its `/native` subpath states the layout; the launch set, the closure-to-options mapping and the
-options schema follow.
-
-```typescript
-// src/native.ts
-import { defineDotnetKernelAdopter } from '@taucad/dotnet-kernel-core/adopter';
-
-export const sampleNative = defineDotnetKernelAdopter({
-  package: '@taucad/sample',
-  kernel: 'sample',
-  displayName: 'Sample',
-  workerAssembly: 'tau-worker/Tau.Sample.Worker.dll',
-  resources: [{ pattern: /^tau-worker\/Sample\.dll$/u, required: 'tau-worker/Sample.dll' }],
-  load: async () => {
-    const { sample } = await import('#sample.plugin.js');
-    return (options) => sample({ kernels: { default: options } });
-  },
-});
-```
-
-Its kernel takes `dotnetKernelOptionsSchema` as `optionsSchema` and starts a mirror and a session in `initialize()`:
+A second C# kernel takes `dotnetKernelOptionsSchema` as `optionsSchema` and starts a mirror and a session in
+`initialize()`:
 
 ```typescript
 // src/sample.kernel.ts (inside defineKernel)
@@ -71,6 +51,27 @@ async initialize(options, services) {
   const session = createDotnetSession(sampleWorker, { ...options, ...mirror, logger: services.logger });
   return { mirror, session };
 }
+```
+
+A kernel's sealed `runtime` closure holds Microsoft's runtime archive under `dotnet/` and the kernel's Tau layer
+under `tau-worker/`. Its `/native` subpath states the layout; the launch set, the closure-to-options mapping and the
+options schema follow.
+
+```typescript
+// src/native.ts
+import { defineDotnetKernelAdopter } from '@taucad/dotnet-kernel-core/adopter';
+
+export const sampleNative = defineDotnetKernelAdopter({
+  package: '@taucad/sample',
+  kernel: 'sample',
+  displayName: 'Sample',
+  workerAssembly: 'tau-worker/Tau.Sample.Worker.dll',
+  resources: [{ pattern: /^tau-worker\/Sample\.dll$/u, required: 'tau-worker/Sample.dll' }],
+  load: async () => {
+    const { sample } = await import('#sample.plugin.js');
+    return (options) => sample({ kernels: { default: options } });
+  },
+});
 ```
 
 Its layer pin is rewritten by a three-line script over the layer rule, which the release job runs:

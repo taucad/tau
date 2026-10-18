@@ -31,17 +31,14 @@ const closure: ClosureLaunch = {
 };
 
 describe('picogkNative', () => {
-  it('should adopt the package named in its manifest with the closure module it already exports', async () => {
+  it('should adopt the package named in its manifest with the mapping its closure module exports', async () => {
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
       name: string;
     };
 
-    expect(picogkNative).toMatchObject({
-      package: manifest.name,
-      ecosystem: 'nuget',
-      optionsFromClosure: picogkOptionsFromClosure,
-      launchSet: picogkLaunchSet,
-    });
+    expect(picogkNative).toMatchObject({ package: manifest.name, ecosystem: 'nuget' });
+    expect(picogkNative.optionsFromClosure(closure)).toEqual(picogkOptionsFromClosure(closure));
+    expect(picogkNative.launchSet(closure.files)).toEqual(picogkLaunchSet(closure.files));
     expect(picogkNative).not.toHaveProperty('seal');
   });
 

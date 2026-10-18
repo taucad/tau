@@ -190,7 +190,17 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     throw new Error(`Unsupported Python resource target: ${targetName}`);
   }
   const output = resolve(resourceRoot, targetName);
-  const workerFiles = ['worker.py', 'analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'] as const;
+  // The worker, its own support modules, then the `tau_kernel` modules of @taucad/python-kernel-core (the order the
+  // kernel's options schema requires).
+  const workerFiles = [
+    'worker.py',
+    'native_materials.py',
+    'mechanisms.py',
+    'tau_kernel/analyzer.py',
+    'tau_kernel/glb.py',
+    'tau_kernel/model.py',
+    'tau_kernel/protocol.py',
+  ] as const;
   const sourceFilesSha256 = createHash('sha256');
   const sourceContents = await Promise.all(
     [
@@ -250,7 +260,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   );
 
   const workerRoot = resolve(temporary, 'tau-worker');
-  await mkdir(workerRoot);
+  await mkdir(resolve(workerRoot, 'tau_kernel'), { recursive: true });
   await Promise.all(workerFiles.map(async (name) => cp(resolve(pythonSourceRoot, name), resolve(workerRoot, name))));
   await cp(topologySchema, resolve(workerRoot, basename(topologySchema)));
 

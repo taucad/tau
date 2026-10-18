@@ -66,10 +66,12 @@ describe('native kernels from the payload store', () => {
     expect(build123d?.launchSet?.([])).toEqual([
       'python/bin/python3',
       'tau-worker/worker.py',
-      'tau-worker/analyzer.py',
-      'tau-worker/glb.py',
       'tau-worker/native_materials.py',
       'tau-worker/mechanisms.py',
+      'tau-worker/tau_kernel/analyzer.py',
+      'tau-worker/tau_kernel/glb.py',
+      'tau-worker/tau_kernel/model.py',
+      'tau-worker/tau_kernel/protocol.py',
     ]);
     expect(picogk?.launchSet).toBeTypeOf('function');
   });

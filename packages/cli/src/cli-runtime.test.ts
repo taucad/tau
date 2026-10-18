@@ -60,10 +60,12 @@ const build123dOptions = {
   workerPath: '/store/closures/sha256/abc/tau-worker/worker.py',
   workerSha256: 'b'.repeat(64),
   supportFiles: [
-    { path: '/store/closures/sha256/abc/tau-worker/analyzer.py', sha256: 'c'.repeat(64) },
-    { path: '/store/closures/sha256/abc/tau-worker/glb.py', sha256: 'd'.repeat(64) },
     { path: '/store/closures/sha256/abc/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
     { path: '/store/closures/sha256/abc/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
+    ...['analyzer', 'glb', 'model', 'protocol'].map((module, index) => ({
+      path: `/store/closures/sha256/abc/tau-worker/tau_kernel/${module}.py`,
+      sha256: String(index).repeat(64),
+    })),
   ],
   runtimePath: '/store/closures/sha256/abc',
 };

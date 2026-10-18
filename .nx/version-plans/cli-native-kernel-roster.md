@@ -1,5 +1,5 @@
 ---
-cli: patch
+cli: minor
 host: minor
 ---
 

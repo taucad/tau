@@ -8,7 +8,7 @@ import type { DotnetClosureLayout, DotnetClosureOptions } from '@taucad/dotnet-k
  * were verified when the closure was sealed and are re-verified, by name, when the worker exits before its handshake
  * (I11).
  */
-const picogkLayout: DotnetClosureLayout = {
+export const picogkClosureLayout = {
   kernel: 'picogk',
   displayName: 'PicoGK',
   workerAssembly: 'tau-worker/Tau.PicoGK.Worker.dll',
@@ -16,7 +16,7 @@ const picogkLayout: DotnetClosureLayout = {
     { pattern: /^tau-worker\/PicoGK\.dll$/u, required: 'tau-worker/PicoGK.dll' },
     { pattern: /^tau-worker\/picogk[^/]*\.(?:dylib|so)$/u, required: 'tau-worker/picogk.<version>.dylib' },
   ],
-};
+} as const satisfies DotnetClosureLayout;
 
 /**
  * PicoGK's launch set (D8, ruling X29): the `dotnet` muxer, `hostfxr`, `hostpolicy`, the worker assembly, `PicoGK.dll`
@@ -26,7 +26,7 @@ const picogkLayout: DotnetClosureLayout = {
  * @returns Closure-relative paths, sorted.
  * @public
  */
-export const picogkLaunchSet = dotnetLaunchSet(picogkLayout);
+export const picogkLaunchSet = dotnetLaunchSet(picogkClosureLayout);
 
 /** Kernel options for a PicoGK worker launched from a prepared closure. @public */
 export type PicogkClosureOptions = DotnetClosureOptions;
@@ -42,4 +42,4 @@ export type PicogkClosureOptions = DotnetClosureOptions;
  * @throws When the receipt lacks a file the launch needs; `tau prepare picogk --verify` repairs the closure.
  * @public
  */
-export const picogkOptionsFromClosure = dotnetOptionsFromClosure(picogkLayout);
+export const picogkOptionsFromClosure = dotnetOptionsFromClosure(picogkClosureLayout);

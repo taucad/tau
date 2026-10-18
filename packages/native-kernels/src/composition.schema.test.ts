@@ -13,7 +13,14 @@ const build123dRow = {
     pythonSha256: sha256('a'),
     workerPath: '/store/closures/sha256/abc/tau-worker/worker.py',
     workerSha256: sha256('b'),
-    supportFiles: ['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].map((name, index) => ({
+    supportFiles: [
+      'native_materials.py',
+      'mechanisms.py',
+      'tau_kernel/analyzer.py',
+      'tau_kernel/glb.py',
+      'tau_kernel/model.py',
+      'tau_kernel/protocol.py',
+    ].map((name, index) => ({
       path: `/store/closures/sha256/abc/tau-worker/${name}`,
       sha256: sha256(String(index)),
     })),

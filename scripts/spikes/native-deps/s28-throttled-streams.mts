@@ -144,7 +144,7 @@ const runProxy = (rateMbit: number, portFile: string, log: string): void => {
 
 /** One host-level preparation of build123d from its origins, with every progress event timestamped. */
 const runPrepare = async (store: string, events: string, cancelAt: number | undefined): Promise<void> => {
-  const plugins = await nativePreparationPlugins();
+  const plugins = nativePreparationPlugins();
   const indicators = detectHostIndicators();
   const host = createPreparationHost({ plugins, store, ...(indicators === undefined ? {} : { indicators }) });
   const controller = new AbortController();

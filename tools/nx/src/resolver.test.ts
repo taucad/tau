@@ -302,8 +302,9 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The current publishable graph has eleven dependency layers.
-    expect(waves).toHaveLength(11);
+    // The current publishable graph has twelve dependency layers; the native chain (process core, language cores,
+    // native kernels, their roster) adds the twelfth.
+    expect(waves).toHaveLength(12);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });
 });

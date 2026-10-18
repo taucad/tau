@@ -82,7 +82,8 @@ const measure = async (): Promise<void> => {
   const started = performance.now();
   const composition = await composeNativeKernels();
   const composed = performance.now();
-  const { build123d, picogk } = composition;
+  const build123d = composition.kernels.flatMap((row) => (row.package === '@taucad/build123d' ? [row.options] : []))[0];
+  const picogk = composition.kernels.flatMap((row) => (row.package === '@taucad/picogk' ? [row.options] : []))[0];
   if (build123d === undefined || picogk === undefined) {
     throw new Error(`both kernels must be prepared: ${JSON.stringify(composition.unavailable)}`);
   }

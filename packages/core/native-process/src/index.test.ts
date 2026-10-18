@@ -316,7 +316,14 @@ describe('NativeProcessSession', () => {
   });
 
   it('should take a large frame delivered in many small chunks in linear time', { timeout: 10_000 }, async () => {
-    const value = fixture(undefined, 30_000);
+    /* Answers only its shutdown, so the frame under test is the one this case feeds. */
+    const value = fixture(
+      `${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='shutdown'){process.stdout.write(JSON.stringify({protocolVersion:1,requestId:request.requestId,result:{shutdown:true}})+'\\n');setTimeout(()=>process.exit(0),5)}});
+${keepAlive}`,
+      30_000,
+    );
     const operation = request<{ readonly value: string }>(value.session);
     try {
       const internals = privateSession(value.session);

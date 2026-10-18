@@ -12,10 +12,7 @@ const reads = vi.hoisted((): Array<{ name: string; cache: unknown }> => []);
 vi.mock('isomorphic-git', async (importOriginal) => {
   const actual = await importOriginal<typeof IsomorphicGit>();
   const recorded =
-    <Arguments extends { cache?: Record<string, unknown> }, Result>(
-      name: string,
-      read: (input: Arguments) => Promise<Result>,
-    ) =>
+    <Arguments extends { cache?: unknown }, Result>(name: string, read: (input: Arguments) => Promise<Result>) =>
     async (input: Arguments): Promise<Result> => {
       reads.push({ name, cache: input.cache });
       return read(input);

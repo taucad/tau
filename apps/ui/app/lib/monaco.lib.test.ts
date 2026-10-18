@@ -239,7 +239,8 @@ describe('TypeScript worker lifetime (B-16, D-UI-19)', () => {
     const { configureMonaco } = await import('#lib/monaco.lib.client.js');
     await configureMonaco();
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- accessing mock structure
-    return (globalThis.self as { MonacoEnvironment: { getWorker: WorkerFactory } }).MonacoEnvironment.getWorker;
+    return (globalThis.self as unknown as { MonacoEnvironment: { getWorker: WorkerFactory } }).MonacoEnvironment
+      .getWorker;
   };
 
   it('never leaves two TypeScript workers running for one language', async () => {

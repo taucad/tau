@@ -7,13 +7,16 @@ import { maximumRateLimitAutoResumes, resetRateLimitAutoResumes } from '#utils/r
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 
+const useChatActions = vi.fn(() => ({ continueChat, regenerate }));
+
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ continueChat, regenerate }),
+  useChatActions: () => useChatActions(),
 }));
 
 describe('ChatErrorRateLimit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useChatActions.mockReturnValue({ continueChat, regenerate });
     resetRateLimitAutoResumes();
   });
 
@@ -164,6 +167,36 @@ describe('ChatErrorRateLimit', () => {
     render(<ChatErrorRateLimit resumable={false} retryAfterSeconds={1} autoResume={{ runId: 'run-1', attempt: 1 }} />);
 
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+  });
+
+  it('should not resume the same attempt again when the countdown re-arms after firing', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <ChatErrorRateLimit resumable retryAfterSeconds={1} autoResume={{ runId: 'run-1', attempt: 1 }} />,
+      );
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
+
+      // A new action identity re-runs the countdown's effect with no time left.
+      useChatActions.mockReturnValue({
+        continueChat: () => {
+          continueChat();
+        },
+        regenerate,
+      });
+      rerender(<ChatErrorRateLimit resumable retryAfterSeconds={1} autoResume={{ runId: 'run-1', attempt: 1 }} />);
+      console.log('DBG timer', screen.queryByRole('timer')?.textContent);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should cancel the pending resume when the card unmounts', () => {

@@ -115,10 +115,13 @@ export const ChatErrorRateLimit = memo(function ({
           }),
     [retry, retryAfterSeconds, description],
   );
+  // The countdown re-arms when `continueChat` changes, so the budget is checked again here:
+  // a failed attempt already resumed is never resumed twice.
   const resumeAutomatically = useCallback(() => {
-    if (runId !== undefined && attempt !== undefined) {
-      recordRateLimitAutoResume(runId, attempt);
+    if (runId === undefined || attempt === undefined || nextRateLimitRetry(runId, attempt) === undefined) {
+      return;
     }
+    recordRateLimitAutoResume(runId, attempt);
     continueChat();
   }, [runId, attempt, continueChat]);
   const counting = resumeAfterMilliseconds !== undefined;

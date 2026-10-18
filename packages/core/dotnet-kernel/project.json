@@ -1,0 +1,7 @@
+{
+  "name": "dotnet-kernel-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/core/dotnet-kernel",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

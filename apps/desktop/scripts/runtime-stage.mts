@@ -13,11 +13,12 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import { acpAgentProfiles } from '@taucad/host';
-import { nativePreparationPlugins } from '@taucad/native-kernels/node';
+import { preparationPluginsOf } from '@taucad/native-process-core/store';
 import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
+import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyRuntimeClosure, copyTree } from '@taucad/nx/runtime-closure';
@@ -421,8 +422,8 @@ export const stageNativePayloads = async (
   if (target === undefined) {
     return [];
   }
-  /* Each roster package with its seal step, launch set and directory, which payloads shipped inside it resolve from. */
-  const plugins = nativePreparationPlugins({ directory: 'resolve' });
+  /* Each bundled package with its seal step, launch set and directory, which payloads shipped inside it resolve from. */
+  const plugins = preparationPluginsOf(desktopNativeDeployments);
   const managed = readManagedPreparation(process.env);
   const store = join(options.workRoot, 'payload-store');
   await rm(options.workRoot, { recursive: true, force: true });

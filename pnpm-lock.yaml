@@ -1936,9 +1936,6 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
-      '@taucad/native-kernels':
-        specifier: workspace:*
-        version: link:../../packages/native-kernels
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../packages/core/native-process

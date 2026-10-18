@@ -1,19 +1,23 @@
 /**
- * What the kernel utility composes its native kernels from (charter W6 phase 1, D8).
+ * What the kernel utility binds its native kernels through (charter W6 phase 1, D8).
  *
  * Main seeds the payload store and reads each sealed closure's launch index, then posts one control frame naming the
  * closure every native kernel runs from, or why it has none. The broker replays the frame to every utility right after
  * its boot frame, and the desktop runtime awaits it before it composes, so a utility forked while main is still
- * seeding waits for the closures instead of composing without them. The utility never reads the store's receipts
- * itself; it re-verifies a closure only when a worker exits before its handshake, so the refusal names the damage.
+ * seeding waits for the closures instead of composing without them. The runtime lists the native kernels' plugins
+ * like any other; each kernel asks the closure resolver installed here for its closure when it initializes, and
+ * refuses with main's reason when it has none. The utility never reads the store's receipts itself; it re-verifies a
+ * closure only when a worker exits before its handshake, so the refusal names the damage.
  *
  * @module
  */
-import { nativeCompositionSchema, nativeKernelAdopters, unavailableKernelsPlugin } from '@taucad/native-kernels';
-import type { UnavailableNativeKernel } from '@taucad/native-kernels';
-import { composeNativePlugins, verifyStoreClosure } from '@taucad/native-kernels/node';
 import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
-import type { PluginInstance } from '@taucad/runtime/plugin';
+import {
+  installNativeClosureResolver,
+  storeClosureResolver,
+  verifyStoreClosure,
+} from '@taucad/native-process-core/store';
+import type { NativeClosureResolver } from '@taucad/native-process-core/store';
 
 import { nativeKernelsFrameType } from '#tau/native-kernels-frame.js';
 import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
@@ -28,7 +32,9 @@ import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
  */
 const nativeRequestTimeoutMilliseconds = 10 * 60_000;
 const nativeMaxArtifactBytes = 1024 * 1024 * 1024;
-const nativeBounds = {
+
+/** The bounds the desktop runtime lists every native kernel with. */
+export const desktopNativeBounds = {
   requestTimeout: nativeRequestTimeoutMilliseconds,
   maxArtifactBytes: nativeMaxArtifactBytes,
 } as const;
@@ -37,6 +43,7 @@ const isFrame = (value: unknown): value is NativeKernelsFrame =>
   typeof value === 'object' &&
   value !== null &&
   Reflect.get(value, 'type') === nativeKernelsFrameType &&
+  typeof Reflect.get(value, 'store') === 'string' &&
   Array.isArray(Reflect.get(value, 'kernels'));
 
 let deliver: ((frame: NativeKernelsFrame) => void) | undefined;
@@ -72,40 +79,50 @@ export const verifyDesktopClosure = verifyStoreClosure(
 );
 
 /**
- * Map main's frame to plugins: a sealed closure gives its kernel's options through the roster's adopter, bounded by
- * the desktop's policy, and installs the re-verifier; a kernel without one is answered by the roster's stand-in, which
- * refuses its files with main's reason.
+ * The closure resolver over main's frame: a kernel the frame gives a sealed closure binds to it; a kernel the frame
+ * refuses answers with main's reason; a kernel the frame does not name (main leaves out those no variant fits this
+ * host) is read from the store main seeded, which also says why it cannot run here.
  * @param frame - What main posted.
- * @returns The native plugins in roster order, then the stand-in, if any.
+ * @param fallback - Where a kernel the frame does not name is looked up; default the frame's store.
+ * @returns The resolver.
  */
-export const desktopNativeKernels = async (frame: NativeKernelsFrame): Promise<readonly PluginInstance[]> => {
-  const composed: unknown[] = [];
-  const missing: UnavailableNativeKernel[] = [];
-  for (const slot of frame.kernels) {
-    const adopter = nativeKernelAdopters.find((candidate) => candidate.package === slot.package);
-    if (slot.closure !== undefined && adopter !== undefined) {
-      composed.push({
-        package: adopter.package,
-        kernel: slot.kernel,
-        closureRoot: slot.closure.root,
-        options: adopter.optionsFromClosure(slot.closure),
-      });
-    } else if (slot.extensions.length > 0) {
-      missing.push({
-        kernel: slot.kernel,
-        package: slot.package,
-        extensions: slot.extensions,
-        reason: 'not-prepared',
-        byteLength: 0,
-        refusal: slot.refusal ?? `The ${slot.kernel} runtime is not installed on this machine.`,
-      });
+export const desktopClosureResolver =
+  (
+    frame: NativeKernelsFrame,
+    fallback: NativeClosureResolver = storeClosureResolver({ store: frame.store }),
+  ): NativeClosureResolver =>
+  async (request) => {
+    const slot = frame.kernels.find(
+      (candidate) => candidate.package === request.package && candidate.kernel === request.kernel,
+    );
+    if (slot === undefined) {
+      const answer = await fallback(request);
+      if (answer.status === 'ready') {
+        /* The store resolver installs its own remedy; the desktop's names the app as the repair. */
+        installNativeRuntimeVerifier(verifyDesktopClosure);
+      }
+      return answer;
     }
-  }
-  /* Each row is checked against its adopter's options schema, which also types it by package. */
-  const { kernels } = nativeCompositionSchema.parse({ kernels: composed, unavailable: [], closureRoots: [] });
-  if (kernels.length > 0) {
+    if (slot.closure !== undefined) {
+      return { status: 'ready', closures: { [slot.closure.dependency]: slot.closure } };
+    }
+    return {
+      status: 'unavailable',
+      reason: 'not-prepared',
+      byteLength: 0,
+      refusal: slot.refusal ?? `The ${slot.kernel} runtime is not installed on this machine.`,
+    };
+  };
+
+/**
+ * Bind this utility's native kernels to main's frame: install the closure resolver every native kernel initializes
+ * through and, when the frame names a sealed closure, the re-verifier. Called once the frame arrives, before the
+ * runtime composes.
+ * @param frame - What main posted.
+ */
+export const installDesktopNativeKernels = (frame: NativeKernelsFrame): void => {
+  installNativeClosureResolver(desktopClosureResolver(frame));
+  if (frame.kernels.some(({ closure }) => closure !== undefined)) {
     installNativeRuntimeVerifier(verifyDesktopClosure);
   }
-  const unavailable = unavailableKernelsPlugin(missing);
-  return [...(await composeNativePlugins(kernels, nativeBounds)), ...(unavailable ? [unavailable] : [])];
 };

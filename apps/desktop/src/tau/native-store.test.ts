@@ -227,6 +227,7 @@ describe('startNativeStore', () => {
     const [frame] = frames;
 
     expect(frames).toHaveLength(1);
+    expect(frame?.store).toBe(await realpath(store));
     expect(frame?.kernels).toHaveLength(1);
     expect(frame?.kernels[0]).toMatchObject({
       kernel: 'demo',
@@ -246,6 +247,7 @@ describe('startNativeStore', () => {
     expect(frames).toEqual([
       {
         type: 'tau:native-kernels',
+        store: await realpath(store),
         kernels: [
           {
             kernel: 'demo',
@@ -260,11 +262,12 @@ describe('startNativeStore', () => {
   });
 });
 
-describe('the desktop native roster', () => {
-  it('should seed and inspect every roster package with its launch set, and never run a seal step', () => {
+describe('the desktop native packages', () => {
+  it('should seed and inspect every bundled package with its launch set, and never run a seal step', () => {
     expect(desktopNativePlugins.map((plugin) => plugin.package)).toEqual(['@taucad/build123d', '@taucad/picogk']);
     for (const plugin of desktopNativePlugins) {
       expect(plugin).not.toHaveProperty('seal');
+      expect(plugin).not.toHaveProperty('directory');
       expect(plugin.launchSet).toBeTypeOf('function');
     }
   });

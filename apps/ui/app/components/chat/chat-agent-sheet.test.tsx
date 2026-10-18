@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
@@ -11,6 +11,9 @@ import type { AgentConfig } from '#components/chat/use-agent-config.js';
 
 /* The cmdk list scrolls the highlighted row into view; jsdom has no layout. */
 Element.prototype.scrollIntoView = vi.fn();
+
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => viewport.isMobile }));
 
 const cost = { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const fable = {
@@ -305,6 +308,24 @@ describe('ChatAgentSheet', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Back to settings' }));
     expect(screen.getByRole('button', { name: 'Agent: Tau. Change' })).toHaveFocus();
+  });
+
+  it('leaves the keyboard down when a phone opens the model and agent lists', async () => {
+    viewport.isMobile = true;
+    state.placements = [codex()];
+    try {
+      renderSheet();
+      await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+      /* A click, not a pointer sequence: vaul reads drag geometry jsdom does not lay out. */
+      fireEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+      expect(screen.getByPlaceholderText('Search models…')).not.toHaveFocus();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back to settings' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+      expect(screen.getByPlaceholderText('Search agents…')).not.toHaveFocus();
+    } finally {
+      viewport.isMobile = false;
+    }
   });
 
   it('moves the chat to another agent at its own defaults when one of its models is chosen', async () => {

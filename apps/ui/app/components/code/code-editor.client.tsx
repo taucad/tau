@@ -289,6 +289,9 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
         // Peek view: filename in the title bar should use monospace
         '[&_.peekview-title_.filename]:!font-mono',
 
+        // Find widget: Monaco sets its inputs to 13px, and iOS zooms the page into a field under 16px.
+        'pointer-coarse:[&_.find-widget_.monaco-findInput_.input]:!text-base',
+
         // Go-to-error: code spans in marker messages should use monospace
         '[&_.marker-widget_.message_.code]:!font-mono',
 

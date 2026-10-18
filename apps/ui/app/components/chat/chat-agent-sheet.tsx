@@ -33,7 +33,14 @@ import {
   CommandItem,
   CommandList,
 } from '@taucad/ui/components/command';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+  useIsInsideDrawer,
+} from '@taucad/ui/components/drawer';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
@@ -958,6 +965,9 @@ function ModelList({
   } = useChatComposer();
   const { open: openSettings } = useSettingsDialog();
   const [query, setQuery] = useState('');
+  /* On a phone the sheet is a drawer, and focusing search there raises the keyboard over a list the
+     user came to tap. */
+  const autoFocusSearch = !useIsInsideDrawer();
   /* The list's height when a search starts, so filtering never shrinks the card under the pointer. */
   const listRef = useRef<HTMLDivElement>(null);
   const [searchFloor, setSearchFloor] = useState<number | undefined>(undefined);
@@ -1014,7 +1024,7 @@ function ModelList({
       onKeyDown={onKeyDown}
     >
       <CommandInput
-        autoFocus
+        autoFocus={autoFocusSearch}
         placeholder={agent.kind === 'tau' ? 'Search models…' : `Search ${agent.displayName} models…`}
         value={query}
         onValueChange={search}
@@ -1137,6 +1147,8 @@ function AgentList({
   readonly onBack: () => void;
 }): React.JSX.Element {
   const [query, setQuery] = useState('');
+  /* As the model list: no keyboard over a list in a phone's drawer. */
+  const autoFocusSearch = !useIsInsideDrawer();
   const hosts = [
     ...new Map(
       agents.flatMap((agent) => (agent.kind === 'acp' ? [[agent.hostId, agent.where] as const] : [])),
@@ -1184,7 +1196,7 @@ function AgentList({
       defaultValue={current.key}
       onKeyDown={backOnEmpty(query, onBack)}
     >
-      <CommandInput autoFocus placeholder='Search agents…' value={query} onValueChange={setQuery} />
+      <CommandInput autoFocus={autoFocusSearch} placeholder='Search agents…' value={query} onValueChange={setQuery} />
       <CommandList className='max-h-none min-h-0 flex-1'>
         <CommandEmpty className='mx-2'>No agents match “{query}”.</CommandEmpty>
         <CommandGroup>{agents.filter((agent) => agent.kind === 'tau').map((agent) => row(agent))}</CommandGroup>

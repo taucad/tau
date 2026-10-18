@@ -11,7 +11,7 @@ implementation, use `.agents/skills/create-kernel/SKILL.md` after this routing s
 ## Resolve
 
 Inspect the request, `tools/workspace-plugin/src/generators/plugin/schema.json`,
-the nearest same-role package, and every applicable host roster. Infer:
+the nearest same-role package, and every applicable host runtime. Infer:
 
 - one or more requested capabilities: `kernel`, `transcoder`, `middleware`,
   `bundler`, `job`, or `machine`;
@@ -33,6 +33,17 @@ pnpm nx g @taucad/workspace-plugin:plugin <name> \
 ```
 
 If the package exists, update it in place instead of rerunning the generator.
+
+A `kernel` with `hostTarget` `python` or `native` runs out of process from a
+prepared closure, so the generator also emits its native deployment: a light
+`src/native.ts` (`definePythonKernelAdopter` from `@taucad/python-kernel-core`,
+or `defineNativeKernelDeployment` from `@taucad/native-process-core/adopter`
+for a single binary), a placeholder `tau-plugin.json`, the `./native` and
+`./tau-plugin.json` exports, a kernel wrapped in `withNativeDeployment` that
+binds its closure in `initialize`, and for Python the `tau-python-kernel`
+targets. A .NET kernel swaps in `defineDotnetKernelAdopter` from
+`@taucad/dotnet-kernel-core/adopter`. Hosts list the plugin like any other;
+see `/create-kernel` section 3.8.
 
 New plugin projects receive a local `AGENTS.md` naming only the selected
 capabilities, host target, generated entrypoints and real Nx commands, plus an
@@ -64,8 +75,8 @@ the four-role CAD executor. ABI 2 plugins must declare a runtime peer range that
 excludes ABI 1 releases before publication; a generated range is not release
 qualification.
 
-Wire only the consumers and host rosters in the request. Record why an
-incompatible roster is skipped. Remove superseded code after behavior parity.
+Wire only the consumers and host runtimes in the request. Record why an
+incompatible runtime is skipped. Remove superseded code after behavior parity.
 
 ## Verify
 
@@ -85,6 +96,7 @@ declarations, payload isolation, host wiring, README quick start, and license
 provenance. Do not hand off with stubs, placeholder budgets, leaked host
 dependencies, or failing checks.
 
-When changing the generator, exercise mixed, job-only and machine-only output:
-schema literals, six capability buckets and presets, role-selected dependencies,
-and generated type/build checks must agree with the public authoring APIs.
+When changing the generator, exercise mixed, job-only and machine-only output
+and the python and native kernel deployments: schema literals, six capability
+buckets and presets, role-selected dependencies, and generated type/build checks
+must agree with the public authoring APIs.

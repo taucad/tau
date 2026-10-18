@@ -2,7 +2,12 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/browser/three-renderer-output.ts', 'src/preparation/index.ts'],
+  entry: [
+    'src/index.ts',
+    'src/browser/three-renderer-output.ts',
+    'src/preparation/index.ts',
+    'src/roster/kernel-roster-coverage.ts',
+  ],
   sourcemap: false,
   clean: true,
   dts: true,

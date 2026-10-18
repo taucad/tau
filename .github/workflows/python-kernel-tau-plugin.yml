@@ -1,0 +1,102 @@
+# A Python kernel's registry-native closure (native-dependency-resolution charter W3, D2, D17, D22, I13), called by each
+# kernel's own `<kernel>-tau-plugin.yml` with its package directory and Nx project.
+# On a pull request, `--check` regenerates tau-plugin.json, the per-target pylock files, the SBOM, the pinned
+# `python/tau_kernel` copy and the golden receipts from the publishers' metadata and fails on any byte difference;
+# the project template check (W9) does the same for the new-project pyproject.toml, pylock.toml and uv.lock.
+# On dispatch, each target's runner prepares its closure from the seed (sandboxed compileall and self-test included)
+# and reports the golden receipt entry it sealed, which a maintainer commits to tau-plugin.golden.json.
+name: Python kernel tau-plugin
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: The kernel package directory, such as packages/plugins/build123d.
+        required: true
+        type: string
+      project:
+        description: The kernel's Nx project, such as build123d.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Generator --check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      PROJECT: ${{ inputs.project }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Regenerate and compare byte for byte
+        run: pnpm nx run "${PROJECT}:generate-tau-plugin:check" --outputStyle=stream
+      - name: Install uv
+        run: command -v uv || pipx install uv
+      # W9: the new-project template must equal its rendering from the per-target pylocks, and uv.lock must still
+      # satisfy its pyproject.toml at the closure's versions.
+      - name: Check the project template
+        run: pnpm nx run "${PROJECT}:generate-project-template:check" --outputStyle=stream
+
+  golden:
+    name: Golden receipt (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64-glibc
+            runner: ubuntu-24.04
+          - target: linux-arm64-glibc
+            runner: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runner: macos-26
+          - target: darwin-x64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      PACKAGE: ${{ inputs.package }}
+      PROJECT: ${{ inputs.project }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Seed, prepare in the sandbox and record the golden receipt
+        run: pnpm nx run "${PROJECT}:golden-tau-plugin" --outputStyle=stream
+      - name: Report the golden entry
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          entry=$(jq -c --arg target "$TARGET" '.[$target]' "${PACKAGE}/tau-plugin.golden.json")
+          echo "::notice title=${PROJECT} golden ${TARGET}::${entry}"
+          {
+            echo "### ${PROJECT} golden receipt: ${TARGET}"
+            echo '```json'
+            echo "${entry}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "${entry}" > "$RUNNER_TEMP/golden-${TARGET}.json"
+      - name: Upload the golden entry
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.project }}-golden-${{ matrix.target }}
+          path: ${{ runner.temp }}/golden-${{ matrix.target }}.json

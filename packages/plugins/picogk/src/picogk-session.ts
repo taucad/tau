@@ -1,9 +1,5 @@
-import { dirname } from 'node:path';
-
-import { NativeProcessSession, NativeWorkerReportedError } from '@taucad/native-process-core';
-import type { NativeProtocolResponse } from '@taucad/native-process-core';
-import type { RuntimeLogger } from '@taucad/runtime/kernel';
-import type { z } from 'zod';
+import { createDotnetSession } from '@taucad/dotnet-kernel-core';
+import type { DotnetRequest, DotnetSession, DotnetSessionOptions, DotnetWorker } from '@taucad/dotnet-kernel-core';
 
 import {
   picogkProtocolVersion,
@@ -22,33 +18,7 @@ import type { PicogkIssue } from '#picogk.protocol.js';
  *
  * @public
  */
-export type PicogkSessionOptions = {
-  readonly workerExecutable: string;
-  readonly workerSha256: string;
-  /** Read-only runtime root; defaults to the executable's directory. */
-  readonly runtimePath?: string;
-  /** Arguments before the worker's own, such as the worker assembly the `dotnet` muxer runs. */
-  readonly workerArguments?: readonly string[];
-  readonly workspacePath: string;
-  readonly artifactPath: string;
-  readonly resourceFiles: ReadonlyArray<{
-    readonly path: string;
-    readonly sha256: string;
-    readonly label: string;
-  }>;
-  readonly requestTimeout: number;
-  readonly maxArtifactBytes: number;
-  readonly logger: RuntimeLogger;
-};
-
-type PicogkRequest<Result> = {
-  readonly method: string;
-  readonly params: Record<string, unknown>;
-  readonly schema: z.ZodType<Result>;
-  readonly signal: AbortSignal;
-  /** Worker method that stops this request cooperatively instead of ending the worker generation. */
-  readonly cancelMethod?: string;
-};
+export type PicogkSessionOptions = DotnetSessionOptions;
 
 /** Structured user-code issues returned by the PicoGK worker. @public */
 export class PicogkWorkerError extends Error {
@@ -61,74 +31,34 @@ export class PicogkWorkerError extends Error {
   }
 }
 
-const parseReady = (value: unknown): void => {
-  picogkReadySchema.parse(value);
-};
-
-const parseResponse = (value: unknown): NativeProtocolResponse<PicogkIssue> => {
-  const response = picogkResponseSchema.parse(value);
-  if ((response.result === undefined) === (response.error === undefined)) {
-    throw new Error('Expected exactly one of result or error.');
-  }
-  return response.error
-    ? { requestId: response.requestId, issues: response.error.issues }
-    : { requestId: response.requestId, result: response.result };
+/** The PicoGK C# worker: its names, its protocol frames and the error its reported issues become. */
+const picogkWorker: DotnetWorker<PicogkIssue> = {
+  sessionName: 'PicoGK C#',
+  executableName: 'PicoGK C# worker',
+  protocolVersion: picogkProtocolVersion,
+  readySchema: picogkReadySchema,
+  responseSchema: picogkResponseSchema,
+  issueSchema: picogkIssueSchema,
+  shutdownSchema: picogkShutdownSchema,
+  // Full assembly descriptors include per-component PBR metadata; measured up to 1.85 MB.
+  maxProtocolLineBytes: 4 * 1024 * 1024,
+  workerError: (issues) => new PicogkWorkerError(issues),
 };
 
 /** One serialized, warm CoreCLR/PicoGK worker session. @public */
 export class PicogkSession {
-  private readonly session: NativeProcessSession<PicogkIssue>;
+  private readonly session: DotnetSession;
 
   public constructor(options: PicogkSessionOptions) {
-    this.session = new NativeProcessSession({
-      executablePath: options.workerExecutable,
-      executableSha256: options.workerSha256,
-      arguments: [
-        ...(options.workerArguments ?? []),
-        '--workspace',
-        options.workspacePath,
-        '--artifacts',
-        options.artifactPath,
-        '--parent-pid',
-        String(process.pid),
-      ],
-      runtimePath: options.runtimePath ?? dirname(options.workerExecutable),
-      workspacePath: options.workspacePath,
-      artifactPath: options.artifactPath,
-      resources: options.resourceFiles,
-      protocolVersion: picogkProtocolVersion,
-      parseReady,
-      parseResponse,
-      requestTimeout: options.requestTimeout,
-      maxArtifactBytes: options.maxArtifactBytes,
-      // Full assembly descriptors include per-component PBR metadata; measured up to 1.85 MB.
-      maxProtocolLineBytes: 4 * 1024 * 1024,
-      logger: options.logger,
-      sessionName: 'PicoGK C#',
-      executableName: 'PicoGK C# worker',
-      shutdown: {
-        method: 'shutdown',
-        parseResult: (value) => picogkShutdownSchema.parse(value),
-      },
-    });
+    this.session = createDotnetSession(picogkWorker, options);
   }
 
   /**
    * Submit one schema-validated operation through the serialized worker lane.
    * @returns The validated operation result.
    */
-  public async request<Result>({ schema, ...request }: PicogkRequest<Result>): Promise<Result> {
-    try {
-      return await this.session.request<Result>({
-        ...request,
-        parseResult: (value) => schema.parse(value),
-      });
-    } catch (error) {
-      if (error instanceof NativeWorkerReportedError) {
-        throw new PicogkWorkerError(picogkIssueSchema.array().parse(error.issues));
-      }
-      throw error;
-    }
+  public async request<Result>(request: DotnetRequest<Result>): Promise<Result> {
+    return this.session.request(request);
   }
 
   /**

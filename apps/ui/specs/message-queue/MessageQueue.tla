@@ -18,6 +18,8 @@
 \* and queue delivery keep the same paths.
 \* A foreign segment rescan that ends unchanged re-presents the local transcript;
 \* it reads the projection only and leaves admission, delivery and the queue alone.
+\* Chat message-change wakes are throttled for React readers only; status wakes
+\* stay immediate, and admission, delivery and the queue never read either.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

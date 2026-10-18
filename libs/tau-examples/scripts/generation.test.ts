@@ -4,7 +4,9 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
 import { projectManifestSchema } from '@taucad/types';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import {
@@ -12,6 +14,7 @@ import {
   createExampleRuntimeClient,
   exampleKernelIds,
   exampleRuntime,
+  workspaceRuntime,
 } from '#scripts/runtime.js';
 
 type ManifestEntry = {
@@ -37,6 +40,28 @@ describe('generated example artifacts', () => {
       'parameterUnits',
       'gltfEdgeDetection',
     ]);
+  });
+
+  it('covers the product catalog, listing the native kernels like any other', () => {
+    assertKernelRosterCoverage({
+      runtime: exampleRuntime,
+      catalog: kernelConfigurations,
+      omitted: {
+        zoo: 'credentialed: example thumbnails render offline, with no Zoo proxy token',
+        build123d: 'no checked-in thumbnails: only the workspace runtime lists Build123d',
+      },
+    });
+  });
+
+  it('lists Build123d in the workspace runtime only', () => {
+    const ids = (runtime: typeof exampleRuntime | typeof workspaceRuntime) => runtime.kernels.map(({ id }) => id);
+    expect(ids(workspaceRuntime)).toEqual([...ids(exampleRuntime).slice(0, -2), 'build123d', 'picogk', 'tscircuit']);
+  });
+
+  it('evaluates a native kernel only once the payload store holds its closure sealed', () => {
+    const listed = new Set<string>(exampleRuntime.kernels.map(({ id }) => id));
+    expect([...exampleKernelIds].every((id) => listed.has(id))).toBe(true);
+    expect([...listed].filter((id) => !exampleKernelIds.has(id)).every((id) => id === 'picogk')).toBe(true);
   });
 
   it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {

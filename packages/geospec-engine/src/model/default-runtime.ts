@@ -14,6 +14,38 @@ import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { smlib } from '@taucad/smlib';
 import { tscircuit } from '@taucad/tscircuit';
+import type { PluginInstance } from '@taucad/runtime/plugin';
+
+/**
+ * An optional peer's plugin, or none when the package is not installed.
+ * @param load - Imports the package and invokes its plugin factory.
+ * @returns The plugin instance, or an empty list.
+ */
+const optionalPlugin = async (load: () => Promise<PluginInstance>): Promise<readonly PluginInstance[]> => {
+  try {
+    return [await load()];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {
+      return [];
+    }
+    throw error;
+  }
+};
+
+/*
+ * The native kernels are optional peers: listed when installed, each binds its own sealed closure from the payload
+ * store when it initialises (`tau prepare <kernel>`) and refuses with `KERNEL_NOT_PREPARED` until then.
+ */
+const [build123dPlugins, picogkPlugins] = await Promise.all([
+  optionalPlugin(async () => {
+    const { build123d } = await import('@taucad/build123d');
+    return build123d();
+  }),
+  optionalPlugin(async () => {
+    const { picogk } = await import('@taucad/picogk');
+    return picogk();
+  }),
+]);
 
 export const defaultRuntime = defineRuntime({
   plugins: [
@@ -33,6 +65,8 @@ export const defaultRuntime = defineRuntime({
     rhino(),
     image(),
     assimp({ preset: 'all' }),
+    ...build123dPlugins,
+    ...picogkPlugins,
     tscircuit(),
   ],
 });

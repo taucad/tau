@@ -33,6 +33,7 @@
     "./rooted-content-client": "./src/rooted-content-client.ts",
     "./file-content-errors": "./src/file-content-errors.ts",
     "./seems-binary": "./src/seems-binary.ts",
+    "./file-content-budget": "./src/file-content-budget.ts",
     "./file-content-service": "./src/file-content-service.ts",
     "./file-tree-service": "./src/file-tree-service.ts",
     "./directory-listing": "./src/directory-listing.ts",
@@ -97,6 +98,11 @@
         "types": "./dist/seems-binary.d.mts",
         "import": "./dist/seems-binary.mjs",
         "default": "./dist/seems-binary.mjs"
+      },
+      "./file-content-budget": {
+        "types": "./dist/file-content-budget.d.mts",
+        "import": "./dist/file-content-budget.mjs",
+        "default": "./dist/file-content-budget.mjs"
       },
       "./file-content-service": {
         "types": "./dist/file-content-service.d.mts",

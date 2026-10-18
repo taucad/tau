@@ -104,12 +104,6 @@ export const computeControlChannels = {
   collect: 'tau:compute:collect',
 } as const;
 
-/** Native kernels included by the desktop runtime recipe. */
-export const desktopNativeKernelIds = [
-  'build123d',
-  ...(process.platform === 'darwin' && process.arch === 'arm64' ? (['picogk'] as const) : []),
-] as const;
-
 /** The two native app-icon variants. */
 export type AppIconTheme = 'light' | 'dark';
 

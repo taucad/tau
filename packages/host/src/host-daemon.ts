@@ -29,7 +29,12 @@ import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
-import type { HostPrepareKernel, HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
+import type {
+  HostPreparableKernel,
+  HostPrepareKernel,
+  HostSystemSkillBundle,
+  HostToolFileSystem,
+} from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import {
@@ -186,10 +191,15 @@ export type HostDaemonAgentOptions = {
   readonly systemPrompt: string;
   /**
    * The native kernel preparation behind `prepare_kernel` (D7, D37), in this process with its unrestricted network.
-   * A `ready` outcome replaces every agent root's runtime child, so the next call composes the prepared kernel. Omit
-   * it and the tool is not offered.
+   * A kernel asks this daemon for its closure on every operation until it binds, so the next call after a `ready`
+   * outcome runs the prepared kernel in the child that refused it. Omit it and the tool is not offered.
    */
   readonly prepareKernel?: HostPrepareKernel | undefined;
+  /**
+   * The kernels `prepareKernel` takes, which `prepare_kernel`'s description names: a list, or a function read each
+   * time the tool list is, for a daemon that learns them from the deployments its runtime children report.
+   */
+  readonly preparableKernels?: readonly HostPreparableKernel[] | (() => readonly HostPreparableKernel[]) | undefined;
   /**
    * Offer the `test_model` tool. Defaults to `true`, which still yields the
    * tool only where the native GeoSpec engine resolves — `false` withholds it
@@ -245,9 +255,10 @@ export type HostDaemonOptions = {
     readonly modulePath: string;
     readonly args?: readonly string[];
     /**
-     * Native kernels (Build123d, PicoGK) the runtime children compose from the payload store (D37). The child may
-     * not spawn, so this daemon starts each native worker on its behalf, only from a sealed closure and only through
-     * the OS sandbox. Absent, the children compose no native kernel.
+     * The native kernels the runtime children's definitions list (D37): each child reports its deployments and asks
+     * this daemon for each kernel's sealed closure, since it cannot read the payload store. The child may not spawn,
+     * so this daemon starts each native worker on its behalf, only from a closure it answered and only through the OS
+     * sandbox. Absent, every native kernel in a child refuses as not prepared.
      */
     readonly native?: RuntimeChildNativeKernels;
   };
@@ -962,19 +973,10 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
       ...(agent.testModel === false ? { geospecRunner: false } : {}),
-      /* A child composes the native kernels once, at its start: a prepared kernel reaches a root on its next call
-       * only through a new child, so every root's child is replaced once the preparation is ready (D7, D37). */
-      ...(agent.prepareKernel === undefined
-        ? {}
-        : {
-            prepareKernel: async (input, context) => {
-              const outcome = await agent.prepareKernel!(input, context);
-              if (outcome.status === 'ready') {
-                await Promise.allSettled(agentRuntimes.keys().map(async (root) => agentRuntimes.close(root)));
-              }
-              return outcome;
-            },
-          }),
+      /* A kernel that refused asks for its closure again on its next operation, so a prepared kernel reaches every
+       * root's child without replacing it (D7, D37). */
+      ...(agent.preparableKernels === undefined ? {} : { preparableKernels: agent.preparableKernels }),
+      ...(agent.prepareKernel === undefined ? {} : { prepareKernel: agent.prepareKernel }),
       /* The MCP url is only known once the server is listening, so it is read per run. */
       ...(discovery.agents.length > 0
         ? {

@@ -17,9 +17,13 @@ import type { ComputeBinding } from '@taucad/runtime/types';
 import type {
   HostDaemonAgentOptions,
   HostDaemonEvent,
+  HostPreparableKernel,
   HostPrepareKernel,
   RuntimeChildNativeKernels,
 } from '@taucad/host';
+import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
+import { nativeDeploymentReportSchema } from '@taucad/native-process-core/store';
+import type { NativeDeploymentReport, NativePreparation } from '@taucad/native-process-core/store';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { createConsola } from 'consola';
@@ -35,7 +39,6 @@ import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { createComputeStoreHost } from '#compute-store.js';
 import type { ComputeStoreConnection } from '#compute-store.js';
 import type * as NativeKernels from '#native-kernels.js';
-import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 
 /* Every report goes to stderr: stdout carries only the served URL or its record (`--print`, `--json`). */
 const consola = createConsola({
@@ -386,18 +389,23 @@ export const acpAdapterResolveFrom = (from: string = import.meta.url): string =>
 };
 
 /**
- * The native kernels this daemon serves (D37): Build123d for `.py`, PicoGK for `.cs`.
+ * The native kernels this daemon serves (D37): each one its runtime children's definitions list.
  *
- * Every runtime child composes them from the payload store's receipts, which this process reads and hands over; a
- * kernel that is not prepared answers `KERNEL_NOT_PREPARED`. `prepare_kernel` prepares in this process, with its
- * unrestricted network (D4). The child may not spawn, so this process starts each native worker on its behalf, from
- * a closure sealed in the store and through the OS sandbox (North Star S2). The native packages load on first use.
+ * A runtime child reports the native deployments its runtime lists and, since it cannot read the payload store, asks
+ * this process for each kernel's sealed closure when the kernel binds; this process answers from the store's launch
+ * index, from the child's data alone, and a kernel that is not prepared answers `KERNEL_NOT_PREPARED`. `prepare_kernel`
+ * prepares in this process, with its unrestricted network (D4), the kernels this CLI ships: a child runs project code,
+ * so this process imports no module a child names unless it is the one this CLI resolves itself. The child may not
+ * spawn, so this process starts each native worker on its behalf, from a closure it answered and through the OS
+ * sandbox (North Star S2). The native packages load on first use.
  *
- * @returns The children's native kernels, the preparation behind `prepare_kernel`, and its disposal.
+ * @returns The children's native kernels, the preparation behind `prepare_kernel`, the kernels it takes, and its
+ *   disposal.
  */
 export const serveNativeKernels = (): {
   readonly native: RuntimeChildNativeKernels;
   readonly prepareKernel: HostPrepareKernel;
+  readonly preparableKernels: () => readonly HostPreparableKernel[];
   readonly dispose: () => Promise<void>;
 } => {
   let loaded: Promise<typeof NativeKernels> | undefined;
@@ -405,29 +413,38 @@ export const serveNativeKernels = (): {
     loaded ??= import('#native-kernels.js');
     return loaded;
   };
-  const compose = async (): Promise<NativeComposition> => {
-    try {
-      const { composeNativeKernels } = await nativeKernels();
-      return await composeNativeKernels();
-    } catch (error) {
-      consola.warn(`Serving without native kernels: ${error instanceof Error ? error.message : String(error)}`);
-      return { unavailable: [] };
-    }
-  };
+  /* The latest child's report, and the kernels it declares: what `prepare_kernel` names. */
+  let report: NativeDeploymentReport = [];
+  let preparable: readonly HostPreparableKernel[] = [];
   let preparation: Promise<NativePreparation> | undefined;
   const openPreparation = async (): Promise<NativePreparation> => {
-    const { openNativePreparation } = await nativeKernels();
-    return openNativePreparation();
+    const { openNativePreparation, shippedDeploymentsOf } = await nativeKernels();
+    return openNativePreparation({ deployments: async () => shippedDeploymentsOf(report) });
   };
   return {
     native: {
       /* Beside the payload store and outside TMPDIR, which each runtime child may write. */
       directory: join(dirname(defaultPayloadStore()), 'runtime-children'),
       store: defaultPayloadStore(),
-      compose,
-      closureRoots: async () => {
-        const { closureRoots } = await compose();
-        return closureRoots ?? [];
+      inspect: async (request) => {
+        const { inspectReportedClosure } = await nativeKernels();
+        return inspectReportedClosure(request);
+      },
+      reported: (value) => {
+        const parsed = nativeDeploymentReportSchema.safeParse(value);
+        if (!parsed.success) {
+          return;
+        }
+        // async-iife: bootstrap -- the kernels are named once the manifests are read; nothing awaits it.
+        void (async () => {
+          try {
+            const { preparableKernelsOf } = await nativeKernels();
+            preparable = preparableKernelsOf(parsed.data);
+            report = parsed.data;
+          } catch (error) {
+            consola.warn(`A runtime child reported native kernels that cannot be read: ${String(error)}`);
+          }
+        })();
       },
       start: startNativeWorker,
       /* A runtime child cannot read the store, so a failed handshake is re-verified here (D8, X35). */
@@ -436,7 +453,18 @@ export const serveNativeKernels = (): {
         return verifyStoreClosure(runtimePath, signal);
       },
     },
+    preparableKernels: () => preparable,
     prepareKernel: async ({ kernel }, { signal, onProgress }) => {
+      const { shippedKernelsOf } = await nativeKernels();
+      const shipped = await shippedKernelsOf(report);
+      if (!shipped.has(kernel) && preparable.some((row) => row.kernel === kernel)) {
+        return {
+          status: 'failed',
+          kernel,
+          code: 'KERNEL_NOT_SHIPPED',
+          message: `${kernel} comes from a plugin this Tau does not ship, so tau serve does not prepare it. Run \`tau prepare ${kernel}\` with the project's --plugin or --config, then call again.`,
+        };
+      }
       preparation ??= openPreparation();
       const opened = await preparation;
       return opened.prepare(kernel, { signal, onProgress });
@@ -448,6 +476,33 @@ export const serveNativeKernels = (): {
       }
     },
   };
+};
+
+/**
+ * The skill bundles a daemon offers: the first-party ones `@taucad/skills` ships, then those of each `--plugin`
+ * package installed in the invoking project. This process never runs project code, so a `--config` module, which only
+ * the runtime child loads, contributes its kernels but not its skills.
+ * @param plugins - The `--plugin` specifiers.
+ * @returns The bundles; the first-party ones alone when a package's bundle cannot be read.
+ */
+const serveSkillBundles = async (plugins: readonly string[]): Promise<readonly HostSystemSkillBundle[]> => {
+  if (plugins.length === 0) {
+    return systemSkillBundles;
+  }
+  try {
+    const { pluginSkillBundles } = await import('#plugin-skills.js');
+    return [
+      ...systemSkillBundles,
+      ...(await pluginSkillBundles({
+        projectRoot: process.cwd(),
+        plugins,
+        exclude: new Set(systemSkillBundles.map(({ slug }) => slug)),
+      })),
+    ];
+  } catch (error) {
+    consola.warn(`Serving without the plugins' skills: ${error instanceof Error ? error.message : String(error)}`);
+    return systemSkillBundles;
+  }
 };
 
 /** The port `tau serve` asks for first, so a served project keeps one bookmarkable URL (charter Q53). */
@@ -1008,10 +1063,12 @@ export const serveCommand = defineCommand({
         : { mode: args.computeMode }
       : undefined;
     const kernels = serveNativeKernels();
+    const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
     const configuredAgent = agent
       ? {
           ...agent,
           prepareKernel: kernels.prepareKernel,
+          preparableKernels: kernels.preparableKernels,
           ...(machines ? { machines } : {}),
           compute: compute!,
           ...(args.computeMode === 'durable'
@@ -1062,7 +1119,7 @@ export const serveCommand = defineCommand({
       },
       zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: process.env['TAU_API_TOKEN'] },
       maxSessions,
-      systemSkillBundles,
+      systemSkillBundles: skillBundles,
       pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
       onEvent,

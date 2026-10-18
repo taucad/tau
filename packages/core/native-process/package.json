@@ -34,6 +34,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./adopter": "./src/native-kernel-adopter.ts",
+    "./store": "./src/store.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -44,6 +46,16 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./adopter": {
+        "types": "./dist/native-kernel-adopter.d.mts",
+        "import": "./dist/native-kernel-adopter.mjs",
+        "default": "./dist/native-kernel-adopter.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -53,11 +65,13 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0"
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
-    "@taucad/runtime-testing": "workspace:*"
+    "@taucad/runtime-testing": "workspace:*",
+    "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "node"

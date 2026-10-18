@@ -24,13 +24,23 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 <% } %>
 
 <% if (capabilities.some(({ role }) => role === 'job' || role === 'machine')) { %>
-import { plugin, <%= alias %><% capabilities.forEach((capability) => { %>, <%= capability.factoryName %><% }); %> } from '#index.js';
+import { plugin, <%= alias %><% if (nativeLanguage) { %>, <%= alias %>Native<% } %><% capabilities.forEach((capability) => { %>, <%= capability.factoryName %><% }); %> } from '#index.js';
 <% } else { %>
-import { plugin, <%= alias %> } from '#index.js';
+import { plugin, <%= alias %><% if (nativeLanguage) { %>, <%= alias %>Native<% } %> } from '#index.js';
 import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
 <% } %>
 
-const selected = plugin();
+<% if (nativeLanguage) { %>
+// A closure holding exactly the launch set, which the deployment maps to the options of an explicit `closure`.
+const closureOptions = <%= alias %>Native.optionsFromClosure({
+  package: '<%= importPath %>',
+  dependency: 'engine',
+  root: '/store/closures/sha256/fixture',
+  closureIntegrity: 'sha256-AAAA',
+  files: <%= alias %>Native.launchSet([]).map((path) => ({ path, byteLength: 1, sha256: '0'.repeat(64), mode: 0o644 })),
+});
+<% } %>
+const selected = plugin(<% if (nativeLanguage) { %>{ kernels: { default: { closure: closureOptions } } }<% } %>);
 <% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>
 expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
   readonly [ReturnType<typeof <%= capability.factoryName %>>]

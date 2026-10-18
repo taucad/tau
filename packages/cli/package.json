@@ -115,6 +115,7 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

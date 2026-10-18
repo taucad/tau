@@ -1043,7 +1043,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
-  it('should process duplicate directory notifications without traversing the retained tree', () => {
+  it('should process duplicate directory notifications without traversing the retained tree', async () => {
     const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
       initialEntries: [
         directoryEntry('existing'),
@@ -1068,9 +1068,46 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       iterate.mockRestore();
       emitFileChanged({ type: 'directoryCreated', path: 'new-directory', backend: 'indexeddb' });
       expect(tree.getTreeSnapshot().get('new-directory')).toMatchObject({ type: 'dir', path: 'new-directory' });
+      /* Subscribers hear once the task's burst is over. */
+      await Promise.resolve();
       expect(changed).toHaveBeenCalledOnce();
     } finally {
       iterate.mockRestore();
+      unsubscribe();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  /* D-UI-15: every change cloned the whole tree Map, so a burst of N worker
+   * facts cost N clones of an N-entry tree. A burst in one task is one
+   * publication, and a published snapshot is never mutated afterwards. */
+  it('should publish one snapshot for a burst of changes in one task', async () => {
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      initialEntries: Array.from({ length: 64 }, (_, index) => textEntry(`file-${index}.ts`)),
+    });
+    const before = tree.getTreeSnapshot();
+    const changed = vi.fn(() => tree.getTreeSnapshot());
+    const unsubscribe = tree.subscribeTree(changed);
+    try {
+      for (let index = 0; index < 32; index++) {
+        emitFileChanged({ type: 'fileDeleted', path: `file-${index}.ts`, backend: 'indexeddb' });
+      }
+      /* Synchronous readers see each fact at once; the published snapshot is untouched. */
+      expect(tree.getCachedFileItems().some((item) => item.path === 'file-0.ts')).toBe(false);
+      expect(before.size).toBe(65);
+      await Promise.resolve();
+      expect(changed).toHaveBeenCalledOnce();
+      const after = tree.getTreeSnapshot();
+      expect(after).not.toBe(before);
+      expect(after.has('file-31.ts')).toBe(false);
+      expect(after.has('file-32.ts')).toBe(true);
+      emitFileChanged({ type: 'fileDeleted', path: 'file-32.ts', backend: 'indexeddb' });
+      expect(after.has('file-32.ts')).toBe(true);
+      await Promise.resolve();
+      expect(changed).toHaveBeenCalledTimes(2);
+      expect(tree.getTreeSnapshot().has('file-32.ts')).toBe(false);
+    } finally {
       unsubscribe();
       tree.dispose();
       disposeChannel();

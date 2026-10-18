@@ -1,10 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 const mobileBreakpoint = 768;
+const mobileQuery = `(max-width: ${mobileBreakpoint - 1}px)`;
+
+const subscribe = (onChange: () => void): (() => void) => {
+  if (typeof globalThis.matchMedia !== 'function') {
+    return () => undefined;
+  }
+  const mql = globalThis.matchMedia(mobileQuery);
+  mql.addEventListener('change', onChange);
+  return () => {
+    mql.removeEventListener('change', onChange);
+  };
+};
+
+const getSnapshot = (): boolean =>
+  typeof globalThis.matchMedia === 'function' && globalThis.matchMedia(mobileQuery).matches;
+
+const getServerSnapshot = (): boolean => false;
 
 /**
  * Report whether the viewport is narrower than Tau's mobile breakpoint. The
- * value is `false` during server rendering and updates through `matchMedia`.
+ * value is read from `matchMedia` on the first client render, so a phone never
+ * mounts the desktop layout first. Server rendering and hydration report
+ * `false`; React re-renders with the client value right after hydrating.
  *
  * @public
  * @returns Whether the current viewport is mobile-sized.
@@ -17,20 +36,5 @@ const mobileBreakpoint = 768;
  * ```
  */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState<boolean | undefined>();
-
-  useEffect(() => {
-    const mql = globalThis.matchMedia(`(max-width: ${mobileBreakpoint - 1}px)`);
-    const onChange = () => {
-      setIsMobile(window.innerWidth < mobileBreakpoint);
-    };
-
-    mql.addEventListener('change', onChange);
-    setIsMobile(window.innerWidth < mobileBreakpoint);
-    return () => {
-      mql.removeEventListener('change', onChange);
-    };
-  }, []);
-
-  return Boolean(isMobile);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

@@ -46,6 +46,42 @@ describe(prepareKernelToolName, () => {
     });
   });
 
+  it('should name the kernels the host can prepare, with their extensions, and none when it lists none', async () => {
+    const prepareKernel: HostPrepareKernel = async ({ kernel }) => ({ status: 'ready', kernel });
+    const listed = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      prepareKernel,
+      preparableKernels: [
+        { kernel: 'alpha', extensions: ['al'] },
+        { kernel: 'beta', extensions: ['be', 'bet'] },
+      ],
+    });
+    const unlisted = createHostToolRegistry({ workspaceRoot: await makeWorkspace(), prepareKernel });
+    const toolOf = (registry: ReturnType<typeof createHostToolRegistry>) =>
+      registry.list().find(({ name }) => name === 'prepare_kernel');
+
+    expect(toolOf(listed)?.description).toContain('so Tau can evaluate its files: alpha for .al, beta for .be, .bet.');
+    expect(toolOf(listed)?.inputSchema).toMatchObject({
+      properties: { kernel: { description: expect.stringMatching(/, such as alpha or beta\.$/) as unknown } },
+    });
+    expect(toolOf(unlisted)?.description).toContain('so Tau can evaluate its files. Call it when');
+    expect(JSON.stringify(toolOf(unlisted)?.inputSchema)).not.toContain('such as');
+  });
+
+  it('should read the kernels again each time the list is read, for a host that learns them later', async () => {
+    let reported: Array<{ kernel: string; extensions: string[] }> = [];
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      prepareKernel: async ({ kernel }) => ({ status: 'ready', kernel }),
+      preparableKernels: () => reported,
+    });
+    const description = () => registry.list().find(({ name }) => name === 'prepare_kernel')?.description;
+
+    expect(description()).toContain('so Tau can evaluate its files. Call it when');
+    reported = [{ kernel: 'rustcad', extensions: ['rcad'] }];
+    expect(description()).toContain('so Tau can evaluate its files: rustcad for .rcad.');
+  });
+
   it('should forward the call signal, report progress as partial results and error unless ready', async () => {
     const seen: Array<{ kernel: string; aborted: boolean }> = [];
     const registry = createHostToolRegistry({

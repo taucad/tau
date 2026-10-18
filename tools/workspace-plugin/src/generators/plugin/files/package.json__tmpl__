@@ -16,7 +16,7 @@
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
-  "files": ["dist", "LICENSE", "README.md", "CHANGELOG.md"],
+  "files": ["dist", <% if (nativeLanguage) { %>"tau-plugin.json", <% } %>"LICENSE", "README.md", "CHANGELOG.md"],
   "keywords": ["cad", "plugin", "<%= name %>"],
   "author": "Richard Fontein",
   "license": "Apache-2.0",
@@ -24,7 +24,9 @@
     "node": ">=24.0.0"
   },
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/index.ts",<% if (nativeLanguage) { %>
+    "./native": "./src/native.ts",
+    "./tau-plugin.json": "./tau-plugin.json",<% } %>
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -34,7 +36,13 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },<% if (nativeLanguage) { %>
+      "./native": {
+        "types": "./dist/native.d.mts",
+        "import": "./dist/native.mjs",
+        "default": "./dist/native.mjs"
       },
+      "./tau-plugin.json": "./tau-plugin.json",<% } %>
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -43,9 +51,13 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "peerDependencies": {
+<% if (nativeLanguage) { %>  "dependencies": {
+    "@taucad/native-process-core": "workspace:*"<% if (nativeLanguage === 'python') { %>,
+    "@taucad/python-kernel-core": "workspace:*"<% } %>
+  },
+<% } %>  "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0"<% if (usesZod) { %>,
-    "zod": "^4.0.0"<% } %>
+    "zod": "^4.1.0"<% } %>
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*"<% if (usesZod) { %>,

@@ -1,3 +1,4 @@
+import { withNativeDeployment } from '@taucad/native-process-core/adopter';
 import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type { ComputeAnnouncement, KernelIssue, KernelServices } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
@@ -7,6 +8,14 @@ import { sha256StringSync } from '@taucad/utils/hash';
 import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
 import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
+import {
+  bindPythonKernel,
+  createPythonSession,
+  createPythonWorkspaceMirror,
+  pyprojectPath,
+  PythonWorkerError,
+} from '@taucad/python-kernel-core';
+import type { PythonSession } from '@taucad/python-kernel-core';
 
 import {
   build123dAnalysisSchema,
@@ -23,9 +32,10 @@ import {
   meshPreviewWithinBudget,
 } from '#build123d-tessellation.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
-import { Build123dWorkerError, PythonSession } from '#python-session.js';
-import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
-import { libraryVersionMismatches, pyprojectPath } from '#project-manifest.js';
+import { createBuild123dResidentBinding } from '#build123d-resident.js';
+import { build123dWorker } from '#build123d-worker.js';
+import { build123dNative } from '#native.js';
+import { libraryVersionMismatches } from '#project-manifest.js';
 
 const computeNamespace = 'build123d.operation.v1';
 const computeProducerVersion = 'build123d@0.13.0|python@3.13|ocp@8.0.1.0.0|occt@8.0.1|worker-protocol@1|adapter@3';
@@ -74,7 +84,7 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   if (error instanceof Build123dTessellationRefusal) {
     return [error.issue];
   }
-  if (error instanceof Build123dWorkerError) {
+  if (error instanceof PythonWorkerError) {
     return error.issues.map(({ code: pythonCode, type: pythonType, ...issue }) => ({
       ...issue,
       code: 'RUNTIME',
@@ -232,8 +242,7 @@ const meshRequests = (
   },
 });
 
-/** `build123d` kernel capability. @public */
-export const build123dKernel = defineKernel({
+const build123dKernelDefinition = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
@@ -258,10 +267,14 @@ export const build123dKernel = defineKernel({
   },
 
   async initialize(options, runtime) {
-    const mirror = await createWorkspaceMirror();
-    const session = new PythonSession({
-      ...options,
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
+    const { options: bound } = await bindPythonKernel({ adopter: build123dNative, options });
+    const mirror = await createPythonWorkspaceMirror(build123dWorker);
+    const session = createPythonSession({
+      ...bound,
       ...mirror,
+      worker: build123dWorker,
       logger: runtime.logger,
     });
     const observedDependencies: string[] = [];
@@ -269,16 +282,16 @@ export const build123dKernel = defineKernel({
     return {
       mirror,
       session,
-      resident: session.createResidentBinding(),
+      resident: createBuild123dResidentBinding(session),
       observedDependencies,
       warmCandidates,
       computeProducer: {
         id: '@taucad/build123d',
         version: computeProducerVersion,
         implementationAssets: [
-          options.pythonSha256,
-          options.workerSha256,
-          ...options.supportFiles.map(({ sha256 }) => sha256),
+          bound.pythonSha256,
+          bound.workerSha256,
+          ...bound.supportFiles.map(({ sha256 }) => sha256),
         ].map((sha256) => contentDigest({ value: `sha256:${sha256}` })),
       },
     };
@@ -388,7 +401,7 @@ export const build123dKernel = defineKernel({
             });
           }
           context.resident.track(admitted);
-          context.session.observeResidentBytes(result.compute.stats.logicalBytes);
+          context.resident.observeResidentBytes(result.compute.stats.logicalBytes);
           scope.announce({ entries: announcements });
           context.warmCandidates = [...new Set([...context.warmCandidates, ...admitted])].slice(
             -build123dComputeDescriptorLimit,
@@ -494,3 +507,10 @@ export const build123dKernel = defineKernel({
     }
   },
 });
+
+/**
+ * The `build123d` kernel capability. Every registration carries `build123dNative`, so a host that lists the plugin in a runtime
+ * definition prepares and binds the kernel from the definition alone.
+ * @public
+ */
+export const build123dKernel = withNativeDeployment(build123dKernelDefinition, build123dNative);

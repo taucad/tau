@@ -7,7 +7,7 @@ import {
   readProjectConfiguration,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import type { Tree } from '@nx/devkit';
+import type { TargetConfiguration, Tree } from '@nx/devkit';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,6 +75,31 @@ const capabilityTemplate = (role: CapabilityRole, propertyName: string, sourceNa
   fileName: `${sourceName}.${role}`,
 });
 
+/**
+ * The payload targets of a Python kernel: `@taucad/python-kernel-core`'s `tau-python-kernel` command, run for this
+ * package, writes its `tau-plugin.json` and project template, fills the payload seed, records the golden receipt and
+ * runs the worker's Python tests.
+ */
+const pythonKernelTargets = (projectRoot: string): Record<string, TargetConfiguration> => {
+  const command = (verb: string, flags = ''): string =>
+    `node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts ${verb} --package ${projectRoot}${flags}`;
+  const script = (verb: string): TargetConfiguration => ({
+    executor: 'nx:run-commands',
+    cache: false,
+    options: { cwd: '.', command: command(verb) },
+  });
+  return {
+    'generate-tau-plugin': { ...script('generate'), configurations: { check: { command: command('check') } } },
+    'generate-project-template': {
+      ...script('template'),
+      configurations: { check: { command: command('template', ' --check') } },
+    },
+    seed: script('seed'),
+    'golden-tau-plugin': { ...script('golden'), dependsOn: ['seed'] },
+    'test-python': { ...script('test'), dependsOn: ['seed'] },
+  };
+};
+
 /** Scaffold a publishable multi-capability Tau plugin toolkit. */
 export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema): Promise<void> => {
   if (schema.publishable === false) {
@@ -90,7 +115,12 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     capabilityTemplate(role, propertyName, sourceName),
   );
   const selectedRoles = new Set(capabilities.map(({ role }) => role));
-  const usesZod = selectedRoles.has('job') || selectedRoles.has('machine');
+  const hostTarget = schema.hostTarget ?? 'browser';
+  /* A python or native kernel runs out of process from a prepared closure, so it ships a `/native` deployment. */
+  const nativeLanguage =
+    selectedRoles.has('kernel') && (hostTarget === 'python' || hostTarget === 'native') ? hostTarget : undefined;
+  const hostRoles = selectedRoles.has('job') || selectedRoles.has('machine');
+  const usesZod = hostRoles || nativeLanguage !== undefined;
   const { private: isPrivate } = placementMetadata.packages;
   const tags = ['scope:shared', 'type:package'];
 
@@ -103,7 +133,6 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     tags,
   });
 
-  const hostTarget = schema.hostTarget ?? 'browser';
   const substitutions = {
     name: schema.name,
     importPath,
@@ -113,8 +142,9 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     alias: propertyName,
     hostTarget,
     capabilities,
-    hasHostRoles: usesZod,
+    hasHostRoles: hostRoles,
     usesZod,
+    nativeLanguage,
     tags: JSON.stringify(tags),
     private: String(isPrivate),
     license: apacheLicenseId,
@@ -131,6 +161,21 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     if (!selectedRoles.has(role)) {
       tree.delete(join(projectRoot, 'src', `${sourceName}.${role}.ts`));
     }
+  }
+
+  if (nativeLanguage === undefined) {
+    tree.delete(join(projectRoot, 'src', 'native.ts'));
+    tree.delete(join(projectRoot, 'src', `${sourceName}.schemas.ts`));
+    tree.delete(join(projectRoot, 'tau-plugin.json'));
+  } else {
+    const tsdownConfig = join(projectRoot, 'tsdown.config.ts');
+    tree.write(
+      tsdownConfig,
+      (tree.read(tsdownConfig, 'utf8') ?? '').replace(
+        "entry: ['src/index.ts']",
+        "entry: ['src/index.ts', 'src/native.ts']",
+      ),
+    );
   }
 
   tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalApacheLicensePath));
@@ -150,6 +195,7 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
       'src/index.ts',
       `src/${sourceName}.plugin.ts`,
       ...capabilities.map(({ fileName }) => `src/${fileName}.ts`),
+      ...(nativeLanguage === undefined ? [] : ['src/native.ts', `src/${sourceName}.schemas.ts`, 'tau-plugin.json']),
       'package.json',
       'project.json',
     ],
@@ -174,7 +220,11 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     ],
   });
   const project = readProjectConfiguration(tree, schema.name);
-  updateProjectConfiguration(tree, schema.name, { ...project, tags });
+  updateProjectConfiguration(tree, schema.name, {
+    ...project,
+    tags,
+    ...(nativeLanguage === 'python' ? { targets: { ...project.targets, ...pythonKernelTargets(projectRoot) } } : {}),
+  });
   await formatFiles(tree);
 };
 

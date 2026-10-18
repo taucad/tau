@@ -12,6 +12,60 @@ export type RunWatchSource = Readonly<{
 /** A detachable SDK stream; closing it never sends a host command. @public */
 export type RunWatch = Readonly<{ stream: ReadableStream<UIMessageChunk>; detach: () => void }>;
 
+/** The text a plain delta chunk appends, and the block it appends to; `undefined` for any other chunk. */
+const deltaOf = (chunk: UIMessageChunk): { key: string; text: string } | undefined => {
+  /* Only the bare shape merges: a delta carrying provider metadata keeps its own chunk. */
+  if (chunk.type === 'tool-input-delta' && Object.keys(chunk).length === 3) {
+    return { key: `tool:${chunk.toolCallId}`, text: chunk.inputTextDelta };
+  }
+  if ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && Object.keys(chunk).length === 3) {
+    return { key: `${chunk.type}:${chunk.id}`, text: chunk.delta };
+  }
+  return undefined;
+};
+
+/**
+ * Merge adjacent deltas of one block into one chunk (D-UI-10).
+ *
+ * The SDK re-parses a tool call's whole accumulated input on every
+ * `tool-input-delta`, so the deltas one drain carries cost one parse rather
+ * than one each; text and reasoning deltas cost one message snapshot each. The
+ * concatenated text is exactly what the SDK would have accumulated.
+ */
+const coalesceDeltas = (chunks: Iterable<UIMessageChunk>): UIMessageChunk[] => {
+  const merged: UIMessageChunk[] = [];
+  let open: { key: string; chunk: UIMessageChunk; parts: string[] } | undefined;
+  const flush = (): void => {
+    if (open !== undefined) {
+      const text = open.parts.join('');
+      merged.push(
+        open.chunk.type === 'tool-input-delta'
+          ? { ...open.chunk, inputTextDelta: text }
+          : open.chunk.type === 'text-delta' || open.chunk.type === 'reasoning-delta'
+            ? { ...open.chunk, delta: text }
+            : open.chunk,
+      );
+      open = undefined;
+    }
+  };
+  for (const chunk of chunks) {
+    const delta = deltaOf(chunk);
+    if (delta === undefined) {
+      flush();
+      merged.push(chunk);
+      continue;
+    }
+    if (open?.key === delta.key) {
+      open.parts.push(delta.text);
+      continue;
+    }
+    flush();
+    open = { key: delta.key, chunk, parts: [delta.text] };
+  }
+  flush();
+  return merged;
+};
+
 /**
  * Replay one run's already-projected chunks, follow later folds, and close at
  * the attempt's terminal or paused row. A settlement is not a stream event.
@@ -53,7 +107,7 @@ export const openRunWatch = (source: RunWatchSource): RunWatch => {
       close();
       return;
     }
-    for (const chunk of chunksSince(chunks, sent)) {
+    for (const chunk of coalesceDeltas(chunksSince(chunks, sent))) {
       controller.enqueue(chunk);
     }
     sent = chunks.length;

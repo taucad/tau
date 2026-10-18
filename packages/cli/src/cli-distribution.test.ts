@@ -362,8 +362,8 @@ describe('tau CLI dist (real binary)', () => {
   /*
    * W17 tier 4b on the native-darwin job (D30): `tau export main.cs` from an empty store refuses naming
    * `tau prepare picogk`, `tau prepare picogk` downloads the pinned runtime and Tau layer from their origins, and the
-   * same export then succeeds with no Tau variable in the environment at all (no `TAU_PICOGK_RESOURCE_ROOT`, no
-   * payload directory or mirror): the kernel composes from the store's receipts alone.
+   * same export then succeeds with no Tau variable in the environment at all (no resource root, no payload
+   * directory or mirror): the kernel composes from the store's receipts alone.
    */
   describe.runIf(nativeDarwin)('tau export main.cs with no environment (W17 tier 4b, native-darwin)', () => {
     it('should refuse, prepare from the pinned origins, then export the sphere to GLB', async () => {

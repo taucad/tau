@@ -17,8 +17,10 @@ import {
 } from '@taucad/host';
 import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
+import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
+import type { NativePreparation } from '@taucad/native-process-core/store';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import { defineCommand } from 'citty';
 
@@ -29,7 +31,7 @@ import { installedVersion } from '#installed-version.js';
 import { exitCodeFor } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 import type * as NativeKernels from '#native-kernels.js';
-import type { NativeComposition, NativePreparation } from '#native-kernels.js';
+import type { DescribedRuntime } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../../package.json' with { type: 'json' };
@@ -103,12 +105,13 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * in. The store has one writer, so the flag is off by default: a server holding it keeps the desktop app from its
  * printers until the agent closes, and a server whose one folder holds no `tau.json` does not take it.
  *
- * Native kernels (Build123d for `.py`, PicoGK for `.cs`) run from closures in the payload store that `tau prepare`
- * and the `prepare_kernel` tool fill (D7). The CAD tools never download: a file whose kernel is not prepared answers
- * `KERNEL_NOT_PREPARED`, naming `prepare_kernel` and its input. The store is read again on every such refusal, so a
- * closure another process prepared is used at once; after a preparation, each project's runtime is replaced, and the
- * old one shuts down once its calls in flight finish. Runtime threads get only the environment
- * {@link childEnvironment} allows, never the agent app's own.
+ * Native kernels (each one the runtime definition lists: built-ins, `--plugin` and `--config`) run from closures in
+ * the payload store that `tau prepare` and the `prepare_kernel` tool fill (D7). The CAD tools never download: a file
+ * whose kernel is not prepared answers `KERNEL_NOT_PREPARED`, naming `prepare_kernel` and its input. The kernel reads
+ * the store again on every operation until it binds, so a closure another process prepared is used at once, with no
+ * runtime replaced. `prepare_kernel` learns which kernels the runtime lists from a thread that builds it, so no kernel
+ * module loads in this process. Runtime threads get only the environment {@link childEnvironment} allows, never the
+ * agent app's own.
  *
  * @example <caption>Serve one project to an MCP client</caption>
  * ```text
@@ -228,27 +231,11 @@ export const mcpCommand = defineCommand({
       process.stderr.write(
         `tau mcp: project root ${workspaceRoot} (${started.source})${pinned ? '' : '; a call that names its own folder works there'}\n`,
       );
-      /* The native kernels every new runtime thread composes, read from the store's receipts once per generation; a
-       * profile no host can honour leaves the native kernels out rather than every CAD tool. */
-      let composition: Promise<NativeComposition> | undefined;
-      /* Loaded on first use: the native packages' entries import their kernels, which `initialize` must not wait for. */
+      /* Loaded on first use: preparation reads the payload store, which `initialize` must not wait for. */
       let nativeModule: Promise<typeof NativeKernels> | undefined;
       const native = async (): Promise<typeof NativeKernels> => {
         nativeModule ??= import('#native-kernels.js');
         return nativeModule;
-      };
-      const composeOrNone = async (): Promise<NativeComposition> => {
-        try {
-          const { composeNativeKernels } = await native();
-          return await composeNativeKernels();
-        } catch (error) {
-          process.stderr.write(`tau mcp: serving without native kernels: ${String(error)}\n`);
-          return { unavailable: [] };
-        }
-      };
-      const nativeKernels = async (): Promise<NativeComposition> => {
-        composition ??= composeOrNone();
-        return composition;
       };
       /* The agent app's environment is not scrubbed (ruling X9): a runtime thread gets the allowed names only. */
       const environment = childEnvironment(process.env);
@@ -256,6 +243,46 @@ export const mcpCommand = defineCommand({
       class RuntimeThread extends Worker {
         public constructor(url: string | URL, options?: WorkerOptions) {
           super(url, { ...options, env: environment });
+        }
+      }
+      const runtimeInputs = {
+        projectRoot: workspaceRoot,
+        ...(args.plugin === undefined ? {} : { plugin: [args.plugin].flat() }),
+        ...(args.config === undefined ? {} : { config: args.config }),
+      } satisfies RuntimeWorkerData;
+      /* What the runtime definition lists (its native deployments and plugins), from a thread of its own that builds
+       * it and serves nothing: kernel modules load there, never in this process. */
+      let described: Promise<DescribedRuntime> | undefined;
+      const describe = async (): Promise<DescribedRuntime> => {
+        described ??= (async () => {
+          const { describeRuntime } = await native();
+          return describeRuntime({ ...runtimeInputs, env: environment });
+        })();
+        return described;
+      };
+      /* The kernels `prepare_kernel` names: none until the runtime is described. */
+      let preparable: ReturnType<typeof NativeKernels.preparableKernelsOf> = [];
+      /* A runtime with `--plugin` or `--config` may list plugins beyond the built-ins, whose kernels and skill bundles
+       * the tool list names, so it is described before serving; the built-ins' skills ship in `systemSkillBundles`. */
+      let skillBundles: readonly HostSystemSkillBundle[] = systemSkillBundles;
+      if (args.plugin !== undefined || args.config !== undefined) {
+        try {
+          const [{ preparableKernelsOf }, { pluginSkillBundles }, runtime] = await Promise.all([
+            native(),
+            import('#plugin-skills.js'),
+            describe(),
+          ]);
+          preparable = preparableKernelsOf(runtime.report);
+          skillBundles = [
+            ...systemSkillBundles,
+            ...(await pluginSkillBundles({
+              projectRoot: workspaceRoot,
+              plugins: runtime.plugins,
+              exclude: new Set(systemSkillBundles.map(({ slug }) => slug)),
+            })),
+          ];
+        } catch (error) {
+          process.stderr.write(`tau mcp: serving without the plugins' kernels and skills: ${String(error)}\n`);
         }
       }
       /* The durable compute store Tau Desktop and tau serve use: a model built once, by any Tau process, is reused
@@ -307,7 +334,6 @@ export const mcpCommand = defineCommand({
           import('@taucad/runtime/transport/node'),
           import('@taucad/runtime/filesystem/node'),
         ]);
-        const native = await nativeKernels();
         return createRuntimeClient<AnyRuntimeDefinition>({
           transport: nodeWorkerTransport({
             workerCtor: RuntimeThread,
@@ -315,28 +341,17 @@ export const mcpCommand = defineCommand({
               import.meta.url.endsWith('.ts') ? '../runtime.worker.ts' : './runtime-worker.mjs',
               import.meta.url,
             ),
-            workerData: {
-              projectRoot: workspaceRoot,
-              ...(args.plugin === undefined ? {} : { plugin: [args.plugin].flat() }),
-              ...(args.config === undefined ? {} : { config: args.config }),
-              native,
-            } satisfies RuntimeWorkerData,
+            workerData: runtimeInputs,
             fileSystem: fromNodeFs(projectPath),
             compute: await computeFor(projectPath),
           }),
           operationTimeout,
         });
       };
-      /* Each client's operations in flight, so a retired client shuts down only once they settle. */
-      const pending = new WeakMap<ProjectRuntimeClient, Set<Promise<unknown>>>();
-      const retiring = new WeakSet<ProjectRuntimeClient>();
       /* A client whose thread exited is terminated, and replaced on its project's next call. */
       const clients = keyedResource<string, ProjectRuntimeClient>(
         openClient,
         async (client) => {
-          if (retiring.has(client)) {
-            await Promise.allSettled(pending.get(client) ?? []);
-          }
           await client.shutdown();
         },
         (client) => client.lifecycleState !== 'terminated',
@@ -360,29 +375,6 @@ export const mcpCommand = defineCommand({
           }, idleRelease).unref(),
         );
       };
-      /**
-       * Replace every project's runtime with one composed from `next` (or the store, read again on next use). Each old
-       * client is evicted at once, so the next call starts a fresh thread, and shuts down after its calls in flight
-       * settle (D7, AR1-8).
-       * @param next - The composition the next clients use; omitted, the store is read again on next use.
-       * @returns Once every old client is evicted, before they drain.
-       */
-      const retireClients = async (next?: NativeComposition): Promise<void> => {
-        composition = next === undefined ? undefined : Promise.resolve(next);
-        await Promise.all(
-          clients.keys().map(async (projectPath) => {
-            let acquired: Awaited<ReturnType<typeof clients.acquire>>;
-            try {
-              acquired = await clients.acquire(projectPath);
-            } catch {
-              /* A client that failed to start has nothing to retire. */
-              return;
-            }
-            retiring.add(acquired.value);
-            void release(projectPath, acquired.incarnation);
-          }),
-        );
-      };
       const clientFor = async (projectPath: string): Promise<ProjectRuntimeClient> => {
         const [{ value, incarnation }, { isOperationTimeoutError }] = await Promise.all([
           clients.acquire(projectPath),
@@ -395,10 +387,7 @@ export const mcpCommand = defineCommand({
         /* An operation that times out evicts its thread at once (the eviction is synchronous), so the next call starts
          * a fresh one rather than meeting a thread the runtime terminates only after its grace. The tools turn the
          * rejection into a result, so the client's own calls are where it shows. */
-        const inFlightOf = pending.get(value) ?? new Set<Promise<unknown>>();
-        pending.set(value, inFlightOf);
         const evictOnTimeout = async (operation: Promise<unknown>): Promise<unknown> => {
-          inFlightOf.add(operation);
           try {
             return await operation;
           } catch (error) {
@@ -406,8 +395,6 @@ export const mcpCommand = defineCommand({
               void release(projectPath, incarnation);
             }
             throw error;
-          } finally {
-            inFlightOf.delete(operation);
           }
         };
         // ponytail: a Proxy over every method beats a hand-written wrapper of HostRuntimeClient's generic surface.
@@ -458,8 +445,13 @@ export const mcpCommand = defineCommand({
       const parameters = openLocalParameterActors({ runtimeClient: clientFor });
       let preparation: Promise<NativePreparation> | undefined;
       const startPreparation = async (): Promise<NativePreparation> => {
-        const { openNativePreparation } = await native();
-        return openNativePreparation();
+        const { openNativePreparation, reportedDeployments } = await native();
+        return openNativePreparation({
+          deployments: async () => {
+            const { report } = await describe();
+            return reportedDeployments(report);
+          },
+        });
       };
       const openPreparation = async (): Promise<NativePreparation> => {
         preparation ??= startPreparation();
@@ -470,50 +462,15 @@ export const mcpCommand = defineCommand({
         checkouts,
         runtimeClient: clientFor,
         parameterActor: parameters.parameterActor,
-        systemSkillBundles,
+        systemSkillBundles: skillBundles,
         ...(machines === undefined ? {} : { machines: machines.facet, projectIdOf: machines.projectOf }),
-        /* In this process, with its unrestricted fetch (D4); a ready kernel is composed by every later call. */
+        preparableKernels: () => preparable,
+        /* In this process, with its unrestricted fetch (D4); a ready kernel binds on its next operation. */
         prepareKernel: async ({ kernel }, { signal, onProgress }) => {
           const opened = await openPreparation();
-          const outcome = await opened.prepare(kernel, { signal, onProgress });
-          if (outcome.status === 'ready') {
-            await retireClients();
-          }
-          return outcome;
+          return opened.prepare(kernel, { signal, onProgress });
         },
       });
-      /**
-       * A call that met an unprepared kernel reads the store again: a closure `tau prepare`, the desktop or another
-       * `tau mcp` sealed meanwhile is composed and the call repeated once, with no `prepare_kernel` (AR1-3).
-       * @param invocation - The registry call.
-       * @returns Its result, or the repeated call's.
-       */
-      const invokeComposed: typeof tools.invoke = async (invocation) => {
-        const result = await tools.invoke(invocation);
-        /* A refusal can only come from a runtime thread, which loaded the module already. */
-        if (nativeModule === undefined) {
-          return result;
-        }
-        const { composeNativeKernels, refusedKernels } = await native();
-        const refused = refusedKernels(result.content);
-        if (refused.size === 0) {
-          return result;
-        }
-        let fresh: NativeComposition;
-        try {
-          fresh = await composeNativeKernels();
-        } catch {
-          return result;
-        }
-        const stillRefused = new Set(
-          fresh.unavailable.filter(({ reason }) => reason === 'not-prepared').map(({ kernel }) => kernel),
-        );
-        if ([...refused].every((kernel) => stillRefused.has(kernel))) {
-          return result;
-        }
-        await retireClients(fresh);
-        return tools.invoke(invocation);
-      };
       /* The idle release waits for a project's last tool call to settle, not its last operation: a call may work
        * between two operations (GeoSpec checks between a test's exports) for longer than the release. The project is
        * found as the registry finds it, and a folder a call names is said once, as the start root was. */
@@ -530,7 +487,7 @@ export const mcpCommand = defineCommand({
           inFlight.set(projectPath, (inFlight.get(projectPath) ?? 0) + 1);
           clearTimeout(idleTimers.get(projectPath));
           try {
-            return await invokeComposed(invocation);
+            return await tools.invoke(invocation);
           } finally {
             const left = (inFlight.get(projectPath) ?? 1) - 1;
             inFlight.set(projectPath, left);

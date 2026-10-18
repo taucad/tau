@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer, maxHighlightedCodeLength } from '#components/code/code-viewer.js';
 
 const useThemeMock = vi.hoisted(() => vi.fn());
 const codeToHtmlMock = vi.hoisted(() =>
@@ -50,5 +50,22 @@ describe('CodeViewer', () => {
       setTimeout(resolve, highlightCleanupWait);
     });
     expect(codeToHtmlMock).not.toHaveBeenCalledWith('after-unmount', expect.anything());
+  });
+
+  /* D-UI-28: Shiki's HTML is 5 to 15 times the source, kept beside the text. */
+  it('should show code beyond the highlight cap as plain text and drop the highlighted HTML', async () => {
+    const { container, rerender } = render(<CodeViewer text='small' language='typescript' />);
+    expect(await screen.findByText('github-light')).toBeInTheDocument();
+    codeToHtmlMock.mockClear();
+
+    const large = 'x'.repeat(maxHighlightedCodeLength + 1);
+    rerender(<CodeViewer text={large} language='typescript' />);
+    await new Promise((resolve) => {
+      setTimeout(resolve, highlightCleanupWait);
+    });
+
+    expect(codeToHtmlMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('github-light')).not.toBeInTheDocument();
+    expect(container.querySelector('code')?.textContent).toBe(large);
   });
 });

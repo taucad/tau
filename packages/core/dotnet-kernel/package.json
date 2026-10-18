@@ -1,0 +1,83 @@
+{
+  "name": "@taucad/dotnet-kernel-core",
+  "version": "0.1.0-beta.6",
+  "description": "Shared TypeScript side of Tau native .NET kernels: launch set, options, session, workspace mirror and layer manifest",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/core/dotnet-kernel"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/core/dotnet-kernel#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "core",
+    "dotnet",
+    "native"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./adopter": "./src/adopter.ts",
+    "./layer": "./src/layer.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./adopter": {
+        "types": "./dist/adopter.d.mts",
+        "import": "./dist/adopter.mjs",
+        "default": "./dist/adopter.mjs"
+      },
+      "./layer": {
+        "types": "./dist/layer.d.mts",
+        "import": "./dist/layer.mjs",
+        "default": "./dist/layer.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "node"
+  },
+  "dependencies": {
+    "@taucad/native-process-core": "workspace:*"
+  }
+}

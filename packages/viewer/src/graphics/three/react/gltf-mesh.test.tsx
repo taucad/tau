@@ -943,7 +943,7 @@ describe('applyModelComponentVisualStateToScene', () => {
       expect(mesh.material).toBe(material);
       expect(material.opacity).toBe(1);
       expect(material.polygonOffset).toBe(true);
-      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 0 : -1.5);
     },
   );
 

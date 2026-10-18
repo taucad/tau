@@ -14,6 +14,7 @@ const baseConfig: UserConfig = {
     'src/rooted-content-client.ts',
     'src/file-content-errors.ts',
     'src/seems-binary.ts',
+    'src/file-content-budget.ts',
     'src/file-content-service.ts',
     'src/file-tree-service.ts',
     'src/directory-listing.ts',

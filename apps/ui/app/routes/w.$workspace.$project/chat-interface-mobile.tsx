@@ -1,12 +1,5 @@
-import { memo } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
-import { ChatFileTree } from '#routes/w.$workspace.$project/chat-file-tree.js';
-import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
-import { ChatEditorLayout } from '#routes/w.$workspace.$project/chat-editor-layout.js';
-import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
-import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
-import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
-import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -17,6 +10,39 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+
+/* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its tab
+ * first opens. Only one `TabsContent` is mounted at a time, so a phone that
+ * stays on the chat never downloads the editor (Monaco and the dockview
+ * workbench), parameters, converter or revision panels. */
+const ChatFileTree = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-file-tree.js');
+  return { default: module.ChatFileTree };
+});
+const ChatParameters = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
+  return { default: module.ChatParameters };
+});
+const ChatEditorLayout = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-editor-layout.js');
+  return { default: module.ChatEditorLayout };
+});
+const ChatDetails = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-details.js');
+  return { default: module.ChatDetails };
+});
+const ChatConverter = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-converter.js');
+  return { default: module.ChatConverter };
+});
+const ProjectShareWorkbenchPanel = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/project-share-action.js');
+  return { default: module.ProjectShareWorkbenchPanel };
+});
+const ChatRevisions = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
+  return { default: module.ChatRevisions };
+});
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
@@ -98,34 +124,36 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 }}
                 onValueChange={handleTabChange}
               >
-                <TabsContent enableAnimation={false} value='chat' className='flex h-full flex-col'>
-                  <ChatHistoryGate>
-                    <ChatHistory />
-                  </ChatHistoryGate>
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col'>
-                  <ChatFileTree />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='parameters' className='flex h-full flex-col'>
-                  <ChatParameters />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='viewer' className='flex h-full flex-col' />
-                <TabsContent enableAnimation={false} value='editor' className='flex h-full flex-col'>
-                  <ChatEditorLayout />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='details' className='flex h-full flex-col'>
-                  <ChatDetails />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='converter' className='flex h-full flex-col'>
-                  <ChatConverter />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='share' className='flex h-full flex-col'>
-                  <ProjectShareWorkbenchPanel />
-                </TabsContent>
-                <TabsContent enableAnimation={false} value='revisions' className='flex h-full flex-col'>
-                  {/* The pane's own title and Close, as every other panel here (L3-F15). */}
-                  <ChatRevisions />
-                </TabsContent>
+                <Suspense fallback={null}>
+                  <TabsContent enableAnimation={false} value='chat' className='flex h-full flex-col'>
+                    <ChatHistoryGate>
+                      <ChatHistory />
+                    </ChatHistoryGate>
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col'>
+                    <ChatFileTree />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='parameters' className='flex h-full flex-col'>
+                    <ChatParameters />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='viewer' className='flex h-full flex-col' />
+                  <TabsContent enableAnimation={false} value='editor' className='flex h-full flex-col'>
+                    <ChatEditorLayout />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='details' className='flex h-full flex-col'>
+                    <ChatDetails />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='converter' className='flex h-full flex-col'>
+                    <ChatConverter />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='share' className='flex h-full flex-col'>
+                    <ProjectShareWorkbenchPanel />
+                  </TabsContent>
+                  <TabsContent enableAnimation={false} value='revisions' className='flex h-full flex-col'>
+                    {/* The pane's own title and Close, as every other panel here (L3-F15). */}
+                    <ChatRevisions />
+                  </TabsContent>
+                </Suspense>
               </Tabs>
             </DrawerContent>
           ) : null}

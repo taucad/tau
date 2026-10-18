@@ -3,25 +3,29 @@
  * (kernel-realm-shared-state blueprint, invariant I8).
  *
  * Started by a `nodeWorkerTransport` client. It composes the CLI runtime from
- * `workerData` `{ projectRoot, plugin?, config?, zooProxyUrl?, native? }`; `native` is the parent's composition of
- * the native kernels from the payload store, which this thread never reads (D4).
+ * `workerData` `{ projectRoot, plugin?, config?, zooProxyUrl? }`. Native kernels in the runtime bind to their sealed
+ * closures themselves, reading the payload store's launch indexes from this thread's environment; nothing here
+ * downloads (D4).
+ *
+ * With `describe`, it builds the runtime, posts what it lists (`{ type: 'described', report, plugins }`: the native
+ * deployments and every plugin's name) and serves nothing, so a parent can prepare the runtime's native kernels
+ * without loading a kernel module itself.
  */
-import { workerData } from 'node:worker_threads';
+import { parentPort, workerData } from 'node:worker_threads';
 
+import { reportNativeDeployments } from '@taucad/native-process-core/store';
 import { nodeWorkerHost } from '@taucad/runtime/transport/node';
-import { createRuntimeWorker } from '@taucad/runtime/worker';
+import { createRuntimeWorker, defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { z } from 'zod';
 
-import { loadCliRuntime } from '#runtime-options.js';
-import type { NativeComposition } from '#native-kernels.js';
+import { loadCliPlugins } from '#runtime-options.js';
 
 const runtimeWorkerDataSchema = z.object({
   projectRoot: z.string().min(1),
   plugin: z.array(z.string()).optional(),
   config: z.string().optional(),
   zooProxyUrl: z.string().optional(),
-  /* Composed by the parent from sealed receipts; structured-cloned, so only its shape is checked here. */
-  native: z.custom<NativeComposition>((value) => typeof value === 'object' && value !== null).optional(),
+  describe: z.boolean().optional(),
 });
 
 /**
@@ -35,13 +39,20 @@ if (!options.success) {
   throw new TypeError(`Tau runtime worker received invalid workerData: ${z.prettifyError(options.error)}`);
 }
 
-const runtime = await loadCliRuntime({
+const plugins = await loadCliPlugins({
   projectRoot: options.data.projectRoot,
   plugin: options.data.plugin,
   ...(options.data.config === undefined ? {} : { config: options.data.config }),
   ...(options.data.zooProxyUrl === undefined ? {} : { zooProxyUrl: options.data.zooProxyUrl }),
-  ...(options.data.native?.build123d === undefined ? {} : { build123d: options.data.native.build123d }),
-  ...(options.data.native?.picogk === undefined ? {} : { picogk: options.data.native.picogk }),
-  ...(options.data.native === undefined ? {} : { unavailableKernels: options.data.native.unavailable }),
 });
-await nodeWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
+const runtime = defineRuntime({ plugins });
+if (options.data.describe === true) {
+  const resolved = await resolveRuntimeDefinition(runtime, undefined);
+  parentPort?.postMessage({
+    type: 'described',
+    report: reportNativeDeployments(resolved),
+    plugins: plugins.map(({ meta }) => meta.name),
+  });
+} else {
+  await nodeWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
+}

@@ -4,7 +4,7 @@
  * The verb CI and scripts lack: `tau export` without the artifact. It loads the CLI runtime exactly as `export` does,
  * opens the document once and stops at `document.evaluation()`. Parameters come from the `described` event, because
  * an evaluation carries none. The project is rooted at the nearest `tau.json`, so a model that imports a sibling
- * module above its own folder resolves (S11 F2). Native kernels are composed from the payload store's receipts and
+ * module above its own folder resolves (S11 F2). Native kernels bind to their sealed closures in the payload store and
  * nothing is downloaded (I5): an unprepared `.py` or `.cs` model is refused with `KERNEL_NOT_PREPARED` naming
  * `tau prepare <kernel>`.
  *
@@ -21,7 +21,6 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
 import { defineCommand } from 'citty';
 
 import { parseJsonObject } from '#commands/export.js';
-import { composeNativeKernels } from '#native-kernels.js';
 import { resolveProjectRoot } from '#project-root.js';
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
 import { loadCliRuntime } from '#runtime-options.js';
@@ -145,16 +144,11 @@ export const checkCommand = defineCommand({
       throw cliError('INPUT_OUTSIDE_PROJECT', `${inputPath} is outside the project ${projectRoot}.`, exitCodes.usage);
     }
 
-    // The native kernels from the payload store's receipts; nothing is downloaded.
-    const native = await composeNativeKernels();
     authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
-      ...(native.build123d === undefined ? {} : { build123d: native.build123d }),
-      ...(native.picogk === undefined ? {} : { picogk: native.picogk }),
-      unavailableKernels: native.unavailable,
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     const client = await createNodeClient({ runtime, projectPath: projectRoot });

@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { assimp } from '@taucad/assimp';
-import { build123d } from '@taucad/build123d';
 import { brep } from '@taucad/brep';
+import { build123d } from '@taucad/build123d';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
@@ -27,7 +27,7 @@ import { slicer } from '@taucad/slicer';
 import { tscircuit } from '@taucad/tscircuit';
 import { zoo } from '@taucad/zoo';
 
-import { awaitNativeKernels, desktopNativeKernels } from '#tau/native-kernels.js';
+import { awaitNativeKernels, desktopNativeBounds, installDesktopNativeKernels } from '#tau/native-kernels.js';
 import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
 import { desktopZooCloseErrors } from '#tau/zoo-close-errors.js';
 import { createDiagnosticsLog } from '#main/diagnostics.js';
@@ -41,8 +41,8 @@ export const desktopRuntimeConfigSchema = z.object({
 export type DesktopRuntimeOptions = {
   readonly withSourceMapping?: boolean;
   /**
-   * The native composition main posts once the payload store is seeded (W6); default the frame this utility
-   * receives. The runtime composes only once it arrives.
+   * The native closures main posts once the payload store is seeded (W6); default the frame this utility receives.
+   * The runtime composes only once it arrives, and its native kernels bind to the closures it names.
    */
   readonly nativeKernels?: () => Promise<NativeKernelsFrame>;
 };
@@ -95,7 +95,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
   defineRuntime({
     configSchema: desktopRuntimeConfigSchema,
     createRuntime: async (config) => {
-      const native = desktopNativeKernels(await (options.nativeKernels ?? awaitNativeKernels)());
+      installDesktopNativeKernels(await (options.nativeKernels ?? awaitNativeKernels)());
       return {
         plugins: [
           esbuild(
@@ -117,9 +117,10 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
             preset: 'all',
             transcoders: { export: { backend: desktopAssimpBackend } },
           }),
-          ...(native.build123d === undefined ? [] : [build123d({ kernels: { default: native.build123d } })]),
-          ...(native.picogk === undefined ? [] : [picogk({ kernels: { default: native.picogk } })]),
-          ...(native.unavailable === undefined ? [] : [native.unavailable]),
+          /* Native kernels bind to the closures main's frame names when they initialize, and refuse with its reason
+           * without one. `desktopNativeDeployments` mirrors these two for packaging; a parity test pins it. */
+          build123d({ kernels: { default: desktopNativeBounds } }),
+          picogk({ kernels: { default: desktopNativeBounds } }),
           replicad({
             kernels: {
               default: {

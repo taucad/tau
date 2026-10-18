@@ -3,3 +3,7 @@ export { <%= alias %>, <%= alias %> as plugin } from '#<%= sourceName %>.plugin.
 <% for (const capability of capabilities) { %>
 export { <%= capability.factoryName %> } from '#<%= capability.fileName %>.js';
 <% } %>
+<% if (nativeLanguage) { %>
+export { <%= alias %>ClosureSchema, <%= alias %>OptionsSchema } from '#<%= sourceName %>.schemas.js';
+export { <%= alias %>Native } from '#native.js';
+<% } %>

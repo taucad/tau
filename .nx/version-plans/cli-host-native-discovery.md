@@ -1,0 +1,8 @@
+---
+cli: minor
+host: minor
+---
+
+The CLI discovers native kernels from the runtime definition instead of the `@taucad/native-kernels` roster. Build123d and PicoGK are built-in plugins again (after Zoo, before Assimp), each binding to its sealed closure in `initialize` and refusing with `KERNEL_NOT_PREPARED` until prepared, so `tau export`, `check`, `test`, `mcp` and `serve` no longer compose kernels up front. `tau prepare` takes `--plugin` and `--config` and prepares any native kernel the runtime lists, learned from a thread that builds the runtime without loading kernel code. `tau mcp` and `tau serve` prepare through the same deployments, and offer the agent skill bundles a `--plugin` package declares under `tau.skills`. A runtime child of `tau serve` asks the daemon for each kernel's closure over IPC when it binds; the daemon prepares only the native kernels this CLI ships and refuses others with `KERNEL_NOT_SHIPPED`. `@taucad/cli` depends on `@taucad/build123d` and `@taucad/picogk`, which were development dependencies.
+
+`@taucad/host`: `preparableKernels` also takes a function, read whenever the tools are listed. `RuntimeChildNativeKernels` replaces `compose` and `closureRoots` with `inspect` (answering a child's `native-closure:inspect` request) and an optional `reported` (the native deployments the child's runtime lists); a child may launch only from the closures it was answered with, and resolves the store when it first launches, so a child started on an empty store keeps running after `prepare_kernel`. The daemon no longer restarts runtime children after a preparation. `defaultPayloadStore` is re-exported from `@taucad/native-process-core/store`, which `@taucad/host` now depends on.

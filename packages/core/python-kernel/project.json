@@ -1,0 +1,21 @@
+{
+  "name": "python-kernel-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/core/python-kernel",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test-python": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The tau_kernel unit tests under a 100% line and branch coverage gate, with CPython 3.13 and the closure's numpy and coverage versions from uv."
+      },
+      "outputs": ["{workspaceRoot}/out/reports/coverage/packages/core/python-kernel-python"],
+      "inputs": ["{projectRoot}/python/**/*", "{projectRoot}/scripts/**/*"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts test"
+      }
+    }
+  }
+}

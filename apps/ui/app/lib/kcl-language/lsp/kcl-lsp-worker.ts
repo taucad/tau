@@ -9,7 +9,7 @@
  */
 
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
-import init, { LspServerConfig, lsp_run_kcl } from '@taucad/kcl-wasm-lib';
+import init, { Context, LspServerConfig, lsp_run_kcl, parse_wasm } from '@taucad/kcl-wasm-lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
 import { joinPath } from '@taucad/utils/path';
@@ -21,6 +21,8 @@ import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp
 import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
 import type {
   KclLspWorkerOptions,
+  KclSymbolRequest,
+  KclSymbolResponse,
   LspWorkerEvent,
   SetDocumentContextPayload,
 } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
@@ -275,6 +277,88 @@ function handleLanguageFsJsonRpcResponse(payload: JSONRPCResponse): void {
   pending.resolve(payload);
 }
 
+/** Engine bridge for symbol-service mock execution, which never sends modeling commands. */
+class MockKclEngineConnection {
+  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
+  public fireModelingCommandFromWasm(_id: string, _range: string, _command: string, _idToRange: string): never {
+    throw new Error('Mock execution should not require modeling commands');
+  }
+
+  // oxlint-disable-next-line max-params -- KCL WASM engine bridge contract has four positional parameters.
+  public async sendModelingCommandFromWasm(
+    _id: string,
+    _range: string,
+    _command: string,
+    _idToRange: string,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    throw new Error('Mock execution should not require modeling commands');
+  }
+
+  public async startNewSession(): Promise<void> {
+    // Mock execution has no engine session state to reset.
+  }
+}
+
+type MockContext = {
+  // oxlint-disable-next-line max-params -- External WASM API contract
+  executeMock: (program: string, path: string, settings: string, capture: boolean) => Promise<unknown>;
+};
+
+let mockContext: Promise<MockContext> | undefined;
+
+/**
+ * The symbol service's mock-execution context, created once on this worker's WASM instance.
+ * Single-file hover and completion never read files, so its filesystem refuses every read.
+ */
+async function getMockContext(): Promise<MockContext> {
+  mockContext ??= (async () => {
+    const mockFileSystem = {
+      async readFile(): Promise<Uint8Array<ArrayBuffer>> {
+        throw new Error('Mock file system does not support file reads');
+      },
+      exists: async (): Promise<boolean> => false,
+      getAllFiles: async (): Promise<string[]> => [],
+    };
+    // oxlint-disable-next-line @typescript-eslint/await-thenable -- WASM Context constructor may return thenable
+    return (await new Context(new MockKclEngineConnection(), mockFileSystem)) as MockContext;
+  })();
+  return mockContext;
+}
+
+function postSymbolResponse(response: KclSymbolResponse): void {
+  const event = { worker: kclWorkerType, eventType: lspWorkerEventType.symbolResponse, eventData: response };
+  try {
+    globalThis.postMessage(event);
+  } catch {
+    // A thrown value the structured clone cannot carry still reaches the caller as its message.
+    const fallback: KclSymbolResponse = response.ok
+      ? { id: response.id, ok: false, error: new Error('KCL symbol result could not be transferred') }
+      : { id: response.id, ok: false, error: new Error(String(response.error)) };
+    globalThis.postMessage({ ...event, eventData: fallback });
+  }
+}
+
+/**
+ * Answer a symbol-service call on this worker's WASM instance (D-RT-14): the main thread no longer loads its own.
+ */
+async function handleSymbolRequest(request: KclSymbolRequest): Promise<void> {
+  if (!isWasmReady) {
+    await wasmReadyPromise;
+  }
+  try {
+    let value: unknown;
+    if (request.operation === 'parse') {
+      value = parse_wasm(request.code) as unknown;
+    } else {
+      const context = await getMockContext();
+      value = await context.executeMock(request.program, request.path, '{}', false);
+    }
+    postSymbolResponse({ id: request.id, ok: true, value });
+  } catch (error) {
+    postSymbolResponse({ id: request.id, ok: false, error });
+  }
+}
+
 function handleMessage(event: MessageEvent): void {
   const { eventType, eventData } = event.data as LspWorkerEvent;
   log.debug('Message received, type:', eventType);
@@ -298,6 +382,11 @@ function handleMessage(event: MessageEvent): void {
 
     case lspWorkerEventType.languageFsJsonRpc: {
       handleLanguageFsJsonRpcResponse(eventData as JSONRPCResponse);
+      break;
+    }
+
+    case lspWorkerEventType.symbolRequest: {
+      void handleSymbolRequest(eventData as KclSymbolRequest);
       break;
     }
 

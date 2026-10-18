@@ -5,8 +5,9 @@
 /**
  * Canonical regex for detecting replicad usage in source code.
  *
- * Branches: ESM import, CJS require, destructured global, JSDoc typedef, CDN import.
+ * Branches: ESM `from` clause, CJS require, destructured global, JSDoc typedef, CDN import. No branch spans
+ * lines through an unbounded wildcard, so the test stays linear in the entry's size (D-RT-23).
  * @public
  */
 export const replicadDetectPattern =
-  /import.*from\s+["']replicad["']|\bconst\s*{\s*[\s\w,]*}\s*=\s*replicad\s*;|require\s*\(\s*["']replicad["']\s*\)|@typedef.*import\s*\(\s*["']replicad["']\s*\)|import.*from\s+["']https?:\/\/[^"']*replicad[^"']*["']/s;
+  /\bfrom\s*["']replicad["']|\bconst\s*{\s*[\s\w,]*}\s*=\s*replicad\s*;|require\s*\(\s*["']replicad["']\s*\)|@typedef[^\n]*?import\s*\(\s*["']replicad["']\s*\)|\bfrom\s*["']https?:\/\/[^"']*replicad[^"']*["']/;

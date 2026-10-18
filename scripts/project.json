@@ -173,6 +173,9 @@
             "filesystem",
             "revisions",
             "picogk",
+            "dotnet-kernel-core",
+            "python-kernel-core",
+            "build123d",
             "native-process-core"
           ]
         }

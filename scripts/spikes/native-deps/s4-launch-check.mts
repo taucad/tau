@@ -28,9 +28,15 @@ import {
 import { join } from 'node:path';
 import process from 'node:process';
 
-/* oxlint-disable no-restricted-imports -- spike-only: the siblings and the CLI's native composition are imported by relative path; deleted with W21. */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI composition is not a public export.
-import { composeNativeKernels } from '../../../packages/cli/src/native-kernels.ts';
+import { readManagedPreparation } from '@taucad/runtime/preparation/node';
+
+/* oxlint-disable no-restricted-imports -- spike-only: the siblings and the native deployments are imported by relative path; deleted with W21. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the native store.
+import { defaultPayloadStore, inspectNativeKernels } from '../../../packages/core/native-process/src/store.ts';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
+import { build123dNative } from '../../../packages/plugins/build123d/src/native.ts';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
+import { picogkNative } from '../../../packages/plugins/picogk/src/native.ts';
 import { hostFacts, median, parseFlags, requiredFlag } from './spike-common.mts';
 import {
   build123dSeed,
@@ -80,12 +86,22 @@ const measure = async (): Promise<void> => {
   // The composition reads TAU_CONFIG_DIR, which the parent set.
   const cpu = process.cpuUsage();
   const started = performance.now();
-  const composition = await composeNativeKernels();
+  const inspection = await inspectNativeKernels({
+    deployments: [build123dNative, picogkNative],
+    store: defaultPayloadStore(),
+    managed: readManagedPreparation(process.env),
+  });
+  const closureOf = (kernel: string) => {
+    const answer = inspection.find((row) => row.kernel === kernel)?.answer;
+    const closure = answer?.status === 'ready' ? Object.values(answer.closures)[0] : undefined;
+    if (closure === undefined) {
+      throw new Error(`both kernels must be prepared: ${JSON.stringify(inspection)}`);
+    }
+    return closure;
+  };
+  const build123d = build123dNative.optionsFromClosure(closureOf('build123d'));
+  const picogk = picogkNative.optionsFromClosure(closureOf('picogk'));
   const composed = performance.now();
-  const { build123d, picogk } = composition;
-  if (build123d === undefined || picogk === undefined) {
-    throw new Error(`both kernels must be prepared: ${JSON.stringify(composition.unavailable)}`);
-  }
   const build123dFiles = [
     { path: build123d.pythonExecutable, sha256: build123d.pythonSha256 },
     { path: build123d.workerPath, sha256: build123d.workerSha256 },

@@ -8,8 +8,13 @@ vi.mock('@monaco-editor/react', () => ({ loader: { config: vi.fn() } }));
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: vi.fn() }));
 vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({ default: vi.fn() }));
 vi.mock('monaco-editor/esm/vs/language/typescript/ts.worker?worker', () => ({
-  // oxlint-disable-next-line @typescript-eslint/no-extraneous-class -- mock class must be constructable
-  default: class TsWorker {},
+  default: class TsWorker {
+    public terminated = false;
+
+    public terminate(): void {
+      this.terminated = true;
+    }
+  },
 }));
 vi.mock('@shikijs/monaco', () => ({
   shikiToMonaco: vi.fn(),
@@ -219,5 +224,42 @@ describe('Monaco configuration state', () => {
     });
     first();
     second();
+  });
+});
+
+describe('TypeScript worker lifetime (B-16, D-UI-19)', () => {
+  type FakeTsWorker = { terminated: boolean; terminate: () => void };
+  type WorkerFactory = (id: string, label: string) => FakeTsWorker;
+
+  const configuredGetWorker = async (): Promise<WorkerFactory> => {
+    vi.resetModules();
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco global
+    vi.stubGlobal('self', { MonacoEnvironment: undefined });
+    Reflect.deleteProperty(document, 'fonts');
+    const { configureMonaco } = await import('#lib/monaco.lib.client.js');
+    await configureMonaco();
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- accessing mock structure
+    return (globalThis.self as unknown as { MonacoEnvironment: { getWorker: WorkerFactory } }).MonacoEnvironment
+      .getWorker;
+  };
+
+  it('never leaves two TypeScript workers running for one language', async () => {
+    const getWorker = await configuredGetWorker();
+
+    const first = getWorker('', 'typescript');
+    const second = getWorker('', 'typescript');
+
+    expect(first.terminated).toBe(true);
+    expect(second.terminated).toBe(false);
+  });
+
+  it('keeps the JavaScript worker when the TypeScript worker is replaced', async () => {
+    const getWorker = await configuredGetWorker();
+
+    const javascript = getWorker('', 'javascript');
+    getWorker('', 'typescript');
+    getWorker('', 'typescript');
+
+    expect(javascript.terminated).toBe(false);
   });
 });

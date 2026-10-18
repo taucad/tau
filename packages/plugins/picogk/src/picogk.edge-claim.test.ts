@@ -160,7 +160,7 @@ describe('PicoGK native edge claim', () => {
     });
     const client = createTestRuntimeClient({
       runtime: defineRuntime({
-        kernels: [picogkKernel(kernelOptions)],
+        kernels: [picogkKernel({ closure: kernelOptions })],
         middleware: [gltfEdgeDetection(), fallbackProbe()],
       }),
       files: { 'main.cs': 'class Model {}' },

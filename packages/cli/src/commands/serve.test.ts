@@ -30,22 +30,39 @@ vi.hoisted(() => {
 });
 
 const nativeKernels = vi.hoisted(() => ({
-  composeNativeKernels: vi.fn<() => Promise<unknown>>(),
+  inspectReportedClosure: vi.fn(async (_request: unknown) => ({
+    answer: { status: 'ready', closures: {} },
+    roots: ['/store/closures/sha256/a'],
+  })),
+  reports: [] as unknown[],
   verifyStoreClosure: vi.fn(async (_root: string, _signal: AbortSignal) => ({
     files: ['lib/python3.13/site-packages/build123d/__init__.pyc'],
     remedy: 'Run `tau prepare --verify` to repair it.',
   })),
-  prepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel })),
+  prepare: vi.fn(async (kernel: string, _context: unknown) => ({ status: 'ready', kernel })),
   dispose: vi.fn(async () => undefined),
   opened: 0,
 }));
 
+/* Each report row declares the kernels it lists; this CLI ships `@taucad/*` in the fixture. */
+type Row = { readonly package: string; readonly kernels: readonly string[] };
 vi.mock('#native-kernels.js', () => ({
-  composeNativeKernels: nativeKernels.composeNativeKernels,
+  inspectReportedClosure: nativeKernels.inspectReportedClosure,
   verifyStoreClosure: nativeKernels.verifyStoreClosure,
-  openNativePreparation: () => {
+  preparableKernelsOf: (report: readonly Row[]) =>
+    report.flatMap(({ kernels }) => kernels.map((kernel) => ({ kernel, extensions: ['x'] }))),
+  shippedDeploymentsOf: async (report: readonly Row[]) => report.filter((row) => row.package.startsWith('@taucad/')),
+  shippedKernelsOf: async (report: readonly Row[]) =>
+    new Set(report.filter((row) => row.package.startsWith('@taucad/')).flatMap(({ kernels }) => kernels)),
+  openNativePreparation: (options: { readonly deployments: () => Promise<unknown> }) => {
     nativeKernels.opened += 1;
-    return { prepare: nativeKernels.prepare, dispose: nativeKernels.dispose };
+    return {
+      prepare: async (kernel: string, context: unknown) => {
+        nativeKernels.reports.push(await options.deployments());
+        return nativeKernels.prepare(kernel, context);
+      },
+      dispose: nativeKernels.dispose,
+    };
   },
 }));
 
@@ -137,35 +154,69 @@ describe('agentWorkspaceRoot', () => {
 
 describe('serveNativeKernels', () => {
   const context = { signal: new AbortController().signal, onProgress: () => undefined };
-
-  it('should compose each child from the store, start workers only from its sealed closures, and prepare in this process once opened', async () => {
-    nativeKernels.composeNativeKernels.mockResolvedValue({
-      unavailable: [],
-      closureRoots: ['/store/closures/sha256/a'],
+  const row = (name: string, kernel: string) => ({
+    package: name,
+    entry: `file:///${kernel}/src/native.ts`,
+    packageRoot: `file:///${kernel}/`,
+    manifest: {},
+    kernels: [kernel],
+  });
+  const report = [row('@taucad/build123d', 'build123d'), row('@acme/rustcad', 'rustcad')];
+  /* The report is read once its module loads, so wait for the kernels to be named. */
+  const reported = async (kernels: ReturnType<typeof serveNativeKernels>): Promise<void> => {
+    kernels.native.reported?.(report);
+    await vi.waitFor(() => {
+      expect(kernels.preparableKernels()).toHaveLength(2);
     });
+  };
+
+  it("should answer a child's closure request from its data, name the kernels it reports, and prepare in this process once opened", async () => {
     const kernels = serveNativeKernels();
+    const request = {
+      package: '@taucad/build123d',
+      kernel: 'build123d',
+      dependencies: ['engine'],
+      manifest: {},
+      packageRoot: 'file:///build123d/',
+    };
 
-    await expect(kernels.native.compose()).resolves.toEqual({
-      unavailable: [],
-      closureRoots: ['/store/closures/sha256/a'],
+    await expect(kernels.native.inspect(request)).resolves.toEqual({
+      answer: { status: 'ready', closures: {} },
+      roots: ['/store/closures/sha256/a'],
     });
-    await expect(kernels.native.closureRoots()).resolves.toEqual(['/store/closures/sha256/a']);
+    expect(nativeKernels.inspectReportedClosure).toHaveBeenCalledWith(request);
     expect(kernels.native.start).toBe(startNativeWorker);
     /* The broker resolves the store's real path itself, so a store under a link launches (macOS's `/tmp`). */
     expect(kernels.native.store).toBe(defaultPayloadStore());
+    expect(kernels.preparableKernels()).toEqual([]);
+    await reported(kernels);
+    expect(kernels.preparableKernels().map(({ kernel }) => kernel)).toEqual(['build123d', 'rustcad']);
     await kernels.dispose();
     expect(nativeKernels.opened).toBe(0);
 
-    await expect(kernels.prepareKernel({ kernel: 'picogk' }, context)).resolves.toEqual({
+    await expect(kernels.prepareKernel({ kernel: 'build123d' }, context)).resolves.toEqual({
       status: 'ready',
-      kernel: 'picogk',
+      kernel: 'build123d',
     });
-    await kernels.prepareKernel({ kernel: 'build123d' }, context);
     await kernels.dispose();
 
     expect(nativeKernels.opened).toBe(1);
     expect(nativeKernels.prepare).toHaveBeenCalledWith('build123d', context);
+    /* Only the deployments this CLI ships are imported here: a child runs project code. */
+    expect(nativeKernels.reports).toEqual([[report[0]]]);
     expect(nativeKernels.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('should not prepare a kernel from a plugin this CLI does not ship, and name the command that does', async () => {
+    const kernels = serveNativeKernels();
+    await reported(kernels);
+
+    await expect(kernels.prepareKernel({ kernel: 'rustcad' }, context)).resolves.toMatchObject({
+      status: 'failed',
+      kernel: 'rustcad',
+      code: 'KERNEL_NOT_SHIPPED',
+      message: expect.stringContaining('tau prepare rustcad') as unknown,
+    });
   });
 
   it('should re-verify a closure for a child in this process, where the store is readable (X35)', async () => {
@@ -179,12 +230,14 @@ describe('serveNativeKernels', () => {
     expect(nativeKernels.verifyStoreClosure).toHaveBeenCalledWith('/store/closures/sha256/a', signal);
   });
 
-  it('should serve without native kernels, and start nothing, when the store cannot be composed', async () => {
-    nativeKernels.composeNativeKernels.mockRejectedValue(new Error('TAU_ACQUISITION is "sometimes"'));
+  it('should ignore a report that does not parse', async () => {
     const kernels = serveNativeKernels();
+    kernels.native.reported?.([{ package: 5 }]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
 
-    await expect(kernels.native.compose()).resolves.toEqual({ unavailable: [] });
-    await expect(kernels.native.closureRoots()).resolves.toEqual([]);
+    expect(kernels.preparableKernels()).toEqual([]);
   });
 });
 

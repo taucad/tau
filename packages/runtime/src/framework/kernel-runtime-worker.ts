@@ -907,6 +907,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     let selected: { kernelId: string; method: SelectionMethod } | undefined;
     try {
       const selection = await this.selectKernel(input.entryPath, runtime);
+      /* A refusal recorded by an earlier selection of this file (a kernel whose initialize threw, such as a native
+       * kernel that was not prepared yet) is stale once this selection completes. */
+      this.selectionErrors.delete(input.entryPath);
       if (!selection) {
         return undefined;
       }

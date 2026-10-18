@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 import { z } from 'zod';
 
 import { picogkProtocolVersion } from '#picogk.protocol.js';
-import { picogkOptionsSchema } from '#picogk.schemas.js';
+import type { picogkOptionsSchema } from '#picogk.schemas.js';
 
 const sha256 = z.string().regex(/^[\da-f]{64}$/u);
 const relativeResourcePath = z
@@ -48,41 +47,3 @@ export type PicogkRuntimeManifest = z.infer<typeof picogkRuntimeManifestSchema>;
 
 /** Fully resolved native options accepted by the PicoGK kernel. @public */
 export type PicogkKernelOptions = z.infer<typeof picogkOptionsSchema>;
-
-/**
- * Locate one host-owned, target-specific PicoGK worker payload.
- *
- * @param options - Prepared resource root and optional host target.
- * @returns Absolute, integrity-pinned PicoGK kernel options.
- * @public
- */
-export const loadPicogkKernelOptions = (options: {
-  readonly resourceRoot: string;
-  readonly target?: string;
-}): PicogkKernelOptions => {
-  const target = options.target ?? `${process.platform}-${process.arch}`;
-  const targetRoot = resolve(options.resourceRoot, target);
-  const manifestPath = join(targetRoot, 'tau-runtime-manifest.json');
-  const json: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  // A worker built for another protocol loads, then fails its handshake; refuse it here with the fix.
-  const { protocolVersion } = z.object({ protocolVersion: z.unknown() }).parse(json);
-  if (protocolVersion !== picogkProtocolVersion) {
-    throw new Error(
-      `PicoGK resources at ${targetRoot} were prepared for worker protocol ${String(protocolVersion)}, ` +
-        `but this build speaks protocol ${picogkProtocolVersion}. ` +
-        'Re-prepare them with `pnpm nx run desktop:prepare-picogk-dotnet`.',
-    );
-  }
-  const manifest = picogkRuntimeManifestSchema.parse(json);
-  if (manifest.target !== target) {
-    throw new Error(`PicoGK resource target mismatch: ${manifest.target}`);
-  }
-  return picogkOptionsSchema.parse({
-    workerExecutable: join(targetRoot, manifest.workerPath),
-    workerSha256: manifest.workerSha256,
-    resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
-      ...resource,
-      path: join(targetRoot, path),
-    })),
-  });
-};

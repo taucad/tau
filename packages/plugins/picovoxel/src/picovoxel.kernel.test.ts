@@ -24,7 +24,12 @@ const registered = vi.hoisted(() => new Map<string, unknown>());
 const renderAborted = () => Object.assign(new Error('Render aborted'), { name: 'RenderAbortedError' });
 const sessions = vi.hoisted(() => ({
   created: [] as Array<{ artifact: 'serial' | 'multi'; options: CreatePicoOptions; pico: Pico }>,
-  runtimes: [] as Array<{ artifact: 'serial' | 'multi'; runtime: PicoRuntime; options: CreatePicoRuntimeOptions }>,
+  runtimes: [] as Array<{
+    artifact: 'serial' | 'multi';
+    runtime: PicoRuntime;
+    options: CreatePicoRuntimeOptions;
+    disposed: boolean;
+  }>,
   author: [] as Array<{ options: CreatePicoOptions; pico: Pico }>,
   memoryTotal: undefined as number | undefined,
   heapBytes: undefined as number | undefined,
@@ -98,18 +103,20 @@ const recordArtifact = (artifact: Artifact, actual: typeof PicovoxelModule): typ
     const runtime = await actual.createPicoRuntime(options);
     const createSession = runtime.createPico.bind(runtime);
     const dispose = runtime.dispose.bind(runtime);
+    const entry = { artifact, runtime, options, disposed: false };
     const recorded = Object.assign(runtime, {
       async createPico(sessionOptions: CreatePicoOptions = {}) {
         return recordSession(artifact, await createSession(sessionOptions), sessionOptions);
       },
       dispose() {
         dispose();
+        entry.disposed = true;
         if (sessions.runtimeDisposeThrows) {
           throw new Error('teardown failed');
         }
       },
     });
-    sessions.runtimes.push({ artifact, runtime: recorded, options });
+    sessions.runtimes.push(entry);
     return recorded;
   },
 });
@@ -348,26 +355,33 @@ describe('picovoxel kernel', () => {
       expect(exact.handle.shapes).toHaveLength(1);
     });
 
-    it('should start one warm runtime per artifact and open a fresh session per render', async () => {
+    // D-RT-18: the serial runtime used to stay warm beside the multi pool, each with its own heap, although on the
+    // multi build it serves only exact renders and exports.
+    it("should keep only the fast lane's runtime warm and release the serial runtime after an exact render", async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'fast' | 'exact') =>
         definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
 
       await render('exact');
-      const serial = context.runtimes.get('serial');
+      expect(context.runtimes.size).toBe(0);
       await render('fast');
+      const multi = context.runtimes.get('multi');
       await render('exact');
       await render('fast');
 
-      expect([...context.runtimes.keys()].sort()).toEqual(['multi', 'serial']);
-      expect(context.runtimes.get('serial')).toBe(serial);
-      expect(sessions.runtimes.map(({ artifact }) => artifact)).toEqual(['serial', 'multi']);
+      expect([...context.runtimes.keys()]).toEqual(['multi']);
+      expect(context.runtimes.get('multi')).toBe(multi);
+      expect(sessions.runtimes.map(({ artifact }) => artifact)).toEqual(['serial', 'multi', 'serial']);
+      expect(sessions.runtimes.filter(({ artifact }) => artifact === 'serial').map(({ disposed }) => disposed)).toEqual(
+        [true, true],
+      );
       expect(sessions.created.map(({ artifact }) => artifact)).toEqual(['serial', 'multi', 'serial', 'multi']);
       const handles = (artifact: 'serial' | 'multi') =>
         new Set(sessions.created.filter((session) => session.artifact === artifact).map(({ pico }) => pico.handle));
-      // Each render opens its own Library instance on the shared module; handles are never reused.
-      expect([handles('serial').size, handles('multi').size]).toEqual([2, 2]);
+      // Each render on the warm multi runtime opens its own Library instance on the shared module; handles are never
+      // reused. Each exact render ran on a fresh serial runtime.
+      expect(handles('multi').size).toBe(2);
       await definition.onDispose!(context);
     }, 60_000);
   });
@@ -1188,8 +1202,8 @@ describe('picovoxel kernel', () => {
           data: { picoCode: 'PICO_OUT_OF_MEMORY' },
         },
       );
-      // The trap recycled the multi runtime.
-      expect([...context.runtimes.keys()]).toEqual(['serial']);
+      // The trap recycled the multi runtime, and the retry released the serial one (D-RT-18).
+      expect(context.runtimes.size).toBe(0);
       await definition.onDispose!(context);
     }, 60_000);
 

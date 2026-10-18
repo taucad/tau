@@ -26,7 +26,7 @@ import { picogkBuildSchema, picogkProtocolVersion } from '#picogk.protocol.js';
 beforeAll(() => installFetchTripwire());
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
-const options = nativeKernelOptions;
+const options = { closure: nativeKernelOptions };
 const runtime = defineRuntime({ kernels: [picogkKernel(options)] });
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=';
 const fullMaterialSource = `using System.Numerics;
@@ -102,7 +102,9 @@ Library.Go(1f, () => {
 });`,
     );
     const session = new PicogkSession({
-      ...options,
+      ...nativeKernelOptions,
+      requestTimeout: 0,
+      maxArtifactBytes: Number.MAX_SAFE_INTEGER,
       workspacePath,
       artifactPath,
       logger: createMockKernelRuntime().logger,

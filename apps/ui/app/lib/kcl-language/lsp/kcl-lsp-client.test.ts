@@ -8,7 +8,12 @@ import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
-import type { LspWorkerEvent, KclLspWorkerOptions } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import type {
+  LspWorkerEvent,
+  KclLspWorkerOptions,
+  KclSymbolRequest,
+  KclSymbolResponse,
+} from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { addHeaders } from '#lib/kcl-language/lsp/codec/headers.js';
 import { decodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
 
@@ -192,6 +197,57 @@ describe('KclLspClient', () => {
       const result = body.result as { dataBase64: string };
       expect(typeof result.dataBase64).toBe('string');
       expect(result.dataBase64.length).toBeGreaterThan(0);
+    });
+  });
+
+  // D-RT-14: the symbol service runs on the worker's KCL WASM instance instead of a main-thread copy.
+  describe('symbol requests', () => {
+    const symbolRequests = (): KclSymbolRequest[] =>
+      mockWorker.postMessageCalls
+        .map((call) => call as LspWorkerEvent)
+        .filter((event) => event.eventType === lspWorkerEventType.symbolRequest)
+        .map((event) => event.eventData as KclSymbolRequest);
+    const answer = (response: KclSymbolResponse): void => {
+      mockWorker.emitMessageToClient({
+        worker: kclWorkerType,
+        eventType: lspWorkerEventType.symbolResponse,
+        eventData: response,
+      });
+    };
+
+    it('should parse on the worker and resolve with its result', async () => {
+      const client = new KclLspClient({ fs: createTestFs() });
+      await client.initialize();
+
+      const parsed = client.parseKcl('width = 10');
+      const [request] = symbolRequests();
+      expect(request).toMatchObject({ operation: 'parse', code: 'width = 10' });
+      answer({ id: request!.id, ok: true, value: [{ body: [] }, []] });
+
+      await expect(parsed).resolves.toEqual([{ body: [] }, []]);
+    });
+
+    it('should reject a mock execution with the value the worker reports it threw', async () => {
+      const client = new KclLspClient({ fs: createTestFs() });
+      await client.initialize();
+
+      const executed = client.executeKclMock('{}', 'main.kcl');
+      const [request] = symbolRequests();
+      expect(request).toMatchObject({ operation: 'executeMock', program: '{}', path: 'main.kcl' });
+      const partial = { variables: { width: { type: 'Number', value: 10 } }, errors: ['boom'] };
+      answer({ id: request!.id, ok: false, error: partial });
+
+      await expect(executed).rejects.toEqual(partial);
+    });
+
+    it('should reject symbol requests still in flight when disposed', async () => {
+      const client = new KclLspClient({ fs: createTestFs() });
+      await client.initialize();
+
+      const parsed = client.parseKcl('width = 10');
+      client.dispose();
+
+      await expect(parsed).rejects.toThrow('KCL LSP client disposed');
     });
   });
 

@@ -49,6 +49,10 @@ A plugin may also name a `launchSet`: the few files its kernel's process loads f
 
 `readStoreGeneration` returns a token that changes whenever the store seals or removes a closure, so a host can drop cached lookups.
 
+## Native kernel deployments
+
+A native kernel package binds its deployment (`tau-plugin.json`, seal step, launch set) to its registrations, so listing the plugin is the whole integration; `nativeDeploymentsOf` reads deployments from a resolved runtime.
+
 ## Receipts
 
 Each sealed closure carries a `ClosureReceipt`: the declaring package and dependency, the target and how it was selected, every `ReceiptFile`, each payload's pin and the `PayloadAcquisition` that served it, and two identities. `computeClosureIntegrity` hashes which pins make up the closure, so two machines agree before downloading. `computeTreeIntegrity` hashes the files the installer produced, so a closure can be compared with its golden receipt. Payload files are written with mode `0o644`, or `0o755` when executable, so a tar of a closure verifies like a clone. `reverifyClosure` re-hashes one closure against the receipt beside it and names the files that differ. A host runs it when a kernel's worker exits before its handshake.

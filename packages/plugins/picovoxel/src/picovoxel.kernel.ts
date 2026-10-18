@@ -179,9 +179,11 @@ export type PicovoxelContext = {
    */
   readonly recycleHeapBytes: number;
   /**
-   * One warm runtime per artifact (D31): the module is compiled and instantiated once, and the multi
+   * Warm runtimes by artifact (D31): the module is compiled and instantiated once, and the multi
    * pthread pool is spawned and warmed once; every render opens a fresh session on it. A runtime is
-   * dropped after a WebAssembly trap or once its heap passes the recycle threshold.
+   * dropped after a WebAssembly trap or once its heap passes the recycle threshold. Only the fast lane's
+   * artifact stays warm between renders; a serial runtime started beside the multi build is released
+   * after its render (D-RT-18).
    */
   readonly runtimes: Map<PicovoxelArtifact, Promise<PicoRuntime>>;
   /** Sessions and runtimes author code created during the current render; disposed when it ends. */
@@ -1307,6 +1309,12 @@ export const picovoxelKernel = defineKernel({
         }
         if (heapBytes > context.recycleHeapBytes) {
           recycleReason ??= `its heap reached ${heapBytes} bytes`;
+        }
+        if (sessionArtifact !== context.wasm) {
+          // D-RT-18: only the fast lane's artifact stays warm. When that is the multi build, the serial runtime
+          // serves just exact renders, exports and the D21 retry, so it is released instead of holding its own
+          // heap for the worker's life; the next exact render instantiates the module it already compiled.
+          recycleReason ??= 'only the fast lane keeps its runtime warm';
         }
         if (recycleReason !== undefined) {
           await recycleRuntime(context, runtime.logger, { artifact: sessionArtifact, reason: recycleReason });

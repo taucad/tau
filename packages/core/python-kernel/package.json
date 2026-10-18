@@ -1,0 +1,93 @@
+{
+  "name": "@taucad/python-kernel-core",
+  "version": "0.1.0-beta.6",
+  "description": "Shared Python language-kernel worker, session, closure and payload-generator helpers for Tau's native Python kernels",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/core/python-kernel"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/core/python-kernel#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "tau-python-kernel": "./dist/bin/tau-python-kernel.mjs"
+  },
+  "files": [
+    "dist",
+    "python/interpreter.json",
+    "python/tau_kernel",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "core",
+    "python",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./generator": "./src/generator.ts",
+    "./template": "./src/template.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./generator": {
+        "types": "./dist/generator.d.mts",
+        "import": "./dist/generator.mjs",
+        "default": "./dist/generator.mjs"
+      },
+      "./template": {
+        "types": "./dist/template.d.mts",
+        "import": "./dist/template.mjs",
+        "default": "./dist/template.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {},
+    "bin": {
+      "tau-python-kernel": "./dist/bin/tau-python-kernel.mjs"
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sandbox-runtime": "catalog:",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@taucad/archive-core": "workspace:*",
+    "@taucad/native-process-core": "workspace:*"
+  },
+  "taucad": {
+    "hostTarget": "node"
+  }
+}

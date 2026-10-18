@@ -18,7 +18,14 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
-import { cloneTree, openDesktopPreparationHost, seedNativeStore, startNativeStore } from '#tau/native-store.js';
+import {
+  cloneTree,
+  desktopNativeKernelIds,
+  desktopNativePlugins,
+  openDesktopPreparationHost,
+  seedNativeStore,
+  startNativeStore,
+} from '#tau/native-store.js';
 
 const packageName = '@taucad/demo-native';
 const files = { 'worker.py': 'print("ready")\n', 'model.py': 'WIDTH = 20\n' } as const;
@@ -220,6 +227,7 @@ describe('startNativeStore', () => {
     const [frame] = frames;
 
     expect(frames).toHaveLength(1);
+    expect(frame?.store).toBe(await realpath(store));
     expect(frame?.kernels).toHaveLength(1);
     expect(frame?.kernels[0]).toMatchObject({
       kernel: 'demo',
@@ -239,6 +247,7 @@ describe('startNativeStore', () => {
     expect(frames).toEqual([
       {
         type: 'tau:native-kernels',
+        store: await realpath(store),
         kernels: [
           {
             kernel: 'demo',
@@ -250,5 +259,24 @@ describe('startNativeStore', () => {
         ],
       },
     ]);
+  });
+});
+
+describe('the desktop native packages', () => {
+  it('should seed and inspect every bundled package with its launch set, and never run a seal step', () => {
+    expect(desktopNativePlugins.map((plugin) => plugin.package)).toEqual(['@taucad/build123d', '@taucad/picogk']);
+    for (const plugin of desktopNativePlugins) {
+      expect(plugin).not.toHaveProperty('seal');
+      expect(plugin).not.toHaveProperty('directory');
+      expect(plugin.launchSet).toBeTypeOf('function');
+    }
+  });
+
+  it('should advertise only the kernels this host declares a runtime for', () => {
+    const declared = desktopNativePlugins.flatMap(({ deployment }) => Object.keys(deployment.kernels));
+    const host = detectHostIndicators();
+
+    expect(declared).toEqual(expect.arrayContaining([...desktopNativeKernelIds()]));
+    expect(desktopNativeKernelIds().length > 0).toBe(host !== undefined && host.os !== 'win32');
   });
 });

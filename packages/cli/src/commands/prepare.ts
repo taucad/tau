@@ -34,7 +34,7 @@ import {
   writeSeedIndex,
 } from '#commands/prepare-seed.js';
 import type { ClosureAudit, SeedClosure } from '#commands/prepare-seed.js';
-import { nativePreparationPlugins, readManaged } from '#native-kernels.js';
+import { describeRuntime, preparationPluginsFor, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
 /** Progress lines on stderr are written at most this often. Milliseconds. */
@@ -90,7 +90,10 @@ const refusal = (
   return cliError(code, outcome.message, { exit: exitCodes.refused, details: outcome });
 };
 
-/** Injected collaborators: the roster, the transport and the host installation path; tests replace all three. */
+/**
+ * Injected collaborators: the preparation plugins (by default, the native deployments the runtime definition lists),
+ * the transport and the host installation path; tests replace all three.
+ */
 export type PrepareCommandOptions = {
   readonly plugins?: () => Promise<readonly PreparationPlugin[]>;
   readonly fetch?: typeof fetch;
@@ -100,7 +103,17 @@ export type PrepareCommandOptions = {
 const prepareArgs = {
   kernel: {
     type: 'positional',
-    description: 'Kernel to prepare, such as build123d or picogk',
+    description: 'Native kernel to prepare, as a KERNEL_NOT_PREPARED refusal names it (one the runtime lists)',
+    required: false,
+  },
+  plugin: {
+    type: 'string',
+    description: 'Additional plugin specifier whose native kernels to prepare (repeatable)',
+    required: false,
+  },
+  config: {
+    type: 'string',
+    description: 'Path to a tau.config module that exports plugins',
     required: false,
   },
   offline: {
@@ -162,6 +175,21 @@ const verifyLine = (row: ClosureVerification): string =>
   `${row.package} ${row.dependency}: ${row.status}${row.payloads.length === 0 ? '' : ` (${row.payloads.join(', ')})`}`;
 
 type Arguments = ParsedArgs<typeof prepareArgs>;
+
+/**
+ * The preparation plugins of every native kernel the runtime lists (built-ins plus `--plugin` and `--config`), learned
+ * from a thread that builds it: no kernel module loads in this process.
+ * @param args - The parsed arguments.
+ * @returns One preparation plugin per native deployment, in list order.
+ */
+const describedPlugins = async (args: Arguments): Promise<readonly PreparationPlugin[]> => {
+  const { report } = await describeRuntime({
+    projectRoot: process.cwd(),
+    ...(args.plugin === undefined ? {} : { plugin: [args.plugin].flat() }),
+    ...(args.config === undefined ? {} : { config: args.config }),
+  });
+  return preparationPluginsFor(report);
+};
 
 /** What every verb shares once the host is composed. */
 type Session = {
@@ -552,8 +580,8 @@ const dispatchDirectory = async (session: Session, output: ConsolaInstance): Pro
 };
 
 /**
- * Build `tau prepare` over a roster.
- * @param options - Roster, transport and host path.
+ * Build `tau prepare` over the runtime definition's native deployments.
+ * @param options - Preparation plugins, transport and host path.
  * @returns The `tau prepare` command definition.
  */
 export const createPrepareCommand = (options: PrepareCommandOptions = {}): CommandDef<typeof prepareArgs> =>
@@ -567,7 +595,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
       const output = await createOutput();
       const managed = readManaged();
       const seedDirectory = args.seed === undefined ? managed.seed : resolve(args.seed);
-      const plugins = await (options.plugins ?? nativePreparationPlugins)();
+      const plugins = options.plugins === undefined ? await describedPlugins(args) : await options.plugins();
       const store = defaultPayloadStore();
       const indicators = detectHostIndicators();
       const host = createPreparationHost({
@@ -623,13 +651,16 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
  * Prepares a native kernel's runtime (an interpreter, wheels, a .NET runtime) into the payload store every Tau host
  * on this machine shares: each payload is downloaded once, verified against its pinned digest before a byte is
  * written, unpacked and sealed with a receipt. `tau mcp`, `tau export` and the desktop use the result without
- * downloading. Honours `TAU_ACQUISITION`, `TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`,
+ * downloading. It prepares the native kernels the runtime definition lists: the built-ins, plus those of `--plugin` and
+ * `--config`, learned from a thread that builds the runtime, so no kernel module loads in this process. Honours
+ * `TAU_ACQUISITION`, `TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`,
  * `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION` and `TAU_CONFIG_DIR`.
  *
  * @example <caption>Prepare, inspect, verify and collect garbage</caption>
  * ```bash
  * tau prepare build123d
  * tau prepare build123d --offline --json
+ * tau prepare rustcad --config tau.config.ts
  * tau prepare --inspect --json
  * tau prepare --verify
  * tau prepare --gc --dry-run

@@ -45,12 +45,79 @@ type RhinoConversionContext = {
 };
 
 /**
+ * An Embind handle over rhino3dm's WebAssembly memory. rhino3dm's declarations omit the Embind members, and the
+ * handle has no finalizer, so only `delete()` frees it.
+ */
+type RhinoHandle = { delete(): void; isDeleted(): boolean };
+
+const isRhinoHandle = (value: unknown): value is RhinoHandle =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Partial<RhinoHandle>).delete === 'function' &&
+  typeof (value as Partial<RhinoHandle>).isDeleted === 'function';
+
+/**
+ * Embind's own `delete`, found on the base handle prototype that also defines `isDeleted`.
+ *
+ * rhino3dm's tables bind a `delete(index)` method that removes a table entry and shadows the handle's
+ * `delete()`, so the release must call the base method rather than whatever `handle.delete` resolves to.
+ *
+ * @param handle - The rhino3dm object to free.
+ * @returns The `delete` that frees the handle itself.
+ */
+const embindDelete = (handle: RhinoHandle): (() => void) => {
+  for (
+    let prototype: unknown = Object.getPrototypeOf(handle);
+    typeof prototype === 'object' && prototype !== null;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    if (Object.hasOwn(prototype, 'isDeleted')) {
+      return (prototype as RhinoHandle).delete;
+    }
+  }
+  return handle.delete;
+};
+
+/**
+ * The rhino3dm objects one parse obtained, deleted together once the glTF document holds plain copies (D-RT-17).
+ *
+ * Every rhino3dm accessor returns a new wrapper the caller owns: the file, its tables, each object, its geometry
+ * and attributes, layers, materials and the meshes made from B-reps or SubDs.
+ */
+class RhinoHandleScope {
+  private readonly handles: RhinoHandle[] = [];
+
+  /**
+   * Take ownership of a rhino3dm object.
+   *
+   * @param value - A rhino3dm object, or nothing.
+   * @returns The same value.
+   */
+  public own<T>(value: T): T {
+    if (isRhinoHandle(value)) {
+      this.handles.push(value);
+    }
+    return value;
+  }
+
+  /** Delete every owned handle, newest first; a handle already deleted is skipped. */
+  public deleteAll(): void {
+    for (const handle of this.handles.splice(0).reverse()) {
+      if (!handle.isDeleted()) {
+        embindDelete(handle).call(handle);
+      }
+    }
+  }
+}
+
+/**
  * Loader for 3dm files using gltf-transform directly (no Three.js dependency).
  */
 export class ThreeDmLoader extends ImportLoader<Document> {
   private readonly rhino: RhinoModule;
   private readonly instanceIdToDefinition = new Map<string, InstanceDefinition>();
   private readonly instanceIdToObject = new Map<string, File3dmObject>();
+  private readonly scope = new RhinoHandleScope();
 
   public constructor(rhino: RhinoModule) {
     super();
@@ -60,26 +127,33 @@ export class ThreeDmLoader extends ImportLoader<Document> {
   protected async parse(files: readonly ImportFile[]): Promise<Document> {
     const { bytes: data } = this.findPrimaryFile(files);
 
-    // Parse the 3dm file using rhino3dm
-    const rhinoFile = this.rhino.File3dm.fromByteArray(data);
+    try {
+      // Parse the 3dm file using rhino3dm
+      const rhinoFile = this.scope.own(this.rhino.File3dm.fromByteArray(data));
 
-    // Create gltf-transform document
-    const document = new Document();
-    const scene = document.createScene();
-    const buffer = document.createBuffer();
-    const context: RhinoConversionContext = { rhinoFile, document, buffer };
+      // Create gltf-transform document
+      const document = new Document();
+      const scene = document.createScene();
+      const buffer = document.createBuffer();
+      const context: RhinoConversionContext = { rhinoFile, document, buffer };
 
-    // Initialize instance maps
-    this.initInstanceMaps(rhinoFile);
+      // Initialize instance maps
+      this.initInstanceMaps(rhinoFile);
 
-    // Process all objects
-    const objects = rhinoFile.objects();
-    for (let i = 0; i < objects.count; i++) {
-      const rhinoObject = objects.get(i);
-      this.processRhinoObject(rhinoObject, { transformationStack: [], parentNode: scene }, context);
+      // Process all objects
+      const objects = this.scope.own(rhinoFile.objects());
+      for (let i = 0; i < objects.count; i++) {
+        const rhinoObject = this.scope.own(objects.get(i));
+        this.processRhinoObject(rhinoObject, { transformationStack: [], parentNode: scene }, context);
+      }
+
+      return document;
+    } finally {
+      // The glTF document holds plain copies of everything it needs; nothing rhino3dm made outlives the parse.
+      this.instanceIdToDefinition.clear();
+      this.instanceIdToObject.clear();
+      this.scope.deleteAll();
     }
-
-    return document;
   }
 
   protected async mapToGlb(document: Document): Promise<Uint8Array<ArrayBuffer>> {
@@ -102,19 +176,19 @@ export class ThreeDmLoader extends ImportLoader<Document> {
     this.instanceIdToObject.clear();
 
     // Map all instance definition objects
-    const objects = rhinoFile.objects();
+    const objects = this.scope.own(rhinoFile.objects());
     for (let i = 0; i < objects.count; i++) {
-      const rhinoObject = objects.get(i);
-      const attributes = rhinoObject.attributes();
+      const rhinoObject = this.scope.own(objects.get(i));
+      const attributes = this.scope.own(rhinoObject.attributes());
       if (attributes.isInstanceDefinitionObject) {
         this.instanceIdToObject.set(attributes.id, rhinoObject);
       }
     }
 
     // Map all instance definitions
-    const instanceDefinitions = rhinoFile.instanceDefinitions();
+    const instanceDefinitions = this.scope.own(rhinoFile.instanceDefinitions());
     for (let i = 0; i < instanceDefinitions.count; i++) {
-      const instanceDefinition = instanceDefinitions.get(i);
+      const instanceDefinition = this.scope.own(instanceDefinitions.get(i));
       this.instanceIdToDefinition.set(instanceDefinition.id, instanceDefinition);
     }
   }
@@ -133,8 +207,8 @@ export class ThreeDmLoader extends ImportLoader<Document> {
   ): void {
     const { transformationStack, parentNode } = options;
     const { rhinoFile } = context;
-    const geometry = rhinoObject.geometry();
-    const attributes = rhinoObject.attributes();
+    const geometry = this.scope.own(rhinoObject.geometry());
+    const attributes = this.scope.own(rhinoObject.attributes());
     const { objectType } = geometry;
 
     // Skip instance definition objects unless we're processing them through an instance reference
@@ -153,7 +227,7 @@ export class ThreeDmLoader extends ImportLoader<Document> {
         const instanceObjectIds = instanceDefinition.getObjectIds() as string[];
 
         // Create transformation matrix from the instance reference
-        const xformArray = instanceRef.xform.toFloatArray(false);
+        const xformArray = this.scope.own(instanceRef.xform).toFloatArray(false);
 
         // Add this transformation to the stack
         const newTransformationStack = [...transformationStack, xformArray];
@@ -185,9 +259,9 @@ export class ThreeDmLoader extends ImportLoader<Document> {
 
         // Set layer visibility (only for objects not in transformation stack)
         if (transformationStack.length === 0) {
-          const layers = rhinoFile.layers();
+          const layers = this.scope.own(rhinoFile.layers());
           if (attributes.layerIndex >= 0 && attributes.layerIndex < layers.count) {
-            const layer = layers.get(attributes.layerIndex);
+            const layer = this.scope.own(layers.get(attributes.layerIndex));
             // Store visibility in extras since gltf-transform nodes don't have direct visibility
             const extras = node.getExtras();
             extras['visible'] = layer.visible;
@@ -347,14 +421,14 @@ export class ThreeDmLoader extends ImportLoader<Document> {
     attributes: ObjectAttributes,
     context: RhinoConversionContext,
   ): { mesh: Mesh; node: Node } {
-    const faces = geometry.faces();
-    const mesh = new this.rhino.Mesh();
+    const faces = this.scope.own(geometry.faces());
+    const mesh = this.scope.own(new this.rhino.Mesh());
 
     // Try to convert each face to mesh
     for (let faceIndex = 0; faceIndex < faces.count; faceIndex++) {
-      const face = faces.get(faceIndex);
+      const face = this.scope.own(faces.get(faceIndex));
       // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- can be null.
-      const faceMesh = face.getMesh(this.rhino.MeshType.Any) as RhinoMesh | null;
+      const faceMesh = this.scope.own(face.getMesh(this.rhino.MeshType.Any) as RhinoMesh | null);
 
       if (faceMesh) {
         mesh.append(faceMesh);
@@ -384,7 +458,7 @@ export class ThreeDmLoader extends ImportLoader<Document> {
     context: RhinoConversionContext,
   ): { mesh: Mesh; node: Node } {
     // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- can be null.
-    const mesh = geometry.getMesh(this.rhino.MeshType.Any) as RhinoMesh | null;
+    const mesh = this.scope.own(geometry.getMesh(this.rhino.MeshType.Any) as RhinoMesh | null);
 
     if (!mesh) {
       // Rhino compute, a cloud-based service is required to support EXTRUSION geometry meshing.
@@ -410,7 +484,7 @@ export class ThreeDmLoader extends ImportLoader<Document> {
     geometry.subdivide();
     // @ts-expect-error -- createFromSubDControlNet has incorrect type.
     // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- can be null.
-    const mesh = this.rhino.Mesh.createFromSubDControlNet(geometry) as RhinoMesh | null;
+    const mesh = this.scope.own(this.rhino.Mesh.createFromSubDControlNet(geometry) as RhinoMesh | null);
 
     if (!mesh) {
       // Rhino compute, a cloud-based service is required to support SubD geometry meshing.
@@ -818,11 +892,11 @@ export class ThreeDmLoader extends ImportLoader<Document> {
    */
   private createGltfMaterial(attributes: ObjectAttributes, rhinoFile: File3dm, document: Document): Material {
     // Try to get material from document
-    const materials = rhinoFile.materials();
+    const materials = this.scope.own(rhinoFile.materials());
     let rhinoMaterial: RhinoMaterial | undefined;
 
     if (attributes.materialIndex >= 0 && attributes.materialIndex < materials.count) {
-      rhinoMaterial = materials.get(attributes.materialIndex);
+      rhinoMaterial = this.scope.own(materials.get(attributes.materialIndex));
     }
 
     if (rhinoMaterial) {
@@ -999,9 +1073,9 @@ export class ThreeDmLoader extends ImportLoader<Document> {
 
     // Add layer information if document is available
     if (rhinoFile && attributes.layerIndex >= 0) {
-      const layers = rhinoFile.layers();
+      const layers = this.scope.own(rhinoFile.layers());
       if (attributes.layerIndex < layers.count) {
-        const layer = layers.get(attributes.layerIndex);
+        const layer = this.scope.own(layers.get(attributes.layerIndex));
         metadata['layer'] = this.extractLayerInfo(layer);
       }
     }

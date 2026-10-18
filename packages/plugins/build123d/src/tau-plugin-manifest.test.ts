@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 
 import { integrityToHex } from '@taucad/archive-core';
 import { parsePluginDeployment, selectVariant, targetKey } from '@taucad/runtime/preparation/node';
@@ -10,10 +11,12 @@ import { describe, expect, it } from 'vitest';
 import { build123dKernel } from '#build123d.kernel.js';
 
 const packageRoot = resolve(import.meta.dirname, '..');
-const read = (path: string): string => readFileSync(join(packageRoot, ...path.split('/')), 'utf8');
+/** `@taucad/python-kernel-core`: the `tau_kernel` modules and the CPython pin every Python kernel shares. */
+const coreRoot = dirname(createRequire(import.meta.url).resolve('@taucad/python-kernel-core/package.json'));
+const read = (path: string, root = packageRoot): string => readFileSync(join(root, ...path.split('/')), 'utf8');
 
 const deployment = parsePluginDeployment(JSON.parse(read('tau-plugin.json')) as unknown, 'tau-plugin.json');
-const interpreter = JSON.parse(read('python/interpreter.json')) as {
+const interpreter = JSON.parse(read('python/interpreter.json', coreRoot)) as {
   readonly release: string;
   readonly targets: ReadonlyArray<{
     readonly key: string;
@@ -35,18 +38,7 @@ const lockedWheels = (key: string): Map<string, { readonly size: number; readonl
 describe('Build123d tau-plugin.json', () => {
   it('should declare one engine variant per pinned target, the kernel row matching the kernel', () => {
     expect(variants.map(({ target }) => targetKey(target))).toEqual(interpreter.targets.map(({ key }) => key));
-    const kernel = build123dKernel({
-      pythonExecutable: '/closure/python/bin/python3',
-      pythonSha256: 'a'.repeat(64),
-      workerPath: '/closure/tau-worker/worker.py',
-      workerSha256: 'b'.repeat(64),
-      supportFiles: [
-        { path: '/closure/tau-worker/analyzer.py', sha256: 'c'.repeat(64) },
-        { path: '/closure/tau-worker/glb.py', sha256: 'd'.repeat(64) },
-        { path: '/closure/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
-        { path: '/closure/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
-      ],
-    });
+    const kernel = build123dKernel();
     expect(deployment.kernels).toEqual({ [kernel.id]: { requires: ['engine'], extensions: [...kernel.extensions] } });
   });
 
@@ -77,20 +69,30 @@ describe('Build123d tau-plugin.json', () => {
       }
 
       const workers = payloads.filter(({ payload }) => payload.origin.kind === 'packagePath');
-      expect(workers.map(({ payload }) => payload.name)).toEqual([
-        'worker.py',
-        'analyzer.py',
-        'glb.py',
-        'native_materials.py',
-        'mechanisms.py',
+      expect(workers.map(({ payload }) => `${payload.destination}/${payload.name}`)).toEqual([
+        'tau-worker/worker.py',
+        'tau-worker/native_materials.py',
+        'tau-worker/mechanisms.py',
+        'tau-worker/tau_kernel/analyzer.py',
+        'tau-worker/tau_kernel/glb.py',
+        'tau-worker/tau_kernel/model.py',
+        'tau-worker/tau_kernel/protocol.py',
       ]);
       for (const { payload, hex } of workers) {
-        const bytes = readFileSync(join(packageRoot, 'python', payload.name));
-        expect(payload).toMatchObject({ format: 'raw', destination: 'tau-worker', byteLength: bytes.byteLength });
+        const origin = payload.origin.kind === 'packagePath' ? payload.origin.path : '';
+        const bytes = readFileSync(join(packageRoot, ...origin.split('/')));
+        expect(origin).toBe(`${payload.destination.replace(/^tau-worker/u, 'python')}/${payload.name}`);
+        expect(payload).toMatchObject({ format: 'raw', byteLength: bytes.byteLength });
         expect(hex, payload.name).toBe(createHash('sha256').update(bytes).digest('hex'));
       }
     },
   );
+
+  it('should pin a copy of the core tau_kernel modules equal to the core', () => {
+    for (const name of ['analyzer.py', 'glb.py', 'model.py', 'protocol.py']) {
+      expect(read(`python/tau_kernel/${name}`), name).toBe(read(`python/tau_kernel/${name}`, coreRoot));
+    }
+  });
 
   it('should install only darwin-arm64 wheels its pylock pins', () => {
     const locked = new Set([...lockedWheels('darwin-arm64').values()].map(({ sha256 }) => sha256));

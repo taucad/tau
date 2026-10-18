@@ -31,13 +31,61 @@ export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
 };
 
 /**
- * Scrub the URLs navigation and fetch breadcrumbs record.
+ * Longest text a console breadcrumb keeps, per logged argument and for its message (D-UI-31).
+ *
+ * @public
+ */
+export const consoleBreadcrumbTextLimit = 500;
+
+const truncate = (text: string): string =>
+  text.length > consoleBreadcrumbTextLimit ? `${text.slice(0, consoleBreadcrumbTextLimit)}…` : text;
+
+/**
+ * Describe one logged value as bounded text, without walking it: a logged
+ * object may be a mesh or a file, and serialising it here would cost what
+ * keeping it did.
+ */
+const describeLogged = (value: unknown): string => {
+  if (typeof value === 'string') {
+    return truncate(value);
+  }
+  if (value instanceof Error) {
+    return truncate(`${value.name}: ${value.message}`);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return `[${(value as { constructor?: { name?: string } }).constructor?.name ?? 'Object'}]`;
+  }
+  return truncate(String(value));
+};
+
+/**
+ * Scrub the URLs navigation and fetch breadcrumbs record, and reduce a console
+ * breadcrumb to bounded text.
+ *
+ * The SDK keeps the last 100 breadcrumbs, and a console breadcrumb held each
+ * logged argument by reference, so a logged mesh, file or transcript stayed
+ * alive until 100 more breadcrumbs pushed it out (D-UI-31).
  *
  * @param breadcrumb - The breadcrumb the SDK is about to keep.
  * @returns The scrubbed breadcrumb.
  * @public
  */
 export const scrubSentryBreadcrumb = (breadcrumb: Breadcrumb): Breadcrumb => {
+  if (breadcrumb.category === 'console') {
+    const logged: unknown = breadcrumb.data?.['arguments'];
+    return {
+      ...breadcrumb,
+      ...(breadcrumb.message === undefined ? {} : { message: truncate(breadcrumb.message) }),
+      ...(breadcrumb.data === undefined
+        ? {}
+        : {
+            data: {
+              ...breadcrumb.data,
+              ...(Array.isArray(logged) ? { arguments: logged.map((value) => describeLogged(value)) } : {}),
+            },
+          }),
+    };
+  }
   if (!breadcrumb.data) {
     return breadcrumb;
   }

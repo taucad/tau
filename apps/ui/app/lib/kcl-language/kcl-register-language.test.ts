@@ -39,6 +39,8 @@ vi.mock('#lib/kcl-language/lsp/kcl-lsp-client.js', () => ({
       textDocumentDidChange: vi.fn(),
       textDocumentDidClose: vi.fn(),
       getFileManager: vi.fn(() => ({ readFile: vi.fn(async () => new Uint8Array()) })),
+      parseKcl: vi.fn(async () => [{}, []]),
+      executeKclMock: vi.fn(async () => ({ variables: {}, errors: [] })),
       dispose: vi.fn(),
     });
   }),
@@ -180,6 +182,27 @@ describe('kclContribution', () => {
 
     const client = getKclLspClient();
     expect(client).toBeDefined();
+  });
+
+  // D-RT-14: the main thread instantiated its own copy of the KCL WASM for symbol parsing, next to the one the
+  // LSP worker already runs.
+  it('should parse symbols on the LSP worker instead of loading KCL WASM on the main thread', async () => {
+    const wasm = await import('@taucad/kcl-wasm-lib');
+    const { kclContribution, getKclLspClient, getSymbolService } =
+      await import('#lib/kcl-language/kcl-register-language.js');
+    const context = createMockContext(stub);
+
+    kclContribution.register(stub.monaco);
+    kclContribution.activate(context);
+    await vi.waitFor(() => {
+      expect(getSymbolService()?.isInitialized).toBe(true);
+    });
+    await getSymbolService()!.updateDocument('file:///workspace/main.kcl', 'width = 10', 1);
+
+    const client = getKclLspClient() as unknown as { parseKcl: ReturnType<typeof vi.fn> };
+    expect(client.parseKcl).toHaveBeenCalledWith('width = 10');
+    expect(wasm.default).not.toHaveBeenCalled();
+    expect(wasm.parse_wasm).not.toHaveBeenCalled();
   });
 
   it('calls setCurrentDocumentUri before textDocumentDidOpen in notifyDocumentOpen', async () => {

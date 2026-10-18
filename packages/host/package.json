@@ -73,6 +73,7 @@
     "@taucad/grbl": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
+    "@taucad/native-process-core": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "@taucad/slicer": "workspace:*",
@@ -96,7 +97,7 @@
     "geospec": "^0.1.0-beta.0",
     "geospec-engine": "^0.2.0",
     "xstate": "^6.0.0-alpha.59",
-    "zod": "^4.0.0"
+    "zod": "^4.1.0"
   },
   "peerDependenciesMeta": {
     "@taucad/geospec-engine": {
@@ -114,7 +115,6 @@
     "@taucad/chat": "workspace:*",
     "@taucad/formal": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
-    "@taucad/native-process-core": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",

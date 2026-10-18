@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import * as hash from '@taucad/utils/hash';
 import { EditorSaveConflictError, FileContentService } from '#file-content-service.js';
+import { FileContentBudget } from '#file-content-budget.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
 import { SharedPool } from '@taucad/memory';
@@ -403,6 +404,29 @@ describe('FileContentService', () => {
     expect(cached).toBeDefined();
     expect(cached).toEqual(new Uint8Array([1, 2, 3]));
     expect(cached).not.toBe(original);
+  });
+
+  /* The bridge clones every unmarked write before its transfer (fs-bridge W9c),
+   * so the service copies the caller's bytes once: the copy it retains is the
+   * copy it hands over. A second, wire-only copy was a third payload at peak (D-UI-14). */
+  it('should hand the bridge the one copy it retains on write', async () => {
+    const original = new Uint8Array([1, 2, 3]);
+
+    await service.write('main.ts', original, 'machine');
+
+    const [_path, sent] = vi.mocked(proxy.writeFile).mock.calls[0] as [string, Uint8Array<ArrayBuffer>];
+    expect(sent).not.toBe(original);
+    expect(service.peek('main.ts')).toBe(sent);
+  });
+
+  it('should hand the bridge the one copy it retains for each file of a batch', async () => {
+    const file = new Uint8Array([1, 2]);
+
+    await service.writeFiles({ 'a.ts': { content: file } }, 'machine');
+
+    const sent = vi.mocked(proxy.writeFiles).mock.calls[0]![0]['/project/a.ts']?.content;
+    expect(sent).not.toBe(file);
+    expect(service.peek('a.ts')).toBe(sent);
   });
 
   it('should fire onDidContentChange with valid data after write', async () => {
@@ -2767,5 +2791,61 @@ describe('inactive content outcome budget', () => {
     unsubscribe();
     harness.service.dispose();
     harness.disposeChannel();
+  });
+});
+
+/*
+ * D-UI-07: every mount held its own 128 MiB, and an unobserved outcome up to
+ * the 50 MiB open limit stayed retained though the cache refused anything past
+ * its single-file cap.
+ */
+describe('retained-byte bounds', () => {
+  const bytes = (length: number): Uint8Array<ArrayBuffer> => new Uint8Array(length).fill(65);
+
+  it('should not retain a released outcome past the single-file cap, but keep it while observed', async () => {
+    const harness = createHarness({ cacheOptions: { maxEntries: 10, maxTotalBytes: 1024, maxSingleFileBytes: 4 } });
+    vi.mocked(harness.proxy.readFile).mockImplementation(async () => bytes(8));
+
+    const unsubscribe = harness.service.subscribe('held.txt', () => undefined);
+    const held = await harness.service.resolve('held.txt');
+    const released = await harness.service.resolve('released.txt');
+    expect(held.kind).toBe('text');
+    expect(released.kind).toBe('text');
+
+    expect(harness.service.peekOutcome('held.txt').kind).toBe('text');
+    expect(harness.service.peekOutcome('released.txt')).toEqual({ kind: 'loading' });
+    unsubscribe();
+    expect(harness.service.peekOutcome('held.txt')).toEqual({ kind: 'loading' });
+    harness.service.dispose();
+    harness.disposeChannel();
+  });
+
+  it('should bound every service sharing a budget by one document-wide total', async () => {
+    const budget = new FileContentBudget({ maxTotalBytes: 6 });
+    const options = { budget, cacheOptions: { maxEntries: 10, maxTotalBytes: 6, maxSingleFileBytes: 4 } };
+    const home = createHarness(options);
+    const project = createHarness({ ...options, workspaceRoot: '/projects/p1' });
+    vi.mocked(home.proxy.readFile).mockImplementation(async () => bytes(2));
+    vi.mocked(project.proxy.readFile).mockImplementation(async () => bytes(2));
+
+    const unsubscribe = home.service.subscribe('held.txt', () => undefined);
+    await home.service.resolve('held.txt');
+    await home.service.resolve('old.txt');
+    await project.service.resolve('a.txt');
+    await project.service.resolve('b.txt');
+
+    /* Each service alone is within its own 6 bytes; together they are not. */
+    expect(budget.retainedBytes).toBeLessThanOrEqual(6);
+    expect(home.service.peekOutcome('held.txt').kind).toBe('text');
+    expect(project.service.peekOutcome('b.txt').kind).toBe('text');
+    expect(home.service.peekOutcome('old.txt')).toEqual({ kind: 'loading' });
+
+    unsubscribe();
+    home.service.dispose();
+    expect(budget.retainedBytes).toBeLessThanOrEqual(4);
+    project.service.dispose();
+    expect(budget.retainedBytes).toBe(0);
+    home.disposeChannel();
+    project.disposeChannel();
   });
 });

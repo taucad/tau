@@ -40,6 +40,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./native": "./src/native.ts",
     "./agent": {
       "types": "./agent/skills.d.cts",
       "default": "./agent/skills.json"
@@ -56,6 +57,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./native": {
+        "types": "./dist/native.d.mts",
+        "import": "./dist/native.mjs",
+        "default": "./dist/native.mjs"
       },
       "./agent": {
         "types": "./agent/skills.d.cts",
@@ -74,7 +80,7 @@
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",
-    "zod": "^4.0.0"
+    "zod": "^4.1.0"
   },
   "devDependencies": {
     "@taucad/agent-tools": "workspace:*",
@@ -82,6 +88,7 @@
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "zod": "catalog:"
   },
@@ -90,7 +97,8 @@
     "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
-    "@taucad/parameters": "workspace:*"
+    "@taucad/parameters": "workspace:*",
+    "@taucad/python-kernel-core": "workspace:*"
   },
   "taucad": {
     "hostTarget": "node"

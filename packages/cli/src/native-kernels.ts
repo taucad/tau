@@ -1,87 +1,48 @@
-import { readFile, realpath } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+/**
+ * The CLI's side of native kernels. A native kernel is whatever the runtime definition lists (built-ins plus
+ * `--plugin`/`--config`): each kernel binds to its sealed closure itself, in `initialize`, and refuses with
+ * `KERNEL_NOT_PREPARED` until it is prepared. This module learns which native deployments a runtime lists from a
+ * thread that builds it (no kernel code loads in the command's process), prepares them through the payload store, and
+ * maps refusals to CLI errors and exit codes.
+ *
+ * @module
+ */
+import { Worker } from 'node:worker_threads';
+import type { WorkerOptions } from 'node:worker_threads';
 
-import { build123dLaunchSet, build123dOptionsFromClosure, sealBuild123dClosure } from '@taucad/build123d';
-import type { Build123dClosureOptions } from '@taucad/build123d';
-import { defaultPayloadStore } from '@taucad/host';
-import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
-import type { NativeRuntimeVerifier } from '@taucad/native-process-core';
-import { picogkLaunchSet, picogkOptionsFromClosure } from '@taucad/picogk';
-import type { PicogkKernelOptions } from '@taucad/picogk';
+import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 import {
-  createPreparationHost,
-  detectHostIndicators,
-  parsePluginDeployment,
-  PreparationError,
-  readManagedPreparation,
-  reverifyClosure,
-  selectVariant,
-} from '@taucad/runtime/preparation/node';
+  defaultPayloadStore,
+  inspectNativeKernels,
+  loadReportedDeployments,
+  nativeDeploymentReportSchema,
+  openNativePreparation as openStorePreparation,
+  preparableKernels,
+  preparationPluginsOf,
+  UnknownNativeKernelError,
+  verifyStoreClosure as storeClosureVerifier,
+} from '@taucad/native-process-core/store';
 import type {
-  ClosureLaunch,
-  Integrity,
-  ManagedPreparation,
-  PreparationHost,
-  PreparationPlugin,
-} from '@taucad/runtime/preparation/node';
+  NativeClosureAnswer,
+  NativeDeploymentReport,
+  NativePreparation,
+  NativeStoreInput,
+} from '@taucad/native-process-core/store';
+import type { KernelIssue } from '@taucad/runtime/kernel';
+import { parsePluginDeployment, readManagedPreparation } from '@taucad/runtime/preparation/node';
+import type { ManagedPreparation, PreparationPlugin } from '@taucad/runtime/preparation/node';
+import { z } from 'zod';
 
 import { cliError, exitCodes } from '#output.js';
-import type { UnavailableNativeKernel } from '#unprepared-kernels.js';
-
-// Packages whose `tau-plugin.json` declares native runtime payloads; each is read without running plugin code.
-const nativePackages = ['@taucad/build123d', '@taucad/picogk'] as const;
-
-/** The kernel options each native package's sealed closure maps to, keyed as `createCliRuntime` takes them. */
-export type PreparedNativeKernel =
-  | { readonly build123d: Build123dClosureOptions }
-  | { readonly picogk: PicogkKernelOptions };
-
-// Per package: the options its sealed closure gives, the seal step, if any, that runs before the closure is sealed,
-// and the launch set its launch index records (D8, X29).
-const adopters: Readonly<
-  Record<
-    string,
-    {
-      readonly options: (closure: ClosureLaunch) => PreparedNativeKernel;
-      readonly seal?: PreparationPlugin['seal'];
-      readonly launchSet: NonNullable<PreparationPlugin['launchSet']>;
-    }
-  >
-> = {
-  // Build123d compiles its bytecode and proves the closure imports before the seal (D22).
-  '@taucad/build123d': {
-    options: (closure) => ({ build123d: build123dOptionsFromClosure(closure) }),
-    seal: sealBuild123dClosure,
-    launchSet: build123dLaunchSet,
-  },
-  '@taucad/picogk': {
-    options: (closure) => ({ picogk: picogkOptionsFromClosure(closure) }),
-    launchSet: picogkLaunchSet,
-  },
-};
+import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /**
  * D8: a native worker that exits before its handshake re-verifies its closure against the receipt beside it, so the
- * refusal names the damaged file. A runtime root without a receipt was a sealed closure when it was composed, so a
- * repair that stopped half way is named too.
- * @param root - The worker's closure root.
- * @param signal - Aborts the re-verification.
- * @returns The damaged files and the repair, or `undefined` when the closure is intact.
+ * refusal names the damaged file and the `tau prepare` call that repairs it.
  */
-export const verifyStoreClosure: NativeRuntimeVerifier = async (root, signal) => {
-  const files = await reverifyClosure(root, signal);
-  if (files?.length === 0) {
-    return undefined;
-  }
-  return {
-    files: files ?? ['receipt.json'],
-    remedy:
-      files === undefined
-        ? 'Run `tau prepare` for the kernel to rebuild it.'
-        : 'Run `tau prepare --verify` to repair it.',
-  };
-};
+export const verifyStoreClosure = storeClosureVerifier((files) =>
+  files === undefined ? 'Run `tau prepare` for the kernel to rebuild it.' : 'Run `tau prepare --verify` to repair it.',
+);
 
 /**
  * The managed acquisition profile from the environment.
@@ -96,303 +57,265 @@ export const readManaged = (): ManagedPreparation => {
   }
 };
 
+const storeInput = (): NativeStoreInput => ({ store: defaultPayloadStore(), managed: readManaged() });
+
+/** What a runtime thread in `describe` mode posts its parent. */
+const describedSchema = z.object({
+  type: z.literal('described'),
+  report: nativeDeploymentReportSchema,
+  plugins: z.array(z.string()),
+});
+
+/** What a runtime definition lists, as a thread that built it reported it. */
+export type DescribedRuntime = {
+  /** The native deployments it lists, in list order. */
+  readonly report: NativeDeploymentReport;
+  /** The `meta.name` of every plugin it lists, in list order. */
+  readonly plugins: readonly string[];
+};
+
+/** Milliseconds a describing thread may take to build the runtime. */
+const describeTimeout = 120_000;
+
 /**
- * The native plugins this CLI can prepare, with their seal steps; an absent package is skipped.
- * @returns The roster.
+ * Build the CLI runtime in a thread of its own and report what it lists, so the native deployments it carries can be
+ * prepared without loading any kernel module in this process.
+ * @param input - The runtime's inputs, as the runtime worker takes them, and the thread's environment and Node flags.
+ * @returns What the runtime lists.
+ * @throws {Error} When the runtime cannot be built (an unloadable `--plugin` or `--config`).
  */
-export const nativePreparationPlugins = async (): Promise<readonly PreparationPlugin[]> => {
-  const require = createRequire(import.meta.url);
-  const plugins: PreparationPlugin[] = [];
-  for (const packageName of nativePackages) {
-    let manifestPath: string;
-    try {
-      manifestPath = require.resolve(`${packageName}/tau-plugin.json`);
-    } catch {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
-    const manifest: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-    const adopter = adopters[packageName];
-    plugins.push({
-      package: packageName,
-      deployment: parsePluginDeployment(manifest, `${packageName} tau-plugin.json`),
-      directory: dirname(manifestPath),
-      ...(adopter?.seal && { seal: adopter.seal }),
-      ...(adopter && { launchSet: adopter.launchSet }),
+export const describeRuntime = async (
+  input: Omit<RuntimeWorkerData, 'describe'> & Pick<WorkerOptions, 'env' | 'execArgv'>,
+): Promise<DescribedRuntime> => {
+  const { env, execArgv, ...workerData } = input;
+  const worker = new Worker(
+    new URL(import.meta.url.endsWith('.ts') ? './runtime.worker.ts' : './runtime-worker.mjs', import.meta.url),
+    {
+      workerData: { ...workerData, describe: true } satisfies RuntimeWorkerData,
+      ...(env === undefined ? {} : { env }),
+      ...(execArgv === undefined ? {} : { execArgv }),
+    },
+  );
+  try {
+    const described = await new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`The runtime did not report its kernels within ${String(describeTimeout / 1000)} s.`));
+      }, describeTimeout);
+      timer.unref();
+      worker.once('message', (message: unknown) => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+      worker.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      worker.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`The runtime thread exited with code ${String(code)} before it reported its kernels.`));
+      });
     });
+    const { report, plugins } = describedSchema.parse(described);
+    return { report, plugins };
+  } finally {
+    await worker.terminate();
   }
-  return plugins;
-};
-
-// A preparation host over the shared payload store; `inspectLaunch` reads launch indexes and never downloads, so an
-// inspect-only host starts no attempt and holds nothing to dispose.
-const storeReader = (plugin: PreparationPlugin, store = defaultPayloadStore()): PreparationHost => {
-  const managed = readManaged();
-  return createPreparationHost({
-    plugins: [plugin],
-    store,
-    ...(managed.seed === undefined ? {} : { seed: managed.seed }),
-    selection: managed.selection,
-  });
-};
-
-/** Why the native kernel for an input could not be composed. */
-export type UnpreparedNativeKernel = {
-  readonly code: 'KERNEL_NOT_PREPARED' | 'UNSUPPORTED_TARGET';
-  readonly message: string;
 };
 
 /**
- * The native kernel whose `tau-plugin.json` row handles an input, read from the store's receipts alone: nothing is
- * downloaded, and an input no native kernel handles leaves the store untouched.
- * @param extension - The input file's extension, without the dot.
- * @returns The prepared kernel's options, the typed refusal when it is not prepared, or `undefined` when no native
- *   kernel handles the extension.
+ * Every kernel a report's deployments declare, with the extensions it handles, read from the manifests alone.
+ * @param report - The report.
+ * @returns One row per declared kernel, in report then manifest order.
  */
-export const nativeKernelFor = async (
-  extension: string,
-): Promise<PreparedNativeKernel | UnpreparedNativeKernel | undefined> => {
-  for (const plugin of await nativePreparationPlugins()) {
-    for (const [name, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
-      if (extensions.includes(extension)) {
-        // oxlint-disable-next-line no-await-in-loop -- at most one installed kernel owns an extension
-        const state = await storeReader(plugin).inspectLaunch({ package: plugin.package, dependencies: requires });
-        const closure = state.status === 'ready' ? state.closures[requires[0]] : undefined;
-        if (closure !== undefined) {
-          installNativeRuntimeVerifier(verifyStoreClosure);
-          return adopters[plugin.package]?.options(closure);
+export const preparableKernelsOf = (
+  report: NativeDeploymentReport,
+): ReadonlyArray<{ readonly kernel: string; readonly extensions: readonly string[] }> =>
+  report.flatMap((row) =>
+    Object.entries(parsePluginDeployment(row.manifest, `${row.package} tau-plugin.json`).kernels).map(
+      ([kernel, { extensions }]) => ({ kernel, extensions }),
+    ),
+  );
+
+/**
+ * The preparation plugins of a report's deployments, with their seal steps and package roots: each light deployment
+ * module is imported by the file URL the thread resolved, never kernel code.
+ * @param report - The report.
+ * @returns One preparation plugin per deployment, in report order.
+ */
+export const preparationPluginsFor = async (report: NativeDeploymentReport): Promise<readonly PreparationPlugin[]> =>
+  preparationPluginsOf(await loadReportedDeployments(report));
+
+/**
+ * The deployments a report lists: each light deployment module, imported by the file URL the thread resolved, never
+ * kernel code.
+ * @param report - The report.
+ * @returns One deployment per row, in report order.
+ */
+export const reportedDeployments = async (report: NativeDeploymentReport): Promise<readonly NativeKernelDeployment[]> =>
+  loadReportedDeployments(report);
+
+/**
+ * Open the preparation host `tau mcp` and `tau serve` prepare through: the deployments with their seal steps, the
+ * shared store and the managed profile, with the process's unrestricted `fetch` (D4).
+ * @param options - The deployments, read when the first kernel is prepared, and the transport, for tests.
+ * @returns The preparation and its disposal; preparing a kernel no deployment declares throws `UNKNOWN_KERNEL` (exit 2).
+ */
+export const openNativePreparation = (options: {
+  readonly deployments: () => Promise<readonly NativeKernelDeployment[]>;
+  readonly fetch?: typeof fetch;
+}): NativePreparation => {
+  let opened: Promise<NativePreparation> | undefined;
+  const open = async (): Promise<NativePreparation> =>
+    openStorePreparation({
+      ...storeInput(),
+      deployments: await options.deployments(),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+  return {
+    prepare: async (kernel, context) => {
+      opened ??= open();
+      const preparation = await opened;
+      try {
+        return await preparation.prepare(kernel, context);
+      } catch (error) {
+        if (error instanceof UnknownNativeKernelError) {
+          throw cliError(error.code, error.message, exitCodes.usage);
         }
-        return state.status === 'blocked' && state.reason === 'unsupported-target'
-          ? { code: 'UNSUPPORTED_TARGET', message: state.message }
-          : {
-              code: 'KERNEL_NOT_PREPARED',
-              message: `The ${name} kernel is not prepared on this machine. Run \`tau prepare ${name}\` once, then export again.`,
-            };
+        throw error;
       }
+    },
+    dispose: async () => {
+      if (opened !== undefined) {
+        const preparation = await opened;
+        await preparation.dispose();
+      }
+    },
+  };
+};
+
+/**
+ * The CLI error for a kernel that refused as not prepared or as unable to run here, as `tau export` reports it.
+ * @param issues - The operation's issues.
+ * @returns The error, or `undefined` when no native kernel refused.
+ */
+export const unpreparedKernelError = (issues: readonly KernelIssue[]): Error | undefined => {
+  for (const issue of issues) {
+    const details = issue.details as Readonly<Record<string, unknown>> | undefined;
+    const kernel = typeof details?.['kernel'] === 'string' ? details['kernel'] : undefined;
+    if (kernel !== undefined && issue.code === 'KERNEL_NOT_PREPARED') {
+      return cliError(
+        'KERNEL_NOT_PREPARED',
+        `The ${kernel} kernel is not prepared on this machine. Run \`tau prepare ${kernel}\` once, then export again.`,
+        exitCodes.refused,
+      );
+    }
+    if (
+      kernel !== undefined &&
+      issue.code === 'KERNEL_CAPABILITY_MISSING' &&
+      details?.['reason'] === 'unsupported-target'
+    ) {
+      return cliError('UNSUPPORTED_TARGET', issue.message, exitCodes.refused);
     }
   }
   return undefined;
 };
 
-/** The native kernels a CLI runtime composes, read from the store's receipts alone. */
-export type NativeComposition = {
-  /** Options for each native kernel whose closure is sealed, as `createCliRuntime` takes them. */
-  readonly build123d?: Build123dClosureOptions;
-  readonly picogk?: PicogkKernelOptions;
-  /** Every declared native kernel that is not composed, with why; the runtime answers its files with the refusal. */
-  readonly unavailable: readonly UnavailableNativeKernel[];
-  /** The sealed closure each composed kernel runs from; a daemon starts native workers from these alone (D37). */
-  readonly closureRoots?: readonly string[];
+/**
+ * The deployment module this CLI itself resolves for a package.
+ * @param packageName - The npm package.
+ * @returns Its URL, or `undefined` when this CLI ships no such package.
+ */
+const shippedEntry = (packageName: string): string | undefined => {
+  try {
+    return import.meta.resolve(`${packageName}/native`);
+  } catch {
+    return undefined;
+  }
 };
 
-// The bytes preparing a kernel downloads on this host: the payloads of the variant each required dependency selects.
-const preparationBytes = (plugin: PreparationPlugin, requires: readonly string[], managed: ManagedPreparation) => {
-  const indicators = detectHostIndicators();
-  if (indicators === undefined) {
-    return 0;
-  }
-  let byteLength = 0;
-  for (const dependency of requires) {
-    const selection = selectVariant(plugin.deployment.dependencies[dependency] ?? [], indicators, managed.selection);
-    for (const payload of selection.status === 'selected' ? selection.variant.payloads : []) {
-      byteLength += payload.byteLength;
-    }
-  }
-  return byteLength;
-};
+const shipped = new Map<string, Promise<NativeKernelDeployment | undefined>>();
 
 /**
- * Compose every native kernel the CLI declares from the payload store: a sealed closure gives its kernel options, and
- * any other state gives the refusal the runtime answers that kernel's files with. Launch indexes only: nothing is
- * downloaded, no closure is verified and no full receipt is parsed, so this is a per-launch cost (I11). A worker that
- * then exits before its handshake re-verifies its closure and names what differs (D8).
- * @returns The composition.
+ * The deployment of a native kernel package this CLI ships, imported from its own install.
+ * @param packageName - The npm package.
+ * @returns The deployment, or `undefined` when this CLI ships no such package.
  */
-export const composeNativeKernels = async (): Promise<NativeComposition> => {
-  const managed = readManaged();
-  /* Closures are composed by the store's real path. The native sandbox denies reads under shared roots such as `/tmp`
-   * and grants a closure by its real path, so a worker started through a link (macOS's `/tmp` is one to
-   * `/private/tmp`, as a linked home or `TAU_CONFIG_DIR` may be) exits before it runs. */
-  const store = await realpath(defaultPayloadStore()).catch(() => defaultPayloadStore());
-  const kernels: { build123d?: Build123dClosureOptions; picogk?: PicogkKernelOptions } = {};
-  const unavailable: UnavailableNativeKernel[] = [];
-  const closureRoots: string[] = [];
-  for (const plugin of await nativePreparationPlugins()) {
-    for (const [kernel, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
-      // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
-      const state = await storeReader(plugin, store).inspectLaunch({ package: plugin.package, dependencies: requires });
-      const closure = state.status === 'ready' ? state.closures[requires[0]] : undefined;
-      const options = closure === undefined ? undefined : adopters[plugin.package]?.options(closure);
-      if (closure !== undefined && options !== undefined) {
-        installNativeRuntimeVerifier(verifyStoreClosure);
-        Object.assign(kernels, options);
-        closureRoots.push(closure.root);
-        continue;
+const shippedDeployment = async (packageName: string): Promise<NativeKernelDeployment | undefined> => {
+  let deployment = shipped.get(packageName);
+  if (deployment === undefined) {
+    const entry = shippedEntry(packageName);
+    deployment = (async () => {
+      if (entry === undefined) {
+        return undefined;
       }
-      const unsupported = state.status === 'blocked' && state.reason === 'unsupported-target';
-      unavailable.push({
-        kernel,
-        package: plugin.package,
-        extensions,
-        reason: unsupported ? 'unsupported-target' : 'not-prepared',
-        byteLength: unsupported ? 0 : preparationBytes(plugin, requires, managed),
-        ...(unsupported ? { detail: state.message } : {}),
-      });
-    }
-  }
-  return { ...kernels, unavailable, closureRoots };
-};
-
-/** What `prepare_kernel` answers (D7). */
-export type PrepareKernelOutput =
-  | {
-      readonly status: 'ready';
-      readonly kernel: string;
-      readonly closureIntegrity: Integrity;
-      readonly treeIntegrity: Integrity;
-      readonly byteLength: number;
-    }
-  | {
-      readonly status: 'blocked';
-      readonly kernel: string;
-      readonly reason: 'unsupported-target' | 'offline-miss' | 'missing-system-library';
-      readonly message: string;
-    }
-  | { readonly status: 'cancelled'; readonly kernel: string; readonly message: string }
-  | { readonly status: 'failed'; readonly kernel: string; readonly code: string; readonly message: string };
-
-/** One progress report of a preparation: bytes done of the total, strictly increasing. */
-export type PrepareKernelProgress = { readonly progress: number; readonly total: number; readonly message: string };
-
-/** A preparation host for one long-lived process (`tau mcp`), joining concurrent calls for one kernel. */
-export type NativePreparation = {
-  /**
-   * Prepare a kernel by name.
-   * @throws {Error} `UNKNOWN_KERNEL` when no installed package declares it, naming the kernels that can be prepared.
-   */
-  readonly prepare: (
-    kernel: string,
-    context: { readonly signal: AbortSignal; readonly onProgress?: (progress: PrepareKernelProgress) => void },
-  ) => Promise<PrepareKernelOutput>;
-  readonly dispose: () => Promise<void>;
-};
-
-/**
- * Open the preparation host `tau mcp` prepares through: the CLI's roster with its seal steps, the shared store and
- * the managed profile, with the process's unrestricted `fetch` (D4). Verified payloads persist, so a cancelled or
- * failed call leaves the next one only the remainder to download.
- * @param options - The transport, for tests.
- * @returns The preparation and its disposal.
- */
-export const openNativePreparation = (options: { readonly fetch?: typeof fetch } = {}): NativePreparation => {
-  let opened: Promise<{ host: PreparationHost; plugins: readonly PreparationPlugin[]; offline: boolean }> | undefined;
-  const open = async () => {
-    const managed = readManaged();
-    const plugins = await nativePreparationPlugins();
-    const indicators = detectHostIndicators();
-    const host = createPreparationHost({
-      plugins,
-      store: defaultPayloadStore(),
-      ...(indicators === undefined ? {} : { indicators }),
-      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
-      ...(managed.seed === undefined ? {} : { seed: managed.seed }),
-      selection: managed.selection,
-    });
-    return { host, plugins, offline: managed.offline };
-  };
-  return {
-    prepare: async (kernel, { signal, onProgress }) => {
-      opened ??= open();
-      const { host, plugins, offline } = await opened;
-      const owner = plugins.find((plugin) => Object.hasOwn(plugin.deployment.kernels, kernel));
-      const requires = owner?.deployment.kernels[kernel]?.requires;
-      if (owner === undefined || requires === undefined) {
-        const known = plugins.flatMap((plugin) => Object.keys(plugin.deployment.kernels)).toSorted();
-        throw cliError(
-          'UNKNOWN_KERNEL',
-          `No native kernel is called '${kernel}'. Kernels that can be prepared: ${known.length === 0 ? 'none are installed' : known.join(', ')}.`,
-          exitCodes.usage,
-        );
-      }
-      let reported = 0;
-      const unsubscribe = host.on('preparation', ({ selection, state }) => {
-        /* MCP progress must increase with every notification: a phase that moves no bytes is not reported. */
-        if (selection.package === owner.package && state.status === 'preparing' && state.completedBytes > reported) {
-          reported = state.completedBytes;
-          onProgress?.({
-            progress: state.completedBytes,
-            total: state.totalBytes,
-            message: `${state.phase} ${state.payload} (${String(state.completedPayloads)}/${String(state.totalPayloads)})`,
-          });
-        }
-      });
       try {
-        const outcome = await host.prepare({ package: owner.package, dependencies: requires, offline, signal });
-        if (outcome.status === 'cancelled') {
-          return {
-            status: 'cancelled',
-            kernel,
-            message: `Preparing ${kernel} was cancelled; verified payloads are kept, so the next call downloads only the rest.`,
-          };
-        }
-        if (outcome.status === 'blocked') {
-          return { status: 'blocked', kernel, reason: outcome.reason, message: outcome.message };
-        }
-        const receipts = requires.flatMap((dependency) => outcome.receipts[dependency] ?? []);
-        const [first] = receipts;
-        if (first === undefined) {
-          throw new Error(
-            `${kernel} is ready but holds no receipt; the store is inconsistent. Run tau prepare --verify.`,
-          );
-        }
-        return {
-          status: 'ready',
-          kernel,
-          closureIntegrity: first.closureIntegrity,
-          treeIntegrity: first.treeIntegrity,
-          byteLength: receipts.flatMap((receipt) => receipt.files).reduce((sum, file) => sum + file.byteLength, 0),
-        };
-      } catch (error) {
-        if (error instanceof PreparationError) {
-          return { status: 'failed', kernel, code: error.code, message: error.message };
-        }
-        throw error;
-      } finally {
-        unsubscribe();
+        const [loaded] = await loadReportedDeployments([
+          { package: packageName, entry, packageRoot: entry, manifest: {}, kernels: [] },
+        ]);
+        return loaded;
+      } catch {
+        return undefined;
       }
-    },
-    dispose: async () => {
-      const session = await opened;
-      session?.host.dispose();
-    },
-  };
+    })();
+    shipped.set(packageName, deployment);
+  }
+  return deployment;
+};
+
+/** One kernel's closure request from a runtime child, as `RuntimeChildClosureRequest` carries it. */
+export type ReportedClosureRequest = {
+  readonly package: string;
+  readonly kernel: string;
+  readonly manifest: unknown;
+  readonly packageRoot: string;
 };
 
 /**
- * The kernels a tool result refuses as not prepared: every `KERNEL_NOT_PREPARED` issue's `details.kernel`, wherever
- * the tool placed its issues.
- * @param value - A tool result's content.
- * @param found - Accumulator.
- * @returns The kernel names.
+ * Answer a runtime child's closure request from the CLI's payload store, from the data it sent alone: its package's
+ * unparsed `tau-plugin.json` and root. No module the child names is imported, and nothing is downloaded.
+ * @param request - The child's request.
+ * @returns The answer the child's kernel binds with, and the roots of the closures it names as sealed.
  */
-export const refusedKernels = (value: unknown, found = new Set<string>()): Set<string> => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      refusedKernels(item, found);
-    }
-    return found;
-  }
-  if (typeof value !== 'object' || value === null) {
-    return found;
-  }
-  const details: unknown = Reflect.get(value, 'details');
-  const kernel: unknown = typeof details === 'object' && details !== null ? Reflect.get(details, 'kernel') : undefined;
-  if (Reflect.get(value, 'code') === 'KERNEL_NOT_PREPARED' && typeof kernel === 'string') {
-    found.add(kernel);
-  }
-  for (const child of Object.values(value)) {
-    refusedKernels(child, found);
-  }
-  return found;
+export const inspectReportedClosure = async (
+  request: ReportedClosureRequest,
+): Promise<{ readonly answer: NativeClosureAnswer; readonly roots: readonly string[] }> => {
+  /* A package this CLI ships is read as this CLI prepares it, from its own deployment, whatever the child sent; any
+   * other from the child's data. Reading a launch index uses only the manifest and the package root: the seal step and
+   * the launch set run when a closure is prepared, which never happens from a child's data. */
+  const deployment: NativeKernelDeployment = (await shippedDeployment(request.package)) ?? {
+    package: request.package,
+    ecosystem: 'none',
+    manifest: request.manifest,
+    packageRoot: request.packageRoot,
+    entry: request.packageRoot,
+    optionsSchema: z.record(z.string(), z.unknown()),
+    optionsFromClosure: () => ({}),
+    launchSet: () => [],
+  };
+  const inspection = await inspectNativeKernels({ ...storeInput(), deployments: [deployment] });
+  const answer: NativeClosureAnswer = inspection.find(({ kernel }) => kernel === request.kernel)?.answer ?? {
+    status: 'unavailable',
+    reason: 'not-prepared',
+    byteLength: 0,
+  };
+  return { answer, roots: answer.status === 'ready' ? Object.values(answer.closures).map(({ root }) => root) : [] };
 };
+
+/**
+ * This CLI's own deployments of the packages a report lists: the native kernels it ships. A daemon prepares only
+ * those, from its own install, since a runtime child runs project code and may report any file.
+ * @param report - A runtime child's report.
+ * @returns The deployments this CLI ships, in report order.
+ */
+export const shippedDeploymentsOf = async (report: NativeDeploymentReport): Promise<NativeKernelDeployment[]> => {
+  const deployments = await Promise.all(report.map(async (row) => shippedDeployment(row.package)));
+  return deployments.filter((deployment): deployment is NativeKernelDeployment => deployment !== undefined);
+};
+
+/**
+ * The kernels of a report this CLI ships, which a daemon prepares.
+ * @param report - A runtime child's report.
+ * @returns Their ids.
+ */
+export const shippedKernelsOf = async (report: NativeDeploymentReport): Promise<ReadonlySet<string>> =>
+  new Set(preparableKernels(await shippedDeploymentsOf(report)).map(({ kernel }) => kernel));

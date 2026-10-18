@@ -14,16 +14,20 @@ describe('@taucad/build123d', () => {
     const { capabilities } = plugin({
       kernels: {
         default: {
-          pythonExecutable: '/python',
-          workerPath: '/worker.py',
-          pythonSha256: 'a'.repeat(64),
-          workerSha256: 'b'.repeat(64),
-          supportFiles: [
-            { path: '/analyzer.py', sha256: 'c'.repeat(64) },
-            { path: '/glb.py', sha256: 'd'.repeat(64) },
-            { path: '/native_materials.py', sha256: 'd'.repeat(64) },
-            { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
-          ],
+          closure: {
+            pythonExecutable: '/python',
+            workerPath: '/worker.py',
+            pythonSha256: 'a'.repeat(64),
+            workerSha256: 'b'.repeat(64),
+            supportFiles: [
+              { path: '/native_materials.py', sha256: 'c'.repeat(64) },
+              { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
+              { path: '/tau_kernel/analyzer.py', sha256: 'd'.repeat(64) },
+              { path: '/tau_kernel/glb.py', sha256: 'd'.repeat(64) },
+              { path: '/tau_kernel/model.py', sha256: 'd'.repeat(64) },
+              { path: '/tau_kernel/protocol.py', sha256: 'd'.repeat(64) },
+            ],
+          },
         },
       },
     });

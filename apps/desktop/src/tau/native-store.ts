@@ -16,12 +16,11 @@ import { access, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:f
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import build123dManifest from '@taucad/build123d/tau-plugin.json' with { type: 'json' };
-import picogkManifest from '@taucad/picogk/tau-plugin.json' with { type: 'json' };
+import { nativeKernelIdsSupportedOn, preparationPluginsOf } from '@taucad/native-process-core/store';
 import {
   computeTreeIntegrity,
   createPreparationHost,
-  parsePluginDeployment,
+  detectHostIndicators,
   readManagedPreparation,
   reverifyClosure,
 } from '@taucad/runtime/preparation/node';
@@ -35,19 +34,30 @@ import type {
   PreparationPlugin,
 } from '@taucad/runtime/preparation/node';
 
+import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import { nativeKernelsFrameType } from '#tau/native-kernels-frame.js';
 import type { NativeKernelsFrame, NativeKernelSlot } from '#tau/native-kernels-frame.js';
 
 const execFileAsync = promisify(execFile);
 
-/** The native packages the desktop composes, read from their `tau-plugin.json` without running plugin code. */
-export const desktopNativePlugins: readonly PreparationPlugin[] = [
-  {
-    package: '@taucad/build123d',
-    deployment: parsePluginDeployment(build123dManifest, '@taucad/build123d tau-plugin.json'),
-  },
-  { package: '@taucad/picogk', deployment: parsePluginDeployment(picogkManifest, '@taucad/picogk tau-plugin.json') },
-];
+/**
+ * The native packages the desktop bundles: each deployment's `tau-plugin.json` rows with its launch set, without its
+ * seal step or package directory. Main only seeds sealed closures from the bundle and reads their launch indexes; it
+ * never runs a seal, and nothing it prepares ships inside a package (its bundle holds no package tree).
+ */
+export const desktopNativePlugins: readonly PreparationPlugin[] = preparationPluginsOf(desktopNativeDeployments).map(
+  ({ seal: _seal, directory: _directory, ...plugin }) => plugin,
+);
+
+/**
+ * The native kernels this machine can run, advertised to the renderer's product catalog: every bundled kernel whose
+ * required dependencies declare a variant for this host.
+ * @returns Kernel names, in list order; none when the host cannot be identified.
+ */
+export const desktopNativeKernelIds = (): readonly string[] => {
+  const indicators = detectHostIndicators();
+  return indicators === undefined ? [] : nativeKernelIdsSupportedOn(desktopNativeDeployments, indicators);
+};
 
 /**
  * Open the preparation host main seeds and inspects through. It never downloads: main only seeds from the bundle and
@@ -265,19 +275,21 @@ export const seedNativeStore = async (input: {
 
 /**
  * The frame main posts to the kernel utilities: each declared native kernel with the sealed closure its launch index
- * names, or why it has none. A kernel no declared variant fits this host is left out, as it always was.
- * @param input - The host, its plugins and what seeding did.
+ * names, or why it has none, and the store it read them from. A kernel no declared variant fits this host is left out;
+ * the utility reads the store for it, which says why it cannot run here.
+ * @param input - The host, the store's real path, its plugins and what seeding did.
  * @returns The frame.
  */
 export const composeDesktopNativeKernels = async (input: {
   readonly host: PreparationHost;
+  readonly store: string;
   readonly plugins?: readonly PreparationPlugin[];
   readonly outcomes: readonly SeedOutcome[];
 }): Promise<NativeKernelsFrame> => {
   const kernels: NativeKernelSlot[] = [];
   for (const plugin of input.plugins ?? desktopNativePlugins) {
     for (const [kernel, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
-      // oxlint-disable-next-line no-await-in-loop -- two small launch indexes, read in roster order
+      // oxlint-disable-next-line no-await-in-loop -- two small launch indexes, read in list order
       const state = await input.host.inspectLaunch({ package: plugin.package, dependencies: requires });
       const closure = state.status === 'ready' ? state.closures[requires[0]] : undefined;
       if (closure !== undefined) {
@@ -298,7 +310,7 @@ export const composeDesktopNativeKernels = async (input: {
       });
     }
   }
-  return { type: nativeKernelsFrameType, kernels };
+  return { type: nativeKernelsFrameType, store: input.store, kernels };
 };
 
 /** What main does with the store once per launch, for its log. */
@@ -348,7 +360,7 @@ export const startNativeStore = async (input: {
       ...(input.clone === undefined ? {} : { clone: input.clone }),
     });
     input.log(seeding.some(({ status }) => status === 'refused') ? 'error' : 'info', 'native.seed', { store, seeding });
-    input.post(await composeDesktopNativeKernels({ host, plugins, outcomes: seeding }));
+    input.post(await composeDesktopNativeKernels({ host, store, plugins, outcomes: seeding }));
     posted = true;
     /* Every closure this installation uses is now linked, so a collection keeps them. */
     const garbage = await host.collectGarbage({ signal: input.signal });
@@ -360,6 +372,7 @@ export const startNativeStore = async (input: {
       const message = `Tau could not open its payload store at ${input.store}: ${error instanceof Error ? error.message : String(error)}`;
       input.post({
         type: nativeKernelsFrameType,
+        store: input.store,
         kernels: plugins.flatMap((plugin) =>
           Object.entries(plugin.deployment.kernels).map(([kernel, { extensions }]) => ({
             kernel,

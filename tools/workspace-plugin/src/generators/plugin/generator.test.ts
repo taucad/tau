@@ -30,17 +30,39 @@ const copy = (source: string, target: string): void => {
   cpSync(resolve(repositoryRoot, source), target);
 };
 
-const checkGeneratedPlugins = async (mode: 'typecheck' | 'build'): Promise<void> => {
+type CompiledFixture = {
+  readonly name: string;
+  readonly capabilities: string;
+  readonly hostTarget: 'daemon' | 'python' | 'native';
+};
+
+const hostRoleFixtures: readonly CompiledFixture[] = [
+  { name: 'compiled-job', capabilities: 'job', hostTarget: 'daemon' },
+  { name: 'compiled-machine', capabilities: 'machine', hostTarget: 'daemon' },
+  { name: 'compiled-mixed', capabilities: 'kernel,job,machine', hostTarget: 'daemon' },
+];
+
+const nativeKernelFixtures: readonly CompiledFixture[] = [
+  { name: 'compiled-python', capabilities: 'kernel', hostTarget: 'python' },
+  { name: 'compiled-native', capabilities: 'kernel', hostTarget: 'native' },
+];
+
+/** Workspace dependencies a generated native kernel declares, which the repository root does not hoist. */
+const nativeWorkspaceDependencies = {
+  '@taucad/native-process-core': 'packages/core/native-process',
+  '@taucad/python-kernel-core': 'packages/core/python-kernel',
+} as const;
+
+const checkGeneratedPlugins = async (
+  mode: 'typecheck' | 'build',
+  fixtures: readonly CompiledFixture[] = hostRoleFixtures,
+): Promise<void> => {
   const root = mkdtempSync(join(tmpdir(), 'tau-plugin-generator-'));
   try {
     const fixtureChanges = await Promise.all(
-      [
-        { name: 'compiled-job', capabilities: 'job' },
-        { name: 'compiled-machine', capabilities: 'machine' },
-        { name: 'compiled-mixed', capabilities: 'kernel,job,machine' },
-      ].map(async (fixture) => {
+      fixtures.map(async (fixture) => {
         const tree = createTreeWithEmptyWorkspace();
-        await pluginGenerator(tree, { ...fixture, hostTarget: 'daemon' });
+        await pluginGenerator(tree, fixture);
         return tree.listChanges();
       }),
     );
@@ -52,8 +74,18 @@ const checkGeneratedPlugins = async (mode: 'typecheck' | 'build'): Promise<void>
     treeModule.flushChanges(root, changes);
     copy('tools/typescript/base.json', join(root, 'tools/typescript/base.json'));
 
-    for (const name of ['compiled-job', 'compiled-machine', 'compiled-mixed']) {
+    for (const { name } of fixtures) {
       const projectRoot = join(root, 'packages/plugins', name);
+      const manifest = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as {
+        readonly dependencies?: Readonly<Record<string, string>>;
+      };
+      for (const [dependency, source] of Object.entries(nativeWorkspaceDependencies)) {
+        if (manifest.dependencies?.[dependency] !== undefined) {
+          const link = join(projectRoot, 'node_modules', dependency);
+          mkdirSync(dirname(link), { recursive: true });
+          symlinkSync(join(repositoryRoot, source), link);
+        }
+      }
       if (mode === 'build') {
         execFileSync(join(repositoryRoot, 'node_modules/.bin/tsdown'), [], {
           cwd: projectRoot,
@@ -347,7 +379,7 @@ describe('plugin generator', () => {
       peerDependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     }>(tree, `${root}/package.json`);
-    expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0', zod: '^4.0.0' });
+    expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0', zod: '^4.1.0' });
     expect(manifest.devDependencies).toEqual({ '@taucad/runtime': 'workspace:*', zod: 'catalog:' });
   });
 
@@ -443,6 +475,83 @@ describe('plugin generator', () => {
   it('should build portable declarations for job-only, machine-only, and mixed packages', async () => {
     await checkGeneratedPlugins('build');
   }, 120_000);
+
+  it.each([
+    {
+      hostTarget: 'python',
+      core: '@taucad/python-kernel-core',
+      define: 'definePythonKernelAdopter',
+      bind: 'bindPythonKernel',
+    },
+    {
+      hostTarget: 'native',
+      core: '@taucad/native-process-core',
+      define: 'defineNativeKernelDeployment',
+      bind: 'bindNativeKernel',
+    },
+  ] as const)(
+    'should give a $hostTarget kernel a /native deployment over $core',
+    async ({ hostTarget, core, define, bind }) => {
+      const tree = createTreeWithEmptyWorkspace();
+      const root = `packages/plugins/${hostTarget}-fixture`;
+
+      await pluginGenerator(tree, { name: `${hostTarget}-fixture`, capabilities: 'kernel', hostTarget });
+
+      const manifest = readJson<{
+        files?: string[];
+        exports?: Record<string, unknown>;
+        publishConfig?: { exports?: Record<string, unknown> };
+        dependencies?: Record<string, string>;
+      }>(tree, `${root}/package.json`);
+      expect(manifest.exports?.['./native']).toBe('./src/native.ts');
+      expect(manifest.exports?.['./tau-plugin.json']).toBe('./tau-plugin.json');
+      expect(manifest.publishConfig?.exports?.['./native']).toMatchObject({ import: './dist/native.mjs' });
+      expect(manifest.files).toContain('tau-plugin.json');
+      expect(manifest.dependencies).toHaveProperty([core], 'workspace:*');
+      const native = readText(tree, `${root}/src/native.ts`);
+      expect(native).toContain(`${define}({`);
+      expect(native).toContain(`package: '@taucad/${hostTarget}-fixture'`);
+      expect(native).toContain('moduleUrl: import.meta.url');
+      expect(native).not.toContain('.plugin.js');
+      const kernel = readText(tree, `${root}/src/${hostTarget}-fixture.kernel.ts`);
+      expect(kernel).toContain('withNativeDeployment(');
+      expect(kernel).toContain(`await ${bind}(`);
+      expect(readJson<{ kernels?: Record<string, unknown> }>(tree, `${root}/tau-plugin.json`).kernels).toHaveProperty([
+        `${hostTarget}-fixture`,
+      ]);
+      expect(readText(tree, `${root}/src/index.ts`)).toContain('Native } from');
+      expect(readText(tree, `${root}/tsdown.config.ts`)).toContain("'src/native.ts'");
+      expect(readText(tree, `${root}/AGENTS.md`)).toContain('src/native.ts');
+      const { targets } = readJson<{ targets?: Record<string, { options?: { command?: string } }> }>(
+        tree,
+        `${root}/project.json`,
+      );
+      expect(targets?.['generate-tau-plugin']?.options?.command?.includes('tau-python-kernel.mts generate')).toBe(
+        hostTarget === 'python' ? true : undefined,
+      );
+    },
+  );
+
+  it('should leave the /native deployment out of a browser, node or non-kernel package', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await pluginGenerator(tree, { name: 'node-kernel', capabilities: 'kernel', hostTarget: 'node' });
+    await pluginGenerator(tree, { name: 'python-transcoder', capabilities: 'transcoder', hostTarget: 'python' });
+
+    for (const name of ['node-kernel', 'python-transcoder']) {
+      expect(tree.exists(`packages/plugins/${name}/src/native.ts`), name).toBe(false);
+      expect(tree.exists(`packages/plugins/${name}/src/${name}.schemas.ts`), name).toBe(false);
+      expect(tree.exists(`packages/plugins/${name}/tau-plugin.json`), name).toBe(false);
+      expect(
+        readJson<{ exports?: Record<string, unknown> }>(tree, `packages/plugins/${name}/package.json`).exports,
+        name,
+      ).not.toHaveProperty(['./native']);
+    }
+  });
+
+  it('typechecks emitted python and native kernels with their deployments', async () => {
+    await checkGeneratedPlugins('typecheck', nativeKernelFixtures);
+  }, 180_000);
 
   it('fails a full creation collision before changing existing bytes', async () => {
     const tree = createTreeWithEmptyWorkspace();

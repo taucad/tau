@@ -33,7 +33,7 @@ Paths are relative to the repository root unless a command says otherwise. `<ker
   ```
 
 - [ ] `pnpm nx generate-manifest tau-examples`; the row appears in `src/manifest.json` with the right `kind`, `geometry` and `mainFile`.
-- [ ] `pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=<kernel>/<example>` (renders the selected row and rewrites the complete `src/thumbnail.assets.ts` from manifest rows with existing thumbnails). Look at the image; the fixed camera cannot be tuned per example, so fix framing in the model's own layout. Set `TAU_PICOGK_RESOURCE_ROOT` for PicoGK.
+- [ ] `pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=<kernel>/<example>` (renders the selected row and rewrites the complete `src/thumbnail.assets.ts` from manifest rows with existing thumbnails). Look at the image; the fixed camera cannot be tuned per example, so fix framing in the model's own layout. Run `tau prepare picogk` first for PicoGK.
 - [ ] Add `"thumbnail": "thumbnail.webp"` to `assets.main`, then `pnpm nx generate-manifest tau-examples` again; `src/builtin.ts` now carries the row and its `thumbnailUrl`.
 - [ ] Health: `TAU_EXAMPLE_PATTERN='<kernel>\.<example>$' pnpm nx run runtime-e2e:example-health` (no `^`; the pattern matches `Tau example model health > <kernel>.<example>`). Over 300 s: make the default cheaper (for example a coarser `voxelSize`) rather than demote, because `reference` unpublishes.
 - [ ] Suite gate, when the row has a suite: one `it()` in `apps/runtime-e2e/src/geospec-suites.test.ts`.

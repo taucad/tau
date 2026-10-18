@@ -75,6 +75,61 @@ Native sessions accept `requestTimeout: 0` to wait for completion or cancellatio
 has a two-minute handshake deadline; a positive request timeout remains an explicit host policy.
 Artifact size limits supplied by the host remain enforced alongside length and digest validation.
 
+## Native kernel deployments (`./adopter`, `./store`)
+
+A native kernel package is fully integrated by listing its plugin in a runtime definition. The
+package defines its deployment once in a light module (its `/native` subpath, no kernel code) and
+binds it to its kernel registrations; a host discovers every native kernel from the runtime it
+resolved and names none.
+
+```typescript
+// src/native.ts (exported as "./native")
+import { defineNativeKernelDeployment } from '@taucad/native-process-core/adopter';
+
+import manifest from '../tau-plugin.json' with { type: 'json' };
+
+export const rustcadNative = defineNativeKernelDeployment({
+  package: '@acme/rustcad',
+  ecosystem: 'none',
+  manifest,
+  moduleUrl: import.meta.url,
+  optionsSchema: rustcadClosureSchema,
+  optionsFromClosure: (closure) => ({ executable: `${closure.root}/bin/rustcad`, runtimePath: closure.root }),
+  launchSet: () => ['bin/rustcad'],
+});
+
+// src/rustcad.kernel.ts: options take an optional explicit `closure`, and `initialize` binds late.
+export const rustcadKernel = withNativeDeployment(
+  defineKernel({
+    id: 'rustcad',
+    extensions: ['rcad'],
+    async initialize(options, runtime) {
+      const { options: bound } = await bindNativeKernel({ deployment: rustcadNative, kernel: 'rustcad', options });
+      // start a NativeProcessSession from `bound`
+    },
+    // ...
+  }),
+  rustcadNative,
+);
+```
+
+`bindNativeKernel` (`./store`) uses an explicit `options.closure` when given; otherwise it asks the
+closure resolver a host installed with `installNativeClosureResolver`, or reads the default payload
+store's launch index itself. An unprepared kernel throws `UnpreparedKernelError`, whose
+`KERNEL_NOT_PREPARED` (or `KERNEL_CAPABILITY_MISSING`) issue the runtime forwards and retries on the
+next operation.
+
+| Export (`./store`)                                     | Purpose                                                                                   |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `nativeDeploymentsOf`                                  | The native packages a resolved runtime lists, with the kernels it routes, in list order.  |
+| `preparationPluginsOf`, `openNativePreparation`        | The preparation plugins of deployments, and a long-lived preparation host over them.      |
+| `preparableKernels`, `nativeKernelIdsSupportedOn`      | Kernels that can be prepared, and those with a variant for a host.                        |
+| `bindNativeKernel`, `UnpreparedKernelError`            | Late binding in `initialize`, and its typed refusal.                                      |
+| `storeClosureResolver`, `installNativeClosureResolver` | The default store reader, and the slot a host installs its own resolver in.               |
+| `inspectNativeKernels`, `inspectionResolver`           | Closure states read by a process that can read the store, answered to one that cannot.    |
+| `reportNativeDeployments`, `loadReportedDeployments`   | The package-neutral report a runtime thread or child sends its parent, and its re-import. |
+| `verifyStoreClosure`, `defaultPayloadStore`            | The closure re-verifier for store launches, and the shared store root.                    |
+
 ## Sandbox
 
 Every session spawns its worker through [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropics/sandbox-runtime)

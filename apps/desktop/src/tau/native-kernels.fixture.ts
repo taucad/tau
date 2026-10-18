@@ -12,8 +12,11 @@ const row = (path: string, digit: string): ReceiptFile => ({
   mode: 0o755,
 });
 
+/** The payload store the fixture's frame names. */
+export const fixturePayloadStore = '/store';
+
 /** Where the fixture's closures claim to live. */
-export const fixtureStore = '/store/closures/sha256';
+export const fixtureStore = `${fixturePayloadStore}/closures/sha256`;
 
 const picogkSlot: NativeKernelSlot = {
   kernel: 'picogk',
@@ -42,6 +45,7 @@ const picogkSlot: NativeKernelSlot = {
  */
 export const nativeKernelsFixture = (options: { readonly picogk: boolean }): NativeKernelsFrame => ({
   type: nativeKernelsFrameType,
+  store: fixturePayloadStore,
   kernels: [
     {
       kernel: 'build123d',
@@ -54,11 +58,13 @@ export const nativeKernelsFixture = (options: { readonly picogk: boolean }): Nat
         closureIntegrity: 'sha256-YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=',
         files: [
           row('python/bin/python3', '1'),
-          row('tau-worker/analyzer.py', '2'),
-          row('tau-worker/glb.py', '3'),
           row('tau-worker/worker.py', '4'),
           row('tau-worker/native_materials.py', 'b'),
           row('tau-worker/mechanisms.py', 'c'),
+          row('tau-worker/tau_kernel/analyzer.py', '2'),
+          row('tau-worker/tau_kernel/glb.py', '3'),
+          row('tau-worker/tau_kernel/model.py', 'd'),
+          row('tau-worker/tau_kernel/protocol.py', 'e'),
         ],
       },
     },

@@ -121,7 +121,7 @@ describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
 registerHooks({
   resolve: (specifier, context, next) =>
     specifier === '@taucad/picogk/tau-plugin.json'
-      ? { url: ${JSON.stringify(pathToFileURL(manifest).href)}, shortCircuit: true }
+      ? { url: ${JSON.stringify(pathToFileURL(manifest).href)}, format: "json", shortCircuit: true }
       : next(specifier, context),
 });
 `,

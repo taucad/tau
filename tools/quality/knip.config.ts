@@ -355,6 +355,10 @@ const config: KnipConfig = {
       // Module declaration for `occt-import-js` and the Emscripten types it reads through `import('…')`.
       entry: ['src/types/{occt-import-js,emscripten}.d.ts'],
     },
+    'packages/core/python-kernel': {
+      // Every Python kernel's Nx targets run these scripts from the workspace root with `--package <dir>`.
+      entry: ['scripts/{generate-tau-plugin,generate-project-template,test-python}.mts'],
+    },
     'packages/plugins/build123d': {
       // Nx targets run every script from the workspace root.
       entry: ['scripts/*.mts'],

@@ -1,6 +1,6 @@
 ---
 name: create-kernel
-description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, or wiring kernel UI catalog, prompt, and Monaco entries. Agents should select this skill autonomously when a request clearly introduces or productizes a kernel.
+description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, wiring kernel UI catalog, skill bundle, and Monaco entries, or writing a native Python, .NET or binary kernel. Agents should select this skill autonomously when a request clearly introduces or productizes a kernel.
 ---
 
 # Create Kernel
@@ -15,8 +15,8 @@ A kernel is one _capability_ of a plugin toolkit. The package declares its packa
 2. Kernel implemented at `packages/plugins/<name>/src/<name>.kernel.ts`
 3. Tests pass at `packages/plugins/<name>/src/<name>.kernel.test.ts` through public authoring and dedicated testing surfaces
 4. `src/index.ts` exports the package-named factory, its `plugin` alias, and the `<name>Kernel` factory
-5. Every applicable host roster is wired explicitly; inapplicable rosters are left alone (section 3)
-6. Product catalog, prompt, editor language/types, icon, and docs surfaces are complete where the kernel is productized
+5. Every applicable host runtime lists the plugin explicitly; inapplicable runtimes name why they omit it (section 3)
+6. Product catalog, skill bundle, editor language/types, icon, and docs surfaces are complete where the kernel is productized
 7. The npm package name and Trusted Publisher are prepared by a maintainer before the first release
 8. Package and affected-host Nx gates pass
 
@@ -31,12 +31,12 @@ pnpm install --no-frozen-lockfile
 
 Options (`tools/workspace-plugin/src/generators/plugin/schema.json`):
 
-| Option         | Required | Default   | Notes                                                                      |
-| -------------- | -------- | --------- | -------------------------------------------------------------------------- |
-| `name`         | Yes      | (argv[0]) | Package name without `@taucad/` (`zoo` → `@taucad/zoo`)                    |
-| `capabilities` | Yes      | —         | One or more of `kernel`, `transcoder`, `middleware`, `bundler`             |
-| `description`  | No       | derived   | Package description                                                        |
-| `hostTarget`   | No       | `browser` | `browser`, `node`, `daemon`, `python`, `native` — drives the payload guard |
+| Option         | Required | Default   | Notes                                                                                                                                            |
+| -------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`         | Yes      | (argv[0]) | Package name without `@taucad/` (`zoo` → `@taucad/zoo`)                                                                                          |
+| `capabilities` | Yes      | —         | One or more of `kernel`, `transcoder`, `middleware`, `bundler`                                                                                   |
+| `description`  | No       | derived   | Package description                                                                                                                              |
+| `hostTarget`   | No       | `browser` | `browser`, `node`, `daemon`, `python`, `native` — drives the payload guard; `python`/`native` kernels also get a native deployment (section 3.8) |
 
 This creates the package baseline; the kernel stub is intentionally non-functional and product wiring remains explicit:
 
@@ -225,20 +225,21 @@ import { <alias> } from '@taucad/<name>';
 defineRuntime({ plugins: [<alias>()] });
 ```
 
-### 3.2 Review every host roster
+### 3.2 Review every host runtime
 
-The six composition rosters are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted.
+The seven host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `build123d()` or `picogk()` is the whole integration (section 3.8).
 
-| Host                          | Runtime roster                                               | Dependency manifest                    |
-| ----------------------------- | ------------------------------------------------------------ | -------------------------------------- |
-| UI editor                     | `apps/ui/app/runtime/ui-runtime.definition.ts`               | `apps/ui/package.json`                 |
-| CLI built-ins                 | `packages/cli/src/cli-runtime.ts`                            | `packages/cli/package.json`            |
-| GeoSpec default model runtime | `packages/geospec-engine/src/model/default-runtime.ts`       | `packages/geospec-engine/package.json` |
-| Runtime integration fixtures  | `apps/runtime-e2e/src/runtime.definition.ts`                 | `apps/runtime-e2e/package.json`        |
-| Checked-in example rendering  | `libs/tau-examples/scripts/runtime.ts`                       | `libs/tau-examples/package.json`       |
-| Import/export converter       | `apps/ui/app/routes/convert/converter-runtime.definition.ts` | `apps/ui/package.json`                 |
+| Host                          | Runtime definition                                     | Coverage test                                   | Dependency manifest                    |
+| ----------------------------- | ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------- |
+| UI editor                     | `apps/ui/app/runtime/ui-runtime.definition.ts`         | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`                 |
+| Desktop utility               | `apps/desktop/src/tau/desktop-runtime.factory.ts`      | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`            |
+| CLI built-ins                 | `packages/cli/src/cli-runtime.ts`                      | `cli-runtime.test.ts`                           | `packages/cli/package.json`            |
+| GeoSpec default model runtime | `packages/geospec-engine/src/model/default-runtime.ts` | `default-runtime.test.ts`                       | `packages/geospec-engine/package.json` |
+| Runtime integration fixtures  | `apps/runtime-e2e/src/runtime.definition.ts`           | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`        |
+| Checked-in example rendering  | `libs/tau-examples/scripts/runtime.ts`                 | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`       |
+| Import/export converter       | `apps/libs/converter/src/runtime.ts`                   | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json`     |
 
-Array order is kernel-selection precedence. Preserve it deliberately. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
+Array order is kernel-selection precedence. Preserve it deliberately; each host's existing order assertions pin it. Every coverage test calls `assertKernelRosterCoverage` from `@taucad/runtime-testing/roster` against `kernelConfigurations`: a new catalog row fails each one until that host lists the kernel or adds an `omitted` reason. The desktop also keeps `apps/desktop/src/tau/desktop-native-deployments.ts`, the native packages it bundles closures for; a parity test holds it equal to the deployments its runtime lists. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
 
 ### 3.3 Catalog metadata
 
@@ -248,15 +249,11 @@ Add an entry to `kernelConfigurations` with `id`, `name`, `language`, `dimension
 
 If the product catalog id differs from the runtime capability id, document the mapping: catalog ids are persisted product offerings, while runtime ids select engines. Add a raw SVG whose id matches the catalog id under `apps/ui/app/components/icons/raw/`, then run `/regen-sprite`; `svg-icon.tsx` intentionally makes a missing kernel icon a type error.
 
-### 3.4 Prompt system
+### 3.4 Agent skills and first-party product tables
 
-Add under `apps/api/app/api/chat/prompts/kernel-prompt-configs/`:
+Kernel guidance ships as a package-owned skill bundle, not as an API prompt config. Add the bundle definition to `libs/api-extractor/src/bundle/generate.ts` (and its usage detector in `src/usage/collect-usage.ts`), generate `agent/skills.json` and `agent/resources.js` into the package, export `./agent` and `./agent/*`, and declare `tau.skills` in its `package.json`. A package with no authoring surface declares `tau.skills: null` with a `reason`.
 
-- `<id>.prompt.config.ts`
-- `<id>.prompt.example.<ext>`
-- Register in the `kernelConfigs` map in `kernel.prompt.config.ts`
-
-Use the existing replicad/jscad/manifold/openscad configs as templates. Include the single-file example, multi-shape example where supported, and multi-file directory where the language supports imports; update the registry tests instead of adding a second prompt map.
+A first-party kernel then gets its product rows: the package in `skillOwners` (`packages/skills/src/skill-bundles.ts`) and its resources import in `src/resources.ts`, its slug and catalog id in `builtInSkillSlugs` and `kernelIds` (`libs/telemetry/src/ingest.ts`), its billing tier (`apps/libs/billing/src/kernel-tier-requirements.ts`) and, for a `pypi`/`nuget` kernel, its project template in the UI's `getKernelProjectTemplate`. The skills, telemetry and UI template tests fail on a missing row and the billing table fails typecheck. These rows are first-party enrichment, not support: a third-party kernel needs none of them, hosts load its `tau.skills` bundle through the plugin listing, and telemetry reports its slug as `custom`.
 
 ### 3.5 Monaco IntelliSense types
 
@@ -288,6 +285,31 @@ npm cannot attach a Trusted Publisher to a package name that does not exist. Bef
 
 This is an operator action, not a network-dependent repository gate and not permission for an agent to publish. Follow `package-release/SKILL.md` for the release-group workflow.
 
+### 3.8 Native kernels
+
+A kernel that runs out of process from a prepared closure (Python, .NET or a single binary) carries its deployment on its kernel registration. A host lists its plugin like any other and discovers the rest with `nativeDeploymentsOf` from `@taucad/native-process-core/store`; no Tau package names it. `--hostTarget=python|native` scaffolds all of this:
+
+1. `src/native.ts`, exported as `./native`, defines the deployment from the package's `tau-plugin.json` (imported statically) and `import.meta.url`. It imports no kernel code: a parent process re-imports it to prepare the closure without loading the kernel.
+2. The kernel is `withNativeDeployment(defineKernel({ ... }), <alias>Native)`. Its options are `{ closure?, requestTimeout, maxArtifactBytes }`; `initialize` binds late (`bindPythonKernel`, `bindDotnetKernel` or `bindNativeKernel`) and so refuses with `KERNEL_NOT_PREPARED` naming `tau prepare <id>` until the closure is sealed.
+3. A `native.test.ts` pins the package name, package root, the golden-target launch set and options, and that the registration carries the deployment (`nativeDeploymentOf`).
+4. A first-party native kernel is listed in the CLI, GeoSpec, desktop and tau-examples runtimes at a reviewed position, with the desktop's bounds as its options there; the UI and runtime-e2e runtimes omit it with a reason.
+
+New Python kernel on `@taucad/python-kernel-core`:
+
+- [ ] `src/native.ts` with `definePythonKernelAdopter({ package, manifest, moduleUrl: import.meta.url, worker: { kernelId, kernelName, workerModules }, selfTestImports, projectLibraries })`; options from `pythonKernelOptionsSchema({ supportModules })`
+- [ ] `python/worker.py` is a `dispatch` served by `tau_kernel.protocol.run_worker`; library calls stay in the kernel's own modules
+- [ ] `python/requirements.in`, then `tau-python-kernel generate` and `template` (`--package <dir>`, the generated Nx targets) write `tau-plugin.json`, the pinned `python/tau_kernel/` copy and `project/*`
+- [ ] A `<kernel>-tau-plugin.yml` caller of `.github/workflows/python-kernel-tau-plugin.yml` records the golden receipts on dispatch
+- [ ] Two kernels claiming `.py` route by list order until the kernel-side "declines this file" outcome exists
+
+New .NET kernel on `@taucad/dotnet-kernel-core`:
+
+- [ ] `src/native.ts` with `defineDotnetKernelAdopter({ package, manifest, moduleUrl: import.meta.url, ...layout })` from `@taucad/dotnet-kernel-core/adopter`; no seal step (ReadyToRun happens at layer build)
+- [ ] Kernel `initialize` uses `bindDotnetKernel`, `createDotnetSession` and `createDotnetWorkspaceMirror`; the layer record and compose script come from `@taucad/dotnet-kernel-core/layer`
+- [ ] The C# worker follows `@taucad/picogk`'s `Tau.PicoGK.Worker` protocol shape until a second C# worker justifies a shared C# project
+
+A Rust or other single-binary kernel uses `defineNativeKernelDeployment` and `bindNativeKernel` from `@taucad/native-process-core` directly; `@taucad/dotnet-kernel-core`'s README ("Rust or other single-binary kernel") holds the recipe and `@taucad/native-process-core`'s README the deployment contract. A third-party author follows the same steps in their own package and edits nothing in Tau: users list the plugin with `--plugin`/`--config`, and `tau prepare <id>`, `prepare_kernel`, `tau mcp`, `tau serve` and GeoSpec support it from the listing.
+
 ## 4) Verify
 
 ```bash
@@ -301,9 +323,9 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 
 1. Scaffold (section 0)
 2. Implement kernel + tests
-3. Review all six host rosters; wire only applicable consumers
+3. Review all seven host runtimes; list only applicable consumers
 4. Verify geometry-naming compliance for render, export, native handles, converter boundaries
-5. Complete catalog, prompt, editor types/language/icon, docs, and npm-name handoff
+5. Complete catalog, skill bundle and product rows, editor types/language/icon, docs, and npm-name handoff
 6. Run the Nx checks and fix every regression
 7. Prepare a version plan and commit only when requested
 
@@ -315,10 +337,11 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - [ ] `packages/plugins/<name>/src/index.ts` exports `plugin`, the alias, and `<alias>Kernel`
 - [ ] `packages/plugins/<name>/package.json` — engine dependency plus the `@taucad/runtime-testing` test dependency
 - [ ] `.size-limit.json` placeholder replaced by a measured budget
-- [ ] UI, CLI, GeoSpec, runtime-e2e, tau-examples, and converter rosters each reviewed; applicable manifests and compositions updated
+- [ ] UI, desktop, CLI, GeoSpec, runtime-e2e, tau-examples, and converter runtimes each reviewed; applicable manifests and lists updated; coverage tests green
 - [ ] `libs/types/src/constants/kernel.constants.ts` — catalog entry and backend/language mappings
 - [ ] `apps/ui/app/components/icons/raw/<id>.svg` added and sprite regenerated
-- [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/` — config, examples, map registration, tests
+- [ ] Skill bundle, `skillOwners`, resources import, telemetry `kernelIds`/`builtInSkillSlugs` and billing tier rows
+- [ ] Native kernel only: `/native` deployment, `withNativeDeployment` kernel with late binding, `tau-plugin.json`, `native.test.ts`
 - [ ] `libs/api-extractor/` — extractor, target, generated declaration map/tests, `kernel-types.ts`, typetest paths
 - [ ] New source language, if any, added through `add-monaco-language`
 - [ ] Kernel docs pages + architecture policy updated
@@ -333,11 +356,13 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - Reached into `@taucad/runtime`'s `#` internals → use the `@taucad/runtime/kernel` author surface
 - Backend payload cached at module scope → breaks payload isolation and the generated `hostTarget` guard
 - Missing `builtinModuleNames` for JS/TS kernels → transitive import detection fails
-- Catalog `mainFile` inconsistent with the kernel's `extensions` → extension→kernel mapping misroutes files
+- Catalog `mainFile` inconsistent with the kernel's `extensions` → extension→kernel mapping misroutes files; the host coverage tests catch it
 - Local mock helpers instead of the shared testing utils → maintenance burden
 - Imported a removed `@taucad/runtime/testing` or `@taucad/geometry-core/testing` subpath → use `@taucad/runtime-testing`
 - Copied legacy generated geometry names instead of the naming helpers → explorer/import/export drift
 - `declare module` wrapper instead of raw `.d.ts` + JSON map → TS1038 errors in Monaco
-- Added the kernel to one host roster without reviewing the other five → hidden CLI/GeoSpec/example/converter drift
-- Added the kernel to code but not to prompts, editor types/icon, or docs comparisons → product-surface drift
+- Added the kernel to one host runtime without reviewing the other six → hidden CLI/GeoSpec/desktop/example/converter drift
+- Added the kernel to code but not to its skill bundle, editor types/icon, or docs comparisons → product-surface drift
+- Wrote a per-host native kernel table or a host-side adopter list → list the plugin in the runtime; the registration carries the deployment
+- A `/native` module that imports the kernel → a parent preparing the closure loads kernel code
 - Expected CI to claim a new npm name automatically → Trusted Publisher setup requires the one-time maintainer reservation first

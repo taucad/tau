@@ -159,6 +159,14 @@ export class FileTreeService {
     }
   });
   private _tree: Map<string, FileEntry>;
+  /*
+   * Whether `_tree` has been handed to a reader. A handed-out snapshot is never
+   * mutated: the next change copies it once, and every further change before
+   * the next read edits that unread copy in place (D-UI-15).
+   */
+  private _treeHandedOut = false;
+  /** One tree publication per task: a burst of facts is one snapshot for subscribers. */
+  private _treePublicationQueued = false;
   private readonly proxy: ComposedViewClient;
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
@@ -302,6 +310,7 @@ export class FileTreeService {
    * @returns Mutable backing map of {@link FileEntry} records keyed by path.
    */
   public getTreeSnapshot(): Map<string, FileEntry> {
+    this._treeHandedOut = true;
     return this._tree;
   }
 
@@ -814,6 +823,7 @@ export class FileTreeService {
       }
     }
     this._tree = newTree;
+    this._treeHandedOut = false;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyGlobal(undefined);
   }
@@ -981,7 +991,7 @@ export class FileTreeService {
     if (!this.isDirectoryResolvedKey(parent) || this._tree.has(relativePath)) {
       return;
     }
-    const newTree = new Map(this._tree);
+    const newTree = this.draftTree();
     const name = relativePath.split('/').pop() ?? relativePath;
     newTree.set(relativePath, {
       path: relativePath,
@@ -992,7 +1002,6 @@ export class FileTreeService {
       isLoaded: false,
       isDirectoryResolved: true,
     });
-    this._tree = newTree;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(parent, undefined);
   }
@@ -1024,17 +1033,12 @@ export class FileTreeService {
     }
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const prefix = relativePath === '' ? '' : relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
-    const newTree = new Map(this._tree);
-    let changed = newTree.delete(relativePath);
-    // oxlint-disable-next-line unicorn/no-useless-spread -- snapshot keys before mutating newTree to keep iteration deterministic across V8/Bun Map invalidation semantics.
-    for (const key of [...newTree.keys()]) {
-      if (key.startsWith(prefix)) {
+    const doomed = [...this._tree.keys()].filter((key) => key === relativePath || key.startsWith(prefix));
+    if (doomed.length > 0) {
+      const newTree = this.draftTree();
+      for (const key of doomed) {
         newTree.delete(key);
-        changed = true;
       }
-    }
-    if (changed) {
-      this._tree = newTree;
       this.notifyTreeSubscribers();
       this._listingPathSubscribers.notifyPath(this.paths.parentOf(relativePath), undefined);
     }
@@ -1050,36 +1054,60 @@ export class FileTreeService {
     this.invalidatePendingDirectory(this.paths.parentOf(newPath));
     const oldPrefix = oldPath === '' ? '' : oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
     const newPrefix = newPath === '' ? '' : newPath.endsWith('/') ? newPath : `${newPath}/`;
-    const newTree = new Map(this._tree);
+    const ownEntry = this._tree.get(oldPath);
+    const moved = [...this._tree.entries()].filter(([key]) => key.startsWith(oldPrefix));
+    if (ownEntry === undefined && moved.length === 0) {
+      return;
+    }
+    const newTree = this.draftTree();
     let changed = false;
-    const ownEntry = newTree.get(oldPath);
     if (ownEntry) {
       newTree.delete(oldPath);
       const name = newPath.split('/').pop() ?? newPath;
       newTree.set(newPath, { ...ownEntry, path: newPath, name });
       changed = true;
     }
-    // oxlint-disable-next-line unicorn/no-useless-spread -- snapshot entries before mutating newTree to keep iteration deterministic across V8/Bun Map invalidation semantics.
-    for (const [key, entry] of [...newTree.entries()]) {
-      if (key.startsWith(oldPrefix)) {
-        const remapped = `${newPrefix}${key.slice(oldPrefix.length)}`;
-        newTree.delete(key);
-        newTree.set(remapped, { ...entry, path: remapped });
-        changed = true;
-      }
+    for (const [key, entry] of moved) {
+      const remapped = `${newPrefix}${key.slice(oldPrefix.length)}`;
+      newTree.delete(key);
+      newTree.set(remapped, { ...entry, path: remapped });
+      changed = true;
     }
     if (changed) {
-      this._tree = newTree;
       this.notifyTreeSubscribers();
       this._listingPathSubscribers.notifyPath(this.paths.parentOf(oldPath), undefined);
       this._listingPathSubscribers.notifyPath(this.paths.parentOf(newPath), undefined);
     }
   }
 
+  /**
+   * The tree to change in place: the current one when no reader has it yet,
+   * otherwise one copy of it that becomes current.
+   * @returns The map a change may mutate.
+   */
+  private draftTree(): Map<string, FileEntry> {
+    if (this._treeHandedOut) {
+      this._tree = new Map(this._tree);
+      this._treeHandedOut = false;
+    }
+    return this._tree;
+  }
+
+  /*
+   * Derived caches follow every change at once; subscribers hear once per
+   * task, so a burst of facts costs one tree copy rather than one per fact.
+   */
   private notifyTreeSubscribers(): void {
     this._cachedCompleteTree = undefined;
     this._completeTreeVersion++;
-    this.#treeTopic.emit();
+    if (this._treePublicationQueued) {
+      return;
+    }
+    this._treePublicationQueued = true;
+    queueMicrotask(() => {
+      this._treePublicationQueued = false;
+      this.#treeTopic.emit();
+    });
   }
 
   private handleContentChange(event: ContentChangeEvent): void {
@@ -1148,7 +1176,7 @@ export class FileTreeService {
     }
     const parts = path.split('/');
     const name = parts.at(-1) ?? path;
-    const newTree = new Map(this._tree);
+    const newTree = this.draftTree();
     newTree.set(path, {
       path,
       name,
@@ -1158,7 +1186,6 @@ export class FileTreeService {
       isLoaded: false,
       ...fileMetadataFields(metadata),
     });
-    this._tree = newTree;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(this.paths.parentOf(path), undefined);
   }
@@ -1168,7 +1195,7 @@ export class FileTreeService {
     if (entry?.type !== 'file') {
       return;
     }
-    const newTree = new Map(this._tree);
+    const newTree = this.draftTree();
     newTree.set(path, {
       path: entry.path,
       name: entry.name,
@@ -1179,7 +1206,6 @@ export class FileTreeService {
       ...fileMetadataFields(metadata),
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     });
-    this._tree = newTree;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(this.paths.parentOf(path), undefined);
   }
@@ -1189,9 +1215,7 @@ export class FileTreeService {
       return;
     }
     const parent = this.paths.parentOf(path);
-    const newTree = new Map(this._tree);
-    newTree.delete(path);
-    this._tree = newTree;
+    this.draftTree().delete(path);
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(parent, undefined);
   }
@@ -1205,10 +1229,9 @@ export class FileTreeService {
     const name = parts.at(-1) ?? newPath;
     const oldParent = this.paths.parentOf(oldPath);
     const newParent = this.paths.parentOf(newPath);
-    const newTree = new Map(this._tree);
+    const newTree = this.draftTree();
     newTree.delete(oldPath);
     newTree.set(newPath, { ...entry, path: newPath, name });
-    this._tree = newTree;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(oldParent, undefined);
     this._listingPathSubscribers.notifyPath(newParent, undefined);
@@ -1454,7 +1477,7 @@ export class FileTreeService {
    */
   private mergeChildren(directoryKey: string, entries: FileTreeNode[]): void {
     this.directoryErrors.delete(directoryKey);
-    const newTree = new Map(this._tree);
+    const newTree = this.draftTree();
     const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
 
     const existingChildKeys = new Set<string>();
@@ -1522,7 +1545,6 @@ export class FileTreeService {
 
     this.applyResolvedDirectoryRow(newTree, directoryKey);
 
-    this._tree = newTree;
     this._listingPathSubscribers.notifyPath(directoryKey, undefined);
     this.notifyTreeSubscribers();
   }

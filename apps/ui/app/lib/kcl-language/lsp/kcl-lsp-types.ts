@@ -12,6 +12,8 @@ export const lspWorkerEventType = {
   call: 'call',
   languageFsJsonRpc: 'languageFsJsonRpc',
   setDocumentContext: 'setDocumentContext',
+  symbolRequest: 'symbolRequest',
+  symbolResponse: 'symbolResponse',
 } as const;
 
 export type LspWorkerEventType = (typeof lspWorkerEventType)[keyof typeof lspWorkerEventType];
@@ -42,6 +44,24 @@ export type SetDocumentContextPayload = Readonly<{
 }>;
 
 /**
+ * A symbol-service call the LSP worker answers on its own KCL WASM instance, so the main thread never
+ * instantiates a second copy of the module (D-RT-14).
+ */
+export type KclSymbolRequest = Readonly<{ id: number }> & KclSymbolCall;
+
+/** The operation a {@link KclSymbolRequest} asks for. */
+export type KclSymbolCall = Readonly<
+  { operation: 'parse'; code: string } | { operation: 'executeMock'; program: string; path: string }
+>;
+
+/**
+ * The worker's answer to a {@link KclSymbolRequest}: the WASM call's return value, or the value it threw.
+ */
+export type KclSymbolResponse = Readonly<
+  { id: number } & ({ ok: true; value: unknown } | { ok: false; error: unknown })
+>;
+
+/**
  * Event sent to/from the LSP worker.
  */
 export type LspWorkerEvent = {
@@ -51,6 +71,8 @@ export type LspWorkerEvent = {
     | Uint8Array<ArrayBuffer>
     | KclLspWorkerOptions
     | SetDocumentContextPayload
+    | KclSymbolRequest
+    | KclSymbolResponse
     | JSONRPCRequest
     | JSONRPCResponse;
 };

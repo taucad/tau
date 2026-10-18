@@ -20,6 +20,7 @@ import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
 import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
+import { FileContentBudget } from '@taucad/fs-client/file-content-budget';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { SharedPool } from '@taucad/memory';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -42,6 +43,12 @@ import {
 const fileCacheMaxEntries = 500;
 const fileCacheMaxTotalBytes = 128 * 1024 * 1024;
 const fileCacheMaxSingleFileBytes = 1024 * 1024;
+/*
+ * One budget for the document, not one per mount (D-UI-07): the Home root and
+ * every open project each hold a content service, and 128 MiB apiece multiplied
+ * with the number of mounts.
+ */
+const documentFileContentBudget = new FileContentBudget({ maxTotalBytes: fileCacheMaxTotalBytes });
 
 const filePoolBytes = 50 * 1024 * 1024;
 
@@ -579,6 +586,7 @@ const initializeServicesActor = fromSafeAsync<
         maxSingleFileBytes: fileCacheMaxSingleFileBytes,
       },
       filePool,
+      budget: documentFileContentBudget,
     });
     contentService = initializedContentService;
 

@@ -1,0 +1,25 @@
+{
+  "//": "TODO: Placeholder. Pin each target's real payloads (sha256 SRI, byte length, release asset URL)<% if (nativeLanguage === 'python') { %>, or run `pnpm nx run <%= name %>:generate-tau-plugin` once python/requirements.in and python/worker.py exist<% } %>, and declare the kernel's real extensions.",
+  "schemaVersion": 1,
+  "dependencies": {
+    "engine": [
+      {
+        "target": { "runtime": "native", "os": "darwin", "arch": "arm64" },
+        "payloads": [
+          {
+            "name": "<%= name %>",
+            "integrity": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "byteLength": 1,
+            "format": "tar.gz",
+            "origin": { "kind": "url", "urls": ["https://example.com/<%= name %>-darwin-arm64.tar.gz"] },
+            "destination": "<%= nativeLanguage === 'python' ? 'python' : 'bin' %>",
+            "stripComponents": 1
+          }
+        ]
+      }
+    ]
+  },
+  "kernels": {
+    "<%= name %>": { "requires": ["engine"], "extensions": ["<%= name %>"] }
+  }
+}

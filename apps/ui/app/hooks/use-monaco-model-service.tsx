@@ -162,8 +162,12 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
       tsRenameParticipant.dispose();
       workspaceContentDispatch.dispose();
       registry.setActivationErrorHandler(undefined);
-      registry.dispose();
+      /* B-16, D-UI-19: models first. Disposing the TS contributions restores
+       * Monaco's TS defaults, which stops the TS worker and re-validates every
+       * open TS model; with the models still open that started a stock worker
+       * that outlived the project and ran beside the next project's worker. */
       modelService.dispose();
+      registry.dispose();
       workspaceFs.dispose();
       markerService.dispose();
 

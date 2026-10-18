@@ -8,9 +8,11 @@ import type { picogkKernel } from '#index.js';
 const selected = plugin({
   kernels: {
     default: {
-      workerExecutable: '/worker',
-      workerSha256: 'a'.repeat(64),
-      resourceFiles: [{ path: '/resource', sha256: 'b'.repeat(64), label: 'resource' }],
+      closure: {
+        workerExecutable: '/worker',
+        workerSha256: 'a'.repeat(64),
+        resourceFiles: [{ path: '/resource', sha256: 'b'.repeat(64), label: 'resource' }],
+      },
     },
   },
 });

@@ -1,41 +1,20 @@
-import { isAbsolute } from 'node:path';
-
 import { occtQualityGltfExportSchema, occtQualityRenderOptionSchema } from '@taucad/occt-core';
+import { pythonClosureSchema, pythonKernelOptionsSchema } from '@taucad/python-kernel-core';
 import { z } from 'zod';
 
-const absolutePath = z.string().min(1).refine(isAbsolute, 'Expected an absolute path');
-const sha256 = z.string().regex(/^[\da-f]{64}$/i, 'Expected a SHA-256 digest');
+const supportModules = ['native_materials.py', 'mechanisms.py'];
 
-/** Host-owned resources required by the sandboxed native Python kernel. @public */
-export const build123dOptionsSchema = z.object({
-  pythonExecutable: absolutePath,
-  workerPath: absolutePath,
-  pythonSha256: sha256,
-  workerSha256: sha256,
-  supportFiles: z
-    .array(z.object({ path: absolutePath, sha256 }))
-    .length(4)
-    .superRefine((files, context) => {
-      const names = new Set(
-        files.map(({ path }) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)),
-      );
-      if (['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].some((name) => !names.has(name))) {
-        context.addIssue({
-          code: 'custom',
-          message: 'Support files must contain analyzer.py, glb.py, native_materials.py and mechanisms.py',
-        });
-      }
-    }),
-  /**
-   * The closure root the sandbox may read, when the interpreter and the worker scripts share one (a closure the
-   * preparation host sealed). Absent, it is the interpreter's prefix, which must then hold the worker too.
-   */
-  runtimePath: absolutePath.optional(),
-  /** Milliseconds. Zero waits for completion or cancellation. */
-  requestTimeout: z.number().int().nonnegative().default(0),
-  /** Optional host policy; by default only the representable byte length is bounded. */
-  maxArtifactBytes: z.number().int().positive().default(Number.MAX_SAFE_INTEGER),
-});
+/**
+ * The files the sandboxed native Python kernel launches from: the interpreter, the worker and its support modules
+ * (`native_materials.py`, `mechanisms.py` and the four `tau_kernel` modules) with their digests. @public
+ */
+export const build123dClosureSchema = pythonClosureSchema({ supportModules });
+
+/**
+ * Build123d's options: an optional explicit closure (otherwise the kernel binds to its sealed closure when it
+ * initializes) and the host's bounds. `build123d()` with no options is a complete listing. @public
+ */
+export const build123dOptionsSchema = pythonKernelOptionsSchema({ supportModules });
 
 /**
  * Build123d display tessellation options: a quality preset derived from the shape's bounding-box diagonal, or explicit

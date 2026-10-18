@@ -41,7 +41,7 @@ Each kernel package exports a toolkit factory, its `plugin` alias for mechanical
 
 No first-party kernel uses `'*'`.
 
-`@taucad/openrscad` needs no native twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit offers separate board, schematic, and PCB views; see [tscircuit](../reference/tscircuit).
+`@taucad/openrscad` needs no native twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d and PicoGK refuse with `KERNEL_NOT_PREPARED` until `tau prepare` seals their closures. tscircuit offers separate board, schematic, and PCB views; see [tscircuit](../reference/tscircuit).
 
 ## Toolkit composition
 

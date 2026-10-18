@@ -70,6 +70,15 @@ type BrowserAgentHostCapabilityProbeOptions = {
 
 /** Page-side liveness bound on a worker that keeps alive every second (T9 E3, E4). Milliseconds. */
 const workerLivenessTimeout = 3500;
+/**
+ * How many times an unresponsive retirement may double the next worker's bound (3.5 s up to 28 s, D-UI-23).
+ *
+ * A replacement re-reads every open chat log; one blocked past the bound by that replay would be replaced again
+ * and re-read them again.
+ */
+const maxLivenessDoublings = 3;
+/** Milliseconds a worker must stay up for its retirement to count as a fresh failure rather than a repeat. */
+const livenessStrikeWindow = 60_000;
 
 const defaultCapabilityProbes = new Map<StorageDurabilityClass, Promise<BrowserAgentHostCapability>>();
 
@@ -545,6 +554,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   let current: Incarnation | undefined;
   const recovering = new Map<string, Promise<void>>();
   const recoveryWanted = new Set<string>();
+  /* Consecutive retirements for missed keepalives; each one doubles the next worker's bound (D-UI-23). */
+  let unresponsiveRetirements = 0;
 
   const retire = (live: Incarnation, reason: string): void => {
     if (live.dead) {
@@ -569,11 +580,12 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     const { port1, port2 } = new MessageChannel();
     const sessionId = randomUuid();
     worker.postMessage(parseAgentHostWorkerConnect({ type: 'agent-host/connect', sessionId, port: port1 }), [port1]);
+    const bootedAt = Date.now();
     const channel = connectAgentWorkerChannel<AgentHostWorkerProtocol>(port2, {
       sessionKey: sessionId,
       protocolSchemas: agentHostWorkerProtocolSchemas,
       label: 'agent-host-main',
-      livenessTimeout: workerLivenessTimeout,
+      livenessTimeout: workerLivenessTimeout * 2 ** Math.min(unresponsiveRetirements, maxLivenessDoublings),
     });
     worker.addEventListener('error', (event) => {
       console.error('[agent-host] resident worker error', event.message);
@@ -613,6 +625,9 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     recordChannelDiagnostic({ event: 'worker.opened', tabId, workerId: sessionId });
     channel.onClose((info) => {
       recordChannelDiagnostic({ event: 'worker.closed', tabId, workerId: sessionId, ...info });
+      if (info.code === 'PEER_UNRESPONSIVE') {
+        unresponsiveRetirements = Date.now() - bootedAt > livenessStrikeWindow ? 1 : unresponsiveRetirements + 1;
+      }
       retire(live, info.code);
     });
     if (typeof document !== 'undefined') {

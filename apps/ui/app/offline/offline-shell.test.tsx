@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -8,9 +8,10 @@ import { OfflineShell } from '#offline/offline-shell.js';
 const register = vi.fn<(scriptUrl: string) => Promise<ServiceWorkerRegistration>>();
 let readyState: DocumentReadyState = 'loading';
 
-const renderShell = (): void => {
-  const router = createMemoryRouter([{ path: '/', element: <OfflineShell /> }]);
+const renderShell = (path = '/'): ReturnType<typeof createMemoryRouter> => {
+  const router = createMemoryRouter([{ path: '*', element: <OfflineShell /> }], { initialEntries: [path] });
   render(<RouterProvider router={router} />);
+  return router;
 };
 
 beforeEach(() => {
@@ -67,5 +68,24 @@ describe('OfflineShell', () => {
     await vi.runAllTimersAsync();
 
     expect(register).not.toHaveBeenCalled();
+  });
+
+  /* B-27, D-UI-26: the precache downloads the usage shell's whole asset list,
+   * which competed with the kernel, WASM and Monaco downloads of an opening
+   * project. */
+  it('should not install while a project workspace is open, and install once the reader leaves it', async () => {
+    readyState = 'complete';
+
+    const router = renderShell('/w/acme/bracket');
+    await vi.runAllTimersAsync();
+
+    expect(register).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await router.navigate('/projects');
+    });
+    await vi.runAllTimersAsync();
+
+    expect(register).toHaveBeenCalledExactlyOnceWith('/offline-shell-worker.js');
   });
 });

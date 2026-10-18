@@ -1,21 +1,43 @@
-import {
+<% if (nativeLanguage) { %>import { withNativeDeployment } from '@taucad/native-process-core/adopter';
+<% } %><% if (nativeLanguage === 'native') { %>import { bindNativeKernel } from '@taucad/native-process-core/store';
+<% } %><% if (nativeLanguage === 'python') { %>import { bindPythonKernel } from '@taucad/python-kernel-core';
+<% } %>import {
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
 } from '@taucad/runtime/kernel';
+<% if (nativeLanguage) { %>
+import { <%= alias %>OptionsSchema } from '#<%= sourceName %>.schemas.js';
+import { <%= alias %>Native } from '#native.js';
+<% } %>
 
-/** `<%= name %>` kernel capability. @public */
-export const <%= alias %>Kernel = defineKernel({
+<% if (nativeLanguage) { %>const <%= alias %>KernelDefinition = defineKernel({<% } else { %>/** `<%= name %>` kernel capability. @public */
+export const <%= alias %>Kernel = defineKernel({<% } %>
   id: '<%= name %>',
   extensions: [],
   name: '<%= alias %>Kernel',
   version: '1.0.0',
-  // TODO: Declare offered views/exports and implement render/export for this backend.
+<% if (nativeLanguage) { %>  // Every option is optional: `<%= alias %>()` binds to the closure `tau prepare <%= name %>` sealed.
+  optionsSchema: <%= alias %>OptionsSchema,
+<% } %>  // TODO: Declare offered views/exports and implement render/export for this backend.
   views: {},
   exports: {},
-  async initialize() {
+<% if (nativeLanguage === 'python') { %>  async initialize(options) {
+    // Refuses with KERNEL_NOT_PREPARED until the closure is sealed; the runtime retries on the next operation.
+    const { options: bound } = await bindPythonKernel({ adopter: <%= alias %>Native, options });
+    // TODO: Start the worker with createPythonWorkspaceMirror and createPythonSession over `bound`.
+    return { bound };
+  },
+<% } else if (nativeLanguage === 'native') { %>  async initialize(options) {
+    // Refuses with KERNEL_NOT_PREPARED until the closure is sealed; the runtime retries on the next operation.
+    const { options: bound } = await bindNativeKernel({ deployment: <%= alias %>Native, kernel: '<%= name %>', options });
+    // TODO: Start the worker with createWorkspaceMirror and a NativeProcessSession over `bound`.
+    return { bound };
+  },
+<% } else { %>  async initialize() {
     return {};
   },
+<% } %>
   async resolve({ entryPath }) {
     return { resolved: [entryPath], unresolved: [] };
   },
@@ -32,3 +54,7 @@ export const <%= alias %>Kernel = defineKernel({
     return { handle: undefined };
   },
 });
+<% if (nativeLanguage) { %>
+/** `<%= name %>` kernel capability; every registration carries `<%= alias %>Native`. @public */
+export const <%= alias %>Kernel = withNativeDeployment(<%= alias %>KernelDefinition, <%= alias %>Native);
+<% } %>

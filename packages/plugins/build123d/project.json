@@ -18,11 +18,11 @@
       "cache": false,
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts"
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts generate --package packages/plugins/build123d"
       },
       "configurations": {
         "check": {
-          "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts --check"
+          "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts check --package packages/plugins/build123d"
         }
       }
     },
@@ -31,11 +31,11 @@
       "cache": false,
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-project-template.mts"
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts template --package packages/plugins/build123d"
       },
       "configurations": {
         "check": {
-          "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-project-template.mts --check"
+          "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts template --package packages/plugins/build123d --check"
         }
       }
     },
@@ -44,7 +44,7 @@
       "cache": false,
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts seed"
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts seed --package packages/plugins/build123d"
       }
     },
     "golden-tau-plugin": {
@@ -53,7 +53,7 @@
       "dependsOn": ["seed"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-tau-plugin.mts golden"
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts golden --package packages/plugins/build123d"
       }
     },
     "test": {
@@ -85,7 +85,7 @@
       "outputs": ["{workspaceRoot}/out/reports/coverage/packages/plugins/build123d-python"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts"
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts test --package packages/plugins/build123d"
       },
       "inputs": [
         "default",
@@ -106,7 +106,7 @@
       "outputs": ["{workspaceRoot}/out/reports/coverage/packages/plugins/build123d-python"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts --desktop"
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python-desktop.mts"
       }
     },
     "benchmark-native": {

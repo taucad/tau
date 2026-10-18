@@ -70,7 +70,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
    pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=<kernel>/<example>
    ```
 
-   Use `pnpm nx generate-thumbnails tau-examples` when every composed row must be re-rendered. The camera is fixed (bounds framing, direction `[0.612, −0.612, 0.5]`, +Z up, 45° perspective, AO, edges on), each row renders in a fresh process, 2D rows rasterise their SVG, and PicoVoxel renders on its exact lane. Set `TAU_PICOGK_RESOURCE_ROOT` for PicoGK rows. Then add `"thumbnail": "thumbnail.webp"` to `tau.json` and run `generate-manifest` again. Check selected image and map drift with the same command plus `--check`.
+   Use `pnpm nx generate-thumbnails tau-examples` when every composed row must be re-rendered. The camera is fixed (bounds framing, direction `[0.612, −0.612, 0.5]`, +Z up, 45° perspective, AO, edges on), each row renders in a fresh process, 2D rows rasterise their SVG, and PicoVoxel renders on its exact lane. Native kernels are listed in `exampleRuntime` like any other (PicoGK; Build123d only in `workspaceRuntime`, since its examples ship no thumbnails yet), and each binds its own sealed closure when it initialises: PicoGK rows render once `tau prepare picogk` has sealed it in the payload store, and are skipped as unprepared until then. Then add `"thumbnail": "thumbnail.webp"` to `tau.json` and run `generate-manifest` again. Check selected image and map drift with the same command plus `--check`.
 
 6. **Gate health** for `model` rows (300 s per model, 1,500 s for the suite; 3D rows must be watertight):
 
@@ -78,7 +78,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
    TAU_EXAMPLE_PATTERN='replicad\.v8-engine$' pnpm nx run runtime-e2e:example-health
    ```
 
-   The pattern is a JavaScript regex matched against `Tau example model health > <kernel>.<example>`, so never anchor it with `^`: the run then selects no test and fails its count. Run the unfiltered target once before landing a batch. Native `picogk` rows need `TAU_PICOGK_RESOURCE_ROOT`.
+   The pattern is a JavaScript regex matched against `Tau example model health > <kernel>.<example>`, so never anchor it with `^`: the run then selects no test and fails its count. Run the unfiltered target once before landing a batch. Native `picogk` rows need `tau prepare picogk` first.
 
 7. **Gate the suite** (when the row has one): add an `it()` to `apps/runtime-e2e/src/geospec-suites.test.ts` (snippet in the checklist).
 8. **Curate** only if selected: add the locator to `communityLocators` at its display position.

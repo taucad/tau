@@ -1922,6 +1922,31 @@ describe('KernelRuntimeWorker kernel selection', () => {
   });
 
   describe('selection cache', () => {
+    it('should evaluate a file once its kernel initializes, after an earlier initialize refused it', async () => {
+      /* A native kernel refuses until its runtime is prepared, then binds on the next operation (late binding). */
+      const notPrepared: KernelIssue = {
+        code: 'KERNEL_NOT_PREPARED',
+        type: 'kernel',
+        severity: 'error',
+        message: 'native handles ".scad" but its runtime is not prepared on this machine.',
+      };
+      const initialize = vi
+        .fn<AnyKernelDefinitionV2['initialize']>()
+        .mockRejectedValueOnce(Object.assign(new Error(notPrepared.message), { issues: [notPrepared] }))
+        .mockResolvedValue({});
+      const worker = await createMultiKernelWorker([
+        { id: 'native', extensions: ['scad'], definition: createMockKernelDefinition('native', { initialize }) },
+      ]);
+
+      const refused = await evaluateWorkerDocument(worker, 'refused-before-prepare', 'model.scad');
+      const evaluated = await evaluateWorkerDocument(worker, 'evaluated-after-prepare', 'model.scad');
+
+      expect(refused.success).toBe(false);
+      expect(refused.issues.map(({ code }) => code)).toEqual(['KERNEL_NOT_PREPARED']);
+      expect(initialize).toHaveBeenCalledTimes(2);
+      expect(evaluated.success, JSON.stringify(evaluated.issues)).toBe(true);
+    });
+
     it('should reuse cached kernel selection on repeated calls for the same file', async () => {
       const scadDefinition = createMockKernelDefinition('openrscad');
 

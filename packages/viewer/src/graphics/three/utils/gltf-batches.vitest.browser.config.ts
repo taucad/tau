@@ -22,6 +22,7 @@ export default defineConfig({
       'src/graphics/three/utils/gltf-surface-batches.browser.test.ts',
       'src/graphics/three/utils/gltf-edge-batches.browser.test.ts',
       'src/graphics/three/materials/section-clip.browser.test.ts',
+      'src/graphics/three/materials/gltf-edge-end-bleed.browser.test.ts',
       'src/graphics/three/utils/measurement-features-worker-client.browser.test.ts',
       'src/graphics/three/utils/bvh-worker-client.browser.test.ts',
       'src/graphics/three/utils/model-gpu-pick.browser.test.ts',

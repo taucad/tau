@@ -1,11 +1,11 @@
 /** Compiled Node pool worker: owns one protocol-3 engine per isolate. @module */
 
 import { memoryUsage } from 'node:process';
-import { resolve } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Engine } from 'geospec-engine/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { RuntimeDefinition } from '@taucad/runtime';
+import type * as NativeStore from '@taucad/native-process-core/store';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
@@ -16,6 +16,31 @@ export type NativePoolWorkerOptions = { projectPath: string; grant: number };
 export type NativePoolPort = {
   postMessage(message: GeoSpecPoolWorkerMessage): void;
   on(event: 'message', listener: (message: GeoSpecPoolHostMessage) => void): void;
+};
+
+/**
+ * Bind the native kernels a runtime lists to this machine's payload store: each one reads its sealed closure from a
+ * launch index when it initialises (nothing is downloaded) and refuses with `KERNEL_NOT_PREPARED` until
+ * `tau prepare <kernel>` seals it. The managed profile is read here, so a malformed one refuses the whole runtime
+ * rather than each native kernel. Without `@taucad/native-process-core`, an optional peer, nothing native is listed.
+ * @param runtime - The runtime the worker serves.
+ */
+const bindNativeKernelsToStore = async (runtime: RuntimeDefinition): Promise<void> => {
+  const { readManagedPreparation } = await import('@taucad/runtime/preparation/node');
+  const managed = readManagedPreparation(process.env);
+  let store: typeof NativeStore;
+  try {
+    store = await import('@taucad/native-process-core/store');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {
+      return;
+    }
+    throw error;
+  }
+  const { resolveRuntimeDefinition } = await import('@taucad/runtime/worker');
+  if (store.nativeDeploymentsOf(await resolveRuntimeDefinition(runtime, undefined)).length > 0) {
+    store.installNativeClosureResolver(store.storeClosureResolver({ managed }));
+  }
 };
 
 /**
@@ -36,21 +61,8 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
           import('@taucad/runtime/node'),
           import('#model/default-runtime.js'),
         ]);
-        let runtime: RuntimeDefinition = defaultRuntime;
-        const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
-        if (resourceRoot) {
-          const [{ defineRuntime }, { loadPicogkKernelOptions, picogk }] = await Promise.all([
-            import('@taucad/runtime/worker'),
-            import('@taucad/picogk'),
-          ]);
-          runtime = defineRuntime({
-            ...defaultRuntime,
-            plugins: [
-              picogk({ kernels: { default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot) }) } }),
-            ],
-          });
-        }
-        return createNodeClient({ runtime, projectPath: options.projectPath });
+        await bindNativeKernelsToStore(defaultRuntime);
+        return createNodeClient({ runtime: defaultRuntime, projectPath: options.projectPath });
       },
       readSource: async (source) => {
         if (typeof source !== 'string') {

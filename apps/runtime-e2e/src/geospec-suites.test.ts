@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
 import { Engine } from 'geospec-engine/node';
-import { createExampleRuntimeClient } from '@taucad/tau-examples/runtime';
+import { createExampleRuntimeClient, exampleKernelIds } from '@taucad/tau-examples/runtime';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, it, expect } from 'vitest';
@@ -113,8 +113,8 @@ describe('geospec example suites (regression backbone)', () => {
     expect(report.success).toBe(true);
   });
 
-  it.skipIf(!process.env['TAU_PICOGK_RESOURCE_ROOT'])(
-    'PicoGK turbofan geospec suite passes with its native SDK resource',
+  it.skipIf(!exampleKernelIds.has('picogk'))(
+    'PicoGK turbofan geospec suite passes from its prepared payload-store closure',
     { timeout: 1_500_000 },
     async () => {
       const projectPath = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/turbofan');

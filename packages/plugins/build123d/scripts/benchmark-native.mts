@@ -24,6 +24,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { createPythonSession } from '@taucad/python-kernel-core';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 import { targetKey } from '@taucad/runtime/preparation/node';
 
@@ -35,7 +36,7 @@ import {
 } from '#build123d.protocol.js';
 import { prepareFromSeed } from '#build123d-closure.fixture.js';
 import { build123dOptionsFromClosure } from '#build123d-closure.js';
-import { PythonSession } from '#python-session.js';
+import { build123dNative } from '#native.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../../..');
 const arguments_ = process.argv.slice(2);
@@ -115,8 +116,9 @@ const artifactPath = join(privateRoot, 'artifacts');
 mkdirSync(workspacePath);
 mkdirSync(artifactPath);
 writeFileSync(join(workspacePath, 'main.py'), source());
-const session = new PythonSession({
+const session = createPythonSession({
   ...closure,
+  worker: build123dNative.worker,
   workspacePath,
   artifactPath,
   requestTimeout: 120_000,

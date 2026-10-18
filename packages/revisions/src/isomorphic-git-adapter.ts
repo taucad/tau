@@ -178,6 +178,12 @@ export type IsomorphicGitRevisionPortOptions = Readonly<{
 }>;
 
 const defaultGitDirectory = '.git';
+
+/**
+ * How long the object cache outlives its last read.
+ * Milliseconds.
+ */
+const objectCacheIdle = 2000;
 const defaultBranch = 'main';
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
@@ -537,6 +543,23 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   }
   const fs = fileSystemShim(filesystem);
   const checkoutsDirectory = `${gitdir}/checkouts`;
+  /* D-UI-29: one object cache for a burst of reads. isomorphic-git keeps each
+   * parsed pack index and the pack's bytes in it; without one, every read of
+   * a packed object reloaded the pack and re-hashed it, and a tree walk did so
+   * once per entry, concurrently. The cache is dropped once reads go quiet, so
+   * the pack's bytes are not held for the session. */
+  let objectCacheValue: Record<string, unknown> | undefined;
+  let objectCacheExpiry: ReturnType<typeof setTimeout> | undefined;
+  const objectCache = (): Record<string, unknown> => {
+    objectCacheValue ??= {};
+    clearTimeout(objectCacheExpiry);
+    objectCacheExpiry = setTimeout(() => {
+      objectCacheValue = undefined;
+      objectCacheExpiry = undefined;
+    }, objectCacheIdle);
+    (objectCacheExpiry as { unref?: () => void }).unref?.();
+    return objectCacheValue;
+  };
   /* A branch name is spelled short and everything else is spelled in full: the
    * record set the design pushes lives outside `refs/heads` (`refs/tau/chats/*`,
    * W17), so a port that could only name branches could not address half of what
@@ -553,7 +576,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       /* eslint-disable-next-line @typescript-eslint/no-deprecated -- the typed
        * readers drop Tau's `change-id` and `jj:*` headers; raw content is the
        * only shape that carries them. */
-      const object = await readObject({ fs, gitdir, oid, format: 'content' });
+      const object = await readObject({ fs, cache: objectCache(), gitdir, oid, format: 'content' });
       return object.format === 'content' && object.type === expected ? new Uint8Array(object.object) : undefined;
     } catch (error) {
       if (isNotFound(error)) {
@@ -620,7 +643,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     prefix: string,
     into: Map<string, Readonly<{ oid: string; mode: string }>>,
   ): Promise<void> => {
-    const { tree } = await readTree({ fs, gitdir, oid });
+    const { tree } = await readTree({ fs, cache: objectCache(), gitdir, oid });
     await Promise.all(
       tree.map(async (entry) => {
         const path = prefix === '' ? entry.path : `${prefix}/${entry.path}`;
@@ -954,7 +977,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // eslint-disable-next-line no-await-in-loop -- see above.
       await Promise.all(
         [...entries].map(async ([path, { oid }]) => {
-          const { blob } = await readBlob({ fs, gitdir, oid });
+          const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
           const pointer = readLfsPointer(new Uint8Array(blob));
           if (pointer !== undefined) {
             paths.set(pointer.oid, { path, size: pointer.size });
@@ -995,7 +1018,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     if ((ref.remoteName ?? ref.name).startsWith(`${tagRefPrefix}/`)) {
       return '[rejected] (already exists)';
     }
-    const forward = await isDescendent({ fs, gitdir, oid: head, ancestor: old, depth: -1 }).catch(() => false);
+    const forward = await isDescendent({ fs, cache: objectCache(), gitdir, oid: head, ancestor: old, depth: -1 }).catch(
+      () => false,
+    );
     return forward ? undefined : '[rejected] (non-fast-forward)';
   };
 
@@ -1061,7 +1086,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const missingObjects = async (tips: readonly string[], haves: ReadonlySet<string>): Promise<readonly string[]> => {
     const send = new Set<string>();
     const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeEntry>> => {
-      const { tree } = await readTree({ fs, gitdir, oid });
+      const { tree } = await readTree({ fs, cache: objectCache(), gitdir, oid });
       return new Map(tree.map((entry) => [entry.path, entry]));
     };
     const treeObjects = async (oid: string, base: string | undefined): Promise<void> => {
@@ -1332,7 +1357,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const paths = await flatTree(commit.tree);
       const entries = await Promise.all(
         [...paths].map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
-          const { blob } = await readBlob({ fs, gitdir, oid });
+          const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
           /* Smudged above the engine, never inside it (S49): the tree holds the
            * pointer and every caller — the user, the agent, a restore — sees
            * the bytes. */
@@ -1894,7 +1919,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           commands.map((command) => command.head),
           new Set(advertised.values()),
         );
-        const { packfile } = await packObjects({ fs, gitdir, oids: [...oids] });
+        const { packfile } = await packObjects({ fs, cache: objectCache(), gitdir, oids: [...oids] });
         const body = concatBytes(...lines, pktEncoder.encode('0000'), packfile ?? new Uint8Array());
         /* Seam 3 of 3 (N1): the remote answering with a status — 401, `403
          * GIT_SYNC_NOT_ENTITLED`, 404, 413 — is the classifier's question, and

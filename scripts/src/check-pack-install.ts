@@ -862,22 +862,49 @@ const checkInstalledTypes = (appRoot: string): void => {
   console.log(`Packed TypeScript ${ts.version}: strict consumer and view/export/option/file-entry completions passed.`);
 };
 
-/** The Zod the consumer app pins: the runtime's declared peer floor, unless an installed package needs more. */
-export const declaredZodFloor = '4.0.0';
+/** The Zod floor when no packed package peers Zod (a closure of leaves only). */
+export const fallbackZodFloor = '4.1.0';
 
 /**
- * The lowest Zod every installed package admits through its own `dependencies` (an application such
- * as `@taucad/cli` may depend on Zod rather than peer it). A dependency floor above the peer floor
- * would install a second Zod, so the app pins the highest such floor instead, and says so.
+ * The Zod the consumer app pins. It starts at the highest floor of every packed `peerDependencies.zod`
+ * range, so the declarations are compiled against the oldest Zod the published contract admits: a
+ * floor the declarations do not support fails here rather than in a consumer's typecheck. An
+ * application such as `@taucad/cli` may depend on Zod rather than peer it, and a dependency floor above
+ * the peer floor would install a second Zod, so the app pins the highest such floor instead, says so,
+ * and reports any exact pin, which no other Zod can satisfy.
  */
-export const consumerZodVersion = (manifests: readonly Manifest[]): { version: string; raisedBy: string[] } => {
+export const consumerZodVersion = (
+  manifests: readonly Manifest[],
+): { version: string; floor: string; raisedBy: string[]; exact: boolean } => {
   const parts = (version: string): number[] => version.split('.').map(Number);
   const newer = (left: string, right: string): boolean => {
     const [a, b] = [parts(left), parts(right)];
     const index = a.findIndex((value, position) => value !== b[position]);
     return index !== -1 && a[index]! > b[index]!;
   };
-  let version = declaredZodFloor;
+  const readRange = (manifest: Manifest, field: string, range: string): { floor: string; caret: boolean } => {
+    const match = /^(?<caret>\^)?(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups;
+    const floor = match?.['floor'];
+    invariant(
+      floor !== undefined,
+      `${manifest.name} declares zod ${range} in ${field}, which is neither a caret range nor a version.`,
+    );
+    return { floor, caret: match?.['caret'] !== undefined };
+  };
+  let floor: string | undefined;
+  for (const manifest of manifests) {
+    const range = manifest.peerDependencies?.['zod'];
+    if (range === undefined) {
+      continue;
+    }
+    const peer = readRange(manifest, 'peerDependencies', range);
+    invariant(peer.caret, `${manifest.name} peers zod ${range}; a Zod peer is a caret range.`);
+    if (floor === undefined || newer(peer.floor, floor)) {
+      floor = peer.floor;
+    }
+  }
+  floor ??= fallbackZodFloor;
+  let version = floor;
   const raisedBy: string[] = [];
   const exact = new Set<string>();
   for (const manifest of manifests) {
@@ -885,19 +912,14 @@ export const consumerZodVersion = (manifests: readonly Manifest[]): { version: s
     if (range === undefined) {
       continue;
     }
-    const match = /^(?<caret>\^)?(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups;
-    const floor = match?.['floor'];
-    invariant(
-      floor !== undefined,
-      `${manifest.name} depends on zod ${range}, which is neither a caret range nor a version.`,
-    );
-    if (match?.['caret'] === undefined) {
-      exact.add(floor);
+    const dependency = readRange(manifest, 'dependencies', range);
+    if (!dependency.caret) {
+      exact.add(dependency.floor);
     }
-    if (newer(floor, declaredZodFloor)) {
+    if (newer(dependency.floor, floor)) {
       raisedBy.push(`${manifest.name} (zod ${range})`);
-      if (newer(floor, version)) {
-        version = floor;
+      if (newer(dependency.floor, version)) {
+        version = dependency.floor;
       }
     }
   }
@@ -907,7 +929,7 @@ export const consumerZodVersion = (manifests: readonly Manifest[]): { version: s
     exact.size === 0 || exact.has(version),
     `zod ${[...exact][0] ?? ''} is pinned exactly, but another package requires at least ${version}.`,
   );
-  return { version, raisedBy };
+  return { version, floor, raisedBy, exact: exact.size > 0 };
 };
 
 /** The `package.json` inside an npm tarball, read without unpacking it. */
@@ -1095,6 +1117,23 @@ const runInstalledTscircuit = async (appRoot: string, zodVersion: string): Promi
     { '/wasm/esbuild.wasm': wasmAsset },
   );
   console.log('Packed tscircuit Node and Chromium GLB/SVG render passed.');
+};
+
+/**
+ * Repeat the declaration and Zod admission checks on the newest Zod 4 a fresh consumer resolves. The
+ * floor pass proves the oldest admitted Zod; this one proves the other end of the peer range, so a
+ * Zod release that changes a type Tau's declarations name fails here first.
+ */
+const checkNewestZod = (appRoot: string): void => {
+  run('npm', ['install', '--no-audit', '--no-fund', 'zod@^4'], appRoot);
+  const { version } = JSON.parse(readFileSync(join(appRoot, 'node_modules/zod/package.json'), 'utf8')) as {
+    version: string;
+  };
+  assertSingleZodInstance(appRoot);
+  checkInstalledTypes(appRoot);
+  writeFileSync(join(appRoot, 'zod-newest.mjs'), installedZodFloorSource(version));
+  run(process.execPath, ['zod-newest.mjs'], appRoot);
+  console.log(`zod: packed declarations and runtime admission passed on the newest Zod 4 (${version}).`);
 };
 
 /** Installed-consumer probe: load modules and JSON; resolve and read exported documentation. */
@@ -1377,11 +1416,11 @@ const main = async (): Promise<void> => {
     // The app declares zod itself, the way a consumer satisfying the plugin peer
     // does; `assertSingleZodInstance` then proves npm did not fork it.
     const zod = consumerZodVersion(plan.tarballs.map((tarball) => tarballManifest(readFileSync(tarball))));
-    if (zod.raisedBy.length > 0) {
-      console.log(
-        `zod: pinned ${zod.version}, not the declared floor ${declaredZodFloor}, for ${zod.raisedBy.join(', ')}.`,
-      );
-    }
+    console.log(
+      zod.raisedBy.length > 0
+        ? `zod: pinned ${zod.version}, not the declared peer floor ${zod.floor}, for ${zod.raisedBy.join(', ')}.`
+        : `zod: pinned the declared peer floor ${zod.floor}.`,
+    );
     writeFileSync(
       join(appRoot, 'package.json'),
       JSON.stringify(
@@ -1438,12 +1477,14 @@ const main = async (): Promise<void> => {
       `Imported ${String(specifiers.length)} published subpaths and instantiated ${String(Object.keys(instantiations).length)} native payload(s).`,
     );
 
+    let typesChecked = false;
     // The tscircuit checks compile a consumer that also imports `@taucad/react`, which the CLI closure lacks.
     if (
       existsSync(join(appRoot, 'node_modules/@taucad/tscircuit')) &&
       existsSync(join(appRoot, 'node_modules/@taucad/react'))
     ) {
       await runInstalledTscircuit(appRoot, zod.version);
+      typesChecked = true;
     }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {
@@ -1459,6 +1500,10 @@ const main = async (): Promise<void> => {
     }
     if (existsSync(join(appRoot, 'node_modules/@taucad/cli'))) {
       await runCliSurface(temporaryRoot, appRoot);
+    }
+    // Last, because it replaces the app's Zod: an exact leaf pin admits no other Zod, so it is skipped then.
+    if (typesChecked && !zod.exact) {
+      checkNewestZod(appRoot);
     }
     console.log(`npm-local install (${plan.sourceLabel}) and published-surface smoke passed in ${elapsed()}.`);
     passed = true;

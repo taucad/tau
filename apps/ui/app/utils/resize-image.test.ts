@@ -143,8 +143,8 @@ describe('resizeImageForChat', () => {
 
     const result = await resizeImageForChat(SMALL_PNG_DATA_URL);
     expect(result).toBe(SMALL_JPEG_DATA_URL);
-    // Last canvas width set should be 800 (last-resort)
-    expect(canvasWidths.at(-1)).toBe(800);
+    // The canvas was redrawn at the last-resort size
+    expect(canvasWidths).toContain(800);
   });
 
   it('should reject rather than return an over-cap data URL when even the last resort does not fit', async () => {
@@ -159,7 +159,7 @@ describe('resizeImageForChat', () => {
     expect(rejection).toBeInstanceOf(ImageTooLargeError);
     expect((rejection as Error).name).toBe('ImageTooLargeError');
     expect((rejection as Error).message).toContain(String(MAX_DATA_URL_LENGTH));
-    expect(canvasWidths.at(-1)).toBe(800);
+    expect(canvasWidths).toContain(800);
   });
 
   it('should reject non-image data URLs', async () => {
@@ -170,5 +170,28 @@ describe('resizeImageForChat', () => {
     mockImageShouldError = true;
 
     await expect(resizeImageForChat('data:image/png;base64,INVALID')).rejects.toThrow('Failed to load image');
+  });
+
+  /* D-UI-22: iOS caps the total canvas memory of a page, and a detached canvas
+   * keeps its backing store until it is collected. */
+  it('should release the canvas backing store once the image is compressed', async () => {
+    mockImageWidth = 4000;
+    mockImageHeight = 3000;
+
+    await resizeImageForChat(SMALL_PNG_DATA_URL);
+
+    expect(canvasWidths.at(-1)).toBe(0);
+    expect(canvasHeights.at(-1)).toBe(0);
+  });
+
+  it('should release the canvas backing store when the image is too large to attach', async () => {
+    mockImageWidth = 4000;
+    mockImageHeight = 4000;
+    mockToDataUrlFunction = () => 'data:image/jpeg;base64,' + 'A'.repeat(2_000_000);
+
+    await expect(resizeImageForChat(SMALL_PNG_DATA_URL)).rejects.toBeInstanceOf(ImageTooLargeError);
+
+    expect(canvasWidths.at(-1)).toBe(0);
+    expect(canvasHeights.at(-1)).toBe(0);
   });
 });

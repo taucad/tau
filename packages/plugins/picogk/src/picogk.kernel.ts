@@ -1,7 +1,7 @@
 import { contentDigest } from '@taucad/cache-core';
 import { createComputeWorkerTransport } from '#compute-worker-transport.js';
 import { transformGltfExportBytes } from '@taucad/geometry-core';
-import { createWorkspaceMirror } from '@taucad/native-process-core';
+import { bindDotnetKernel, createDotnetWorkspaceMirror } from '@taucad/dotnet-kernel-core';
 import {
   asBuffer,
   createKernelError,
@@ -9,6 +9,7 @@ import {
   createKernelSuccess,
   defineKernel,
 } from '@taucad/runtime/kernel';
+import { withNativeDeployment } from '@taucad/native-process-core/adopter';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
@@ -16,6 +17,7 @@ import { picogkArtifactToGlb, picogkTessellation, picogkTessellationSchema } fro
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { picogkNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
@@ -63,8 +65,7 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
-/** `picogk` native C# kernel capability. @public */
-export const picogkKernel = defineKernel({
+const picogkKernelDefinition = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
@@ -95,15 +96,16 @@ export const picogkKernel = defineKernel({
   },
 
   async initialize(options, services) {
-    const mirror = await createWorkspaceMirror({
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
+    const { options: bound } = await bindDotnetKernel({ adopter: picogkNative, options });
+    const mirror = await createDotnetWorkspaceMirror({
       temporaryPrefix: 'tau-picogk-',
       displayName: 'PicoGK',
-      excludedDirectories: ['bin', 'obj', '.vs'],
-      excludedFileSuffixes: ['.dll', '.exe', '.pdb'],
       excludedPaths: ['thumbnail.webp'],
     });
     const session = new PicogkSession({
-      ...options,
+      ...bound,
       ...mirror,
       logger: services.logger,
     });
@@ -111,7 +113,7 @@ export const picogkKernel = defineKernel({
       producer: {
         id: 'picogk',
         version: 'operation-v1.codec2.layout1',
-        implementationAssets: [options.workerSha256, ...options.resourceFiles.map(({ sha256 }) => sha256)]
+        implementationAssets: [bound.workerSha256, ...bound.resourceFiles.map(({ sha256 }) => sha256)]
           .sort()
           .map((hash) => contentDigest({ value: `sha256:${hash.toLowerCase()}` })),
       },
@@ -337,3 +339,10 @@ export const picogkKernel = defineKernel({
     }
   },
 });
+
+/**
+ * The `picogk` kernel capability. Every registration carries `picogkNative`, so a host that lists the plugin in a runtime
+ * definition prepares and binds the kernel from the definition alone.
+ * @public
+ */
+export const picogkKernel = withNativeDeployment(picogkKernelDefinition, picogkNative);

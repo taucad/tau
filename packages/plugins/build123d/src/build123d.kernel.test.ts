@@ -5,11 +5,11 @@ import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockKernelRuntime } from '@taucad/runtime-testing';
+import { PythonWorkerError } from '@taucad/python-kernel-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { build123dKernel } from '#build123d.kernel.js';
 import { build123dComputeDescriptorLimit } from '#build123d.protocol.js';
-import { Build123dWorkerError } from '#python-session.js';
 
 const runtime = createMockKernelRuntime();
 const renderOptions = { tessellation: { linearTolerance: 0.05, angularTolerance: 20 } } as const;
@@ -19,10 +19,12 @@ const kernelOptions = {
   pythonSha256: 'a'.repeat(64),
   workerSha256: 'b'.repeat(64),
   supportFiles: [
-    { path: '/analyzer.py', sha256: 'c'.repeat(64) },
-    { path: '/glb.py', sha256: 'd'.repeat(64) },
-    { path: '/native_materials.py', sha256: 'd'.repeat(64) },
+    { path: '/native_materials.py', sha256: 'c'.repeat(64) },
     { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
+    { path: '/tau_kernel/analyzer.py', sha256: 'd'.repeat(64) },
+    { path: '/tau_kernel/glb.py', sha256: 'd'.repeat(64) },
+    { path: '/tau_kernel/model.py', sha256: 'd'.repeat(64) },
+    { path: '/tau_kernel/protocol.py', sha256: 'd'.repeat(64) },
   ],
 };
 const parameterDeclaration = {
@@ -51,7 +53,6 @@ const createContextData = () => ({
     generation: 2,
     request: vi.fn(),
     readArtifact: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
-    observeResidentBytes: vi.fn(),
     isHandleGenerationValid: vi.fn().mockReturnValue(true),
     release: vi.fn(),
     cleanup: vi.fn().mockResolvedValue(undefined),
@@ -59,6 +60,7 @@ const createContextData = () => ({
   resident: {
     contains: vi.fn().mockReturnValue(false),
     track: vi.fn(),
+    observeResidentBytes: vi.fn(),
     importEntries: vi.fn().mockResolvedValue({ imported: [], omitted: [] }),
     exportEntries: vi.fn().mockResolvedValue({ entries: [], omitted: [] }),
     stats: vi.fn().mockReturnValue({
@@ -89,7 +91,7 @@ const requestedMethods = (request: ReturnType<typeof vi.fn>): string[] =>
   request.mock.calls.map(([call]) => (call as { readonly method: string }).method);
 
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syntax') =>
-  new Build123dWorkerError([
+  new PythonWorkerError([
     {
       message: `${type} failed`,
       code: 'PYTHON_TEST',
@@ -99,7 +101,8 @@ const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syn
     },
   ]);
 
-const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
+const loadDefinition = async () =>
+  resolveRuntimePluginDefinition('kernel', build123dKernel({ closure: kernelOptions }));
 // The hook tests use focused session/mirror doubles; this is their checked context boundary.
 const createContext = () =>
   createContextData() as ReturnType<typeof createContextData> &
@@ -576,7 +579,7 @@ describe('Build123d kernel lifecycle errors', () => {
     // A worker digest that disagrees with the runtime's own canonicalization is never announced.
     expect(context.resident.track).toHaveBeenCalledWith([digest]);
     expect(context.warmCandidates).toEqual([digest]);
-    expect(context.session.observeResidentBytes).toHaveBeenCalledWith(4096);
+    expect(context.resident.observeResidentBytes).toHaveBeenCalledWith(4096);
 
     // The next build warms from the refreshed candidate set before it executes.
     context.session.request.mockResolvedValueOnce({ handleId: 'again', observedDependencies: [] });

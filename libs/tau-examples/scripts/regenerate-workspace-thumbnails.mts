@@ -3,8 +3,6 @@
  * same runtime, camera and encoder as the checked-in example thumbnails.
  *
  * Usage:
- *   TAU_PICOGK_RESOURCE_ROOT="$PWD/apps/desktop/resources/picogk" \
- *   TAU_BUILD123D_RESOURCE_ROOT="$PWD/apps/desktop/resources/python" \
  *   pnpm exec tsx libs/tau-examples/scripts/regenerate-workspace-thumbnails.mts \
  *     --workspace=<dir> --backup=<dir> --record=<file.json> [--only=<slug>,<slug>] [--timeout=<seconds>]
  *
@@ -12,6 +10,8 @@
  * and a backup is never overwritten. A project that fails to evaluate or render,
  * has no main entry, or yields an image of the wrong size keeps its current file.
  * Each project renders in its own process, so native kernel memory is reclaimed.
+ * Native projects render once `tau prepare <kernel>` has sealed the kernel's
+ * closure in this machine's payload store (`TAU_CONFIG_DIR` relocates it).
  */
 
 import { spawnSync } from 'node:child_process';

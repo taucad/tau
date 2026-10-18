@@ -7,9 +7,16 @@ import {
 } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
 import { installNativeRuntimeVerifier, installNativeWorkerLauncher } from '@taucad/native-process-core';
+import {
+  installNativeClosureResolver,
+  inspectionResolver,
+  nativeClosureAnswerSchema,
+  reportNativeDeployments,
+} from '@taucad/native-process-core/store';
+import type { NativeClosureAnswer, NativeClosureResolver } from '@taucad/native-process-core/store';
+import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
-import type { NativeComposition } from '#native-kernels.js';
 import { acquisitionOf } from '#acquisition.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { installSandboxModuleHooks } from '#sandbox-modules.js';
@@ -35,6 +42,53 @@ installZooProxyCredential((listener) => {
   process.on('message', listener);
 });
 
+/**
+ * A closure resolver that asks the daemon: this child cannot read the payload store, so each kernel's request goes
+ * over the IPC channel with its package's unparsed `tau-plugin.json` and root (no kernel code), and the daemon answers
+ * from the store's launch index. An answer that does not parse, or a daemon that could not answer, is not prepared.
+ * @returns The resolver.
+ */
+const daemonClosureResolver = (): NativeClosureResolver => {
+  const pending = new Map<string, (answer: NativeClosureAnswer) => void>();
+  let requests = 0;
+  const notPrepared: NativeClosureAnswer = { status: 'unavailable', reason: 'not-prepared', byteLength: 0 };
+  process.on('message', (message: unknown) => {
+    if (typeof message !== 'object' || message === null || Reflect.get(message, 'type') !== 'native-closure:answer') {
+      return;
+    }
+    const id: unknown = Reflect.get(message, 'id');
+    const settle = typeof id === 'string' ? pending.get(id) : undefined;
+    if (settle === undefined) {
+      return;
+    }
+    pending.delete(id as string);
+    const answer = nativeClosureAnswerSchema.safeParse(Reflect.get(message, 'answer'));
+    settle(answer.success ? answer.data : notPrepared);
+  });
+  return async ({ package: name, kernel, dependencies, deployment }) => {
+    if (!process.connected) {
+      return notPrepared;
+    }
+    requests += 1;
+    const id = `closure-${String(requests)}`;
+    const answered = new Promise<NativeClosureAnswer>((resolve) => {
+      pending.set(id, resolve);
+    });
+    process.send?.({
+      type: 'native-closure:inspect',
+      id,
+      request: {
+        package: name,
+        kernel,
+        dependencies: [...dependencies],
+        manifest: deployment.manifest,
+        packageRoot: deployment.packageRoot,
+      },
+    });
+    return answered;
+  };
+};
+
 let host: HostRuntimeHandle | undefined;
 let messageChain = Promise.resolve();
 
@@ -42,10 +96,11 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (typeof message !== 'object' || message === null || !('type' in message)) {
     throw new TypeError('Tau Host runtime child received an invalid IPC message.');
   }
-  /* Credential frames and native worker frames have listeners of their own. */
+  /* Credential frames, native worker frames and closure answers have listeners of their own. */
   if (
     message.type === zooProxyCredentialFrameType ||
-    (typeof message.type === 'string' && message.type.startsWith('native-worker:'))
+    (typeof message.type === 'string' &&
+      (message.type.startsWith('native-worker:') || message.type.startsWith('native-closure:')))
   ) {
     return;
   }
@@ -67,27 +122,29 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (host) {
     throw new Error('Tau Host runtime child was started more than once.');
   }
-  /* The daemon composed the native kernels from the payload store, which this child never reads, and starts their
-   * workers on its behalf: this child may not spawn (D37, North Star S2). A worker that exits before its handshake has
-   * its closure re-verified by the daemon too, so the refusal names the damaged file (D8, X35). */
-  const native =
-    'native' in message && typeof message.native === 'object' && message.native !== null
-      ? (message.native as NativeComposition)
-      : undefined;
-  if (native !== undefined) {
+  /* This child never reads the payload store and may not spawn (D37, North Star S2): with `native`, the daemon answers
+   * each native kernel's closure request, starts its workers on this child's behalf and re-verifies a closure whose
+   * worker exited before its handshake (D8, X35). Without it, every native kernel refuses as not prepared. */
+  const native = 'native' in message && message.native === true;
+  if (native) {
     installNativeWorkerLauncher(createRuntimeChildWorkerLauncher());
     installNativeRuntimeVerifier(createRuntimeChildRuntimeVerifier());
   }
+  installNativeClosureResolver(native ? daemonClosureResolver() : inspectionResolver([]));
   const runtime = await loadCliRuntime({
     projectRoot: process.cwd(),
     plugin: values.plugin,
     config: values.config,
     ...(values['zoo-proxy-url'] ? { zooProxyUrl: values['zoo-proxy-url'] } : {}),
     acquisition: acquisitionOf(values.acquisition),
-    ...(native?.build123d === undefined ? {} : { build123d: native.build123d }),
-    ...(native?.picogk === undefined ? {} : { picogk: native.picogk }),
-    ...(native === undefined ? {} : { unavailableKernels: native.unavailable }),
   });
+  /* What `prepare_kernel` names and prepares: the native deployments this runtime lists, as data. */
+  if (native) {
+    process.send?.({
+      type: 'native-deployments',
+      report: reportNativeDeployments(await resolveRuntimeDefinition(runtime, undefined)),
+    });
+  }
   host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
   process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });
 };

@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-17'
+updated: '2026-10-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -168,7 +168,12 @@ The first implementation, `@taucad/build123d`, establishes these requirements fo
 - native handles are valid only for one process generation. Mesh and export consume retained handles and never rerun source;
 - every native worker is spawned through the shared operating-system sandbox seam with one fixed capability profile (bundled runtime and mirrored snapshot readable, one private writable root, no network); when the sandbox cannot start, the native runtime is unavailable and the worker is never spawned unsandboxed. There is no user trust decision, trusted-location list, or override.
 
-Do not extract a shared language-runner package or public runner ABI from the first implementation. A later PicoGK kernel may copy this shape; shared code is justified only after the second implementation proves an identical stable seam. Native-code containment is the sandbox seam itself and is not implied by worker or utility-process isolation.
+Shared code is justified only after a second implementation proves an identical stable seam. Build123d and PicoGK proved it on the TypeScript side (one `NativeProcessSession`, one JSON-lines protocol shape, one closure-to-options and launch-set mapping), so the seam is owned in layers, each a support core and none a runtime plugin role:
+
+- `@taucad/native-process-core` owns the language-agnostic process seam: session, sandbox, workspace mirror and launch verification; the `/adopter` deployment contract (`defineNativeKernelDeployment`, `withNativeDeployment`) a native kernel package exports from a light `/native` subpath and binds to its kernel registrations; and the Node `/store` machinery a host uses to discover deployments from its resolved runtime (`nativeDeploymentsOf`), prepare their closures and bind kernels to them late. A Rust or other single-binary kernel uses it directly.
+- `@taucad/python-kernel-core` and `@taucad/dotnet-kernel-core` are language specialisations of it (session, options schema, launch set, seal, mirror, generator, layer helpers). They hold no CAD library code; a kernel's library calls stay in its own worker.
+
+There is no native kernel roster. Listing a native kernel's plugin in a runtime definition is its whole integration: its registration carries its deployment, and every host discovers it from the runtime it resolved, so a third-party native kernel needs no Tau change. The C# worker protocol has one implementation, so it stays in `@taucad/picogk` until a second C# worker exists. Do not add a public runner ABI to `@taucad/runtime`; the runtime still knows no concrete capability, and the deployment rides in a symbol slot rather than a registry field until a plugin ABI bump promotes it. Native-code containment is the sandbox seam itself and is not implied by worker or utility-process isolation.
 
 ### Multi-Bundler Support
 
@@ -520,10 +525,13 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 @taucad/image         → named plugin export plus imageTranscoder
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
-@taucad/build123d     → Node-hosted Build123d kernel; private supervised Python process
+@taucad/build123d     → Node-hosted Build123d kernel on python-kernel-core; `/native` deployment
+@taucad/picogk        → Node-hosted PicoGK kernel on dotnet-kernel-core; `/native` deployment
 @taucad/tscircuit     → browser/Node tscircuit EDA kernel; `output` render option selects GLB or SVG
 @taucad/occt-core     → shared OCCT helper package, no plugin export
 @taucad/geometry-core → shared geometry helper package, no plugin export
+@taucad/native-process-core, @taucad/python-kernel-core, @taucad/dotnet-kernel-core
+                      → native process and language-core helper packages, no plugin export
 ```
 
 ## Tessellation

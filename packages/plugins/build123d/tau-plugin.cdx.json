@@ -116,6 +116,40 @@
       ]
     },
     {
+      "bom-ref": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
       "type": "library",
       "name": "psutil",
@@ -599,40 +633,6 @@
       ]
     },
     {
-      "bom-ref": "1fc8ba6a3abe99e2a5f2848b175db14c13b8b475e2c9c5a88c03931d605d8877",
-      "type": "file",
-      "name": "tau-worker/glb.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "1fc8ba6a3abe99e2a5f2848b175db14c13b8b475e2c9c5a88c03931d605d8877"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
       "type": "library",
       "name": "pygments",
@@ -815,6 +815,40 @@
         }
       ],
       "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/analyzer.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
@@ -1171,6 +1205,40 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "49dfd6e1dcba5647abe881c8256b6e90df5afa49fd3980227619f2a737de180f",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/glb.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "49dfd6e1dcba5647abe881c8256b6e90df5afa49fd3980227619f2a737de180f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -1569,40 +1637,6 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "63ea57c84482172c527087f7c014a5c84832124397d258cd3b121b95774a8b14",
-      "type": "file",
-      "name": "tau-worker/analyzer.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "63ea57c84482172c527087f7c014a5c84832124397d258cd3b121b95774a8b14"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -2364,6 +2398,40 @@
       ]
     },
     {
+      "bom-ref": "9a172b38644cc2a2be12d0d54e49f9ddcf1793dcea2998793a4b1b53ee0b4907",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/protocol.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9a172b38644cc2a2be12d0d54e49f9ddcf1793dcea2998793a4b1b53ee0b4907"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
       "type": "library",
       "name": "cloudpickle",
@@ -2983,40 +3051,6 @@
       ]
     },
     {
-      "bom-ref": "d23cf6edb2d5cffbc2a64eafa05ce37617575c4ba484f4624e1419227b8175d0",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "d23cf6edb2d5cffbc2a64eafa05ce37617575c4ba484f4624e1419227b8175d0"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
       "type": "platform",
       "name": "cpython",
@@ -3413,6 +3447,40 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ecc2ca0b00f1fde670edbfa470e84408a0c7c9e9b2d2753eb7e9bac917ffb39c",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/model.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ecc2ca0b00f1fde670edbfa470e84408a0c7c9e9b2d2753eb7e9bac917ffb39c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },

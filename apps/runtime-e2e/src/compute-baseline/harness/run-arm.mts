@@ -387,14 +387,16 @@ const kernelFor = async () => {
       build123d({
         kernels: {
           default: {
-            pythonExecutable: resolve(targetRoot, manifest.pythonRelativePath),
-            workerPath: resolve(targetRoot, manifest.workerPath),
-            pythonSha256: manifest.pythonSha256,
-            workerSha256: manifest.workerSha256,
-            supportFiles: manifest.supportFiles.map(({ path, sha256: digest }: { path: string; sha256: string }) => ({
-              path: resolve(targetRoot, path),
-              sha256: digest,
-            })),
+            closure: {
+              pythonExecutable: resolve(targetRoot, manifest.pythonRelativePath),
+              workerPath: resolve(targetRoot, manifest.workerPath),
+              pythonSha256: manifest.pythonSha256,
+              workerSha256: manifest.workerSha256,
+              supportFiles: manifest.supportFiles.map(({ path, sha256: digest }: { path: string; sha256: string }) => ({
+                path: resolve(targetRoot, path),
+                sha256: digest,
+              })),
+            },
             requestTimeout: 600_000,
           },
         },

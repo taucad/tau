@@ -6,8 +6,10 @@ import { manifoldKernel } from '@taucad/manifold';
 import { picovoxelKernel } from '@taucad/picovoxel';
 import { smlibKernel } from '@taucad/smlib';
 import { tscircuitKernel } from '@taucad/tscircuit';
+import { kernelConfigurations } from '@taucad/types/constants';
+import type { KernelEcosystem } from '@taucad/types/constants';
 import { kernelLibraries } from '#utils/kernel-libraries.js';
-import { getKernelDependencies, kernelsWithLibraries } from '#utils/kernel.utils.js';
+import { getKernelDependencies, getKernelProjectTemplate, kernelsWithLibraries } from '#utils/kernel.utils.js';
 
 describe('getKernelDependencies', () => {
   it('should match every kernel without loading executable plugins into the renderer', () => {
@@ -41,4 +43,28 @@ describe('getKernelDependencies', () => {
   it('should declare nothing for a kernel without npm libraries', async () => {
     await expect(getKernelDependencies('openscad')).resolves.toEqual({});
   });
+});
+
+/** The files a new project of each ecosystem starts from its kernel's template; Tau writes the others itself. */
+const templateFiles: Readonly<Record<KernelEcosystem, readonly string[] | undefined>> = {
+  pypi: ['pyproject.toml', 'pylock.toml', 'uv.lock'],
+  nuget: ['project.csproj', 'packages.lock.json'],
+  npm: undefined,
+  kcl: undefined,
+  none: undefined,
+};
+
+describe('getKernelProjectTemplate', () => {
+  it.each(kernelConfigurations.map(({ id, ecosystem }) => [id, ecosystem] as const))(
+    'should give %s the %s template files, each non-empty',
+    async (id, ecosystem) => {
+      const template = await getKernelProjectTemplate(id);
+      const expected = templateFiles[ecosystem];
+
+      expect(template === undefined ? undefined : Object.keys(template).toSorted()).toEqual(
+        expected === undefined ? undefined : [...expected].toSorted(),
+      );
+      expect(Object.values(template ?? {}).filter((text) => text.length === 0)).toEqual([]);
+    },
+  );
 });

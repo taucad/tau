@@ -33,9 +33,13 @@ import process from 'node:process';
 
 import { createPreparationHost, detectHostIndicators } from '@taucad/runtime/preparation/node';
 
-/* oxlint-disable no-restricted-imports -- spike-only: siblings and the CLI's native roster by relative path; deleted with W21. */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI roster is not a public export.
-import { nativePreparationPlugins } from '../../../packages/cli/src/native-kernels.ts';
+/* oxlint-disable no-restricted-imports -- spike-only: siblings and the native deployments by relative path; deleted with W21. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the native store.
+import { preparationPluginsOf } from '../../../packages/core/native-process/src/store.ts';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
+import { build123dNative } from '../../../packages/plugins/build123d/src/native.ts';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
+import { picogkNative } from '../../../packages/plugins/picogk/src/native.ts';
 import { hostFacts, parseFlags, requiredFlag } from './spike-common.mts';
 import { round1, runTau, Summary, tail } from './store-spike.mts';
 /* oxlint-enable no-restricted-imports */
@@ -144,7 +148,7 @@ const runProxy = (rateMbit: number, portFile: string, log: string): void => {
 
 /** One host-level preparation of build123d from its origins, with every progress event timestamped. */
 const runPrepare = async (store: string, events: string, cancelAt: number | undefined): Promise<void> => {
-  const plugins = await nativePreparationPlugins();
+  const plugins = preparationPluginsOf([build123dNative, picogkNative]);
   const indicators = detectHostIndicators();
   const host = createPreparationHost({ plugins, store, ...(indicators === undefined ? {} : { indicators }) });
   const controller = new AbortController();

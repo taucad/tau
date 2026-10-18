@@ -7,7 +7,7 @@ import type { ExportResult } from '@taucad/runtime';
 import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import { loadCliRuntime } from '#runtime-options.js';
-import { nativeKernelFor } from '#native-kernels.js';
+import { unpreparedKernelError } from '#native-kernels.js';
 import { resolveProjectRoot } from '#project-root.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
@@ -49,7 +49,6 @@ export const parseJsonObject = (flag: string, input: string | undefined): Record
  */
 const capabilityMissingCodes = new Set(['KERNEL_CAPABILITY_MISSING', 'TRANSCODER_CAPABILITY_MISSING']);
 
-/** Why the PicoGK kernel was left out of the runtime for an input it would have handled. */
 /**
  * `tau export` command.
  *
@@ -179,15 +178,13 @@ export const exportCommand = defineCommand({
     // folder resolves (S11 F2). Plugins still load from the invoking project.
     const { root: projectRoot } = resolveProjectRoot({ file: inputPath, cwd: process.cwd() });
     const sourcePath = relative(projectRoot, inputPath).split(sep).join('/');
-    // The native kernel for this input, from the payload store's receipts; nothing is downloaded.
-    const native = await nativeKernelFor(extname(inputPath).slice(1));
-    const unprepared = native !== undefined && 'code' in native ? native : undefined;
+    // A native kernel binds to its sealed closure itself, reading the payload store's launch index, and refuses with
+    // KERNEL_NOT_PREPARED until it is prepared; nothing is downloaded.
     authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
-      ...(native !== undefined && !('code' in native) && native),
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     profileLedger?.checkpoint('cli.load-configured-plugins');
@@ -260,8 +257,9 @@ export const exportCommand = defineCommand({
       runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
 
       if (!result.success) {
-        if (unprepared !== undefined && result.issues.some(({ code }) => code === 'KERNEL_CAPABILITY_MISSING')) {
-          throw cliError(unprepared.code, unprepared.message, exitCodes.refused);
+        const unprepared = unpreparedKernelError(result.issues);
+        if (unprepared !== undefined) {
+          throw unprepared;
         }
         const messages = result.issues
           .map((issue) =>

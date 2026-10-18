@@ -1,11 +1,7 @@
 import type { PluginFactory, PluginInstance } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
-import type { Build123dClosureOptions } from '@taucad/build123d';
-import type { PicogkKernelOptions } from '@taucad/picogk';
 import { cliZooCloseErrors } from '#zoo-proxy.js';
-import { unavailableKernelsPlugin } from '#unprepared-kernels.js';
-import type { UnavailableNativeKernel } from '#unprepared-kernels.js';
 import type { Acquisition } from '#acquisition.js';
 
 /** A plugin factory whose default invocation is valid for `--plugin`. @public */
@@ -18,14 +14,6 @@ export type DefaultInvocablePluginFactory = {
 export type CliRuntimeOptions = {
   readonly explicitFactories?: readonly DefaultInvocablePluginFactory[];
   readonly configuredPlugins?: readonly PluginInstance[];
-  readonly picogk?: PicogkKernelOptions;
-  /** Build123d's options from the closure `tau prepare build123d` sealed; absent, no Build123d kernel is composed. */
-  readonly build123d?: Build123dClosureOptions;
-  /**
-   * Native kernels declared but not composed (not prepared, or no runtime for this host); their files answer the
-   * typed refusal instead of "no kernel handles this extension" (D7).
-   */
-  readonly unavailableKernels?: readonly UnavailableNativeKernel[];
   /** The Zoo proxy the KCL kernel connects to; defaults to Tau Cloud's (see `cliZooProxyUrl`). */
   readonly zooProxyUrl?: string;
   /** `locked` (`TAU_ACQUISITION=locked`): the bundler refuses every import it would download (`package-not-locked`). */
@@ -33,12 +21,13 @@ export type CliRuntimeOptions = {
 };
 
 /**
- * Build the CLI runtime from built-ins, configured instances, and default-invoked `--plugin` factories.
+ * The CLI runtime's plugin list: built-ins, configured instances in place of or after them, then default-invoked
+ * `--plugin` factories.
  *
  * @param options - Explicit and config-module plugins loaded from the invoking project.
- * @returns The CLI's complete runtime definition.
+ * @returns The invoked plugins, in kernel-selection precedence.
  */
-export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise<AnyRuntimeDefinition> => {
+export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise<readonly PluginInstance[]> => {
   /*
    * Array order is kernel-selection precedence. Extensions and routes stay owned by the packages.
    */
@@ -58,14 +47,13 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, picogkModule, build123dModule] = await Promise.all([
+  const [{ assimp }, { image }, { zoo }, { build123d }, { picogk }] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
     import('@taucad/zoo'),
-    options.picogk ? import('@taucad/picogk') : undefined,
-    options.build123d ? import('@taucad/build123d') : undefined,
+    import('@taucad/build123d'),
+    import('@taucad/picogk'),
   ]);
-  const unavailable = unavailableKernelsPlugin(options.unavailableKernels ?? []);
   const builtIns = [
     middlewareModule.plugin(),
     esbuildModule.plugin(
@@ -81,11 +69,9 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
         },
       },
     }),
-    ...(picogkModule && options.picogk ? [picogkModule.picogk({ kernels: { default: options.picogk } })] : []),
-    ...(build123dModule && options.build123d
-      ? [build123dModule.build123d({ kernels: { default: options.build123d } })]
-      : []),
-    ...(unavailable ? [unavailable] : []),
+    /* Native kernels bind to their sealed closures themselves, and refuse with `KERNEL_NOT_PREPARED` until then. */
+    build123d(),
+    picogk(),
     assimp({ preset: 'all' }),
     image(),
   ];
@@ -126,5 +112,14 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     plugins.push(instance);
   }
 
-  return defineRuntime({ plugins });
+  return plugins;
 };
+
+/**
+ * Build the CLI runtime from built-ins, configured instances, and default-invoked `--plugin` factories.
+ *
+ * @param options - Explicit and config-module plugins loaded from the invoking project.
+ * @returns The CLI's complete runtime definition.
+ */
+export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise<AnyRuntimeDefinition> =>
+  defineRuntime({ plugins: await createCliPlugins(options) });

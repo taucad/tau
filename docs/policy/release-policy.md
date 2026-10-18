@@ -20,7 +20,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 
 ## Packages in Scope
 
-The fixed release group is every `tag:type:package` project that is not private: 57 packages on 2026-10-17. `scripts/src/check-release-projects.ts` resolves that set from the project graph in the release gate, so the table below names the main packages and families rather than every member.
+The fixed release group is every `tag:type:package` project that is not private: 59 packages on 2026-10-18. `scripts/src/check-release-projects.ts` resolves that set from the project graph in the release gate, so the table below names the main packages and families rather than every member.
 
 | Package                   | Description                                               |
 | ------------------------- | --------------------------------------------------------- |

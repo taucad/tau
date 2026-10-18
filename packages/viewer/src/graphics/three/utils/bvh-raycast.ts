@@ -2,11 +2,12 @@ import { getGltfOccurrenceLayers } from '#graphics/three/utils/gltf-surface-batc
 import * as THREE from 'three';
 import { isSectionRemoved } from '#graphics/section-cuts.js';
 import type { SectionPiece } from '#graphics/section-cuts.js';
-import { getOrBuildBvh, intersectsBvhGeometryBounds } from '#graphics/three/utils/bvh-cache.js';
+import { ensureBvh, getBvh, getBvhGeometryBounds, getBvhStatus } from '#graphics/three/utils/bvh-cache.js';
 
 const inverseMatrix = new THREE.Matrix4();
 const localRay = new THREE.Ray();
 const worldPoint = new THREE.Vector3();
+const entryPoint = new THREE.Vector3();
 
 /** The section a raycast respects: the union of `pieces`, in the render frame, is removed. */
 export type RaycastClipState = Readonly<{
@@ -73,6 +74,28 @@ const toWorldHit = ({
   };
 };
 
+/** Settles once every wait has, however each ends. */
+const settleAll = async (waits: ReadonlyArray<Promise<unknown>>): Promise<void> => {
+  await Promise.allSettled(waits);
+};
+
+/**
+ * A model pick: the nearest visible, unclipped hit, or none. `pending` means a mesh whose tree is still building in the
+ * worker lies nearer along the ray than any answered hit, so the answer is not known yet: a consumer treats it as "not
+ * yet", never as a miss. `whenReady` settles when those trees land or fail, for the consumer to ask again.
+ */
+export type MeshPick = Readonly<{
+  hit: THREE.Intersection<THREE.Mesh> | undefined;
+  pending: boolean;
+  whenReady: Promise<void> | undefined;
+}>;
+
+/**
+ * Raycasts the meshes for the nearest visible hit that clipping keeps, through each geometry's tree. A geometry
+ * under the synchronous threshold is built on first use; a larger one is requested from the BVH worker and makes the
+ * pick pending only when the ray enters its bounds before the nearest answered hit, so a farther mesh never wins in its
+ * place. A geometry whose build failed is skipped.
+ */
 export function raycastFirstVisibleMeshHit({
   raycaster,
   meshes,
@@ -81,8 +104,10 @@ export function raycastFirstVisibleMeshHit({
   readonly raycaster: THREE.Raycaster;
   readonly meshes: readonly THREE.Mesh[];
   readonly clipping?: RaycastClipState;
-}): THREE.Intersection<THREE.Mesh> | undefined {
+}): MeshPick {
   let nearest: THREE.Intersection<THREE.Mesh> | undefined;
+  let pendingDistance = Number.POSITIVE_INFINITY;
+  const waits: Array<Promise<unknown>> = [];
   const isKept = createRaycastClipTest(clipping);
 
   for (const mesh of meshes) {
@@ -99,11 +124,22 @@ export function raycastFirstVisibleMeshHit({
     inverseMatrix.copy(mesh.matrixWorld).invert();
     localRay.copy(raycaster.ray).applyMatrix4(inverseMatrix);
 
-    if (!intersectsBvhGeometryBounds(mesh.geometry, localRay)) {
+    if (!localRay.intersectBox(getBvhGeometryBounds(mesh.geometry), entryPoint)) {
       continue;
     }
 
-    const bvh = getOrBuildBvh(mesh.geometry);
+    const bvh = getBvh(mesh.geometry);
+    if (!bvh) {
+      if (getBvhStatus(mesh.geometry).status !== 'failed') {
+        waits.push(ensureBvh(mesh.geometry));
+        const entryDistance = entryPoint.applyMatrix4(mesh.matrixWorld).distanceTo(raycaster.ray.origin);
+        if (entryDistance <= raycaster.far) {
+          pendingDistance = Math.min(pendingDistance, entryDistance);
+        }
+      }
+      continue;
+    }
+
     const firstHit = isKept ? undefined : bvh.raycastFirst(localRay, mesh.material, 0, Number.POSITIVE_INFINITY);
     const hits = isKept
       ? bvh.raycast(localRay, mesh.material, 0, Number.POSITIVE_INFINITY)
@@ -132,5 +168,10 @@ export function raycastFirstVisibleMeshHit({
     }
   }
 
-  return nearest;
+  const pending = pendingDistance < (nearest?.distance ?? Number.POSITIVE_INFINITY);
+  return {
+    hit: pending ? undefined : nearest,
+    pending,
+    whenReady: pending ? settleAll(waits) : undefined,
+  };
 }

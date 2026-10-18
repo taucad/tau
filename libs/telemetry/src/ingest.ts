@@ -164,6 +164,7 @@ export const kernelIds = [
   'zoo',
   'jscad',
   'opencascadejs',
+  'smlib',
   'tscircuit',
 ] as const;
 
@@ -181,6 +182,7 @@ export const builtInSkillSlugs = [
   'cad-picogk',
   'cad-picovoxel',
   'cad-replicad',
+  'cad-smlib',
   'cad-tscircuit',
   'cad-zoo',
   'geospec-authoring',

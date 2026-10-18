@@ -1,6 +1,6 @@
 # build123d — geometry
 
-13 top-level symbols. Signatures are verbatim python.
+11 top-level symbols. Signatures are verbatim python.
 
 # Category: geometry
 # Axis
@@ -39,10 +39,6 @@ class Axis
   # relocates self to a new location possibly changing position and direction
   # build123d.geometry.Axis.located (method)
   located(new_location: Location)
-
-  # Return self as Plane
-  # build123d.geometry.Axis.to_plane (method)
-  to_plane() -> Plane
 
   # are axes coaxial
   # Remarks: True if the angle between self and other is lower or equal to angular_tolerance and the distance between self and other is lower or equal to linear_tolerance. Returns: bool: axes are coaxial
@@ -107,13 +103,14 @@ class Axis
   intersect(shape: Shape) -> Shape | None
 
 # Category: geometry
-# A BoundingBox for a Shape
+# An axis-aligned bounding box for a shape
+# Remarks: In addition to its extents, a :class:`BoundBox` provides spatial predicates. :meth:`covers` and :meth:`covered_by` test inclusive enclosure; :meth:`contains` and :meth:`within` require enclosure with relevant-dimensional interior; and :meth:`contains_properly` additionally excludes boundary contact. :meth:`intersects` and :meth:`disjoint` test whether the distance between boxes is within the given tolerance. :meth:`touches` identifies contact without shared interior, while :meth:`overlaps` identifies shared interior where neither box contains the other. Predicate comparisons account for degenerate bounding boxes. An axis that is degenerate and coincident in both boxes is excluded from interior comparisons, so coplanar bounding rectangles compare in two dimensions and collinear bounding lines compare in one. Degenerate axes at different coordinates remain distinct: for example, rectangles on parallel planes do not have a shared interior. This behavior concerns bounding-box extents only; it does not infer the topological dimension of the underlying shape.
 # build123d.geometry.BoundBox (class)
 class BoundBox
 
   # build123d.geometry.BoundBox.__init__ (constructor)
   BoundBox(bounding_box: Bnd_Box) -> None
-  BoundBox(shape: TopoDS_Shape, tolerance: float | None = None, optimal: bool = True) -> None
+  BoundBox(shape: Shape | TopoDS_Shape, tolerance: float | None = None, optimal: bool = True) -> None
 
   # Return the overall Lebesgue measure of the bounding box
   # Remarks: - For 1D objects: length - For 2D objects: area - For 3D objects: volume
@@ -134,7 +131,7 @@ class BoundBox
   #   tol: float
 
   # Compares bounding boxes
-  # Remarks: Compares bounding boxes. Returns none if neither is inside the other. Returns the outer one if either is outside the other. BoundBox.is_inside works in 3d, but this is a 2d bounding box, so it doesn't work correctly plus, there was all kinds of rounding error in the built-in implementation i do not understand. Returns:
+  # Remarks: Compares bounding boxes. Returns none if neither is inside the other. Returns the outer one if either is outside the other. .. deprecated:: Use :meth:`contains` to identify the enclosing bounding box. Returns:
   # build123d.geometry.BoundBox.find_outside_box_2d (method)
   find_outside_box_2d(bb1: BoundBox, bb2: BoundBox) -> BoundBox | None
   #   bb1: BoundBox
@@ -148,17 +145,48 @@ class BoundBox
   #   tolerance: float
   #   optimal: bool
 
-  # Is the provided bounding box inside this one?
-  # Remarks: Returns:
-  # build123d.geometry.BoundBox.is_inside (method)
-  is_inside(second_box: BoundBox) -> bool
+  # Return whether this bounding box includes every point of *other*
+  # Remarks: Boundary contact is included, so this predicate also applies to degenerate bounding boxes such as those of vertices, edges, and faces.
+  # build123d.geometry.BoundBox.covers (method)
+  covers(other: BoundBox, tolerance: float = TOLERANCE) -> bool
 
-  # Check if this bounding box overlaps with another
-  # Remarks: Returns: True if bounding boxes overlap (share any volume), False otherwise
+  # Return whether every point of this bounding box is in *other*
+  # build123d.geometry.BoundBox.covered_by (method)
+  covered_by(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether this bounding box contains *other*
+  # Remarks: Boundary contact is permitted, but *other* must have an interior point in this bounding box. Use :meth:`covers` for degenerate bounding boxes.
+  # build123d.geometry.BoundBox.contains (method)
+  contains(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether *other* is contained without touching this box's boundary
+  # build123d.geometry.BoundBox.contains_properly (method)
+  contains_properly(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether this bounding box is contained in *other*
+  # build123d.geometry.BoundBox.within (method)
+  within(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether the distance between bounding boxes is within *tolerance*
+  # build123d.geometry.BoundBox.intersects (method)
+  intersects(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether these bounding boxes do not intersect
+  # build123d.geometry.BoundBox.disjoint (method)
+  disjoint(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether these bounding boxes meet without sharing positive volume
+  # build123d.geometry.BoundBox.touches (method)
+  touches(other: BoundBox, tolerance: float = TOLERANCE) -> bool
+
+  # Return whether these boxes overlap without either one containing the other
   # build123d.geometry.BoundBox.overlaps (method)
   overlaps(other: BoundBox, tolerance: float = TOLERANCE) -> bool
-  #   other: BoundBox to check overlap with
-  #   tolerance: Distance tolerance for overlap detection
+
+  # Return whether this bounding box is inside *other*
+  # Remarks: .. deprecated:: Use :meth:`within` instead.
+  # build123d.geometry.BoundBox.is_inside (method)
+  is_inside(other: BoundBox, tolerance: float = TOLERANCE) -> bool
 
   # Amount to move object to achieve the desired alignment
   # build123d.geometry.BoundBox.to_align_offset (method)
@@ -242,11 +270,15 @@ class Location
   # build123d.geometry.Location.inverse (method)
   inverse() -> Location
 
-  # Combine locations
+  # Apply this location to a location, movable object, or iterable
+  # Remarks: Locations are composed with other locations. Objects that provide a ``moved`` method, such as Shapes and Planes, are moved as a whole. Other iterables are converted to a list once and processed element by element, either as locations or as movable objects. Unsupported operands return ``NotImplemented`` so Python can try reflected operator dispatch.
   # build123d.geometry.Location.__mul__ (method)
   __mul__(other: _ShapeT) -> _ShapeT  # Location * other
   __mul__(other: Location) -> Location  # Location * other
+  __mul__(other: Plane) -> Plane  # Location * other
   __mul__(other: Iterable[Location]) -> list[Location]  # Location * other
+  __mul__(other: Iterable[Plane]) -> list[Plane]  # Location * other
+  __mul__(other: Iterable[_ShapeT]) -> list[_ShapeT]  # Location * other
 
   # build123d.geometry.Location.__pow__ (method)
   __pow__(exponent: int) -> Location  # Location ** exponent
@@ -269,14 +301,6 @@ class Location
   mirror(mirror_plane: Plane) -> Location
   #   mirror_plane: The plane to mirror across
 
-  # Convert the location into an Axis
-  # build123d.geometry.Location.to_axis (method)
-  to_axis() -> Axis
-
-  # Convert the location to a translation, rotation tuple
-  # build123d.geometry.Location.to_tuple (method)
-  to_tuple() -> tuple[tuple[float, float, float], tuple[float, float, float]]
-
   # Find intersection of location and geometric object or shape
   # build123d.geometry.Location.intersect (method)
   intersect(vector: VectorLike) -> Vector | None
@@ -284,21 +308,6 @@ class Location
   intersect(axis: Axis) -> Vector | Location | None
   intersect(plane: Plane) -> Vector | Location | None
   intersect(shape: Shape) -> Shape | None
-
-# Category: geometry
-# Custom JSON Encoder for Location values
-# Remarks: Example: .. code:: data_dict = { "part1": { "joint_one": Location((1, 2, 3), (4, 5, 6)), "joint_two": Location((7, 8, 9), (10, 11, 12)), }, "part2": { "joint_one": Location((13, 14, 15), (16, 17, 18)), "joint_two": Location((19, 20, 21), (22, 23, 24)), }, } json_object = json.dumps(data_dict, indent=4, cls=LocationEncoder) with open("sample.json", "w") as outfile: outfile.write(json_object) with open("sample.json", "r") as infile: copy_data_dict = json.load(infile, object_hook=LocationEncoder.location_hook)
-# build123d.geometry.LocationEncoder (class)
-class LocationEncoder(JSONEncoder)
-
-  # Return a serializable object
-  # build123d.geometry.LocationEncoder.default (method)
-  default(o: Location) -> dict
-
-  # Convert Locations loaded from json to Location objects
-  # Remarks: Example: read_json = json.load(infile, object_hook=LocationEncoder.location_hook)
-  # build123d.geometry.LocationEncoder.location_hook (method)
-  location_hook(obj) -> dict
 
 # Category: geometry
 # A 3d , 4x4 transformation matrix
@@ -598,8 +607,9 @@ class Pos(Location)
 class Rot(Location)
 
   # build123d.geometry.Rotation.__init__ (constructor)
-  Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic == Intrinsic.XYZ)
+  Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
   Rotation(X: float = 0, Y: float = 0, Z: float = 0, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
+  Rotation(axis: Axis, angle: float)
 
 # Category: geometry
 # Subclass of Location used only for object rotation
@@ -608,160 +618,6 @@ class Rot(Location)
 class Rotation(Location)
 
   # build123d.geometry.Rotation.__init__ (constructor)
-  Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic == Intrinsic.XYZ)
+  Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
   Rotation(X: float = 0, Y: float = 0, Z: float = 0, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
-
-# Category: geometry
-# Create a 3-dimensional vector
-# Remarks: Attributes: wrapped (gp_Vec): the OCP vector object
-# build123d.geometry.Vector (class)
-class Vector
-
-  # build123d.geometry.Vector.__init__ (constructor)
-  Vector(X: float, Y: float, Z: float)
-  Vector(X: float, Y: float)
-  Vector(v: Vector)
-  Vector(v: Sequence[float])
-  Vector(v: gp_Vec | gp_Pnt | gp_Dir | gp_XYZ)
-  Vector()
-
-  # Get x value
-  X: float
-
-  # Get y value
-  Y: float
-
-  # Get z value
-  Z: float
-
-  # OCCT object
-  wrapped: gp_Vec
-
-  # Return tuple equivalent
-  # build123d.geometry.Vector.to_tuple (method)
-  to_tuple() -> tuple[float, float, float]
-
-  # Vector length
-  length: float
-
-  # Mathematical cross function
-  # build123d.geometry.Vector.cross (method)
-  cross(vec: Vector) -> Vector
-
-  # Mathematical dot function
-  # build123d.geometry.Vector.dot (method)
-  dot(vec: Vector) -> float
-
-  # build123d.geometry.Vector.sub (method)
-  sub(vec: VectorLike)
-
-  # Mathematical subtraction operator -
-  # build123d.geometry.Vector.__sub__ (method)
-  __sub__(vec: VectorLike) -> Vector  # Vector - vec
-
-  # build123d.geometry.Vector.add (method)
-  add(vec: VectorLike)
-
-  # Mathematical addition operator +
-  # build123d.geometry.Vector.__add__ (method)
-  __add__(vec: VectorLike) -> Vector  # Vector + vec
-
-  # Mathematical reverse addition operator +
-  # build123d.geometry.Vector.__radd__ (method)
-  __radd__(vec: Vector) -> Vector  # vec + Vector
-
-  # Mathematical multiply function
-  # build123d.geometry.Vector.multiply (method)
-  multiply(scale: float) -> Vector
-
-  # Mathematical multiply operator *
-  # build123d.geometry.Vector.__mul__ (method)
-  __mul__(scale: float) -> Vector  # Vector * scale
-
-  # Mathematical division operator /
-  # build123d.geometry.Vector.__truediv__ (method)
-  __truediv__(denom: float) -> Vector  # Vector / denom
-
-  # Mathematical multiply operator *
-  # build123d.geometry.Vector.__rmul__ (method)
-  __rmul__(scale: float) -> Vector  # scale * Vector
-
-  # Scale to length of 1
-  # build123d.geometry.Vector.normalized (method)
-  normalized() -> Vector
-
-  # Return a vector with the same magnitude but pointing in the opposite direction
-  # build123d.geometry.Vector.reverse (method)
-  reverse() -> Vector
-
-  # center
-  # Remarks: Returns: The center of myself is myself. Provided so that vectors, vertices, and other shapes all support a common interface, when center() is requested for all objects on the stack.
-  # build123d.geometry.Vector.center (method)
-  center() -> Vector
-
-  # Unsigned angle between vectors
-  # build123d.geometry.Vector.get_angle (method)
-  get_angle(vec: Vector) -> float
-
-  # Signed Angle Between Vectors
-  # Remarks: Return the signed angle in degrees between two vectors with the given normal based on this math: angle = atan2((Va × Vb) ⋅ Vn, Va ⋅ Vb) Returns: float: Angle between vectors
-  # build123d.geometry.Vector.get_signed_angle (method)
-  get_signed_angle(vec: Vector, normal: Vector | None = None) -> float
-  #   normal: normal direction
-
-  # Returns a new vector equal to the projection of this Vector onto the line
-  # Remarks: represented by Vector <line> Returns: Vector: Returns the projected vector.
-  # build123d.geometry.Vector.project_to_line (method)
-  project_to_line(line: Vector) -> Vector
-  #   line: project to this line
-
-  # Minimum unsigned distance between vector and plane
-  # build123d.geometry.Vector.distance_to_plane (method)
-  distance_to_plane(plane: Plane) -> float
-
-  # Signed distance from plane to point vector
-  # build123d.geometry.Vector.signed_distance_from_plane (method)
-  signed_distance_from_plane(plane: Plane) -> float
-
-  # Vector is projected onto the plane provided as input
-  # Remarks: Returns:
-  # build123d.geometry.Vector.project_to_plane (method)
-  project_to_plane(plane: Plane) -> Vector
-
-  # Flip direction of vector operator -
-  # build123d.geometry.Vector.__neg__ (method)
-  __neg__() -> Vector  # -Vector
-
-  # intersect vector with other &
-  # build123d.geometry.Vector.__and__ (method)
-  __and__(other: Axis | Location | Plane | VectorLike | Shape)  # Vector & other
-
-  # Convert to OCCT gp_Pnt object
-  # build123d.geometry.Vector.to_pnt (method)
-  to_pnt() -> gp_Pnt
-
-  # Convert to OCCT gp_Dir object
-  # build123d.geometry.Vector.to_dir (method)
-  to_dir() -> gp_Dir
-
-  # Apply affine transformation
-  # Remarks: Returns: Vector: transformed vector
-  # build123d.geometry.Vector.transform (method)
-  transform(affine_transform: Matrix, is_direction: bool = False) -> Vector
-  #   affine_transform: affine transformation matrix
-  #   is_direction: Should self be transformed as a vector or direction? Defaults to False (vector)
-
-  # Rotate about axis
-  # Remarks: Rotate about the given Axis by an angle in degrees Returns: Vector: rotated vector
-  # build123d.geometry.Vector.rotate (method)
-  rotate(axis: Axis, angle: float) -> Vector
-  #   axis: Axis of rotation
-  #   angle: angle in degrees
-
-  # Find intersection of vector and geometric object or shape
-  # build123d.geometry.Vector.intersect (method)
-  intersect(vector: VectorLike) -> Vector | None
-  intersect(location: Location) -> Vector | None
-  intersect(axis: Axis) -> Vector | None
-  intersect(plane: Plane) -> Vector | None
-  intersect(shape: Shape) -> Shape | None
+  Rotation(axis: Axis, angle: float)

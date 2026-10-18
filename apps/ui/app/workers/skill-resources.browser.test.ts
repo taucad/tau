@@ -16,6 +16,7 @@ describe('browser skill resources', () => {
       'cad-openscad',
       'cad-picogk',
       'cad-picovoxel',
+      'cad-smlib',
       'cad-zoo',
       'cad-tscircuit',
       'geospec-authoring',

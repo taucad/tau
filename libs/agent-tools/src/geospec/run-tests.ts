@@ -12,9 +12,8 @@
  */
 
 import type { RunGeoSpecTestsRpcInput } from '@taucad/chat';
-import { discoverGeoSpecFiles } from 'geospec/runner';
-import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
-import type { GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
+import { discoverGeoSpecFiles } from 'geospec/runner/worker';
+import type { GeoSpecDiscoveryFileSystem, GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
 
 import { runnerResultToTestModelOutput } from '#geospec/result.js';
 import type { GeoSpecKernelEvidence, TestModelOutput } from '#geospec/result.js';

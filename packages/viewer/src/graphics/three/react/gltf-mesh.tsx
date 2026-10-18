@@ -88,6 +88,7 @@ import type { ModelInteractionUnitState } from '#machines/model-interaction.mach
 import { resolveSectionViewRaycastClip, useSectionViewFlags } from '#graphics/three/use-section-view.js';
 import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#graphics/three/utils/bvh-raycast.js';
+import { useModelGpuPick } from '#graphics/three/react/use-model-gpu-pick.js';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentPrimitiveRef } from '@taucad/types';
 import { createThreeResourceDisposer } from '@taucad/three/resources';
 import { applyCanonicalGltfBounds, createCanonicalGltfToTauMatrix } from '#graphics/three/gltf-world.js';
@@ -1576,6 +1577,32 @@ export function hasModelHitBlockingSceneUiHit(
   return false;
 }
 
+/** A model intersection that stands for a pick not answered yet: neither a hit to act on nor a miss. */
+type PendingModelPick = Intersection & { readonly tauPickPending: true };
+
+/**
+ * The intersection the model reports while its pick is pending. It names the object the pointer was last over, so R3F
+ * keeps that hover, and lies past everything else, so scene UI in front still takes the event; a click on it is not a
+ * miss, so `onPointerMissed` cannot clear the selection.
+ */
+const createPendingModelPick = (object: Object3D, raycaster: Raycaster): PendingModelPick => ({
+  distance: Number.POSITIVE_INFINITY,
+  point: raycaster.ray.origin.clone(),
+  object,
+  tauPickPending: true,
+});
+
+/**
+ * Whether an R3F event came from a pending model pick, which handlers leave alone.
+ *
+ * @param event - The R3F event or intersection.
+ * @returns `true` while the model's pick is not answered yet.
+ * @public
+ */
+export function isPendingModelPick(event: Intersection): boolean {
+  return 'tauPickPending' in event && event.tauPickPending === true;
+}
+
 /**
  * Find the model component under a ray, taking the first visible mesh hit that clipping does not remove.
  *
@@ -1592,7 +1619,7 @@ export function resolveModelComponentHitFromRay({
   readonly meshes: readonly Mesh[];
   readonly clipping?: RaycastClipState;
 }): string | undefined {
-  const hit = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
+  const { hit } = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
   return getObjectComponentId(hit?.object);
 }
 
@@ -2107,13 +2134,17 @@ export function GltfMesh({
     return meshes;
   }, [scene]);
 
+  const modelPick = useModelGpuPick({ getMeshes: getModelPickableMeshes, sectionClip });
+
   useLayoutEffect(() => {
     if (!scene) {
       return undefined;
     }
     const previousRaycast = scene.raycast;
+    let lastPickedObject: Object3D | undefined;
+    let isReplayArmed = false;
     // R3F recursively raycasts the event root before dispatching handlers. Return
-    // false to stop Three's descendant walk after the clipping-aware BVH query.
+    // false to stop Three's descendant walk after the model pick.
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
       const { context } = graphicsActor.getSnapshot();
@@ -2124,12 +2155,37 @@ export function GltfMesh({
         return false;
       }
 
-      const hit = raycastFirstVisibleMeshHit({
-        raycaster,
-        meshes: getModelPickableMeshes(),
-        // Read here, not selected: a section drag step must not re-render the model.
-        clipping: resolveSectionViewRaycastClip(context, renderFrame),
-      });
+      // The GPU pick answers a pointer ray; another ray, or a renderer that cannot pick, asks the trees.
+      const gpu = modelPick.pick(raycaster);
+      let hit: Intersection<Mesh> | undefined;
+      let pending: boolean;
+      if (gpu.status === 'unavailable') {
+        const cpu = raycastFirstVisibleMeshHit({
+          raycaster,
+          meshes: getModelPickableMeshes(),
+          // Read here, not selected: a section drag step must not re-render the model.
+          clipping: resolveSectionViewRaycastClip(context, renderFrame),
+        });
+        ({ hit, pending } = cpu);
+        const { whenReady } = cpu;
+        if (whenReady && !isReplayArmed) {
+          isReplayArmed = true;
+          // async-iife: bootstrap -- A synchronous raycast cannot await a tree building in the worker.
+          void (async () => {
+            await whenReady;
+            isReplayArmed = false;
+            modelPick.replay();
+          })();
+        }
+      } else {
+        hit = gpu.status === 'hit' ? gpu.intersection : undefined;
+        pending = gpu.status === 'pending';
+      }
+      if (pending) {
+        intersections.push(createPendingModelPick(lastPickedObject ?? scene, raycaster));
+        return false;
+      }
+      lastPickedObject = hit?.object;
       if (hit) {
         intersections.push(hit);
       }
@@ -2138,7 +2194,7 @@ export function GltfMesh({
     return () => {
       scene.raycast = previousRaycast;
     };
-  }, [getModelPickableMeshes, graphicsActor, renderFrame, scene]);
+  }, [getModelPickableMeshes, graphicsActor, modelPick, renderFrame, scene]);
 
   const handleKinematicsPointerDown = useKinematicsViewer({
     unitId,
@@ -2513,6 +2569,11 @@ export function GltfMesh({
         return;
       }
 
+      // Not answered yet: the hover stays as it is until the pick lands and the pointer is resolved again.
+      if (isPendingModelPick(event)) {
+        return;
+      }
+
       if (graphicsActor.getSnapshot().context.suppressNextModelPointerClick) {
         graphicsActor.send({ type: 'clearModelPointerClickGuard' });
       }
@@ -2557,6 +2618,11 @@ export function GltfMesh({
 
   const handleClick = useCallback(
     (event: ThreeEvent<MouseEvent>) => {
+      // A click on a pick not answered yet is ignored, neither a selection nor a miss.
+      if (isPendingModelPick(event)) {
+        event.stopPropagation();
+        return;
+      }
       const graphicsContext = graphicsActor.getSnapshot().context;
       const clickAction = resolveModelPointerClickAction({
         intersections: event.intersections,
@@ -2613,6 +2679,10 @@ export function GltfMesh({
 
   const handlePointerDown = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
+      // A press on a pick not answered yet neither starts a drag nor opens a menu.
+      if (isPendingModelPick(event)) {
+        return;
+      }
       if (event.nativeEvent.button === 0) {
         if (!hasModelHitBlockingSceneUiHit(event.intersections)) {
           handleKinematicsPointerDown(event);

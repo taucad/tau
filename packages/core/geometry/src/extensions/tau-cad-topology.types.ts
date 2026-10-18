@@ -1,3 +1,10 @@
+import type { SpatialMatrix } from '@taucad/spatial';
+import type {
+  JointInterface,
+  JointEndpoint,
+  MechanismIntent,
+  MechanismDiagnostic,
+} from '#extensions/mechanism-intent.types.js';
 import type { Mechanism } from '@taucad/kinematics';
 import type { JSONObject } from '@taucad/runtime/types';
 
@@ -29,6 +36,11 @@ export type TauCadTopologyComponent = {
   readonly selector: string;
   /** Authored sRGB RGBA display color. */
   readonly color?: [number, number, number, number];
+  /** As-built component-local to model frame, in the GLB vertex units and axes. */
+  readonly placement?: SpatialMatrix;
+  readonly jointInterfaces?: Readonly<Record<string, JointInterface>>;
+  /** Public aliases resolve to the actual moving descendant, never a copied frame. */
+  readonly jointInterfaceAliases?: Readonly<Record<string, JointEndpoint>>;
   readonly nodeIndex?: number;
   readonly meshIndex?: number;
   readonly parentId?: string;
@@ -53,4 +65,6 @@ export type TauCadTopologyPayload = {
    * axes in the vertices' frame, link components as `components[].id` values.
    */
   readonly mechanism?: Mechanism;
+  readonly mechanismIntent?: MechanismIntent;
+  readonly mechanismDiagnostics?: readonly MechanismDiagnostic[];
 };

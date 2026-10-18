@@ -860,15 +860,22 @@ describe('BillableModelInvocationService', () => {
       );
     });
 
-    it('should leave a step the client left while the process runs to recovery, as before', async () => {
+    /* A person who stops a turn (Stop, or a queued message's Send now) cuts the supplier stream as a restart does:
+     * nothing further can price it, and the chat's next step asks about this attempt before it may start. */
+    it('should settle a step the client left at once as absorbed, labelled client_abort', async () => {
       const { ledger, service } = midStream(new ShutdownService());
 
       await cut(service);
 
-      expect(ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0].evidence).toMatchObject({
+      const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+      expect(recorded?.evidence).toMatchObject({
         kind: 'absorbed_unknown',
+        executionStatus: 'cancelled',
+        normalizationEvidence: { terminalReason: 'client_abort' },
       });
-      expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+      expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ evidence: recorded?.evidence }),
+      );
     });
   });
 

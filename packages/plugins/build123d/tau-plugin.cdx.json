@@ -12,6 +12,43 @@
   },
   "components": [
     {
+      "bom-ref": "013fa8a3c4c276c24d26d84ce934dc964e2aa794345a0f8c7e5a7191482c8a73",
+      "type": "library",
+      "name": "marshmallow",
+      "version": "3.26.2",
+      "purl": "pkg:pypi/marshmallow@3.26.2?file_name=marshmallow-3.26.2-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "013fa8a3c4c276c24d26d84ce934dc964e2aa794345a0f8c7e5a7191482c8a73"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/be/2f/5108cb3ee4ba6501748c4908b908e55f42a5b66245b4cfe0c99326e1ef6e/marshmallow-3.26.2-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2",
       "type": "library",
       "name": "prompt-toolkit",
@@ -75,40 +112,6 @@
         {
           "name": "taucad:target",
           "value": "linux-arm64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "058c78b8d12953d25f524298d328513d045e22383845d6948004dfa110ada18b",
-      "type": "file",
-      "name": "tau-worker/analyzer.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "058c78b8d12953d25f524298d328513d045e22383845d6948004dfa110ada18b"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -253,6 +256,50 @@
       ]
     },
     {
+      "bom-ref": "0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a",
+      "type": "library",
+      "name": "dataclasses-json",
+      "version": "0.6.7",
+      "purl": "pkg:pypi/dataclasses-json@0.6.7?file_name=dataclasses_json-0.6.7-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/c3/be/d0d44e092656fe7a06b55e6103cbce807cdbdee17884a5367c68c9860853/dataclasses_json-0.6.7-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "10b6ba00ab1132a0ce4428ff68cf50a25efd6840a42cdf4239c9b99aad83be8b",
       "type": "library",
       "name": "coverage",
@@ -278,6 +325,82 @@
         }
       ],
       "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "1702dfc8f5bdcb916ce65ea0c6314fe453cc78a6a3d49a044fb3062d47b0ef9f",
+      "type": "library",
+      "name": "cadquery-ocp-novtk",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.0.0?file_name=cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1702dfc8f5bdcb916ce65ea0c6314fe453cc78a6a3d49a044fb3062d47b0ef9f"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/83/a8/752777f38c5bd8cb6e239f4639f3a64a704b5812f3247b0a11f2ecb48900/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "177f114e5f0514054189134346d386c7004048f8e58430b9b84b74a04fbc94fe",
+      "type": "library",
+      "name": "build123d",
+      "version": "0.13.0",
+      "purl": "pkg:pypi/build123d@0.13.0?file_name=build123d-0.13.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "177f114e5f0514054189134346d386c7004048f8e58430b9b84b74a04fbc94fe"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/16/a2/da58cdab8a6978376d66c909b06f4a1c9aafbd23163540741c75a51b675e/build123d-0.13.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
@@ -313,6 +436,77 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505",
+      "type": "library",
+      "name": "mypy-extensions",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/mypy-extensions@1.1.0?file_name=mypy_extensions-1.1.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "1cd591fe4aa79f3c4804887799a652fe7fde12973bc1a3ff71e55300159c0793",
+      "type": "file",
+      "name": "tau-worker/mechanisms.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1cd591fe4aa79f3c4804887799a652fe7fde12973bc1a3ff71e55300159c0793"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -405,34 +599,36 @@
       ]
     },
     {
-      "bom-ref": "2287812f213af7020f8bbc69b07d6039e529f5e0e154c0192221aff3fdac6676",
-      "type": "library",
-      "name": "cadquery-ocp-novtk",
-      "version": "7.9.3.1.1",
-      "purl": "pkg:pypi/cadquery-ocp-novtk@7.9.3.1.1?file_name=cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl",
+      "bom-ref": "1fc8ba6a3abe99e2a5f2848b175db14c13b8b475e2c9c5a88c03931d605d8877",
+      "type": "file",
+      "name": "tau-worker/glb.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "2287812f213af7020f8bbc69b07d6039e529f5e0e154c0192221aff3fdac6676"
+          "content": "1fc8ba6a3abe99e2a5f2848b175db14c13b8b475e2c9c5a88c03931d605d8877"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/f7/80/dc46dac2ebb6ae6bcce27bc7f717438b99897199be25323cda559a76e0a1/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_arm64.whl"
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -459,6 +655,43 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "27a43ba75e4eb115c03b0a3ce188ee8482228d019965d2e7d892ff9c0ad38742",
+      "type": "library",
+      "name": "bd-materials",
+      "version": "0.2.4",
+      "purl": "pkg:pypi/bd-materials@0.2.4?file_name=bd_materials-0.2.4-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "27a43ba75e4eb115c03b0a3ce188ee8482228d019965d2e7d892ff9c0ad38742"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/d3/fb/ea1f307dfcecb7a5e842d48031086dac70633fe61de0c0fb53ee6c8d7d35/bd_materials-0.2.4-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -621,6 +854,38 @@
       ]
     },
     {
+      "bom-ref": "3938bcb1bc602c651922c8a0f5d2a255b9de55b436b29ecb3cb02306e89a026e",
+      "type": "library",
+      "name": "cadquery-ocp-novtk",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.0.0?file_name=cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_aarch64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3938bcb1bc602c651922c8a0f5d2a255b9de55b436b29ecb3cb02306e89a026e"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/a8/06/ae17a2b53b8193941e7c73cc79d20ab5aedd2994f40976a31e304e9f0961/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-manylinux_2_28_aarch64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "3ab3523da44749156e1f68b464dc56af11ae4cbc5c739a49d05f32b982eca9f3",
       "type": "library",
       "name": "scipy",
@@ -737,6 +1002,87 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1",
+      "type": "library",
+      "name": "platformdirs",
+      "version": "4.13.0",
+      "purl": "pkg:pypi/platformdirs@4.13.0?file_name=platformdirs-4.13.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/8d/15/1633010b26e88e872c93b67c0b6c5e174fb74cb6fb5c1472b4d51d4a8f22/platformdirs-4.13.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "41d3349c59dcf1586faeaee29c967be07ac2bf7cecdb8ae2b527da1f25afdaac",
+      "type": "library",
+      "name": "pygltflib",
+      "version": "1.16.5",
+      "purl": "pkg:pypi/pygltflib@1.16.5?file_name=pygltflib-1.16.5-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "41d3349c59dcf1586faeaee29c967be07ac2bf7cecdb8ae2b527da1f25afdaac"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/91/d6/7eb8a0e4eb30add2b76c957a41107a5f2ba26472d656e2733728bec0476b/pygltflib-1.16.5-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -921,50 +1267,6 @@
       ]
     },
     {
-      "bom-ref": "4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10",
-      "type": "library",
-      "name": "build123d",
-      "version": "0.11.1",
-      "purl": "pkg:pypi/build123d@0.11.1?file_name=build123d-0.11.1-py3-none-any.whl",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080",
       "type": "library",
       "name": "numpy",
@@ -993,6 +1295,82 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "56b25336f502b6ed02e889f4ece894a72612fe885889a6e8c4c80239ff6e5f5f",
+      "type": "library",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0?file_name=pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "56b25336f502b6ed02e889f4ece894a72612fe885889a6e8c4c80239ff6e5f5f"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT-CMU"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/71/43/905a14a8b17fdb1ccb58d282454490662d2cb89a6bfec26af6d3520da5ec/pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "58204cf4a7f6270d547af5c278ee7a6bb56045a4b3d8441a1cd11660f41b7939",
+      "type": "library",
+      "name": "deprecated",
+      "version": "3.0.0",
+      "purl": "pkg:pypi/deprecated@3.0.0?file_name=deprecated-3.0.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "58204cf4a7f6270d547af5c278ee7a6bb56045a4b3d8441a1cd11660f41b7939"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/83/ae/676feae8e4644a6d7169951a97f61c56f416c73f67bf1761f2461d75cc81/deprecated-3.0.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -1029,55 +1407,92 @@
       ]
     },
     {
-      "bom-ref": "5cae10e6b8d2a3f7642afd52bd7cadd281970e969481fd55d07f524d5a43664c",
-      "type": "file",
-      "name": "tau-worker/worker.py",
+      "bom-ref": "5cdfebd752ec52bf5bb4e35d9c64b40826bc5b40a13df7c3cda20a2c03a0f5ed",
+      "type": "library",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0?file_name=pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "5cae10e6b8d2a3f7642afd52bd7cadd281970e969481fd55d07f524d5a43664c"
+          "content": "5cdfebd752ec52bf5bb4e35d9c64b40826bc5b40a13df7c3cda20a2c03a0f5ed"
         }
       ],
       "licenses": [
         {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "5cfc6deb2f602ded845596409e41fe8f5e1b389e14e8cc727db0955f0e88de7b",
-      "type": "library",
-      "name": "ocpsvg",
-      "version": "0.6.0",
-      "purl": "pkg:pypi/ocpsvg@0.6.0?file_name=ocpsvg-0.6.0-py3-none-any.whl",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "5cfc6deb2f602ded845596409e41fe8f5e1b389e14e8cc727db0955f0e88de7b"
+          "license": {
+            "name": "MIT-CMU"
+          }
         }
       ],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/a9/d7/27d2c9d5a2645fdda9e502a2a1a1cb5d4c9d137223ef76a43296eb7c152b/ocpsvg-0.6.0-py3-none-any.whl"
+          "url": "https://files.pythonhosted.org/packages/4b/6e/3ccb54ce8ec4ddd1accd2d89004308b7b0b21c4ac3d20fa70af4760a4330/pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "5d2fd0fa6b5d9d1de415060363433f28da8b1526c1c129020435e186794b3795",
+      "type": "library",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0?file_name=pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5d2fd0fa6b5d9d1de415060363433f28da8b1526c1c129020435e186794b3795"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT-CMU"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/34/46/6c717baadcd62bc8ed51d238d521ab651eaa74838291bda1f86fe1f864c9/pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "5df14c38032dcca582ba788e53f8d2e8b39a646a5ea786a0309e8494b3061a81",
+      "type": "library",
+      "name": "ocp-gordon",
+      "version": "0.3.1",
+      "purl": "pkg:pypi/ocp-gordon@0.3.1?file_name=ocp_gordon-0.3.1-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5df14c38032dcca582ba788e53f8d2e8b39a646a5ea786a0309e8494b3061a81"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/3e/dc/ffc8307cd048f4f1e28d95cff6fe694af74f2bae771af6da272701d9646a/ocp_gordon-0.3.1-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -1176,28 +1591,18 @@
       ]
     },
     {
-      "bom-ref": "6414e901a11065a56e839c81b56f418100b4d0b81eb5aa23bb1f8f72f97ff099",
-      "type": "library",
-      "name": "ocp-gordon",
-      "version": "0.2.2",
-      "purl": "pkg:pypi/ocp-gordon@0.2.2?file_name=ocp_gordon-0.2.2-py3-none-any.whl",
+      "bom-ref": "63ea57c84482172c527087f7c014a5c84832124397d258cd3b121b95774a8b14",
+      "type": "file",
+      "name": "tau-worker/analyzer.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6414e901a11065a56e839c81b56f418100b4d0b81eb5aa23bb1f8f72f97ff099"
+          "content": "63ea57c84482172c527087f7c014a5c84832124397d258cd3b121b95774a8b14"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/6c/d1/ee535cdbc502790dda6555e439ea8bcacdd38325859151769d109d307a94/ocp_gordon-0.2.2-py3-none-any.whl"
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -1352,6 +1757,38 @@
       ]
     },
     {
+      "bom-ref": "733c976b2102d9684e4cd3f7fbad8aba8726426322f2b1d547a5cc6aceb0d6fb",
+      "type": "library",
+      "name": "cadquery-ocp-novtk",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.0.0?file_name=cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "733c976b2102d9684e4cd3f7fbad8aba8726426322f2b1d547a5cc6aceb0d6fb"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/65/4d/a2536f16fc299c51b8b196fcca010a0720dd9080eee0fdf90f3653871815/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
       "bom-ref": "73ab1601f84dc804f7812dc297e93cd99381162da39c47040a827d4e8dafe63b",
       "type": "library",
       "name": "coverage",
@@ -1384,6 +1821,38 @@
       ]
     },
     {
+      "bom-ref": "757739321ae6b99f8d4541228ce5584cb2edb6d897e90a1d1056226b9125d34b",
+      "type": "library",
+      "name": "cadquery-ocp-novtk",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.0.0?file_name=cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "757739321ae6b99f8d4541228ce5584cb2edb6d897e90a1d1056226b9125d34b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/e5/bb/090f501d57bbe1b64efc2bc0ec260b3283bdf3658b3db3e4af49cd368495/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-macosx_11_0_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017",
       "type": "library",
       "name": "executing",
@@ -1406,6 +1875,50 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "791e46fc3725474e8ebcf483e815700f4baf6e7d7bd7a004d9825cd0dead0b60",
+      "type": "library",
+      "name": "threejs-materials",
+      "version": "1.2.4",
+      "purl": "pkg:pypi/threejs-materials@1.2.4?file_name=threejs_materials-1.2.4-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "791e46fc3725474e8ebcf483e815700f4baf6e7d7bd7a004d9825cd0dead0b60"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -1851,40 +2364,6 @@
       ]
     },
     {
-      "bom-ref": "9909249e3b2553cfc83f9e76fe0500fc1a9dfdede0186c93a05bfd1bfa232024",
-      "type": "file",
-      "name": "tau-worker/glb.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "9909249e3b2553cfc83f9e76fe0500fc1a9dfdede0186c93a05bfd1bfa232024"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
       "type": "library",
       "name": "cloudpickle",
@@ -1907,6 +2386,40 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "9bb4cba4ac424c8572de4a526c919e82dbaa104d3a33b9ef416dee8d92ed544b",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9bb4cba4ac424c8572de4a526c919e82dbaa104d3a33b9ef416dee8d92ed544b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -1973,6 +2486,50 @@
       ]
     },
     {
+      "bom-ref": "9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f",
+      "type": "library",
+      "name": "typing-inspect",
+      "version": "0.9.0",
+      "purl": "pkg:pypi/typing-inspect@0.9.0?file_name=typing_inspect-0.9.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/65/f3/107a22063bf27bdccf2024833d3445f4eea42b2e598abfbd46f6a63b6cb0/typing_inspect-0.9.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
       "type": "library",
       "name": "mpmath",
@@ -1995,6 +2552,43 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "a476bb48b6b2e2d9f1f3a6356fde579373d681618b39a6ad9c99a808a0113997",
+      "type": "library",
+      "name": "ocpsvg",
+      "version": "0.7.0",
+      "purl": "pkg:pypi/ocpsvg@0.7.0?file_name=ocpsvg-0.7.0-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a476bb48b6b2e2d9f1f3a6356fde579373d681618b39a6ad9c99a808a0113997"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/f1/a5/4143c35ee979c5decc985ba4621f50fae1ec6977adf8ab0429c2a74be668/ocpsvg-0.7.0-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -2142,6 +2736,38 @@
       ]
     },
     {
+      "bom-ref": "ab6db7d2a18d366cc57c2228253cf26443190aba0a6dd0939b3c1e8ac6e29e2c",
+      "type": "library",
+      "name": "wrapt",
+      "version": "2.5.1",
+      "purl": "pkg:pypi/wrapt@2.5.1?file_name=wrapt-2.5.1-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ab6db7d2a18d366cc57c2228253cf26443190aba0a6dd0939b3c1e8ac6e29e2c"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/01/b9/41642877fe741db56d240833c8822188b663c4c5d52beb087964774035d4/wrapt-2.5.1-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
       "bom-ref": "b0726cecd84f9474419d67252add4ac0cd9811b04d61123054b9fb6f57df6e9e",
       "type": "library",
       "name": "psutil",
@@ -2217,6 +2843,40 @@
         }
       ],
       "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6",
+      "type": "file",
+      "name": "tau-worker/native_materials.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
@@ -2353,50 +3013,6 @@
         {
           "name": "taucad:target",
           "value": "linux-arm64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91",
-      "type": "library",
-      "name": "cadquery-ocp-proxy",
-      "version": "7.9.3.1.1",
-      "purl": "pkg:pypi/cadquery-ocp-proxy@7.9.3.1.1?file_name=cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/30/c0/04e9363a99fee892de2776820e3dcf04f8825b6edc9580efe3416c9465a7/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -2544,15 +3160,15 @@
       ]
     },
     {
-      "bom-ref": "d8f68b05c2917fb0f5ea569ed88c697d47cc57a7b293929d863b52c99ace9312",
+      "bom-ref": "d6a6909a73d2300ca4581ff762ccf0137993ac75c57a2dc82e12bffa3a12b680",
       "type": "library",
-      "name": "cadquery-ocp-novtk",
-      "version": "7.9.3.1.1",
-      "purl": "pkg:pypi/cadquery-ocp-novtk@7.9.3.1.1?file_name=cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl",
+      "name": "cadquery-ocp-proxy",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-proxy@8.0.1.0.0?file_name=cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "d8f68b05c2917fb0f5ea569ed88c697d47cc57a7b293929d863b52c99ace9312"
+          "content": "d6a6909a73d2300ca4581ff762ccf0137993ac75c57a2dc82e12bffa3a12b680"
         }
       ],
       "licenses": [
@@ -2565,7 +3181,95 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/6a/bc/3eb58a3b7513309d665e0a65c00da93fc825dc930744cd8ab23626cd2e1f/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_aarch64.whl"
+          "url": "https://files.pythonhosted.org/packages/15/36/4a8dbfdf4ab61a7841c36398615c6ab3d3c932d4254b978963690650feea/cadquery_ocp_proxy-8.0.1.0.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "type": "library",
+      "name": "packaging",
+      "version": "26.3",
+      "purl": "pkg:pypi/packaging@26.3?file_name=packaging-26.3-py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0 OR BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "d800c7689154622b0ba2922ceca44a3cf2ef61c3b9a4c4eeb1d8b3050d7ededa",
+      "type": "library",
+      "name": "wrapt",
+      "version": "2.5.1",
+      "purl": "pkg:pypi/wrapt@2.5.1?file_name=wrapt-2.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d800c7689154622b0ba2922ceca44a3cf2ef61c3b9a4c4eeb1d8b3050d7ededa"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/3d/e9/8d81185bc9a40cfb43d91fc70a1e80ecde752c95dc98f5452cae82037976/wrapt-2.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
         }
       ],
       "properties": [
@@ -2648,38 +3352,6 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "e2969d2129bf21067f44953117cc18f1426f5aacaed8bcc074228eb50f3179b2",
-      "type": "library",
-      "name": "cadquery-ocp-novtk",
-      "version": "7.9.3.1.1",
-      "purl": "pkg:pypi/cadquery-ocp-novtk@7.9.3.1.1?file_name=cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "e2969d2129bf21067f44953117cc18f1426f5aacaed8bcc074228eb50f3179b2"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/97/55/93f76eb2a1874b2d51c98e6cad1b55ae7562fc9b6eb36365e3b0597d25c4/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-macosx_11_0_x86_64.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
         }
       ]
     },
@@ -2773,6 +3445,70 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "eedf4b74eda2b5a4b2b2fb4c006d6295df3bf29e459e198c90ea48e130dc75c3",
+      "type": "library",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0?file_name=pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "eedf4b74eda2b5a4b2b2fb4c006d6295df3bf29e459e198c90ea48e130dc75c3"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT-CMU"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/67/ee/21d4e8536afd1a328f01b359b4d3997b291ffd35a237c877b331c1c3b71c/pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "f1630201b0e2a96bb26304b7adfbd91a4ef486abb5a4c48377444a0bed749f37",
+      "type": "library",
+      "name": "wrapt",
+      "version": "2.5.1",
+      "purl": "pkg:pypi/wrapt@2.5.1?file_name=wrapt-2.5.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f1630201b0e2a96bb26304b7adfbd91a4ef486abb5a4c48377444a0bed749f37"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/37/62/20edad100b93552ec5c172e509a9db898a73d5043ae701fcb6e9986f9d33/wrapt-2.5.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },
@@ -2873,6 +3609,38 @@
       ]
     },
     {
+      "bom-ref": "f98eaf784cd12bc69c77af398084174531007cd81849c962163ccfc6e791f3ea",
+      "type": "library",
+      "name": "wrapt",
+      "version": "2.5.1",
+      "purl": "pkg:pypi/wrapt@2.5.1?file_name=wrapt-2.5.1-cp313-cp313-macosx_10_13_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f98eaf784cd12bc69c77af398084174531007cd81849c962163ccfc6e791f3ea"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/e4/6d/cfe55762435f36107815d56a2cfbebe7e3129b593c47a670c6eb1d7917d3/wrapt-2.5.1-cp313-cp313-macosx_10_13_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "fc4c3b59358ada164552084a8ebee637c221e4059267d0f8325b3b560f6c7f0a",
       "type": "library",
       "name": "webcolors",
@@ -2932,38 +3700,6 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/41/48/6450ed9243315322bbc19ac57b9b70d66a20bf1d38d124c96bc4bf6af9ea/scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
-      "bom-ref": "ffcd04d4efa087d3aa942360020265a1ac0e12407bd7bcfeb37e70b4d1ee72df",
-      "type": "library",
-      "name": "cadquery-ocp-novtk",
-      "version": "7.9.3.1.1",
-      "purl": "pkg:pypi/cadquery-ocp-novtk@7.9.3.1.1?file_name=cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "ffcd04d4efa087d3aa942360020265a1ac0e12407bd7bcfeb37e70b4d1ee72df"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "name": "Apache-2.0"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
         }
       ],
       "properties": [

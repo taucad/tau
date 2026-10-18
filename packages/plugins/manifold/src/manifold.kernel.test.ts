@@ -415,6 +415,49 @@ describe('ManifoldWorker', () => {
     });
   });
 
+  describe('memory', () => {
+    const probeKey = '__tauManifoldHandles';
+
+    afterEach(() => {
+      Reflect.deleteProperty(globalThis, probeKey);
+    });
+
+    it('deletes every intermediate Manifold and CrossSection once the render is delivered', async () => {
+      const result = await createGeometry(
+        {
+          'intermediates.ts': `
+            import { CrossSection, Manifold } from 'manifold-3d/manifoldCAD';
+
+            export default function main() {
+              const handles = {};
+              handles.constructed = new CrossSection([[[0, 0], [10, 0], [10, 10]]]);
+              // manifold-3d's CrossSection is also callable without \`new\`.
+              handles.called = CrossSection([[[0, 0], [1, 0], [0, 1]]]);
+              handles.extruded = handles.constructed.add(handles.called).extrude(5);
+              handles.translated = handles.extruded.translate([1, 2, 3]);
+              handles.rotated = handles.translated.rotate([0, 0, 45]);
+              handles.square = CrossSection.square([2, 2]).translate([20, 0]);
+              handles.revolved = handles.square.revolve(16);
+              handles.cube = Manifold.cube([4, 4, 4]);
+              handles.added = handles.rotated.add(handles.cube);
+              handles.result = handles.added.subtract(Manifold.sphere(1, 8)).add(handles.revolved);
+              globalThis['${probeKey}'] = handles;
+              return handles.result;
+            }
+          `,
+        },
+        'intermediates.ts',
+      );
+      assertRenderingSuccess(result);
+
+      const handles = (globalThis as Record<string, unknown>)[probeKey] as Record<string, { isDeleted(): boolean }>;
+      const live = Object.entries(handles)
+        .filter(([, handle]) => !handle.isDeleted())
+        .map(([name]) => name);
+      expect(live).toEqual([]);
+    });
+  });
+
   describe('normals', () => {
     type TrianglePrimitive = {
       readonly positions: Float32Array;

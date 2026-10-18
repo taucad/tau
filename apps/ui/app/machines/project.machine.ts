@@ -41,6 +41,8 @@ export type ProjectContext = {
   isLoading: boolean;
   shouldLoadModelOnStart: boolean;
   kernelOptionsFactory: LazyKernelOptionsFactory;
+  /** Kernel heap above which each geometry unit recycles its runtime (see {@link ProjectInput}). */
+  recycleHeapBytes: number | undefined;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
   /** Bytes each geometry unit's first render stages (see {@link ProjectInput}). */
@@ -79,6 +81,8 @@ type ProjectInput = {
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
   kernelOptionsFactory: LazyKernelOptionsFactory;
+  /** Kernel heap in bytes above which each geometry unit recycles its runtime once idle; omitted never recycles. */
+  recycleHeapBytes?: number;
   /** Bytes each geometry unit's first render stages, for a memory-mounted project whose kernel cannot see the mount. */
   stage?: Record<string, Uint8Array<ArrayBuffer>>;
 };
@@ -275,6 +279,7 @@ const spawnGeometryUnit = (
       kernelOptionsFactory: context.kernelOptionsFactory,
       fileSystemRoot: context.fileSystemRoot,
       ...(options.operationTimeout === undefined ? {} : { operationTimeout: options.operationTimeout }),
+      ...(context.recycleHeapBytes === undefined ? {} : { recycleHeapBytes: context.recycleHeapBytes }),
     },
   });
   enq.sendTo(cadUnit, { type: 'initializeModel', entryPath, ...(context.stage ? { stage: context.stage } : {}) });
@@ -460,6 +465,7 @@ export const projectMachine = setup({
       fileManagerRef,
       fileSystemRoot,
       kernelOptionsFactory,
+      recycleHeapBytes,
       stage,
     } = input;
 
@@ -486,6 +492,7 @@ export const projectMachine = setup({
       isLoading: true,
       shouldLoadModelOnStart,
       kernelOptionsFactory,
+      recycleHeapBytes,
       fileManagerRef,
       fileSystemRoot,
       stage,

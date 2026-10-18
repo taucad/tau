@@ -71,6 +71,7 @@ await installSkills('.agents/skills');
 | `cad-jscad`         | `@taucad/jscad`       | TypeScript (`@jscad/modeling`)                           |
 | `cad-manifold`      | `@taucad/manifold`    | TypeScript (`manifold-3d`)                               |
 | `cad-opencascadejs` | `@taucad/opencascade` | TypeScript (`libcascade` / OpenCascade; signatures only) |
+| `cad-smlib`         | `@taucad/smlib`       | TypeScript (`@classcad/smlibwasm`)                       |
 | `cad-build123d`     | `@taucad/build123d`   | Python                                                   |
 | `cad-picogk`        | `@taucad/picogk`      | C#                                                       |
 | `cad-openscad`      | `@taucad/openrscad`   | OpenRSCAD builtins table                                 |

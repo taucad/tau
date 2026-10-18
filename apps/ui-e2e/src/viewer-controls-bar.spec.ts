@@ -21,7 +21,7 @@ type ViewerBridge = {
   addSectionCut(cut: { kind: 'plane'; plane: 'xy' | 'xz' | 'yz' }): string | undefined;
   selectSectionCut(id: string | undefined): void;
   getSectionCapCompleteness():
-    | { status: 'complete'; trueCutComponentCount: number; cappedTrueCutComponentCount: number }
+    | { status: 'complete'; admittedSourceCount: number; unsupportedSourceCount: number }
     | { status: 'unsupported' | 'failed' }
     | undefined;
   getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined };
@@ -376,8 +376,8 @@ describe('Viewer controls bar', () => {
     if (completeness?.status !== 'complete') {
       throw new Error(`The caps are incomplete: ${JSON.stringify(completeness)}`);
     }
-    expect(completeness.trueCutComponentCount).toBeGreaterThan(0);
-    expect(completeness.cappedTrueCutComponentCount).toBe(completeness.trueCutComponentCount);
+    expect(completeness.admittedSourceCount).toBeGreaterThan(0);
+    expect(completeness.unsupportedSourceCount).toBe(0);
   });
 
   it('should set the field of view from Viewer settings', async () => {

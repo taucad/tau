@@ -12,6 +12,7 @@ import {
   opencascadeTypes,
   picovoxelTypes,
   replicadTypes,
+  smlibTypes,
 } from '#kernel-types.js';
 
 describe('@taucad/api-extractor runtime subpaths', () => {
@@ -39,7 +40,16 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       }
     }
     expect(Object.keys(packages).sort()).toEqual(
-      ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'picovoxel', '@taucad/picovoxel'].sort(),
+      [
+        'libcascade',
+        'replicad',
+        '@jscad/modeling',
+        'manifold-3d',
+        'picovoxel',
+        '@taucad/picovoxel',
+        '@classcad/smlibwasm',
+        '@taucad/smlib',
+      ].sort(),
     );
 
     const jscadPackage = packages['@jscad/modeling'];
@@ -98,6 +108,25 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(picovoxelPackage?.content).toContain('type Pico,');
     expect(picovoxelFiles['shapekernel.d.ts']).toContain('BaseBox');
     expect(Object.keys(picovoxelFiles).filter((name) => name.startsWith('shapekernel/')).length).toBeGreaterThan(0);
+  });
+
+  it('should project SMLib with its flat declaration directory and the Tau model subpath', () => {
+    const smlibPackage = smlibTypes['@classcad/smlibwasm'];
+    expect(kernelTypePackageMaps).toContain(smlibTypes);
+    const smlibFiles: Readonly<Record<string, string | undefined>> = {
+      'index.d.ts': smlibPackage?.content,
+      ...smlibPackage?.files,
+    };
+    // Every relative import lands on a bundled file.
+    for (const [name, declaration] of Object.entries(smlibFiles)) {
+      for (const [, specifier] of declaration!.matchAll(/(?:from\s+|import\s*\(\s*)["'](\.\/[^"']+)\.js["']/gu)) {
+        expect(smlibFiles, `${name} imports ${specifier}`).toHaveProperty([`${specifier!.slice(2)}.d.ts`]);
+      }
+    }
+    expect(smlibTypes['@taucad/smlib']?.packageJson?.['exports']).toEqual({
+      '.': { types: './index.d.ts' },
+      './model': { types: './model.d.ts' },
+    });
   });
 
   it('should keep KCL markdown assets out of the kernel-types module', () => {

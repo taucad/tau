@@ -5,13 +5,12 @@ Millimetres and degrees. ``main`` returns one labelled Compound assembly;
 See README.md for provenance, verification and transport limitations.
 """
 
-from copy import copy
 from dataclasses import dataclass
-from math import acos, atan, atan2, cos, hypot, pi, sin, sqrt, tan
+from math import acos, atan, atan2, cos, hypot, inf, pi, sin, sqrt, tan
 
 from build123d import (
     Axis, Color, Compound, Edge, Face, Location, Part, Plane,
-    RigidJoint, Solid, Vector, Wire,
+    RevoluteJoint, RigidJoint, Solid, Vector, Wire,
 )
 
 
@@ -22,6 +21,11 @@ class Params:
     input_angle: float = 0.0
 
 
+SUN_TEETH = 24
+PLANET_TEETH = 24
+RING_TEETH = SUN_TEETH + 2 * PLANET_TEETH
+CARRIER_RATIO = SUN_TEETH / (SUN_TEETH + RING_TEETH)
+PLANET_RELATIVE_RATIO = -(SUN_TEETH / PLANET_TEETH) * (1 - CARRIER_RATIO)
 RAD = pi / 180
 
 
@@ -166,7 +170,7 @@ def carrier_plate(a):
 def planet_unit(p, gear_blank):
     """A complete bearing/pin/gear stack, placed by its parent assembly."""
     f = p.face_width
-    gear = gear_blank.cut(cylinder(7.015, f + 2, -1)).rotate(Axis.Z, 7.5 - 3 * p.input_angle / 4)
+    gear = gear_blank.cut(cylinder(7.015, f + 2, -1))
     points = [(0, 0, -7.9), (3.745, 0, -7.9), (3.995, 0, -7.65), (3.995, 0, -3), (5, 0, -3), (5, 0, f + 3), (3.995, 0, f + 3), (3.995, 0, f + 7.65), (3.745, 0, f + 7.9), (0, 0, f + 7.9)]
     pin_face = Face(Wire.make_polygon(points, close=True))
     pin_face = pin_face.fillet_2d(0.15, [v for v in pin_face.vertices() if abs(v.center().X - 3.995) < 1e-6 and (abs(v.center().Z + 3) < 1e-6 or abs(v.center().Z - f - 3) < 1e-6)])
@@ -195,24 +199,29 @@ def planet_unit(p, gear_blank):
         part("Rear Socket Screw", screw.rotate(Axis.X, 180).translate((0, 0, -9)), "#313B46"),
     ])
     RigidJoint("mount", unit, Location())
+    RevoluteJoint("spin", unit, Axis.Z, angular_range=(-inf, inf))
+    unit.joints["spin"].connect_to(unit.children[0].joints["axis"],
+                 angle=180 / PLANET_TEETH + PLANET_RELATIVE_RATIO * p.input_angle)
+    # Native Compound caches its aggregate BRep: refresh after moving a child.
+    unit.children = unit.children
     return unit
 
 
 def main(p: Params = Params()):
     if not (1.5 <= p.module <= 3 and 10 <= p.face_width <= 24):
         raise ValueError("This spike supports module 1.5–3 mm and face_width 10–24 mm.")
-    f, a = p.face_width, 24 * p.module
-    gear_blank = extrude(tooth_profile(24, p.module), f)
+    f, a = p.face_width, (SUN_TEETH + PLANET_TEETH) * p.module / 2
+    gear_blank = extrude(tooth_profile(SUN_TEETH, p.module), f)
     shaft = chamfer(cylinder(8, f + 30, -28), 0.5)
     sun = gear_blank.fuse(shaft, chamfer(cylinder(12, 2, -2), 0.25), chamfer(cylinder(12, 2, f), 0.25))
     keyseat = capsule(16, 5).rotate(Axis.Z, 90).rotate(Axis.X, 90).translate((0, 5, -18))
-    sun = sun.cut(Solid.extrude(keyseat, (0, 5, 0)), cylinder(2.5, 9.1, -28.1)).rotate(Axis.Z, p.input_angle)
-    ring_void = extrude(tooth_profile(72, p.module, True).rotate(Axis.Z, 2.5), f + 4, -2)
+    sun = sun.cut(Solid.extrude(keyseat, (0, 5, 0)), cylinder(2.5, 9.1, -28.1))
+    ring_void = extrude(tooth_profile(RING_TEETH, p.module, True).rotate(Axis.Z, 180 / RING_TEETH), f + 4, -2)
     holes = []
     for i in range(6):
-        x, y, _ = polar(36 * p.module + 9, (30 + 60 * i) * RAD)
+        x, y, _ = polar(RING_TEETH * p.module / 2 + 9, (30 + 60 * i) * RAD)
         holes.extend([cylinder(2.75, f + 4, -2, x, y), cylinder(4.75, 3.2, f - 2, x, y)])
-    ring = chamfer(cylinder(36 * p.module + 15, f + 2, -1), 0.6).cut(ring_void, *holes)
+    ring = chamfer(cylinder(RING_TEETH * p.module / 2 + 15, f + 2, -1), 0.6).cut(ring_void, *holes)
     plate = carrier_plate(a)
     rear = plate.cut(cylinder(9, 7, -1)).translate((0, 0, -8))
     output_hub = chamfer(cylinder(15, 18, f + 8), 0.6, f + 26)
@@ -220,13 +229,11 @@ def main(p: Params = Params()):
     front = front.fillet(1, [e for e in edges_at(front, f + 8) if abs(e.length - 2 * pi * 15) < 1e-4])
     front = front.cut(cylinder(6, 25, f + 2), Solid.make_box(4, 7.8, 25, Plane((-2, 0, f + 2))), Solid.make_cylinder(2, 11, Plane(origin=(15.1, 0, f + 18), z_dir=(-1, 0, 0))))
 
-    prototype = planet_unit(p, gear_blank)
     units = []
     for i in range(3):
-        # A fresh assembly container avoids build123d 0.11.1 STEP child duplication
-        # when copy(Compound) shares its root TShape. Copy leaves to retain reuse.
-        unit = Compound(label=f"Planet Unit {i + 1}", children=[copy(child) for child in prototype.children])
-        RigidJoint("mount", unit, prototype.joints["mount"].relative_location)
+        # Fresh native factories keep each articulated occurrence independent.
+        unit = planet_unit(p, gear_blank)
+        unit.label = f"Planet Unit {i + 1}"
         unit.move(Location(polar(a, i * 120 * RAD)))
         units.append(unit)
     carrier = Compound(label="Carrier", children=[
@@ -234,12 +241,45 @@ def main(p: Params = Params()):
         part("Carrier Front And Output Hub", front, "#285E88"),
         *units,
     ])
+    RigidJoint("mount", carrier, Location())
     RigidJoint("output", carrier, Location((0, 0, f + 26)))
-    carrier.move(Location((0, 0, 0), (0, 0, p.input_angle / 4)))
-    result = Compound(label="Planetary Gear System", children=[
-        part("Internal Ring Gear", ring, "#718293"),
-        part("Sun Gear And Input Shaft", sun, "#D0D6DD"),
-        carrier,
-    ])
-    RigidJoint("mount", result, Location())
-    return result
+    for i, unit in enumerate(units):
+        RigidJoint(f"planet-{i + 1}", carrier, Location(polar(a, i * 120 * RAD)))
+        carrier.joints[f"planet-{i + 1}"].connect_to(unit.joints["mount"])
+    carrier.children = carrier.children
+    ring_part = part("Internal Ring Gear", ring, "#718293")
+    sun_part = part("Sun Gear And Input Shaft", sun, "#D0D6DD")
+    RevoluteJoint("sun", ring_part, Axis.Z, angular_range=(-inf, inf))
+    RevoluteJoint("carrier", ring_part, Axis.Z, angular_range=(-inf, inf))
+    ring_part.joints["sun"].connect_to(sun_part.joints["axis"], angle=p.input_angle)
+    ring_part.joints["carrier"].connect_to(carrier.joints["mount"], angle=CARRIER_RATIO * p.input_angle)
+    model = Compound(label="Planetary Gear System", children=[ring_part, sun_part, carrier])
+    model.input_angle = p.input_angle
+    return model
+
+
+def planet_couplings(unit, input_joint):
+    """Local native module gearing; callers compose ordinary Python data."""
+    return [{"driver": (input_joint, "angle"), "follower": (unit.joints["spin"], "angle"),
+             "ratio": PLANET_RELATIVE_RATIO, "offset": 180 / PLANET_TEETH}]
+
+
+def motion(model):
+    """Native joint graph is inferred; only gearing, grounding and clips need metadata.
+
+    Coordinates are absolute native degrees. The adapter subtracts each as-built
+    reference exactly once, preserving multi-turn angles and tooth phase.
+    """
+    ring, sun, carrier = model.children
+    drive = ring.joints["sun"]
+    angle = model.input_angle
+    return {"ground": ring,
+            "couplings": [
+                {"driver": (drive, "angle"), "follower": (ring.joints["carrier"], "angle"), "ratio": CARRIER_RATIO},
+                *[coupling for unit in carrier.children[2:] for coupling in planet_couplings(unit, drive)],
+            ],
+            "animations": [{"id": "sun-four-turns", "name": "Sun input · four turns", "duration": 8,
+                            "loop": "repeat", "keyframes": [
+                                {"time": 0, "coordinates": {(drive, "angle"): angle}},
+                                {"time": 8, "coordinates": {(drive, "angle"): angle + 1440}},
+                            ]}]}

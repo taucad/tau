@@ -7,15 +7,15 @@
 export const isCoarsePointerDevice = (): boolean =>
   typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches;
 
-/** The drawing-buffer pixel-ratio cap on a fine-pointer display. */
-const desktopPixelRatioCap = 2;
-/** At 1.5 every drawing-buffer-sized target holds 44% fewer pixels than at 2. */
-const coarsePointerPixelRatioCap = 1.5;
+/**
+ * The drawing-buffer pixel-ratio cap on every device. Phones keep 2 too: at 1.5 the model's edges and section
+ * outlines looked soft on a 3x screen, which outweighs the extra render-target memory.
+ */
+const viewerPixelRatioCap = 2;
 
 /**
  * The viewer's drawing-buffer pixel ratio for this device.
  *
- * @returns The device ratio, capped at 2, or at 1.5 on a coarse-pointer device.
+ * @returns The device ratio, capped at 2.
  */
-export const resolveViewerPixelRatio = (): number =>
-  Math.min(globalThis.devicePixelRatio, isCoarsePointerDevice() ? coarsePointerPixelRatioCap : desktopPixelRatioCap);
+export const resolveViewerPixelRatio = (): number => Math.min(globalThis.devicePixelRatio, viewerPixelRatioCap);

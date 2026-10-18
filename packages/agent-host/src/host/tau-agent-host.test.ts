@@ -4362,8 +4362,11 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
    * supplier finishes; a lookup of a key it never admitted voids it (GI-R3), and a late request for a voided key is
    * refused (GI-A10).
    */
-  const gateway = (script: ReadonlyArray<'complete' | 'drop' | 'hang' | 'oversized'>, principal = 'account-a') => {
-    const keys = new Map<string, 'admitted' | 'charged' | 'voided'>();
+  const gateway = (
+    script: ReadonlyArray<'complete' | 'drop' | 'hang' | 'oversized' | 'stopped'>,
+    principal = 'account-a',
+  ) => {
+    const keys = new Map<string, 'admitted' | 'stopping' | 'charged' | 'voided'>();
     const attempts: string[] = [];
     const lookups: string[] = [];
     let charges = 0;
@@ -4377,6 +4380,11 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
         if (state === undefined || state === 'voided') {
           keys.set(attemptId, 'voided');
           return { status: 'voided' };
+        }
+        if (state === 'stopping') {
+          /* The relay's cut reaches the ledger a moment after the first lookup. */
+          keys.set(attemptId, 'charged');
+          return { status: 'pending' };
         }
         return state === 'admitted'
           ? { status: 'pending' }
@@ -4396,6 +4404,15 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
         if (step === 'hang') {
           await new Promise<never>(() => {
             /* The host dies mid-call: this call never returns. */
+          });
+        }
+        if (step === 'stopped') {
+          /* The person stops the run mid-call: the relay is cut, and the gateway settles the attempt afterwards. */
+          await new Promise<never>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => {
+              keys.set(request.attemptId, 'stopping');
+              reject(new DOMException('The run was stopped.', 'AbortError'));
+            });
           });
         }
         keys.set(request.attemptId, 'charged');
@@ -4502,6 +4519,41 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
       }
     }
     expect(rows.filter((row) => row.startsWith('prepared'))).toHaveLength(3);
+    await host.close();
+  });
+
+  // A queued message's Steer stops the live run and sends the message at once, while the gateway is still settling.
+  it('should run the next message when the stopped call settles after the next run starts', async () => {
+    const file = createMemoryLogFile();
+    const sim = gateway(['stopped', 'complete']);
+    const host = hostOn(file, sim.transport, 'steer');
+
+    const stopped = start(host, 'chat-steer');
+    await vi.waitFor(() => {
+      expect(sim.attempts).toEqual(['run-1:1:0']);
+    });
+    await host.command({
+      type: 'cancel',
+      commandId: 'cancel-steer',
+      payload: { chatId: 'chat-steer', runId: 'run-1' },
+    });
+    await stopped;
+    await host.admit({
+      chatId: 'chat-steer',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Use the non-voxel methods instead.' },
+    });
+
+    const ended = await host.snapshot('chat-steer');
+    expect(ended.failure).toBeUndefined();
+    expect(ended).toMatchObject({ state: 'completed' });
+    expect(invocationRows(await readLog(file))).toEqual([
+      'prepared run-1:1:0',
+      'settled run-1:1:0 settled',
+      'prepared run-2:1:0',
+    ]);
+    expect(sim.attempts).toEqual(['run-1:1:0', 'run-2:1:0']);
     await host.close();
   });
 

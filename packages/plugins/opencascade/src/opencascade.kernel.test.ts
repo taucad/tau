@@ -526,6 +526,7 @@ export default function main() {
         oc: cascade,
         occt: { value: cascade, release: vi.fn() },
         isParallelMeshing: false,
+        previewTriangleBudget: 2_000_000,
         tracingSummary: undefined,
         nextSnapshotPath: (index: number) => `/tmp/tau_opencascade_test_snapshot_${++snapshotNumber}_${index}.brep`,
       };

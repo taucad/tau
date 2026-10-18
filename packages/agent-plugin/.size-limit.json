@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 1.11 kB brotli on 2026-10-10",
+    "name": "total (ESM JS) — measured 2.07 kB brotli on 2026-10-17 (1.99 kB before the bounded `tau --version` probe killed with SIGKILL, the guarded spawn, the probe deduplication, the cache probe's cleanup and the two exit-4 reasons; 1.26 kB before the version-matched installed CLI, the preflight and TAU_LAUNCH)",
     "path": "dist/**/*.mjs",
-    "limit": "2 kB"
+    "limit": "2.1 kB"
   },
   {
     "name": "viewer page (single file) — measured 1.89 MB gzip on 2026-10-16 (the shared workbench panes and part menu; provisional, to be re-baselined when the page is trimmed)",

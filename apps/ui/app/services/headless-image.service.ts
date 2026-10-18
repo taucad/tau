@@ -59,7 +59,7 @@ export type HeadlessImageJob = HeadlessGlbImageJob | HeadlessSvgImageJob;
 export type HeadlessImageBackend = {
   readonly createImageClient: () => Promise<ImageClient>;
   readonly isGpuAvailable?: () => boolean | Promise<boolean>;
-  /** Automatic previews may be deferred on a software adapter that stalls the viewport, or on a phone. */
+  /** Automatic previews may be deferred on a software adapter that stalls the viewport. */
   readonly isAutomaticGpuAvailable?: () => boolean | Promise<boolean>;
   readonly renderSvg?: (
     content: string,
@@ -253,13 +253,16 @@ export class HeadlessImageService {
     if (!automaticGpuAvailable) {
       throw new HeadlessImageError(
         'driver-unsupported',
-        'Automatic previews are deferred on this device (software WebGPU adapter or touch device).',
+        'Automatic previews are deferred on this software WebGPU adapter.',
       );
     }
+    // Desktop renders in its native utility process; only browser batches need
+    // a prior successful render to avoid cold WebGPU startup in the viewport.
     if (
       job.kind === 'automatic-thumbnail' &&
       job.sourceFormat === 'glb' &&
       job.exportOptions.mode === 'batch' &&
+      !isDesktopTarget() &&
       !this.successfulGlbRender
     ) {
       throw new HeadlessImageError(

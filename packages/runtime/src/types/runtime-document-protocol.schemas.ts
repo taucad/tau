@@ -146,6 +146,7 @@ const rendering = discriminatedWireUnion('success', [
       view: id,
       artifact,
       hash: id,
+      heapBytes: count.optional(),
       requestId: id,
       evaluationId: id,
       instance: id.optional(),

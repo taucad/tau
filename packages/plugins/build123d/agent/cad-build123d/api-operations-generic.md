@@ -1,13 +1,12 @@
 # build123d — operations_generic
 
-10 top-level symbols. Signatures are verbatim python.
+11 top-level symbols. Signatures are verbatim python.
 
 # Category: operations_generic
 # Generic Object
-# Remarks: Add an object to a builder. BuildPart: Edges and Wires are added to pending_edges. Compounds of Face are added to pending_faces. Solids or Compounds of Solid are combined into the part. BuildSketch: Edges and Wires are added to pending_edges. Compounds of Face are added to sketch. BuildLine: Edges and Wires are added to line.
+# Remarks: .. deprecated:: Use :func:`insert` instead.
 # build123d.operations_generic.add (function)
 add(objects: AddType | Iterable[AddType], rotation: float | RotationLike | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Compound
-#   mode: combine mode
 
 # Category: operations_generic
 # Generic Operation
@@ -44,6 +43,13 @@ chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float,
 fillet(objects: ChamferFilletType | Iterable[ChamferFilletType], radius: float) -> Sketch | Part | Curve
 #   objects: edges or vertices to fillet
 #   radius: fillet size - must be less than 1/2 local width
+
+# Category: operations_generic
+# Generic Object
+# Remarks: Insert an object into a builder. BuildPart: Edges and Wires are added to pending_edges. Compounds of Face are added to pending_faces. Solids or Compounds of Solid are combined into the part. BuildSketch: Edges and Wires are added to pending_edges. Compounds of Face are added to sketch. BuildLine: Edges and Wires are added to line.
+# build123d.operations_generic.insert (function)
+insert(objects: AddType | Iterable[AddType], rotation: float | RotationLike | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Compound
+#   mode: combine mode
 
 # Category: operations_generic
 # Generic Operation

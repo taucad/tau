@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-16'
+updated: '2026-10-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -68,6 +68,8 @@ GLTF lines retain their geometric depth. Resolve coplanar separation on the owni
 
 Synchronous render decisions may use manifest and broad-phase capability data. Exact section intersections and overlap diagnostics remain asynchronous and may refine diagnostic output. Do not block ordinary rendering on exact analysis or present a broad-phase candidate as an exact result.
 
+Draw section caps with the stencil buffer (`graphics/three/utils/section-stencil-caps.ts`), never with per-frame CPU slicing, polygon booleans or triangulation. Each source's meshes count their crossings of the cut in the stencil, a polygon on the cut plane fills where the count is odd, and a stencil overlap bit marks the pixels where two owners' solids hold the cut, so overlap equals what the exact boolean would find. The cap's main-thread cost follows the cut pieces and the sources' meshes, never their triangles. Stencil operations live only in the cap owners that `section-view-cleanup.ratchet.test.ts` names. WebGPU post-processing passes carry no stencil, so the caps draw as an overlay pass on the canvas after the post owner restores depth, on both backends; they are not tone-mapped or ambient-occluded. Exact contours, cap regions and overlap areas are built in a worker only when a consumer asks for them; certification refuses a cut it cannot vouch for (open shells, unsupported topology, partial visibility) with a span and the safe view, and never falls back to a main-thread build above `maxSynchronousBvhTriangles`.
+
 ### 7. Preserve one viewport lifecycle
 
 Keep one camera, controls, gizmo, and renderer lifecycle per canvas. Camera replacement, fit-to-view, controls listeners, and gizmo synchronization must use the owning graphics state and clean up the prior instance.
@@ -88,7 +90,9 @@ Resources allocated with `useMemo` require matching effect cleanup. Dispose only
 
 ### 10. Keep picking local and clipping-aware
 
-Route pointer-rate model picking through `raycastFirstVisibleMeshHit` in `graphics/three/utils/bvh-raycast.ts`. Pass the active clipping state so a clipped first triangle cannot hide a farther visible hit.
+Answer pointer hover and click on the model from the GPU pick in `graphics/three/utils/model-gpu-pick.ts`. Its pass draws what the viewport draws (transforms, visibility, layers, face side and the section clip) into an ID and world-position target, only when its inputs changed and the camera is still, and reads it back asynchronously. A pick is answered synchronously from the read-back copy; while the copy is stale the pick is pending: hover stays as it is, a click is neither a selection nor a miss, and the pointer is resolved again once through R3F `events.update()` when the pass lands.
+
+Rays the pick cannot answer (not through a camera pixel, or a renderer that cannot read the pass back) and exact consumers such as measurement and section topology use `raycastFirstVisibleMeshHit` in `graphics/three/utils/bvh-raycast.ts`. Pass the active clipping state so a clipped first triangle cannot hide a farther visible hit. A tree above `maxSynchronousBvhTriangles` is built in the BVH worker on demand; until it lands its mesh is pending, never a miss.
 
 Do not patch `Mesh.prototype.raycast`. Section handles and the plane picker may use the stock raycaster only on their own subtrees.
 
@@ -148,20 +152,22 @@ INCORRECT (a `VALIDATION_ERROR`):
 
 ### 16. Bound mesh cost by lane and report what was delivered
 
-| Lane                          | Triangle budget | Over budget                                                                                                                                                   |
-| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Preview and capture (renders) | 2,000,000       | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
-| Export                        | 20,000,000      | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
+| Lane                          | Triangle budget                                   | Over budget                                                                                                                                                   |
+| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preview and capture (renders) | 2,000,000; 400,000 on a memory-constrained device | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
+| Export                        | 20,000,000                                        | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
 
 Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time; tolerance-meshed kernels add the requested form, the effective `linearTolerance` and `angularTolerance` and the downgrade steps; voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes mesh output reports it here.
 
-**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect.
+A memory-constrained device is a coarse-pointer or `navigator.deviceMemory` ≤ 4 GB one (`isMemoryConstrainedDevice` in `apps/ui`); the host passes the smaller budget as the kernels' `previewTriangleBudget` and the `displaySimplification` middleware's `maxTriangles`.
+
+**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect. On a phone, 2,000,000 preview triangles cost about 230 MiB in the viewer and over 1 GiB with Section armed.
 
 ### 17. Keep a voxel model's grid; simplify only its picture
 
 In voxel kernels (PicoVoxel, PicoGK) the voxel size is the model (ruling R2). No lane of the harness changes `voxelSize`; it is a model parameter, never a tessellation option, and iteration goes through per-call `parameters`. Choose it from the thinnest feature, about one third of the thinnest wall or strut: field evaluation time scales with 1/h³, and memory and triangles with 1/h².
 
-A voxel render over the 2,000,000-triangle preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
+A voxel render over the preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
 
 **Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while a simplified display mesh changes only the picture, within half a voxel.
 

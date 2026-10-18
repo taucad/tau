@@ -37,6 +37,7 @@ import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { createRaycastClipTest, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
+import type { MeshPick } from '#graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
@@ -91,7 +92,12 @@ export function describeMeasurementTarget(
   return `${owner}: ${target.label} ${ordinal}${endpoint}`;
 }
 
-function isSupportVisible(hit: THREE.Intersection | undefined, ray: THREE.Ray, support: THREE.Vector3): boolean {
+/** Whether nothing the pick answered lies in front of `support`. A pending pick is not an answer: not visible yet. */
+function isSupportVisible(pick: MeshPick, ray: THREE.Ray, support: THREE.Vector3): boolean {
+  const { hit } = pick;
+  if (pick.pending) {
+    return false;
+  }
   if (!hit) {
     return true;
   }
@@ -377,6 +383,23 @@ export function MeasureTool(): React.JSX.Element {
   }, [graphSource]);
   // Where the pointer last moved, so a cut change can raycast its snaps again from there.
   const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
+  // A pick that waited on a tree still building in the worker asks again from the last pointer once it lands.
+  const replayArmedRef = useRef(false);
+  const replayWhenReady = useCallback((pick: MeshPick): void => {
+    if (!pick.whenReady || replayArmedRef.current) {
+      return;
+    }
+    replayArmedRef.current = true;
+    const { whenReady } = pick;
+    // async-iife: bootstrap -- A pointer snapshot cannot await a tree building in the worker.
+    void (async () => {
+      await whenReady;
+      replayArmedRef.current = false;
+      if (lastPointerRef.current) {
+        pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
+      }
+    })();
+  }, []);
   const wasCameraMovingRef = useRef(cameraMoving);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
@@ -525,11 +548,13 @@ export function MeasureTool(): React.JSX.Element {
 
       // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
       const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
-      const firstIntersection = raycastFirstVisibleMeshHit({
+      const firstPick = raycastFirstVisibleMeshHit({
         raycaster: raycasterRef.current,
         meshes: getCachedMeshes(),
         clipping,
       });
+      replayWhenReady(firstPick);
+      const firstIntersection = firstPick.hit;
 
       const nextCandidates = new Map<
         string,
@@ -555,12 +580,13 @@ export function MeasureTool(): React.JSX.Element {
               return false;
             }
             setRaycasterFromCamera(raycasterRef.current, new THREE.Vector2(projected.x, projected.y), camera);
-            const visibleHit = raycastFirstVisibleMeshHit({
+            const visiblePick = raycastFirstVisibleMeshHit({
               raycaster: raycasterRef.current,
               meshes: getCachedMeshes(),
               clipping,
             });
-            return isSupportVisible(visibleHit, raycasterRef.current.ray, support);
+            replayWhenReady(visiblePick);
+            return isSupportVisible(visiblePick, raycasterRef.current.ray, support);
           });
         };
         const graph =
@@ -673,6 +699,7 @@ export function MeasureTool(): React.JSX.Element {
       measureMode,
       measureSnapEnabled,
       renderFrame,
+      replayWhenReady,
       snapDistance,
     ],
   );
@@ -1193,6 +1220,13 @@ export function MeasureTool(): React.JSX.Element {
       }));
       graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id, hasMore });
     };
+    /** Resumes the scan once a tree it waited on lands, unless the catalog moved on meanwhile. */
+    const resumeWhenTreesLand = async (ready: Promise<void>): Promise<void> => {
+      await ready;
+      if (!cancelled && version === catalogVersionRef.current) {
+        timer = setTimeout(step, 0);
+      }
+    };
     const requestCatalogGraph = async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
       graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
       try {
@@ -1279,6 +1313,7 @@ export function MeasureTool(): React.JSX.Element {
           target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
             ? featureSupports(target.feature, target.position, mesh)
             : [target.position];
+        let waitFor: Promise<void> | undefined;
         const visible = supportPoints.some((support) => {
           if (isKept && !isKept(support)) {
             return false;
@@ -1288,9 +1323,17 @@ export function MeasureTool(): React.JSX.Element {
             return false;
           }
           setRaycasterFromCamera(catalogRaycaster, new THREE.Vector2(projected.x, projected.y), camera);
-          const hit = raycastFirstVisibleMeshHit({ raycaster: catalogRaycaster, meshes: getCachedMeshes(), clipping });
-          return isSupportVisible(hit, catalogRaycaster.ray, support);
+          const pick = raycastFirstVisibleMeshHit({ raycaster: catalogRaycaster, meshes: getCachedMeshes(), clipping });
+          waitFor ??= pick.whenReady;
+          return isSupportVisible(pick, catalogRaycaster.ray, support);
         });
+        if (!visible && waitFor) {
+          // A tree is still building in the worker: check this target again once it lands, not never.
+          scan.targetIndex--;
+          // async-iife: bootstrap -- The catalog's timer yields while the tree builds in the worker.
+          void resumeWhenTreesLand(waitFor);
+          return;
+        }
         if (visible) {
           const id = `${mesh.uuid}:${target.id}`;
           scan.catalog.set(id, { target: { ...target, id }, mesh });

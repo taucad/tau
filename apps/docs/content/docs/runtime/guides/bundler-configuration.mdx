@@ -132,6 +132,7 @@ export const runtime = defineRuntime({
 ## Variations
 
 - **Multiple bundlers**: The worker matches the entry path's extension against each `bundler.extensions`; the first matching bundler wins.
+- **SMLib under Vite's dev server**: add `optimizeDeps: { exclude: ['@classcad/smlibwasm'] }`, because pre-bundling breaks its WebAssembly URL.
 - **Test the production composition**: Pass `esbuild()` in the `defineRuntime` used by `createTestRuntimeClient`; unit tests of a definition can use `createMockKernelRuntime` when bundling is not part of the invariant.
 
 ## Related

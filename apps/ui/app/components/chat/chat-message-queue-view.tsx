@@ -81,10 +81,9 @@ export function ChatMessageQueueView({
           const attachments = item.message.parts.filter((part) => part.type === 'file').length;
           const busy =
             sendingId === item.id || pending?.id === item.id || (item.steer !== undefined && error === undefined);
-          const busyLabel =
-            pending?.id === item.id ? pending.label : item.steer === undefined ? 'Sending…' : 'Steering…';
+          const busyLabel = pending?.id === item.id ? pending.label : 'Sending…';
           const statusLabel =
-            item.steer !== undefined && error !== undefined ? 'Steer failed' : busy ? busyLabel : undefined;
+            item.steer !== undefined && error !== undefined ? 'Send failed' : busy ? busyLabel : undefined;
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
             <li
@@ -249,17 +248,17 @@ export function ChatMessageQueueView({
                       'gap-1 px-1 font-normal has-[>svg]:px-1',
                       statusLabel !== undefined && 'disabled:opacity-100',
                     )}
-                    aria-label='Steer'
+                    aria-label='Send now'
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
                     onClick={() => {
-                      act(item.id, 'Steering…', async () => onSteer(item.id));
+                      act(item.id, 'Sending…', async () => onSteer(item.id));
                     }}
                   >
                     {statusLabel === undefined ? (
                       <>
                         <CornerDownRight aria-hidden='true' className='size-3.5' />
-                        Steer
+                        Send now
                       </>
                     ) : (
                       <span role='status'>{statusLabel}</span>

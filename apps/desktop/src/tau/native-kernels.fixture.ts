@@ -57,6 +57,8 @@ export const nativeKernelsFixture = (options: { readonly picogk: boolean }): Nat
           row('tau-worker/analyzer.py', '2'),
           row('tau-worker/glb.py', '3'),
           row('tau-worker/worker.py', '4'),
+          row('tau-worker/native_materials.py', 'b'),
+          row('tau-worker/mechanisms.py', 'c'),
         ],
       },
     },

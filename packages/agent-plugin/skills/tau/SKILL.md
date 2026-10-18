@@ -30,15 +30,16 @@ A Tau project is a folder whose model entry file, normally `main.<ext>` at its r
 
 The entry's extension picks the kernel. A `.ts` or `.js` entry runs on the kernel whose library it, or a file it imports, imports. Load the kernel's skill before writing model code.
 
-| Kernel                                       | Entry       | Imports           | Skill                 |
-| -------------------------------------------- | ----------- | ----------------- | --------------------- |
-| replicad: BRep solids, the default for parts | `main.ts`   | `replicad`        | `cad-replicad`        |
-| OpenSCAD                                     | `main.scad` | —                 | `cad-openscad`        |
-| JSCAD                                        | `main.ts`   | `@jscad/modeling` | `cad-jscad`           |
-| Manifold: robust mesh booleans               | `main.ts`   | `manifold-3d`     | `cad-manifold`        |
-| PicoVoxel: voxels, SDFs, lattices            | `main.ts`   | `picovoxel`       | `cad-picovoxel`       |
-| tscircuit: circuit boards                    | `main.tsx`  | `tscircuit`       | `cad-tscircuit`       |
-| OpenCascade.js                               | `main.ts`   | `libcascade`      | none; prefer replicad |
+| Kernel                                       | Entry       | Imports               | Skill                 |
+| -------------------------------------------- | ----------- | --------------------- | --------------------- |
+| replicad: BRep solids, the default for parts | `main.ts`   | `replicad`            | `cad-replicad`        |
+| OpenSCAD                                     | `main.scad` | —                     | `cad-openscad`        |
+| JSCAD                                        | `main.ts`   | `@jscad/modeling`     | `cad-jscad`           |
+| Manifold: robust mesh booleans               | `main.ts`   | `manifold-3d`         | `cad-manifold`        |
+| PicoVoxel: voxels, SDFs, lattices            | `main.ts`   | `picovoxel`           | `cad-picovoxel`       |
+| SMLib: NURBS BRep solids                     | `main.ts`   | `@classcad/smlibwasm` | `cad-smlib`           |
+| tscircuit: circuit boards                    | `main.tsx`  | `tscircuit`           | `cad-tscircuit`       |
+| OpenCascade.js                               | `main.ts`   | `libcascade`          | none; prefer replicad |
 
 The kernels' libraries come with the server: do not install them or add a `package.json` for them. Existing STEP, IGES, BREP, 3DM, glTF and mesh files (STL, OBJ, 3MF, FBX and more) open for evaluation, screenshots and conversion, not for authoring.
 

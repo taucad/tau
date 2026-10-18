@@ -90,7 +90,8 @@ describe('billing database protections and real command', () => {
       },
     );
     expect(result.stderr).not.toContain('requires TAU_CLOUD_ENABLED');
-    expect(result.status).toBe(0);
+    const migrationDiagnostic = result.stderr.replaceAll(/[a-z][a-z\d+.-]*:\/\/\S+/giu, '[redacted URL]');
+    expect(result.status, migrationDiagnostic).toBe(0);
   });
 
   it('should refuse every billing command before opening a database when Cloud is disabled', () => {

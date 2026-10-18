@@ -58,7 +58,20 @@ export type Description = Readonly<
 
 /** One view projection, correlated to both its request and evaluation. @public */
 export type Rendering<ViewId extends string = string> = Readonly<
-  ({ success: true; view: ViewId; artifact: Artifact; hash: string } | { success: false; view?: ViewId }) & {
+  (
+    | {
+        success: true;
+        view: ViewId;
+        artifact: Artifact;
+        hash: string;
+        /**
+         * Bytes of WebAssembly linear memory the producing kernel held once this rendering was delivered; absent for a
+         * kernel that reports none. Linear memory never shrinks, so a host can recycle the runtime past a threshold.
+         */
+        heapBytes?: number;
+      }
+    | { success: false; view?: ViewId }
+  ) & {
     requestId: string;
     evaluationId: string;
     instance?: string;

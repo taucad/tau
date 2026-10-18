@@ -35,6 +35,20 @@ export type ExportFormatEntry = Readonly<{
 }>;
 
 /**
+ * Why an entry's formats could not be listed.
+ *
+ * @public
+ */
+export type ExportUnavailable = Readonly<{
+  /** Stable code, such as `UNKNOWN_TOOL` for a host whose server cannot list formats at all. */
+  code: string;
+  /** What the person reads: the cause and the next step. */
+  message: string;
+  /** Ask for the formats again, or `undefined` when asking again cannot help. */
+  retry: (() => void) | undefined;
+}>;
+
+/**
  * What the pane can offer for one entry.
  *
  * @public
@@ -44,6 +58,8 @@ export type ExportEntryState = Readonly<{
   hasGeometry: boolean;
   /** The formats its kernel offers, or `undefined` while the kernel is not ready to say. */
   formats: readonly ExportFormatEntry[] | undefined;
+  /** Why the formats could not be listed, when they could not; the pane shows it in their place. */
+  unavailable?: ExportUnavailable | undefined;
 }>;
 
 /**

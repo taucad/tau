@@ -1,0 +1,7 @@
+[
+  {
+    "name": "total (ESM JS), @classcad/smlibwasm external — measured 11.26 kB brotlied on 2026-10-17",
+    "path": ["dist/**/*.mjs"],
+    "limit": "12 kB"
+  }
+]

@@ -21,6 +21,8 @@ const kernelOptions = {
   supportFiles: [
     { path: '/analyzer.py', sha256: 'c'.repeat(64) },
     { path: '/glb.py', sha256: 'd'.repeat(64) },
+    { path: '/native_materials.py', sha256: 'd'.repeat(64) },
+    { path: '/mechanisms.py', sha256: 'd'.repeat(64) },
   ],
 };
 const parameterDeclaration = {
@@ -143,6 +145,42 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(context.session.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'analyze' }));
   });
 
+  it('reports an analyzer response that omits the required parameter declaration', async () => {
+    const context = createContext();
+    context.session.request.mockResolvedValueOnce({ resolved: ['main.py'], unresolved: [] });
+    await expect(definition.describe({ entryPath: 'main.py' }, runtime, context)).resolves.toMatchObject({
+      success: false,
+      issues: [expect.objectContaining({ message: 'Build123d analyzer omitted its parameter declaration.' })],
+    });
+  });
+
+  it('closes the compute scope as cancelled when the build is interrupted', async () => {
+    const context = createContext();
+    const cancellation = new AbortController();
+    const capability = runtime.compute as Extract<typeof runtime.compute, { status: 'on' }>;
+    const scope = capability.openScope({
+      namespace: 'build123d.operation.v1',
+      producer: context.computeProducer,
+      environment: {},
+      resident: context.resident,
+    });
+    const close = vi.spyOn(scope, 'close');
+    const openScope = vi.spyOn(capability, 'openScope').mockReturnValueOnce(scope);
+    context.session.request.mockImplementationOnce(async () => {
+      cancellation.abort();
+      throw new Error('build cancelled');
+    });
+    await expect(
+      definition.evaluate(
+        { entryPath: 'main.py', parameters: {}, options: {} },
+        { ...runtime, signal: cancellation.signal },
+        context,
+      ),
+    ).rejects.toThrow('build cancelled');
+    expect(close).toHaveBeenCalledWith({ outcome: 'cancelled' });
+    openScope.mockRestore();
+  });
+
   it('analyzes the entry once per runtime operation and scopes each mirror sync to it', async () => {
     const context = createContext();
     context.session.request.mockImplementation(async ({ method }: { method: string }) =>
@@ -219,6 +257,114 @@ describe('Build123d kernel lifecycle errors', () => {
         context,
       ),
     ).rejects.toThrow(/stale/);
+  });
+
+  it('should surface preserved unsupported mechanism intent in the Kinematics pane', async () => {
+    const context = createContext();
+    const diagnostic = {
+      code: 'UNSUPPORTED_MECHANISM',
+      path: '/mechanismIntent/connections',
+      message: 'Closed graph',
+      recovery: 'Inspect the retained intent.',
+    };
+    context.session.request.mockResolvedValue({
+      artifactPath: '/private/model.glb',
+      byteLength: 3,
+      mechanismDiagnostics: [diagnostic],
+      mechanismIntent: { connections: [{}] },
+    });
+    const result = await definition.render?.(
+      { view: 'model', handle: { sessionGeneration: 2, handleId: 'shape' }, options: renderOptions },
+      runtime,
+      context,
+    );
+    expect(result).toMatchObject({
+      content: new Uint8Array([1, 2, 3]),
+      issues: [
+        {
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: { producer: { kernelId: 'build123d' }, mechanism: diagnostic },
+        },
+      ],
+    });
+  });
+
+  it('rejects invalid native coupling ratios, cycles and clip timing before render or export delivery', async () => {
+    const joints = {
+      first: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 1, 0] },
+      second: { type: 'revolute', parent: 'arm', child: 'tool', origin: [0, 0, 0], axis: [0, 1, 0] },
+    };
+    const base = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: [] }, arm: { components: ['arm'] }, tool: { components: ['tool'] } },
+      joints,
+    };
+    const checkProjection = async (projection: Record<string, unknown>) => {
+      const context = createContext();
+      context.session.request.mockResolvedValue({ artifactPath: '/private/model.glb', byteLength: 3, ...projection });
+      const handle = { sessionGeneration: 2, handleId: 'shape' };
+      const rejection = {
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            code: 'INVALID_ANNOTATION',
+            severity: 'error',
+            details: expect.objectContaining({ producer: { kernelId: 'build123d' } }),
+          }),
+        ]),
+      };
+      await Promise.all([
+        expect(
+          definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
+        ).rejects.toMatchObject(rejection),
+        expect(
+          definition.export!(
+            {
+              exportId: 'glb',
+              handle,
+              options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+            },
+            runtime,
+            context,
+          ),
+        ).rejects.toMatchObject(rejection),
+      ]);
+    };
+    const checks: Array<Promise<void>> = [];
+    for (const invalid of [
+      { ...base, couplings: [{ driver: 'first', follower: 'second', ratio: 'invalid' }] },
+      {
+        ...base,
+        couplings: [
+          { driver: 'first', follower: 'second', ratio: 1 },
+          { driver: 'second', follower: 'first', ratio: 1 },
+        ],
+      },
+      { ...base, animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 2, coordinates: { first: 1 } }] }] },
+    ]) {
+      for (const projection of [
+        { mechanism: invalid },
+        {
+          mechanismIntent: {
+            ...invalid,
+            connections: [{ playbackCoordinates: { angle: 'first', distance: 'second' } }],
+          },
+          mechanismDiagnostics: [
+            {
+              code: 'UNSUPPORTED_MECHANISM',
+              path: '/mechanismIntent',
+              message: 'Unsupported graph',
+              recovery: 'Inspect the retained intent.',
+            },
+          ],
+        },
+      ]) {
+        checks.push(checkProjection(projection));
+      }
+    }
+    await Promise.all(checks);
   });
 
   it('handles mesh/export worker failures and GLB export naming', async () => {
@@ -478,7 +624,7 @@ describe('Build123d kernel lifecycle errors', () => {
           code: 'LIBRARY_VERSION_MISMATCH',
           severity: 'warning',
           location: { fileName: 'pyproject.toml', startLineNumber: 3 },
-          details: { library: 'build123d', declared: '0.12.0', runs: '0.11.1' },
+          details: { library: 'build123d', declared: '0.12.0', runs: '0.13.0' },
         },
       ],
     });

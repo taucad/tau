@@ -1,6 +1,6 @@
 # build123d API index
 
-build123d 0.11.1 · 1046 symbols · extracted by CPython 3.13.15 inspect+ast.
+build123d 0.13.0 · 1067 symbols · extracted by CPython 3.13.15 inspect+ast.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
@@ -10,12 +10,12 @@ build123d.objects_curve.Airfoil (class) [3 members] [category: objects_curve] �
   build123d.objects_curve.Airfoil.parse_naca4 (method) — Parse NACA 4-digit (or fractional) airfoil code into parameters
   build123d.objects_curve.Airfoil.__init__ (constructor)
   build123d.objects_curve.Airfoil.camber_line (property) — Camber line of the airfoil as an Edge
-build123d.objects_curve.ArcArcTangentArc (class) [1 members] [category: objects_curve] — Line Object
-  build123d.objects_curve.ArcArcTangentArc.__init__ (constructor)
-build123d.objects_curve.ArcArcTangentLine (class) [1 members] [category: objects_curve] — Line Object
-  build123d.objects_curve.ArcArcTangentLine.__init__ (constructor)
 build123d.objects_curve.BSpline (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.BSpline.__init__ (constructor)
+build123d.objects_curve.BaseCurveObject (class) [1 members] [category: objects_curve] — BaseCurveObject specialized for Curve
+  build123d.objects_curve.BaseCurveObject.__init__ (constructor)
+build123d.objects_curve.BaseEdgeObject (class) [1 members] [category: objects_curve] — BaseEdgeObject specialized for Edge
+  build123d.objects_curve.BaseEdgeObject.__init__ (constructor)
 build123d.objects_curve.BaseLineObject (class) [1 members] [category: objects_curve] — BaseLineObject specialized for Wire
   build123d.objects_curve.BaseLineObject.__init__ (constructor)
 build123d.objects_curve.Bezier (class) [1 members] [category: objects_curve] — Line Object
@@ -27,7 +27,7 @@ build123d.objects_curve.CenterArc (class) [1 members] [category: objects_curve] 
 build123d.objects_curve.ConstrainedArcs (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ConstrainedArcs.__init__ (constructor)
 build123d.objects_curve.ConstrainedLines (class) [1 members] [category: objects_curve] — Line Object
-  build123d.objects_curve.ConstrainedLines.__init__ (constructor) — Create planar line(s) on XY subject to tangency/contact constraints
+  build123d.objects_curve.ConstrainedLines.__init__ (constructor) — Create planar line(s) on XY subject to tangency, point-incidence, or
 build123d.objects_curve.DoubleTangentArc (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.DoubleTangentArc.__init__ (constructor)
 build123d.objects_curve.EllipticalCenterArc (class) [1 members] [category: objects_curve] — Line Object
@@ -48,10 +48,6 @@ build123d.objects_curve.Line (class) [1 members] [category: objects_curve] — L
   build123d.objects_curve.Line.__init__ (constructor)
 build123d.objects_curve.ParabolicCenterArc (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ParabolicCenterArc.__init__ (constructor)
-build123d.objects_curve.PointArcTangentArc (class) [1 members] [category: objects_curve] — Line Object
-  build123d.objects_curve.PointArcTangentArc.__init__ (constructor)
-build123d.objects_curve.PointArcTangentLine (class) [1 members] [category: objects_curve] — Line Object
-  build123d.objects_curve.PointArcTangentLine.__init__ (constructor)
 build123d.objects_curve.PolarLine (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.PolarLine.__init__ (constructor)
 build123d.objects_curve.Polyline (class) [1 members] [category: objects_curve] — Line Object
@@ -66,10 +62,6 @@ build123d.objects_curve.TangentArc (class) [1 members] [category: objects_curve]
   build123d.objects_curve.TangentArc.__init__ (constructor)
 build123d.objects_curve.ThreePointArc (class) [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ThreePointArc.__init__ (constructor)
-build123d.objects_curve.BaseEdgeObject (class) [1 members] [category: objects_curve] — BaseEdgeObject specialized for Edge
-  build123d.objects_curve.BaseEdgeObject.__init__ (constructor)
-build123d.objects_curve.BaseCurveObject (class) [1 members] [category: objects_curve] — BaseCurveObject specialized for Curve
-  build123d.objects_curve.BaseCurveObject.__init__ (constructor)
 
 ## build_enums — `api-build-enums.md`
 
@@ -93,6 +85,11 @@ build123d.build_enums.ContinuityLevel (enum) [3 members] [category: build_enums]
   build123d.build_enums.ContinuityLevel.C0 (enumMember)
   build123d.build_enums.ContinuityLevel.C1 (enumMember)
   build123d.build_enums.ContinuityLevel.C2 (enumMember)
+build123d.build_enums.Convexity (enum) [4 members] [category: build_enums] — How the material of a shape sits around one of…
+  build123d.build_enums.Convexity.CONVEX (enumMember)
+  build123d.build_enums.Convexity.CONCAVE (enumMember)
+  build123d.build_enums.Convexity.SMOOTH (enumMember)
+  build123d.build_enums.Convexity.SADDLE (enumMember)
 build123d.build_enums.Extrinsic (enum) [12 members] [category: build_enums] — Order to apply extrinsic rotations by axis
   build123d.build_enums.Extrinsic.XYZ (enumMember)
   build123d.build_enums.Extrinsic.XZY (enumMember)
@@ -204,7 +201,7 @@ build123d.build_enums.Sagitta (enum) [3 members] [category: build_enums] — Sag
   build123d.build_enums.Sagitta.SHORT (enumMember)
   build123d.build_enums.Sagitta.LONG (enumMember)
   build123d.build_enums.Sagitta.BOTH (enumMember)
-build123d.build_enums.Select (enum) [3 members] [category: build_enums] — Selector scope - all, last operation or new objects
+build123d.build_enums.Select (enum) [3 members] [category: build_enums] — How much of a shape a selector returns
   build123d.build_enums.Select.ALL (enumMember)
   build123d.build_enums.Select.LAST (enumMember)
   build123d.build_enums.Select.NEW (enumMember)
@@ -234,13 +231,16 @@ build123d.build_enums.Transition (enum) [3 members] [category: build_enums] — 
   build123d.build_enums.Transition.RIGHT (enumMember)
   build123d.build_enums.Transition.ROUND (enumMember)
   build123d.build_enums.Transition.TRANSFORMED (enumMember)
-build123d.build_enums.Unit (enum) [6 members] [category: build_enums] — Standard Units
+build123d.build_enums.Unit (enum) [9 members] [category: build_enums] — Standard Units
   build123d.build_enums.Unit.MC (enumMember)
   build123d.build_enums.Unit.MM (enumMember)
   build123d.build_enums.Unit.CM (enumMember)
   build123d.build_enums.Unit.M (enumMember)
   build123d.build_enums.Unit.IN (enumMember)
   build123d.build_enums.Unit.FT (enumMember)
+  build123d.build_enums.Unit.G (enumMember)
+  build123d.build_enums.Unit.KG (enumMember)
+  build123d.build_enums.Unit.LB (enumMember)
 build123d.build_enums.Until (enum) [4 members] [category: build_enums] — Extrude limit
   build123d.build_enums.Until.NEXT (enumMember)
   build123d.build_enums.Until.LAST (enumMember)
@@ -265,7 +265,7 @@ build123d.drafting.TechnicalDrawing (class) [1 members] [category: drafting] —
 
 ## geometry — `api-geometry.md`
 
-build123d.geometry.Axis (class) [20 members] [category: geometry] — Axis
+build123d.geometry.Axis (class) [19 members] [category: geometry] — Axis
   build123d.geometry.Axis.X (property) — X Axis
   build123d.geometry.Axis.Y (property) — Y Axis
   build123d.geometry.Axis.Z (property) — Z Axis
@@ -275,7 +275,6 @@ build123d.geometry.Axis (class) [20 members] [category: geometry] — Axis
   build123d.geometry.Axis.direction (property) — The normalized direction of the Axis
   build123d.geometry.Axis.location (property) — Return self as Location
   build123d.geometry.Axis.located (method) — relocates self to a new location possibly changing position and…
-  build123d.geometry.Axis.to_plane (method) — Return self as Plane
   build123d.geometry.Axis.is_coaxial (method) — are axes coaxial
   build123d.geometry.Axis.is_normal (method) — are axes normal
   build123d.geometry.Axis.is_opposite (method) — are axes opposite
@@ -286,7 +285,7 @@ build123d.geometry.Axis (class) [20 members] [category: geometry] — Axis
   build123d.geometry.Axis.__neg__ (method) — Flip direction operator -
   build123d.geometry.Axis.__and__ (method) — intersect vector with other &
   build123d.geometry.Axis.intersect (method) — Find intersection of axis and geometric object or shape
-build123d.geometry.BoundBox (class) [10 members] [category: geometry] — A BoundingBox for a Shape
+build123d.geometry.BoundBox (class) [18 members] [category: geometry] — An axis-aligned bounding box for a shape
   build123d.geometry.BoundBox.__init__ (constructor)
   build123d.geometry.BoundBox.measure (property) — Return the overall Lebesgue measure of the bounding box
   build123d.geometry.BoundBox.diagonal (property) — body diagonal length (i.e
@@ -294,8 +293,16 @@ build123d.geometry.BoundBox (class) [10 members] [category: geometry] — A Boun
   build123d.geometry.BoundBox.add (method) — Returns a modified (expanded) bounding box
   build123d.geometry.BoundBox.find_outside_box_2d (method) — Compares bounding boxes
   build123d.geometry.BoundBox.from_topo_ds (method) — Constructs a bounding box from a TopoDS_Shape
-  build123d.geometry.BoundBox.is_inside (method) — Is the provided bounding box inside this one?
-  build123d.geometry.BoundBox.overlaps (method) — Check if this bounding box overlaps with another
+  build123d.geometry.BoundBox.covers (method) — Return whether this bounding box includes every point of *other*
+  build123d.geometry.BoundBox.covered_by (method) — Return whether every point of this bounding box is in…
+  build123d.geometry.BoundBox.contains (method) — Return whether this bounding box contains *other*
+  build123d.geometry.BoundBox.contains_properly (method) — Return whether *other* is contained without touching this box's boundary
+  build123d.geometry.BoundBox.within (method) — Return whether this bounding box is contained in *other*
+  build123d.geometry.BoundBox.intersects (method) — Return whether the distance between bounding boxes is within *tolerance*
+  build123d.geometry.BoundBox.disjoint (method) — Return whether these bounding boxes do not intersect
+  build123d.geometry.BoundBox.touches (method) — Return whether these bounding boxes meet without sharing positive volume
+  build123d.geometry.BoundBox.overlaps (method) — Return whether these boxes overlap without either one containing the…
+  build123d.geometry.BoundBox.is_inside (method) — Return whether this bounding box is inside *other*
   build123d.geometry.BoundBox.to_align_offset (method) — Amount to move object to achieve the desired alignment
 build123d.geometry.Color (class) [2 members] [category: geometry] — Color object based on OCCT Quantity_ColorRGBA
   build123d.geometry.Color.__init__ (constructor)
@@ -303,7 +310,7 @@ build123d.geometry.Color (class) [2 members] [category: geometry] — Color obje
 build123d.geometry.GeomEncoder (class) [2 members] [category: geometry] — A JSON encoder for build123d geometry objects
   build123d.geometry.GeomEncoder.default (method) — Return a JSON-serializable representation of a known geometry object
   build123d.geometry.GeomEncoder.geometry_hook (method) — Convert dictionaries back into geometry objects for decoding
-build123d.geometry.Location (class) [17 members] [category: geometry] — Location in 3D space
+build123d.geometry.Location (class) [15 members] [category: geometry] — Location in 3D space
   build123d.geometry.Location.__init__ (constructor)
   build123d.geometry.Location.wrapped (property) — OCP object
   build123d.geometry.Location.position (property) — Extract Position component of self
@@ -312,18 +319,13 @@ build123d.geometry.Location (class) [17 members] [category: geometry] — Locati
   build123d.geometry.Location.y_axis (property) — Default Y axis when used as a plane
   build123d.geometry.Location.z_axis (property) — Default Z axis when used as a plane
   build123d.geometry.Location.inverse (method) — Inverted location
-  build123d.geometry.Location.__mul__ (method) — Combine locations
+  build123d.geometry.Location.__mul__ (method) — Apply this location to a location, movable object, or iterable
   build123d.geometry.Location.__pow__ (method)
   build123d.geometry.Location.__neg__ (method) — Flip the orientation without changing the position operator -
   build123d.geometry.Location.__and__ (method) — intersect axis with other &
   build123d.geometry.Location.center (method) — Return center of the location - useful for sorting
   build123d.geometry.Location.mirror (method) — Return a new Location mirrored across the given plane
-  build123d.geometry.Location.to_axis (method) — Convert the location into an Axis
-  build123d.geometry.Location.to_tuple (method) — Convert the location to a translation, rotation tuple
   build123d.geometry.Location.intersect (method) — Find intersection of location and geometric object or shape
-build123d.geometry.LocationEncoder (class) [2 members] [category: geometry] — Custom JSON Encoder for Location values
-  build123d.geometry.LocationEncoder.default (method) — Return a serializable object
-  build123d.geometry.LocationEncoder.location_hook (method) — Convert Locations loaded from json to Location objects
 build123d.geometry.Matrix (class) [6 members] [category: geometry] — A 3d , 4x4 transformation matrix
   build123d.geometry.Matrix.__init__ (constructor)
   build123d.geometry.Matrix.rotate (method) — General rotate about axis by angle in degrees
@@ -392,19 +394,21 @@ build123d.geometry.Rot (class) [1 members] [category: geometry] — Subclass of 
   build123d.geometry.Rotation.__init__ (constructor) [id: python:build123d.geometry.Rotation.__init__]
 build123d.geometry.Rotation (class) [1 members] [category: geometry] — Subclass of Location used only for object rotation
   build123d.geometry.Rotation.__init__ (constructor) [id: python:build123d.geometry.Rotation.__init__#constructor]
-build123d.geometry.Vector (class) [34 members] [category: geometry] — Create a 3-dimensional vector
+
+## geometry (2) — `api-geometry-2.md`
+
+build123d.geometry.Vector (class) [33 members] [category: geometry] — Create a 3-dimensional vector
   build123d.geometry.Vector.__init__ (constructor)
   build123d.geometry.Vector.X (property) — Get x value
   build123d.geometry.Vector.Y (property) — Get y value
   build123d.geometry.Vector.Z (property) — Get z value
   build123d.geometry.Vector.wrapped (property) — OCCT object
-  build123d.geometry.Vector.to_tuple (method) — Return tuple equivalent
   build123d.geometry.Vector.length (property) — Vector length
   build123d.geometry.Vector.cross (method) — Mathematical cross function
   build123d.geometry.Vector.dot (method) — Mathematical dot function
-  build123d.geometry.Vector.sub (method)
+  build123d.geometry.Vector.sub (method) — Mathematical subtraction function
   build123d.geometry.Vector.__sub__ (method) — Mathematical subtraction operator -
-  build123d.geometry.Vector.add (method)
+  build123d.geometry.Vector.add (method) — Mathematical addition function
   build123d.geometry.Vector.__add__ (method) — Mathematical addition operator +
   build123d.geometry.Vector.__radd__ (method) — Mathematical reverse addition operator +
   build123d.geometry.Vector.multiply (method) — Mathematical multiply function
@@ -485,6 +489,7 @@ build123d.objects_part.Torus (class) [1 members] [category: objects_part] — Pa
   build123d.objects_part.Torus.__init__ (constructor)
 build123d.objects_part.Wedge (class) [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Wedge.__init__ (constructor)
+build123d.objects_part._BaseHole (class) [category: objects_part] — Shared functionality for hole-style part operations
 
 ## objects_sketch — `api-objects-sketch.md`
 
@@ -510,6 +515,8 @@ build123d.objects_sketch.SlotCenterToCenter (class) [1 members] [category: objec
   build123d.objects_sketch.SlotCenterToCenter.__init__ (constructor)
 build123d.objects_sketch.SlotOverall (class) [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.SlotOverall.__init__ (constructor)
+build123d.objects_sketch.Superellipse (class) [1 members] [category: objects_sketch] — Sketch Object
+  build123d.objects_sketch.Superellipse.__init__ (constructor)
 build123d.objects_sketch.Text (class) [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Text.__init__ (constructor)
 build123d.objects_sketch.Trapezoid (class) [1 members] [category: objects_sketch] — Sketch Object
@@ -521,8 +528,8 @@ build123d.objects_sketch.Triangle (class) [1 members] [category: objects_sketch]
 
 build123d.build_line.BuildLine (class) [7 members] [category: build_line] — BuildLine
   build123d.build_line.BuildLine.__init__ (constructor)
-  build123d.build_line.BuildLine.line (property) — Get the current line
-  build123d.build_line.BuildLine.__exit__ (method) — Upon exiting restore context and send object to parent
+  build123d.build_line.BuildLine.line (property) — Get the placed line
+  build123d.build_line.BuildLine.line_local (property) — Get the line in the Builder's local construction coordinates
   build123d.build_line.BuildLine.faces (method) — faces() not implemented
   build123d.build_line.BuildLine.face (method) — face() not implemented
   build123d.build_line.BuildLine.solids (method) — solids() not implemented
@@ -530,9 +537,10 @@ build123d.build_line.BuildLine (class) [7 members] [category: build_line] — Bu
 
 ## build_part — `api-build-part.md`
 
-build123d.build_part.BuildPart (class) [4 members] [category: build_part] — BuildPart
+build123d.build_part.BuildPart (class) [5 members] [category: build_part] — BuildPart
   build123d.build_part.BuildPart.__init__ (constructor)
-  build123d.build_part.BuildPart.part (property) — Get the current part
+  build123d.build_part.BuildPart.part (property) — Get the placed part
+  build123d.build_part.BuildPart.part_local (property) — Get the part in the Builder's local construction coordinates
   build123d.build_part.BuildPart.pending_edges_as_wire (property) — Return a wire representation of the pending edges
   build123d.build_part.BuildPart.location (property) — Builder's location
 
@@ -541,7 +549,7 @@ build123d.build_part.BuildPart (class) [4 members] [category: build_part] — Bu
 build123d.build_sketch.BuildSketch (class) [6 members] [category: build_sketch] — BuildSketch
   build123d.build_sketch.BuildSketch.__init__ (constructor)
   build123d.build_sketch.BuildSketch.sketch_local (property) — Get the builder's object
-  build123d.build_sketch.BuildSketch.sketch (property) — The global version of the sketch - may contain multiple…
+  build123d.build_sketch.BuildSketch.sketch (property) — Get the placed sketch
   build123d.build_sketch.BuildSketch.solids (method) — solids() not implemented
   build123d.build_sketch.BuildSketch.solid (method) — solid() not implemented
   build123d.build_sketch.BuildSketch.consolidate_edges (method) — Unify pending edges into one or more Wires
@@ -551,6 +559,7 @@ build123d.build_sketch.BuildSketch (class) [6 members] [category: build_sketch] 
 CM (constant) — 10
 FT (constant) — 304.79999999999995
 G (constant) — 1
+G_PER_LB (constant) — 453.59237
 IN (constant) — 25.4
 KG (constant) — 1000
 LB (constant) — 453.59237
@@ -559,16 +568,18 @@ MC (constant) — 0.001
 MM (constant) — 1
 RotationLike (type)
 THOU (constant) — 0.0254
+UNITS_PER_KILOGRAM (type)
 UNITS_PER_METER (type)
 VectorLike (type)
 
 ## composite — `api-composite.md`
 
-build123d.topology.composite.Compound (class) [17 members] [category: composite] — A Compound in build123d is a topological entity representing a…
+build123d.topology.composite.Compound (class) [18 members] [category: composite] — A Compound in build123d is a topological entity representing a…
   build123d.topology.composite.Compound.__init__ (constructor) — Build a Compound from Shapes
   build123d.topology.composite.Compound.volume (property) — volume - the volume of this Compound
-  build123d.topology.composite.Compound.cast (method) — Returns the right type of wrapper, given a OCCT object
+  build123d.topology.composite.Compound.mass (method) — mass - the mass of this Compound
   build123d.topology.composite.Compound.extrude (method) — extrude
+  build123d.topology.composite.Compound.resolve_font (method) — Resolve a requested font to its name, path, and system…
   build123d.topology.composite.Compound.make_text (method) — Text that optionally follows a path
   build123d.topology.composite.Compound.make_triad (method) — The coordinate system triad (X, Y, Z axes)
   build123d.topology.composite.Compound.__add__ (method) — Combine other to self `+` operator
@@ -656,9 +667,10 @@ build123d.exporters.AutoNameEnum (enum) [category: exporters] — An enum class 
 
 build123d.topology.three_d.DraftAngleError (class) [1 members] [category: three_d] — Solid.draft custom exception
   build123d.topology.three_d.DraftAngleError.__init__ (constructor)
-build123d.topology.three_d.Solid (class) [20 members] [category: three_d] — A Solid in build123d represents a three-dimensional solid geometry
+build123d.topology.three_d.Solid (class) [21 members] [category: three_d] — A Solid in build123d represents a three-dimensional solid geometry
   build123d.topology.three_d.Solid.__init__ (constructor) — Build a solid from an OCCT TopoDS_Shape/TopoDS_Solid
   build123d.topology.three_d.Solid.volume (property) — volume - the volume of this Solid
+  build123d.topology.three_d.Solid.mass (method) — mass - the mass of this Solid
   build123d.topology.three_d.Solid.touch (method) — Find where this Solid's boundary contacts another shape
   build123d.topology.three_d.Solid.extrude (method) — extrude
   build123d.topology.three_d.Solid.extrude_linear_with_rotation (method) — Extrude with Rotation
@@ -677,9 +689,8 @@ build123d.topology.three_d.Solid (class) [20 members] [category: three_d] — A 
   build123d.topology.three_d.Solid.sweep_multi (method) — Multi section sweep
   build123d.topology.three_d.Solid.thicken (method) — Thicken Face or Shell
   build123d.topology.three_d.Solid.draft (method) — Apply a draft angle to the given faces of the…
-build123d.topology.three_d.Mixin3D (class) [12 members] [category: three_d] — Additional methods to add to 3D Shape classes
+build123d.topology.three_d.Mixin3D (class) [11 members] [category: three_d] — Additional methods to add to 3D Shape classes
   build123d.topology.three_d.Mixin3D.find_intersection_points (method) — Find point and normal at intersection
-  build123d.topology.three_d.Mixin3D.cast (method) — Returns the right type of wrapper, given a OCCT object
   build123d.topology.three_d.Mixin3D.extrude (method) — Unused - only here because Mixin1D is a subclass of…
   build123d.topology.three_d.Mixin3D.center (method) — Return center of object
   build123d.topology.three_d.Mixin3D.chamfer (method) — Chamfer
@@ -693,14 +704,14 @@ build123d.topology.three_d.Mixin3D (class) [12 members] [category: three_d] — 
 
 ## one_d — `api-one-d.md`
 
-build123d.topology.one_d.Edge (class) [35 members] [category: one_d] — An Edge in build123d is a fundamental element in the…
+build123d.topology.one_d.Edge (class) [33 members] [category: one_d] — An Edge in build123d is a fundamental element in the…
   build123d.topology.one_d.Edge.__init__ (constructor) — Build an Edge from an OCCT TopoDS_Shape/TopoDS_Edge
   build123d.topology.one_d.Edge.arc_center (property) — center of an underlying circle or ellipse geometry
   build123d.topology.one_d.Edge.extrude (method) — extrude
   build123d.topology.one_d.Edge.make_bezier (method) — make_bezier
   build123d.topology.one_d.Edge.make_circle (method) — make circle
   build123d.topology.one_d.Edge.make_constrained_arcs (method)
-  build123d.topology.one_d.Edge.make_constrained_lines (method) — Create planar line(s) on XY subject to tangency/contact constraints
+  build123d.topology.one_d.Edge.make_constrained_lines (method) — Create planar line(s) on XY subject to tangency, point-incidence, or
   build123d.topology.one_d.Edge.make_ellipse (method) — make ellipse
   build123d.topology.one_d.Edge.make_parabola (method) — make parabola
   build123d.topology.one_d.Edge.make_hyperbola (method) — make hyperbola
@@ -722,14 +733,12 @@ build123d.topology.one_d.Edge (class) [35 members] [category: one_d] — An Edge
   build123d.topology.one_d.Edge.param_at_point (method) — Return the normalized parameter (∈ [0.0, 1.0]) of the location…
   build123d.topology.one_d.Edge.project_to_shape (method) — Project Edge
   build123d.topology.one_d.Edge.reversed (method) — reversed
-  build123d.topology.one_d.Edge.to_axis (method) — Translate a linear Edge to an Axis
-  build123d.topology.one_d.Edge.to_wire (method) — Edge as Wire
   build123d.topology.one_d.Edge.trim (method) — trim
   build123d.topology.one_d.Edge.trim_to_length (method) — trim_to_length
   build123d.topology.one_d.Edge.trim_to_other (method) — Return the shortest Edge of self trimmed by other or…
   build123d.topology.one_d.Edge.is_infinite (property) — Check if edge is infinite (LINE with length > 1e100)
   build123d.topology.one_d.Edge.trim_infinite (method) — Trim an infinite line edge to a finite length
-build123d.topology.one_d.Wire (class) [23 members] [category: one_d] — A Wire in build123d is a topological entity representing a…
+build123d.topology.one_d.Wire (class) [22 members] [category: one_d] — A Wire in build123d is a topological entity representing a…
   build123d.topology.one_d.Wire.__init__ (constructor)
   build123d.topology.one_d.Wire.combine (method) — combine
   build123d.topology.one_d.Wire.extrude (method) — extrude - invalid operation for Wire
@@ -741,7 +750,7 @@ build123d.topology.one_d.Wire (class) [23 members] [category: one_d] — A Wire 
   build123d.topology.one_d.Wire.order_chamfer_edges (method) — Order the edges of a chamfer relative to a reference…
   build123d.topology.one_d.Wire.chamfer_2d (method) — chamfer_2d
   build123d.topology.one_d.Wire.close (method) — Close a Wire
-  build123d.topology.one_d.Wire.edges (method) — edges - all the edges in this Shape
+  build123d.topology.one_d.Wire.edges (method) — edges - all the edges in this Shape, in connection…
   build123d.topology.one_d.Wire.fillet_2d (method) — fillet_2d
   build123d.topology.one_d.Wire.fix_degenerate_edges (method) — fix_degenerate_edges
   build123d.topology.one_d.Wire.geom_adaptor (method) — Return the Geom Comp Curve for this Wire
@@ -751,18 +760,18 @@ build123d.topology.one_d.Wire (class) [23 members] [category: one_d] — A Wire 
   build123d.topology.one_d.Wire.param_at_point (method) — Return the normalized wire parameter for the point closest to…
   build123d.topology.one_d.Wire.project_to_shape (method) — Project Wire
   build123d.topology.one_d.Wire.stitch (method) — Attempt to stitch wires
-  build123d.topology.one_d.Wire.to_wire (method) — Return Wire - used as a pair with Edge.to_wire when…
   build123d.topology.one_d.Wire.trim (method) — Trim a wire between [start, end] normalized over total length
 build123d.topology.one_d.edges_to_wires (function) [category: one_d] — Convert edges to a list of wires
 build123d.topology.one_d.topo_explore_connected_edges (function) [category: one_d] — Find edges connected to the given edge with at least…
-build123d.topology.one_d.Mixin1D (class) [29 members] [category: one_d] — Methods to add to the Edge and Wire classes
+build123d.topology.one_d.Mixin1D (class) [30 members] [category: one_d] — Methods to add to the Edge and Wire classes
   build123d.topology.one_d.Mixin1D.is_closed (property) — Are the start and end points equal?
   build123d.topology.one_d.Mixin1D.is_forward (property) — Does the Edge/Wire loop forward or reverse
-  build123d.topology.one_d.Mixin1D.is_interior (property) — Check if the edge is an interior edge
+  build123d.topology.one_d.Mixin1D.convexity (property) — How the shape this edge was selected from sits around…
+  build123d.topology.one_d.Mixin1D.is_interior (property) — Is this a concave edge of the shape it was…
   build123d.topology.one_d.Mixin1D.length (property) — Edge or Wire length
   build123d.topology.one_d.Mixin1D.radius (property) — Calculate the radius
   build123d.topology.one_d.Mixin1D.volume (property) — volume - the volume of this Edge or Wire, which…
-  build123d.topology.one_d.Mixin1D.cast (method) — Returns the right type of wrapper, given a OCCT object
+  build123d.topology.one_d.Mixin1D.mass (method) — mass - the mass of this Edge or Wire, which…
   build123d.topology.one_d.Mixin1D.extrude (method) — Unused - only here because Mixin1D is a subclass of…
   build123d.topology.one_d.Mixin1D.__add__ (method) — fuse shape to wire/edge operator +
   build123d.topology.one_d.Mixin1D.__matmul__ (method) — Position on wire operator @
@@ -795,8 +804,9 @@ build123d.topology.two_d.Face (class) [47 members] [category: two_d] — A Face 
   build123d.topology.two_d.Face.axes_of_symmetry (property) — Computes and returns the axes of symmetry for a planar…
   build123d.topology.two_d.Face.center_location (property) — Location at the center of face
   build123d.topology.two_d.Face.geometry (property) — geometry of planar face
-  build123d.topology.two_d.Face.is_circular_convex (property) — Determine whether a given face is convex relative to its…
-  build123d.topology.two_d.Face.is_circular_concave (property) — Determine whether a given face is concave relative to its…
+  build123d.topology.two_d.Face.convexity (property) — How the material behind this face sits against it
+  build123d.topology.two_d.Face.is_circular_convex (property) — Does this face curve away from the material behind it?
+  build123d.topology.two_d.Face.is_circular_concave (property) — Does this face curve into the material behind it?
   build123d.topology.two_d.Face.is_planar (property) — Is the face planar even though its geom_type may not…
   build123d.topology.two_d.Face.length (property) — length of planar face
   build123d.topology.two_d.Face.radii (property) — Return the major and minor radii of a torus otherwise…
@@ -805,11 +815,11 @@ build123d.topology.two_d.Face (class) [47 members] [category: two_d] — A Face 
   build123d.topology.two_d.Face.semi_angle (property) — Return the semi angle of a cone, otherwise None
   build123d.topology.two_d.Face.uv_face (property) — Create a planar face from a face's parametric-space boundary
   build123d.topology.two_d.Face.volume (property) — volume - the volume of this Face, which is always…
+  build123d.topology.two_d.Face.mass (method) — mass - the mass of this Face, which is always…
   build123d.topology.two_d.Face.width (property) — width of planar face
   build123d.topology.two_d.Face.extrude (method) — extrude
   build123d.topology.two_d.Face.make_bezier_surface (method) — make_bezier_surface
   build123d.topology.two_d.Face.make_gordon_surface (method) — Constructs a Gordon surface from a network of profile and…
-  build123d.topology.two_d.Face.make_plane (method) — Create a unlimited size Face aligned with plane
   build123d.topology.two_d.Face.make_rect (method) — make_rect
   build123d.topology.two_d.Face.make_surface (method) — Create Non-Planar Face
   build123d.topology.two_d.Face.make_surface_from_array_of_points (method) — make_surface_from_array_of_points
@@ -831,22 +841,21 @@ build123d.topology.two_d.Face (class) [47 members] [category: two_d] — A Face 
   build123d.topology.two_d.Face.outer_wire (method) — Extract the perimeter wire from this Face
   build123d.topology.two_d.Face.position_at (method) — position_at
   build123d.topology.two_d.Face.project_to_shape (method) — Project Face to target Object
-  build123d.topology.two_d.Face.to_arcs (method) — to_arcs
   build123d.topology.two_d.Face.without_holes (method) — without_holes
   build123d.topology.two_d.Face.wire (method) — Return the outerwire, generate a warning if inner_wires present
   build123d.topology.two_d.Face.wrap (method) — wrap
   build123d.topology.two_d.Face.wrap_faces (method) — wrap_faces
-build123d.topology.two_d.Shell (class) [8 members] [category: two_d] — A Shell is a fundamental component in build123d's topological data…
+build123d.topology.two_d.Shell (class) [9 members] [category: two_d] — A Shell is a fundamental component in build123d's topological data…
   build123d.topology.two_d.Shell.__init__ (constructor) — Build a shell from an OCCT TopoDS_Shape/TopoDS_Shell
   build123d.topology.two_d.Shell.volume (property) — volume - the volume of this Shell if manifold, otherwise…
+  build123d.topology.two_d.Shell.mass (method) — mass - the mass of this Shell if manifold in…
   build123d.topology.two_d.Shell.extrude (method) — extrude
   build123d.topology.two_d.Shell.make_loft (method) — make loft
   build123d.topology.two_d.Shell.revolve (method) — sweep
   build123d.topology.two_d.Shell.sweep (method) — sweep
   build123d.topology.two_d.Shell.center (method) — Center of mass of the shell
   build123d.topology.two_d.Shell.location_at (method) — location_at
-build123d.topology.two_d.Mixin2D (class) [9 members] [category: two_d] — Additional methods to add to Face and Shell class
-  build123d.topology.two_d.Mixin2D.cast (method) — Returns the right type of wrapper, given a OCCT object
+build123d.topology.two_d.Mixin2D (class) [8 members] [category: two_d] — Additional methods to add to Face and Shell class
   build123d.topology.two_d.Mixin2D.extrude (method) — Unused - only here because Mixin1D is a subclass of…
   build123d.topology.two_d.Mixin2D.__neg__ (method) — Reverse normal operator -
   build123d.topology.two_d.Mixin2D.split_by_perimeter (method) — split_by_perimeter
@@ -866,7 +875,7 @@ build123d.text.FontManager (class) [7 members] [category: text] — Wrap OCP Fon
   build123d.text.FontManager.register_font (method) — Register all font faces in a font file and return…
   build123d.text.FontManager.register_folder (method) — Register all fonts in a folder
   build123d.text.FontManager.register_system_fonts (method) — Runner to (re)inititalize the OCCT FontMgr font list since user…
-build123d.text.available_fonts (function) [category: text] — Get list of available fonts by name and available styles…
+build123d.text.available_fonts (function) [category: text] — Get available fonts without initializing the font manager on import
 
 ## build_common — `api-build-common.md`
 
@@ -888,10 +897,12 @@ build123d.build_common.vertex (function) [category: build_common] — Return Ver
 build123d.build_common.vertices (function) [category: build_common] — Return Vertices
 build123d.build_common.wire (function) [category: build_common] — Return Wire
 build123d.build_common.wires (function) [category: build_common] — Return Wires
-build123d.build_common.Builder (class) [16 members] [category: build_common] — Builder
+build123d.build_common.BaseObject (class) [category: build_common] — Common context-isolation behavior for builder-aware objects
+build123d.build_common.Builder (class) [19 members] [category: build_common] — Builder
   build123d.build_common.Builder.__init__ (constructor)
   build123d.build_common.Builder.max_dimension (property) — Maximum size of object in all directions
-  build123d.build_common.Builder.new_edges (property) — Edges that changed during last operation
+  build123d.build_common.Builder.label (property) — Label assigned to the builder's output object
+  build123d.build_common.Builder.new_edges (property) — Edges the last operation created outright, as ``edges(Select.NEW)``
   build123d.build_common.Builder.__enter__ (method) — Upon entering record the parent and a token to restore…
   build123d.build_common.Builder.__exit__ (method) — Upon exiting restore context and send object to parent
   build123d.build_common.Builder.vertices (method) — Return Vertices
@@ -904,9 +915,11 @@ build123d.build_common.Builder (class) [16 members] [category: build_common] —
   build123d.build_common.Builder.face (method) — Return Face
   build123d.build_common.Builder.solids (method) — Return Solids
   build123d.build_common.Builder.solid (method) — Return Solid
+  build123d.build_common.Builder.lasts (property) — Shapes the last operation brought in or created, by type
+  build123d.build_common.Builder.news (property) — Shapes the last operation created outright, by type
   build123d.build_common.Builder.validate_inputs (method) — Validate that objects/operations and parameters apply
 build123d.build_common.LocationList (class) [4 members] [category: build_common] — Location Context
-  build123d.build_common.LocationList.locations (property) — Current local locations globalized with current workplanes
+  build123d.build_common.LocationList.locations (property) — Current locations in local construction coordinates
   build123d.build_common.LocationList.__init__ (constructor)
   build123d.build_common.LocationList.__enter__ (method) — Upon entering create a token to restore contextvars
   build123d.build_common.LocationList.__exit__ (method) — Upon exiting restore context
@@ -954,15 +967,21 @@ build123d.topology.shape_core.ShapeList (class) [33 members] [category: shape_co
   build123d.topology.shape_core.ShapeList.wire (method) — Return the Wire
   build123d.topology.shape_core.ShapeList.wires (method) — wires - all the wires in this ShapeList
 build123d.topology.shape_core.topo_distance_to (function) [category: shape_core] — Return a key function that yields topological distance to ``other``
-build123d.topology.shape_core.Shape (class) [82 members] [category: shape_core] — Shape
+
+## shape_core (2) — `api-shape-core-2.md`
+
+build123d.topology.shape_core.Shape (class) [88 members] [category: shape_core] — Shape
   build123d.topology.shape_core.Shape.__init__ (constructor)
+  build123d.topology.shape_core.Shape.topo_parent (property) — The shape this one was ultimately taken out of
+  build123d.topology.shape_core.Shape.topo_owner (property) — The shape this one was taken directly out of
   build123d.topology.shape_core.Shape.wrapped (property) — OCP TopoDS object
   build123d.topology.shape_core.Shape.area (property) — area -the surface area of all faces in this Shape
   build123d.topology.shape_core.Shape.color (property) — Get the shape's color
+  build123d.topology.shape_core.Shape.material (property) — Get the shape's material
+  build123d.topology.shape_core.Shape.convexity (property) — How the shape this was selected from sits around it
   build123d.topology.shape_core.Shape.geom_type (property) — Gets the underlying geometry type
   build123d.topology.shape_core.Shape.is_manifold (property) — is_manifold
   build123d.topology.shape_core.Shape.is_null (property) — Returns true if this shape is null
-  build123d.topology.shape_core.Shape.is_planar_face (property) — Is the shape a planar face even though its geom_type…
   build123d.topology.shape_core.Shape.is_valid (property) — Returns True if no defect is detected on the shape…
   build123d.topology.shape_core.Shape.global_location (property) — The location of this Shape relative to the global coordinate…
   build123d.topology.shape_core.Shape.location (property) — Get this Shape's Location
@@ -972,10 +991,12 @@ build123d.topology.shape_core.Shape (class) [82 members] [category: shape_core] 
   build123d.topology.shape_core.Shape.principal_properties (property) — Compute the principal moments of inertia and their corresponding axes
   build123d.topology.shape_core.Shape.shape_type (property) — Return the shape type string for this class
   build123d.topology.shape_core.Shape.static_moments (property) — Compute the static moments (first moments of mass) of the…
+  build123d.topology.shape_core.Shape.register_shape_constructor (method) — Register a wrapper class for a TopAbs type without importing…
+  build123d.topology.shape_core.Shape.register_geometry_constructor (method) — Register how a geometry class becomes a Shape, without importing…
+  build123d.topology.shape_core.Shape.as_shape (method) — Return the Shape equivalent of a geometry object
   build123d.topology.shape_core.Shape.cast (method) — Returns the right type of wrapper, given a OCCT object
   build123d.topology.shape_core.Shape.extrude (method) — extrude
   build123d.topology.shape_core.Shape.combined_center (method) — combined center
-  build123d.topology.shape_core.Shape.compute_mass (method) — Calculates the 'mass' of an object
   build123d.topology.shape_core.Shape.get_shape_list (method) — Helper to extract entities of a specific type from a…
   build123d.topology.shape_core.Shape.get_single_shape (method) — Return the single entity of the requested type
   build123d.topology.shape_core.Shape.register_composite_factory (method) — Register a composite constructor without importing it here
@@ -984,6 +1005,8 @@ build123d.topology.shape_core.Shape (class) [82 members] [category: shape_core] 
   build123d.topology.shape_core.Shape.__and__ (method) — intersect shape with self operator &
   build123d.topology.shape_core.Shape.__rmul__ (method) — right multiply for positioning operator *
   build123d.topology.shape_core.Shape.__sub__ (method) — cut shape from self operator -
+  build123d.topology.shape_core.Shape.compute_volume (method) — Calculates the volume of an object
+  build123d.topology.shape_core.Shape.compute_mass (method) — Calculates the 'mass' of an object
   build123d.topology.shape_core.Shape.bounding_box (method) — Create a bounding box for this Shape
   build123d.topology.shape_core.Shape.clean (method) — clean
   build123d.topology.shape_core.Shape.closest_points (method) — Points on two shapes where the distance between them is…
@@ -999,7 +1022,7 @@ build123d.topology.shape_core.Shape (class) [82 members] [category: shape_core] 
   build123d.topology.shape_core.Shape.edges (method) — edges - all the edges in this Shape - subclasses…
   build123d.topology.shape_core.Shape.entities (method) — Return all of the TopoDS sub entities of the given…
   build123d.topology.shape_core.Shape.face (method) — Return the Face
-  build123d.topology.shape_core.Shape.faces (method) — faces - all the faces in this Shape
+  build123d.topology.shape_core.Shape.faces (method) — faces - all the faces in this Shape, or those…
   build123d.topology.shape_core.Shape.faces_intersected_by_axis (method) — Line Intersection
   build123d.topology.shape_core.Shape.fix (method) — fix - try to fix shape if not valid
   build123d.topology.shape_core.Shape.fuse (method) — fuse
@@ -1017,26 +1040,25 @@ build123d.topology.shape_core.Shape (class) [82 members] [category: shape_core] 
   build123d.topology.shape_core.Shape.oriented_bounding_box (method) — Create an oriented bounding box for this Shape
   build123d.topology.shape_core.Shape.project_faces (method) — Projected Faces following the given path on Shape
   build123d.topology.shape_core.Shape.radius_of_gyration (method) — Compute the radius of gyration of the shape about a…
-  build123d.topology.shape_core.Shape.relocate (method) — Change the location of self while keeping it geometrically similar
   build123d.topology.shape_core.Shape.rotate (method) — rotate a copy
   build123d.topology.shape_core.Shape.scale (method) — Scale this shape about a point
   build123d.topology.shape_core.Shape.shell (method) — Return the Shell
-  build123d.topology.shape_core.Shape.shells (method) — shells - all the shells in this Shape
+  build123d.topology.shape_core.Shape.shells (method) — shells - all the shells in this Shape, or those…
   build123d.topology.shape_core.Shape.show_topology (method) — Display internal topology
   build123d.topology.shape_core.Shape.solid (method) — Return the Solid
-  build123d.topology.shape_core.Shape.solids (method) — solids - all the solids in this Shape
+  build123d.topology.shape_core.Shape.solids (method) — solids - all the solids in this Shape, or those…
   build123d.topology.shape_core.Shape.split (method) — split
-  build123d.topology.shape_core.Shape.split_by_perimeter (method) — split_by_perimeter
   build123d.topology.shape_core.Shape.tessellate (method) — General triangulated approximation
+  build123d.topology.shape_core.Shape.tessellate_with_uvs (method) — Triangulated approximation with per-vertex normals and UV coordinates
   build123d.topology.shape_core.Shape.to_splines (method) — to_splines
   build123d.topology.shape_core.Shape.transform_geometry (method) — Apply affine transform
   build123d.topology.shape_core.Shape.transform_shape (method) — Apply affine transform without changing type
   build123d.topology.shape_core.Shape.transformed (method) — Transform Shape
   build123d.topology.shape_core.Shape.translate (method) — Translates this shape through a transformation
   build123d.topology.shape_core.Shape.wire (method) — Return the Wire
-  build123d.topology.shape_core.Shape.wires (method) — wires - all the wires in this Shape
+  build123d.topology.shape_core.Shape.wires (method) — wires - all the wires in this Shape, or those…
   build123d.topology.shape_core.Shape.vertex (method) — Return the Vertex
-  build123d.topology.shape_core.Shape.vertices (method) — vertices - all the vertices in this Shape
+  build123d.topology.shape_core.Shape.vertices (method) — vertices - all the vertices in this Shape, or those…
 
 ## mesher — `api-mesher.md`
 
@@ -1059,17 +1081,20 @@ build123d.mesher.Mesher (class) [15 members] [category: mesher] — Mesher
 
 ## zero_d — `api-zero-d.md`
 
-build123d.topology.zero_d.Vertex (class) [13 members] [category: zero_d] — A Vertex in build123d represents a zero-dimensional point in the…
+build123d.topology.zero_d.Vertex (class) [16 members] [category: zero_d] — A Vertex in build123d represents a zero-dimensional point in the…
   build123d.topology.zero_d.Vertex.__init__ (constructor)
   build123d.topology.zero_d.Vertex.volume (property) — volume - the volume of this Vertex, which is always…
-  build123d.topology.zero_d.Vertex.cast (method) — Returns the right type of wrapper, given a OCCT object
+  build123d.topology.zero_d.Vertex.mass (method) — mass - the mass of this Vertex, which is always…
+  build123d.topology.zero_d.Vertex.convexity (property) — How the shape this vertex was selected from sits around…
+  build123d.topology.zero_d.Vertex.X (property) — The X coordinate of this Vertex, including its current Location
+  build123d.topology.zero_d.Vertex.Y (property) — The Y coordinate of this Vertex, including its current Location
+  build123d.topology.zero_d.Vertex.Z (property) — The Z coordinate of this Vertex, including its current Location
   build123d.topology.zero_d.Vertex.extrude (method) — extrude - invalid operation for Vertex
   build123d.topology.zero_d.Vertex.__add__ (method) — Add
   build123d.topology.zero_d.Vertex.__and__ (method) — intersect operator +
   build123d.topology.zero_d.Vertex.__sub__ (method) — Subtract
   build123d.topology.zero_d.Vertex.center (method) — The center of a vertex is itself!
   build123d.topology.zero_d.Vertex.split (method) — split - not implemented
-  build123d.topology.zero_d.Vertex.to_tuple (method) — Return vertex as three tuple of floats
   build123d.topology.zero_d.Vertex.transform_shape (method) — Apply affine transform without changing type
   build123d.topology.zero_d.Vertex.vertex (method) — Return the Vertex
   build123d.topology.zero_d.Vertex.vertices (method) — vertices - all the vertices in this Shape
@@ -1081,6 +1106,7 @@ build123d.operations_generic.add (function) [category: operations_generic] — G
 build123d.operations_generic.bounding_box (function) [category: operations_generic] — Generic Operation
 build123d.operations_generic.chamfer (function) [category: operations_generic] — Generic Operation
 build123d.operations_generic.fillet (function) [category: operations_generic] — Generic Operation
+build123d.operations_generic.insert (function) [category: operations_generic] — Generic Object
 build123d.operations_generic.mirror (function) [category: operations_generic] — Generic Operation
 build123d.operations_generic.offset (function) [category: operations_generic] — Generic Operation
 build123d.operations_generic.project (function) [category: operations_generic] — Generic Operation
@@ -1113,6 +1139,7 @@ build123d.operations_part.thicken (function) [category: operations_part] — Par
 
 build123d.exporters3d.export_brep (function) [category: exporters3d] — Export this shape to a BREP file
 build123d.exporters3d.export_gltf (function) [category: exporters3d] — export_gltf
+build123d.exporters3d.export_obj (function) [category: exporters3d] — export_obj
 build123d.exporters3d.export_step (function) [category: exporters3d] — export_step
 build123d.exporters3d.export_stl (function) [category: exporters3d] — Export STL
 build123d.exporters3d.export_to_pcbway (function) [category: exporters3d] — Export a shape to PCBWay for quoting

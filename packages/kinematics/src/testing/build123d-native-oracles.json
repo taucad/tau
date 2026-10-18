@@ -1,0 +1,791 @@
+[
+  {
+    "name": "fixed",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": {
+          "parent": "occurrence:path/0/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "fixed",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428]
+        }
+      }
+    },
+    "coordinates": {},
+    "child": "occurrence:path/0/1",
+    "expected": [
+      1.0, -3.729655473350135e-17, 4.5102810375396984e-17, 0.0, -1.448494102440634e-16, 1.0000000000000002,
+      2.220446049250313e-16, 0.0, -2.6020852139652106e-17, -5.551115123125783e-17, 1.0, 0.0, 7.105427357601002e-18, 0.0,
+      -4.440892098500626e-18, 1.0
+    ]
+  },
+  {
+    "name": "fixed-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": {
+          "parent": "occurrence:path/0/1",
+          "child": "occurrence:path/0/0",
+          "name": "mate",
+          "type": "fixed",
+          "origin": [0.038461173326357546, -0.0029997489803376765, -0.022151394461785916]
+        }
+      }
+    },
+    "coordinates": {},
+    "child": "occurrence:path/0/0",
+    "expected": [
+      1.0000000000000002, -7.632783294297951e-17, 2.7755575615628914e-17, 0.0, 3.469446951953614e-17,
+      0.9999999999999998, -2.7755575615628914e-17, 0.0, -2.7755575615628914e-17, -1.1102230246251565e-16, 1.0, 0.0,
+      -7.105427357601002e-18, 0.0, -1.7763568394002505e-18, 1.0
+    ]
+  },
+  {
+    "name": "revolute",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": {
+          "parent": "occurrence:path/0/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "revolute",
+          "origin": [0.042077696243197106, -0.005775683656395249, -0.022615020028634285],
+          "axis": [-0.5265643735008105, 0.848325066930469, -0.05544854711454767],
+          "limits": {
+            "lower": -10022.5,
+            "upper": 9977.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": 73.0
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      0.4885758300633363, -0.3691216818852625, -0.7905965103895393, 0.0, -0.26307026325149774, 0.8016202421859537,
+      -0.5368417121559399, 0.0, 0.8319180818269966, 0.4702703172431025, 0.29454733719618365, 0.0, 0.03881398433677941,
+      0.02502118392550482, 0.014212025813570655, 1.0
+    ]
+  },
+  {
+    "name": "revolute-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": {
+          "parent": "occurrence:path/0/1",
+          "child": "occurrence:path/0/0",
+          "name": "mate",
+          "type": "revolute",
+          "origin": [0.03846117332635755, -0.0029997489803376813, -0.022151394461785916],
+          "axis": [-0.6017098492073713, -0.7592344857948956, -0.2480085743408947],
+          "limits": {
+            "lower": -10022.5,
+            "upper": 9977.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": 73.0
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.5485718850492862, 0.08610033018960307, 0.8316583553808099, 0.0, 0.5604438885132221, 0.7002748394953631,
+      -0.44217394427750084, 0.0, -0.6204607439328063, 0.7086620367361192, 0.3358966849008242, 0.0,
+      0.0052995752697055495, 0.011487232348350125, -0.04802378148923467, 1.0
+    ]
+  },
+  {
+    "name": "revolute-multiturn",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": {
+          "parent": "occurrence:path/0/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "revolute",
+          "origin": [0.042077696243197106, -0.005775683656395249, -0.022615020028634285],
+          "axis": [-0.5265643735008105, 0.848325066930469, -0.05544854711454767],
+          "limits": {
+            "lower": -10022.5,
+            "upper": 9977.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": 1440.0
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      1.0, -1.968911145233676e-16, -1.0408340855860843e-15, 0.0, 1.231653667943533e-16, 1.0000000000000002,
+      -5.551115123125783e-16, 0.0, 9.43689570931383e-16, 4.996003610813204e-16, 0.9999999999999998, 0.0,
+      2.1316282072803006e-17, 1.9539925233402754e-17, 3.6415315207705136e-17, 1.0
+    ]
+  },
+  {
+    "name": "revolute-multiturn-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": {
+          "parent": "occurrence:path/0/1",
+          "child": "occurrence:path/0/0",
+          "name": "mate",
+          "type": "revolute",
+          "origin": [0.03846117332635755, -0.0029997489803376813, -0.022151394461785916],
+          "axis": [-0.6017098492073713, -0.7592344857948956, -0.2480085743408947],
+          "limits": {
+            "lower": -10022.5,
+            "upper": 9977.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": 1440.0
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.9999999999999998, -3.3306690738754696e-16, 9.992007221626409e-16, 0.0, 2.7755575615628914e-16,
+      0.9999999999999999, -8.326672684688674e-16, 0.0, -7.216449660063518e-16, 4.996003610813204e-16, 1.0, 0.0, 0.0,
+      2.4868995751603507e-17, -4.6185277824406516e-17, 1.0
+    ]
+  },
+  {
+    "name": "linear",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": {
+          "parent": "occurrence:path/0/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "prismatic",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.022615020028634282],
+          "axis": [0.20791169081775823, 0.9601762743044169, 0.18663936102599052],
+          "limits": {
+            "lower": -0.014
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate": 0.006999999999999999
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      1.0, -2.2898349882893854e-16, -3.8163916471489756e-17, 0.0, -2.246466901389965e-16, 1.0, -5.551115123125783e-17,
+      0.0, -3.469446951953614e-18, 1.1102230246251565e-16, 1.0, 0.0, 0.001455381835724303, 0.006721233920130923,
+      0.0013064755271819655, 1.0
+    ]
+  },
+  {
+    "name": "linear-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": {
+          "parent": "occurrence:path/0/1",
+          "child": "occurrence:path/0/0",
+          "name": "mate",
+          "type": "prismatic",
+          "origin": [0.038461173326357546, -0.0029997489803376765, -0.022151394461785916],
+          "axis": [0.10462484557034199, -0.8089834654102039, -0.5784456710722966],
+          "limits": {
+            "lower": -0.014
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native": 0.006999999999999999
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.9999999999999998, -8.326672684688674e-17, 1.1102230246251565e-16, 0.0, 2.0816681711721685e-17,
+      0.9999999999999999, -5.551115123125783e-17, 0.0, 0.0, -8.326672684688674e-17, 1.0000000000000002, 0.0,
+      0.0007323739189924084, -0.00566288425787144, -0.0040491196975060645, 1.0
+    ]
+  },
+  {
+    "name": "cylindrical",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
+          "components": []
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": {
+          "parent": "occurrence:path/0/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "name": "native",
+          "type": "prismatic",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.022615020028634282],
+          "axis": [0.20791169081776026, 0.9601762743044157, 0.18663936102599502],
+          "limits": {
+            "lower": -0.014,
+            "upper": 0.096
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": {
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "revolute",
+          "origin": [0.04207769624319711, -0.005775683656395246, -0.022615020028634285],
+          "axis": [0.20791169081775945, 0.9601762743044158, 0.1866393610259951],
+          "limits": {
+            "lower": -742.5,
+            "upper": 697.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": 0.006999999999999999,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": 73.0
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      0.3229605449364078, 0.31974927034217865, -0.8907619718701639, 0.0, -0.03721894685594346, 0.9447614580743622,
+      0.3256386606841083, 0.0, 0.9456803034901977, -0.07201521681457057, 0.3170214064347037, 0.0, 0.0511152565116015,
+      -0.008680744665742158, 0.025222898522322006, 1.0
+    ]
+  },
+  {
+    "name": "cylindrical-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
+          "components": []
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/distance": {
+          "parent": "occurrence:path/0/1",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "name": "mate",
+          "type": "prismatic",
+          "origin": [0.038461173326357546, -0.0029997489803376765, -0.022151394461785916],
+          "axis": [-0.6017098492073628, -0.7592344857949005, -0.2480085743409],
+          "limits": {
+            "lower": -0.014,
+            "upper": 0.096
+          }
+        },
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/angle": {
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "child": "occurrence:path/0/0",
+          "name": "mate",
+          "type": "revolute",
+          "origin": [0.03846117332635755, -0.0029997489803376847, -0.022151394461785913],
+          "axis": [-0.6017098492073714, -0.7592344857948955, -0.24800857434089457],
+          "limits": {
+            "lower": -742.5,
+            "upper": 697.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/distance": 0.006999999999999999,
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/angle": 73.0
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.5485718850492861, 0.0861003301896031, 0.8316583553808101, 0.0, 0.5604438885132221, 0.7002748394953631,
+      -0.44217394427750073, 0.0, -0.6204607439328064, 0.7086620367361193, 0.3358966849008242, 0.0,
+      0.0010876063252539582, 0.006172590947785851, -0.04975984150962093, 1.0
+    ]
+  },
+  {
+    "name": "ball",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
+          "components": []
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1": {
+          "components": []
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": {
+          "type": "revolute",
+          "parent": "occurrence:path/0/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "name": "native / X (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [0.9384472853749152, 0.022590878558260655, -0.34468296270401627],
+          "limits": {
+            "lower": -214.45691815205436,
+            "upper": 145.54308184794564
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
+          "name": "native / Y (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [-0.18665298215553594, 0.8727963390714092, -0.4509847167654253],
+          "limits": {
+            "lower": -152.10430259907508,
+            "upper": 27.895697400924902
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
+          "child": "occurrence:path/0/1",
+          "name": "native / Z (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [0.9653848881992906, 0.2480780332822031, 0.08055623526007938],
+          "limits": {
+            "lower": -213.2352265115788,
+            "upper": 146.7647734884212
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": 33.14708590215846,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": -63.4234843135569,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": 41.19986744974831
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      0.5584817091424547, -0.08203338236777107, 0.8254506070811419, 0.0, -0.7618686938665165, 0.34287526959942927,
+      0.5495385726254773, 0.0, -0.32810710729798387, -0.9357922171478144, 0.12899090071058267, 0.0,
+      0.0067576111619541595, -0.021506528553952495, -0.05125698718160406, 1.0
+    ]
+  },
+  {
+    "name": "ball-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
+          "components": []
+        },
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1": {
+          "components": []
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": {
+          "type": "revolute",
+          "parent": "occurrence:path/0/1",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "name": "native / Z (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [-0.601709849207371, -0.7592344857948956, -0.24800857434089488],
+          "limits": {
+            "lower": -213.23522651157882,
+            "upper": 146.76477348842118
+          }
+        },
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
+          "name": "native / Y (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [0.1823950971408763, -0.43291976831278356, 0.882786782152393],
+          "limits": {
+            "lower": -152.10430259907508,
+            "upper": 27.89569740092491
+          }
+        },
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
+          "child": "occurrence:path/0/0",
+          "name": "native / X (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [-0.8956069131073043, -0.44365567166333014, -0.03252540845807267],
+          "limits": {
+            "lower": -214.45691815205436,
+            "upper": 145.54308184794564
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": 33.147085902158466,
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": -63.42348431355689,
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": 41.19986744974829
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.3303296617102789, -0.7790255209209478, 0.5329179602417425, 0.0, 0.8630953717781485, 0.020780485419468614,
+      -0.5046132683955808, 0.0, 0.3820323203729129, 0.6266477552657297, 0.6792377323227191, 0.0, 0.036807925039638895,
+      0.04090594446089071, -0.029115694694697495, 1.0
+    ]
+  },
+  {
+    "name": "ball-near-singular",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
+          "components": []
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1": {
+          "components": []
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": {
+          "type": "revolute",
+          "parent": "occurrence:path/0/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "name": "native / X (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [0.9384472853749152, 0.022590878558260655, -0.34468296270401627],
+          "limits": {
+            "lower": -214.45691815205436,
+            "upper": 145.54308184794564
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
+          "name": "native / Y (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [-0.18665298215553594, 0.8727963390714092, -0.4509847167654253],
+          "limits": {
+            "lower": -152.10430259907508,
+            "upper": 27.895697400924902
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/1",
+          "child": "occurrence:path/0/1",
+          "name": "native / Z (composed)",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.02261502002863428],
+          "axis": [0.9653848881992906, 0.2480780332822031, 0.08055623526007938],
+          "limits": {
+            "lower": -213.2352265115788,
+            "upper": 146.7647734884212
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/x": 10.543081848847656,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/y": 27.894697400924898,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/z": -1.2352265123021304
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      0.873821309061297, -0.21560966046459207, -0.43583115325174404, 0.0, 0.24631973527153675, 0.9690809500258397,
+      0.014446463677170618, 0.0, 0.4192408709157085, -0.11997744209374989, 0.8999124988255687, 0.0,
+      0.016213114191519246, 0.006180486892586476, 0.01615872824032639, 1.0
+    ]
+  },
+  {
+    "name": "ball-near-singular-reverse",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/1",
+      "links": {
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0": {
+          "components": []
+        },
+        "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1": {
+          "components": []
+        },
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": {
+          "type": "revolute",
+          "parent": "occurrence:path/0/1",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "name": "native / Z (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [-0.601709849207371, -0.7592344857948956, -0.24800857434089488],
+          "limits": {
+            "lower": -213.23522651157882,
+            "upper": 146.76477348842118
+          }
+        },
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
+          "name": "native / Y (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [0.1823950971408763, -0.43291976831278356, 0.882786782152393],
+          "limits": {
+            "lower": -152.10430259907508,
+            "upper": 27.89569740092491
+          }
+        },
+        "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": {
+          "type": "revolute",
+          "parent": "virtual:occurrence%3Apath%2F0%2F1%2Fjoint%2Fmate%2Foccurrence%3Apath%2F0%2F0%2Fnative/1",
+          "child": "occurrence:path/0/0",
+          "name": "native / X (composed)",
+          "origin": [0.038461173326357546, -0.0029997489803376743, -0.02215139446178591],
+          "axis": [-0.8956069131073043, -0.44365567166333014, -0.03252540845807267],
+          "limits": {
+            "lower": -214.45691815205436,
+            "upper": 145.54308184794564
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/x": 10.543081848847663,
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/y": 27.894697400924905,
+      "occurrence:path/0/1/joint/mate/occurrence:path/0/0/native/z": -1.2352265123021517
+    },
+    "child": "occurrence:path/0/0",
+    "expected": [
+      0.8721121651234973, 0.39339768968071126, 0.2909615596560569, 0.0, -0.3818127187632565, 0.9190145672834384,
+      -0.09813904886152336, 0.0, -0.3060055869330114, -0.025504565762092618, 0.9516880255057693, 0.0,
+      -0.0030050765939357332, -0.01593843439498483, -0.012555293093242038, 1.0
+    ]
+  },
+  {
+    "name": "linear-revolute",
+    "mechanism": {
+      "schemaVersion": 1,
+      "units": {
+        "length": "m",
+        "angle": "deg"
+      },
+      "root": "occurrence:path/0/0",
+      "links": {
+        "occurrence:path/0/0": {
+          "components": ["occurrence:path/0/0"]
+        },
+        "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0": {
+          "components": []
+        },
+        "occurrence:path/0/1": {
+          "components": ["occurrence:path/0/1"]
+        }
+      },
+      "joints": {
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": {
+          "parent": "occurrence:path/0/0",
+          "child": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "name": "native",
+          "type": "prismatic",
+          "origin": [0.04207769624319711, -0.0057756836563952465, -0.022615020028634282],
+          "axis": [0.20791169081776664, 0.960176274304414, 0.18663936102599613],
+          "limits": {
+            "lower": -0.014
+          }
+        },
+        "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": {
+          "parent": "virtual:occurrence%3Apath%2F0%2F0%2Fjoint%2Fnative%2Foccurrence%3Apath%2F0%2F1%2Fmate/0",
+          "child": "occurrence:path/0/1",
+          "name": "native",
+          "type": "revolute",
+          "origin": [0.040590109573013566, -0.0033143447605354683, -0.02253219603063108],
+          "axis": [0.8346002800557379, 0.49637927831953377, 0.23885138598271272],
+          "limits": {
+            "lower": -742.5,
+            "upper": 697.5
+          }
+        }
+      }
+    },
+    "coordinates": {
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/distance": 0.006999999999999999,
+      "occurrence:path/0/0/joint/native/occurrence:path/0/1/mate/angle": 73.0
+    },
+    "child": "occurrence:path/0/1",
+    "expected": [
+      0.7852755912110823, 0.5215697527558192, -0.3336273952455327, 0.0, 0.06474031998855737, 0.46672593017356623,
+      0.8820292495554775, 0.0, 0.615752333991406, -0.7142351847352897, 0.3327418880608252, 0.0, 0.024259893152629497,
+      -0.0323100808078856, 0.0027370064974182144, 1.0
+    ]
+  }
+]

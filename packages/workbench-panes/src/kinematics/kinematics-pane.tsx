@@ -181,7 +181,10 @@ function usePointerHandlers(componentIds: readonly string[]) {
 function LiveGlyph({ dof, value }: { readonly dof: DegreeOfFreedom; readonly value: number }): React.JSX.Element {
   const { mechanism } = useUnitContext();
   const factor = getDisplayFactors(mechanism)[dof.kind];
-  const scaled = (range: JointLimits): JointLimits => ({ lower: range.lower * factor, upper: range.upper * factor });
+  const scaled = (range: Required<JointLimits>): Required<JointLimits> => ({
+    lower: range.lower * factor,
+    upper: range.upper * factor,
+  });
   if (dof.kind === 'angle') {
     return <AngleDial value={value * factor} limits={dof.limits === undefined ? undefined : scaled(dof.limits)} />;
   }
@@ -192,7 +195,10 @@ function LiveGlyph({ dof, value }: { readonly dof: DegreeOfFreedom; readonly val
   return (
     <TravelTrack
       value={value * factor}
-      range={range === undefined ? { lower: -extent, upper: extent } : scaled(range)}
+      range={{
+        lower: range && Number.isFinite(range.lower) ? range.lower * factor : value * factor - extent,
+        upper: range && Number.isFinite(range.upper) ? range.upper * factor : value * factor + extent,
+      }}
     />
   );
 }
@@ -227,15 +233,17 @@ const JointRow = memo(function JointRow({
   const factor = getDisplayFactors(mechanism)[dof.kind];
   const { limits } = dof;
   const displayValue = value * factor;
-  const min = limits ? limits.lower * factor : displayValue - display.extent;
-  const max = limits ? limits.upper * factor : displayValue + display.extent;
+  const min = limits && Number.isFinite(limits.lower) ? limits.lower * factor : displayValue - display.extent;
+  const max = limits && Number.isFinite(limits.upper) ? limits.upper * factor : displayValue + display.extent;
   const name = dofLabel(dof, mechanism);
   const type = capitalize(mechanism.joints[dof.jointId]?.type ?? 'fixed');
   const parent = mechanism.joints[dof.jointId]?.parent;
   const parts = listParts(partNames(componentIds));
   const details = [
     `${type} joint · driver · ${dof.jointId}`,
-    limits ? `Range ${withSymbol(min, dof.kind)} to ${withSymbol(max, dof.kind)}` : 'Unlimited range',
+    limits
+      ? `Range ${Number.isFinite(limits.lower) ? withSymbol(limits.lower * factor, dof.kind) : 'unbounded'} to ${Number.isFinite(limits.upper) ? withSymbol(limits.upper * factor, dof.kind) : 'unbounded'}`
+      : 'Unlimited range',
     ...(parent === undefined ? [] : [`On ${linkLabel(parent, mechanism)}`]),
     ...(parts === undefined ? [] : [parts]),
   ];
@@ -278,8 +286,8 @@ const JointRow = memo(function JointRow({
             rangeMin={min}
             rangeMax={max}
             // An unlimited joint's range is a scrub window, so Home and End have no limit to reach.
-            hasMinimum={limits !== undefined}
-            hasMaximum={limits !== undefined}
+            hasMinimum={limits !== undefined && Number.isFinite(limits.lower)}
+            hasMaximum={limits !== undefined && Number.isFinite(limits.upper)}
             step={display.step}
             aria-label={name}
             diagnostic={isAtLimit ? 'At limit' : undefined}

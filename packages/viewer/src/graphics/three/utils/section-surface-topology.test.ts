@@ -8,7 +8,10 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import type { GeometryComponentManifest } from '@taucad/types';
 import { countConstructions } from '#test/three-allocations.test-utils.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
+import * as bvhCache from '#graphics/three/utils/bvh-cache.js';
+import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import {
+  buildSectionCanonicalTopologyWorkerResult,
   buildSectionSurfaceTopologyForGeometry,
   collectSectionSurfaceSources,
   getSectionSourceWorldMatrix,
@@ -17,7 +20,24 @@ import {
   sliceSectionSurfaceSource,
   sliceSectionSurfaceTopologyForGeometry,
 } from '#graphics/three/utils/section-surface-topology.js';
-import type { SectionSurfaceSlice, SectionTopologyGltfParser } from '#graphics/three/utils/section-surface-topology.js';
+import type {
+  SectionCanonicalTopologyWorkerInput,
+  SectionCanonicalTopologyWorkerResult,
+  SectionSurfaceSlice,
+  SectionTopologyGltfParser,
+} from '#graphics/three/utils/section-surface-topology.js';
+
+const workerMocks = vi.hoisted(() => ({
+  build: undefined as
+    | ((input: SectionCanonicalTopologyWorkerInput) => Promise<SectionCanonicalTopologyWorkerResult>)
+    | undefined,
+}));
+
+vi.mock('#graphics/three/utils/section-surface-topology-worker-client.js', () => ({
+  // oxlint-disable-next-line typescript/promise-function-async -- Without a worker the client returns undefined, not a promise.
+  buildSectionTopologyRecipeInWorker: (input: SectionCanonicalTopologyWorkerInput) => workerMocks.build?.(input),
+  releaseSectionTopologyWorker: () => undefined,
+}));
 
 const positionAttribute = 'POSITION';
 const manifoldExtension = 'EXT_mesh_manifold';
@@ -475,12 +495,108 @@ describe('section surface topology', () => {
     expect(collectSectionSurfaceSources(scene)).toEqual([]);
   });
 
-  it('permits standalone fallback only for an explicitly unsupported glTF root', () => {
-    const scene = new THREE.Group();
-    scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
-    setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
+  describe('off the main thread', () => {
+    afterEach(() => {
+      clearRendererSpans();
+      workerMocks.build = undefined;
+    });
 
-    expect(collectSectionSurfaceSources(scene)).toHaveLength(1);
+    /** A closed sphere above the synchronous limit, so its topology may only build in the worker. */
+    const largeSphere = (): THREE.BufferGeometry => {
+      const geometry = mergeVertices(
+        new THREE.SphereGeometry(1, 256, 80).deleteAttribute('normal').deleteAttribute('uv'),
+      );
+      expect(geometry.getIndex()!.count / 3).toBeGreaterThan(bvhCache.maxSynchronousBvhTriangles);
+      return geometry;
+    };
+
+    const unsupportedSpans = () =>
+      rendererSpans()
+        .filter(({ name }) => name === 'renderer.section-source-unsupported')
+        .map(({ detail }) => detail);
+
+    it('never waits on a tree to register or slice a source', async () => {
+      const scene = new THREE.Group();
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      scene.add(mesh);
+      const ensure = vi.spyOn(bvhCache, 'ensureBvh');
+      vi.spyOn(bvhCache, 'getBvh').mockReturnValue(undefined);
+      await registerGltfSectionSurfaceSources({
+        scene,
+        manifest,
+        unitId: 'unit',
+        parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+      });
+      expect(ensure).not.toHaveBeenCalled();
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(
+        sliceSectionSurfaceSource({
+          visibleSource: visible!,
+          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+        }),
+      ).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
+    });
+
+    it('refuses the meshes of a model whose registration failed, without building them, reported once', () => {
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
+      setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
+      for (let frame = 0; frame < 2; frame++) {
+        const [visible] = collectSectionSurfaceSources(scene);
+        expect(visible?.source.topology).toMatchObject({
+          status: 'unsupported',
+          failure: { code: 'topology-unavailable' },
+        });
+      }
+      expect(unsupportedSpans()).toEqual([expect.objectContaining({ code: 'topology-unavailable' })]);
+    });
+
+    it('builds a large standalone surface in the worker, out of the cut until it lands', async () => {
+      workerMocks.build = async (input) => buildSectionCanonicalTopologyWorkerResult(input);
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
+      const blocked = vi.fn();
+      expect(collectSectionSurfaceSources(scene, blocked)).toEqual([]);
+      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
+      await ready;
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(visible?.source.topology.status).toBe('ready');
+    });
+
+    it('refuses a large surface whose worker fails twice, without building it here', async () => {
+      const build = vi.fn(async () => {
+        throw new Error('worker crashed');
+      });
+      workerMocks.build = build;
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
+      const blocked = vi.fn();
+      collectSectionSurfaceSources(scene, blocked);
+      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
+      await ready;
+      const [visible] = collectSectionSurfaceSources(scene);
+      // Asked once, then once more in a fresh worker.
+      expect(build).toHaveBeenCalledTimes(2);
+      expect(visible?.source.topology).toMatchObject({
+        status: 'unsupported',
+        failure: { code: 'topology-unavailable' },
+      });
+      expect(unsupportedSpans()).toEqual([
+        expect.objectContaining({ code: 'topology-unavailable', reason: 'worker crashed' }),
+      ]);
+    });
+
+    it('refuses a large surface without a worker rather than building it here', async () => {
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
+      const blocked = vi.fn();
+      collectSectionSurfaceSources(scene, blocked);
+      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
+      await ready;
+      const [visible] = collectSectionSurfaceSources(scene);
+      expect(visible?.source.topology).toMatchObject({ status: 'unsupported' });
+      expect(unsupportedSpans()).toEqual([expect.objectContaining({ reason: 'no topology worker' })]);
+    });
   });
 
   it('cuts a registered part where a kinematic pose placed it after registration', async () => {

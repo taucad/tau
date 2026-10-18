@@ -6,11 +6,11 @@ wordBudgetOverride: 450
 icon: lucide:boxes
 ---
 
-Build123d is Tau's native Python BRep kernel. Tau Desktop packages the pinned CPython, Build123d, and OCP payload and asks you to trust the physical project directory before Python starts; the web runtime neither advertises the kernel nor ships the payload.
+Tau's native Python BRep kernel uses Build123D 0.13 and packaged dependencies. Trust the project before execution. Browsers are unsupported.
 
 ## Authoring contract
 
-Each entry file defines one frozen `Params` dataclass and a synchronous `main(params)` function. `main` returns a `build123d.Shape` or a non-empty list or tuple of shapes. Root labels must be unique because Tau uses them for topology identity, selection, and export.
+Each entry defines a frozen `Params` dataclass and `main(params)`. `main` returns a `build123d.Shape` or a non-empty list or tuple of shapes. Labels are display names; repeated labels are supported.
 
 ```python
 from dataclasses import dataclass
@@ -46,21 +46,29 @@ def main(params: Params) -> Shape:
     return body
 ```
 
-Supported parameter annotations are `bool`, `int`, `float`, `str`, and scalar `Literal` values. Every field needs a literal default. `__tau__.parameters` may refine the generated JSON Schema with numeric bounds, string bounds/patterns, descriptions, and enums. Put non-Python files read by the model in `__tau__.dependencies` so edits invalidate the render.
+Supported parameter annotations are `bool`, `int`, `float`, `str`, and scalar `Literal` values. Fields need literal defaults. `__tau__.parameters` may refine the generated JSON Schema with numeric bounds, string bounds/patterns, descriptions, and enums. Put non-Python files read by the model in `__tau__.dependencies` for render invalidation.
 
-Local imports must be static and project-relative. Tau parses the entry and its local import closure without executing it, mirrors the rooted project into a private directory, then calls `main(Params(...))` in a warm native process. Editing an imported `.py` file or declared data dependency triggers the same autonomous rerender loop as other kernels.
+Local imports are static and project-relative. Tau mirrors the project into a private directory and runs it in a warm native process. Imported Python and dependency edits trigger rerendering.
+
+## Parts, appearance, and motion
+
+Use native shapes, `Compound`, factories and domain classes for reusable assemblies. Properties may expose descendant joints without reassigning their owner. Native `connect_to` places connected parts; moving a descendant does not place its entire containing assembly.
+
+Rigid, Revolute, Linear, Cylindrical and Ball joints export attachment interfaces. `motion(model)` data declares grounding, couplings and clips, plus explicit connections when native history is insufficient. Supported graphs animate; unsupported graphs retain intent and diagnostics. No Tau Python package is required.
+
+Native `Shape.material` supplies PBR appearance. GLB retains normals, face UVs and embedded textures. Declare project images in `__tau__.dependencies`.
 
 ## Geometry, topology, and export
 
-The kernel retains the Build123d/OCP shapes from the successful build. Preview meshing emits a GLB carrying the canonical `TAU_cad_topology` payload, and STEP export consumes the same retained shapes without running the source again.
+GLB carries `TAU_cad_topology`, assembly hierarchy and mechanism intent. STEP exports retained exact BRep geometry and assembly placements, without reevaluating source. STEP mechanism entities, embedded-source recovery and physical properties are outside this contract.
 
-Tau maps Build123d's Z-up millimeter coordinates to glTF Y-up meters. Preview tessellation is a runtime render option, not a model parameter; STEP remains an exact BRep export.
+Coordinates convert from Z-up millimeters to Y-up meters. Surface and edge tessellation share boundary samples; free curves honor linear and angular tolerances. Valid seams remain visible.
 
 ## Trust and resources
 
-Python executes with the desktop user's operating-system permissions. Utility-process isolation protects the UI from a crash or hang but is not a malicious-code sandbox: trust only code you know, and revoke native execution from the visible project control. A moved or replaced directory does not inherit an old grant.
+Python executes with the desktop user's permissions. Process isolation is not a malicious-code sandbox. Trust only known code; moved or replaced directories require a new grant.
 
-Production hosts pass exact packaged interpreter, worker, and support-file hashes plus a trust marker to `build123d()`. The kernel never searches `PATH`, runs `pip`, downloads wheels, or falls back to system Python.
+Hosts supply packaged interpreter and worker hashes plus a trust marker. Runtime execution does not install packages or fall back to system Python.
 
 ## Related
 

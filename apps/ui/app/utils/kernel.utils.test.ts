@@ -4,6 +4,7 @@ import { replicadKernel } from '@taucad/replicad';
 import { jscadKernel } from '@taucad/jscad';
 import { manifoldKernel } from '@taucad/manifold';
 import { picovoxelKernel } from '@taucad/picovoxel';
+import { smlibKernel } from '@taucad/smlib';
 import { tscircuitKernel } from '@taucad/tscircuit';
 import { kernelLibraries } from '#utils/kernel-libraries.js';
 import { getKernelDependencies, kernelsWithLibraries } from '#utils/kernel.utils.js';
@@ -16,6 +17,7 @@ describe('getKernelDependencies', () => {
       jscad: jscadKernel().builtinDependencies,
       manifold: manifoldKernel().builtinDependencies,
       picovoxel: picovoxelKernel().builtinDependencies,
+      smlib: smlibKernel().builtinDependencies,
       tscircuit: tscircuitKernel().builtinDependencies,
     });
   });

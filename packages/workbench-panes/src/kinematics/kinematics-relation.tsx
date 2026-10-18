@@ -116,7 +116,9 @@ function RelationCard({ dof, driver, mechanism, value, driverValue, parts }: Rel
           </Term>
         ) : (
           <Term term='Range'>
-            {limits ? `${inDisplay(limits.lower, dof.kind)} to ${inDisplay(limits.upper, dof.kind)}` : 'Unlimited'}
+            {limits
+              ? `${Number.isFinite(limits.lower) ? inDisplay(limits.lower, dof.kind) : 'Unbounded'} to ${Number.isFinite(limits.upper) ? inDisplay(limits.upper, dof.kind) : 'unbounded'}`
+              : 'Unlimited'}
           </Term>
         )}
         <Term term='On'>{parent === undefined ? '—' : linkLabel(parent, mechanism)}</Term>

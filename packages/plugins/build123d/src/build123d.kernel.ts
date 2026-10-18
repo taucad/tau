@@ -4,6 +4,7 @@ import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
+import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
 import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
 
@@ -15,7 +16,7 @@ import {
   build123dMeasureSchema,
   build123dMeshSchema,
 } from '#build123d.protocol.js';
-import type { Build123dAnalysis, Build123dMesh } from '#build123d.protocol.js';
+import type { Build123dAnalysis, Build123dArtifact, Build123dMesh } from '#build123d.protocol.js';
 import {
   Build123dTessellationRefusal,
   meshExportWithinBudget,
@@ -27,7 +28,7 @@ import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
 import { libraryVersionMismatches, pyprojectPath } from '#project-manifest.js';
 
 const computeNamespace = 'build123d.operation.v1';
-const computeProducerVersion = 'build123d@0.11.1|python@3.13|ocp@7.9.3.1.1|occt@7.9.3|worker-protocol@1|adapter@1';
+const computeProducerVersion = 'build123d@0.13.0|python@3.13|ocp@8.0.1.0.0|occt@8.0.1|worker-protocol@1|adapter@3';
 const computeEnvironment = {
   platform: process.platform,
   architecture: process.arch,
@@ -67,6 +68,9 @@ class Build123dKernelError extends Error {
 }
 
 const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
+  if (error instanceof Build123dKernelError) {
+    return error.issues;
+  }
   if (error instanceof Build123dTessellationRefusal) {
     return [error.issue];
   }
@@ -87,6 +91,57 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
       ...(fileName ? { location: { fileName, startLineNumber: 1, startColumn: 1 } } : {}),
     },
   ];
+};
+
+/**
+ * Admit authored motion independently of solver support, then expose retained intent warnings.
+ * @param artifact - Native artifact and its projected mechanical metadata.
+ * @returns Unsupported intent warnings shown by the Kinematics pane.
+ * @throws {Build123dKernelError} When intent or compiled playback violates the shared contract.
+ */
+const mechanismIssues = (artifact: Build123dArtifact): KernelIssue[] => {
+  if (artifact.mechanismIntent !== undefined) {
+    const intent = artifact.mechanismIntent;
+    const issues = validateMechanismMotion({
+      coordinates: [
+        ...new Set(intent.connections.flatMap((connection) => Object.values(connection.playbackCoordinates ?? {}))),
+      ],
+      couplings: intent.couplings,
+      animations: intent.animations,
+    });
+    if (issues.length > 0) {
+      throw new Build123dKernelError(
+        issues.map((issue) => ({
+          code: 'INVALID_ANNOTATION',
+          severity: 'error',
+          type: 'kernel',
+          message: `Mechanism intent ${issue.path}: ${issue.message} ${issue.recovery}`,
+          details: { producer: { kernelId: 'build123d' }, mechanism: issue },
+        })),
+      );
+    }
+  }
+  if (artifact.mechanism !== undefined) {
+    const admission = admitMechanism(artifact.mechanism);
+    if (admission.status === 'invalid') {
+      throw new Build123dKernelError(
+        admission.issues.map((issue) => ({
+          code: 'INVALID_ANNOTATION',
+          severity: 'error',
+          type: 'kernel',
+          message: `Mechanism ${issue.path}: ${issue.message} ${issue.recovery}`,
+          details: { producer: { kernelId: 'build123d' }, mechanism: issue },
+        })),
+      );
+    }
+  }
+  return (artifact.mechanismDiagnostics ?? []).map((issue) => ({
+    code: 'INVALID_ANNOTATION',
+    severity: 'warning',
+    type: 'kernel',
+    message: `Mechanism ${issue.path}: ${issue.message} ${issue.recovery}`,
+    details: { producer: { kernelId: 'build123d' }, mechanism: issue },
+  }));
 };
 
 /** The part of the kernel context `analyzeEntry` reads; it adds the memo field. */
@@ -182,7 +237,7 @@ export const build123dKernel = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
-  version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1.tessellation1',
+  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.nativeMotion1.tessellation1',
   optionsSchema: build123dOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: build123dRenderSchema } },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
@@ -379,7 +434,7 @@ export const build123dKernel = defineKernel({
       return {
         content: await context.session.readArtifact(meshed.artifact),
         tessellation: meshed.tessellation,
-        issues: meshed.issues,
+        issues: [...meshed.issues, ...mechanismIssues(meshed.artifact)],
       };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
@@ -405,7 +460,10 @@ export const build123dKernel = defineKernel({
           mesh,
         );
         const bytes = await context.session.readArtifact(meshed.artifact);
-        return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))], issues: meshed.issues };
+        return {
+          files: [createExportFile('glb', 'model.glb', asBuffer(bytes))],
+          issues: [...meshed.issues, ...mechanismIssues(meshed.artifact)],
+        };
       }
       const artifact = await context.session.request({
         method: 'export',
@@ -414,7 +472,7 @@ export const build123dKernel = defineKernel({
         signal: runtime.signal,
       });
       const bytes = await context.session.readArtifact(artifact);
-      return { files: [createExportFile('step', 'assembly.step', asBuffer(bytes))] };
+      return { files: [createExportFile('step', 'assembly.step', asBuffer(bytes))], issues: mechanismIssues(artifact) };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
     }

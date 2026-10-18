@@ -25,6 +25,13 @@ const clipOf = (...cuts: SectionCut[]): RaycastClipState => ({ enabled: true, pi
 /** Removes everything above z = -1.5. */
 const aboveMinusOnePointFive: SectionCut = { id: 'xy', kind: 'plane', plane: 'xy', offset: -1.5, isFlipped: false };
 
+/** The pick's hit; these geometries are under the synchronous threshold, so a pick is never pending. */
+const firstVisibleHit = (options: Parameters<typeof raycastFirstVisibleMeshHit>[0]) => {
+  const pick = raycastFirstVisibleMeshHit(options);
+  expect(pick.pending).toBe(false);
+  return pick.hit;
+};
+
 function createDoubleTriangleMesh(): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -40,7 +47,7 @@ describe('raycastFirstVisibleMeshHit', () => {
   });
 
   it('should reject missed mesh bounds before constructing any BVH', () => {
-    const build = vi.spyOn(bvhCache, 'getOrBuildBvh');
+    const build = vi.spyOn(bvhCache, 'getBvh');
     const meshes = Array.from({ length: 20 }, (_, index) => {
       const mesh = createTriangleMesh(-1);
       mesh.position.x = 10 + index * 3;
@@ -48,16 +55,16 @@ describe('raycastFirstVisibleMeshHit', () => {
     });
     const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes })).toBeUndefined();
+    expect(firstVisibleHit({ raycaster, meshes })).toBeUndefined();
     expect(build).not.toHaveBeenCalled();
   });
 
-  it('should refresh stale bounds when missed vertices move into the ray', () => {
-    const build = vi.spyOn(bvhCache, 'getOrBuildBvh');
+  it('should test bounds again once the owner clears them after missed vertices move into the ray', () => {
+    const build = vi.spyOn(bvhCache, 'getBvh');
     const mesh = createTriangleMesh(-1);
     mesh.geometry.translate(10, 0, 0);
     const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })).toBeUndefined();
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })).toBeUndefined();
     expect(build).not.toHaveBeenCalled();
 
     const position = mesh.geometry.getAttribute('position');
@@ -65,8 +72,10 @@ describe('raycastFirstVisibleMeshHit', () => {
       position.setX(index, position.getX(index) - 10);
     }
     position.needsUpdate = true;
+    // The owner of an edit replaces or clears the bounds with the positions, as the in-place update does.
+    mesh.geometry.boundingBox = null;
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
     expect(build).toHaveBeenCalledTimes(1);
   });
 
@@ -83,7 +92,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const direction = target.clone().sub(origin).normalize();
     const raycaster = new THREE.Raycaster(origin, direction);
 
-    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] });
+    const hit = firstVisibleHit({ raycaster, meshes: [mesh] });
     expect(hit?.object).toBe(mesh);
     expect(hit?.distance).toBeCloseTo(3);
     expect(hit?.point.distanceTo(target)).toBeCloseTo(0);
@@ -93,16 +102,17 @@ describe('raycastFirstVisibleMeshHit', () => {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8), new THREE.MeshBasicMaterial());
     mesh.position.z = -2;
     const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
 
     const position = mesh.geometry.getAttribute('position').clone();
     for (let index = 0; index < position.count; index++) {
       position.setX(index, position.getX(index) + 10);
     }
     mesh.geometry.setAttribute('position', position);
+    mesh.geometry.boundingBox = null;
     raycaster.ray.origin.x = 10;
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
   });
 
   it.each(['version', 'replacement'] as const)('should refresh the BVH after an index %s change', (change) => {
@@ -120,7 +130,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     );
     mesh.geometry.setIndex(indices);
     const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
 
     const replacementIndices = Array.from({ length: 48 }, (_, index) => index + 48);
     if (change === 'replacement') {
@@ -131,7 +141,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     }
     raycaster.ray.origin.x = 100;
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(2);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(2);
   });
 
   it('should return the closest visible mesh hit in world distance order', () => {
@@ -140,7 +150,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [farMesh, nearMesh],
     });
@@ -156,7 +166,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [nearMesh, farMesh],
     });
@@ -172,10 +182,10 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [nearMesh, farMesh] })?.object).toBe(farMesh);
+    expect(firstVisibleHit({ raycaster, meshes: [nearMesh, farMesh] })?.object).toBe(farMesh);
 
     raycaster.layers.enable(1);
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [nearMesh, farMesh] })?.object).toBe(nearMesh);
+    expect(firstVisibleHit({ raycaster, meshes: [nearMesh, farMesh] })?.object).toBe(nearMesh);
   });
 
   it('should skip clipped front hits and return the nearest visible hit behind them', () => {
@@ -183,7 +193,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [mesh],
       clipping: clipOf(aboveMinusOnePointFive),
@@ -199,7 +209,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [mesh],
       clipping: { ...clipOf(aboveMinusOnePointFive), enabled: false },
@@ -222,7 +232,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster();
     raycaster.ray.set(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [mesh],
       clipping: clipOf(aboveMinusOnePointFive),
@@ -245,7 +255,7 @@ describe('raycastFirstVisibleMeshHit', () => {
       sweep: 60,
     });
 
-    const hit = raycastFirstVisibleMeshHit({
+    const hit = firstVisibleHit({
       raycaster,
       meshes: [mesh],
       clipping: clipOf(wedge('around +y', 60), wedge('around -y', 240)),
@@ -261,7 +271,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     ]);
     const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
-    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(aboveMinusOnePointFive) });
+    const hit = firstVisibleHit({ raycaster, meshes: [mesh], clipping: clipOf(aboveMinusOnePointFive) });
 
     expect(hit?.point.z).toBeCloseTo(-1.5);
   });
@@ -283,7 +293,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     // Up from the kept side under the face, onto an exact point of it.
     const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 0, 1));
 
-    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping });
+    const hit = firstVisibleHit({ raycaster, meshes: [mesh], clipping });
 
     expect(hit?.point.toArray()).toEqual([0, 0.5, 0.5]);
   });
@@ -294,7 +304,72 @@ describe('raycastFirstVisibleMeshHit', () => {
     const raycaster = new THREE.Raycaster(new THREE.Vector3(-2, 5, 0), new THREE.Vector3(0, -1, 0));
     const cutaway: SectionCut = { id: 'wide', kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 45, sweep: 270 };
 
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.point.y).toBeCloseTo(0);
-    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(cutaway) })).toBeUndefined();
+    expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.point.y).toBeCloseTo(0);
+    expect(firstVisibleHit({ raycaster, meshes: [mesh], clipping: clipOf(cutaway) })).toBeUndefined();
+  });
+
+  describe('with a tree still building in the worker', () => {
+    const building = (mesh: THREE.Mesh) => {
+      let land!: () => void;
+      const ready = new Promise<undefined>((resolve) => {
+        land = () => {
+          resolve(undefined);
+        };
+      });
+      const { getBvh } = bvhCache;
+      vi.spyOn(bvhCache, 'getBvh').mockImplementation((geometry) =>
+        geometry === mesh.geometry ? undefined : getBvh(geometry),
+      );
+      vi.spyOn(bvhCache, 'getBvhStatus').mockImplementation((geometry) =>
+        geometry === mesh.geometry ? { status: 'building' } : { status: 'ready' },
+      );
+      const ensure = vi.spyOn(bvhCache, 'ensureBvh').mockReturnValue(ready);
+      return { land, ensure };
+    };
+
+    it('should be pending, not a miss, while the building mesh is nearer than every answered hit', async () => {
+      const near = createTriangleMesh(-1);
+      const far = createTriangleMesh(-2);
+      const { land, ensure } = building(near);
+      const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+
+      const pick = raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] });
+      expect(pick.pending).toBe(true);
+      expect(pick.hit).toBeUndefined();
+      expect(ensure).toHaveBeenCalledWith(near.geometry);
+      const notYet = Symbol('not yet');
+      expect(await Promise.race([pick.whenReady, Promise.resolve(notYet)])).toBe(notYet);
+      land();
+      await expect(pick.whenReady).resolves.toBeUndefined();
+    });
+
+    it('should answer the nearer hit while a farther mesh builds', () => {
+      const near = createTriangleMesh(-1);
+      const far = createTriangleMesh(-2);
+      building(far);
+      const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+
+      const pick = raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] });
+      expect(pick.pending).toBe(false);
+      expect(pick.whenReady).toBeUndefined();
+      expect(pick.hit?.object).toBe(near);
+    });
+
+    it('should skip a mesh whose build failed instead of waiting on it', () => {
+      const near = createTriangleMesh(-1);
+      const far = createTriangleMesh(-2);
+      const { getBvh } = bvhCache;
+      vi.spyOn(bvhCache, 'getBvh').mockImplementation((geometry) =>
+        geometry === near.geometry ? undefined : getBvh(geometry),
+      );
+      vi.spyOn(bvhCache, 'getBvhStatus').mockReturnValue({ status: 'failed', reason: 'worker failed' });
+      const ensure = vi.spyOn(bvhCache, 'ensureBvh');
+      const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+
+      const pick = raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] });
+      expect(pick.pending).toBe(false);
+      expect(pick.hit?.object).toBe(far);
+      expect(ensure).not.toHaveBeenCalled();
+    });
   });
 });

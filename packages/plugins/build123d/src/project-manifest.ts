@@ -8,8 +8,8 @@ export const pyprojectPath = 'pyproject.toml';
  * `python/requirements.in`. A test keeps them equal to that file and to the project template.
  */
 export const build123dProjectLibraries: Readonly<Record<string, string>> = {
-  build123d: '0.11.1',
-  'cadquery-ocp-novtk': '7.9.3.1.1',
+  build123d: '0.13.0',
+  'cadquery-ocp-novtk': '8.0.1.0.0',
 };
 
 const projectLibraries = new Map(Object.entries(build123dProjectLibraries));

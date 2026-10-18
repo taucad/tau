@@ -9,6 +9,7 @@ import { createReplicadComputeReuse, replicadModuleFacade } from '#replicad-comp
 type FakeBooleanOptions = { readonly [key: string]: unknown; readonly optimisation?: string };
 
 class FakeShape {
+  public static serializations = 0;
   public deleted = false;
   public readonly value: string;
 
@@ -17,6 +18,7 @@ class FakeShape {
   }
 
   public serialize(): string {
+    FakeShape.serializations += 1;
     return this.value;
   }
 
@@ -95,18 +97,27 @@ type Adapter = ReturnType<typeof createReplicadComputeReuse>;
 const createScope = (
   adapter: Adapter,
   cache: Map<ActionDigest, CacheEntry>,
-  warmFailure?: 'unavailable' | 'stale-generation',
+  options: Readonly<{
+    warmFailure?: 'unavailable' | 'stale-generation';
+    admit?: (entry: { readonly digest: ActionDigest }) => boolean;
+  }> = {},
 ) => {
+  const { warmFailure, admit = () => true } = options;
   const announced: ActionDigest[] = [];
   const announce = vi.fn<ComputeReuseScope['announce']>(({ entries }) => {
     const admitted: ActionDigest[] = [];
+    const rejected: Array<{ digest: ActionDigest; reason: 'below-floor' }> = [];
     for (const entry of entries) {
       if (entry.kind === 'action') {
+        if (!admit(entry)) {
+          rejected.push({ digest: entry.digest, reason: 'below-floor' });
+          continue;
+        }
         announced.push(entry.digest);
         admitted.push(entry.digest);
       }
     }
-    return { admitted, rejected: [] };
+    return { admitted, rejected };
   });
   const scope: ComputeReuseScope = {
     generation: 1 as ComputeGeneration,
@@ -245,7 +256,7 @@ describe('Replicad semantic compute reuse', () => {
   it.each(['unavailable', 'stale-generation'] as const)('computes when warm discovery is %s', async (failure) => {
     const cache = new Map<ActionDigest, CacheEntry>();
     const fixture = createFixture();
-    const scope = createScope(fixture.adapter, cache, failure);
+    const scope = createScope(fixture.adapter, cache, { warmFailure: failure });
     const library = fixture.adapter.library as typeof fixture.adapter.library & {
       makeSphere(radius: number): FakeShape;
     };
@@ -415,6 +426,112 @@ describe('Replicad semantic compute reuse', () => {
     expect(enabled.unwrap({ shape: wrapped, color: 'red' })).toMatchObject({
       shape: { value: 'sphere(9)' },
       color: 'red',
+    });
+  });
+
+  describe('resident memory bound (D-RT-01, D-RT-21)', () => {
+    const mebibyte = 1024 * 1024;
+    const residentByteCap = 64 * mebibyte;
+    const residentEntryCap = 4096;
+
+    it('stays under its byte cap after 100 parameter scrubs', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      // Each scrub step is a new digest whose BRep text is 1 MiB, as a mid-size boolean result's is.
+      const adapter = createReplicadComputeReuse({
+        library: {
+          makeSphere: (radius: number) => new FakeShape(`sphere(${String(radius)})`.padEnd(mebibyte, ' ')),
+          deserializeShape: (serialized: string) => new FakeShape(serialized),
+        },
+        enabled: true,
+        producer: producer(),
+        environment: { variant: 'single' },
+      });
+      const { makeSphere } = adapter.library;
+      for (let step = 0; step < 100; step += 1) {
+        const scrub = createScope(adapter, cache);
+        // oxlint-disable-next-line no-await-in-loop -- scrub steps render one after another.
+        await adapter.run(scrub.scope, async () => makeSphere(1 + step / 100));
+      }
+      const stats = adapter.resident.stats();
+      expect(stats.logicalBytes).toBeLessThanOrEqual(residentByteCap);
+      expect(stats.evictions).toBeGreaterThan(0);
+    });
+
+    it('skips a result larger than the byte cap instead of evicting the working set for it', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      const adapter = createReplicadComputeReuse({
+        library: {
+          makeSphere: (radius: number) =>
+            new FakeShape(`sphere(${String(radius)})`.padEnd(radius > 1 ? residentByteCap + mebibyte : 16, ' ')),
+          deserializeShape: (serialized: string) => new FakeShape(serialized),
+        },
+        enabled: true,
+        producer: producer(),
+        environment: { variant: 'single' },
+      });
+      const { makeSphere } = adapter.library;
+      await adapter.run(createScope(adapter, cache).scope, async () => makeSphere(1));
+      await adapter.run(createScope(adapter, cache).scope, async () => makeSphere(2));
+      const stats = adapter.resident.stats();
+      expect(stats).toMatchObject({ entries: 1, evictions: 0 });
+      expect(stats.omissions).toBeGreaterThan(0);
+    });
+
+    it('caps the number of resident entries however small they are', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      const { adapter } = createFixture();
+      const { makeSphere } = adapter.library as typeof adapter.library & { makeSphere(radius: number): FakeShape };
+      const scope = createScope(adapter, cache);
+      await adapter.run(scope.scope, async () => {
+        for (let step = 0; step < residentEntryCap + 100; step += 1) {
+          makeSphere(step + 1);
+        }
+      });
+      expect(adapter.resident.stats().entries).toBeLessThanOrEqual(residentEntryCap);
+    });
+
+    it('serializes and keeps only results the scope admits, while descendants keep their lineage', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      const { adapter, calls } = createFixture();
+      const library = adapter.library as typeof adapter.library & {
+        makeBox(first: readonly number[], second: readonly number[]): FakeShape;
+        makeSphere(radius: number): FakeShape;
+      };
+      let announcements = 0;
+      // Admit only the boolean (the third announcement); the primitives fall below the admission floor.
+      const scope = createScope(adapter, cache, {
+        admit: () => {
+          announcements += 1;
+          return announcements === 3;
+        },
+      });
+      FakeShape.serializations = 0;
+      await adapter.run(scope.scope, async () => library.makeBox([0, 0, 0], [1, 1, 1]).fuse(library.makeSphere(1)));
+      expect(FakeShape.serializations).toBe(1);
+      expect(adapter.resident.stats().entries).toBe(1);
+      await scope.publish();
+      expect(calls).toMatchObject({ box: 1, sphere: 1 });
+    });
+
+    it('does not copy entries a warm import finds already resident', async () => {
+      const cache = new Map<ActionDigest, CacheEntry>();
+      const { adapter } = createFixture();
+      const { makeSphere } = adapter.library as typeof adapter.library & { makeSphere(radius: number): FakeShape };
+      const cold = createScope(adapter, cache);
+      await adapter.run(cold.scope, async () => makeSphere(3));
+      await cold.publish();
+      const [digest] = [...cache.keys()];
+      const exportBytes = async () => {
+        const exported = await adapter.resident.exportEntries({
+          digests: [digest!],
+          signal: new AbortController().signal,
+        });
+        return exported.entries[0]?.bytes;
+      };
+      const before = await exportBytes();
+
+      await adapter.run(createScope(adapter, cache).scope, async () => makeSphere(3));
+      expect(await exportBytes()).toBe(before);
     });
   });
 });

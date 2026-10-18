@@ -131,15 +131,6 @@ const mechanismIssuesSchema = z.array(
 const memoryWarningBytes = 2 ** 30;
 
 /**
- * WebAssembly heap size above which an idle runtime is recycled after its render.
- *
- * Linear memory never shrinks, so a runtime that once built a fine model keeps its peak heap for the
- * worker's life. Origin: blueprint D31's provisional 1.5 GiB, replaced by the V0.15-T measurement;
- * deliberately not a user option.
- */
-const recycleHeapBytes = 1.5 * 2 ** 30;
-
-/**
  * Module specifiers PicoVoxel authors may import.
  *
  * `picovoxel/multi` and `picovoxel/raw` are deliberately absent: the kernel owns every session and
@@ -179,6 +170,14 @@ export type PicovoxelContext = {
   readonly root: PicovoxelRoot;
   /** The fast lane's artifact, resolved from the host's `wasm` option inside this worker. */
   readonly wasm: PicovoxelArtifact;
+  /**
+   * WebAssembly heap size above which an idle runtime is recycled after its render.
+   *
+   * Linear memory never shrinks, so a runtime that once built a fine model keeps its peak heap for the
+   * worker's life. Origin: blueprint D31's provisional 1.5 GiB (the option's default); a host option, not a
+   * model one, so a phone host can recycle earlier (D-RT-03).
+   */
+  readonly recycleHeapBytes: number;
   /**
    * One warm runtime per artifact (D31): the module is compiled and instantiated once, and the multi
    * pthread pool is spawned and warmed once; every render opens a fresh session on it. A runtime is
@@ -1192,7 +1191,13 @@ export const picovoxelKernel = defineKernel({
         ? `PicoVoxel fast-lane WASM variant: ${options.wasm}`
         : `PicoVoxel fast-lane WASM variant: ${options.wasm} (multi-threaded build unavailable: ${unavailable})`,
     );
-    return { root, wasm: options.wasm, runtimes: new Map(), authorResources };
+    return {
+      root,
+      wasm: options.wasm,
+      recycleHeapBytes: options.recycleHeapBytes,
+      runtimes: new Map(),
+      authorResources,
+    };
   },
 
   async resolve({ entryPath }, runtime) {
@@ -1300,7 +1305,7 @@ export const picovoxelKernel = defineKernel({
         if (!releaseRender(pico, context.authorResources)) {
           recycleReason ??= 'a session could not be disposed';
         }
-        if (heapBytes > recycleHeapBytes) {
+        if (heapBytes > context.recycleHeapBytes) {
           recycleReason ??= `its heap reached ${heapBytes} bytes`;
         }
         if (recycleReason !== undefined) {

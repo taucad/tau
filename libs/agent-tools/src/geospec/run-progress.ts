@@ -13,7 +13,7 @@
 
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import type { GeoSpecRunTimeout } from '@taucad/chat/schemas/tools/test-model';
-import { geoSpecTimeoutCode } from 'geospec/runner';
+import { geoSpecTimeoutCode } from 'geospec/runner/worker';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 
 import { projectGeoSpecFile, projectGeoSpecTest } from '#geospec/result.js';

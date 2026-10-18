@@ -11,6 +11,7 @@ import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
+import { smlib } from '@taucad/smlib';
 import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
@@ -36,6 +37,7 @@ const examplePlugins = () => [
   opencascade(),
   manifold(),
   picovoxel(),
+  smlib(),
   jscad(),
   openrscad(),
   esbuild(),

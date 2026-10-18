@@ -241,6 +241,33 @@ describe('KinematicsPane', () => {
     releaseUnits.mockClear();
   });
 
+  it('should expose one-sided native travel without infinite slider bounds', () => {
+    renderPane({
+      loaded: {
+        schemaVersion: 1,
+        units: { length: 'm', angle: 'deg' },
+        root: 'base',
+        links: { base: { components: [] }, slide: { components: ['slide'] } },
+        joints: {
+          slide: {
+            type: 'prismatic',
+            name: 'Slide',
+            parent: 'base',
+            child: 'slide',
+            origin: [0, 0, 0],
+            axis: [1, 0, 0],
+            limits: { lower: 0 },
+          },
+        },
+      },
+    });
+    expect(field('Slide')).toHaveAccessibleDescription(expect.stringContaining('Range 0 mm to unbounded'));
+    for (const slider of screen.queryAllByRole('slider')) {
+      expect(slider.getAttribute('aria-valuemin')).not.toBe('-Infinity');
+      expect(slider.getAttribute('aria-valuemax')).not.toBe('Infinity');
+    }
+  });
+
   it('should render driver sliders in degrees and millimetres and followers as one-line readouts with their relation', async () => {
     const user = userEvent.setup();
     renderPane();

@@ -36,6 +36,7 @@ export const kernelsWithLibraries: ReadonlySet<KernelProvider> = new Set([
   'jscad',
   'manifold',
   'picovoxel',
+  'smlib',
   'tscircuit',
 ]);
 

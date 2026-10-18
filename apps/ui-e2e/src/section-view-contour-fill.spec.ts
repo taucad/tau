@@ -30,16 +30,10 @@ type SectionViewBridgeWindow = Window & {
         depthWrite: boolean;
       }>;
     };
-    getSectionCapPerformanceDiagnostics?():
+    getSectionCapStencilDiagnostics():
       | {
-          latestFrame: {
-            baseCapTopologyKey?: string;
-            baseCapFrameTopologyKey?: string;
-            baseCapIsCurrent?: boolean;
-            exactDiagnosticIsCurrent?: boolean;
-            pendingReason?: string;
-            counters: Record<string, number>;
-          };
+          sequence: number;
+          latest: { drawnPieceCount: number; crossingSourceCount: number; outlineSourceCount: number } | undefined;
         }
       | undefined;
     getSectionCapCompleteness(): SectionCapCompleteness | undefined;
@@ -51,11 +45,6 @@ type SectionCapCompleteness =
   | Readonly<{
       status: 'complete';
       admittedSourceCount: number;
-      extensionSourceCount: number;
-      fallbackSourceCount: number;
-      trueCutComponentCount: number;
-      cappedTrueCutComponentCount: number;
-      unresolvedTrueCutEdgeCount: number;
       unsupportedSourceCount: number;
     }>
   | Readonly<{
@@ -299,18 +288,8 @@ async function getSectionHelperSummary(): Promise<{
   });
 }
 
-async function getSectionCapPerformanceDiagnostics(): Promise<
-  | {
-      latestFrame: {
-        baseCapTopologyKey?: string;
-        baseCapFrameTopologyKey?: string;
-        baseCapIsCurrent?: boolean;
-        exactDiagnosticIsCurrent?: boolean;
-        pendingReason?: string;
-        counters: Record<string, number>;
-      };
-    }
-  | undefined
+async function getSectionCapStencilDiagnostics(): Promise<
+  ReturnType<NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getSectionCapStencilDiagnostics']>
 > {
   return target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
@@ -318,7 +297,7 @@ async function getSectionCapPerformanceDiagnostics(): Promise<
       throw new Error('Section view e2e bridge is not installed.');
     }
 
-    return bridge.getSectionCapPerformanceDiagnostics?.();
+    return bridge.getSectionCapStencilDiagnostics();
   });
 }
 
@@ -346,10 +325,6 @@ async function expectCompleteSectionCaps(context: string): Promise<void> {
     completeness.admittedSourceCount,
     `${context}: at least one logical source should be admitted`,
   ).toBeGreaterThan(0);
-  expect(completeness.cappedTrueCutComponentCount, `${context}: every true-cut component should be capped`).toBe(
-    completeness.trueCutComponentCount,
-  );
-  expect(completeness.unresolvedTrueCutEdgeCount, `${context}: no true-cut edge may remain unresolved`).toBe(0);
   expect(completeness.unsupportedSourceCount, `${context}: no admitted source may be unsupported`).toBe(0);
 }
 
@@ -366,20 +341,13 @@ async function expectClosedSectionCapIntegrity(backend: 'webgl' | 'webgpu', star
   expect(stats.yellowish, `start=${start}°: yellow internal part should remain visible`).toBeGreaterThan(6);
   expect(stats.blueish, `start=${start}°: blue holed housing cap should remain visible`).toBeGreaterThan(6);
   expect(stats.reddish, `start=${start}°: red internal posts should remain visible`).toBeGreaterThan(2);
+  // The stencil caps outline the cut on the GPU, without contour line helpers.
+  expect(helperSummary.sectionHelperContourSegmentCount, `${backend}: no CPU contour helpers`).toBe(0);
+  const diagnostics = await getSectionCapStencilDiagnostics();
   expect(
-    helperSummary.sectionHelperLineSegments2Count,
-    `${backend}: section contour fills should render fat-line clipped-cap borders`,
+    diagnostics?.latest?.outlineSourceCount ?? 0,
+    `${backend}: caps should outline their cut edges`,
   ).toBeGreaterThan(0);
-  expect(
-    helperSummary.sectionHelperContourSegmentCount,
-    `${backend}: section contour fill borders should contain drawable segment endpoints`,
-  ).toBeGreaterThan(0);
-  expect(
-    helperSummary.sectionHelperMaterialStates.some(
-      (state) => state.objectType === 'LineSegments2' && !state.transparent && state.depthTest && !state.depthWrite,
-    ),
-    `${backend}: section contour outlines should use opaque, depth-tested, non-depth-writing material state`,
-  ).toBe(true);
   expect(
     stats.edgeLineish,
     `start=${start}°: generated cap outlines should remain visibly near-black in the composed frame`,
@@ -454,14 +422,8 @@ async function expectFlowerAttachmentContoursVisible(backend: 'webgl' | 'webgpu'
     stats.edgeLineish,
     `${backend}: Flower generated contour outlines should survive final canvas composition`,
   ).toBeGreaterThan(45);
-  expect(
-    helperSummary.sectionHelperLineSegments2Count,
-    `${backend}: Flower section should create contour outline line helpers`,
-  ).toBeGreaterThan(0);
-  expect(
-    helperSummary.sectionHelperContourSegmentCount,
-    `${backend}: Flower section outline helpers should contain drawable segments`,
-  ).toBeGreaterThan(0);
+  // The stencil caps outline the cut on the GPU, without contour line helpers.
+  expect(helperSummary.sectionHelperContourSegmentCount, `${backend}: no CPU contour helpers`).toBe(0);
 }
 
 async function expectOverlayAxesVisibleThroughClippedAwayRegion(backend: 'webgl' | 'webgpu'): Promise<void> {
@@ -542,31 +504,22 @@ test.describe('Section view contour fill regression', () => {
       await expectCompleteSectionCaps(`${backend} Flower Attachment`);
       await captureSectionCanvas(`flower-attachment-section-outline-${backend}.png`);
       await expectFlowerAttachmentContoursVisible(backend);
-      const firstDiagnostics = await getSectionCapPerformanceDiagnostics();
-      expect(firstDiagnostics?.latestFrame.baseCapIsCurrent, `${backend}: Flower base cap should be current`).toBe(
-        true,
-      );
+      const firstDiagnostics = await getSectionCapStencilDiagnostics();
+      expect(firstDiagnostics?.latest?.drawnPieceCount ?? 0, `${backend}: Flower caps should draw`).toBeGreaterThan(0);
       expect(
-        firstDiagnostics?.latestFrame.counters['baseFillVertexCount'] ?? 0,
-        `${backend}: Flower base cap should publish fill vertices`,
-      ).toBeGreaterThan(0);
-      expect(
-        firstDiagnostics?.latestFrame.counters['baseBoundarySegmentCount'] ?? 0,
-        `${backend}: Flower base cap should publish sanitized boundary segments`,
+        firstDiagnostics?.latest?.outlineSourceCount ?? 0,
+        `${backend}: Flower caps should outline their cut edges`,
       ).toBeGreaterThan(0);
 
       await driveFlowerAttachmentSectionView(5);
       await expectCompleteSectionCaps(`${backend} dragged Flower Attachment`);
       await captureSectionCanvas(`flower-attachment-section-outline-drag-${backend}.png`);
       await expectFlowerAttachmentContoursVisible(backend);
-      const draggedDiagnostics = await getSectionCapPerformanceDiagnostics();
-      expect(draggedDiagnostics?.latestFrame.baseCapIsCurrent, `${backend}: dragged base cap should be current`).toBe(
-        true,
-      );
+      const draggedDiagnostics = await getSectionCapStencilDiagnostics();
       expect(
-        draggedDiagnostics?.latestFrame.baseCapTopologyKey,
-        `${backend}: dragging the clipping plane should update the base cap topology key`,
-      ).not.toBe(firstDiagnostics?.latestFrame.baseCapTopologyKey);
+        draggedDiagnostics?.sequence ?? 0,
+        `${backend}: dragging the clipping plane should draw new cap frames`,
+      ).toBeGreaterThan(firstDiagnostics?.sequence ?? 0);
       await expectNoWebGpuValidationFailures(messageStart);
     });
   }
@@ -600,8 +553,8 @@ test.describe('Section view contour fill regression', () => {
           completeness?.status === 'unsupported' ? completeness.failure.code : '',
         ),
       ).toBe(true);
-      const diagnostics = await getSectionCapPerformanceDiagnostics();
-      expect(diagnostics?.latestFrame.counters['safeSnapshotCurrentCount']).toBe(0);
+      const diagnostics = await getSectionCapStencilDiagnostics();
+      expect(diagnostics?.latest?.drawnPieceCount ?? 0, 'refused sections draw no caps').toBe(0);
       const helperSummary = await getSectionHelperSummary();
       expect(helperSummary.sectionHelperContourSegmentCount).toBe(0);
       await expectNoWebGpuValidationFailures(messageStart);

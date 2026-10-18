@@ -108,6 +108,13 @@ export type OpenCascadeOptions = {
   wasm?: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig;
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
+  /**
+   * Triangles a preview may carry before it is coarsened one step at a time (and a `TESSELLATION_DOWNGRADED`
+   * warning reported). A host on a memory-constrained device passes a smaller budget.
+   *
+   * @default occtTriangleBudgets.preview (2,000,000)
+   */
+  previewTriangleBudget?: number;
 };
 
 // =============================================================================
@@ -119,6 +126,8 @@ type OpenCascadeContext = {
   /** This kernel's share of the realm's one libcascade instance. */
   occt: RealmHold<OpenCascadeInstance>;
   isParallelMeshing: boolean;
+  /** Triangles a preview may carry before it is coarsened. */
+  previewTriangleBudget: number;
   tracingSummary?: OcTracingSummary;
   /** Unique MEMFS scratch path per snapshot write, owned by this kernel instance. */
   nextSnapshotPath: (index: number) => string;
@@ -673,6 +682,7 @@ export const opencascadeKernel = defineKernel({
         oc,
         occt,
         isParallelMeshing: resolved.variant === 'multi',
+        previewTriangleBudget: options.previewTriangleBudget,
         tracingSummary,
         nextSnapshotPath: createSnapshotPathAllocator(),
       } satisfies OpenCascadeContext;
@@ -810,7 +820,7 @@ export const opencascadeKernel = defineKernel({
         // preview budget.
         return await renderShapesWithinBudget(context.oc, handle, {
           request: { tessellation: options.tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-          budget: occtTriangleBudgets.preview,
+          budget: context.previewTriangleBudget,
           inParallel: context.isParallelMeshing,
         });
       } finally {
@@ -931,6 +941,9 @@ export const opencascadeKernel = defineKernel({
     assertSerializedNativeHandle(serialized);
     return retainShapeEntries(serialized.entries.map((entry, index) => deserializeShapeEntry(context, entry, index)));
   },
+
+  // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
+  heapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
     context.occt.release();

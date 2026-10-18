@@ -1,0 +1,101 @@
+{
+  "name": "@taucad/smlib",
+  "version": "0.1.0-beta.6",
+  "description": "SMLib kernel plugin for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/smlib"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/smlib#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "agent",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "smlib",
+    "nurbs",
+    "brep"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": {
+      "types": "./agent/skills.d.cts",
+      "default": "./agent/skills.json"
+    },
+    "./agent/*": "./agent/*",
+    "./package.json": "./package.json",
+    "./model": "./src/model.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": {
+        "types": "./agent/skills.d.cts",
+        "default": "./agent/skills.json"
+      },
+      "./agent/*": "./agent/*",
+      "./package.json": "./package.json",
+      "./model": {
+        "types": "./dist/model.d.mts",
+        "import": "./dist/model.mjs",
+        "default": "./dist/model.mjs"
+      }
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@msgpack/msgpack": "catalog:",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/parameters": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  },
+  "dependencies": {
+    "@classcad/smlibwasm": "catalog:",
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/extensions": "catalog:",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
+    "culori": "catalog:"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
+  }
+}

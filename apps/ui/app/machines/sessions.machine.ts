@@ -16,7 +16,9 @@ import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/p
  * `touch`; nothing in the app closes a project as a side effect of leaving it
  * (I22). The two visible policies — the idle window and the live-project
  * budget — refuse to touch a running, dirty or unpushed project (I24, I25) and
- * say why on the snapshot the sidebar reads.
+ * say why on the snapshot the sidebar reads. On a one-project device, opening
+ * another project is the person leaving the current one, so it closes that
+ * project as their own close unless a run would stop (B-08).
  */
 
 /** The browser holds at most eight live projects (OQ-W25, operator ruling). */
@@ -179,6 +181,21 @@ export const sessionsCloseSuggestions = (context: SessionsMachineContext): reado
     .filter((projectId) => isClosable(context, projectId))
     .sort((left, right) => (context.touchOrder[left] ?? 0) - (context.touchOrder[right] ?? 0));
 
+/**
+ * On a one-project device, the live projects opening another may close as the
+ * person's own close: anything but a project with a run in flight, which only
+ * the person may stop (I24). Least recently touched first.
+ */
+const switchCloseCandidates = (context: SessionsMachineContext): readonly string[] =>
+  context.budget > constrainedLiveProjectBudget
+    ? []
+    : Object.keys(context.refs)
+        .filter((projectId) => {
+          const status = statusOf(context, projectId);
+          return status?.runs === 0 && status.state !== 'closing';
+        })
+        .sort((left, right) => (context.touchOrder[left] ?? 0) - (context.touchOrder[right] ?? 0));
+
 type SessionsEnqueue = EnqueueObject<
   SessionsMachineEvent,
   SessionsMachineEmitted,
@@ -257,27 +274,39 @@ export const sessionsMachine = setup({
   initial: 'ready',
   on: {
     /* A child says where it is; the registry's policies read nothing else. */
-    sessionState: {
-      context: ({ context, event }) => ({
-        status: {
-          ...context.status,
-          [event.projectId]: {
-            state: event.state,
-            runs: event.runs,
-            dirty: event.dirty,
-            pushed: event.pushed,
-            pending: event.pending ?? 0,
+    sessionState: ({ context, event }, enq) => {
+      /* A close made to free a slot came back live or failed (a producer
+       * refused, R4): the slot will not free, so the open the registry was
+       * holding for it becomes the refusal the person answers (I28). */
+      if (
+        context.pendingOpen !== undefined &&
+        context.status[event.projectId]?.state === 'closing' &&
+        (event.state === 'live' || event.state === 'failed')
+      ) {
+        enq.emit({ type: 'budgetRefused', projectId: context.pendingOpen, suggestions: Object.keys(context.refs) });
+      }
+      return {
+        context: {
+          status: {
+            ...context.status,
+            [event.projectId]: {
+              state: event.state,
+              runs: event.runs,
+              dirty: event.dirty,
+              pushed: event.pushed,
+              pending: event.pending ?? 0,
+            },
           },
+          /* R6: a refusal is about the facts at the time, not about the project.
+           * The run settled, the tree was saved, the push landed — the reason is
+           * gone, so the row stops saying it and the next `idleExpired` decides
+           * again. */
+          refusals:
+            context.refusals[event.projectId] !== undefined && event.runs === 0 && !event.dirty && event.pushed
+              ? withoutKey(context.refusals, event.projectId)
+              : context.refusals,
         },
-        /* R6: a refusal is about the facts at the time, not about the project.
-         * The run settled, the tree was saved, the push landed — the reason is
-         * gone, so the row stops saying it and the next `idleExpired` decides
-         * again. */
-        refusals:
-          context.refusals[event.projectId] !== undefined && event.runs === 0 && !event.dirty && event.pushed
-            ? withoutKey(context.refusals, event.projectId)
-            : context.refusals,
-      }),
+      };
     },
     /* The person said *Not now* to the budget: forget the refused open, or the
      * next close would resume something nobody is waiting for any more. */
@@ -344,6 +373,16 @@ export const sessionsMachine = setup({
             if (victim !== undefined) {
               enq.sendTo(context.refs[victim]!, { type: 'close', reason: 'budget' });
             }
+            return { context: { pendingOpen: event.projectId } };
+          }
+          /* One-project device (B-08): the dialog below could only offer
+           * *Close X and open*, so the open takes that answer itself — the
+           * person's close, whose `closing` cuts and flushes a dirty or unpushed
+           * project before releasing it (I25). A run would stop, so a running
+           * project still asks (I24). */
+          const [leaving] = switchCloseCandidates(context);
+          if (leaving !== undefined) {
+            enq.sendTo(context.refs[leaving]!, { type: 'close', reason: 'user' });
             return { context: { pendingOpen: event.projectId } };
           }
           /* Nothing is idle: the budget refuses and names the candidates, so

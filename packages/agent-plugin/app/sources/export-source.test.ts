@@ -3,6 +3,9 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import type { ExportEntryState, ExportSource } from '@taucad/workbench-panes/export/export-source';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
+import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge, HostView } from '#app/host-bridge.js';
 import { createExportSource, viewerExportTool } from '#app/sources/export-source.js';
 
@@ -124,18 +127,61 @@ describe('createExportSource', () => {
     });
   });
 
-  it('should report an entry the server cannot list as having nothing to export', async () => {
+  it('should name the matching CLI when the server has no formats tool, with no retry', async () => {
+    const { bridge, callTool } = createBridge('loopback');
+    callTool.mockRejectedValueOnce(new ToolCallError('UNKNOWN_TOOL', 'HTTP 404'));
+    const source = createExportSource(bridge, model);
+
+    readEntry(source, 'gear.ts');
+    const { version } = packageJson;
+    await vi.waitFor(() => {
+      expect(readEntry(source, 'gear.ts')).toEqual({
+        hasGeometry: true,
+        formats: undefined,
+        unavailable: {
+          code: 'UNKNOWN_TOOL',
+          message: `This Tau server has no export formats; plugin ${version} needs the same version: npm install -g @taucad/cli@${version}, then restart the Tau server or your agent`,
+          retry: undefined,
+        },
+      });
+    });
+  });
+
+  it.each([
+    { failure: 'NO_KERNEL', thrown: new ToolCallError('NO_KERNEL', 'No kernel exports gear.ts.'), code: 'NO_KERNEL' },
+    {
+      failure: 'FORMATS_UNAVAILABLE',
+      thrown: new ToolCallError('FORMATS_UNAVAILABLE', 'The runtime is still starting.'),
+      code: 'FORMATS_UNAVAILABLE',
+    },
+    { failure: 'an uncoded error', thrown: new Error('Failed to fetch'), code: 'FORMATS_UNAVAILABLE' },
+  ])('should show why the formats are missing after $failure and ask again on retry', async ({ thrown, code }) => {
     const { bridge, callTool } = createBridge('mcp-app');
-    callTool.mockRejectedValueOnce(new Error('No kernel exports gear.ts.'));
+    callTool.mockRejectedValueOnce(thrown);
     const source = createExportSource(bridge, model);
 
     readEntry(source, 'gear.ts');
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts')).toEqual({
-        hasGeometry: false,
-        formats: undefined,
-      });
+      expect(readEntry(source, 'gear.ts').unavailable).toMatchObject({ code, message: thrown.message });
     });
+    const { hasGeometry, unavailable } = readEntry(source, 'gear.ts');
+    expect(hasGeometry).toBe(true);
+    expect(unavailable?.retry).toBeTypeOf('function');
+
+    unavailable?.retry?.();
+    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: true, formats: undefined });
+    await vi.waitFor(() => {
+      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
+    });
+    expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('should report a model file with no bytes as having no geometry, without asking the server', () => {
+    const { bridge, callTool } = createBridge('mcp-app');
+    const source = createExportSource(bridge, { ...model, byteLength: 0 });
+
+    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: false, formats: undefined });
+    expect(callTool).not.toHaveBeenCalled();
   });
 
   it('should export each format with its admitted options and copy it into exports/', async () => {

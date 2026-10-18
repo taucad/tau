@@ -152,7 +152,7 @@ describe('createInitialProject', () => {
     const lockedNames = [...lock.matchAll(/^\[\[package\]\]\nname = "(.*)"$/gmu)].map(([, name]) => String(name));
 
     expect(pyproject).toBe(template?.['pyproject.toml']?.replace('name = "tau-project"', 'name = "zebra-hinge"'));
-    expect(pyproject).toContain('dependencies = [\n  "build123d==0.11.1",\n  "cadquery-ocp-novtk==7.9.3.1.1",\n]');
+    expect(pyproject).toContain('dependencies = [\n  "build123d==0.13.0",\n  "cadquery-ocp-novtk==8.0.1.0.0",\n]');
     expect(decode(files['pylock.toml']?.content)).toBe(template?.['pylock.toml']);
     expect(lock).toContain('[[package]]\nname = "zebra-hinge"\nversion = "0.1.0"\nsource = { virtual = "." }\n');
     expect(lock).not.toContain('tau-project');

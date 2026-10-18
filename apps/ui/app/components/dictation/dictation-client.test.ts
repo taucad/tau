@@ -68,6 +68,28 @@ describe('transcribeDictation', () => {
     });
   });
 
+  it('should read the stream where ReadableStream is not async iterable, as in Safari', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(ReadableStream.prototype, Symbol.asyncIterator);
+    // WebKit ships ReadableStream without Symbol.asyncIterator, so `for await` over a body throws.
+    Reflect.deleteProperty(ReadableStream.prototype, Symbol.asyncIterator);
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(ndjson('{"type":"delta","text":"Build"}\n', '{"type":"done","text":"Build."}\n')),
+      );
+      const onPreview = vi.fn();
+
+      await expect(transcribeDictation(wav, { signal, onPreview })).resolves.toBe('Build.');
+      expect(onPreview.mock.calls).toEqual([['Build']]);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(ReadableStream.prototype, Symbol.asyncIterator, descriptor);
+      }
+    }
+  });
+
   it('should surface the API refusal, a streamed error and a truncated stream', async () => {
     vi.stubGlobal(
       'fetch',

@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 750 packages, with the license each declares.
+The web and desktop apps include the following 751 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -91,6 +91,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
 | [@date-fns/tz](https://github.com/date-fns/date-fns) | 1.5.0 | MIT |
 | [@dimforge/rapier3d-compat](https://github.com/dimforge/rapier.js) | 0.12.0 | Apache-2.0 |
@@ -578,8 +579,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.6.0 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.6.0 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.6.1 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.6.1 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |

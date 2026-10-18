@@ -8,6 +8,7 @@
 
 import { Document, Primitive, WebIO, getBounds } from '@gltf-transform/core';
 import type { Manifold } from 'manifold-3d';
+import type * as ManifoldCad from 'manifold-3d/manifoldCAD';
 import type { BaseGLTFNode, GLTFAttribute, GLTFMaterial } from 'manifold-3d/lib/gltf-node.js';
 
 import { createExportFile } from '@taucad/runtime/types';
@@ -87,18 +88,120 @@ const recordDebugView = (view: unknown): ((manifold: unknown) => unknown) => {
   };
 };
 
+/** A Manifold or CrossSection object that owns WASM memory until `delete()` is called. */
+type NativeHandle = { delete(): void; isDeleted(): boolean };
+
+/** Every Manifold and CrossSection created in this realm since the last {@link cleanupManifoldRuntime}. */
+const liveHandles = new Set<NativeHandle>();
+
+const isNativeHandle = (value: unknown): value is NativeHandle =>
+  isRecordObject(value) && typeof value['delete'] === 'function' && typeof value['isDeleted'] === 'function';
+
+type ManifoldConstructors = Pick<typeof ManifoldCad, 'Manifold' | 'CrossSection'>;
+
+let trackedConstructors: Promise<ManifoldConstructors> | undefined;
+
+/**
+ * Record every Manifold and CrossSection that model code creates, so cleanup can delete them.
+ *
+ * manifold-3d's `garbageCollectManifold` frees only the results of static constructors such as `cube`: its
+ * `setup()` replaces `Module.Manifold` and `Module.CrossSection` with factories whose `prototype` the instances
+ * never inherit, so the wrapped member functions never run and every `translate`, boolean, `extrude`, `revolve`
+ * and `new CrossSection` result stays allocated. This wraps the prototypes the instances do inherit, the module's
+ * native free functions that build new shapes, and the two constructors. It runs once per realm, like the
+ * manifold-3d registry it supplements.
+ *
+ * @param manifoldCad - The `manifold-3d/manifoldCAD` module.
+ * @returns Constructors that record the objects they create.
+ */
+async function trackManifoldHandles(manifoldCad: typeof ManifoldCad): Promise<ManifoldConstructors> {
+  const { getManifoldModuleSync } = await import('manifold-3d/lib/wasm.js');
+  const asRecord = (value: unknown, label: string): Record<string, unknown> => {
+    if (!isRecordObject(value)) {
+      throw new TypeError(`manifold-3d ${label} is not an object.`);
+    }
+    return value;
+  };
+  // These probes are themselves static-constructor results, so manifold-3d's own registry frees them.
+  const prototypes = [
+    asRecord(Object.getPrototypeOf(manifoldCad.Manifold.tetrahedron()), 'Manifold prototype'),
+    asRecord(Object.getPrototypeOf(manifoldCad.CrossSection.square()), 'CrossSection prototype'),
+  ];
+  const record = (value: unknown): void => {
+    if (
+      isNativeHandle(value) &&
+      prototypes.some((prototype) => Object.prototype.isPrototypeOf.call(prototype, value))
+    ) {
+      liveHandles.add(value);
+    }
+  };
+  const track = (result: unknown): unknown => {
+    if (Array.isArray(result)) {
+      for (const element of result) {
+        record(element);
+      }
+    } else {
+      record(result);
+    }
+    return result;
+  };
+  const wrapFunctions = (target: Record<string, unknown>, names: readonly string[]): void => {
+    for (const name of names) {
+      const original = target[name];
+      if (name === 'constructor' || !isCallable(original)) {
+        continue;
+      }
+      target[name] = function (this: unknown, ...arguments_: unknown[]) {
+        return track(original.apply(this, arguments_));
+      };
+    }
+  };
+  for (const prototype of prototypes) {
+    wrapFunctions(prototype, Object.getOwnPropertyNames(prototype));
+  }
+  // The native free functions (`_Cube`, `_Extrude`, `_Revolve`, `_manifoldUnionN`, …) that the JS methods call.
+  const wasm = asRecord(getManifoldModuleSync(), 'module');
+  wrapFunctions(
+    wasm,
+    Object.keys(wasm).filter((name) => name.startsWith('_')),
+  );
+  const tracked = <Constructor extends new (...arguments_: never[]) => unknown>(
+    constructor: Constructor,
+  ): Constructor =>
+    new Proxy(constructor, {
+      apply: (target, thisArgument, arguments_: unknown[]) => track(Reflect.apply(target, thisArgument, arguments_)),
+      construct: (target, arguments_: unknown[], newTarget) =>
+        asRecord(track(Reflect.construct(target, arguments_, newTarget)), 'constructor result'),
+    });
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Manifold naming convention
+  return { Manifold: tracked(manifoldCad.Manifold), CrossSection: tracked(manifoldCad.CrossSection) };
+}
+
+/** Delete every Manifold and CrossSection recorded since the last cleanup that is still allocated. */
+function deleteLiveHandles(): void {
+  for (const handle of liveHandles) {
+    if (!handle.isDeleted()) {
+      handle.delete();
+    }
+  }
+  liveHandles.clear();
+}
+
 async function registerManifoldModules(services: KernelServices): Promise<Record<string, unknown>> {
   const [manifoldRoot, manifoldCad, gltfNodeModule] = await Promise.all([
     import('manifold-3d'),
     import('manifold-3d/manifoldCAD'),
     import('manifold-3d/lib/gltf-node.js'),
   ]);
+  trackedConstructors ??= trackManifoldHandles(manifoldCad);
+  const constructors = await trackedConstructors;
 
   // ManifoldCAD.js stubs GLTFNode (non-tracked) and getGLTFNodes (returns []).
   // These only work in manifold's own bundler which replaces the stubs.
   // Patch with tracked versions from gltf-node.js so side-effect patterns work.
   const patchedManifoldCad = {
     ...manifoldCad,
+    ...constructors,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Manifold naming convention
     GLTFNode: gltfNodeModule.GLTFNodeTracked,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Manifold naming convention
@@ -203,6 +306,8 @@ async function cleanupManifoldRuntime(): Promise<void> {
   ]);
 
   cleanupGarbageCollector();
+  // After manifold-3d's registry, which deletes without checking and shares some of these objects.
+  deleteLiveHandles();
   cleanupSceneBuilder();
   cleanupGltfNodes();
   cleanupLevelOfDetail();

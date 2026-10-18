@@ -64,6 +64,27 @@ describe('handleExportModel', () => {
     );
   });
 
+  it('should forward a content request to graphics.exportModel as given', async () => {
+    const graphics = mock<RpcGraphicsClient>();
+    graphics.exportModel.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+    });
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.writeBinaryFile.mockResolvedValue(undefined);
+
+    await handleExportModel(
+      { toolCallId: 'tc-1', targetFile: 'main.ts', to: 'glb', content: { includeTopology: true } },
+      { graphics, fileSystem },
+    );
+
+    expect(graphics.exportModel).toHaveBeenCalledWith(
+      { targetFile: 'main.ts', to: 'glb', content: { includeTopology: true } },
+      undefined,
+    );
+  });
+
   it('should embed slug(targetFile) and to in artifactPath', async () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.exportModel.mockResolvedValue({

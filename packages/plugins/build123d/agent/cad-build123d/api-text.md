@@ -38,6 +38,6 @@ class FontManager
   register_system_fonts()
 
 # Category: text
-# Get list of available fonts by name and available styles (also called aspects)
+# Get available fonts without initializing the font manager on import
 # build123d.text.available_fonts (function)
 available_fonts() -> list[FontInfo]

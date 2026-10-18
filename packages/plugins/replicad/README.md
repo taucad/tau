@@ -38,13 +38,13 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export               | Kind            | Use                                                                                  |
-| -------------------- | --------------- | ------------------------------------------------------------------------------------ |
-| `replicad`           | toolkit factory | package-named factory; forwards `kernels.default` options to `replicadKernel`        |
-| `plugin`             | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key        |
-| `replicadKernel`     | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                       |
-| `ReplicadOptions`    | type            | `wasm`, `ocTracing`, `libraryTracing`, `tessellationInstancing`, `withSourceMapping` |
-| `ReplicadWasmConfig` | type            | `{ wasmUrl, wasmBindingsUrl }` for a custom build                                    |
+| Export               | Kind            | Use                                                                                                           |
+| -------------------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `replicad`           | toolkit factory | package-named factory; forwards `kernels.default` options to `replicadKernel`                                 |
+| `plugin`             | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key                                 |
+| `replicadKernel`     | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                                                |
+| `ReplicadOptions`    | type            | `wasm`, `ocTracing`, `libraryTracing`, `tessellationInstancing`, `previewTriangleBudget`, `withSourceMapping` |
+| `ReplicadWasmConfig` | type            | `{ wasmUrl, wasmBindingsUrl }` for a custom build                                                             |
 
 The `default` preset selects `kernels.default`. Configure that selected kernel through the toolkit,
 for example `replicad({ kernels: { default: { wasm: 'single' } } })` for the pthread-free build.

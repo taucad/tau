@@ -175,14 +175,17 @@ export function validateGlbMaterial(
         }
       } else if (colors.has(key)) {
         const length = key === 'baseColorFactor' ? 4 : 3;
+        // KHR_materials_specular permits color factors above one; the BRDF clamps the resulting F0.
+        const bounded = key !== 'specularColorFactor';
         if (
           !Array.isArray(child) ||
           child.length !== length ||
           child.some(
-            (channel) => typeof channel !== 'number' || !Number.isFinite(channel) || channel < 0 || channel > 1,
+            (channel) =>
+              typeof channel !== 'number' || !Number.isFinite(channel) || channel < 0 || (bounded && channel > 1),
           )
         ) {
-          fail(property, `must have ${length} finite components within [0, 1]`);
+          fail(property, `must have ${length} finite components ${bounded ? 'within [0, 1]' : 'at least zero'}`);
         }
       } else if (key.endsWith('Texture')) {
         if (

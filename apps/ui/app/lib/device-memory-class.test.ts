@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
 
 const environment = (options: { readonly coarse?: boolean; readonly deviceMemory?: number }) => ({
   matchMedia: (query: string) => ({ matches: query === '(pointer: coarse)' && options.coarse === true }),
@@ -22,5 +22,13 @@ describe('isMemoryConstrainedDevice', () => {
 
   it('is unconstrained where there is no window (SSR)', () => {
     expect(isMemoryConstrainedDevice({})).toBe(false);
+  });
+});
+
+// D-RT-03: the heap above which an idle editor runtime is recycled scales with the device (W8 1.5 GiB browser default).
+describe('runtimeRecycleHeapBytes', () => {
+  it('recycles a phone runtime past 512 MiB and any other past 1.5 GiB', () => {
+    expect(runtimeRecycleHeapBytes(true)).toBe(512 * 2 ** 20);
+    expect(runtimeRecycleHeapBytes(false)).toBe(1.5 * 2 ** 30);
   });
 });

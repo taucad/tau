@@ -27,16 +27,48 @@ export type ResolveTauCliInput = {
   readonly fileExists: (path: string) => boolean;
   /** A file's UTF-8 text. Throws when the file cannot be read. */
   readonly readFile: (path: string) => string;
+  /** What `<path> --version` prints, trimmed, or `undefined` when it fails or does not answer in time. */
+  readonly versionOf: (path: string) => string | undefined;
 };
 
 /**
- * A command that serves Tau's MCP tools over its stdio.
+ * A command that serves Tau's MCP tools over its stdio, and how it was chosen.
  *
  * @public
  */
 export type TauCliCommand = {
   readonly command: string;
   readonly args: readonly string[];
+  /**
+   * Where the command came from: `TAU_CLI` (`explicit`), the checkout's `.dev/cli.json` (`workspace`),
+   * a `tau` whose version is the plugin's (`installed`), or `npx` pinned to the plugin's version (`npx`).
+   */
+  readonly source: 'explicit' | 'workspace' | 'installed' | 'npx';
+  /** The `tau` the command starts, from `TAU_CLI` or installed; absent for the workspace pointer and `npx`. */
+  readonly path?: string;
+  /** The CLI's version: what it printed for `--version`, or the version `npx` fetches; absent when unknown. */
+  readonly cliVersion?: string;
+  /** This plugin's version, from its `package.json`. */
+  readonly pluginVersion: string;
+  /** Installed `tau` executables passed over before the chosen one, with the version each printed, if any. */
+  readonly skipped: ReadonlyArray<{ readonly path: string; readonly version?: string }>;
+};
+
+/**
+ * The plugin's version, which an installed CLI must print and `npx` fetches.
+ *
+ * @param input - The launching process.
+ * @param path - Path functions for the host platform.
+ * @returns The `version` of the plugin's `package.json`.
+ * @throws When that `package.json` names no version.
+ */
+const pluginVersionOf = (input: ResolveTauCliInput, path: PlatformPath): string => {
+  const manifest = path.join(input.pluginRoot, 'package.json');
+  const { version } = JSON.parse(input.readFile(manifest)) as { readonly version?: unknown };
+  if (typeof version !== 'string' || version === '') {
+    throw new Error(`${manifest} names no version, so the matching @taucad/cli is unknown`);
+  }
+  return version;
 };
 
 /**
@@ -68,59 +100,42 @@ const workspaceCliArgv = (input: ResolveTauCliInput, path: PlatformPath): readon
 };
 
 /**
- * An installed `tau` on `PATH`, then in the usual install folders a desktop app's minimal `PATH` omits.
+ * Every installed `tau` on `PATH`, then in the usual install folders a desktop app's minimal `PATH` omits.
  *
  * @param input - The launching process.
  * @param path - Path functions for the host platform.
- * @returns The first `tau` (`tau.cmd` on Windows) that exists, or `undefined`.
+ * @returns Each `tau` (`tau.cmd` on Windows) that exists, in search order, each path once: joining normalizes the
+ *   folder, so `/usr/local/bin` and `/usr/local/bin/` name one `tau`.
  */
-const installedCli = (input: ResolveTauCliInput, path: PlatformPath): string | undefined => {
+const installedClis = (input: ResolveTauCliInput, path: PlatformPath): string[] => {
   const windows = input.platform === 'win32';
-  const directories = [
-    ...(input.env['PATH'] ?? '').split(path.delimiter).filter((directory) => directory !== ''),
-    ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']),
-  ];
-  return directories
-    .map((directory) => path.join(directory, windows ? 'tau.cmd' : 'tau'))
-    .find((candidate) => input.fileExists(candidate));
-};
-
-/**
- * `npx`, pinned to the CLI released with this plugin.
- *
- * @param input - The launching process.
- * @param path - Path functions for the host platform.
- * @returns The `npx` command for the `@taucad/cli` version in the plugin's `package.json`.
- * @throws When that `package.json` names no version.
- */
-const npxCli = (input: ResolveTauCliInput, path: PlatformPath): TauCliCommand => {
-  const manifest = path.join(input.pluginRoot, 'package.json');
-  const { version } = JSON.parse(input.readFile(manifest)) as { readonly version?: unknown };
-  if (typeof version !== 'string' || version === '') {
-    throw new Error(`${manifest} names no version, so the matching @taucad/cli is unknown`);
-  }
-  return {
-    command: input.platform === 'win32' ? 'npx.cmd' : 'npx',
-    args: ['--yes', `--package=@taucad/cli@${version}`, 'tau', 'mcp'],
-  };
+  const candidates = new Set(
+    [
+      ...(input.env['PATH'] ?? '').split(path.delimiter).filter((directory) => directory !== ''),
+      ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']),
+    ].map((directory) => path.join(directory, windows ? 'tau.cmd' : 'tau')),
+  );
+  return [...candidates].filter((candidate) => input.fileExists(candidate));
 };
 
 /**
  * Resolve the command that serves Tau's MCP tools for this plugin.
  *
- * Takes the first that applies: `TAU_CLI`; the workspace pointer `.dev/cli.json`
- * that `nx build agent-plugin` writes; `tau` on `PATH`, then in `/opt/homebrew/bin`
- * and `/usr/local/bin`; otherwise `npx` with the `@taucad/cli` version this plugin
- * was released with.
+ * Takes the first that applies: `TAU_CLI`, run whatever its version; the workspace
+ * pointer `.dev/cli.json` that `nx build agent-plugin` writes; the first installed
+ * `tau` whose `--version` is this plugin's version, searching `PATH`, then
+ * `/opt/homebrew/bin` and `/usr/local/bin`; otherwise `npx` with the `@taucad/cli`
+ * version this plugin was released with. An installed `tau` of any other version is
+ * skipped, since the plugin and the CLI are released together.
  *
- * @param input - The environment, platform, plugin folder and file access of the launching process.
- * @returns The command and arguments to spawn with inherited stdio.
- * @throws When only `npx` remains and the plugin's `package.json` has no version.
+ * @param input - The environment, platform, plugin folder, file access and version probe of the launching process.
+ * @returns The command and arguments to spawn with inherited stdio, and how they were chosen.
+ * @throws When the plugin's `package.json` has no version.
  * @public
  *
  * @example <caption>Start the server from a launcher inside the plugin's `dist`</caption>
  * ```typescript
- * import { spawn } from 'node:child_process';
+ * import { execFileSync, spawn } from 'node:child_process';
  * import { existsSync, readFileSync } from 'node:fs';
  * import { fileURLToPath } from 'node:url';
  * import { resolveTauCli } from '@taucad/agent-plugin';
@@ -132,23 +147,70 @@ const npxCli = (input: ResolveTauCliInput, path: PlatformPath): TauCliCommand =>
  *   execPath: process.execPath,
  *   fileExists: existsSync,
  *   readFile: (path) => readFileSync(path, 'utf8'),
+ *   versionOf: (path) => {
+ *     try {
+ *       return execFileSync(path, ['--version'], {
+ *         encoding: 'utf8',
+ *         killSignal: 'SIGKILL',
+ *         maxBuffer: 128,
+ *         stdio: ['ignore', 'pipe', 'ignore'],
+ *         timeout: 2000,
+ *       }).trim();
+ *     } catch {
+ *       return undefined;
+ *     }
+ *   },
  * });
  * spawn(cli.command, cli.args, { stdio: 'inherit' });
  * ```
  */
 export const resolveTauCli = (input: ResolveTauCliInput): TauCliCommand => {
   const path = input.platform === 'win32' ? win32 : posix;
+  const pluginVersion = pluginVersionOf(input, path);
   const explicit = input.env['TAU_CLI'];
-  if (explicit !== undefined && explicit !== '') {
-    return { command: explicit, args: ['mcp'] };
+  if (explicit) {
+    return {
+      command: explicit,
+      args: ['mcp'],
+      source: 'explicit',
+      path: explicit,
+      cliVersion: input.versionOf(explicit),
+      pluginVersion,
+      skipped: [],
+    };
   }
   const workspace = workspaceCliArgv(input, path);
-  if (workspace !== undefined) {
-    return { command: input.execPath, args: [...workspace, 'mcp'] };
+  if (workspace) {
+    return {
+      command: input.execPath,
+      args: [...workspace, 'mcp'],
+      source: 'workspace',
+      pluginVersion,
+      skipped: [],
+    };
   }
-  const installed = installedCli(input, path);
-  if (installed !== undefined) {
-    return { command: installed, args: ['mcp'] };
+  const skipped: Array<{ readonly path: string; readonly version?: string }> = [];
+  for (const installed of installedClis(input, path)) {
+    const version = input.versionOf(installed);
+    if (version === pluginVersion) {
+      return {
+        command: installed,
+        args: ['mcp'],
+        source: 'installed',
+        path: installed,
+        cliVersion: version,
+        pluginVersion,
+        skipped,
+      };
+    }
+    skipped.push({ path: installed, version });
   }
-  return npxCli(input, path);
+  return {
+    command: input.platform === 'win32' ? 'npx.cmd' : 'npx',
+    args: ['--yes', `--package=@taucad/cli@${pluginVersion}`, 'tau', 'mcp'],
+    source: 'npx',
+    cliVersion: pluginVersion,
+    pluginVersion,
+    skipped,
+  };
 };

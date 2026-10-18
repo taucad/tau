@@ -21,6 +21,7 @@ describe('createUiRuntimeConfig', () => {
       tauApiUrl: 'https://api.tau.test',
       tauWebSocketUrl: 'wss://api.tau.test',
       acquisition: 'open',
+      memoryConstrained: false,
     } satisfies RuntimeConfigInput<typeof runtime>);
     expect(uiRuntimeConfigSchema.parse(config)).toEqual(config);
   });
@@ -78,5 +79,90 @@ describe('createUiRuntimeConfig', () => {
     expect(resolvedRuntime.bundlers.find(({ id }) => id === 'esbuild')).toMatchObject({
       options: { acquisition: 'open' },
     });
+  });
+
+  it('should carry the page device memory class into the runtime config', () => {
+    const environment = {
+      [tauApiUrlEnvironmentKey]: 'https://api.tau.test',
+      [tauWebSocketUrlEnvironmentKey]: 'wss://api.tau.test',
+      [tauAcquisitionEnvironmentKey]: 'open',
+    } as const;
+
+    expect(createUiRuntimeConfig(environment, { memoryConstrained: true })).toMatchObject({ memoryConstrained: true });
+    expect(createUiRuntimeConfig(environment, { memoryConstrained: false })).toMatchObject({
+      memoryConstrained: false,
+    });
+  });
+
+  // D-RT-04: the pthread builds reserve a 4 GiB shared memory, spawn a worker per core with 8 MiB stacks, and cost
+  // +124 MB WASM and +4 workers at load on the iPhone profile.
+  it('should select the single-threaded OCCT and PicoVoxel builds on a memory-constrained device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+      memoryConstrained: true,
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ wasm: 'single' });
+    // OpenCascade defaults to its single-threaded 'full' build; nothing may ask for 'multi' or 'auto' here.
+    expect(kernelOptions('opencascade')?.['wasm'] ?? 'full').toBe('full');
+    expect(kernelOptions('picovoxel')).toMatchObject({ wasm: 'serial' });
+  });
+
+  it('should keep the automatic build choice on a standard device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ wasm: 'auto' });
+    expect(kernelOptions('picovoxel')?.['wasm']).not.toBe('serial');
+  });
+
+  // D-RT-01: replicad's semantic reuse keeps serialized BRep per operation (measured ~10 MB per edit on the iPhone
+  // profile); a phone renders without it until its resident bound is qualified there.
+  it('should turn replicad compute reuse off on a memory-constrained device only', async () => {
+    const replicadOptions = async (memoryConstrained: boolean) => {
+      const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+        tauApiUrl: 'https://api.tau.test',
+        tauWebSocketUrl: 'wss://api.tau.test',
+        memoryConstrained,
+      });
+      return resolvedRuntime.kernels.find((kernel) => kernel.id === 'replicad')?.options;
+    };
+
+    expect(await replicadOptions(true)).toMatchObject({ computeReuse: false });
+    const standard = await replicadOptions(false);
+    expect(standard?.['computeReuse']).toBeUndefined();
+  });
+
+  // D-RT-05 / D-GFX-10: a 2,000,000-triangle preview costs ~230 MiB steady on a phone and over 1 GiB with Section.
+  it('should give previews the phone triangle budget and PicoVoxel the phone recycle threshold on a memory-constrained device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+      memoryConstrained: true,
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')).toMatchObject({ previewTriangleBudget: 400_000 });
+    expect(kernelOptions('opencascade')).toMatchObject({ previewTriangleBudget: 400_000 });
+    expect(resolvedRuntime.middleware.find(({ id }) => id === 'displaySimplification')).toMatchObject({
+      options: { maxTriangles: 400_000 },
+    });
+    expect(kernelOptions('picovoxel')).toMatchObject({ recycleHeapBytes: 512 * 2 ** 20 });
+  });
+
+  it('should keep the policy preview budgets on a standard device', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+
+    expect(kernelOptions('replicad')?.['previewTriangleBudget']).toBeUndefined();
+    expect(kernelOptions('opencascade')?.['previewTriangleBudget']).toBeUndefined();
   });
 });

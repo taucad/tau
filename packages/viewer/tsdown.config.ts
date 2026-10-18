@@ -10,7 +10,7 @@ import type { UserConfig } from 'tsdown';
 const workerEntries = [
   'src/graphics/three/utils/measurement-features.worker.ts',
   'src/graphics/three/utils/section-surface-topology.worker.ts',
-  'src/graphics/three/workers/section-cap-overlap.worker.ts',
+  'src/graphics/three/workers/bvh.worker.ts',
 ];
 
 /** Matches a worker URL literal that names a `.worker.ts` source module. */
@@ -90,6 +90,7 @@ const baseConfig: UserConfig = {
     'src/graphics/three/utils/section-cap-polygon-types.ts',
     'src/graphics/three/utils/section-cap-region.ts',
     'src/graphics/three/utils/section-cap-render-parts.ts',
+    'src/graphics/three/utils/section-cap-stencil-debug.ts',
     'src/graphics/three/utils/three-shader-debug.ts',
     'src/graphics/three/utils/tsl-node-graph-snapshot.ts',
     'src/hooks/use-graphics.tsx',

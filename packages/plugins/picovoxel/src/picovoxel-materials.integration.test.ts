@@ -420,7 +420,7 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
         }),
       },
     });
-    const context = await definition.initialize({ wasm: 'serial' }, runtimeMock);
+    const context = await definition.initialize({ wasm: 'serial', recycleHeapBytes: 1.5 * 2 ** 30 }, runtimeMock);
     try {
       const result = await definition.evaluate(
         { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'exact' } },

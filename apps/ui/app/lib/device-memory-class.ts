@@ -30,6 +30,21 @@ const browserEnvironment = (): DeviceEnvironment => ({
 /** At or below this many GB, `navigator.deviceMemory` marks a device as constrained. */
 const constrainedDeviceMemoryGigabytes = 4;
 
+/** Heap above which a phone's idle editor runtime is recycled: the audit's 512 MiB (editor memory remediation B-04). */
+const constrainedRecycleHeapBytes = 512 * 2 ** 20;
+/** Heap above which any other idle editor runtime is recycled: the compute-reuse W8 browser high-water candidate. */
+const standardRecycleHeapBytes = 1.5 * 2 ** 30;
+
+/**
+ * The WebAssembly heap above which an editor runtime is recycled once idle (D-RT-03).
+ *
+ * @param constrained - Whether the device is memory-constrained (`isMemoryConstrainedDevice`).
+ * @returns The threshold in bytes.
+ * @public
+ */
+export const runtimeRecycleHeapBytes = (constrained: boolean): number =>
+  constrained ? constrainedRecycleHeapBytes : standardRecycleHeapBytes;
+
 /**
  * Read the device's memory class.
  *

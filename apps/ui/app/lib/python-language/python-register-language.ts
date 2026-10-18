@@ -16,6 +16,13 @@ const build123dAuthoringStubs = [
   ['BuildSketch', 'Context builder for sketches'],
   ['Location', 'Rigid placement transform'],
   ['Color', 'Shape display color'],
+  ['RigidJoint', 'Attach a named fixed interface to a native part'],
+  ['RevoluteJoint', 'Attach a rotary joint with a native reference frame'],
+  ['LinearJoint', 'Attach a sliding joint with optional travel limits'],
+  ['CylindricalJoint', 'Attach a joint allowing sliding and rotation'],
+  ['BallJoint', 'Attach a spherical joint to a native part'],
+  ['Select', 'Select topology including native NEW and LAST history'],
+  ['export_gltf', 'Export native geometry and materials to glTF'],
   ['export_step', 'Export retained BRep geometry to STEP'],
 ] as const;
 
@@ -38,10 +45,9 @@ const createBuild123dCompletionProvider = (monaco: typeof Monaco): Monaco.langua
         insertText: label,
         detail: `build123d.${label}`,
         documentation,
-        kind:
-          label === 'export_step'
-            ? monaco.languages.CompletionItemKind.Function
-            : monaco.languages.CompletionItemKind.Class,
+        kind: label.startsWith('export_')
+          ? monaco.languages.CompletionItemKind.Function
+          : monaco.languages.CompletionItemKind.Class,
         range,
       })),
     };

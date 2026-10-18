@@ -200,6 +200,39 @@ describe('ExportPane', () => {
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
   });
 
+  it('should say why the formats could not be loaded, with a retry only when asking again can help', () => {
+    const retry = vi.fn();
+    const failed = createSource({
+      entry: {
+        hasGeometry: true,
+        formats: undefined,
+        unavailable: { code: 'NO_KERNEL', message: 'No kernel exports model.ts.', retry },
+      },
+    });
+    const view = renderPane(failed.source);
+    const alert = screen.getByRole('alert', { name: 'Export formats could not be loaded' });
+    expect(alert).toHaveTextContent('No kernel exports model.ts.');
+    expect(screen.queryByRole('status', { name: 'Export formats are still loading' })).toBeNull();
+    expect(screen.queryByText('No geometry to export for this file')).toBeNull();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
+    view.unmount();
+
+    const message =
+      'This Tau server has no export formats; plugin 1.2.3 needs the same version: npm install -g @taucad/cli@1.2.3, then restart the Tau server or your agent';
+    const mismatched = createSource({
+      entry: {
+        hasGeometry: true,
+        formats: undefined,
+        unavailable: { code: 'UNKNOWN_TOOL', message, retry: undefined },
+      },
+    });
+    renderPane(mismatched.source);
+    const mismatch = screen.getByRole('alert', { name: 'Export formats could not be loaded' });
+    expect(mismatch).toHaveTextContent(message);
+    expect(within(mismatch).queryByRole('button')).toBeNull();
+  });
+
   it('should claim the selected entry while it is shown', () => {
     const release = vi.fn();
     const claimUnits = vi.fn(() => release);

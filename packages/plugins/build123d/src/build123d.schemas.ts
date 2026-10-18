@@ -14,13 +14,16 @@ export const build123dOptionsSchema = z.object({
   workerSha256: sha256,
   supportFiles: z
     .array(z.object({ path: absolutePath, sha256 }))
-    .length(2)
+    .length(4)
     .superRefine((files, context) => {
       const names = new Set(
         files.map(({ path }) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)),
       );
-      if (!names.has('analyzer.py') || !names.has('glb.py')) {
-        context.addIssue({ code: 'custom', message: 'Support files must contain analyzer.py and glb.py' });
+      if (['analyzer.py', 'glb.py', 'native_materials.py', 'mechanisms.py'].some((name) => !names.has(name))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Support files must contain analyzer.py, glb.py, native_materials.py and mechanisms.py',
+        });
       }
     }),
   /**

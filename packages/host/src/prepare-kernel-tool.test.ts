@@ -68,6 +68,20 @@ describe(prepareKernelToolName, () => {
     expect(JSON.stringify(toolOf(unlisted)?.inputSchema)).not.toContain('such as');
   });
 
+  it('should read the kernels again each time the list is read, for a host that learns them later', async () => {
+    let reported: Array<{ kernel: string; extensions: string[] }> = [];
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      prepareKernel: async ({ kernel }) => ({ status: 'ready', kernel }),
+      preparableKernels: () => reported,
+    });
+    const description = () => registry.list().find(({ name }) => name === 'prepare_kernel')?.description;
+
+    expect(description()).toContain('so Tau can evaluate its files. Call it when');
+    reported = [{ kernel: 'rustcad', extensions: ['rcad'] }];
+    expect(description()).toContain('so Tau can evaluate its files: rustcad for .rcad.');
+  });
+
   it('should forward the call signal, report progress as partial results and error unless ready', async () => {
     const seen: Array<{ kernel: string; aborted: boolean }> = [];
     const registry = createHostToolRegistry({

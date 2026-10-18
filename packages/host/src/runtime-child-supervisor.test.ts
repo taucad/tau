@@ -24,7 +24,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
-import type { RuntimeChildWorker, RuntimeChildWorkerLaunch } from '#runtime-child-supervisor.js';
+import type {
+  RuntimeChildNativeKernels,
+  RuntimeChildWorker,
+  RuntimeChildWorkerLaunch,
+} from '#runtime-child-supervisor.js';
 
 const proofSchema = z.object({
   filesystem: z.literal(true),
@@ -255,6 +259,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     childPermission: z.boolean(),
     ownSpawn: z.string(),
     native: z.unknown().optional(),
+    closures: z.array(z.unknown()),
     outcomes: z.record(z.string(), outcomeSchema),
   });
 
@@ -275,18 +280,14 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       spawnUncontained(launch),
     );
     const modulePath = fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url));
+    const answer = { status: 'ready', closures: { runtime: { root: sealed } } };
+    const inspect = vi.fn(async () => ({ answer, roots: [sealed] }));
+    const reported = vi.fn();
 
     const child = await startRuntimeChild({
       modulePath,
       args: [proofPath, JSON.stringify(requests)],
-      native: {
-        directory,
-        store: join(scratch, 'store'),
-        compose: async () => ({ unavailable: [], closureRoots: [sealed] }),
-        closureRoots: async () => [sealed],
-        start,
-        verify: vi.fn(),
-      },
+      native: { directory, store: join(scratch, 'store'), inspect, reported, start, verify: vi.fn() },
     });
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
     const childTemporaryDirectory = proof.execArgv.at(3)?.slice('--allow-fs-read='.length) ?? '';
@@ -299,7 +300,17 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       childPermission: false,
       ownSpawn: 'ERR_ACCESS_DENIED',
     });
-    expect(proof.native).toEqual({ unavailable: [], closureRoots: [sealed] });
+    /* The start frame says the daemon answers; the child's closure request carried data, and its answer came back. */
+    expect(proof.native).toBe(true);
+    expect(proof.closures).toEqual([{ answer }]);
+    expect(inspect).toHaveBeenCalledWith({
+      package: '@acme/fixture',
+      kernel: 'fixture',
+      dependencies: ['runtime'],
+      manifest: { schemaVersion: 1 },
+      packageRoot: 'file:///fixture/',
+    });
+    expect(reported).toHaveBeenCalledWith([{ package: '@acme/fixture' }]);
     expect(proof.outcomes['sealed']).toEqual({
       started: true,
       stdout: 'worker ready\nechoed through the daemon\n',
@@ -322,6 +333,41 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(started?.runtimePath).toBe(sealed);
     expect(started?.workspacePath).toMatch(/\/tau-runtime-child-[^/]+\/tmp\/mirror-[^/]+\/workspace$/u);
     expect(started?.sandboxRoot).toBe(dirname(childTemporaryDirectory));
+  });
+
+  it('launches from a store that did not exist when the child started, once a kernel was answered from it', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-cold-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    const closure = join(scratch, 'store', 'closures', 'sha256', 'a'.repeat(64));
+    const launch = {
+      executablePath: join(closure, 'worker.sh'),
+      executableSha256: createHash('sha256').update('#!/bin/sh\necho worker ready\ncat\n').digest('hex'),
+      executableName: 'Fixture worker',
+      arguments: [],
+      runtimePath: closure,
+      resources: [],
+      workspacePath: '<private>/workspace',
+      artifactPath: '<private>/artifacts',
+      commandId: 'Fixture#1',
+    };
+    /* The store is sealed while the child runs, as `prepare_kernel` seals it, and only then answered. */
+    const inspect = vi.fn(async () => {
+      await sealedClosure(scratch);
+      return { answer: { status: 'ready', closures: { runtime: { root: closure } } }, roots: [closure] };
+    });
+    const start = vi.fn(async (request: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) =>
+      spawnUncontained(request),
+    );
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify([{ name: 'sealed', launch }])],
+      native: { directory, store: join(scratch, 'store'), inspect, start, verify: vi.fn() },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    await child.close();
+
+    expect(proof.outcomes['sealed']).toMatchObject({ started: true, end: { exitCode: 0 } });
   });
 
   it('re-verifies a closure the child cannot read in the daemon, once for concurrent asks, and refuses one outside the store (X35)', async () => {
@@ -352,8 +398,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       native: {
         directory,
         store: join(scratch, 'store'),
-        compose: async () => ({ unavailable: [], closureRoots: [damaged, intact] }),
-        closureRoots: async () => [damaged, intact],
+        inspect: async () => ({ answer: {}, roots: [damaged, intact] }),
         start: vi.fn(),
         verify,
       },
@@ -408,8 +453,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       native: {
         directory,
         store,
-        compose: async () => ({ unavailable: [], closureRoots: [sealed, escaping] }),
-        closureRoots: async () => [sealed, escaping],
+        inspect: async () => ({ answer: {}, roots: [sealed, escaping] }),
         start,
         verify: vi.fn(),
       },
@@ -451,8 +495,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       native: {
         directory,
         store: join(scratch, 'store'),
-        compose: async () => ({ unavailable: [] }),
-        closureRoots: async () => [closure],
+        inspect: async () => ({ answer: {}, roots: [closure] }),
         start,
         verify: vi.fn(),
       },
@@ -505,8 +548,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       native: {
         directory,
         store: join(scratch, 'store'),
-        compose: async () => ({ unavailable: [] }),
-        closureRoots: async () => [],
+        inspect: async () => ({ answer: {}, roots: [] }),
         start: vi.fn(),
         verify: vi.fn(),
       },
@@ -540,8 +582,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       native: {
         directory,
         store: join(scratch, 'store'),
-        compose: async () => ({ unavailable: [] }),
-        closureRoots: async () => [closure],
+        inspect: async () => ({ answer: {}, roots: [closure] }),
         start,
         verify: vi.fn(),
       },
@@ -556,22 +597,23 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('hands a child no composition when the store cannot be read, and carries a failed start back as its refusal', async () => {
+  it('answers a closure request it cannot read with why, and carries a failed start back as its refusal', async () => {
     const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-refused-');
     const { closure: sealed, launchFrom } = await sealedClosure(scratch);
     const launch = launchFrom({ executableSha256: '0'.repeat(64) });
     const modulePath = fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url));
     const refusedProof = join(daemonTemporaryDirectory, 'refused.json');
+    const inspect = vi
+      .fn<RuntimeChildNativeKernels['inspect']>()
+      .mockRejectedValueOnce(new Error('the store cannot be read'))
+      .mockResolvedValueOnce({ answer: {}, roots: [sealed] });
     const refused = await startRuntimeChild({
       modulePath,
-      args: [refusedProof, JSON.stringify([{ name: 'refused', launch }])],
+      args: [refusedProof, JSON.stringify([{ name: 'refused', launch }]), '2'],
       native: {
         directory,
         store: join(scratch, 'store'),
-        compose: async () => {
-          throw new Error('the store cannot be read');
-        },
-        closureRoots: async () => [sealed],
+        inspect,
         verify: vi.fn(),
         start: async () => {
           throw new Error('The native runtime is unavailable because its sandbox could not start: no bwrap.');
@@ -581,7 +623,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     await refused.close();
 
     const refusedRun = brokerProofSchema.parse(JSON.parse(await readFile(refusedProof, 'utf8')));
-    expect(refusedRun.native).toBeUndefined();
+    expect(refusedRun.closures).toEqual([{ message: 'the store cannot be read' }, { answer: {} }]);
     expect(refusedRun.outcomes['refused']).toEqual({
       started: false,
       refusal: 'The native runtime is unavailable because its sandbox could not start: no bwrap.',

@@ -3,8 +3,8 @@
  *
  * The host already runs GeoSpec for MCP `test_model` with `createHostGeoSpecRunner` over a runtime client; this verb
  * runs that runner over the CLI runtime `tau export` and `tau check` use, so CI can run a project's own tests without
- * an agent. Discovery is GeoSpec's own (`*.geospec.ts` under the project, or the files named). Native kernels are
- * composed from the payload store's receipts and nothing is downloaded (I5): a suite over an unprepared `.py` model
+ * an agent. Discovery is GeoSpec's own (`*.geospec.ts` under the project, or the files named). Native kernels bind to
+ * their sealed closures in the payload store and nothing is downloaded (I5): a suite over an unprepared `.py` model
  * fails with the kernel's `KERNEL_NOT_PREPARED` refusal and exits 3.
  *
  * Exit codes: 0 every selected test passed, 1 a test failed, 2 an unusable request, 3 nothing ran because the runtime
@@ -19,7 +19,6 @@ import type { HostGeoSpecRunner, HostGeoSpecRuntimeClient } from '@taucad/host/a
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineCommand } from 'citty';
 
-import { composeNativeKernels } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 import { loadCliRuntime } from '#runtime-options.js';
@@ -237,13 +236,11 @@ export const testCommand = defineCommand({
       );
     }
 
-    const native = await composeNativeKernels();
     authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,
       config: args.config,
-      native,
       zooProxyUrl: cliZooProxyUrl(process.env),
     });
     const client = await createNodeClient({ runtime, projectPath: projectRoot });

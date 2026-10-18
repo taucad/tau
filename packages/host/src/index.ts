@@ -118,6 +118,7 @@ export type { HostToolRegistryOptions } from '#agent-tools.js';
 export { prepareKernelToolName } from '#prepare-kernel-tool.js';
 export type { HostPreparableKernel, HostPrepareKernel, HostPrepareKernelProgress } from '#agent-tools.js';
 export type {
+  RuntimeChildClosureRequest,
   RuntimeChildNativeKernels,
   RuntimeChildRuntimeDamage,
   RuntimeChildWorker,

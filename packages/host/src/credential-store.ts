@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { homedir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { defaultPayloadStore as storePayloadRoot } from '@taucad/native-process-core/store';
 import { z } from 'zod';
 
 const credentialSchema = z.object({
@@ -35,30 +36,13 @@ export const defaultConfigDirectory = (): string => {
 };
 
 /**
- * Resolve the digest-keyed payload store shared by the CLI, `tau mcp`, the daemon and the desktop: the per-OS data
- * root (Application Support on macOS, `$XDG_DATA_HOME/tau` on Linux, `%LOCALAPPDATA%\tau` on Windows), never the
- * roaming or config roots, or `<TAU_CONFIG_DIR>/payloads` when the one override is set.
+ * Resolve the digest-keyed payload store shared by the CLI, `tau mcp`, the daemon and the desktop. It has one
+ * definition, the native store machinery's: the per-OS data root, or `<TAU_CONFIG_DIR>/payloads` when the one override
+ * is set.
  * @returns Absolute store root.
  * @public
  */
-export const defaultPayloadStore = (): string => {
-  if (process.env['TAU_CONFIG_DIR']) {
-    return join(process.env['TAU_CONFIG_DIR'], 'payloads');
-  }
-  if (platform() === 'win32') {
-    return join(process.env['LOCALAPPDATA'] ?? join(homedir(), 'AppData', 'Local'), 'tau', 'payloads');
-  }
-  if (platform() === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'tau', 'payloads');
-  }
-  // An empty XDG_DATA_HOME means the default, as the XDG Base Directory specification says.
-  const dataHome = process.env['XDG_DATA_HOME'];
-  return join(
-    dataHome === undefined || dataHome === '' ? join(homedir(), '.local', 'share') : dataHome,
-    'tau',
-    'payloads',
-  );
-};
+export const defaultPayloadStore = (): string => storePayloadRoot();
 
 export const hostCredentialPath = (): string => join(defaultConfigDirectory(), 'host.json');
 

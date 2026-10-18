@@ -1,0 +1,290 @@
+{
+  "slug": "cad-smlibpy",
+  "sources": {
+    "workspaceFiles": 0,
+    "exampleFiles": 3,
+    "transcriptRuns": 0
+  },
+  "symbols": [
+    {
+      "id": "python:smlibpy.align.Align",
+      "name": "Align",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.align.Align.CENTER",
+      "name": "CENTER",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.align.Align.MIN",
+      "name": "MIN",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.parts.Box",
+      "name": "Box",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.parts.Cylinder",
+      "name": "Cylinder",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Edge.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Face.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Part.fillet",
+      "name": "fillet",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Shape.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.ShapeList.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Sketch.fillet",
+      "name": "fillet",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Vertex.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Wire.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes._Body.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "python:Z",
+      "name": "Z",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.geometry.Pos",
+      "name": "Pos",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.geometry.Vector.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.parts.Sphere",
+      "name": "Sphere",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Edge.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.ShapeList.group_by",
+      "name": "group_by",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.ShapeList.parallel_to",
+      "name": "parallel_to",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Wire.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.align.Align.MAX",
+      "name": "MAX",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.geometry.BoundBox.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.geometry.Rot",
+      "name": "Rot",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.locations.GridLocations",
+      "name": "GridLocations",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Edge.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Face.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Part.shell",
+      "name": "shell",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Shape.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.ShapeList.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.ShapeList.top",
+      "name": "top",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes.Vertex.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.shapes._Body.faces",
+      "name": "faces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:smlibpy.sheetmetal.FlatPattern.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

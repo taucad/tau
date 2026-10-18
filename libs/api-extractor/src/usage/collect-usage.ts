@@ -152,9 +152,11 @@ export const attributeFile = (fileName: string, text: string): readonly string[]
       return ['cad-picogk'];
     }
     case 'py': {
-      return /^\s*(?:from\s+build123d\b|import\s+build123d\b)/mu.test(stripSource(text, 'python', true))
-        ? ['cad-build123d']
-        : [];
+      const code = stripSource(text, 'python', true);
+      return [
+        ...(/^\s*(?:from\s+build123d\b|import\s+build123d\b)/mu.test(code) ? ['cad-build123d'] : []),
+        ...(/^\s*(?:from\s+smlibpy\b|import\s+smlibpy\b)/mu.test(code) ? ['cad-smlibpy'] : []),
+      ];
     }
     case 'ts':
     case 'tsx':

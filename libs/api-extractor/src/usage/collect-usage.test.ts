@@ -85,6 +85,8 @@ describe('collect-usage', () => {
       ['Program.cs', '', ['cad-picogk']],
       ['main.py', 'from build123d import *', ['cad-build123d']],
       ['main.py', 'import build123d as bd', ['cad-build123d']],
+      ['main.py', 'from smlibpy import Box', ['cad-smlibpy']],
+      ['main.py', 'import smlibpy', ['cad-smlibpy']],
       ['helper.py', 'import numpy', []],
       ['main.geospec.ts', "import { replicad } from 'replicad';", ['geospec-authoring']],
       ['main.ts', "import { drawCircle } from 'replicad';", ['cad-replicad']],

@@ -68,12 +68,17 @@ type RawPayload = {
 };
 
 /**
- * The vendored interpreter for this platform.
+ * The interpreter to describe a package with: `TAU_PYTHON_API_EXECUTABLE` when set (a CPython with the package
+ * installed, such as a virtual environment holding `smlibpy`), otherwise the vendored desktop interpreter.
  *
- * @returns Absolute path to the CPython that has `build123d` installed.
- * @throws When the runtime has not been prepared for this target.
+ * @returns Absolute path to the CPython that has the package installed.
+ * @throws When no override is set and the runtime has not been prepared for this target.
  */
 export const resolvePythonExecutable = (): string => {
+  const override = process.env['TAU_PYTHON_API_EXECUTABLE'];
+  if (override !== undefined && override !== '') {
+    return override;
+  }
   const target = `${process.platform}-${process.arch}`;
   const executable = join(pythonResourceRoot, target, process.platform === 'win32' ? 'python.exe' : 'bin/python3');
   if (!existsSync(executable)) {

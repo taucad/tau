@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rate-limit.js';
+import { maximumRateLimitAutoResumes, resetRateLimitAutoResumes } from '#utils/rate-limit-auto-resume.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
@@ -13,6 +14,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 describe('ChatErrorRateLimit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetRateLimitAutoResumes();
   });
 
   it('should resume the interrupted turn rather than offering to try again', async () => {
@@ -63,5 +65,122 @@ describe('ChatErrorRateLimit', () => {
 
     expect(regenerate).toHaveBeenCalledTimes(1);
     expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  // ── Automatic resume ────────────────────────────────────────────────
+
+  it('should count down beside Resume and resume on its own when the wait ends', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ChatErrorRateLimit resumable retryAfterSeconds={3} autoResume={{ runId: 'run-1', attempt: 1 }} />);
+
+      const timer = screen.getByRole('timer');
+      expect(timer).toHaveTextContent('Resuming in 3 seconds');
+      expect(timer.nextElementSibling).toBe(screen.getByRole('button', { name: 'Resume' }));
+      expect(screen.queryByText('Resume in 3 seconds.')).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 1 second');
+      expect(continueChat).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should take the wait from the provider sentence without a Retry-After', () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <ChatErrorRateLimit
+          resumable
+          description='Please try again in 7s.'
+          autoResume={{ runId: 'run-1', attempt: 1 }}
+        />,
+      );
+
+      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 7 seconds');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should resume once when the person clicks Resume during the countdown', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ChatErrorRateLimit resumable retryAfterSeconds={5} autoResume={{ runId: 'run-1', attempt: 1 }} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should stop counting down once the run has spent its automatic resumes', () => {
+    vi.useFakeTimers();
+    try {
+      for (let attempt = 1; attempt <= maximumRateLimitAutoResumes; attempt += 1) {
+        const { unmount } = render(
+          <ChatErrorRateLimit resumable retryAfterSeconds={1} autoResume={{ runId: 'run-1', attempt }} />,
+        );
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        unmount();
+      }
+      expect(continueChat).toHaveBeenCalledTimes(maximumRateLimitAutoResumes);
+
+      render(
+        <ChatErrorRateLimit
+          resumable
+          retryAfterSeconds={1}
+          autoResume={{
+            runId: 'run-1',
+            attempt: maximumRateLimitAutoResumes + 1,
+          }}
+        />,
+      );
+
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      expect(screen.getByText('Resume in 1 second.')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not count down for a wait the host will not resume', () => {
+    render(<ChatErrorRateLimit resumable={false} retryAfterSeconds={1} autoResume={{ runId: 'run-1', attempt: 1 }} />);
+
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+  });
+
+  it('should cancel the pending resume when the card unmounts', () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(
+        <ChatErrorRateLimit resumable retryAfterSeconds={2} autoResume={{ runId: 'run-1', attempt: 1 }} />,
+      );
+
+      unmount();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(continueChat).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

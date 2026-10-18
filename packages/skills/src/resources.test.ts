@@ -10,7 +10,7 @@ import { skillOwners } from '#skill-bundles.js';
 
 describe('@taucad/skills/resources', () => {
   it('should aggregate one immutable lazy bundle per declared owner', () => {
-    expect(systemSkillBundles).toHaveLength(13);
+    expect(systemSkillBundles).toHaveLength(14);
     expect(systemSkillBundles).toHaveLength(skillOwners.length);
     expect(Object.isFrozen(systemSkillBundles)).toBe(true);
     expect(new Set(systemSkillBundles.map(({ slug }) => slug))).toHaveProperty('size', skillOwners.length);

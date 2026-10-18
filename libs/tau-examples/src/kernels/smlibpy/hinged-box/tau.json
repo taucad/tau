@@ -1,0 +1,19 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_Wd9KcV2mPj7Ls4Qh1Ny8A",
+  "name": "Hinged Box — SMLibPy",
+  "description": "A walnut box whose lid opens on a three-knuckle brass hinge, with a revolute joint and an open-and-close animation.",
+  "tags": [
+    "smlibpy",
+    "python",
+    "mechanism",
+    "kinematics",
+    "hinge",
+    "reference"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.py"
+    }
+  }
+}

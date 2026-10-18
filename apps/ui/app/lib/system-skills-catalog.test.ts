@@ -11,6 +11,7 @@ const progressiveDisclosureSkillNames = [
   'cad-picogk',
   'cad-picovoxel',
   'cad-smlib',
+  'cad-smlibpy',
   'cad-openscad',
   'cad-replicad',
   'cad-manifold',

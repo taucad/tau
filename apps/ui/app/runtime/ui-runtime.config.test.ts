@@ -54,6 +54,7 @@ describe('createUiRuntimeConfig', () => {
       catalog: kernelConfigurations,
       omitted: {
         build123d: 'native: a browser cannot run a sandboxed CPython; the desktop runtime lists build123d()',
+        smlibpy: 'native: a browser cannot run a sandboxed CPython; the desktop runtime lists smlibpy()',
         picogk: 'native: a browser cannot run the .NET worker; the desktop runtime lists picogk()',
       },
     });

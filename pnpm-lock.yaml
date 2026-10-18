@@ -1960,6 +1960,9 @@ importers:
       '@taucad/smlib':
         specifier: workspace:*
         version: link:../../packages/plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../../packages/plugins/smlibpy
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../../packages/plugins/tscircuit
@@ -2721,6 +2724,9 @@ importers:
       '@taucad/smlib':
         specifier: workspace:*
         version: link:../../packages/plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../../packages/plugins/smlibpy
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples
@@ -3683,6 +3689,9 @@ importers:
       '@taucad/smlib':
         specifier: workspace:*
         version: link:../plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../plugins/smlibpy
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../plugins/tscircuit
@@ -4027,6 +4036,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../runtime-testing
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../plugins/smlibpy
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -5413,6 +5425,9 @@ importers:
       '@taucad/smlib':
         specifier: workspace:*
         version: link:../plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../plugins/smlibpy
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../plugins/tscircuit

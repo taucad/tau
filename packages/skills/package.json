@@ -1,7 +1,7 @@
 {
   "name": "@taucad/skills",
   "version": "0.1.0-beta.6",
-  "description": "Tau CAD agent skill bundles for replicad, JSCAD, Manifold, OpenCascade, build123d, PicoGK, OpenSCAD, KCL and GeoSpec",
+  "description": "Tau CAD agent skill bundles for replicad, JSCAD, Manifold, OpenCascade, build123d, SMLibPy, PicoGK, OpenSCAD, KCL and GeoSpec",
   "type": "module",
   "sideEffects": false,
   "private": false,
@@ -76,6 +76,7 @@
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/smlib": "workspace:*",
+    "@taucad/smlibpy": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/workbench": "workspace:*",
     "@taucad/zoo": "workspace:*",

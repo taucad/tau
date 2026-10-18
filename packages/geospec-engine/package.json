@@ -89,6 +89,7 @@
     "@taucad/native-process-core": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/smlibpy": "workspace:*",
     "@taucad/types": "workspace:*",
     "vitest": "catalog:"
   },
@@ -98,7 +99,8 @@
   "peerDependencies": {
     "@taucad/build123d": "^0.1.0-beta.0",
     "@taucad/native-process-core": "^0.1.0-beta.0",
-    "@taucad/picogk": "^0.1.0-beta.0"
+    "@taucad/picogk": "^0.1.0-beta.0",
+    "@taucad/smlibpy": "^0.1.0-beta.0"
   },
   "peerDependenciesMeta": {
     "@taucad/build123d": {
@@ -108,6 +110,9 @@
       "optional": true
     },
     "@taucad/picogk": {
+      "optional": true
+    },
+    "@taucad/smlibpy": {
       "optional": true
     }
   }

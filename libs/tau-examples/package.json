@@ -34,6 +34,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/smlib": "workspace:*",
+    "@taucad/smlibpy": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*"
   },

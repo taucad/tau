@@ -1595,6 +1595,42 @@
     ]
   },
   {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "smlibpy",
+    "name": "hinged-box",
+    "mainFile": "main.py",
+    "files": [
+      "README.md",
+      "main.py",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "smlibpy",
+    "name": "parametric-plate",
+    "mainFile": "main.py",
+    "files": [
+      "README.md",
+      "main.py",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "smlibpy",
+    "name": "pbr-materials",
+    "mainFile": "main.py",
+    "files": [
+      "README.md",
+      "main.py",
+      "tau.json"
+    ]
+  },
+  {
     "kind": "model",
     "geometry": "3d",
     "kernel": "tscircuit",

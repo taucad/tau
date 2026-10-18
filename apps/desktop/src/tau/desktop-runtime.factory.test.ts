@@ -64,14 +64,26 @@ describe('desktop runtime kernels', () => {
     expect(importMatcher.test("import { makeBox } from 'replicad';")).toBe(false);
   });
 
-  it('should list Build123d and PicoGK after Assimp and before Replicad, each bounded by the desktop policy', async () => {
+  it('should route only smlibpy-importing Python files to SMLibPy, leaving the rest to Build123d', async () => {
+    const { kernels } = await resolveDesktopRuntime();
+    const smlibpyKernel = kernels.find((kernel) => kernel.id === 'smlibpy')!;
+    const importMatcher = new RegExp(smlibpyKernel.detectImport!.source, smlibpyKernel.detectImport!.flags);
+
+    expect(smlibpyKernel.extensions).toEqual(['py']);
+    expect(importMatcher.test('from smlibpy import Box\n')).toBe(true);
+    expect(importMatcher.test('import numpy as np, smlibpy as sm\n')).toBe(true);
+    expect(importMatcher.test('from build123d import Box\n')).toBe(false);
+    expect(importMatcher.test('# import smlibpy\nfrom build123d import Box\n')).toBe(false);
+  });
+
+  it('should list SMLibPy, Build123d and PicoGK after Assimp and before Replicad, each bounded by the desktop policy', async () => {
     const { kernels } = await resolveDesktopRuntime();
     const ids = kernels.map((kernel) => kernel.id);
 
-    expect(ids.slice(ids.indexOf('build123d'), ids.indexOf('picogk') + 1)).toEqual(['build123d', 'picogk']);
+    expect(ids.slice(ids.indexOf('smlibpy'), ids.indexOf('picogk') + 1)).toEqual(['smlibpy', 'build123d', 'picogk']);
     expect(ids.indexOf('replicad')).toBeGreaterThan(ids.indexOf('picogk'));
     /* Unbounded defaults let one script hold all memory for as long as it runs. */
-    for (const id of ['build123d', 'picogk']) {
+    for (const id of ['smlibpy', 'build123d', 'picogk']) {
       const { options } = kernels.find((kernel) => kernel.id === id)!;
       expect(options).toMatchObject({ requestTimeout: 10 * 60_000, maxArtifactBytes: 1024 * 1024 * 1024 });
       expect(options).not.toHaveProperty('closure');

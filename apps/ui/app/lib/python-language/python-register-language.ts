@@ -26,10 +26,40 @@ const build123dAuthoringStubs = [
   ['export_step', 'Export retained BRep geometry to STEP'],
 ] as const;
 
-const createBuild123dCompletionProvider = (monaco: typeof Monaco): Monaco.languages.CompletionItemProvider => ({
+const smlibpyAuthoringStubs = [
+  ['Part', 'SMLib NURBS solid with booleans, fillets, chamfers and shells'],
+  ['Sketch', 'Planar region to extrude, revolve or sweep'],
+  ['Box', 'Create a box centered on the origin'],
+  ['Cylinder', 'Create a cylinder centered on the origin'],
+  ['Sphere', 'Create a sphere centered on the origin'],
+  ['Rectangle', 'Create a rectangle sketch, optionally filleted'],
+  ['Circle', 'Create a circle sketch'],
+  ['Polygon', 'Create a polygon sketch from points'],
+  ['Align', 'Place a new shape by its bounds on each axis'],
+  ['Plane', 'Construction plane: Plane.XY, Plane.XZ, offset and placement'],
+  ['Pos', 'Translation location; Pos(x, y, z) * shape'],
+  ['Rot', 'Rotation location in degrees; Rot(x, y, z) * shape'],
+  ['GridLocations', 'Grid of locations; GridLocations(...) * shape'],
+  ['PolarLocations', 'Circular pattern of locations'],
+  ['Hole', 'Cylindrical cutter for a drilled hole'],
+  ['loft', 'Loft a solid through profiles'],
+  ['sweep', 'Sweep a profile along a path'],
+  ['tessellate', 'Triangulate a shape at chordal and angular tolerances'],
+] as const;
+
+const createKernelCompletionProvider = (monaco: typeof Monaco): Monaco.languages.CompletionItemProvider => ({
   provideCompletionItems(model, position) {
     const line = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
-    if (!/(?:\bfrom\s+build123d\s+import\s+[\w, ]*|\bbuild123d\.[\w]*)$/u.test(line)) {
+    const match = /(?:\bfrom\s+(build123d|smlibpy)\s+import\s+[\w, ]*|\b(build123d|smlibpy)\.\w*)$/u.exec(line);
+    // The kernel module completes its own stubs after `from <module> import` or `<module>.`.
+    const module = match?.[1] ?? match?.[2];
+    const kernel =
+      module === 'smlibpy'
+        ? { module, stubs: smlibpyAuthoringStubs }
+        : module === 'build123d'
+          ? { module, stubs: build123dAuthoringStubs }
+          : undefined;
+    if (kernel === undefined) {
       return { suggestions: [] };
     }
     const word = model.getWordUntilPosition(position);
@@ -40,12 +70,12 @@ const createBuild123dCompletionProvider = (monaco: typeof Monaco): Monaco.langua
       endColumn: word.endColumn,
     };
     return {
-      suggestions: build123dAuthoringStubs.map(([label, documentation]) => ({
+      suggestions: kernel.stubs.map(([label, documentation]) => ({
         label,
         insertText: label,
-        detail: `build123d.${label}`,
+        detail: `${kernel.module}.${label}`,
         documentation,
-        kind: label.startsWith('export_')
+        kind: /^[a-z]/u.test(label)
           ? monaco.languages.CompletionItemKind.Function
           : monaco.languages.CompletionItemKind.Class,
         range,
@@ -61,7 +91,7 @@ export const pythonContribution: LanguageContribution = {
   register: () => undefined,
   activate: ({ monaco }): ActivationResult => ({
     disposables: [
-      monaco.languages.registerCompletionItemProvider(codeLanguages.python, createBuild123dCompletionProvider(monaco)),
+      monaco.languages.registerCompletionItemProvider(codeLanguages.python, createKernelCompletionProvider(monaco)),
     ],
   }),
   dispose: () => undefined,

@@ -495,13 +495,13 @@ type ShippedClosure = { readonly root: string; readonly receipt: ClosureReceipt 
 const verifyNativeClosures = async (): Promise<ReadonlyMap<string, ShippedClosure>> => {
   const closuresRoot = resolve(appPath, 'Contents/Resources/payloads/closures/sha256');
   const expected = new Map<string, { readonly package: string; readonly dependency: string }>();
-  for (const name of ['@taucad/build123d', '@taucad/picogk']) {
+  for (const name of ['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk']) {
     const manifestPath = resolve(workspaceRoot, `packages/plugins/${name.slice('@taucad/'.length)}/tau-plugin.json`);
     const deployment = parsePluginDeployment(JSON.parse(readFileSync(manifestPath, 'utf8')), manifestPath);
     for (const [dependency, variants] of Object.entries(deployment.dependencies)) {
       const variant = variants.find(({ target }) => targetKey(target) === `darwin-${architecture}`);
       if (variant !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- two small manifests
+        // oxlint-disable-next-line no-await-in-loop -- three small manifests
         const integrity = await computeClosureIntegrity(variant.payloads);
         const key = Buffer.from(integrity.slice('sha256-'.length), 'base64');
         expected.set(key.toString('hex'), { package: name, dependency });

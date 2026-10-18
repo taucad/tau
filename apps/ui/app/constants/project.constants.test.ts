@@ -122,6 +122,7 @@ describe('createInitialProject', () => {
     ['openscad', ['main.scad']],
     ['zoo', ['main.kcl', 'project.toml']],
     ['build123d', ['main.py', 'pylock.toml', 'pyproject.toml', 'uv.lock']],
+    ['smlibpy', ['main.py', 'pylock.toml', 'pyproject.toml', 'uv.lock']],
     ['picogk', ['MountingBracketV2.csproj', 'main.cs', 'packages.lock.json']],
     ['replicad', ['main.ts', 'package.json']],
   ])('should give a %s project the files its ecosystem reads: %j', async (kernel, paths) => {

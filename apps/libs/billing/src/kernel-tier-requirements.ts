@@ -17,6 +17,7 @@ export const kernelTierRequirements = {
   jscad: 'free',
   opencascadejs: 'free',
   smlib: 'free',
+  smlibpy: 'free',
   tscircuit: 'free',
   zoo: 'pro',
 } as const satisfies Record<KernelId, BillingTier>;

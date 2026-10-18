@@ -38,7 +38,7 @@ describe('standalone-project oracle', () => {
   });
 
   it('should group the catalog by ecosystem', () => {
-    expect(ecosystemKernels('pypi')).toEqual(['build123d']);
+    expect(ecosystemKernels('pypi')).toEqual(['build123d', 'smlibpy']);
     expect(ecosystemKernels('nuget')).toEqual(['picogk']);
     expect(ecosystemKernels('none')).toEqual(['openscad']);
     expect(ecosystemKernels('kcl')).toEqual(['zoo']);

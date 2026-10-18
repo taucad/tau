@@ -56,7 +56,7 @@ export async function getKernelDependencies(kernelId: KernelProvider): Promise<R
 
 /**
  * The project template a new project of this kernel starts from: the manifest and lock files its plugin publishes,
- * pinned to the kernel's own closure (`@taucad/build123d/project/*`, `@taucad/picogk/project/*`); undefined for a
+ * pinned to the kernel's own closure (`@taucad/build123d/project/*`, `@taucad/smlibpy/project/*`, `@taucad/picogk/project/*`); undefined for a
  * kernel whose project files Tau writes itself. Only the text files load, never the plugin.
  */
 export async function getKernelProjectTemplate(kernelId: KernelProvider): Promise<Record<string, string> | undefined> {
@@ -66,6 +66,15 @@ export async function getKernelProjectTemplate(kernelId: KernelProvider): Promis
         import('@taucad/build123d/project/pyproject.toml?raw'),
         import('@taucad/build123d/project/pylock.toml?raw'),
         import('@taucad/build123d/project/uv.lock?raw'),
+      ]);
+      return { 'pyproject.toml': pyproject.default, 'pylock.toml': pylock.default, 'uv.lock': uvLock.default };
+    }
+
+    case 'smlibpy': {
+      const [pyproject, pylock, uvLock] = await Promise.all([
+        import('@taucad/smlibpy/project/pyproject.toml?raw'),
+        import('@taucad/smlibpy/project/pylock.toml?raw'),
+        import('@taucad/smlibpy/project/uv.lock?raw'),
       ]);
       return { 'pyproject.toml': pyproject.default, 'pylock.toml': pylock.default, 'uv.lock': uvLock.default };
     }

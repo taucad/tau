@@ -56,6 +56,15 @@ build123d
   (https://github.com/CadQuery/cadquery), also licensed under the Apache
   License, Version 2.0.
 
+smlibpy
+  Copyright (c) 2026 AWV Informatik AG
+  Licensed under the MIT License.
+  https://pypi.org/project/smlibpy/
+  Corpus source: the public names, signatures and docstrings of the smlibpy
+  0.3.5 Python package, described by CPython. smlibpy's compiled kernel is USD
+  BRep (Apache License, Version 2.0, Copyright (c) 2020-2026 NVIDIA
+  CORPORATION & AFFILIATES); the corpus carries none of its code.
+
 PicoGK
   Copyright 2023-2026 LEAP 71
   Licensed under the Apache License, Version 2.0.

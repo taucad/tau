@@ -47,10 +47,11 @@ export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, { build123d }, { picogk }] = await Promise.all([
+  const [{ assimp }, { image }, { zoo }, { smlibpy }, { build123d }, { picogk }] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
     import('@taucad/zoo'),
+    import('@taucad/smlibpy'),
     import('@taucad/build123d'),
     import('@taucad/picogk'),
   ]);
@@ -69,7 +70,11 @@ export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise
         },
       },
     }),
-    /* Native kernels bind to their sealed closures themselves, and refuse with `KERNEL_NOT_PREPARED` until then. */
+    /*
+     * Native kernels bind to their sealed closures themselves, and refuse with `KERNEL_NOT_PREPARED` until then.
+     * SMLibPy comes before Build123d: it claims only a `.py` entry that imports smlibpy, and the rest falls through.
+     */
+    smlibpy(),
     build123d(),
     picogk(),
     assimp({ preset: 'all' }),

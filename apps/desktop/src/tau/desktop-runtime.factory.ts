@@ -23,6 +23,7 @@ import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { smlib } from '@taucad/smlib';
+import { smlibpy } from '@taucad/smlibpy';
 import { slicer } from '@taucad/slicer';
 import { tscircuit } from '@taucad/tscircuit';
 import { zoo } from '@taucad/zoo';
@@ -118,7 +119,9 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
             transcoders: { export: { backend: desktopAssimpBackend } },
           }),
           /* Native kernels bind to the closures main's frame names when they initialize, and refuse with its reason
-           * without one. `desktopNativeDeployments` mirrors these two for packaging; a parity test pins it. */
+           * without one. `desktopNativeDeployments` mirrors these three for packaging; a parity test pins it. SMLibPy
+           * precedes Build123d: it claims only a `.py` entry that imports smlibpy, and the rest falls through. */
+          smlibpy({ kernels: { default: desktopNativeBounds } }),
           build123d({ kernels: { default: desktopNativeBounds } }),
           picogk({ kernels: { default: desktopNativeBounds } }),
           replicad({

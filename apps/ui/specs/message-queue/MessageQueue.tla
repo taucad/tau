@@ -12,6 +12,8 @@
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;
 \* queued admission, FIFO delivery and durable cancellation retain these owners.
+\* A foreign segment rescan that ends unchanged re-presents the local transcript;
+\* it reads the projection only and leaves admission, delivery and the queue alone.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -66,9 +66,17 @@ describe('section cap outline', () => {
     const material = createSectionCapOutlineMaterial(createSectionCapOutlineFaces(), 0xff_00_00);
     expect(material.fragmentShader.split('#include <clipping_planes_fragment>')).toHaveLength(2);
     expect(material.vertexShader.split('#include <clipping_planes_vertex>')).toHaveLength(2);
-    expect(material.fragmentShader).toContain('if ( ! tauIsOutline ) discard;');
-    expect(material.fragmentShader).toContain('min( tauSlope, tauPixelWorld ) * tauOutline.y');
+    expect(material.fragmentShader).toContain('if ( tauCoverage <= 0.0 ) discard;');
+    // The pixel's footprint inside the line width, in screen pixels at any wall angle.
+    expect(material.fragmentShader).toContain(
+      'clamp( min( tauPixels + 0.5, tauOutline.y ) - max( tauPixels - 0.5, 0.0 ), 0.0, 1.0 )',
+    );
+    // A wall seen from inside, through the cut, draws at the plane so the cap does not hide its line.
+    expect(material.fragmentShader).toContain('if ( ! gl_FrontFacing && tauAlong < 0.0 )');
+    expect(material.fragmentShader).toContain('gl_FragDepth = tauDepth;');
     expect([material.depthTest, material.depthWrite, material.side]).toEqual([true, false, THREE.DoubleSide]);
+    // Blended at its coverage, yet drawn in the opaque pass after the caps.
+    expect([material.transparent, material.blending]).toEqual([false, THREE.CustomBlending]);
   });
 
   it('matches stable stripped section cap outline node material JSON snapshot', async () => {

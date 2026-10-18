@@ -4,6 +4,62 @@ import { cn } from '#utils/cn.js';
 
 const DrawerContext = React.createContext(false);
 
+/** A visual viewport shorter than the layout viewport by less than this is browser chrome, not a keyboard. CSS pixels. */
+const softKeyboardThreshold = 120;
+
+/** The slice of the layout viewport the user can see. CSS pixels, layout-viewport coordinates. */
+type VisibleFrame = { readonly top: number; readonly bottom: number };
+
+let visibleFrame: VisibleFrame | undefined;
+
+/* A software keyboard shrinks only the visual viewport, and iOS also pans it down to reveal the
+   focused field, so what the user sees is `offsetTop` to `offsetTop + height`. A pinch zoom shrinks
+   it too, so a scaled viewport never reads as a keyboard. */
+function readKeyboardFrame(): VisibleFrame | undefined {
+  const viewport = globalThis.visualViewport;
+  if (!viewport || viewport.scale > 1.01 || globalThis.innerHeight - viewport.height < softKeyboardThreshold) {
+    visibleFrame = undefined;
+    return visibleFrame;
+  }
+  const top = Math.round(viewport.offsetTop);
+  const bottom = Math.round(viewport.offsetTop + viewport.height);
+  if (visibleFrame?.top !== top || visibleFrame.bottom !== bottom) {
+    visibleFrame = { top, bottom };
+  }
+  return visibleFrame;
+}
+
+function subscribeKeyboardFrame(onChange: () => void): () => void {
+  const viewport = globalThis.visualViewport;
+  viewport?.addEventListener('resize', onChange);
+  viewport?.addEventListener('scroll', onChange);
+  return () => {
+    viewport?.removeEventListener('resize', onChange);
+    viewport?.removeEventListener('scroll', onChange);
+  };
+}
+
+const readNoKeyboard = (): undefined => undefined;
+
+const nonTextInputTypes = new Set([
+  'button',
+  'checkbox',
+  'color',
+  'file',
+  'image',
+  'radio',
+  'range',
+  'reset',
+  'submit',
+]);
+
+function isTextEntry(target: EventTarget): boolean {
+  if (target instanceof HTMLInputElement) {
+    return !nonTextInputTypes.has(target.type);
+  }
+  return target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
+}
+
 /**
  * Reports whether the caller is rendered inside a {@link Drawer}.
  *
@@ -20,7 +76,8 @@ function useIsInsideDrawer(): boolean {
 }
 
 /**
- * Owns the open state and gesture lifecycle for a drawer.
+ * Owns the open state and gesture lifecycle for a drawer. `repositionInputs` defaults to `false`:
+ * {@link DrawerContent} keeps a focused field above the keyboard instead.
  *
  * @public
  * @example <caption>Open a drawer by default.</caption>
@@ -31,11 +88,17 @@ function useIsInsideDrawer(): boolean {
  * createElement(Drawer, { defaultOpen: true });
  * ```
  */
-function Drawer({ ...properties }: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
+function Drawer({
+  repositionInputs = false,
+  ...properties
+}: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
   return (
     // oxlint-disable-next-line react/jsx-boolean-value -- we want to explicitly set the value to true
     <DrawerContext.Provider value={true}>
-      <DrawerPrimitive.Root data-slot='drawer' {...properties} />
+      {/* DrawerContent keeps a focused field above the keyboard. Vaul's own repositioning moves the
+          drawer a second time on top of iOS's pan, and with snap points it counts the snap offset
+          twice, so it pushes the field off screen. */}
+      <DrawerPrimitive.Root data-slot='drawer' repositionInputs={repositionInputs} {...properties} />
     </DrawerContext.Provider>
   );
 }
@@ -53,9 +116,12 @@ function Drawer({ ...properties }: React.ComponentProps<typeof DrawerPrimitive.R
  * ```
  */
 function DrawerNestedRoot({
+  repositionInputs = false,
   ...properties
 }: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>): React.JSX.Element {
-  return <DrawerPrimitive.NestedRoot data-slot='drawer-nested-root' {...properties} />;
+  return (
+    <DrawerPrimitive.NestedRoot data-slot='drawer-nested-root' repositionInputs={repositionInputs} {...properties} />
+  );
 }
 
 /**
@@ -167,7 +233,9 @@ function DrawerOverlay({
 }
 
 /**
- * Renders the draggable drawer surface.
+ * Renders the draggable drawer surface. While a field inside a bottom drawer has the software
+ * keyboard, the drawer fills the part of the screen the keyboard leaves visible, so the field
+ * stays in view, and it exposes that state as `data-keyboard="open"`.
  *
  * @public
  * @example <caption>Render drawer content.</caption>
@@ -181,16 +249,47 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  style,
+  onFocus,
+  onBlur,
   ...properties
 }: React.ComponentProps<typeof DrawerPrimitive.Content>): React.JSX.Element {
+  const keyboardFrame = React.useSyncExternalStore(subscribeKeyboardFrame, readKeyboardFrame, readNoKeyboard);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const keyboard = isEditing ? keyboardFrame : undefined;
+
+  /* Fitting the drawer to the frame can leave the field below the fold of a scrolling panel. */
+  React.useEffect(() => {
+    if (keyboard && document.activeElement instanceof HTMLElement) {
+      document.activeElement.scrollIntoView({ block: 'nearest' });
+    }
+  }, [keyboard]);
+
+  const frameStyle: Record<`--${string}`, string> | undefined = keyboard
+    ? {
+        '--keyboard-frame-bottom': `${globalThis.innerHeight - keyboard.bottom}px`,
+        '--keyboard-frame-height': `${keyboard.bottom - keyboard.top}px`,
+      }
+    : undefined;
+
   return (
     <DrawerPortal data-slot='drawer-portal'>
       <DrawerOverlay />
       <DrawerPrimitive.Content
         data-slot='drawer-content'
+        data-keyboard={keyboard ? 'open' : undefined}
+        style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
           'group/drawer-content fixed z-50 flex h-auto flex-col bg-background',
           'select-none',
+          /* A field is editable text even inside an unselectable drawer: WebKit inherits
+             user-select, and iOS will not place a caret in an editor under user-select: none. */
+          '[&_:is(input,textarea,[contenteditable=true])]:select-text',
+          /* While a field has the keyboard, a bottom drawer fills the visible frame above it, at
+             any snap point; the !s outrank the inline geometry vaul and callers set. */
+          'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:bottom-(--keyboard-frame-bottom)!',
+          'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:max-h-(--keyboard-frame-height)!',
+          'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:transform-none!',
           /* A drawer is a touch surface: its list rows are 44px thumb targets (Tau's spacing unit is 4.4px). */
           '[&_[data-slot=command-item]]:min-h-10',
           'data-[vaul-drawer-direction=bottom]:pb-[env(safe-area-inset-bottom)]',
@@ -200,6 +299,14 @@ function DrawerContent({
           'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0 data-[vaul-drawer-direction=left]:w-3/4 data-[vaul-drawer-direction=left]:border-r data-[vaul-drawer-direction=left]:sm:max-w-sm',
           className,
         )}
+        onFocus={(event) => {
+          setIsEditing(isTextEntry(event.target));
+          onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setIsEditing(false);
+          onBlur?.(event);
+        }}
         {...properties}
       >
         <DrawerHandleIndicator />

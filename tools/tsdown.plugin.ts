@@ -6,27 +6,13 @@
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
-import type {
-  CreateNodesContext,
-  CreateNodesContextV2,
-  CreateNodesResult,
-  CreateNodesV2,
-  ProjectConfiguration,
-} from '@nx/devkit';
+import type { CreateNodesContext, CreateNodesResult, CreateNodes, ProjectConfiguration } from '@nx/devkit';
 
-type InputDefinition =
-  | { input: string; projects: string | string[] }
-  | { input: string; dependencies: true }
-  | { input: string }
-  | { fileset: string }
-  | { runtime: string }
-  | { externalDependencies: string[] }
-  | { dependentTasksOutputFiles: string; transitive?: boolean }
-  | { env: string };
+type NamedInputs = NonNullable<ProjectConfiguration['namedInputs']>;
 
 type PackageJson = {
   nx?: {
-    namedInputs?: Record<string, Array<string | InputDefinition>>;
+    namedInputs?: NamedInputs;
   };
 };
 
@@ -35,10 +21,7 @@ type PackageJson = {
  *
  * Copied from NX source code as it's not available in the @nx/devkit exports.
  */
-export function getNamedInputs(
-  directory: string,
-  context: CreateNodesContext | CreateNodesContextV2,
-): Record<string, Array<string | InputDefinition>> {
+export function getNamedInputs(directory: string, context: CreateNodesContext): NamedInputs {
   const projectJsonPath = join(directory, 'project.json');
   const projectJson: ProjectConfiguration | undefined = existsSync(projectJsonPath)
     ? readJsonFile<ProjectConfiguration>(projectJsonPath)
@@ -54,7 +37,7 @@ export function getNamedInputs(
   };
 }
 
-const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2): CreateNodesResult | undefined => {
+const createTsupTarget = (configFilePath: string, context: CreateNodesContext): CreateNodesResult | undefined => {
   const projectRoot = dirname(configFilePath);
 
   if (projectRoot === '.') {
@@ -92,7 +75,7 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
   };
 };
 
-export const createNodesV2: CreateNodesV2 = [
+export const createNodesV2: CreateNodes = [
   '**/tsdown.config.ts',
   // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options, context) => {

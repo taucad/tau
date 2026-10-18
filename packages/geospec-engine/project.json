@@ -5,6 +5,11 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "build": {
+      "options": {
+        "command": "node --max-old-space-size=4096 ../../node_modules/tsdown/dist/run.mjs"
+      }
+    },
     "generate-provenance": {
       "command": "node scripts/generate-provenance.mjs",
       "options": {

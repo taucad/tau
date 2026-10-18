@@ -107,7 +107,7 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     chunkSizeWarningLimit: 16_384,
-    rollupOptions: { input: 'app/index.html' },
+    rolldownOptions: { input: 'app/index.html' },
   },
   worker: { format: 'es' },
 });

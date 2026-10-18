@@ -84,16 +84,16 @@ catalog:
   '@nestjs/platform-fastify': ^11.2.4
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
-  '@nx/devkit': 22.7.12
-  '@nx/eslint': 22.7.12
-  '@nx/eslint-plugin': 22.7.12
-  '@nx/js': 22.7.12
-  '@nx/nest': 22.7.12
-  '@nx/node': 22.7.12
-  '@nx/react': 22.7.12
-  '@nx/vite': 22.7.12
-  '@nx/web': 22.7.12
-  '@nx/webpack': 22.7.12
+  '@nx/devkit': 23.3.0
+  '@nx/eslint': 23.3.0
+  '@nx/eslint-plugin': 23.3.0
+  '@nx/js': 23.3.0
+  '@nx/nest': 23.3.0
+  '@nx/node': 23.3.0
+  '@nx/react': 23.3.0
+  '@nx/vite': 23.3.0
+  '@nx/web': 23.3.0
+  '@nx/webpack': 23.3.0
   '@opentelemetry/api': ^1.9.1
   '@opentelemetry/auto-instrumentations-node': ^0.81.0
   '@opentelemetry/exporter-logs-otlp-http': ^0.223.0
@@ -243,7 +243,7 @@ catalog:
   netlify-cli: ^27.12.0
   next: ^16.4.0
   next-themes: ^0.4.6
-  nx: 22.7.12
+  nx: 23.3.0
   '@taulabs/openrscad-engine': 0.11.0-beta.4
   oxfmt: ^0.36.0
   oxlint: ^1.80.0
@@ -330,7 +330,7 @@ catalog:
   cheerio: 1.2.0
   sharp: 0.35.5
   '@types/web-app-manifest': 1.0.9
-  '@nx/vitest': 22.7.12
+  '@nx/vitest': 23.3.0
   happy-dom: ^21.0.1
   dompurify: 3.4.16
   postcss: ^8.5.29
@@ -462,7 +462,8 @@ overrides:
   next@15.5.27>sharp: 0.35.5
   nx@22.7.12>axios: 1.20.0
   nx@22.7.12>brace-expansion: 5.0.12
-  nx@22.7.12>smol-toml: 1.9.1
+  nx@23.3.0>smol-toml: 1.9.1
+  nx@23.3.0>undici: 7.29.1
   oxfmt@0.36.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
   replicad: 'catalog:'

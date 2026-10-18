@@ -27,7 +27,7 @@
 import { dirname, join, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
-import type { CreateNodesContextV2, CreateNodesResult, CreateNodesV2, ProjectConfiguration } from '@nx/devkit';
+import type { CreateNodesContext, CreateNodesResult, CreateNodes, ProjectConfiguration } from '@nx/devkit';
 
 /**
  * The input shapes this plugin itself emits. Nx's own `InputDefinition` is a
@@ -57,7 +57,7 @@ type TsgoPluginOptions = {
 const tsConfigCandidates = ['tsconfig.app.json', 'tsconfig.lib.json'];
 
 /** Only probed for key presence, so the value shape is deliberately opaque. */
-function getNamedInputs(directory: string, context: CreateNodesContextV2): Record<string, unknown> {
+function getNamedInputs(directory: string, context: CreateNodesContext): Record<string, unknown> {
   const projectJsonPath = join(directory, 'project.json');
   const projectJson: ProjectConfiguration | undefined = existsSync(projectJsonPath)
     ? readJsonFile<ProjectConfiguration>(projectJsonPath)
@@ -181,7 +181,7 @@ function detectTsConfigs(workspaceRoot: string, projectRoot: string): string[] {
 
 const createTsgoTarget = (
   configFilePath: string,
-  context: CreateNodesContextV2,
+  context: CreateNodesContext,
   options: TsgoPluginOptions,
 ): CreateNodesResult | undefined => {
   const projectRoot = dirname(configFilePath);
@@ -247,7 +247,7 @@ const createTsgoTarget = (
   };
 };
 
-export const createNodesV2: CreateNodesV2<TsgoPluginOptions> = [
+export const createNodesV2: CreateNodes<TsgoPluginOptions> = [
   '**/tsconfig.json',
 
   (configFiles, options, context) => {

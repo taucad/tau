@@ -10,6 +10,6 @@ export default defineConfig({
     ssr: 'app/maintenance-command.ts',
     outDir: 'dist',
     emptyOutDir: false,
-    rollupOptions: { output: { entryFileNames: 'maintenance-command.js' } },
+    rolldownOptions: { output: { entryFileNames: 'maintenance-command.js' } },
   },
 });

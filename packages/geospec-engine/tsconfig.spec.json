@@ -28,6 +28,7 @@
     "src/cli/wire-value.ts",
     "src/model/default-runtime.test.ts",
     "src/model/default-runtime.ts",
+    "src/doctrine-ceilings.test.ts",
     "src/package-metadata.test.ts",
     "src/provenance-script.test.ts",
     "src/runner/events.test.ts",

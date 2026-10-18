@@ -489,7 +489,7 @@ TAU: number
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 284 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 284 symbols by file with the lines that hold each, and read that range of the named file.
 
 - 20 reference files, named in `api-index.md`
 

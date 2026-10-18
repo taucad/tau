@@ -2,17 +2,17 @@
 
 PicoGK 2.3.0.0 · 1990 symbols · extracted by Roslyn 5.9.0.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
+Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
 ## CAD authoring — PicoGK — `api-cad-authoring-picogk.md`
 
-PicoGK.ActiveVoxelCounterScalar (class) [2 members] [category: CAD authoring]
+PicoGK.ActiveVoxelCounterScalar (class) [lines 5-13] [2 members] [category: CAD authoring]
   PicoGK.ActiveVoxelCounterScalar.nCount (method)
   PicoGK.ActiveVoxelCounterScalar.InformActiveValue (method)
-PicoGK.AddVectorFieldToViewer (class) [2 members] [category: CAD authoring]
+PicoGK.AddVectorFieldToViewer (class) [lines 15-23] [2 members] [category: CAD authoring]
   PicoGK.AddVectorFieldToViewer.AddToViewer (method)
   PicoGK.AddVectorFieldToViewer.InformActiveValue (method)
-PicoGK.Animation (class) [5 members] [category: CAD authoring]
+PicoGK.Animation (class) [lines 25-54] [5 members] [category: CAD authoring]
   PicoGK.Animation.IAction (interface) [1 members]
     PicoGK.Animation.IAction.Do (method)
   PicoGK.Animation.EType (enum) [3 members]
@@ -22,13 +22,13 @@ PicoGK.Animation (class) [5 members] [category: CAD authoring]
   PicoGK.Animation.Animation (constructor)
   PicoGK.Animation.End (method)
   PicoGK.Animation.bAnimate (method)
-PicoGK.AnimationQueue (class) [5 members] [category: CAD authoring]
+PicoGK.AnimationQueue (class) [lines 56-73] [5 members] [category: CAD authoring]
   PicoGK.AnimationQueue.AnimationQueue (constructor)
   PicoGK.AnimationQueue.Clear (method)
   PicoGK.AnimationQueue.bPulse (method)
   PicoGK.AnimationQueue.bIsIdle (method)
   PicoGK.AnimationQueue.Add (method)
-PicoGK.BBox2 (struct) [10 members] [category: CAD authoring] — 2D Bounding Box object
+PicoGK.BBox2 (struct) [lines 75-122] [10 members] [category: CAD authoring] — 2D Bounding Box object
   PicoGK.BBox2.vecMin (field) — Minimum coordinate of the bounding box
   PicoGK.BBox2.vecMax (field) — Maximum coordinate of the bounding box
   PicoGK.BBox2.BBox2 (constructor) — Creates an empty Bounding Box
@@ -39,7 +39,7 @@ PicoGK.BBox2 (struct) [10 members] [category: CAD authoring] — 2D Bounding Box
   PicoGK.BBox2.vecSize (method) — Returns the size of the Bounding Box
   PicoGK.BBox2.vecCenter (method) — Center point of the bounding box
   PicoGK.BBox2.ToString (method) — A string representation of the Bounding Box
-PicoGK.BBox3 (struct) [13 members] [category: CAD authoring] — 3D bounding box
+PicoGK.BBox3 (struct) [lines 124-188] [13 members] [category: CAD authoring] — 3D bounding box
   PicoGK.BBox3.vecMin (field) — Minimum coordinate of the bounding box
   PicoGK.BBox3.vecMax (field) — Maximum coordinate of the bounding box
   PicoGK.BBox3.BBox3 (constructor) — Create an empty Bounding Box
@@ -53,7 +53,7 @@ PicoGK.BBox3 (struct) [13 members] [category: CAD authoring] — 3D bounding box
   PicoGK.BBox3.vecRandomVectorInside (method) — A function to return a random point in a Bounding…
   PicoGK.BBox3.oAsBoundingBox2 (method) — Return the 2D extent of this Bounding Box
   PicoGK.BBox3.ToString (method) — Return the Bounding Box as string
-PicoGK.CliIo (class) [4 members] [category: CAD authoring] — ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
+PicoGK.CliIo (class) [lines 190-266] [4 members] [category: CAD authoring] — ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
   PicoGK.CliIo.EFormat (enum) [2 members] — Format options for CLI writer
     PicoGK.CliIo.EFormat.UseEmptyFirstLayer (enumMember) — Uses an intentionally-empty first layer to allow the CLI reader…
     PicoGK.CliIo.EFormat.FirstLayerWithContent (enumMember) — The first layer contains outlines (default)
@@ -70,20 +70,20 @@ PicoGK.CliIo (class) [4 members] [category: CAD authoring] — ASCII CLI (Common
     PicoGK.CliIo.Result.Result (constructor)
   PicoGK.CliIo.WriteSlicesToCliFile (method) — Write a stack of PolySlices to a CLI file
   PicoGK.CliIo.oSlicesFromCliFile (method) — Read PolySlice objects from a CLI file
-PicoGK.ColorBgr24 (struct) [5 members] [category: CAD authoring] — BGR 24 bit color value
+PicoGK.ColorBgr24 (struct) [lines 268-298] [5 members] [category: CAD authoring] — BGR 24 bit color value
   PicoGK.ColorBgr24.B (field) — Blue value (0..255)
   PicoGK.ColorBgr24.G (field) — Green value (0..255)
   PicoGK.ColorBgr24.R (field) — Red value (0..255)
   PicoGK.ColorBgr24.ColorBgr24 (constructor) — Construct a BGR value from 3 bytes
   PicoGK.ColorBgr24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-PicoGK.ColorBgra32 (struct) [6 members] [category: CAD authoring] — BGRA 32 bit color value
+PicoGK.ColorBgra32 (struct) [lines 300-335] [6 members] [category: CAD authoring] — BGRA 32 bit color value
   PicoGK.ColorBgra32.B (field) — Blue value (0..255)
   PicoGK.ColorBgra32.G (field) — Green value (0..255)
   PicoGK.ColorBgra32.R (field) — Red value (0..255)
   PicoGK.ColorBgra32.A (field) — Alpha value (0..255)
   PicoGK.ColorBgra32.ColorBgra32 (constructor) — Construct a 32 bit BGRA color value from 4 bytes
   PicoGK.ColorBgra32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-PicoGK.ColorFloat (struct) [11 members] [category: CAD authoring] — A floating point color value with R,G,B,A values
+PicoGK.ColorFloat (struct) [lines 337-401] [11 members] [category: CAD authoring] — A floating point color value with R,G,B,A values
   PicoGK.ColorFloat.R (field) — Red value (1 is full color)
   PicoGK.ColorFloat.G (field) — Green value (1 is full color)
   PicoGK.ColorFloat.B (field) — Blue value (1 is full color)
@@ -95,35 +95,35 @@ PicoGK.ColorFloat (struct) [11 members] [category: CAD authoring] — A floating
   PicoGK.ColorFloat.ToString (method) — Returns the color as hex string
   PicoGK.ColorFloat.clrWeighted (method) — Weighted linear interpolation between two colors
   PicoGK.ColorFloat.clrRandom (method) — Return a random color
-PicoGK.ColorHLS (struct) [5 members] [category: CAD authoring] — A color value in HSV space
+PicoGK.ColorHLS (struct) [lines 403-433] [5 members] [category: CAD authoring] — A color value in HSV space
   PicoGK.ColorHLS.H (field) — Hue value (0..360º)
   PicoGK.ColorHLS.L (field) — Lightness value (0..1)
   PicoGK.ColorHLS.S (field) — Saturation value (0..1)
   PicoGK.ColorHLS.ColorHLS (constructor) — Create an HLS color from its three components
   PicoGK.ColorHLS.op_Implicit (method) — Implicit conversion from ColorFloat to ColorHLS
-PicoGK.ColorHSV (struct) [5 members] [category: CAD authoring] — Hue Saturation Value (HSV) color
+PicoGK.ColorHSV (struct) [lines 435-463] [5 members] [category: CAD authoring] — Hue Saturation Value (HSV) color
   PicoGK.ColorHSV.H (field) — Hue (0..360º)
   PicoGK.ColorHSV.S (field) — Saturation (0..1)
   PicoGK.ColorHSV.V (field) — Value component
   PicoGK.ColorHSV.ColorHSV (constructor) — Create an HSV value from its three components
   PicoGK.ColorHSV.op_Implicit (method) — Implicit conversion that allows you to pass a ColorFloat to…
-PicoGK.ColorRgb24 (struct) [5 members] [category: CAD authoring] — 24 bit RGB color
+PicoGK.ColorRgb24 (struct) [lines 465-495] [5 members] [category: CAD authoring] — 24 bit RGB color
   PicoGK.ColorRgb24.R (field) — Red value (0..255)
   PicoGK.ColorRgb24.G (field) — Green value (0..255)
   PicoGK.ColorRgb24.B (field) — Blue value (0..255)
   PicoGK.ColorRgb24.ColorRgb24 (constructor) — Construct a 24 bit RGB value from 3 byes
   PicoGK.ColorRgb24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-PicoGK.ColorRgba32 (struct) [6 members] [category: CAD authoring] — 32 bit RGBA color
+PicoGK.ColorRgba32 (struct) [lines 497-532] [6 members] [category: CAD authoring] — 32 bit RGBA color
   PicoGK.ColorRgba32.R (field) — Red value (0..255)
   PicoGK.ColorRgba32.G (field) — Green value (0..255)
   PicoGK.ColorRgba32.B (field) — Blue value (0..255)
   PicoGK.ColorRgba32.A (field) — Alpha value 0..255 (255 is opaque)
   PicoGK.ColorRgba32.ColorRgba32 (constructor) — Create a color from 3 or 4 bytes
   PicoGK.ColorRgba32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-PicoGK.Config (class) [2 members] [category: CAD authoring]
+PicoGK.Config (class) [lines 534-542] [2 members] [category: CAD authoring]
   PicoGK.Config.strPicoGKLib (constant)
   PicoGK.Config.Config (constructor)
-PicoGK.CsvTable (class) [11 members] [category: CAD authoring]
+PicoGK.CsvTable (class) [lines 544-581] [11 members] [category: CAD authoring]
   PicoGK.CsvTable.CsvTable (constructor)
   PicoGK.CsvTable.Save (method)
   PicoGK.CsvTable.nRowCount (method)
@@ -135,7 +135,7 @@ PicoGK.CsvTable (class) [11 members] [category: CAD authoring]
   PicoGK.CsvTable.strColumnId (method)
   PicoGK.CsvTable.SetColumnIds (method)
   PicoGK.CsvTable.AddRow (method)
-PicoGK.Easing (class) [12 members] [category: CAD authoring] — Easing functions — they take a float value from 0..1…
+PicoGK.Easing (class) [lines 583-652] [12 members] [category: CAD authoring] — Easing functions — they take a float value from 0..1…
   PicoGK.Easing.EEasing (enum) [10 members]
     PicoGK.Easing.EEasing.LINEAR (enumMember)
     PicoGK.Easing.EEasing.SINE_IN (enumMember)
@@ -158,7 +158,7 @@ PicoGK.Easing (class) [12 members] [category: CAD authoring] — Easing function
   PicoGK.Easing.fEaseCubicInOut (method)
   PicoGK.Easing.fEasingFunction (method)
   PicoGK.Easing.Easing (constructor)
-PicoGK.FieldMetadata (class) [11 members] [category: CAD authoring] — Metadata table containing parameters associated with field types like Voxels,…
+PicoGK.FieldMetadata (class) [lines 654-727] [11 members] [category: CAD authoring] — Metadata table containing parameters associated with field types like Voxels,…
   PicoGK.FieldMetadata.EType (enum) [4 members] — Type of the data items in the metadata table
     PicoGK.FieldMetadata.EType.UNKNOWN (enumMember)
     PicoGK.FieldMetadata.EType.STRING (enumMember)
@@ -174,9 +174,9 @@ PicoGK.FieldMetadata (class) [11 members] [category: CAD authoring] — Metadata
   PicoGK.FieldMetadata.RemoveValue (method) — Remove a value from the metadata table
   PicoGK.FieldMetadata.ToString (method) — Converts the contents of the metadata table to a string
   PicoGK.FieldMetadata.Dispose (method)
-PicoGK.IBoundedImplicit (interface) [1 members] [category: CAD authoring] — Interface for a bounded implicit function
+PicoGK.IBoundedImplicit (interface) [lines 729-736] [1 members] [category: CAD authoring] — Interface for a bounded implicit function
   PicoGK.IBoundedImplicit.oBounds (property) — Access the bounding box of the implicit function
-PicoGK.IDataTable (interface) [7 members] [category: CAD authoring]
+PicoGK.IDataTable (interface) [lines 738-761] [7 members] [category: CAD authoring]
   PicoGK.IDataTable.nMaxColumnCount (method)
   PicoGK.IDataTable.strColumnId (method)
   PicoGK.IDataTable.bFindColumn (method)
@@ -184,19 +184,19 @@ PicoGK.IDataTable (interface) [7 members] [category: CAD authoring]
   PicoGK.IDataTable.strGetAt (method)
   PicoGK.IDataTable.SetColumnIds (method)
   PicoGK.IDataTable.AddRow (method)
-PicoGK.IFieldWithMetadata (interface) [1 members] [category: CAD authoring]
+PicoGK.IFieldWithMetadata (interface) [lines 763-770] [1 members] [category: CAD authoring]
   PicoGK.IFieldWithMetadata.oMetaData (method) — Return metadata borrowed from this field owner
-PicoGK.IImplicit (interface) [1 members] [category: CAD authoring] — Function signature for signed distance implicts
+PicoGK.IImplicit (interface) [lines 772-780] [1 members] [category: CAD authoring] — Function signature for signed distance implicts
   PicoGK.IImplicit.fSignedDistance (method) — Return the signed distance to the iso surface
-PicoGK.ILog (interface) [1 members] [category: CAD authoring] — Logging interface which allows you to output diagnostics
+PicoGK.ILog (interface) [lines 782-789] [1 members] [category: CAD authoring] — Logging interface which allows you to output diagnostics
   PicoGK.ILog.Log (method) — This function allows you to output information using the standard…
-PicoGK.IProgress (interface) [1 members] [category: CAD authoring] — A generic progress reporting interface
+PicoGK.IProgress (interface) [lines 791-798] [1 members] [category: CAD authoring] — A generic progress reporting interface
   PicoGK.IProgress.Progress (method) — Report progress from 0..1
-PicoGK.ITraverseScalarField (interface) [1 members] [category: CAD authoring] — An interface used to traverse the active values of a…
+PicoGK.ITraverseScalarField (interface) [lines 800-809] [1 members] [category: CAD authoring] — An interface used to traverse the active values of a…
   PicoGK.ITraverseScalarField.InformActiveValue (method) — Called for every active value in the ScalarField object
-PicoGK.ITraverseVectorField (interface) [1 members] [category: CAD authoring] — An interface to allow traversal of all active values in…
+PicoGK.ITraverseVectorField (interface) [lines 811-820] [1 members] [category: CAD authoring] — An interface to allow traversal of all active values in…
   PicoGK.ITraverseVectorField.InformActiveValue (method) — Called for every active value in the VectorField object
-PicoGK.Image (class) [25 members] [category: CAD authoring]
+PicoGK.Image (class) [lines 822-916] [25 members] [category: CAD authoring]
   PicoGK.Image.EType (enum) [3 members]
     PicoGK.Image.EType.BW (enumMember)
     PicoGK.Image.EType.GRAY (enumMember)
@@ -225,40 +225,40 @@ PicoGK.Image (class) [25 members] [category: CAD authoring]
   PicoGK.Image.SaveJpg (method)
   PicoGK.Image.SaveTga (method)
   PicoGK.Image.imgLoadFromFile (method)
-PicoGK.ImageBWAbstract (class) [4 members] [category: CAD authoring]
+PicoGK.ImageBWAbstract (class) [lines 918-933] [4 members] [category: CAD authoring]
   PicoGK.ImageBWAbstract.ImageBWAbstract (constructor)
   PicoGK.ImageBWAbstract.fValue (method)
   PicoGK.ImageBWAbstract.clrValue (method)
   PicoGK.ImageBWAbstract.SetValue (method)
-PicoGK.ImageColor (class) [3 members] [category: CAD authoring]
+PicoGK.ImageColor (class) [lines 935-947] [3 members] [category: CAD authoring]
   PicoGK.ImageColor.ImageColor (constructor)
   PicoGK.ImageColor.SetValue (method)
   PicoGK.ImageColor.clrValue (method)
-PicoGK.ImageColorAbstract (class) [4 members] [category: CAD authoring]
+PicoGK.ImageColorAbstract (class) [lines 949-964] [4 members] [category: CAD authoring]
   PicoGK.ImageColorAbstract.ImageColorAbstract (constructor)
   PicoGK.ImageColorAbstract.fValue (method)
   PicoGK.ImageColorAbstract.bValue (method)
   PicoGK.ImageColorAbstract.SetValue (method)
-PicoGK.ImageGrayScale (class) [6 members] [category: CAD authoring]
+PicoGK.ImageGrayScale (class) [lines 966-986] [6 members] [category: CAD authoring]
   PicoGK.ImageGrayScale.m_afValues (field)
   PicoGK.ImageGrayScale.ImageGrayScale (constructor)
   PicoGK.ImageGrayScale.SetValue (method)
   PicoGK.ImageGrayScale.fValue (method)
   PicoGK.ImageGrayScale.imgGetColorCodedSDF (method)
   PicoGK.ImageGrayScale.imgGetInterpolated (method)
-PicoGK.ImageGrayscaleAbstract (class) [5 members] [category: CAD authoring]
+PicoGK.ImageGrayscaleAbstract (class) [lines 988-1007] [5 members] [category: CAD authoring]
   PicoGK.ImageGrayscaleAbstract.ImageGrayscaleAbstract (constructor)
   PicoGK.ImageGrayscaleAbstract.clrValue (method)
   PicoGK.ImageGrayscaleAbstract.bValue (method)
   PicoGK.ImageGrayscaleAbstract.SetValue (method)
   PicoGK.ImageGrayscaleAbstract.bContainsActivePixels (method) — Returns whether the image has any pixels set to a…
-PicoGK.ImageRgb24 (class) [5 members] [category: CAD authoring]
+PicoGK.ImageRgb24 (class) [lines 1009-1027] [5 members] [category: CAD authoring]
   PicoGK.ImageRgb24.ImageRgb24 (constructor)
   PicoGK.ImageRgb24.clrValue (method)
   PicoGK.ImageRgb24.SetValue (method)
   PicoGK.ImageRgb24.SetRgb24 (method)
   PicoGK.ImageRgb24.sGetRgb24 (method)
-PicoGK.ImageRgba32 (class) [5 members] [category: CAD authoring]
+PicoGK.ImageRgba32 (class) [lines 1029-1047] [5 members] [category: CAD authoring]
   PicoGK.ImageRgba32.ImageRgba32 (constructor)
   PicoGK.ImageRgba32.clrValue (method)
   PicoGK.ImageRgba32.SetValue (method)
@@ -267,12 +267,12 @@ PicoGK.ImageRgba32 (class) [5 members] [category: CAD authoring]
 
 ## CAD authoring — PicoGK (2) — `api-cad-authoring-picogk-2.md`
 
-PicoGK.Lattice (class) [4 members] [category: CAD authoring] — A lattice of beams (and spheres)
+PicoGK.Lattice (class) [lines 5-33] [4 members] [category: CAD authoring] — A lattice of beams (and spheres)
   PicoGK.Lattice.Lattice (constructor) — Creates a new empty Lattice, using the global library instance
   PicoGK.Lattice.AddSphere (method) — Add a sphere to the lattice
   PicoGK.Lattice.AddBeam (method) — Add a beam to the lattice
   PicoGK.Lattice.Dispose (method)
-PicoGK.Library (class) [39 members] [category: CAD authoring] — The Library object encapsulates an instance of a PicoGK library…
+PicoGK.Library (class) [lines 35-219] [39 members] [category: CAD authoring] — The Library object encapsulates an instance of a PicoGK library…
   PicoGK.Library.nStringLength (constant)
   PicoGK.Library.fVoxelSize (field) — Voxel size in millimeters
   PicoGK.Library.GlobalInstance (class) [5 members]
@@ -317,19 +317,19 @@ PicoGK.Library (class) [39 members] [category: CAD authoring] — The Library ob
   PicoGK.Library.strName (method) — Returns the library name (from the C++ side)
   PicoGK.Library.strVersion (method) — Returns the library version (from the C++ side)
   PicoGK.Library.strBuildInfo (method) — Returns internal build info, such as build date/time of the…
-PicoGK.LogConsole (class) [2 members] [category: CAD authoring] — A simple logging class which outputs to the console
+PicoGK.LogConsole (class) [lines 221-231] [2 members] [category: CAD authoring] — A simple logging class which outputs to the console
   PicoGK.LogConsole.Log (method) — Implementation of a simple logging class that outputs to the…
   PicoGK.LogConsole.LogConsole (constructor)
-PicoGK.LogFile (class) [4 members] [category: CAD authoring]
+PicoGK.LogFile (class) [lines 233-248] [4 members] [category: CAD authoring]
   PicoGK.LogFile.LogFile (constructor)
   PicoGK.LogFile.Log (method)
   PicoGK.LogFile.LogTime (method)
   PicoGK.LogFile.Dispose (method)
-PicoGK.LogProgress (class) [3 members] [category: CAD authoring] — A progress reporting class that outputs to a log interface
+PicoGK.LogProgress (class) [lines 250-268] [3 members] [category: CAD authoring] — A progress reporting class that outputs to a log interface
   PicoGK.LogProgress.LogProgress (constructor) — Initialize a new progress reporting object
   PicoGK.LogProgress.Progress (method) — Report progress from 0..1
   PicoGK.LogProgress.Dispose (method) — Cleanup (just reports that the task is finished)
-PicoGK.Material (class) [27 members] [category: CAD authoring] — Typed Material appearance
+PicoGK.Material (class) [lines 270-354] [27 members] [category: CAD authoring] — Typed Material appearance
   PicoGK.Material.Name (property)
   PicoGK.Material.Color (property)
   PicoGK.Material.Metallic (property)
@@ -357,16 +357,16 @@ PicoGK.Material (class) [27 members] [category: CAD authoring] — Typed Materia
   PicoGK.Material.Transmission (property)
   PicoGK.Material.Volume (property)
   PicoGK.Material.Material (constructor)
-PicoGK.MaterialAlphaMode (enum) [3 members] [category: CAD authoring] — Typed MaterialAlphaMode appearance
+PicoGK.MaterialAlphaMode (enum) [lines 356-368] [3 members] [category: CAD authoring] — Typed MaterialAlphaMode appearance
   PicoGK.MaterialAlphaMode.Opaque (enumMember)
   PicoGK.MaterialAlphaMode.Mask (enumMember)
   PicoGK.MaterialAlphaMode.Blend (enumMember)
-PicoGK.MaterialAnisotropy (class) [4 members] [category: CAD authoring] — Typed MaterialAnisotropy appearance
+PicoGK.MaterialAnisotropy (class) [lines 370-385] [4 members] [category: CAD authoring] — Typed MaterialAnisotropy appearance
   PicoGK.MaterialAnisotropy.Strength (property)
   PicoGK.MaterialAnisotropy.Rotation (property)
   PicoGK.MaterialAnisotropy.Texture (property)
   PicoGK.MaterialAnisotropy.MaterialAnisotropy (constructor)
-PicoGK.MaterialClearcoat (class) [7 members] [category: CAD authoring] — Typed MaterialClearcoat appearance
+PicoGK.MaterialClearcoat (class) [lines 387-411] [7 members] [category: CAD authoring] — Typed MaterialClearcoat appearance
   PicoGK.MaterialClearcoat.Factor (property)
   PicoGK.MaterialClearcoat.Roughness (property)
   PicoGK.MaterialClearcoat.Texture (property)
@@ -374,17 +374,17 @@ PicoGK.MaterialClearcoat (class) [7 members] [category: CAD authoring] — Typed
   PicoGK.MaterialClearcoat.NormalTexture (property)
   PicoGK.MaterialClearcoat.NormalScale (property)
   PicoGK.MaterialClearcoat.MaterialClearcoat (constructor)
-PicoGK.MaterialImage (class) [4 members] [category: CAD authoring] — Encoded image bytes
+PicoGK.MaterialImage (class) [lines 413-429] [4 members] [category: CAD authoring] — Encoded image bytes
   PicoGK.MaterialImage.Data (property)
   PicoGK.MaterialImage.Format (property)
   PicoGK.MaterialImage.Name (property)
   PicoGK.MaterialImage.MaterialImage (constructor)
-PicoGK.MaterialImageFormat (enum) [4 members] [category: CAD authoring] — Encoded image formats
+PicoGK.MaterialImageFormat (enum) [lines 431-446] [4 members] [category: CAD authoring] — Encoded image formats
   PicoGK.MaterialImageFormat.Auto (enumMember)
   PicoGK.MaterialImageFormat.Png (enumMember)
   PicoGK.MaterialImageFormat.Jpeg (enumMember)
   PicoGK.MaterialImageFormat.WebP (enumMember)
-PicoGK.MaterialIridescence (class) [7 members] [category: CAD authoring] — Typed MaterialIridescence appearance
+PicoGK.MaterialIridescence (class) [lines 448-472] [7 members] [category: CAD authoring] — Typed MaterialIridescence appearance
   PicoGK.MaterialIridescence.Factor (property)
   PicoGK.MaterialIridescence.Ior (property)
   PicoGK.MaterialIridescence.ThicknessMinimum (property)
@@ -392,59 +392,59 @@ PicoGK.MaterialIridescence (class) [7 members] [category: CAD authoring] — Typ
   PicoGK.MaterialIridescence.Texture (property)
   PicoGK.MaterialIridescence.ThicknessTexture (property)
   PicoGK.MaterialIridescence.MaterialIridescence (constructor)
-PicoGK.MaterialMagFilter (enum) [2 members] [category: CAD authoring] — Typed MaterialMagFilter appearance
+PicoGK.MaterialMagFilter (enum) [lines 474-483] [2 members] [category: CAD authoring] — Typed MaterialMagFilter appearance
   PicoGK.MaterialMagFilter.Nearest (enumMember)
   PicoGK.MaterialMagFilter.Linear (enumMember)
-PicoGK.MaterialMinFilter (enum) [6 members] [category: CAD authoring] — Typed MaterialMinFilter appearance
+PicoGK.MaterialMinFilter (enum) [lines 485-506] [6 members] [category: CAD authoring] — Typed MaterialMinFilter appearance
   PicoGK.MaterialMinFilter.Nearest (enumMember)
   PicoGK.MaterialMinFilter.Linear (enumMember)
   PicoGK.MaterialMinFilter.NearestMipmapNearest (enumMember)
   PicoGK.MaterialMinFilter.LinearMipmapNearest (enumMember)
   PicoGK.MaterialMinFilter.NearestMipmapLinear (enumMember)
   PicoGK.MaterialMinFilter.LinearMipmapLinear (enumMember)
-PicoGK.MaterialSampler (class) [5 members] [category: CAD authoring] — Typed MaterialSampler appearance
+PicoGK.MaterialSampler (class) [lines 508-526] [5 members] [category: CAD authoring] — Typed MaterialSampler appearance
   PicoGK.MaterialSampler.WrapS (property)
   PicoGK.MaterialSampler.WrapT (property)
   PicoGK.MaterialSampler.MagFilter (property)
   PicoGK.MaterialSampler.MinFilter (property)
   PicoGK.MaterialSampler.MaterialSampler (constructor)
-PicoGK.MaterialSheen (class) [5 members] [category: CAD authoring] — Typed MaterialSheen appearance
+PicoGK.MaterialSheen (class) [lines 528-546] [5 members] [category: CAD authoring] — Typed MaterialSheen appearance
   PicoGK.MaterialSheen.Color (property)
   PicoGK.MaterialSheen.Roughness (property)
   PicoGK.MaterialSheen.ColorTexture (property)
   PicoGK.MaterialSheen.RoughnessTexture (property)
   PicoGK.MaterialSheen.MaterialSheen (constructor)
-PicoGK.MaterialSpecular (class) [5 members] [category: CAD authoring] — Typed MaterialSpecular appearance
+PicoGK.MaterialSpecular (class) [lines 548-566] [5 members] [category: CAD authoring] — Typed MaterialSpecular appearance
   PicoGK.MaterialSpecular.Factor (property)
   PicoGK.MaterialSpecular.Color (property)
   PicoGK.MaterialSpecular.Texture (property)
   PicoGK.MaterialSpecular.ColorTexture (property)
   PicoGK.MaterialSpecular.MaterialSpecular (constructor)
-PicoGK.MaterialTexture (class) [4 members] [category: CAD authoring] — Typed MaterialTexture appearance
+PicoGK.MaterialTexture (class) [lines 568-583] [4 members] [category: CAD authoring] — Typed MaterialTexture appearance
   PicoGK.MaterialTexture.Image (property)
   PicoGK.MaterialTexture.Sampler (property)
   PicoGK.MaterialTexture.Transform (property)
   PicoGK.MaterialTexture.MaterialTexture (constructor)
-PicoGK.MaterialTextureTransform (class) [4 members] [category: CAD authoring] — Typed MaterialTextureTransform appearance
+PicoGK.MaterialTextureTransform (class) [lines 585-600] [4 members] [category: CAD authoring] — Typed MaterialTextureTransform appearance
   PicoGK.MaterialTextureTransform.Offset (property)
   PicoGK.MaterialTextureTransform.Scale (property)
   PicoGK.MaterialTextureTransform.Rotation (property)
   PicoGK.MaterialTextureTransform.MaterialTextureTransform (constructor)
-PicoGK.MaterialTransmission (class) [3 members] [category: CAD authoring] — Typed MaterialTransmission appearance
+PicoGK.MaterialTransmission (class) [lines 602-614] [3 members] [category: CAD authoring] — Typed MaterialTransmission appearance
   PicoGK.MaterialTransmission.Factor (property)
   PicoGK.MaterialTransmission.Texture (property)
   PicoGK.MaterialTransmission.MaterialTransmission (constructor)
-PicoGK.MaterialVolume (class) [5 members] [category: CAD authoring] — Typed MaterialVolume appearance
+PicoGK.MaterialVolume (class) [lines 616-634] [5 members] [category: CAD authoring] — Typed MaterialVolume appearance
   PicoGK.MaterialVolume.Thickness (property)
   PicoGK.MaterialVolume.AttenuationDistance (property)
   PicoGK.MaterialVolume.AttenuationColor (property)
   PicoGK.MaterialVolume.ThicknessTexture (property)
   PicoGK.MaterialVolume.MaterialVolume (constructor)
-PicoGK.MaterialWrap (enum) [3 members] [category: CAD authoring] — Typed MaterialWrap appearance
+PicoGK.MaterialWrap (enum) [lines 636-648] [3 members] [category: CAD authoring] — Typed MaterialWrap appearance
   PicoGK.MaterialWrap.ClampToEdge (enumMember)
   PicoGK.MaterialWrap.MirroredRepeat (enumMember)
   PicoGK.MaterialWrap.Repeat (enumMember)
-PicoGK.Mesh (class) [22 members] [category: CAD authoring] — A triangle mesh
+PicoGK.Mesh (class) [lines 650-784] [22 members] [category: CAD authoring] — A triangle mesh
   PicoGK.Mesh.EStlUnit (enum) [6 members]
     PicoGK.Mesh.EStlUnit.AUTO (enumMember)
     PicoGK.Mesh.EStlUnit.MM (enumMember)
@@ -476,7 +476,7 @@ PicoGK.Mesh (class) [22 members] [category: CAD authoring] — A triangle mesh
 
 ## CAD authoring — PicoGK (3) — `api-cad-authoring-picogk-3.md`
 
-PicoGK.OpenVdbFile (class) [16 members] [category: CAD authoring] — OpenVdbFile handles the creation, loading and saving of openvdb .VDB…
+PicoGK.OpenVdbFile (class) [lines 5-109] [16 members] [category: CAD authoring] — OpenVdbFile handles the creation, loading and saving of openvdb .VDB…
   PicoGK.OpenVdbFile.EFieldType (enum) [4 members] — Types of fields in .VDB files
     PicoGK.OpenVdbFile.EFieldType.Unsupported (enumMember) — Unsupported data type (for example FOG)
     PicoGK.OpenVdbFile.EFieldType.Voxels (enumMember) — PicoGK.Voxels field
@@ -497,7 +497,7 @@ PicoGK.OpenVdbFile (class) [16 members] [category: CAD authoring] — OpenVdbFil
   PicoGK.OpenVdbFile.bIsPicoGKCompatible (method)
   PicoGK.OpenVdbFile.fPicoGKVoxelSizeMM (method)
   PicoGK.OpenVdbFile.Dispose (method)
-PicoGK.PolyContour (class) [14 members] [category: CAD authoring]
+PicoGK.PolyContour (class) [lines 111-165] [14 members] [category: CAD authoring]
   PicoGK.PolyContour.EWinding (enum) [3 members]
     PicoGK.PolyContour.EWinding.UNKNOWN (enumMember)
     PicoGK.PolyContour.EWinding.CLOCKWISE (enumMember)
@@ -515,7 +515,7 @@ PicoGK.PolyContour (class) [14 members] [category: CAD authoring]
   PicoGK.PolyContour.oBBox (method)
   PicoGK.PolyContour.nCount (method)
   PicoGK.PolyContour.vecVertex (method)
-PicoGK.PolyLine (class) [10 members] [category: CAD authoring] — A colored 3D polyline for use in the viewer
+PicoGK.PolyLine (class) [lines 167-218] [10 members] [category: CAD authoring] — A colored 3D polyline for use in the viewer
   PicoGK.PolyLine.PolyLine (constructor) — Creates a new empty PolyLine, using the global library instance
   PicoGK.PolyLine.nAddVertex (method) — Add a vertex to the polyline
   PicoGK.PolyLine.Add (method) — Adds all vertices from a container
@@ -526,7 +526,7 @@ PicoGK.PolyLine (class) [10 members] [category: CAD authoring] — A colored 3D 
   PicoGK.PolyLine.AddArrow (method) — Adds an arrow to the tip of the current polyline…
   PicoGK.PolyLine.AddCross (method) — Add a cross at the end of a polyline
   PicoGK.PolyLine.Dispose (method)
-PicoGK.PolySlice (class) [10 members] [category: CAD authoring]
+PicoGK.PolySlice (class) [lines 220-252] [10 members] [category: CAD authoring]
   PicoGK.PolySlice.PolySlice (constructor)
   PicoGK.PolySlice.AddContour (method)
   PicoGK.PolySlice.bIsEmpty (method)
@@ -537,24 +537,24 @@ PicoGK.PolySlice (class) [10 members] [category: CAD authoring]
   PicoGK.PolySlice.oBBox (method)
   PicoGK.PolySlice.nContours (method)
   PicoGK.PolySlice.oContourAt (method)
-PicoGK.PolySliceStack (class) [6 members] [category: CAD authoring]
+PicoGK.PolySliceStack (class) [lines 254-275] [6 members] [category: CAD authoring]
   PicoGK.PolySliceStack.PolySliceStack (constructor)
   PicoGK.PolySliceStack.AddSlices (method)
   PicoGK.PolySliceStack.AddToViewer (method)
   PicoGK.PolySliceStack.nCount (method)
   PicoGK.PolySliceStack.oSliceAt (method)
   PicoGK.PolySliceStack.oBBox (method)
-PicoGK.ProgressCounter (class) [3 members] [category: CAD authoring] — A progress counting class for counting up items to 100%
+PicoGK.ProgressCounter (class) [lines 277-294] [3 members] [category: CAD authoring] — A progress counting class for counting up items to 100%
   PicoGK.ProgressCounter.ProgressCounter (constructor) — Create a new progress counter object
   PicoGK.ProgressCounter.SetItem (method) — Set the item (nItemCount == 100%)
   PicoGK.ProgressCounter.op_Increment (method) — Allow you to use ++ to count up to the…
-PicoGK.ProgressNoop (class) [2 members] [category: CAD authoring] — A progress reporting class that does nothing (can be used…
+PicoGK.ProgressNoop (class) [lines 296-306] [2 members] [category: CAD authoring] — A progress reporting class that does nothing (can be used…
   PicoGK.ProgressNoop.Progress (method) — Progress from 0..1
   PicoGK.ProgressNoop.ProgressNoop (constructor)
-PicoGK.SKHelpers (class) [2 members] [category: CAD authoring]
+PicoGK.SKHelpers (class) [lines 308-317] [2 members] [category: CAD authoring]
   PicoGK.SKHelpers.oAsSkColor (method)
   PicoGK.SKHelpers.clrAsColorRgba32 (method)
-PicoGK.ScalarField (class) [12 members] [category: CAD authoring] — A field of scalar floating point values
+PicoGK.ScalarField (class) [lines 319-391] [12 members] [category: CAD authoring] — A field of scalar floating point values
   PicoGK.ScalarField.m_oMetadata (field) — Field metadata
   PicoGK.ScalarField.oMetaData (method) — Return metadata borrowed from this field owner
   PicoGK.ScalarField.ScalarField (constructor) — Create an empty scalar field object
@@ -567,33 +567,33 @@ PicoGK.ScalarField (class) [12 members] [category: CAD authoring] — A field of
   PicoGK.ScalarField.fSignedDistance (method) — Return the scalar value at the specified position as as…
   PicoGK.ScalarField.oBoundingBox (method) — Returns the bounding box of all active voxels in mm…
   PicoGK.ScalarField.Dispose (method)
-PicoGK.SdfVisualizer (class) [4 members] [category: CAD authoring]
+PicoGK.SdfVisualizer (class) [lines 393-430] [4 members] [category: CAD authoring]
   PicoGK.SdfVisualizer.imgEncodeFromSdf (method) — Create a color image which encodes the signed distance values…
   PicoGK.SdfVisualizer.bDoesSliceContainDefect (method) — Checks if the scalar field slice contains a defective voxel
   PicoGK.SdfVisualizer.bVisualizeSdfSlicesAsTgaStack (method) — Saves a stack of TGA files, visualizing the signed distance…
   PicoGK.SdfVisualizer.SdfVisualizer (constructor)
-PicoGK.SliceViz (class) [4 members] [category: CAD authoring]
+PicoGK.SliceViz (class) [lines 432-450] [4 members] [category: CAD authoring]
   PicoGK.SliceViz.nSliceCount (property) — The number of slices in this voxel field
   PicoGK.SliceViz.SliceViz (constructor)
   PicoGK.SliceViz.Visualize (method) — Visualize the slice in the viewer using a normalized parameter…
   PicoGK.SliceViz.Dispose (method) — Dispose the object (IDispose)
-PicoGK.SplitProgress (class) [3 members] [category: CAD authoring] — This class allows you to split progress reporting into multiple…
+PicoGK.SplitProgress (class) [lines 452-469] [3 members] [category: CAD authoring] — This class allows you to split progress reporting into multiple…
   PicoGK.SplitProgress.SplitProgress (constructor) — Create a new SplitProgress object
   PicoGK.SplitProgress.Progress (method) — Report progress from 0..1 - this function automatically scales the…
   PicoGK.SplitProgress.op_Increment (method) — Allow you to use ++ to count up to the…
-PicoGK.SurfaceNormalFieldExtractor (class) [2 members] [category: CAD authoring]
+PicoGK.SurfaceNormalFieldExtractor (class) [lines 471-479] [2 members] [category: CAD authoring]
   PicoGK.SurfaceNormalFieldExtractor.oExtract (method)
   PicoGK.SurfaceNormalFieldExtractor.InformActiveValue (method)
-PicoGK.Text (class) [3 members] [category: CAD authoring]
+PicoGK.Text (class) [lines 481-492] [3 members] [category: CAD authoring]
   PicoGK.Text.oDefaultTypeface (property)
   PicoGK.Text.imgRenderText (method)
   PicoGK.Text.Text (constructor)
-PicoGK.TgaIo (class) [4 members] [category: CAD authoring]
+PicoGK.TgaIo (class) [lines 494-511] [4 members] [category: CAD authoring]
   PicoGK.TgaIo.SaveTga (method)
   PicoGK.TgaIo.GetFileInfo (method)
   PicoGK.TgaIo.LoadTga (method)
   PicoGK.TgaIo.TgaIo (constructor)
-PicoGK.Utils (class) [13 members] [category: CAD authoring]
+PicoGK.Utils (class) [lines 513-585] [13 members] [category: CAD authoring]
   PicoGK.Utils.TempFolder (class) [3 members] — Creates a temporary folder with an arbitrary filename in the…
     PicoGK.Utils.TempFolder.strFolder (field)
     PicoGK.Utils.TempFolder.TempFolder (constructor)
@@ -610,10 +610,10 @@ PicoGK.Utils (class) [13 members] [category: CAD authoring]
   PicoGK.Utils.strDateTimeFilename (method) — Returns a file name in the form 20230930_134500 to be…
   PicoGK.Utils.strShorten (method) — Shorted a string, IF it is too long
   PicoGK.Utils.Utils (constructor)
-PicoGK.Vdb2Cli (class) [2 members] [category: CAD authoring] — Helper class to save a voxel field contained in a…
+PicoGK.Vdb2Cli (class) [lines 587-603] [2 members] [category: CAD authoring] — Helper class to save a voxel field contained in a…
   PicoGK.Vdb2Cli.Convert (method) — Convert a voxel field to a CLI slice file
   PicoGK.Vdb2Cli.Vdb2Cli (constructor)
-PicoGK.VectorField (class) [8 members] [category: CAD authoring] — A Field of 3D floating point vectors
+PicoGK.VectorField (class) [lines 605-651] [8 members] [category: CAD authoring] — A Field of 3D floating point vectors
   PicoGK.VectorField.m_oMetadata (field) — VectorField metadata
   PicoGK.VectorField.oMetaData (method) — Return metadata borrowed from this field owner
   PicoGK.VectorField.VectorField (constructor) — Create an empty VectorField object
@@ -622,13 +622,13 @@ PicoGK.VectorField (class) [8 members] [category: CAD authoring] — A Field of 
   PicoGK.VectorField.RemoveValue (method) — Removes the value at the specified position
   PicoGK.VectorField.TraverseActive (method) — Visit each active value in the vector field and call…
   PicoGK.VectorField.Dispose (method)
-PicoGK.VectorFieldMerge (class) [2 members] [category: CAD authoring]
+PicoGK.VectorFieldMerge (class) [lines 653-661] [2 members] [category: CAD authoring]
   PicoGK.VectorFieldMerge.Merge (method)
   PicoGK.VectorFieldMerge.InformActiveValue (method)
 
 ## CAD authoring — PicoGK (4) — `api-cad-authoring-picogk-4.md`
 
-PicoGK.Viewer (class) [46 members] [category: CAD authoring] — PicoGK viewer
+PicoGK.Viewer (class) [lines 5-241] [46 members] [category: CAD authoring] — PicoGK viewer
   PicoGK.Viewer.InfoCallback (type)
   PicoGK.Viewer.UpdateCallback (type)
   PicoGK.Viewer.KeyPressedCallback (type)
@@ -683,12 +683,12 @@ PicoGK.Viewer (class) [46 members] [category: CAD authoring] — PicoGK viewer
   PicoGK.Viewer.RemoveAllAnimations (method)
   PicoGK.Viewer.AddCross (method) — Marks the supplied coordinate with a cross-shaped polyline
   PicoGK.Viewer.AddArrow (method) — Adds an line ending in an arrow to the viewer
-PicoGK.VoxCutViz (class) [4 members] [category: CAD authoring] — Visualizes the result of a voxel filed cut along an…
+PicoGK.VoxCutViz (class) [lines 243-269] [4 members] [category: CAD authoring] — Visualizes the result of a voxel filed cut along an…
   PicoGK.VoxCutViz.nSliceCount (property) — Number of slices in the voxel field
   PicoGK.VoxCutViz.VoxCutViz (constructor) — Initializes a new VoxCutViz object with the specified Viewer and…
   PicoGK.VoxCutViz.Cut (method) — Cut the voxel field along the two normalized values (0…
   PicoGK.VoxCutViz.Dispose (method) — Call to stop the visualization (or let the object go…
-PicoGK.Voxels (class) [70 members] [category: CAD authoring]
+PicoGK.Voxels (class) [lines 271-672] [70 members] [category: CAD authoring]
   PicoGK.Voxels.fVoxelSize (property) — Returns the voxel size in millimeters used in the voxel…
   PicoGK.Voxels.ESliceMode (enum) [3 members]
     PicoGK.Voxels.ESliceMode.SignedDistance (enumMember)
@@ -768,12 +768,12 @@ PicoGK.Voxels (class) [70 members] [category: CAD authoring]
 
 ## CAD authoring — PicoGK.Numerics — `api-cad-authoring-picogk-numerics.md`
 
-PicoGK.Numerics.ComparisonExtensions (class) [4 members] [category: CAD authoring] — Extensions that allow for fuzzy comparisons of types
+PicoGK.Numerics.ComparisonExtensions (class) [lines 5-26] [4 members] [category: CAD authoring] — Extensions that allow for fuzzy comparisons of types
   PicoGK.Numerics.ComparisonExtensions.bAlmostEqual (method) — Fuzzy comparison function to determine equality between two floats Can…
   PicoGK.Numerics.ComparisonExtensions.bAlmostLessOrEqual (method)
   PicoGK.Numerics.ComparisonExtensions.bAlmostMoreOrEqual (method)
   PicoGK.Numerics.ComparisonExtensions.bAlmostZero (method) — Fuzzy test for zero
-PicoGK.Numerics.Cylindrical (struct) [7 members] [category: CAD authoring] — A coordinate in a cylindrical coordinate system
+PicoGK.Numerics.Cylindrical (struct) [lines 28-64] [7 members] [category: CAD authoring] — A coordinate in a cylindrical coordinate system
   PicoGK.Numerics.Cylindrical.R (field) — Distance from the cylinder's axis
   PicoGK.Numerics.Cylindrical.Phi (field) — Azimuth angle in the XY plane
   PicoGK.Numerics.Cylindrical.Z (field) — Position along the Z axis
@@ -781,9 +781,9 @@ PicoGK.Numerics.Cylindrical (struct) [7 members] [category: CAD authoring] — A
   PicoGK.Numerics.Cylindrical.vecAsCartesian (method) — Convert a cylindrical coordinate into a cartesian coordinate
   PicoGK.Numerics.Cylindrical.oLerp (method) — Linear interpolation between two Cylindrical coordinates (in Cylindrical coordinate space)
   PicoGK.Numerics.Cylindrical.ToString (method) — Convert the cylindrical coordinate to a string
-PicoGK.Numerics.FloatExt (class) [1 members] [category: CAD authoring]
+PicoGK.Numerics.FloatExt (class) [lines 66-72] [1 members] [category: CAD authoring]
   PicoGK.Numerics.FloatExt.bIsFinite (method) — Checks whether the value is finite, i.e
-PicoGK.Numerics.Overhang (struct) [24 members] [category: CAD authoring]
+PicoGK.Numerics.Overhang (struct) [lines 74-162] [24 members] [category: CAD authoring]
   PicoGK.Numerics.Overhang.uNone (property) — No overhang (0%)
   PicoGK.Numerics.Overhang.uFull (property) — Maximum overhang (100%)
   PicoGK.Numerics.Overhang.fNormalized (property) — Normalized overhang severity from 0..1 - 0.0
@@ -808,14 +808,14 @@ PicoGK.Numerics.Overhang (struct) [24 members] [category: CAD authoring]
   PicoGK.Numerics.Overhang.op_Equality (method)
   PicoGK.Numerics.Overhang.op_Inequality (method)
   PicoGK.Numerics.Overhang.Overhang (constructor)
-PicoGK.Numerics.Polar (struct) [6 members] [category: CAD authoring] — A polar coordinate
+PicoGK.Numerics.Polar (struct) [lines 164-194] [6 members] [category: CAD authoring] — A polar coordinate
   PicoGK.Numerics.Polar.R (field) — Distance from the center of the coordinate system
   PicoGK.Numerics.Polar.Phi (field) — Azimuth angle in the XY plane
   PicoGK.Numerics.Polar.Polar (constructor) — Initialize a new polar coordinate
   PicoGK.Numerics.Polar.vecAsCartesian (method) — Return the polar coordinate as a cartesian coordinate
   PicoGK.Numerics.Polar.oLerp (method) — Linear interpolation between two polar coordinates (in Polar coordinate space)
   PicoGK.Numerics.Polar.ToString (method) — Convert the polar coordinate to a string
-PicoGK.Numerics.Rad (struct) [48 members] [category: CAD authoring] — This type encapsulates an angle in Radians, with helper functions…
+PicoGK.Numerics.Rad (struct) [lines 196-380] [48 members] [category: CAD authoring] — This type encapsulates an angle in Radians, with helper functions…
   PicoGK.Numerics.Rad.TwoPi (constant) — Defines 2*Pi, which is constantly being used in Rad angles
   PicoGK.Numerics.Rad.Zero (field) — Zero degrees angles
   PicoGK.Numerics.Rad.Full (field) — 360º angle
@@ -864,7 +864,7 @@ PicoGK.Numerics.Rad (struct) [48 members] [category: CAD authoring] — This typ
   PicoGK.Numerics.Rad.op_GreaterThanOrEqual (method)
   PicoGK.Numerics.Rad.op_Equality (method)
   PicoGK.Numerics.Rad.op_Inequality (method)
-PicoGK.Numerics.Spherical (struct) [7 members] [category: CAD authoring]
+PicoGK.Numerics.Spherical (struct) [lines 382-416] [7 members] [category: CAD authoring]
   PicoGK.Numerics.Spherical.R (field) — Distance from the sphere center
   PicoGK.Numerics.Spherical.Phi (field) — Azimuth angle in the XY plane, measured from +X toward…
   PicoGK.Numerics.Spherical.Theta (field) — Polar angle measured from +Z toward the XY plane and…
@@ -872,12 +872,12 @@ PicoGK.Numerics.Spherical (struct) [7 members] [category: CAD authoring]
   PicoGK.Numerics.Spherical.vecAsCartesian (method) — Convert the spherical coordinate to a cartesian coordinate
   PicoGK.Numerics.Spherical.oLerp (method) — Linear interpolation between two Spherical coordinates (in Spherical coordinate space)
   PicoGK.Numerics.Spherical.ToString (method) — Convert the spherical coordinate to a string
-PicoGK.Numerics.Tolerances (class) [4 members] [category: CAD authoring] — Default tolerances for comparisons
+PicoGK.Numerics.Tolerances (class) [lines 418-437] [4 members] [category: CAD authoring] — Default tolerances for comparisons
   PicoGK.Numerics.Tolerances.fDef (constant) — Default tolerance for fuzzy comparisons
   PicoGK.Numerics.Tolerances.fDefSquared (constant) — Default squared tolerance for fuzzy comparisons
   PicoGK.Numerics.Tolerances.fZero (constant) — Default number regarded as zero for fuzzy zero check Chosen…
   PicoGK.Numerics.Tolerances.fZeroSquared (constant) — Default squared number regarded as zero for fuzzy zero check
-PicoGK.Numerics.VectorExt (class) [11 members] [category: CAD authoring] — Extensions to the Vector2 and Vector3 System.Numerics types
+PicoGK.Numerics.VectorExt (class) [lines 439-495] [11 members] [category: CAD authoring] — Extensions to the Vector2 and Vector3 System.Numerics types
   PicoGK.Numerics.VectorExt.vecNormalized (method) — Returns the normalized version of this vector (length 1) Can…
   PicoGK.Numerics.VectorExt.vecSafeNormalized (method) — Returns the normalized version of this vector (length 1) Returns…
   PicoGK.Numerics.VectorExt.vecStripZ (method) — Converts a Vector3 into a Vector2 by stripping the Z…
@@ -892,7 +892,7 @@ PicoGK.Numerics.VectorExt (class) [11 members] [category: CAD authoring] — Ext
 
 ## CAD authoring — PicoGK.Shapes — `api-cad-authoring-picogk-shapes.md`
 
-PicoGK.Shapes.Arc2d (struct) [8 members] [category: CAD authoring] — A circular arc in 2D space
+PicoGK.Shapes.Arc2d (struct) [lines 5-39] [8 members] [category: CAD authoring] — A circular arc in 2D space
   PicoGK.Shapes.Arc2d.vecStart (property) — Start coordinate
   PicoGK.Shapes.Arc2d.vecEnd (property) — End coordinate
   PicoGK.Shapes.Arc2d.vecCenter (property) — Center point
@@ -901,24 +901,24 @@ PicoGK.Shapes.Arc2d (struct) [8 members] [category: CAD authoring] — A circula
   PicoGK.Shapes.Arc2d.fLength (property)
   PicoGK.Shapes.Arc2d.Arc2d (constructor) — Construct a new 2D arc with the specified start point,…
   PicoGK.Shapes.Arc2d.vecPtAtT (method)
-PicoGK.Shapes.Circle (struct) [5 members] [category: CAD authoring] — Class to represent an circle as a normalized path/contour
+PicoGK.Shapes.Circle (struct) [lines 41-62] [5 members] [category: CAD authoring] — Class to represent an circle as a normalized path/contour
   PicoGK.Shapes.Circle.fR (property) — Radius of the circle
   PicoGK.Shapes.Circle.fLength (property)
   PicoGK.Shapes.Circle.Circle (constructor) — Create a Circle contour with radius fR
   PicoGK.Shapes.Circle.vecPtAtT (method)
   PicoGK.Shapes.Circle.PtAtT (method)
-PicoGK.Shapes.ContourFromPath (class) [4 members] [category: CAD authoring] — This class allows you to use a closed path as…
+PicoGK.Shapes.ContourFromPath (class) [lines 64-80] [4 members] [category: CAD authoring] — This class allows you to use a closed path as…
   PicoGK.Shapes.ContourFromPath.fLength (property)
   PicoGK.Shapes.ContourFromPath.ContourFromPath (constructor) — Create a IContour2d-compatible contour from an existing closed path The…
   PicoGK.Shapes.ContourFromPath.vecPtAtT (method)
   PicoGK.Shapes.ContourFromPath.vecPtAtTLinear (method)
-PicoGK.Shapes.ContourSampler2d (class) [4 members] [category: CAD authoring] — Implements a way to adaptively sample a contour to retrieve…
+PicoGK.Shapes.ContourSampler2d (class) [lines 82-108] [4 members] [category: CAD authoring] — Implements a way to adaptively sample a contour to retrieve…
   PicoGK.Shapes.ContourSampler2d.ISampleable (interface) [1 members] — This interface enables a contour to be sampled in linear…
     PicoGK.Shapes.ContourSampler2d.ISampleable.vecPtAtTLinear (method) — Return the uncorrected position at linear t (uncorrected)
   PicoGK.Shapes.ContourSampler2d.fTotalLength (property) — Return sum of all arc segement lengths
   PicoGK.Shapes.ContourSampler2d.ContourSampler2d (constructor) — Adaptively sample the contour to map the linear time to…
   PicoGK.Shapes.ContourSampler2d.fArcTFromLinearT (method) — Convert from linear t to arc-length t
-PicoGK.Shapes.Ellipse (class) [8 members] [category: CAD authoring] — Class to represent an ellipse as a normalized path/contour
+PicoGK.Shapes.Ellipse (class) [lines 110-146] [8 members] [category: CAD authoring] — Class to represent an ellipse as a normalized path/contour
   PicoGK.Shapes.Ellipse.fPhi (property) — Rotation angle of the ellipse
   PicoGK.Shapes.Ellipse.rPhi (property) — Rotation angle of the ellipse
   PicoGK.Shapes.Ellipse.fA (property) — Half-length of the ellipse in A
@@ -927,7 +927,7 @@ PicoGK.Shapes.Ellipse (class) [8 members] [category: CAD authoring] — Class to
   PicoGK.Shapes.Ellipse.Ellipse (constructor) — Constructor using axis A vector and axis B length
   PicoGK.Shapes.Ellipse.vecPtAtTLinear (method)
   PicoGK.Shapes.Ellipse.vecPtAtT (method)
-PicoGK.Shapes.Frame3d (struct) [32 members] [category: CAD authoring] — The Frame3d object stores a local coordinate system, i.e
+PicoGK.Shapes.Frame3d (struct) [lines 148-306] [32 members] [category: CAD authoring] — The Frame3d object stores a local coordinate system, i.e
   PicoGK.Shapes.Frame3d.frmWorld (field) — Local frame representing the world coordinate system
   PicoGK.Shapes.Frame3d.vecPos (property) — Position of the origin of the Frame3d
   PicoGK.Shapes.Frame3d.vecLx (property) — Direction of the local X axis in world coordinates
@@ -960,33 +960,33 @@ PicoGK.Shapes.Frame3d (struct) [32 members] [category: CAD authoring] — The Fr
   PicoGK.Shapes.Frame3d.frmInterpolate (method) — Interpolate between two Frame3d pos/orientations
   PicoGK.Shapes.Frame3d.Equals (method) — Test for equality (IEquatable)
   PicoGK.Shapes.Frame3d.GetHashCode (method) — Create hash code (IEquatable)
-PicoGK.Shapes.IContour2d (interface) [2 members] [category: CAD authoring] — Interface to represent a normalized closed contour in 2D which…
+PicoGK.Shapes.IContour2d (interface) [lines 308-319] [2 members] [category: CAD authoring] — Interface to represent a normalized closed contour in 2D which…
   PicoGK.Shapes.IContour2d.PtAtT (method) — Function to return both point and normal at t
   PicoGK.Shapes.IContour2d.vecSampleNormalAt (method) — Sample the normal at fT Helper function used by PtAtT
-PicoGK.Shapes.IContour3d (interface) [1 members] [category: CAD authoring] — A two dimensional closed contour aligned in a plane in…
+PicoGK.Shapes.IContour3d (interface) [lines 321-328] [1 members] [category: CAD authoring] — A two dimensional closed contour aligned in a plane in…
   PicoGK.Shapes.IContour3d.PtAtT (method) — Returns the point and normal at position t (0..1) As…
-PicoGK.Shapes.IPath2d (interface) [2 members] [category: CAD authoring] — Interface to represent a normalized path in 2D space which…
+PicoGK.Shapes.IPath2d (interface) [lines 330-341] [2 members] [category: CAD authoring] — Interface to represent a normalized path in 2D space which…
   PicoGK.Shapes.IPath2d.fLength (property) — Length of the entire contour
   PicoGK.Shapes.IPath2d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
-PicoGK.Shapes.IPath3d (interface) [2 members] [category: CAD authoring] — Interface to represent a normalized path in 2D space which…
+PicoGK.Shapes.IPath3d (interface) [lines 343-354] [2 members] [category: CAD authoring] — Interface to represent a normalized path in 2D space which…
   PicoGK.Shapes.IPath3d.fLength (property) — Length of the entire contour
   PicoGK.Shapes.IPath3d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
-PicoGK.Shapes.Line2d (struct) [5 members] [category: CAD authoring] — A 2d line
+PicoGK.Shapes.Line2d (struct) [lines 356-378] [5 members] [category: CAD authoring] — A 2d line
   PicoGK.Shapes.Line2d.vecA (property) — Start coordinate
   PicoGK.Shapes.Line2d.vecB (property) — End coordinate
   PicoGK.Shapes.Line2d.fLength (property)
   PicoGK.Shapes.Line2d.Line2d (constructor) — Construct a line with the specified start and end coordinates
   PicoGK.Shapes.Line2d.vecPtAtT (method)
-PicoGK.Shapes.OrientedContour (class) [4 members] [category: CAD authoring] — Represents an oriented 2D contour placed in 3D space by…
+PicoGK.Shapes.OrientedContour (class) [lines 380-396] [4 members] [category: CAD authoring] — Represents an oriented 2D contour placed in 3D space by…
   PicoGK.Shapes.OrientedContour.fLength (property)
   PicoGK.Shapes.OrientedContour.OrientedContour (constructor) — Create an oriented contour from a 2D contour and a…
   PicoGK.Shapes.OrientedContour.vecPtAtT (method)
   PicoGK.Shapes.OrientedContour.PtAtT (method)
-PicoGK.Shapes.OrientedPath (class) [3 members] [category: CAD authoring] — Interface to represent a normalized 2D path oriented in space…
+PicoGK.Shapes.OrientedPath (class) [lines 398-410] [3 members] [category: CAD authoring] — Interface to represent a normalized 2D path oriented in space…
   PicoGK.Shapes.OrientedPath.fLength (property)
   PicoGK.Shapes.OrientedPath.OrientedPath (constructor)
   PicoGK.Shapes.OrientedPath.vecPtAtT (method)
-PicoGK.Shapes.Path2d (class) [8 members] [category: CAD authoring] — A compound path which consists of a list of other…
+PicoGK.Shapes.Path2d (class) [lines 412-444] [8 members] [category: CAD authoring] — A compound path which consists of a list of other…
   PicoGK.Shapes.Path2d.fLength (property)
   PicoGK.Shapes.Path2d.Add (method) — Add another path to the compound path Note, the start…
   PicoGK.Shapes.Path2d.AddLine (method) — Append a line to the specified coordinate
@@ -995,7 +995,7 @@ PicoGK.Shapes.Path2d (class) [8 members] [category: CAD authoring] — A compoun
   PicoGK.Shapes.Path2d.AddArcRel (method) — Add an arc with the specified center, relative to the…
   PicoGK.Shapes.Path2d.vecPtAtT (method)
   PicoGK.Shapes.Path2d.Path2d (constructor)
-PicoGK.Shapes.Supershape (class) [5 members] [category: CAD authoring] — Implements the supershape formula for interesting 2D contours
+PicoGK.Shapes.Supershape (class) [lines 446-477] [5 members] [category: CAD authoring] — Implements the supershape formula for interesting 2D contours
   PicoGK.Shapes.Supershape.fLength (property)
   PicoGK.Shapes.Supershape.oRoundedPolygon (method) — Helper function to create simple rounded polygons based on the…
   PicoGK.Shapes.Supershape.Supershape (constructor) — Constructor for a supershape with superformula parameters and rotation
@@ -1004,7 +1004,7 @@ PicoGK.Shapes.Supershape (class) [5 members] [category: CAD authoring] — Imple
 
 ## Selected BCL reference — System — `api-selected-bcl-reference-system.md`
 
-System.Array (class) [41 members] [category: Selected BCL reference]
+System.Array (class) [lines 5-197] [41 members] [category: Selected BCL reference]
   System.Array.Length (property)
   System.Array.LongLength (property)
   System.Array.Rank (property)
@@ -1046,7 +1046,7 @@ System.Array (class) [41 members] [category: Selected BCL reference]
   System.Array.Sort (method)
   System.Array.TrueForAll (method)
   System.Array.GetEnumerator (method)
-System.Console (class) [48 members] [category: Selected BCL reference]
+System.Console (class) [lines 199-388] [48 members] [category: Selected BCL reference]
   System.Console.In (property)
   System.Console.InputEncoding (property)
   System.Console.OutputEncoding (property)
@@ -1098,7 +1098,7 @@ System.Console (class) [48 members] [category: Selected BCL reference]
 
 ## Selected BCL reference — System (2) — `api-selected-bcl-reference-system-2.md`
 
-System.Convert (class) [31 members] [category: Selected BCL reference]
+System.Convert (class) [lines 5-400] [31 members] [category: Selected BCL reference]
   System.Convert.DBNull (field)
   System.Convert.GetTypeCode (method)
   System.Convert.IsDBNull (method)
@@ -1130,7 +1130,7 @@ System.Convert (class) [31 members] [category: Selected BCL reference]
   System.Convert.TryToHexString (method)
   System.Convert.ToHexStringLower (method)
   System.Convert.TryToHexStringLower (method)
-System.Math (class) [46 members] [category: Selected BCL reference]
+System.Math (class) [lines 402-619] [46 members] [category: Selected BCL reference]
   System.Math.E (constant)
   System.Math.PI (constant)
   System.Math.Tau (constant)
@@ -1177,7 +1177,7 @@ System.Math (class) [46 members] [category: Selected BCL reference]
   System.Math.Sign (method)
   System.Math.Truncate (method)
   System.Math.ScaleB (method)
-System.MathF (class) [43 members] [category: Selected BCL reference]
+System.MathF (class) [lines 621-756] [43 members] [category: Selected BCL reference]
   System.MathF.E (constant)
   System.MathF.PI (constant)
   System.MathF.Tau (constant)
@@ -1224,7 +1224,7 @@ System.MathF (class) [43 members] [category: Selected BCL reference]
 
 ## Selected BCL reference — System (3) — `api-selected-bcl-reference-system-3.md`
 
-System.Random (class) [11 members] [category: Selected BCL reference]
+System.Random (class) [lines 5-50] [11 members] [category: Selected BCL reference]
   System.Random.Shared (property)
   System.Random.Random (constructor)
   System.Random.Next (method)
@@ -1236,7 +1236,7 @@ System.Random (class) [11 members] [category: Selected BCL reference]
   System.Random.Shuffle (method)
   System.Random.GetString (method)
   System.Random.GetHexString (method)
-System.String (class) [54 members] [category: Selected BCL reference]
+System.String (class) [lines 52-349] [54 members] [category: Selected BCL reference]
   System.String.Empty (field)
   System.String.this[int index] (property)
   System.String.Length (property)
@@ -1294,7 +1294,7 @@ System.String (class) [54 members] [category: Selected BCL reference]
 
 ## Selected BCL reference — System.Collections.Generic — `api-selected-bcl-reference-system-collections-generic.md`
 
-System.Collections.Generic.Dictionary (class) [25 members] [category: Selected BCL reference]
+System.Collections.Generic.Dictionary (class) [lines 5-185] [25 members] [category: Selected BCL reference]
   System.Collections.Generic.Dictionary.Comparer (property)
   System.Collections.Generic.Dictionary.Count (property)
   System.Collections.Generic.Dictionary.Capacity (property)
@@ -1350,7 +1350,7 @@ System.Collections.Generic.Dictionary (class) [25 members] [category: Selected B
   System.Collections.Generic.Dictionary.TryAdd (method)
   System.Collections.Generic.Dictionary.EnsureCapacity (method)
   System.Collections.Generic.Dictionary.TrimExcess (method)
-System.Collections.Generic.HashSet (class) [31 members] [category: Selected BCL reference]
+System.Collections.Generic.HashSet (class) [lines 187-322] [31 members] [category: Selected BCL reference]
   System.Collections.Generic.HashSet.Count (property)
   System.Collections.Generic.HashSet.Capacity (property)
   System.Collections.Generic.HashSet.Comparer (property)
@@ -1392,7 +1392,7 @@ System.Collections.Generic.HashSet (class) [31 members] [category: Selected BCL 
   System.Collections.Generic.HashSet.EnsureCapacity (method)
   System.Collections.Generic.HashSet.TrimExcess (method)
   System.Collections.Generic.HashSet.CreateSetComparer (method)
-System.Collections.Generic.List (class) [37 members] [category: Selected BCL reference]
+System.Collections.Generic.List (class) [lines 324-467] [37 members] [category: Selected BCL reference]
   System.Collections.Generic.List.Capacity (property)
   System.Collections.Generic.List.Count (property)
   System.Collections.Generic.List.this[int index] (property)
@@ -1437,7 +1437,7 @@ System.Collections.Generic.List (class) [37 members] [category: Selected BCL ref
 
 ## Selected BCL reference — System.Numerics — `api-selected-bcl-reference-system-numerics.md`
 
-System.Numerics.Matrix3x2 (struct) [40 members] [category: Selected BCL reference]
+System.Numerics.Matrix3x2 (struct) [lines 5-142] [40 members] [category: Selected BCL reference]
   System.Numerics.Matrix3x2.M11 (field)
   System.Numerics.Matrix3x2.M12 (field)
   System.Numerics.Matrix3x2.M21 (field)
@@ -1478,7 +1478,7 @@ System.Numerics.Matrix3x2 (struct) [40 members] [category: Selected BCL referenc
   System.Numerics.Matrix3x2.ToString (method)
   System.Numerics.Matrix3x2.WithElement (method)
   System.Numerics.Matrix3x2.WithRow (method)
-System.Numerics.Matrix4x4 (struct) [81 members] [category: Selected BCL reference]
+System.Numerics.Matrix4x4 (struct) [lines 144-407] [81 members] [category: Selected BCL reference]
   System.Numerics.Matrix4x4.M11 (field)
   System.Numerics.Matrix4x4.M12 (field)
   System.Numerics.Matrix4x4.M13 (field)
@@ -1560,7 +1560,7 @@ System.Numerics.Matrix4x4 (struct) [81 members] [category: Selected BCL referenc
   System.Numerics.Matrix4x4.ToString (method)
   System.Numerics.Matrix4x4.WithElement (method)
   System.Numerics.Matrix4x4.WithRow (method)
-System.Numerics.Plane (struct) [15 members] [category: Selected BCL reference]
+System.Numerics.Plane (struct) [lines 409-463] [15 members] [category: Selected BCL reference]
   System.Numerics.Plane.Normal (field)
   System.Numerics.Plane.D (field)
   System.Numerics.Plane.Plane (constructor)
@@ -1576,7 +1576,7 @@ System.Numerics.Plane (struct) [15 members] [category: Selected BCL reference]
   System.Numerics.Plane.Equals (method)
   System.Numerics.Plane.GetHashCode (method)
   System.Numerics.Plane.ToString (method)
-System.Numerics.Quaternion (struct) [37 members] [category: Selected BCL reference]
+System.Numerics.Quaternion (struct) [lines 465-584] [37 members] [category: Selected BCL reference]
   System.Numerics.Quaternion.X (field)
   System.Numerics.Quaternion.Y (field)
   System.Numerics.Quaternion.Z (field)
@@ -1617,7 +1617,7 @@ System.Numerics.Quaternion (struct) [37 members] [category: Selected BCL referen
 
 ## Selected BCL reference — System.Numerics (2) — `api-selected-bcl-reference-system-numerics-2.md`
 
-System.Numerics.Vector2 (struct) [135 members] [category: Selected BCL reference]
+System.Numerics.Vector2 (struct) [lines 5-435] [135 members] [category: Selected BCL reference]
   System.Numerics.Vector2.X (field)
   System.Numerics.Vector2.Y (field)
   System.Numerics.Vector2.AllBitsSet (property)
@@ -1756,7 +1756,7 @@ System.Numerics.Vector2 (struct) [135 members] [category: Selected BCL reference
 
 ## Selected BCL reference — System.Numerics (3) — `api-selected-bcl-reference-system-numerics-3.md`
 
-System.Numerics.Vector3 (struct) [137 members] [category: Selected BCL reference]
+System.Numerics.Vector3 (struct) [lines 5-441] [137 members] [category: Selected BCL reference]
   System.Numerics.Vector3.X (field)
   System.Numerics.Vector3.Y (field)
   System.Numerics.Vector3.Z (field)
@@ -1897,7 +1897,7 @@ System.Numerics.Vector3 (struct) [137 members] [category: Selected BCL reference
 
 ## Selected BCL reference — System.Numerics (4) — `api-selected-bcl-reference-system-numerics-4.md`
 
-System.Numerics.Vector4 (struct) [137 members] [category: Selected BCL reference]
+System.Numerics.Vector4 (struct) [lines 5-447] [137 members] [category: Selected BCL reference]
   System.Numerics.Vector4.X (field)
   System.Numerics.Vector4.Y (field)
   System.Numerics.Vector4.Z (field)

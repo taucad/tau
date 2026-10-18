@@ -2,95 +2,95 @@
 
 build123d 0.13.0 · 1067 symbols · extracted by CPython 3.13.15 inspect+ast.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
+Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
 ## objects_curve — `api-objects-curve.md`
 
-build123d.objects_curve.Airfoil (class) [3 members] [category: objects_curve] — Create an airfoil described by a 4-digit (or fractional) NACA…
+build123d.objects_curve.Airfoil (class) [lines 5-23] [3 members] [category: objects_curve] — Create an airfoil described by a 4-digit (or fractional) NACA…
   build123d.objects_curve.Airfoil.parse_naca4 (method) — Parse NACA 4-digit (or fractional) airfoil code into parameters
   build123d.objects_curve.Airfoil.__init__ (constructor)
   build123d.objects_curve.Airfoil.camber_line (property) — Camber line of the airfoil as an Edge
-build123d.objects_curve.BSpline (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.BSpline (class) [lines 25-38] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.BSpline.__init__ (constructor)
-build123d.objects_curve.BaseCurveObject (class) [1 members] [category: objects_curve] — BaseCurveObject specialized for Curve
+build123d.objects_curve.BaseCurveObject (class) [lines 40-48] [1 members] [category: objects_curve] — BaseCurveObject specialized for Curve
   build123d.objects_curve.BaseCurveObject.__init__ (constructor)
-build123d.objects_curve.BaseEdgeObject (class) [1 members] [category: objects_curve] — BaseEdgeObject specialized for Edge
+build123d.objects_curve.BaseEdgeObject (class) [lines 50-58] [1 members] [category: objects_curve] — BaseEdgeObject specialized for Edge
   build123d.objects_curve.BaseEdgeObject.__init__ (constructor)
-build123d.objects_curve.BaseLineObject (class) [1 members] [category: objects_curve] — BaseLineObject specialized for Wire
+build123d.objects_curve.BaseLineObject (class) [lines 60-68] [1 members] [category: objects_curve] — BaseLineObject specialized for Wire
   build123d.objects_curve.BaseLineObject.__init__ (constructor)
-build123d.objects_curve.Bezier (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.Bezier (class) [lines 70-80] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.Bezier.__init__ (constructor)
-build123d.objects_curve.BlendCurve (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.BlendCurve (class) [lines 82-98] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.BlendCurve.__init__ (constructor)
-build123d.objects_curve.CenterArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.CenterArc (class) [lines 100-112] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.CenterArc.__init__ (constructor)
-build123d.objects_curve.ConstrainedArcs (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.ConstrainedArcs (class) [lines 114-129] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ConstrainedArcs.__init__ (constructor)
-build123d.objects_curve.ConstrainedLines (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.ConstrainedLines (class) [lines 131-144] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ConstrainedLines.__init__ (constructor) — Create planar line(s) on XY subject to tangency, point-incidence, or
-build123d.objects_curve.DoubleTangentArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.DoubleTangentArc (class) [lines 146-159] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.DoubleTangentArc.__init__ (constructor)
-build123d.objects_curve.EllipticalCenterArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.EllipticalCenterArc (class) [lines 161-175] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.EllipticalCenterArc.__init__ (constructor)
-build123d.objects_curve.EllipticalStartArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.EllipticalStartArc (class) [lines 177-192] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.EllipticalStartArc.__init__ (constructor)
-build123d.objects_curve.FilletPolyline (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.FilletPolyline (class) [lines 194-207] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.FilletPolyline.__init__ (constructor)
-build123d.objects_curve.Helix (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.Helix (class) [lines 209-224] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.Helix.__init__ (constructor)
-build123d.objects_curve.HyperbolicCenterArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.HyperbolicCenterArc (class) [lines 226-240] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.HyperbolicCenterArc.__init__ (constructor)
-build123d.objects_curve.IntersectingLine (class) [1 members] [category: objects_curve] — Intersecting Line Object
+build123d.objects_curve.IntersectingLine (class) [lines 242-253] [1 members] [category: objects_curve] — Intersecting Line Object
   build123d.objects_curve.IntersectingLine.__init__ (constructor)
-build123d.objects_curve.JernArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.JernArc (class) [lines 255-267] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.JernArc.__init__ (constructor)
-build123d.objects_curve.Line (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.Line (class) [lines 269-279] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.Line.__init__ (constructor)
-build123d.objects_curve.ParabolicCenterArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.ParabolicCenterArc (class) [lines 281-294] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ParabolicCenterArc.__init__ (constructor)
-build123d.objects_curve.PolarLine (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.PolarLine (class) [lines 296-311] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.PolarLine.__init__ (constructor)
-build123d.objects_curve.Polyline (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.Polyline (class) [lines 313-324] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.Polyline.__init__ (constructor)
-build123d.objects_curve.RadiusArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.RadiusArc (class) [lines 326-339] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.RadiusArc.__init__ (constructor)
-build123d.objects_curve.SagittaArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.SagittaArc (class) [lines 341-352] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.SagittaArc.__init__ (constructor)
-build123d.objects_curve.Spline (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.Spline (class) [lines 354-366] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.Spline.__init__ (constructor)
-build123d.objects_curve.TangentArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.TangentArc (class) [lines 368-380] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.TangentArc.__init__ (constructor)
-build123d.objects_curve.ThreePointArc (class) [1 members] [category: objects_curve] — Line Object
+build123d.objects_curve.ThreePointArc (class) [lines 382-392] [1 members] [category: objects_curve] — Line Object
   build123d.objects_curve.ThreePointArc.__init__ (constructor)
 
 ## build_enums — `api-build-enums.md`
 
-build123d.build_enums.Align (enum) [4 members] [category: build_enums] — Align object about Axis
+build123d.build_enums.Align (enum) [lines 5-16] [4 members] [category: build_enums] — Align object about Axis
   build123d.build_enums.Align.MIN (enumMember)
   build123d.build_enums.Align.CENTER (enumMember)
   build123d.build_enums.Align.MAX (enumMember)
   build123d.build_enums.Align.NONE (enumMember)
-build123d.build_enums.AngularDirection (enum) [2 members] [category: build_enums] — Angular rotation direction
+build123d.build_enums.AngularDirection (enum) [lines 18-25] [2 members] [category: build_enums] — Angular rotation direction
   build123d.build_enums.AngularDirection.CLOCKWISE (enumMember)
   build123d.build_enums.AngularDirection.COUNTER_CLOCKWISE (enumMember)
-build123d.build_enums.ApproxOption (enum) [3 members] [category: build_enums] — DXF export spline approximation strategy
+build123d.build_enums.ApproxOption (enum) [lines 27-36] [3 members] [category: build_enums] — DXF export spline approximation strategy
   build123d.build_enums.ApproxOption.ARC (enumMember)
   build123d.build_enums.ApproxOption.NONE (enumMember)
   build123d.build_enums.ApproxOption.SPLINE (enumMember)
-build123d.build_enums.CenterOf (enum) [3 members] [category: build_enums] — Center Options
+build123d.build_enums.CenterOf (enum) [lines 38-47] [3 members] [category: build_enums] — Center Options
   build123d.build_enums.CenterOf.GEOMETRY (enumMember)
   build123d.build_enums.CenterOf.MASS (enumMember)
   build123d.build_enums.CenterOf.BOUNDING_BOX (enumMember)
-build123d.build_enums.ContinuityLevel (enum) [3 members] [category: build_enums] — Continuity level for evaluating geometric connections
+build123d.build_enums.ContinuityLevel (enum) [lines 49-59] [3 members] [category: build_enums] — Continuity level for evaluating geometric connections
   build123d.build_enums.ContinuityLevel.C0 (enumMember)
   build123d.build_enums.ContinuityLevel.C1 (enumMember)
   build123d.build_enums.ContinuityLevel.C2 (enumMember)
-build123d.build_enums.Convexity (enum) [4 members] [category: build_enums] — How the material of a shape sits around one of…
+build123d.build_enums.Convexity (enum) [lines 61-73] [4 members] [category: build_enums] — How the material of a shape sits around one of…
   build123d.build_enums.Convexity.CONVEX (enumMember)
   build123d.build_enums.Convexity.CONCAVE (enumMember)
   build123d.build_enums.Convexity.SMOOTH (enumMember)
   build123d.build_enums.Convexity.SADDLE (enumMember)
-build123d.build_enums.Extrinsic (enum) [12 members] [category: build_enums] — Order to apply extrinsic rotations by axis
+build123d.build_enums.Extrinsic (enum) [lines 75-102] [12 members] [category: build_enums] — Order to apply extrinsic rotations by axis
   build123d.build_enums.Extrinsic.XYZ (enumMember)
   build123d.build_enums.Extrinsic.XZY (enumMember)
   build123d.build_enums.Extrinsic.YZX (enumMember)
@@ -103,15 +103,15 @@ build123d.build_enums.Extrinsic (enum) [12 members] [category: build_enums] — 
   build123d.build_enums.Extrinsic.YXY (enumMember)
   build123d.build_enums.Extrinsic.ZXZ (enumMember)
   build123d.build_enums.Extrinsic.ZYZ (enumMember)
-build123d.build_enums.FontStyle (enum) [4 members] [category: build_enums] — Text Font Styles
+build123d.build_enums.FontStyle (enum) [lines 104-115] [4 members] [category: build_enums] — Text Font Styles
   build123d.build_enums.FontStyle.REGULAR (enumMember)
   build123d.build_enums.FontStyle.BOLD (enumMember)
   build123d.build_enums.FontStyle.ITALIC (enumMember)
   build123d.build_enums.FontStyle.BOLDITALIC (enumMember)
-build123d.build_enums.FrameMethod (enum) [2 members] [category: build_enums] — Moving frame calculation method
+build123d.build_enums.FrameMethod (enum) [lines 117-124] [2 members] [category: build_enums] — Moving frame calculation method
   build123d.build_enums.FrameMethod.FRENET (enumMember)
   build123d.build_enums.FrameMethod.CORRECTED (enumMember)
-build123d.build_enums.GeomType (enum) [16 members] [category: build_enums] — CAD geometry object type
+build123d.build_enums.GeomType (enum) [lines 126-161] [16 members] [category: build_enums] — CAD geometry object type
   build123d.build_enums.GeomType.PLANE (enumMember)
   build123d.build_enums.GeomType.CYLINDER (enumMember)
   build123d.build_enums.GeomType.CONE (enumMember)
@@ -128,11 +128,11 @@ build123d.build_enums.GeomType (enum) [16 members] [category: build_enums] — C
   build123d.build_enums.GeomType.HYPERBOLA (enumMember)
   build123d.build_enums.GeomType.PARABOLA (enumMember)
   build123d.build_enums.GeomType.OTHER (enumMember)
-build123d.build_enums.HeadType (enum) [3 members] [category: build_enums] — Arrow head types
+build123d.build_enums.HeadType (enum) [lines 163-172] [3 members] [category: build_enums] — Arrow head types
   build123d.build_enums.HeadType.STRAIGHT (enumMember)
   build123d.build_enums.HeadType.CURVED (enumMember)
   build123d.build_enums.HeadType.FILLETED (enumMember)
-build123d.build_enums.Intrinsic (enum) [12 members] [category: build_enums] — Order to apply intrinsic rotations by axis
+build123d.build_enums.Intrinsic (enum) [lines 174-201] [12 members] [category: build_enums] — Order to apply intrinsic rotations by axis
   build123d.build_enums.Intrinsic.XYZ (enumMember)
   build123d.build_enums.Intrinsic.XZY (enumMember)
   build123d.build_enums.Intrinsic.YZX (enumMember)
@@ -145,36 +145,36 @@ build123d.build_enums.Intrinsic (enum) [12 members] [category: build_enums] — 
   build123d.build_enums.Intrinsic.YXY (enumMember)
   build123d.build_enums.Intrinsic.ZXZ (enumMember)
   build123d.build_enums.Intrinsic.ZYZ (enumMember)
-build123d.build_enums.Keep (enum) [6 members] [category: build_enums] — Split options
+build123d.build_enums.Keep (enum) [lines 203-218] [6 members] [category: build_enums] — Split options
   build123d.build_enums.Keep.ALL (enumMember)
   build123d.build_enums.Keep.BOTTOM (enumMember)
   build123d.build_enums.Keep.BOTH (enumMember)
   build123d.build_enums.Keep.INSIDE (enumMember)
   build123d.build_enums.Keep.OUTSIDE (enumMember)
   build123d.build_enums.Keep.TOP (enumMember)
-build123d.build_enums.Kind (enum) [3 members] [category: build_enums] — Offset corner transition
+build123d.build_enums.Kind (enum) [lines 220-229] [3 members] [category: build_enums] — Offset corner transition
   build123d.build_enums.Kind.ARC (enumMember)
   build123d.build_enums.Kind.INTERSECTION (enumMember)
   build123d.build_enums.Kind.TANGENT (enumMember)
-build123d.build_enums.LengthMode (enum) [3 members] [category: build_enums] — Method of specifying length along PolarLine
+build123d.build_enums.LengthMode (enum) [lines 231-240] [3 members] [category: build_enums] — Method of specifying length along PolarLine
   build123d.build_enums.LengthMode.DIAGONAL (enumMember)
   build123d.build_enums.LengthMode.HORIZONTAL (enumMember)
   build123d.build_enums.LengthMode.VERTICAL (enumMember)
-build123d.build_enums.MeshType (enum) [4 members] [category: build_enums] — 3MF mesh types typically for 3D printing
+build123d.build_enums.MeshType (enum) [lines 242-253] [4 members] [category: build_enums] — 3MF mesh types typically for 3D printing
   build123d.build_enums.MeshType.OTHER (enumMember)
   build123d.build_enums.MeshType.MODEL (enumMember)
   build123d.build_enums.MeshType.SUPPORT (enumMember)
   build123d.build_enums.MeshType.SOLIDSUPPORT (enumMember)
-build123d.build_enums.Mode (enum) [5 members] [category: build_enums] — Combination Mode
+build123d.build_enums.Mode (enum) [lines 255-268] [5 members] [category: build_enums] — Combination Mode
   build123d.build_enums.Mode.ADD (enumMember)
   build123d.build_enums.Mode.SUBTRACT (enumMember)
   build123d.build_enums.Mode.INTERSECT (enumMember)
   build123d.build_enums.Mode.REPLACE (enumMember)
   build123d.build_enums.Mode.PRIVATE (enumMember)
-build123d.build_enums.NumberDisplay (enum) [2 members] [category: build_enums] — Methods for displaying numbers
+build123d.build_enums.NumberDisplay (enum) [lines 270-277] [2 members] [category: build_enums] — Methods for displaying numbers
   build123d.build_enums.NumberDisplay.DECIMAL (enumMember)
   build123d.build_enums.NumberDisplay.FRACTION (enumMember)
-build123d.build_enums.PageSize (enum) [14 members] [category: build_enums] — Align object about Axis
+build123d.build_enums.PageSize (enum) [lines 279-310] [14 members] [category: build_enums] — Align object about Axis
   build123d.build_enums.PageSize.A0 (enumMember)
   build123d.build_enums.PageSize.A1 (enumMember)
   build123d.build_enums.PageSize.A2 (enumMember)
@@ -189,49 +189,49 @@ build123d.build_enums.PageSize (enum) [14 members] [category: build_enums] — A
   build123d.build_enums.PageSize.LETTER (enumMember)
   build123d.build_enums.PageSize.LEGAL (enumMember)
   build123d.build_enums.PageSize.LEDGER (enumMember)
-build123d.build_enums.PositionMode (enum) [2 members] [category: build_enums] — Position along curve mode
+build123d.build_enums.PositionMode (enum) [lines 312-319] [2 members] [category: build_enums] — Position along curve mode
   build123d.build_enums.PositionMode.LENGTH (enumMember)
   build123d.build_enums.PositionMode.PARAMETER (enumMember)
-build123d.build_enums.PrecisionMode (enum) [4 members] [category: build_enums] — When you export a model to a STEP file, the…
+build123d.build_enums.PrecisionMode (enum) [lines 321-333] [4 members] [category: build_enums] — When you export a model to a STEP file, the…
   build123d.build_enums.PrecisionMode.SESSION (enumMember)
   build123d.build_enums.PrecisionMode.GREATEST (enumMember)
   build123d.build_enums.PrecisionMode.AVERAGE (enumMember)
   build123d.build_enums.PrecisionMode.LEAST (enumMember)
-build123d.build_enums.Sagitta (enum) [3 members] [category: build_enums] — Sagitta selection
+build123d.build_enums.Sagitta (enum) [lines 335-344] [3 members] [category: build_enums] — Sagitta selection
   build123d.build_enums.Sagitta.SHORT (enumMember)
   build123d.build_enums.Sagitta.LONG (enumMember)
   build123d.build_enums.Sagitta.BOTH (enumMember)
-build123d.build_enums.Select (enum) [3 members] [category: build_enums] — How much of a shape a selector returns
+build123d.build_enums.Select (enum) [lines 346-356] [3 members] [category: build_enums] — How much of a shape a selector returns
   build123d.build_enums.Select.ALL (enumMember)
   build123d.build_enums.Select.LAST (enumMember)
   build123d.build_enums.Select.NEW (enumMember)
-build123d.build_enums.Side (enum) [3 members] [category: build_enums] — 2D Offset types
+build123d.build_enums.Side (enum) [lines 358-367] [3 members] [category: build_enums] — 2D Offset types
   build123d.build_enums.Side.LEFT (enumMember)
   build123d.build_enums.Side.RIGHT (enumMember)
   build123d.build_enums.Side.BOTH (enumMember)
-build123d.build_enums.SortBy (enum) [5 members] [category: build_enums] — Sorting criteria
+build123d.build_enums.SortBy (enum) [lines 369-382] [5 members] [category: build_enums] — Sorting criteria
   build123d.build_enums.SortBy.LENGTH (enumMember)
   build123d.build_enums.SortBy.RADIUS (enumMember)
   build123d.build_enums.SortBy.AREA (enumMember)
   build123d.build_enums.SortBy.VOLUME (enumMember)
   build123d.build_enums.SortBy.DISTANCE (enumMember)
-build123d.build_enums.Tangency (enum) [4 members] [category: build_enums] — Tangency constraint for solvers edge selection
+build123d.build_enums.Tangency (enum) [lines 384-395] [4 members] [category: build_enums] — Tangency constraint for solvers edge selection
   build123d.build_enums.Tangency.UNQUALIFIED (enumMember)
   build123d.build_enums.Tangency.ENCLOSING (enumMember)
   build123d.build_enums.Tangency.ENCLOSED (enumMember)
   build123d.build_enums.Tangency.OUTSIDE (enumMember)
-build123d.build_enums.TextAlign (enum) [6 members] [category: build_enums] — Text Alignment
+build123d.build_enums.TextAlign (enum) [lines 397-412] [6 members] [category: build_enums] — Text Alignment
   build123d.build_enums.TextAlign.BOTTOM (enumMember)
   build123d.build_enums.TextAlign.CENTER (enumMember)
   build123d.build_enums.TextAlign.LEFT (enumMember)
   build123d.build_enums.TextAlign.RIGHT (enumMember)
   build123d.build_enums.TextAlign.TOP (enumMember)
   build123d.build_enums.TextAlign.TOPFIRSTLINE (enumMember)
-build123d.build_enums.Transition (enum) [3 members] [category: build_enums] — Sweep discontinuity handling option
+build123d.build_enums.Transition (enum) [lines 414-423] [3 members] [category: build_enums] — Sweep discontinuity handling option
   build123d.build_enums.Transition.RIGHT (enumMember)
   build123d.build_enums.Transition.ROUND (enumMember)
   build123d.build_enums.Transition.TRANSFORMED (enumMember)
-build123d.build_enums.Unit (enum) [9 members] [category: build_enums] — Standard Units
+build123d.build_enums.Unit (enum) [lines 425-446] [9 members] [category: build_enums] — Standard Units
   build123d.build_enums.Unit.MC (enumMember)
   build123d.build_enums.Unit.MM (enumMember)
   build123d.build_enums.Unit.CM (enumMember)
@@ -241,7 +241,7 @@ build123d.build_enums.Unit (enum) [9 members] [category: build_enums] — Standa
   build123d.build_enums.Unit.G (enumMember)
   build123d.build_enums.Unit.KG (enumMember)
   build123d.build_enums.Unit.LB (enumMember)
-build123d.build_enums.Until (enum) [4 members] [category: build_enums] — Extrude limit
+build123d.build_enums.Until (enum) [lines 448-459] [4 members] [category: build_enums] — Extrude limit
   build123d.build_enums.Until.NEXT (enumMember)
   build123d.build_enums.Until.LAST (enumMember)
   build123d.build_enums.Until.PREVIOUS (enumMember)
@@ -249,23 +249,23 @@ build123d.build_enums.Until (enum) [4 members] [category: build_enums] — Extru
 
 ## drafting — `api-drafting.md`
 
-build123d.drafting.Arrow (class) [1 members] [category: drafting] — Sketch Object
+build123d.drafting.Arrow (class) [lines 5-17] [1 members] [category: drafting] — Sketch Object
   build123d.drafting.Arrow.__init__ (constructor)
-build123d.drafting.ArrowHead (class) [1 members] [category: drafting] — Sketch Object
+build123d.drafting.ArrowHead (class) [lines 19-29] [1 members] [category: drafting] — Sketch Object
   build123d.drafting.ArrowHead.__init__ (constructor)
-build123d.drafting.DimensionLine (class) [1 members] [category: drafting] — Sketch Object
+build123d.drafting.DimensionLine (class) [lines 31-48] [1 members] [category: drafting] — Sketch Object
   build123d.drafting.DimensionLine.__init__ (constructor)
-build123d.drafting.Draft (class) [2 members] [category: drafting] — Draft
+build123d.drafting.Draft (class) [lines 50-73] [2 members] [category: drafting] — Draft
   build123d.drafting.Draft.is_metric (property) — Are metric units being used
   build123d.drafting.Draft.__init__ (constructor)
-build123d.drafting.ExtensionLine (class) [1 members] [category: drafting] — Sketch Object
+build123d.drafting.ExtensionLine (class) [lines 75-91] [1 members] [category: drafting] — Sketch Object
   build123d.drafting.ExtensionLine.__init__ (constructor)
-build123d.drafting.TechnicalDrawing (class) [1 members] [category: drafting] — Sketch Object
+build123d.drafting.TechnicalDrawing (class) [lines 93-111] [1 members] [category: drafting] — Sketch Object
   build123d.drafting.TechnicalDrawing.__init__ (constructor)
 
 ## geometry — `api-geometry.md`
 
-build123d.geometry.Axis (class) [19 members] [category: geometry] — Axis
+build123d.geometry.Axis (class) [lines 5-103] [19 members] [category: geometry] — Axis
   build123d.geometry.Axis.X (property) — X Axis
   build123d.geometry.Axis.Y (property) — Y Axis
   build123d.geometry.Axis.Z (property) — Z Axis
@@ -285,7 +285,7 @@ build123d.geometry.Axis (class) [19 members] [category: geometry] — Axis
   build123d.geometry.Axis.__neg__ (method) — Flip direction operator -
   build123d.geometry.Axis.__and__ (method) — intersect vector with other &
   build123d.geometry.Axis.intersect (method) — Find intersection of axis and geometric object or shape
-build123d.geometry.BoundBox (class) [18 members] [category: geometry] — An axis-aligned bounding box for a shape
+build123d.geometry.BoundBox (class) [lines 105-193] [18 members] [category: geometry] — An axis-aligned bounding box for a shape
   build123d.geometry.BoundBox.__init__ (constructor)
   build123d.geometry.BoundBox.measure (property) — Return the overall Lebesgue measure of the bounding box
   build123d.geometry.BoundBox.diagonal (property) — body diagonal length (i.e
@@ -304,13 +304,13 @@ build123d.geometry.BoundBox (class) [18 members] [category: geometry] — An axi
   build123d.geometry.BoundBox.overlaps (method) — Return whether these boxes overlap without either one containing the…
   build123d.geometry.BoundBox.is_inside (method) — Return whether this bounding box is inside *other*
   build123d.geometry.BoundBox.to_align_offset (method) — Amount to move object to achieve the desired alignment
-build123d.geometry.Color (class) [2 members] [category: geometry] — Color object based on OCCT Quantity_ColorRGBA
+build123d.geometry.Color (class) [lines 195-215] [2 members] [category: geometry] — Color object based on OCCT Quantity_ColorRGBA
   build123d.geometry.Color.__init__ (constructor)
   build123d.geometry.Color.categorical_set (method) — Generate a palette of evenly spaced colors
-build123d.geometry.GeomEncoder (class) [2 members] [category: geometry] — A JSON encoder for build123d geometry objects
+build123d.geometry.GeomEncoder (class) [lines 217-229] [2 members] [category: geometry] — A JSON encoder for build123d geometry objects
   build123d.geometry.GeomEncoder.default (method) — Return a JSON-serializable representation of a known geometry object
   build123d.geometry.GeomEncoder.geometry_hook (method) — Convert dictionaries back into geometry objects for decoding
-build123d.geometry.Location (class) [15 members] [category: geometry] — Location in 3D space
+build123d.geometry.Location (class) [lines 231-310] [15 members] [category: geometry] — Location in 3D space
   build123d.geometry.Location.__init__ (constructor)
   build123d.geometry.Location.wrapped (property) — OCP object
   build123d.geometry.Location.position (property) — Extract Position component of self
@@ -326,14 +326,14 @@ build123d.geometry.Location (class) [15 members] [category: geometry] — Locati
   build123d.geometry.Location.center (method) — Return center of the location - useful for sorting
   build123d.geometry.Location.mirror (method) — Return a new Location mirrored across the given plane
   build123d.geometry.Location.intersect (method) — Find intersection of location and geometric object or shape
-build123d.geometry.Matrix (class) [6 members] [category: geometry] — A 3d , 4x4 transformation matrix
+build123d.geometry.Matrix (class) [lines 312-343] [6 members] [category: geometry] — A 3d , 4x4 transformation matrix
   build123d.geometry.Matrix.__init__ (constructor)
   build123d.geometry.Matrix.rotate (method) — General rotate about axis by angle in degrees
   build123d.geometry.Matrix.inverse (method) — Invert Matrix
   build123d.geometry.Matrix.multiply (method) — Matrix multiplication
   build123d.geometry.Matrix.transposed_list (method) — Needed by the cqparts gltf exporter
   build123d.geometry.Matrix.__getitem__ (method) — Provide Matrix[r, c] syntax for accessing individual values
-build123d.geometry.OrientedBoundBox (class) [13 members] [category: geometry] — An Oriented Bounding Box
+build123d.geometry.OrientedBoundBox (class) [lines 345-409] [13 members] [category: geometry] — An Oriented Bounding Box
   build123d.geometry.OrientedBoundBox.__init__ (constructor) — Create an oriented bounding box from either a precomputed Bnd_OBB…
   build123d.geometry.OrientedBoundBox.wrapped (property) — OCP object
   build123d.geometry.OrientedBoundBox.corners (property) — Compute and return the unique corner points of the oriented…
@@ -347,7 +347,7 @@ build123d.geometry.OrientedBoundBox (class) [13 members] [category: geometry] �
   build123d.geometry.OrientedBoundBox.center (method) — Compute and return the center point of the oriented bounding…
   build123d.geometry.OrientedBoundBox.is_completely_inside (method) — Determine whether the given oriented bounding box is entirely contained
   build123d.geometry.OrientedBoundBox.is_outside (method) — Determine whether a given point lies entirely outside this oriented…
-build123d.geometry.Plane (class) [40 members] [category: geometry] — Plane
+build123d.geometry.Plane (class) [lines 411-591] [40 members] [category: geometry] — Plane
   build123d.geometry.Plane.XY (property) — XY Plane
   build123d.geometry.Plane.YZ (property) — YZ Plane
   build123d.geometry.Plane.ZX (property) — ZX Plane
@@ -388,16 +388,16 @@ build123d.geometry.Plane (class) [40 members] [category: geometry] — Plane
   build123d.geometry.Plane.location_between (method) — Return a location representing the translation from self to other
   build123d.geometry.Plane.contains (method) — contains
   build123d.geometry.Plane.intersect (method) — Find intersection of plane and geometric object or shape
-build123d.geometry.Pos (class) [1 members] [category: geometry] — A position only sub-class of Location
+build123d.geometry.Pos (class) [lines 593-601] [1 members] [category: geometry] — A position only sub-class of Location
   build123d.geometry.Pos.__init__ (constructor)
-build123d.geometry.Rot (class) [1 members] [category: geometry] — Subclass of Location used only for object rotation
+build123d.geometry.Rot (class) [lines 603-612] [1 members] [category: geometry] — Subclass of Location used only for object rotation
   build123d.geometry.Rotation.__init__ (constructor) [id: python:build123d.geometry.Rotation.__init__]
-build123d.geometry.Rotation (class) [1 members] [category: geometry] — Subclass of Location used only for object rotation
+build123d.geometry.Rotation (class) [lines 614-623] [1 members] [category: geometry] — Subclass of Location used only for object rotation
   build123d.geometry.Rotation.__init__ (constructor) [id: python:build123d.geometry.Rotation.__init__#constructor]
 
 ## geometry (2) — `api-geometry-2.md`
 
-build123d.geometry.Vector (class) [33 members] [category: geometry] — Create a 3-dimensional vector
+build123d.geometry.Vector (class) [lines 5-156] [33 members] [category: geometry] — Create a 3-dimensional vector
   build123d.geometry.Vector.__init__ (constructor)
   build123d.geometry.Vector.X (property) — Get x value
   build123d.geometry.Vector.Y (property) — Get y value
@@ -434,31 +434,31 @@ build123d.geometry.Vector (class) [33 members] [category: geometry] — Create a
 
 ## joints — `api-joints.md`
 
-build123d.joints.BallJoint (class) [5 members] [category: joints] — BallJoint
+build123d.joints.BallJoint (class) [lines 5-39] [5 members] [category: joints] — BallJoint
   build123d.joints.BallJoint.location (property) — Location of joint
   build123d.joints.BallJoint.symbol (property) — A CAD symbol representing joint as bound to part
   build123d.joints.BallJoint.__init__ (constructor)
   build123d.joints.BallJoint.connect_to (method) — Connect BallJoint and RigidJoint
   build123d.joints.BallJoint.relative_to (method) — relative_to - BallJoint
-build123d.joints.CylindricalJoint (class) [5 members] [category: joints] — CylindricalJoint
+build123d.joints.CylindricalJoint (class) [lines 41-81] [5 members] [category: joints] — CylindricalJoint
   build123d.joints.CylindricalJoint.location (property) — Location of joint
   build123d.joints.CylindricalJoint.symbol (property) — A CAD symbol representing the cylindrical axis as bound to…
   build123d.joints.CylindricalJoint.__init__ (constructor)
   build123d.joints.CylindricalJoint.connect_to (method) — Connect CylindricalJoint and RigidJoint"
   build123d.joints.CylindricalJoint.relative_to (method) — Relative location of CylindricalJoint to RigidJoint
-build123d.joints.LinearJoint (class) [5 members] [category: joints] — LinearJoint
+build123d.joints.LinearJoint (class) [lines 83-120] [5 members] [category: joints] — LinearJoint
   build123d.joints.LinearJoint.location (property) — Location of joint
   build123d.joints.LinearJoint.symbol (property) — A CAD symbol of the linear axis positioned relative to_part
   build123d.joints.LinearJoint.__init__ (constructor)
   build123d.joints.LinearJoint.connect_to (method) — Connect LinearJoint to another Joint
   build123d.joints.LinearJoint.relative_to (method) — Relative location of LinearJoint to RevoluteJoint or RigidJoint
-build123d.joints.RevoluteJoint (class) [5 members] [category: joints] — RevoluteJoint
+build123d.joints.RevoluteJoint (class) [lines 122-155] [5 members] [category: joints] — RevoluteJoint
   build123d.joints.RevoluteJoint.location (property) — Location of joint
   build123d.joints.RevoluteJoint.symbol (property) — A CAD symbol representing the axis of rotation as bound…
   build123d.joints.RevoluteJoint.__init__ (constructor)
   build123d.joints.RevoluteJoint.connect_to (method) — Connect RevoluteJoint and RigidJoint
   build123d.joints.RevoluteJoint.relative_to (method) — Relative location of RevoluteJoint to RigidJoint
-build123d.joints.RigidJoint (class) [5 members] [category: joints] — RigidJoint
+build123d.joints.RigidJoint (class) [lines 157-195] [5 members] [category: joints] — RigidJoint
   build123d.joints.RigidJoint.location (property) — Location of joint
   build123d.joints.RigidJoint.symbol (property) — A CAD symbol (XYZ indicator) as bound to part
   build123d.joints.RigidJoint.__init__ (constructor)
@@ -467,66 +467,66 @@ build123d.joints.RigidJoint (class) [5 members] [category: joints] — RigidJoin
 
 ## objects_part — `api-objects-part.md`
 
-build123d.objects_part.BasePartObject (class) [1 members] [category: objects_part] — BasePartObject
+build123d.objects_part.BasePartObject (class) [lines 5-15] [1 members] [category: objects_part] — BasePartObject
   build123d.objects_part.BasePartObject.__init__ (constructor)
-build123d.objects_part.Box (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Box (class) [lines 17-30] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Box.__init__ (constructor)
-build123d.objects_part.Cone (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Cone (class) [lines 32-46] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Cone.__init__ (constructor)
-build123d.objects_part.ConvexPolyhedron (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.ConvexPolyhedron (class) [lines 48-59] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.ConvexPolyhedron.__init__ (constructor)
-build123d.objects_part.CounterBoreHole (class) [1 members] [category: objects_part] — Part Operation
+build123d.objects_part.CounterBoreHole (class) [lines 61-73] [1 members] [category: objects_part] — Part Operation
   build123d.objects_part.CounterBoreHole.__init__ (constructor)
-build123d.objects_part.CounterSinkHole (class) [1 members] [category: objects_part] — Part Operation
+build123d.objects_part.CounterSinkHole (class) [lines 75-87] [1 members] [category: objects_part] — Part Operation
   build123d.objects_part.CounterSinkHole.__init__ (constructor)
-build123d.objects_part.Cylinder (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Cylinder (class) [lines 89-102] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Cylinder.__init__ (constructor)
-build123d.objects_part.Hole (class) [1 members] [category: objects_part] — Part Operation
+build123d.objects_part.Hole (class) [lines 104-114] [1 members] [category: objects_part] — Part Operation
   build123d.objects_part.Hole.__init__ (constructor)
-build123d.objects_part.Sphere (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Sphere (class) [lines 116-130] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Sphere.__init__ (constructor)
-build123d.objects_part.Torus (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Torus (class) [lines 132-147] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Torus.__init__ (constructor)
-build123d.objects_part.Wedge (class) [1 members] [category: objects_part] — Part Object
+build123d.objects_part.Wedge (class) [lines 149-166] [1 members] [category: objects_part] — Part Object
   build123d.objects_part.Wedge.__init__ (constructor)
-build123d.objects_part._BaseHole (class) [category: objects_part] — Shared functionality for hole-style part operations
+build123d.objects_part._BaseHole (class) [lines 168-171] [category: objects_part] — Shared functionality for hole-style part operations
 
 ## objects_sketch — `api-objects-sketch.md`
 
-build123d.objects_sketch.BaseSketchObject (class) [1 members] [category: objects_sketch] — BaseSketchObject
+build123d.objects_sketch.BaseSketchObject (class) [lines 5-16] [1 members] [category: objects_sketch] — BaseSketchObject
   build123d.objects_sketch.BaseSketchObject.__init__ (constructor)
-build123d.objects_sketch.Circle (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Circle (class) [lines 18-29] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Circle.__init__ (constructor)
-build123d.objects_sketch.Ellipse (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Ellipse (class) [lines 31-43] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Ellipse.__init__ (constructor)
-build123d.objects_sketch.Polygon (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Polygon (class) [lines 45-56] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Polygon.__init__ (constructor)
-build123d.objects_sketch.Rectangle (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Rectangle (class) [lines 58-70] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Rectangle.__init__ (constructor)
-build123d.objects_sketch.RectangleRounded (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.RectangleRounded (class) [lines 72-85] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.RectangleRounded.__init__ (constructor)
-build123d.objects_sketch.RegularPolygon (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.RegularPolygon (class) [lines 87-100] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.RegularPolygon.__init__ (constructor)
-build123d.objects_sketch.SlotArc (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.SlotArc (class) [lines 102-113] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.SlotArc.__init__ (constructor)
-build123d.objects_sketch.SlotCenterPoint (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.SlotCenterPoint (class) [lines 115-127] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.SlotCenterPoint.__init__ (constructor)
-build123d.objects_sketch.SlotCenterToCenter (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.SlotCenterToCenter (class) [lines 129-140] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.SlotCenterToCenter.__init__ (constructor)
-build123d.objects_sketch.SlotOverall (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.SlotOverall (class) [lines 142-154] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.SlotOverall.__init__ (constructor)
-build123d.objects_sketch.Superellipse (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Superellipse (class) [lines 156-170] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Superellipse.__init__ (constructor)
-build123d.objects_sketch.Text (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Text (class) [lines 172-191] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Text.__init__ (constructor)
-build123d.objects_sketch.Trapezoid (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Trapezoid (class) [lines 193-208] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Trapezoid.__init__ (constructor)
-build123d.objects_sketch.Triangle (class) [1 members] [category: objects_sketch] — Sketch Object
+build123d.objects_sketch.Triangle (class) [lines 210-227] [1 members] [category: objects_sketch] — Sketch Object
   build123d.objects_sketch.Triangle.__init__ (constructor)
 
 ## build_line — `api-build-line.md`
 
-build123d.build_line.BuildLine (class) [7 members] [category: build_line] — BuildLine
+build123d.build_line.BuildLine (class) [lines 5-36] [7 members] [category: build_line] — BuildLine
   build123d.build_line.BuildLine.__init__ (constructor)
   build123d.build_line.BuildLine.line (property) — Get the placed line
   build123d.build_line.BuildLine.line_local (property) — Get the line in the Builder's local construction coordinates
@@ -537,7 +537,7 @@ build123d.build_line.BuildLine (class) [7 members] [category: build_line] — Bu
 
 ## build_part — `api-build-part.md`
 
-build123d.build_part.BuildPart (class) [5 members] [category: build_part] — BuildPart
+build123d.build_part.BuildPart (class) [lines 5-26] [5 members] [category: build_part] — BuildPart
   build123d.build_part.BuildPart.__init__ (constructor)
   build123d.build_part.BuildPart.part (property) — Get the placed part
   build123d.build_part.BuildPart.part_local (property) — Get the part in the Builder's local construction coordinates
@@ -546,7 +546,7 @@ build123d.build_part.BuildPart (class) [5 members] [category: build_part] — Bu
 
 ## build_sketch — `api-build-sketch.md`
 
-build123d.build_sketch.BuildSketch (class) [6 members] [category: build_sketch] — BuildSketch
+build123d.build_sketch.BuildSketch (class) [lines 5-32] [6 members] [category: build_sketch] — BuildSketch
   build123d.build_sketch.BuildSketch.__init__ (constructor)
   build123d.build_sketch.BuildSketch.sketch_local (property) — Get the builder's object
   build123d.build_sketch.BuildSketch.sketch (property) — Get the placed sketch
@@ -556,25 +556,25 @@ build123d.build_sketch.BuildSketch (class) [6 members] [category: build_sketch] 
 
 ## other — `api-other.md`
 
-CM (constant) — 10
-FT (constant) — 304.79999999999995
-G (constant) — 1
-G_PER_LB (constant) — 453.59237
-IN (constant) — 25.4
-KG (constant) — 1000
-LB (constant) — 453.59237
-M (constant) — 1000
-MC (constant) — 0.001
-MM (constant) — 1
-RotationLike (type)
-THOU (constant) — 0.0254
-UNITS_PER_KILOGRAM (type)
-UNITS_PER_METER (type)
-VectorLike (type)
+CM (constant) [lines 5-6] — 10
+FT (constant) [lines 8-9] — 304.79999999999995
+G (constant) [lines 11-12] — 1
+G_PER_LB (constant) [lines 14-15] — 453.59237
+IN (constant) [lines 17-18] — 25.4
+KG (constant) [lines 20-21] — 1000
+LB (constant) [lines 23-24] — 453.59237
+M (constant) [lines 26-27] — 1000
+MC (constant) [lines 29-30] — 0.001
+MM (constant) [lines 32-33] — 1
+RotationLike (type) [lines 35-35]
+THOU (constant) [lines 37-38] — 0.0254
+UNITS_PER_KILOGRAM (type) [lines 40-40]
+UNITS_PER_METER (type) [lines 42-42]
+VectorLike (type) [lines 44-44]
 
 ## composite — `api-composite.md`
 
-build123d.topology.composite.Compound (class) [18 members] [category: composite] — A Compound in build123d is a topological entity representing a…
+build123d.topology.composite.Compound (class) [lines 5-117] [18 members] [category: composite] — A Compound in build123d is a topological entity representing a…
   build123d.topology.composite.Compound.__init__ (constructor) — Build a Compound from Shapes
   build123d.topology.composite.Compound.volume (property) — volume - the volume of this Compound
   build123d.topology.composite.Compound.mass (method) — mass - the mass of this Compound
@@ -593,35 +593,35 @@ build123d.topology.composite.Compound (class) [18 members] [category: composite]
   build123d.topology.composite.Compound.touch (method) — Distribute touch over compound elements
   build123d.topology.composite.Compound.project_to_viewport (method) — project_to_viewport
   build123d.topology.composite.Compound.unwrap (method) — Strip unnecessary Compound wrappers
-build123d.topology.composite.Curve (class) [5 members] [category: composite] — A Compound containing 1D objects - aka Edges
+build123d.topology.composite.Curve (class) [lines 119-143] [5 members] [category: composite] — A Compound containing 1D objects - aka Edges
   build123d.topology.composite.Curve.__add__ (method) — fuse shape to wire/edge operator +
   build123d.topology.composite.Curve.__matmul__ (method) — Position on curve operator @ - only works if continuous
   build123d.topology.composite.Curve.__mod__ (method) — Tangent on wire operator % - only works if continuous
   build123d.topology.composite.Curve.__xor__ (method) — Location on wire operator ^ - only works if continuous
   build123d.topology.composite.Curve.wires (method) — A list of wires created from the edges
-build123d.topology.composite.Part (class) [1 members] [category: composite] — A Compound containing 3D objects - aka Solids
+build123d.topology.composite.Part (class) [lines 145-151] [1 members] [category: composite] — A Compound containing 3D objects - aka Solids
   build123d.topology.composite.Part.__iadd__ (method)
-build123d.topology.composite.Sketch (class) [1 members] [category: composite] — A Compound containing 2D objects - aka Faces
+build123d.topology.composite.Sketch (class) [lines 153-159] [1 members] [category: composite] — A Compound containing 2D objects - aka Faces
   build123d.topology.composite.Sketch.__iadd__ (method)
 
 ## exporters — `api-exporters.md`
 
-build123d.exporters.DotLength (enum) [3 members] [category: exporters] — Line type dash pattern dot widths, expressed in tenths of…
+build123d.exporters.DotLength (enum) [lines 5-14] [3 members] [category: exporters] — Line type dash pattern dot widths, expressed in tenths of…
   build123d.exporters.DotLength.TRUE_DOT (enumMember)
   build123d.exporters.DotLength.INKSCAPE_COMPAT (enumMember)
   build123d.exporters.DotLength.QCAD_IMPERIAL (enumMember)
-build123d.exporters.Export2D (class) [category: exporters] — Base class for 2D exporters (DXF, SVG)
-build123d.exporters.ExportDXF (class) [4 members] [category: exporters] — The ExportDXF class provides functionality for exporting 2D shapes to…
+build123d.exporters.Export2D (class) [lines 16-19] [category: exporters] — Base class for 2D exporters (DXF, SVG)
+build123d.exporters.ExportDXF (class) [lines 21-57] [4 members] [category: exporters] — The ExportDXF class provides functionality for exporting 2D shapes to…
   build123d.exporters.ExportDXF.__init__ (constructor)
   build123d.exporters.ExportDXF.add_layer (method) — add_layer
   build123d.exporters.ExportDXF.add_shape (method) — add_shape
   build123d.exporters.ExportDXF.write (method) — write
-build123d.exporters.ExportSVG (class) [4 members] [category: exporters] — ExportSVG
+build123d.exporters.ExportSVG (class) [lines 59-104] [4 members] [category: exporters] — ExportSVG
   build123d.exporters.ExportSVG.__init__ (constructor)
   build123d.exporters.ExportSVG.add_layer (method) — add_layer
   build123d.exporters.ExportSVG.add_shape (method) — add_shape
   build123d.exporters.ExportSVG.write (method) — write
-build123d.exporters.LineType (enum) [39 members] [category: exporters] — Line Types
+build123d.exporters.LineType (enum) [lines 106-187] [39 members] [category: exporters] — Line Types
   build123d.exporters.LineType.CONTINUOUS (enumMember)
   build123d.exporters.LineType.BORDER (enumMember)
   build123d.exporters.LineType.BORDER2 (enumMember)
@@ -661,13 +661,13 @@ build123d.exporters.LineType (enum) [39 members] [category: exporters] — Line 
   build123d.exporters.LineType.ISO_DOUBLE_DASH_DOUBLE_DOT (enumMember)
   build123d.exporters.LineType.ISO_DASH_TRIPLE_DOT (enumMember)
   build123d.exporters.LineType.ISO_DOUBLE_DASH_TRIPLE_DOT (enumMember)
-build123d.exporters.AutoNameEnum (enum) [category: exporters] — An enum class that automatically sets members' value to their…
+build123d.exporters.AutoNameEnum (enum) [lines 189-192] [category: exporters] — An enum class that automatically sets members' value to their…
 
 ## three_d — `api-three-d.md`
 
-build123d.topology.three_d.DraftAngleError (class) [1 members] [category: three_d] — Solid.draft custom exception
+build123d.topology.three_d.DraftAngleError (class) [lines 5-11] [1 members] [category: three_d] — Solid.draft custom exception
   build123d.topology.three_d.DraftAngleError.__init__ (constructor)
-build123d.topology.three_d.Solid (class) [21 members] [category: three_d] — A Solid in build123d represents a three-dimensional solid geometry
+build123d.topology.three_d.Solid (class) [lines 13-178] [21 members] [category: three_d] — A Solid in build123d represents a three-dimensional solid geometry
   build123d.topology.three_d.Solid.__init__ (constructor) — Build a solid from an OCCT TopoDS_Shape/TopoDS_Solid
   build123d.topology.three_d.Solid.volume (property) — volume - the volume of this Solid
   build123d.topology.three_d.Solid.mass (method) — mass - the mass of this Solid
@@ -689,7 +689,7 @@ build123d.topology.three_d.Solid (class) [21 members] [category: three_d] — A 
   build123d.topology.three_d.Solid.sweep_multi (method) — Multi section sweep
   build123d.topology.three_d.Solid.thicken (method) — Thicken Face or Shell
   build123d.topology.three_d.Solid.draft (method) — Apply a draft angle to the given faces of the…
-build123d.topology.three_d.Mixin3D (class) [11 members] [category: three_d] — Additional methods to add to 3D Shape classes
+build123d.topology.three_d.Mixin3D (class) [lines 180-274] [11 members] [category: three_d] — Additional methods to add to 3D Shape classes
   build123d.topology.three_d.Mixin3D.find_intersection_points (method) — Find point and normal at intersection
   build123d.topology.three_d.Mixin3D.extrude (method) — Unused - only here because Mixin1D is a subclass of…
   build123d.topology.three_d.Mixin3D.center (method) — Return center of object
@@ -704,7 +704,7 @@ build123d.topology.three_d.Mixin3D (class) [11 members] [category: three_d] — 
 
 ## one_d — `api-one-d.md`
 
-build123d.topology.one_d.Edge (class) [33 members] [category: one_d] — An Edge in build123d is a fundamental element in the…
+build123d.topology.one_d.Edge (class) [lines 5-263] [33 members] [category: one_d] — An Edge in build123d is a fundamental element in the…
   build123d.topology.one_d.Edge.__init__ (constructor) — Build an Edge from an OCCT TopoDS_Shape/TopoDS_Edge
   build123d.topology.one_d.Edge.arc_center (property) — center of an underlying circle or ellipse geometry
   build123d.topology.one_d.Edge.extrude (method) — extrude
@@ -738,7 +738,7 @@ build123d.topology.one_d.Edge (class) [33 members] [category: one_d] — An Edge
   build123d.topology.one_d.Edge.trim_to_other (method) — Return the shortest Edge of self trimmed by other or…
   build123d.topology.one_d.Edge.is_infinite (property) — Check if edge is infinite (LINE with length > 1e100)
   build123d.topology.one_d.Edge.trim_infinite (method) — Trim an infinite line edge to a finite length
-build123d.topology.one_d.Wire (class) [22 members] [category: one_d] — A Wire in build123d is a topological entity representing a…
+build123d.topology.one_d.Wire (class) [lines 265-418] [22 members] [category: one_d] — A Wire in build123d is a topological entity representing a…
   build123d.topology.one_d.Wire.__init__ (constructor)
   build123d.topology.one_d.Wire.combine (method) — combine
   build123d.topology.one_d.Wire.extrude (method) — extrude - invalid operation for Wire
@@ -761,9 +761,9 @@ build123d.topology.one_d.Wire (class) [22 members] [category: one_d] — A Wire 
   build123d.topology.one_d.Wire.project_to_shape (method) — Project Wire
   build123d.topology.one_d.Wire.stitch (method) — Attempt to stitch wires
   build123d.topology.one_d.Wire.trim (method) — Trim a wire between [start, end] normalized over total length
-build123d.topology.one_d.edges_to_wires (function) [category: one_d] — Convert edges to a list of wires
-build123d.topology.one_d.topo_explore_connected_edges (function) [category: one_d] — Find edges connected to the given edge with at least…
-build123d.topology.one_d.Mixin1D (class) [30 members] [category: one_d] — Methods to add to the Edge and Wire classes
+build123d.topology.one_d.edges_to_wires (function) [lines 420-426] [category: one_d] — Convert edges to a list of wires
+build123d.topology.one_d.topo_explore_connected_edges (function) [lines 428-432] [category: one_d] — Find edges connected to the given edge with at least…
+build123d.topology.one_d.Mixin1D (class) [lines 434-622] [30 members] [category: one_d] — Methods to add to the Edge and Wire classes
   build123d.topology.one_d.Mixin1D.is_closed (property) — Are the start and end points equal?
   build123d.topology.one_d.Mixin1D.is_forward (property) — Does the Edge/Wire loop forward or reverse
   build123d.topology.one_d.Mixin1D.convexity (property) — How the shape this edge was selected from sits around…
@@ -797,7 +797,7 @@ build123d.topology.one_d.Mixin1D (class) [30 members] [category: one_d] — Meth
 
 ## two_d — `api-two-d.md`
 
-build123d.topology.two_d.Face (class) [47 members] [category: two_d] — A Face in build123d represents a 3D bounded surface within…
+build123d.topology.two_d.Face (class) [lines 5-292] [47 members] [category: two_d] — A Face in build123d represents a 3D bounded surface within…
   build123d.topology.two_d.Face.__init__ (constructor)
   build123d.topology.two_d.Face.area_without_holes (property) — Calculate the total surface area of the face, including the…
   build123d.topology.two_d.Face.axis_of_rotation (property) — Get the rotational axis of a cylinder or torus
@@ -845,7 +845,7 @@ build123d.topology.two_d.Face (class) [47 members] [category: two_d] — A Face 
   build123d.topology.two_d.Face.wire (method) — Return the outerwire, generate a warning if inner_wires present
   build123d.topology.two_d.Face.wrap (method) — wrap
   build123d.topology.two_d.Face.wrap_faces (method) — wrap_faces
-build123d.topology.two_d.Shell (class) [9 members] [category: two_d] — A Shell is a fundamental component in build123d's topological data…
+build123d.topology.two_d.Shell (class) [lines 294-356] [9 members] [category: two_d] — A Shell is a fundamental component in build123d's topological data…
   build123d.topology.two_d.Shell.__init__ (constructor) — Build a shell from an OCCT TopoDS_Shape/TopoDS_Shell
   build123d.topology.two_d.Shell.volume (property) — volume - the volume of this Shell if manifold, otherwise…
   build123d.topology.two_d.Shell.mass (method) — mass - the mass of this Shell if manifold in…
@@ -855,7 +855,7 @@ build123d.topology.two_d.Shell (class) [9 members] [category: two_d] — A Shell
   build123d.topology.two_d.Shell.sweep (method) — sweep
   build123d.topology.two_d.Shell.center (method) — Center of mass of the shell
   build123d.topology.two_d.Shell.location_at (method) — location_at
-build123d.topology.two_d.Mixin2D (class) [8 members] [category: two_d] — Additional methods to add to Face and Shell class
+build123d.topology.two_d.Mixin2D (class) [lines 358-411] [8 members] [category: two_d] — Additional methods to add to Face and Shell class
   build123d.topology.two_d.Mixin2D.extrude (method) — Unused - only here because Mixin1D is a subclass of…
   build123d.topology.two_d.Mixin2D.__neg__ (method) — Reverse normal operator -
   build123d.topology.two_d.Mixin2D.split_by_perimeter (method) — split_by_perimeter
@@ -867,7 +867,7 @@ build123d.topology.two_d.Mixin2D (class) [8 members] [category: two_d] — Addit
 
 ## text — `api-text.md`
 
-build123d.text.FontManager (class) [7 members] [category: text] — Wrap OCP Font_FontMgr
+build123d.text.FontManager (class) [lines 5-38] [7 members] [category: text] — Wrap OCP Font_FontMgr
   build123d.text.FontManager.__init__ (constructor) — Initialize FontManager
   build123d.text.FontManager.available_fonts (method) — Get list of available fonts by name and available styles…
   build123d.text.FontManager.check_font (method) — Check if font exists at path and return system font
@@ -875,30 +875,30 @@ build123d.text.FontManager (class) [7 members] [category: text] — Wrap OCP Fon
   build123d.text.FontManager.register_font (method) — Register all font faces in a font file and return…
   build123d.text.FontManager.register_folder (method) — Register all fonts in a folder
   build123d.text.FontManager.register_system_fonts (method) — Runner to (re)inititalize the OCCT FontMgr font list since user…
-build123d.text.available_fonts (function) [category: text] — Get available fonts without initializing the font manager on import
+build123d.text.available_fonts (function) [lines 40-43] [category: text] — Get available fonts without initializing the font manager on import
 
 ## build_common — `api-build-common.md`
 
-build123d.build_common.GridLocations (class) [1 members] [category: build_common] — Location Context
+build123d.build_common.GridLocations (class) [lines 5-18] [1 members] [category: build_common] — Location Context
   build123d.build_common.GridLocations.__init__ (constructor)
-build123d.build_common.HexLocations (class) [1 members] [category: build_common] — Location Context
+build123d.build_common.HexLocations (class) [lines 20-33] [1 members] [category: build_common] — Location Context
   build123d.build_common.HexLocations.__init__ (constructor)
-build123d.build_common.Locations (class) [1 members] [category: build_common] — Location Context
+build123d.build_common.Locations (class) [lines 35-43] [1 members] [category: build_common] — Location Context
   build123d.build_common.Locations.__init__ (constructor)
-build123d.build_common.PolarLocations (class) [1 members] [category: build_common] — Location Context
+build123d.build_common.PolarLocations (class) [lines 45-59] [1 members] [category: build_common] — Location Context
   build123d.build_common.PolarLocations.__init__ (constructor)
-build123d.build_common.edge (function) [category: build_common] — Return Edge
-build123d.build_common.edges (function) [category: build_common] — Return Edges
-build123d.build_common.face (function) [category: build_common] — Return Face
-build123d.build_common.faces (function) [category: build_common] — Return Faces
-build123d.build_common.solid (function) [category: build_common] — Return Solid
-build123d.build_common.solids (function) [category: build_common] — Return Solids
-build123d.build_common.vertex (function) [category: build_common] — Return Vertex
-build123d.build_common.vertices (function) [category: build_common] — Return Vertices
-build123d.build_common.wire (function) [category: build_common] — Return Wire
-build123d.build_common.wires (function) [category: build_common] — Return Wires
-build123d.build_common.BaseObject (class) [category: build_common] — Common context-isolation behavior for builder-aware objects
-build123d.build_common.Builder (class) [19 members] [category: build_common] — Builder
+build123d.build_common.edge (function) [lines 61-66] [category: build_common] — Return Edge
+build123d.build_common.edges (function) [lines 68-73] [category: build_common] — Return Edges
+build123d.build_common.face (function) [lines 75-80] [category: build_common] — Return Face
+build123d.build_common.faces (function) [lines 82-87] [category: build_common] — Return Faces
+build123d.build_common.solid (function) [lines 89-94] [category: build_common] — Return Solid
+build123d.build_common.solids (function) [lines 96-101] [category: build_common] — Return Solids
+build123d.build_common.vertex (function) [lines 103-108] [category: build_common] — Return Vertex
+build123d.build_common.vertices (function) [lines 110-115] [category: build_common] — Return Vertices
+build123d.build_common.wire (function) [lines 117-122] [category: build_common] — Return Wire
+build123d.build_common.wires (function) [lines 124-129] [category: build_common] — Return Wires
+build123d.build_common.BaseObject (class) [lines 131-134] [category: build_common] — Common context-isolation behavior for builder-aware objects
+build123d.build_common.Builder (class) [lines 136-232] [19 members] [category: build_common] — Builder
   build123d.build_common.Builder.__init__ (constructor)
   build123d.build_common.Builder.max_dimension (property) — Maximum size of object in all directions
   build123d.build_common.Builder.label (property) — Label assigned to the builder's output object
@@ -918,7 +918,7 @@ build123d.build_common.Builder (class) [19 members] [category: build_common] —
   build123d.build_common.Builder.lasts (property) — Shapes the last operation brought in or created, by type
   build123d.build_common.Builder.news (property) — Shapes the last operation created outright, by type
   build123d.build_common.Builder.validate_inputs (method) — Validate that objects/operations and parameters apply
-build123d.build_common.LocationList (class) [4 members] [category: build_common] — Location Context
+build123d.build_common.LocationList (class) [lines 234-253] [4 members] [category: build_common] — Location Context
   build123d.build_common.LocationList.locations (property) — Current locations in local construction coordinates
   build123d.build_common.LocationList.__init__ (constructor)
   build123d.build_common.LocationList.__enter__ (method) — Upon entering create a token to restore contextvars
@@ -926,13 +926,13 @@ build123d.build_common.LocationList (class) [4 members] [category: build_common]
 
 ## shape_core — `api-shape-core.md`
 
-build123d.topology.shape_core.Joint (class) [5 members] [category: shape_core] — Joint
+build123d.topology.shape_core.Joint (class) [lines 5-27] [5 members] [category: shape_core] — Joint
   build123d.topology.shape_core.Joint.__init__ (constructor)
   build123d.topology.shape_core.Joint.location (property) — Location of joint
   build123d.topology.shape_core.Joint.symbol (property) — A CAD object positioned in global space to illustrate the…
   build123d.topology.shape_core.Joint.connect_to (method) — All derived classes must provide a connect_to method
   build123d.topology.shape_core.Joint.relative_to (method) — Return relative location to another joint
-build123d.topology.shape_core.ShapeList (class) [33 members] [category: shape_core] — Subclass of list with custom filter and sort methods appropriate…
+build123d.topology.shape_core.ShapeList (class) [lines 29-185] [33 members] [category: shape_core] — Subclass of list with custom filter and sort methods appropriate…
   build123d.topology.shape_core.ShapeList.first (property) — First element in the ShapeList
   build123d.topology.shape_core.ShapeList.last (property) — Last element in the ShapeList
   build123d.topology.shape_core.ShapeList.__add__ (method) — Return a new ShapeList that includes other
@@ -966,11 +966,11 @@ build123d.topology.shape_core.ShapeList (class) [33 members] [category: shape_co
   build123d.topology.shape_core.ShapeList.vertices (method) — vertices - all the vertices in this ShapeList
   build123d.topology.shape_core.ShapeList.wire (method) — Return the Wire
   build123d.topology.shape_core.ShapeList.wires (method) — wires - all the wires in this ShapeList
-build123d.topology.shape_core.topo_distance_to (function) [category: shape_core] — Return a key function that yields topological distance to ``other``
+build123d.topology.shape_core.topo_distance_to (function) [lines 187-194] [category: shape_core] — Return a key function that yields topological distance to ``other``
 
 ## shape_core (2) — `api-shape-core-2.md`
 
-build123d.topology.shape_core.Shape (class) [88 members] [category: shape_core] — Shape
+build123d.topology.shape_core.Shape (class) [lines 5-476] [88 members] [category: shape_core] — Shape
   build123d.topology.shape_core.Shape.__init__ (constructor)
   build123d.topology.shape_core.Shape.topo_parent (property) — The shape this one was ultimately taken out of
   build123d.topology.shape_core.Shape.topo_owner (property) — The shape this one was taken directly out of
@@ -1062,7 +1062,7 @@ build123d.topology.shape_core.Shape (class) [88 members] [category: shape_core] 
 
 ## mesher — `api-mesher.md`
 
-build123d.mesher.Mesher (class) [15 members] [category: mesher] — Mesher
+build123d.mesher.Mesher (class) [lines 5-87] [15 members] [category: mesher] — Mesher
   build123d.mesher.Mesher.__init__ (constructor)
   build123d.mesher.Mesher.model_unit (property) — Unit used in the model
   build123d.mesher.Mesher.triangle_counts (property) — Number of triangles in each of the model's meshes
@@ -1081,7 +1081,7 @@ build123d.mesher.Mesher (class) [15 members] [category: mesher] — Mesher
 
 ## zero_d — `api-zero-d.md`
 
-build123d.topology.zero_d.Vertex (class) [16 members] [category: zero_d] — A Vertex in build123d represents a zero-dimensional point in the…
+build123d.topology.zero_d.Vertex (class) [lines 5-82] [16 members] [category: zero_d] — A Vertex in build123d represents a zero-dimensional point in the…
   build123d.topology.zero_d.Vertex.__init__ (constructor)
   build123d.topology.zero_d.Vertex.volume (property) — volume - the volume of this Vertex, which is always…
   build123d.topology.zero_d.Vertex.mass (method) — mass - the mass of this Vertex, which is always…
@@ -1098,71 +1098,71 @@ build123d.topology.zero_d.Vertex (class) [16 members] [category: zero_d] — A V
   build123d.topology.zero_d.Vertex.transform_shape (method) — Apply affine transform without changing type
   build123d.topology.zero_d.Vertex.vertex (method) — Return the Vertex
   build123d.topology.zero_d.Vertex.vertices (method) — vertices - all the vertices in this Shape
-build123d.topology.zero_d.topo_explore_common_vertex (function) [category: zero_d] — Given two edges, find the common vertex
+build123d.topology.zero_d.topo_explore_common_vertex (function) [lines 84-87] [category: zero_d] — Given two edges, find the common vertex
 
 ## operations_generic — `api-operations-generic.md`
 
-build123d.operations_generic.add (function) [category: operations_generic] — Generic Object
-build123d.operations_generic.bounding_box (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.chamfer (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.fillet (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.insert (function) [category: operations_generic] — Generic Object
-build123d.operations_generic.mirror (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.offset (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.project (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.scale (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.split (function) [category: operations_generic] — Generic Operation
-build123d.operations_generic.sweep (function) [category: operations_generic] — Generic Operation
+build123d.operations_generic.add (function) [lines 5-9] [category: operations_generic] — Generic Object
+build123d.operations_generic.bounding_box (function) [lines 11-17] [category: operations_generic] — Generic Operation
+build123d.operations_generic.chamfer (function) [lines 19-33] [category: operations_generic] — Generic Operation
+build123d.operations_generic.fillet (function) [lines 35-45] [category: operations_generic] — Generic Operation
+build123d.operations_generic.insert (function) [lines 47-52] [category: operations_generic] — Generic Object
+build123d.operations_generic.mirror (function) [lines 54-62] [category: operations_generic] — Generic Operation
+build123d.operations_generic.offset (function) [lines 64-77] [category: operations_generic] — Generic Operation
+build123d.operations_generic.project (function) [lines 79-91] [category: operations_generic] — Generic Operation
+build123d.operations_generic.scale (function) [lines 93-102] [category: operations_generic] — Generic Operation
+build123d.operations_generic.split (function) [lines 104-112] [category: operations_generic] — Generic Operation
+build123d.operations_generic.sweep (function) [lines 114-127] [category: operations_generic] — Generic Operation
 
 ## utils — `api-utils.md`
 
-build123d.topology.utils.delta (function) [category: utils] — Compare the OCCT objects of each list and return the…
-build123d.topology.utils.new_edges (function) [category: utils] — new_edges
-build123d.topology.utils.polar (function) [category: utils] — Convert polar coordinates into cartesian coordinates
+build123d.topology.utils.delta (function) [lines 5-8] [category: utils] — Compare the OCCT objects of each list and return the…
+build123d.topology.utils.new_edges (function) [lines 10-16] [category: utils] — new_edges
+build123d.topology.utils.polar (function) [lines 18-21] [category: utils] — Convert polar coordinates into cartesian coordinates
 
 ## brep_from_stl — `api-brep-from-stl.md`
 
-build123d.brep_from_stl.detect_primitives (function) [category: brep_from_stl] — Detect analytic primitives in a mesh and return faces, leftovers,…
+build123d.brep_from_stl.detect_primitives (function) [lines 5-9] [category: brep_from_stl] — Detect analytic primitives in a mesh and return faces, leftovers,…
 
 ## operations_part — `api-operations-part.md`
 
-build123d.operations_part.draft (function) [category: operations_part] — Part Operation
-build123d.operations_part.extrude (function) [category: operations_part] — Part Operation
-build123d.operations_part.loft (function) [category: operations_part] — Part Operation
-build123d.operations_part.make_brake_formed (function) [category: operations_part] — make_brake_formed
-build123d.operations_part.project_workplane (function) [category: operations_part] — Part Operation
-build123d.operations_part.revolve (function) [category: operations_part] — Part Operation
-build123d.operations_part.section (function) [category: operations_part] — Part Operation
-build123d.operations_part.thicken (function) [category: operations_part] — Part Operation
+build123d.operations_part.draft (function) [lines 5-12] [category: operations_part] — Part Operation
+build123d.operations_part.extrude (function) [lines 14-29] [category: operations_part] — Part Operation
+build123d.operations_part.loft (function) [lines 31-39] [category: operations_part] — Part Operation
+build123d.operations_part.make_brake_formed (function) [lines 41-56] [category: operations_part] — make_brake_formed
+build123d.operations_part.project_workplane (function) [lines 58-68] [category: operations_part] — Part Operation
+build123d.operations_part.revolve (function) [lines 70-80] [category: operations_part] — Part Operation
+build123d.operations_part.section (function) [lines 82-91] [category: operations_part] — Part Operation
+build123d.operations_part.thicken (function) [lines 93-105] [category: operations_part] — Part Operation
 
 ## exporters3d — `api-exporters3d.md`
 
-build123d.exporters3d.export_brep (function) [category: exporters3d] — Export this shape to a BREP file
-build123d.exporters3d.export_gltf (function) [category: exporters3d] — export_gltf
-build123d.exporters3d.export_obj (function) [category: exporters3d] — export_obj
-build123d.exporters3d.export_step (function) [category: exporters3d] — export_step
-build123d.exporters3d.export_stl (function) [category: exporters3d] — Export STL
-build123d.exporters3d.export_to_pcbway (function) [category: exporters3d] — Export a shape to PCBWay for quoting
+build123d.exporters3d.export_brep (function) [lines 5-11] [category: exporters3d] — Export this shape to a BREP file
+build123d.exporters3d.export_gltf (function) [lines 13-24] [category: exporters3d] — export_gltf
+build123d.exporters3d.export_obj (function) [lines 26-37] [category: exporters3d] — export_obj
+build123d.exporters3d.export_step (function) [lines 39-49] [category: exporters3d] — export_step
+build123d.exporters3d.export_stl (function) [lines 51-61] [category: exporters3d] — Export STL
+build123d.exporters3d.export_to_pcbway (function) [lines 63-71] [category: exporters3d] — Export a shape to PCBWay for quoting
 
 ## operations_sketch — `api-operations-sketch.md`
 
-build123d.operations_sketch.full_round (function) [category: operations_sketch] — Sketch Operation
-build123d.operations_sketch.make_face (function) [category: operations_sketch] — Sketch Operation
-build123d.operations_sketch.make_hull (function) [category: operations_sketch] — Sketch Operation
-build123d.operations_sketch.trace (function) [category: operations_sketch] — Sketch Operation
+build123d.operations_sketch.full_round (function) [lines 5-14] [category: operations_sketch] — Sketch Operation
+build123d.operations_sketch.make_face (function) [lines 16-22] [category: operations_sketch] — Sketch Operation
+build123d.operations_sketch.make_hull (function) [lines 24-30] [category: operations_sketch] — Sketch Operation
+build123d.operations_sketch.trace (function) [lines 32-40] [category: operations_sketch] — Sketch Operation
 
 ## importers — `api-importers.md`
 
-build123d.importers.import_brep (function) [category: importers] — Import shape from a BREP file
-build123d.importers.import_step (function) [category: importers] — import_step
-build123d.importers.import_stl (function) [category: importers] — import_stl
-build123d.importers.import_svg (function) [category: importers] — import_svg
-build123d.importers.import_svg_as_buildline_code (function) [category: importers] — translate_to_buildline_code
+build123d.importers.import_brep (function) [lines 5-11] [category: importers] — Import shape from a BREP file
+build123d.importers.import_step (function) [lines 13-18] [category: importers] — import_step
+build123d.importers.import_stl (function) [lines 20-28] [category: importers] — import_stl
+build123d.importers.import_svg (function) [lines 30-40] [category: importers] — import_svg
+build123d.importers.import_svg_as_buildline_code (function) [lines 42-48] [category: importers] — translate_to_buildline_code
 
 ## import_dxf — `api-import-dxf.md`
 
-build123d.import_dxf.import_dxf (function) [category: import_dxf] — Import shapes from a DXF file
+build123d.import_dxf.import_dxf (function) [lines 5-11] [category: import_dxf] — Import shapes from a DXF file
 
 ## pack — `api-pack.md`
 
-build123d.pack.pack (function) [category: pack] — Pack objects in a squarish area in Plane.XY
+build123d.pack.pack (function) [lines 5-12] [category: pack] — Pack objects in a squarish area in Plane.XY

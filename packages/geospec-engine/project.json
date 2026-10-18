@@ -15,6 +15,9 @@
     },
     "pkgcheck": {
       "dependsOn": ["generate-provenance", "^build", "pkgcheck-deps"]
+    },
+    "test": {
+      "inputs": ["default", "^production", "{workspaceRoot}/packages/geospec/agent/doctrine.md"]
     }
   }
 }

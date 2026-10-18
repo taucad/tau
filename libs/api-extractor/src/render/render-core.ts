@@ -14,6 +14,8 @@
  * @module
  */
 
+import ts from 'typescript';
+
 import type { ApiCorpus, ApiEntry } from '#model/api-corpus.types.js';
 import { labelledDeclaration, nativeComments } from '#render/render-reference.js';
 import { estimateTokens } from '#render/shard-plan.js';
@@ -73,6 +75,8 @@ const smallReferencedTokens = 220;
 const defaultBudgetLines = 300;
 /** Words an entry summary may spend. */
 const summaryWords = 14;
+/** Characters the omitted-member names may spend on their one marker line. */
+const omittedNameChars = 360;
 
 const fenceLanguage: Readonly<Record<ApiCorpus['metadata']['language'], string>> = {
   typescript: 'ts',
@@ -133,6 +137,51 @@ const containerHeader = (entry: ApiEntry): { readonly line: string; readonly clo
   return { line: first, closes: first.endsWith('{') };
 };
 
+const variantPrinter = ts.createPrinter({ removeComments: true });
+
+/**
+ * The variants of a type alias declared as a union with an object variant, one line each without comments, or
+ * `undefined` for any other entry. Its members are only the first variant's, so the container path would show one
+ * variant and hide the rest.
+ */
+const unionVariants = (entry: ApiEntry): readonly string[] | undefined => {
+  if (entry.kind !== 'type' || entry.type === undefined || (entry.signatures?.length ?? 0) > 0) {
+    return undefined;
+  }
+  const source = ts.createSourceFile('variant.ts', `type Variant = ${entry.type.text};`, ts.ScriptTarget.Latest, true);
+  const [statement] = source.statements;
+  const declared = statement !== undefined && ts.isTypeAliasDeclaration(statement) ? statement.type : undefined;
+  if (
+    declared === undefined ||
+    !ts.isUnionTypeNode(declared) ||
+    !declared.types.some((type) => ts.isTypeLiteralNode(type))
+  ) {
+    return undefined;
+  }
+  return declared.types.map((type) =>
+    variantPrinter
+      .printNode(ts.EmitHint.Unspecified, type, source)
+      .replaceAll(/\s+/gu, ' ')
+      .replaceAll(/;\s*\}/gu, ' }'),
+  );
+};
+
+/** The omitted members by name, once each, on one line: as many as fit, then how many more. */
+const omittedNames = (omitted: readonly ApiEntry[]): string => {
+  const names = [...new Set(omitted.map((member) => member.name))];
+  const shown: string[] = [];
+  let length = 0;
+  for (const name of names) {
+    if (length + name.length + 2 > omittedNameChars) {
+      break;
+    }
+    shown.push(name);
+    length += name.length + 2;
+  }
+  const rest = names.length - shown.length;
+  return `${shown.join(', ')}${rest === 0 ? '' : `, and ${String(rest)} more`}`;
+};
+
 const memberWeight = (entry: ApiEntry): number =>
   (entry.members ?? []).reduce((sum, member) => sum + estimateTokens(renderMember(member).join('\n')), 0);
 
@@ -147,14 +196,19 @@ const renderEntry = (entry: ApiEntry, members: readonly ApiEntry[]): readonly st
   if (entry.members === undefined || entry.members.length === 0) {
     return renderLeaf(entry, '');
   }
+  const variants = unionVariants(entry);
+  if (variants !== undefined) {
+    return [...summaryLine(entry, ''), `${entry.name}:`, ...variants.map((variant) => `  | ${variant}`)];
+  }
   const header = containerHeader(entry);
   const lines = [...summaryLine(entry, ''), header.line];
   for (const member of members) {
     lines.push(...renderMember(member));
   }
-  const omitted = entry.members.length - members.length;
-  if (omitted > 0) {
-    lines.push(`  // … ${String(omitted)} more members in the API reference`);
+  const kept = new Set(members);
+  const omitted = entry.members.filter((member) => !kept.has(member));
+  if (omitted.length > 0) {
+    lines.push(`  // … ${String(omitted.length)} more members in the API reference: ${omittedNames(omitted)}`);
   }
   if (header.closes) {
     lines.push('}');
@@ -355,8 +409,16 @@ export const renderCoreApi = (
   let lineCount = header.length + 2;
   const budgetLines = options.budgetLines ?? defaultBudgetLines;
 
+  /** Rendered blocks already shown: a small type two shown signatures both name is inlined once, not once each. */
+  const shownBlocks = new Set<string>();
   const add = (candidate: Candidate, entry: ApiEntry, members: readonly ApiEntry[]): boolean => {
     const block = renderEntry(entry, members).join('\n');
+    if (shownBlocks.has(block)) {
+      for (const id of [entry.id, ...members.map((member) => member.id)]) {
+        shown.add(id);
+      }
+      return true;
+    }
     const group = groups.get(candidate.group);
     const groupCost =
       group === undefined ? estimateTokens(`### ${candidate.group}\n\n\`\`\`${candidate.fence}\n\`\`\`\n`) : 0;
@@ -368,6 +430,7 @@ export const renderCoreApi = (
     }
     tokens += cost;
     lineCount += blockLines;
+    shownBlocks.add(block);
     if (group === undefined) {
       groups.set(candidate.group, { fence: candidate.fence, blocks: [block] });
     } else {

@@ -40,10 +40,24 @@ Every matcher takes one expectation object:
 ## Loads and budgets
 
 - GeoSpec has no `beforeAll`. Write each `loadModel` inside its own `it`: within one run, identical loads (same file or code, parameters, format, tolerances and region) share one export and one admission. Each load keeps its own `loadId` and records `reused: true`, and a file is reused only while its source closure is unchanged.
-- `loadModel({ file, workUnitLimit })` sets the default claim budget for that subject, and `expectGeo(model, { workUnitLimit })` overrides it for one chain. The budget is a positive integer no greater than 512000000. A `MATCHER_TIMEOUT` refusal reports `details.limit` and, when measured, `details.used`; raise the budget within the bound or simplify the model, and never treat the refusal as a pass.
+- `loadModel({ file, workUnitLimit })` sets the default claim budget for that subject, and `expectGeo(model, { workUnitLimit })` overrides it for one chain. The budget is a positive integer no greater than 512000000. A `MATCHER_TIMEOUT` refusal reports `details.limit` and, when measured, `details.used`; its `test_model` row (category `work-budget`) names in `limit.retry` the one `workUnitLimit` that can decide the claim, or `null` at the host maximum. Never treat the refusal as a pass.
 - `loadModel({ file, region: { min: [x, y, z], max: [x, y, z] } })` makes a separate claim about one millimetre box, never a stand-in for a whole-model claim. The kernel crops before export (PicoVoxel trims Voxels parts), and other kernels, STEP loads and unconfirmed crops refuse with a typed diagnostic. A cropped subject answers only bounding box, volume, surface area, mass and center of mass of its region, and its assertions record the region. Every other matcher on it refuses with `GEOSPEC_REGION_WHOLE_MODEL_CLAIM`. Name the region in the test, and keep whole-model claims on whole-model loads.
-- A host or engine limit leaves a claim undecided, never false. Keep the model as designed: never coarsen, shrink or crop it to fit. Raise `workUnitLimit` or `testTimeout` within the host's maximum, which the host can raise, or report the claim as not decided at this capacity.
+- A host or engine limit leaves a claim undecided, never false: `test_model` reports it as inconclusive with category `analysis-limit`, `resource-limit` or `work-budget` and a typed `limit` naming the limit and its numbers. Keep the model as designed: never coarsen, shrink or crop it to fit. Only a `work-budget` row's `limit.retry` is a retry, and `testTimeout` only answers a `timeout` row; report every other limit row as not decided at this capacity.
 - `toHaveCenterOfMass({ point, tolerance })` takes an exact point. Per-axis ranges such as `{ y: { greaterThan: 1 } }` are refused.
+
+## Ceilings
+
+Fixed in this release; design within them, and report a claim that meets one as not decided.
+
+| Ceiling                               | Value                | Where an agent meets it                                                                                                           |
+| ------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `maxSubjectBytes`, `maxResourceBytes` | 64 MiB each          | A mesh `loadModel({ file })` exports about 72 bytes per triangle, so admission refuses near 930,000 triangles (`resource-limit`). |
+| `maxTotalBinaryBytes`                 | 128 MiB              | All subjects of one load together.                                                                                                |
+| `maxTriangles`, `maxVertices`         | 4,000,000, 2,000,000 | A decoded mesh.                                                                                                                   |
+| `continuousEvidenceBytes`             | 32 MiB               | `toHaveNoComponentInterference` on a large assembly (`analysis-limit`).                                                           |
+| `workUnitLimit`                       | 512000000 at most    | Any claim; the only limit an argument raises.                                                                                     |
+
+Load `format: 'step'` only for the exact-BRep matchers above; every other matcher answers on the cheaper mesh.
 
 ## Coverage
 
@@ -107,6 +121,14 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
+
+// GeoSpec test helper used inside VM-executed test modules
+export declare function it(name: string, function_: GeoSpecTestCallback): void;
+  skip(name: string, function_?: GeoSpecTestCallback): void;
+
+// GeoSpec suite helper used inside VM-executed test modules
+export declare function describe(name: string, function_: GeoSpecTestCallback): void;
+  skip(name: string, function_?: GeoSpecTestCallback): void;
 ```
 
 ### Types
@@ -423,15 +445,6 @@ GeoSpecSpatialRelationshipExpectation: {
   reason?: string
 }
 
-// Shared scalar expectation used by geometry measurements
-GeoSpecNumericExpectation: number | {
-    value?: number;
-    greaterThan?: number;
-    greaterThanOrEqual?: number;
-    lessThan?: number;
-    lessThanOrEqual?: number;
-}
-
 // Diagnostic emitted by GeoSpec loaders, analyzers, and matchers
 GeometryDiagnostic: {
   code: KernelIssueCode | (string & {})
@@ -446,46 +459,33 @@ GeometryDiagnostic: {
   details?: unknown
 }
 
-// Shared scalar expectation used by geometry measurements
-GeoSpecNumericExpectation: number | {
-    value?: number;
-    greaterThan?: number;
-    greaterThanOrEqual?: number;
-    lessThan?: number;
-    lessThanOrEqual?: number;
-}
-
-// Shared scalar expectation used by geometry measurements
-GeoSpecNumericExpectation: number | {
-    value?: number;
-    greaterThan?: number;
-    greaterThanOrEqual?: number;
-    lessThan?: number;
-    lessThanOrEqual?: number;
-}
-
-// Shared scalar expectation used by geometry measurements
-GeoSpecNumericExpectation: number | {
-    value?: number;
-    greaterThan?: number;
-    greaterThanOrEqual?: number;
-    lessThan?: number;
-    lessThanOrEqual?: number;
-}
-
 // Point expectation accepted by center and feature matchers
 GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 
-// Point expectation accepted by center and feature matchers
-GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
+// One void-continuity waypoint
+GeoSpecVoidWaypoint: Vec3 | {
+    occurrence: string;
+}
 
-// Point expectation accepted by center and feature matchers
-GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
+// Inline code-CAD model load options
+LoadModelCodeOptions: {
+  // Source files keyed by project-relative path
+  code: Code
+  // Geometry format to export
+  format?: GeoSpecModelFormat
+  // Explicit parameters passed to the runtime
+  parameters?: Record<string, unknown>
+  // Whether STEP loading should also produce mesh evidence
+  mesh?: boolean
+  // … 10 more members in the API reference: file, rootDir, runtime, sourceAdapters, projectPath, stepStreaming, meshLinearTolerance, meshAngularToleranceDegrees, workUnitLimit, region
+}
+
+RuntimeBackedModelFormat: Exclude<GeoSpecModelFormat, 'mesh-buffer'>
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 364 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 364 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

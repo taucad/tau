@@ -91,7 +91,41 @@ describe('renderCoreApi', () => {
 
     expect(core?.markdown).toContain('export declare class Solid extends Shape\n  fillet(radius: number): Solid;');
     expect(core?.markdown).not.toContain('member0(');
-    expect(core?.markdown).toContain('// … 40 more members in the API reference');
+    expect(core?.markdown).toContain(
+      `// … 40 more members in the API reference: ${Array.from({ length: 37 }, (_value, index) => `member${String(index)}`).join(', ')}, and 3 more`,
+    );
+  });
+
+  it('should show every variant of a union alias, not only the first', () => {
+    const union = createApiCorpus(metadata, [
+      {
+        name: 'CreateOptions',
+        kind: 'type',
+        type: {
+          text: "{\n  shape: 'empty';\n} | {\n  shape: 'sphere';\n  radius: number;\n} |\n/** Kept for compatibility. */\n{\n  shape: 'capsule';\n  start: Vec3;\n}",
+        },
+        members: [{ name: 'shape', kind: 'property', type: { text: "'empty'" } }],
+      },
+    ]);
+    const core = renderCoreApi([{ corpus: union, groupBy }], undefined, {
+      budgetTokens: 4000,
+      pins: ['CreateOptions'],
+    });
+
+    expect(core?.markdown).toContain(
+      "CreateOptions:\n  | { shape: 'empty' }\n  | { shape: 'sphere'; radius: number }\n  | { shape: 'capsule'; start: Vec3 }",
+    );
+  });
+
+  it('should show one declaration exported from several modules once', () => {
+    const record = { kind: 'type', type: { text: 'number | {\n  value?: number;\n}' } } as const;
+    const twice = createApiCorpus(metadata, [
+      { ...record, name: 'Expectation', path: 'a' },
+      { ...record, name: 'Expectation', path: 'b' },
+    ]);
+    const core = renderCoreApi([{ corpus: twice, groupBy }], undefined, { budgetTokens: 4000, includeUnused: true });
+
+    expect(core?.markdown.match(/value\?: number/gu)).toHaveLength(1);
   });
 
   it('should show every member of a container pinned with .*', () => {

@@ -183,7 +183,7 @@ export declare class Part extends _Body
   shell(thickness: number, openings?: unknown, options?: {
           outward?: boolean;
       }): Part;
-  // … 26 more members in the API reference
+  // … 26 more members in the API reference: volume, area, center, massProperties, isValid, solids, merge, cells, offset, split, section, twist, taper, bend, deform, removeFillets, removeFaces, draftAnalysis, partingLine, draft, fold, flange, bends, unfold, flatPattern, toString
 
 // A coordinate system
 export declare class Plane
@@ -191,7 +191,7 @@ export declare class Plane
   static XZ: Plane
   // This plane moved `distance` along its normal
   offset(distance: number): Plane;
-  // … 32 more members in the API reference
+  // … 32 more members in the API reference: YZ, ZX, YX, ZY, top, bottom, front, back, left, right, origin, xDir, yDir, zDir, constructor, normal, location, shifted, flipped, rotated, moved, at, toLocal, fromLocal, contains, distanceTo, project, isCoplanar, mul, equals, toString, [inspect]
 
 // A rigid placement (rotation + translation), stored as a 4x4 matrix
 export declare class Location
@@ -247,7 +247,7 @@ export declare abstract class Shape
   mirror(plane?: Plane | Face | Axis | ShapeList<Face>): this;
   // Place this shape, designed around the world XY plane, onto a plane or face
   on(target: Plane | Face | Location | ShapeList<Face> | Sketch): this;
-  // … 14 more members in the API reference
+  // … 14 more members in the API reference: vertices, edges, wires, faces, moved, scale, bbox, center, distanceTo, mesh, show, export, toString, [inspect]
 
 // A planar region (with holes, possibly several pieces) on a plane
 export declare class Sketch extends Shell
@@ -261,7 +261,7 @@ export declare class Sketch extends Shell
   sweep(path: Edge | Wire, options?: {
           sharpCorners?: boolean | null;
       }): Part;
-  // … 11 more members in the API reference
+  // … 11 more members in the API reference: plane, fuse, cut, intersect, xor, center, perimeter, offset, chamfer, mirror, toString
 
 // A list of shapes with selection helpers
 export declare class ShapeList<T = Shape> extends Array<T>
@@ -277,7 +277,7 @@ export declare class ShapeList<T = Shape> extends Array<T>
   parallelTo(axis: Axis | VectorLike): ShapeList<T>;
   // Straight edges perpendicular to `axis`, or planar faces containing it
   perpendicularTo(axis: Axis | VectorLike): ShapeList<T>;
-  // … 44 more members in the API reference
+  // … 44 more members in the API reference: one, first, last, sortByDistance, groupBy, maxBy, minBy, right, left, back, front, largest, smallest, nearest, filter, map, ofType, lines, circles, planar, cylinders, facing, convex, concave, smooth, fillets, hitBy, within, atPoint, union, difference, intersection, vertices, edges, faces, wires, center, bbox, moved, on, translate, rotate, toString, and 1 more
 ```
 
 ### Types
@@ -315,7 +315,7 @@ Model: GlbResources & {
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 697 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 697 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-constants.md` — Constants
 - `api-classes.md` — Classes

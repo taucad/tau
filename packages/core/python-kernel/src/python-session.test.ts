@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { createMockLogger } from '@taucad/runtime-testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { pythonSupportModules } from '#python-kernel.js';
@@ -193,10 +193,17 @@ readline.on('line',(line)=>{
   process.stdout.write(JSON.stringify({protocolVersion:1,requestId:running,error:{issues:[{message:'cancelled',code:'CANCELLED',type:'runtime',severity:'error'}]}})+'\\n');
   return;
  }
+ if(frame.method==='shutdown'){
+  process.stdout.write(JSON.stringify({protocolVersion:1,requestId:frame.requestId,result:{shutdown:true}})+'\\n');
+  setTimeout(()=>process.exit(0),5);
+  return;
+ }
  running=frame.requestId;
+ process.stderr.write('running\\n');
 });
 ${keepAlive}`);
-    const session = createPythonSession({ ...options, runtimePath: join(options.workerPath, '..') });
+    const logger = createMockLogger();
+    const session = createPythonSession({ ...options, logger, runtimePath: join(options.workerPath, '..') });
     const controller = new AbortController();
     const reason = new Error('caller cancelled');
 
@@ -207,9 +214,14 @@ ${keepAlive}`);
       signal: controller.signal,
       cancelMethod: 'cancel',
     });
-    setTimeout(() => {
-      controller.abort(reason);
-    }, 50);
+    // Abort once the worker runs the request; an abort during the sandboxed launch recycles instead of cancelling.
+    await vi.waitFor(
+      () => {
+        expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('running'));
+      },
+      { timeout: 4000 },
+    );
+    controller.abort(reason);
 
     await expect(pending).rejects.toBe(reason);
     await session.cleanup();

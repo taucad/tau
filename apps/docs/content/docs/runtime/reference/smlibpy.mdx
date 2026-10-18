@@ -1,0 +1,63 @@
+---
+title: SMLibPy
+description: Author SMLib NURBS models in Python for Tau's Node hosts.
+docType: reference
+wordBudgetOverride: 450
+icon: lucide:boxes
+---
+
+Tau's native SMLibPy kernel runs smlibpy 0.3.5, the Python API of the SMLib NURBS kernel, from the closure `tau prepare smlibpy` seals. Browsers are unsupported; in a browser, use the SMLib WebAssembly kernel.
+
+## Routing
+
+SMLibPy and Build123d both open `.py` entries. SMLibPy claims an entry only when a top-level line imports `smlibpy` (`import smlibpy`, `import numpy, smlibpy as sm` or `from smlibpy import Box`); any other Python file falls through to Build123d. A comment or string that mentions smlibpy does not count.
+
+## Authoring contract
+
+Each entry defines a frozen `Params` dataclass and `main(params)`. `main` returns a body, a `ShapeConfig` dict, a list of either, a `Model` dict with glTF resources, or `None`.
+
+```python
+from dataclasses import dataclass
+
+from smlibpy import Align, Box, Cylinder, GridLocations, Z
+
+STANDING = (Align.CENTER, Align.CENTER, Align.MIN)
+
+
+@dataclass(frozen=True)
+class Params:
+    width: float = 80.0
+    depth: float = 60.0
+    thickness: float = 8.0
+
+
+def main(p: Params):
+    plate = Box(p.width, p.depth, p.thickness, align=STANDING)
+    plate = plate.fillet(plate.edges().parallel_to(Z), 6)
+    plate = plate - GridLocations(24, 24, 3, 2) * Cylinder(3, p.thickness, align=STANDING)
+    return {"name": "Plate", "shape": plate, "color": "#9aa3ad", "metalness": 1, "roughness": 0.35}
+```
+
+Parameter annotations, `__tau__` parameter refinements, dependencies and local imports follow the same rules as [Build123d](./build123d).
+
+## Appearance and motion
+
+A shape takes either the legacy `color`, `opacity`, `metalness` and `roughness`, or one glTF 2.0 `material` dict with the ratified `KHR_materials_*` extensions. A `Model` dict adds `images`, `textures` and `samplers`; textured and anisotropic materials receive box-projected UVs and tangents.
+
+smlibpy has no native joints. A module-level `mechanism` dict or `mechanism(params)` function returns Tau's shared kinematics source, naming the returned shapes in its links.
+
+## Geometry and export
+
+GLB and glTF carry names, colors, full PBR materials, textures, `TAU_cad_topology` and, with `includeTopology`, the mechanism. STEP exports the exact NURBS bodies with names and legacy colors. STL is the tessellated surface. Coordinates convert from Z-up millimeters to Y-up meters on request.
+
+Eligible exact operations are cached in Tau's compute store as `.smb` values and restored on an unchanged rebuild.
+
+## Trust and resources
+
+Python executes with the desktop user's permissions; process isolation is not a malicious-code sandbox. Hosts supply the sealed closure; runtime execution installs nothing and never falls back to system Python.
+
+## Related
+
+- [Build123d](./build123d)
+- [Choose a Kernel](../guides/choosing-a-kernel)
+- [Kernel Selection](../concepts/kernel-selection)

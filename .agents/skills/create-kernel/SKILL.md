@@ -227,7 +227,7 @@ defineRuntime({ plugins: [<alias>()] });
 
 ### 3.2 Review every host runtime
 
-The seven host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `build123d()` or `picogk()` is the whole integration (section 3.8).
+The seven host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
 
 | Host                          | Runtime definition                                     | Coverage test                                   | Dependency manifest                    |
 | ----------------------------- | ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------- |
@@ -300,7 +300,7 @@ New Python kernel on `@taucad/python-kernel-core`:
 - [ ] `python/worker.py` is a `dispatch` served by `tau_kernel.protocol.run_worker`; library calls stay in the kernel's own modules
 - [ ] `python/requirements.in`, then `tau-python-kernel generate` and `template` (`--package <dir>`, the generated Nx targets) write `tau-plugin.json`, the pinned `python/tau_kernel/` copy and `project/*`
 - [ ] A `<kernel>-tau-plugin.yml` caller of `.github/workflows/python-kernel-tau-plugin.yml` records the golden receipts on dispatch
-- [ ] Two kernels claiming `.py` route by list order until the kernel-side "declines this file" outcome exists
+- [ ] A second kernel claiming `.py` declares `detectImport` for its library's top-level import and is listed before the catch-all Python kernel, as `@taucad/smlibpy` (`smlibpyDetectPattern`) precedes `@taucad/build123d`; a file it does not match falls through by list order
 
 New .NET kernel on `@taucad/dotnet-kernel-core`:
 

@@ -23,7 +23,7 @@ const kernelList = (kernels: readonly PreparableKernel[]): string =>
 
 /**
  * What the model reads about `prepare_kernel`.
- * @param kernels - The kernels the host can prepare, from its native kernel roster; empty names none.
+ * @param kernels - The kernels the host can prepare, from the native deployments its runtime lists; empty names none.
  * @returns The tool description.
  * @public
  */

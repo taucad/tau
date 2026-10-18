@@ -1,0 +1,44 @@
+<% if (nativeLanguage === 'python') { %>import { pythonClosureSchema, pythonKernelOptionsSchema } from '@taucad/python-kernel-core';
+
+/**
+ * The files the sandboxed `<%= name %>` worker launches from: the interpreter, `worker.py` and the `tau_kernel`
+ * modules, with their digests. Name the worker's own support modules here when it gains any.
+ * @public
+ */
+export const <%= alias %>ClosureSchema = pythonClosureSchema({ supportModules: [] });
+
+/**
+ * `<%= name %>`'s options: an optional explicit closure (otherwise the kernel binds to its sealed closure when it
+ * initializes) and the host's bounds. `<%= alias %>()` with no options is a complete listing.
+ * @public
+ */
+export const <%= alias %>OptionsSchema = pythonKernelOptionsSchema({ supportModules: [] });
+<% } else { %>import { isAbsolute } from 'node:path';
+
+import { z } from 'zod';
+
+const absolutePath = z.string().min(1).refine(isAbsolute, 'Expected an absolute path');
+
+/**
+ * The sandboxed `<%= name %>` executable, its digest and the closure root the sandbox may read.
+ * @public
+ */
+export const <%= alias %>ClosureSchema = z.strictObject({
+  executablePath: absolutePath,
+  executableSha256: z.string().regex(/^[\da-f]{64}$/iu, 'Expected a SHA-256 digest'),
+  runtimePath: absolutePath,
+});
+
+/**
+ * `<%= name %>`'s options: an optional explicit closure (otherwise the kernel binds to its sealed closure when it
+ * initializes) and the host's bounds. `<%= alias %>()` with no options is a complete listing.
+ * @public
+ */
+export const <%= alias %>OptionsSchema = z.strictObject({
+  closure: <%= alias %>ClosureSchema.optional(),
+  /** Milliseconds. Zero waits for completion or cancellation. */
+  requestTimeout: z.number().int().nonnegative().default(0),
+  /** Optional host policy; by default only the representable byte length is bounded. */
+  maxArtifactBytes: z.number().int().positive().default(Number.MAX_SAFE_INTEGER),
+});
+<% } %>

@@ -14,7 +14,7 @@ Shared TypeScript side of Tau native .NET kernels: launch set, options, session,
 ## Entrypoints
 
 - `src/index.ts`: the worker session and the workspace mirror
-- `src/adopter.ts` (`./adopter`): the adopter factory, closure layout mapping and options schemas; imports no session code, so a host roster that imports a kernel's `/native` subpath stays light
+- `src/adopter.ts` (`./adopter`): the adopter factory, closure layout mapping and options schemas; imports no session code, so a parent that imports a kernel's `/native` subpath to prepare it loads no kernel
 - `src/layer.ts` (`./layer`): the layer record, manifest pin, SBOM and the compose-script runner
 - `package.json`
 - `project.json`

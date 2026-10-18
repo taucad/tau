@@ -1,0 +1,59 @@
+<% if (nativeLanguage === 'python') { %>import manifest from '<%= importPath %>/tau-plugin.json' with { type: 'json' };
+import { definePythonKernelAdopter } from '@taucad/python-kernel-core';
+
+import { <%= alias %>ClosureSchema } from '#<%= sourceName %>.schemas.js';
+
+/**
+ * How a host prepares `<%= importPath %>` and how the kernel binds to its closure: the sealed `engine` closure maps to
+ * the interpreter, `python/worker.py` and the shared `tau_kernel` modules, and the seal compiles bytecode and imports
+ * `selfTestImports`. Imports no kernel code, so a parent process can prepare the kernel by importing this module alone.
+ * @public
+ */
+export const <%= alias %>Native = definePythonKernelAdopter({
+  package: '<%= importPath %>',
+  manifest,
+  moduleUrl: import.meta.url,
+  worker: { kernelId: '<%= name %>', kernelName: '<%= alias %>', workerModules: ['worker.py'] },
+  // TODO: Name the modules that prove the closure loads, such as the CAD library the worker imports.
+  selfTestImports: ['json'],
+  // TODO: Pin the libraries a project declares in `pyproject.toml`, at the versions the worker runs.
+  projectLibraries: {},
+  // A sealed closure always names its root, which the sandbox reads the interpreter and the worker from.
+  optionsSchema: <%= alias %>ClosureSchema.required({ runtimePath: true }),
+});
+<% } else { %>import { join } from 'node:path';
+
+import manifest from '<%= importPath %>/tau-plugin.json' with { type: 'json' };
+import { defineNativeKernelDeployment } from '@taucad/native-process-core/adopter';
+
+import { <%= alias %>ClosureSchema } from '#<%= sourceName %>.schemas.js';
+
+/** Closure-relative path of the kernel's one executable, the whole launch set. */
+const executable = 'bin/<%= name %>';
+
+/**
+ * How a host prepares `<%= importPath %>` and how the kernel binds to its closure: the sealed `engine` closure holds
+ * one executable, which every launch hashes. Imports no kernel code, so a parent process can prepare the kernel by
+ * importing this module alone.
+ * @public
+ */
+export const <%= alias %>Native = defineNativeKernelDeployment({
+  package: '<%= importPath %>',
+  ecosystem: 'none',
+  manifest,
+  moduleUrl: import.meta.url,
+  optionsSchema: <%= alias %>ClosureSchema,
+  optionsFromClosure: (closure) => {
+    const row = closure.files.find(({ path, symlinkTarget }) => path === executable && symlinkTarget === undefined);
+    if (row === undefined) {
+      throw new Error(`The ${closure.package} closure at ${closure.root} has no ${executable}. Run tau prepare <%= name %> --verify.`);
+    }
+    return {
+      executablePath: join(closure.root, ...executable.split('/')),
+      executableSha256: row.sha256,
+      runtimePath: closure.root,
+    };
+  },
+  launchSet: () => [executable],
+});
+<% } %>

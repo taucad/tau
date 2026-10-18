@@ -61,7 +61,7 @@ Use a direct role factory instead for app-local capabilities, isolated tests, or
 
 ## Choose Build123d only in a native host
 
-Build123d needs a packaged CPython payload and a project trust grant, so only a native host such as Tau Desktop can advertise it. Its `.py` files skip the JavaScript bundler entirely -- see [Build123d](../reference/build123d) for the authoring contract.
+Build123d runs from a sealed CPython closure (`tau prepare build123d`), so only a Node host can list it. Its `.py` files skip the JavaScript bundler entirely -- see [Build123d](../reference/build123d) for the authoring contract.
 
 ## Choose SMLib for NURBS BRep in TypeScript
 

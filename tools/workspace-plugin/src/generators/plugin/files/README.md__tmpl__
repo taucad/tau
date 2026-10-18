@@ -49,6 +49,8 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | `<%= alias %>` | toolkit factory | package-named authoring factory; presets select capabilities |
 | `plugin` | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
 <% for (const capability of capabilities) { %>| `<%= capability.factoryName %>` | <%= capability.role %> factory | direct `<%= capability.bucket %>` composition, with options |
+<% } %><% if (nativeLanguage) { %>| `<%= alias %>OptionsSchema`, `<%= alias %>ClosureSchema` | options schemas | an optional explicit closure and the host's bounds; the files a sealed closure maps to |
+| `<%= alias %>Native` (`<%= importPath %>/native`) | native kernel deployment | how a host prepares the closure, carried by every kernel registration; imports no kernel code |
 <% } %>
 One preset, `default`, selecting <% for (const [index, capability] of capabilities.entries()) { %><%= index > 0 ? ', ' : '' %>`<%= capability.bucket %>.default`<% } %>.
 

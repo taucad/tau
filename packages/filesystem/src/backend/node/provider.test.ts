@@ -147,6 +147,64 @@ describe('NodeFsProvider atomic writes', () => {
     expect(events).toEqual([]);
   });
 
+  it.each(['created', 'removed', 'never present', 'unsubscribed'] as const)(
+    'should reconcile a requested leaf after ancestor rearm when it is %s',
+    async (outcome) => {
+      const root = createRoot();
+      const replacement = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
+      const firstClose = vi.fn(async () => undefined);
+      const replacementClose = vi.fn(async () => undefined);
+      let onAncestorEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+      const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+        if (!onAncestorEvents) {
+          onAncestorEvents = callback;
+          return { unsubscribe: firstClose };
+        }
+        return replacement.promise;
+      });
+      const provider = new NodeFsProvider(root);
+      const events: unknown[] = [];
+      const requestedPath = 'absent/nested/deep.ts';
+      const excludedPath = 'absent/nested/ignored.ts';
+      const stop = await provider.watch(
+        { paths: [requestedPath, excludedPath], recursive: false, excludes: [excludedPath] },
+        (event) => events.push(event),
+      );
+      try {
+        mkdirSync(join(root, 'absent', 'nested'), { recursive: true });
+        writeFileSync(join(root, excludedPath), 'excluded sibling');
+        // Native enumeration may absorb the leaf into its initial snapshot, delivering only the ancestor.
+        onAncestorEvents?.(null, [{ type: 'create', path: join(root, 'absent') }]);
+        await vi.waitFor(() => {
+          expect(subscribe).toHaveBeenCalledTimes(2);
+        });
+        if (outcome !== 'never present') {
+          writeFileSync(join(root, requestedPath), 'created during replacement admission');
+        }
+        if (outcome === 'removed') {
+          rmSync(join(root, requestedPath));
+        } else if (outcome === 'unsubscribed') {
+          stop();
+        }
+        replacement.resolve({ unsubscribe: replacementClose });
+        await drainNodeFsProviderWatchClosures(provider);
+        if (outcome === 'created') {
+          expect(events).toEqual([{ type: 'change', path: requestedPath, kind: 'file' }, { type: 'reset' }]);
+        } else if (outcome === 'removed' || outcome === 'never present') {
+          expect(events).toEqual([{ type: 'delete', path: requestedPath }, { type: 'reset' }]);
+        } else {
+          expect(events).toEqual([]);
+        }
+      } finally {
+        replacement.resolve({ unsubscribe: replacementClose });
+        stop();
+        await drainNodeFsProviderWatchClosures(provider);
+      }
+      expect(firstClose).toHaveBeenCalledOnce();
+      expect(replacementClose).toHaveBeenCalledOnce();
+    },
+  );
+
   it('revalidates a missing parent created during native admission before acknowledging', async () => {
     const root = createRoot();
     const first = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();

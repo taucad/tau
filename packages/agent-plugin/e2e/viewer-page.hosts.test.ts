@@ -18,7 +18,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { chromium } from 'playwright';
 import type { Browser, Frame, Locator, Page } from 'playwright';
 import { build } from 'vite';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
@@ -153,16 +153,57 @@ let project = '';
 const pageErrors: string[] = [];
 let hostScript = '';
 let browser: Browser | undefined;
-const clients: Client[] = [];
+const clients = new Map<Client, StdioClientTransport>();
+const testClients = new Set<Client>();
+
+/** Close the protocol and its subprocess transport, including a failed handshake. */
+const closeClient = async (client: Client | undefined): Promise<void> => {
+  if (client === undefined) {
+    return;
+  }
+  const transport = clients.get(client);
+  if (transport === undefined) {
+    return;
+  }
+  try {
+    await client.close();
+  } catch (error) {
+    try {
+      await transport.close();
+    } catch (transportError) {
+      throw new AggregateError([error, transportError], 'MCP client and transport cleanup failed.');
+    }
+    throw error;
+  }
+  clients.delete(client);
+  testClients.delete(client);
+};
+
+/** Attempt every cleanup and retain failures rather than abandoning later owners. */
+const cleanupFailures = async (tasks: ReadonlyArray<Promise<unknown>>): Promise<unknown[]> => {
+  const results = await Promise.allSettled(tasks);
+  const failures: unknown[] = [];
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push(result.reason);
+    }
+  }
+  return failures;
+};
 
 /**
  * Start `tau mcp` as a plugin host does, serving the built page.
  *
  * @param name - The client name the host sends.
  * @param capabilities - The client's `initialize` capabilities.
+ * @param lifetime - Whether the client belongs to this case or its enclosing suite.
  * @returns The connected client.
  */
-const connect = async (name: string, capabilities: Record<string, unknown>): Promise<Client> => {
+const connect = async (
+  name: string,
+  capabilities: Record<string, unknown>,
+  lifetime: 'suite' | 'test' = 'suite',
+): Promise<Client> => {
   /* Built by assignment so no environment key is a source literal. */
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -180,8 +221,19 @@ const connect = async (name: string, capabilities: Record<string, unknown>): Pro
     stderr: 'ignore',
   });
   const client = new Client({ name, version: '1.0.0' }, { capabilities });
-  await client.connect(transport);
-  clients.push(client);
+  clients.set(client, transport);
+  if (lifetime === 'test') {
+    testClients.add(client);
+  }
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    const failures = await cleanupFailures([closeClient(client)]);
+    if (failures.length > 0) {
+      throw new AggregateError([error, ...failures], 'MCP connection and cleanup failed.');
+    }
+    throw error;
+  }
   return client;
 };
 
@@ -252,8 +304,6 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
   const { resources } = await client.listResources();
   const listed = resources.find((resource) => resource.uri === resourceUri);
   const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
-  /* Closed when its test ends, passed or failed, so it reports nothing into a later test. */
-  onTestFinished(async () => page.close());
   page.on('pageerror', (error) => {
     pageErrors.push(error.message);
   });
@@ -431,14 +481,25 @@ beforeAll(async () => {
   });
 }, kernelCallLimit);
 
-afterAll(async () => {
-  /* A setup failure leaves no browser to close. */
-  await browser?.close();
-  for (const client of clients) {
-    // oxlint-disable-next-line no-await-in-loop -- each server stops before the project is removed.
-    await client.close();
+afterEach(async () => {
+  /* Stop page requests before stopping only this case's MCP servers. */
+  const failures = await cleanupFailures((browser?.contexts() ?? []).map(async (context) => context.close()));
+  failures.push(...(await cleanupFailures([...testClients].map(async (client) => closeClient(client)))));
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Case resources did not close.');
   }
-  await rm(project, { recursive: true, force: true });
+});
+
+afterAll(async () => {
+  /* Final fallback also handles setup failures; retain the project if cleanup fails. */
+  const failures = await cleanupFailures([browser?.close() ?? Promise.resolve()]);
+  failures.push(...(await cleanupFailures([...clients.keys()].map(async (client) => closeClient(client)))));
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Suite resources did not close.');
+  }
+  if (project !== '') {
+    await rm(project, { recursive: true, force: true });
+  }
 });
 
 beforeEach(() => {
@@ -450,6 +511,10 @@ describe('the viewer page in an MCP Apps host', () => {
 
   beforeAll(async () => {
     client = await connect('claude-ai', mcpAppsCapabilities);
+  });
+
+  afterAll(async () => {
+    await closeClient(client);
   });
 
   it(
@@ -566,7 +631,7 @@ describe('exchange formats (W7)', () => {
   it(
     'should convert STEP, STL and OBJ files to GLB on the server and draw them',
     async () => {
-      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const client = await connect('claude-ai', mcpAppsCapabilities, 'test');
       for (const targetFile of ['cylinders.step', 'wedge.stl', 'wedge.obj']) {
         // oxlint-disable-next-line no-await-in-loop -- one kernel conversion at a time.
         const { model } = shown(await callTool(client, 'show_model', { targetFile }));
@@ -589,6 +654,10 @@ describe("the tab's panels (W10)", () => {
 
   beforeAll(async () => {
     client = await connect('claude-ai', mcpAppsCapabilities);
+  });
+
+  afterAll(async () => {
+    await closeClient(client);
   });
 
   it(
@@ -738,10 +807,14 @@ describe('the live view (W6)', () => {
     client = await connect('claude-ai', mcpAppsCapabilities);
   });
 
+  afterAll(async () => {
+    await closeClient(client);
+  });
+
   it(
     'should keep a card on its model in fullscreen when another show_model follows',
     async () => {
-      const cardClient = await connect('claude-ai', mcpAppsCapabilities);
+      const cardClient = await connect('claude-ai', mcpAppsCapabilities, 'test');
       const first = await callTool(cardClient, 'show_model', { targetFile: 'main.ts' });
       const page = await mountInHarness(cardClient, first, { displayMode: 'fullscreen' });
       await drawn(viewerFrame(page), 'Export');
@@ -780,6 +853,21 @@ describe('the live view (W6)', () => {
       const page = await mountInHarness(client, undefined, { displayMode: 'fullscreen' });
       const frame = viewerFrame(page);
       await drawn(frame, 'Export');
+
+      /* Export can enable while the canvas still has its initial 300 × 150 buffer.
+       * The public capture waits for the model presentation before we measure and click the canvas. */
+      await expect
+        .poll(
+          async () => {
+            const ready = await callTool(client, 'view_state', { capture: true });
+            return {
+              isError: Boolean(ready.isError),
+              hasImage: ready.content.some((block) => block.type === 'image' && block.data.length > 0),
+            };
+          },
+          { timeout: 120_000 },
+        )
+        .toEqual({ isError: false, hasImage: true });
 
       /* The person picks the box in the middle of the canvas. */
       const canvasBox = await frame.locator('canvas').first().boundingBox();
@@ -877,7 +965,7 @@ describe('the viewer page from a text host', () => {
   it(
     'should open the loopback link in the tab composition',
     async () => {
-      const client = await connect('claude-code', claudeCodeCapabilities);
+      const client = await connect('claude-code', claudeCodeCapabilities, 'test');
       const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'main.ts' }));
       expect(viewerUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?model=/u);
       /* A later show does not change what the first link opens. */
@@ -898,7 +986,7 @@ describe('the viewer page from a text host', () => {
   it(
     'should carry Share, Export and the workbench toggle in the header of a narrow tab, and no host actions in the bar',
     async () => {
-      const client = await connect('claude-code', claudeCodeCapabilities);
+      const client = await connect('claude-code', claudeCodeCapabilities, 'test');
       const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'main.ts' }));
       /* Below 720 px the tab opens with the canvas whole; the header is the only way to the panes. */
       const page = await launched().newPage({ viewport: { width: 700, height: 640 } });
@@ -923,7 +1011,7 @@ describe('the viewer page from a text host', () => {
   it(
     'should name the version mismatch when the server has no formats tool',
     async () => {
-      const client = await connect('claude-code', claudeCodeCapabilities);
+      const client = await connect('claude-code', claudeCodeCapabilities, 'test');
       const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
       const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
       /* A `tau` from before the formats tool answers the loopback call as the server does for any tool it lacks. */
@@ -954,7 +1042,7 @@ describe('the viewer page from a text host', () => {
   it(
     'should fit the opening tabs beside the header buttons and activate each at its centre (VUI-5)',
     async () => {
-      const client = await connect('claude-code', claudeCodeCapabilities);
+      const client = await connect('claude-code', claudeCodeCapabilities, 'test');
       const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
       const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
       await page.goto(viewerUrl ?? '');

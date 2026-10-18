@@ -108,7 +108,12 @@ export function QuestionTextAnswer({
         style={{ minHeight: isDictating ? recordingHeight : undefined }}
       >
         {isDictating ? (
-          <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
+          <DictationRecording
+            size='icon-xs'
+            phase={dictation.phase}
+            waveform={dictation.waveform}
+            onCancel={dictation.cancel}
+          />
         ) : (
           <InputGroupTextarea
             ref={textRef}
@@ -132,7 +137,7 @@ export function QuestionTextAnswer({
         )}
         <div className='flex min-h-8 shrink-0 items-center gap-1'>
           {dictation.available === true && isOpen ? (
-            <DictationButton phase={dictation.phase} onStart={start} onStop={dictation.stop} />
+            <DictationButton size='icon-xs' phase={dictation.phase} onStart={start} onStop={dictation.stop} />
           ) : null}
           <Tooltip>
             <TooltipTrigger asChild>

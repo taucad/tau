@@ -1,4 +1,5 @@
 import '#test/browser.css';
+import CameraControlsImpl from 'camera-controls';
 import { cleanup, render } from '@testing-library/react';
 import { useFrame } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
@@ -26,6 +27,28 @@ import {
 
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
 
+const observeRenderedReadiness = (current: RootState) => {
+  const canvas = current.gl.domElement;
+  const gizmo = canvas.parentElement?.querySelector('.viewport-gizmo-cube');
+  const bounds = gizmo?.getBoundingClientRect();
+  const origin = new Vector3().project(current.camera);
+  return {
+    root: current,
+    canvas,
+    controlsMounted: current.controls instanceof CameraControlsImpl,
+    canvasConnected: canvas.isConnected,
+    width: canvas.width,
+    height: canvas.height,
+    gizmoConnected: gizmo?.isConnected === true,
+    gizmoWidth: bounds?.width ?? 0,
+    gizmoHeight: bounds?.height ?? 0,
+    originX: origin.x,
+    originY: origin.y,
+    originZ: origin.z,
+  };
+};
+let renderedReadiness: ReturnType<typeof observeRenderedReadiness> | undefined;
+
 let state: RootState | undefined;
 let frames = 0;
 let sceneSamples: number | undefined;
@@ -49,6 +72,7 @@ function FrameProbe(): undefined {
       sceneSamples = current.gl.getRenderTarget()?.samples;
     };
     frames += 1;
+    renderedReadiness = observeRenderedReadiness(current);
     const requested = captureFrame;
     captureFrame = undefined;
     if (requested) {
@@ -97,6 +121,7 @@ afterEach(async () => {
   document.documentElement.classList.remove('dark');
   state = undefined;
   frames = 0;
+  renderedReadiness = undefined;
   sceneSamples = undefined;
   pendingFrame = undefined;
 });
@@ -154,7 +179,27 @@ it.each([
     const view = render(fixture());
     await vi.waitFor(
       () => {
-        expect(frames).toBeGreaterThan(2);
+        // Observe ready owners in a completed natural scene frame before capture
+        // requests any frames; React may batch startup into different counts.
+        expect(renderedReadiness, 'a natural frame observed the ready scene').toBeDefined();
+        expect(renderedReadiness!.root).toBe(state);
+        expect(renderedReadiness!.canvas).toBe(state!.gl.domElement);
+        expect(renderedReadiness!.controlsMounted, 'camera controls were mounted during the frame').toBe(true);
+        expect(renderedReadiness!.canvasConnected, 'the rendered canvas was mounted').toBe(true);
+        expect(renderedReadiness!.width, 'the rendered drawing buffer had width').toBeGreaterThan(0);
+        expect(renderedReadiness!.height, 'the rendered drawing buffer had height').toBeGreaterThan(0);
+        expect(renderedReadiness!.gizmoConnected, 'the viewport gizmo was mounted during the frame').toBe(true);
+        expect(renderedReadiness!.gizmoWidth, 'the rendered gizmo had a visible viewport').toBeGreaterThan(0);
+        expect(renderedReadiness!.gizmoHeight, 'the rendered gizmo had a visible viewport').toBeGreaterThan(0);
+        expect(
+          Math.abs(renderedReadiness!.originX),
+          'the rendered camera centres the origin horizontally',
+        ).toBeLessThan(0.001);
+        expect(Math.abs(renderedReadiness!.originY), 'the rendered camera centres the origin vertically').toBeLessThan(
+          0.001,
+        );
+        expect(renderedReadiness!.originZ, 'the rendered origin is inside the clip range').toBeGreaterThan(-1);
+        expect(renderedReadiness!.originZ).toBeLessThan(1);
       },
       { timeout: 45_000 },
     );
@@ -168,6 +213,7 @@ it.each([
     }
     const capture = async (): Promise<Uint8ClampedArray> => {
       let pixels: Uint8ClampedArray = new Uint8ClampedArray();
+      const framesBeforeCapture = frames;
       // Let scene changes settle, completing each final-frame readback before requesting the next.
       for (let sample = 0; sample < 3; sample++) {
         const completed = Promise.withResolvers<Uint8ClampedArray>();
@@ -182,6 +228,7 @@ it.each([
         // oxlint-disable-next-line eslint/no-await-in-loop -- Each frame must finish its GPU copy before another capture.
         pixels = await completed.promise;
       }
+      expect(frames - framesBeforeCapture, 'each requested capture frame is delivered').toBeGreaterThanOrEqual(3);
       return pixels;
     };
     const screenshot = async (pixels: Uint8ClampedArray, phase: string): Promise<void> => {

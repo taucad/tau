@@ -907,6 +907,14 @@
       "token": "this.idleTimer = setTimeout(",
       "class": "Debounce",
       "owner": "viewer memory"
+    },
+    {
+      "id": "M12",
+      "bound": "isomorphic-git object cache idle expiry",
+      "site": "packages/revisions/src/isomorphic-git-adapter.ts",
+      "token": "objectCacheIdle",
+      "class": "Debounce",
+      "owner": "revisions memory"
     }
   ]
 }

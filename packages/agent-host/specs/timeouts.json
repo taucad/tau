@@ -837,6 +837,14 @@
       "owner": "W17"
     },
     {
+      "id": "E36",
+      "bound": "tau mcp compute store open: a project's durable store must answer its first inspect within 10 s, else that project's builds stay in memory",
+      "site": "packages/cli/src/commands/mcp.ts",
+      "token": "computeStoreOpenLimit",
+      "class": "Liveness",
+      "owner": "tau mcp"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

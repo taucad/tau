@@ -1,7 +1,0 @@
-{
-  "name": "native-kernels",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/native-kernels",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
-}

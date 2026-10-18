@@ -7,8 +7,8 @@
  * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts [--target platform-arch]
  *   [--seed [dir]]
  *   `--seed` produces the registry-native payload seed instead (`blobs/sha256/<hex>`, the layout `TAU_PAYLOAD_DIR` and a
- *   mirror share) by delegating to Build123d's `tau-plugin.json` generator, so the desktop and the CLI prepare the
- *   same digest-pinned closure; the default directory is `out/cache/build123d-seed`.
+ *   mirror share) by running `tau-python-kernel seed` over Build123d's `tau-plugin.json`, so the desktop and the CLI
+ *   prepare the same digest-pinned closure; the default directory is `out/cache/build123d-seed`.
  * Exit codes: 0 for an integrity-verified resource; non-zero for unsupported targets or any hash/install failure.
  */
 
@@ -82,8 +82,8 @@ const parseArguments = (): { readonly targets: string[]; readonly seed?: string 
 };
 
 /**
- * Fill the payload seed for each target through Build123d's generator, which downloads every third-party payload
- * of the target's `tau-plugin.json` variant and keeps it only when its bytes match the pinned digest.
+ * Fill the payload seed for each target with `tau-python-kernel seed` over Build123d, which downloads every
+ * third-party payload of the target's `tau-plugin.json` variant and keeps it only when its bytes match the pinned digest.
  * @param targets - Desktop target names (`linux-x64` is the glibc variant).
  * @param seed - The seed directory.
  */
@@ -98,8 +98,10 @@ const produceSeed = (targets: readonly string[], seed: string): void => {
       [
         '--import',
         '@oxc-node/core/register',
-        resolve(workspaceRoot, 'packages/plugins/build123d/scripts/generate-tau-plugin.mts'),
+        resolve(workspaceRoot, 'packages/core/python-kernel/scripts/tau-python-kernel.mts'),
         'seed',
+        '--package',
+        resolve(workspaceRoot, 'packages/plugins/build123d'),
         '--target',
         key,
         '--seed',

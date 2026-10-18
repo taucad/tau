@@ -9,7 +9,6 @@
  *
  * @module
  */
-import type { PluginInstance } from '@taucad/runtime/plugin';
 import type { ClosureLaunch, PreparationPlugin } from '@taucad/runtime/preparation/node';
 import type { z } from 'zod';
 
@@ -226,52 +225,4 @@ export const nativeDeploymentOf = (kernel: { readonly id: string }): NativeKerne
   return isRecord(deployment) && typeof deployment['package'] === 'string'
     ? (deployment as NativeKernelDeployment)
     : undefined;
-};
-
-/**
- * The plugin factory a loaded native kernel package gave a host roster. A rev1 shim kept until
- * `@taucad/native-kernels` is deleted: kernels bind their own closure through {@link withNativeDeployment}.
- * @public
- */
-export type NativeKernelPluginFactory<Options extends Record<string, unknown>> = (
-  options: Options & NativeKernelBounds,
-) => PluginInstance;
-
-/**
- * A rev1 roster adopter: the closure mapping, seal step and launch set, with a lazy `load()`. A shim kept until
- * `@taucad/native-kernels` is deleted; use {@link NativeKernelDeployment}.
- * @public
- */
-export type NativeKernelAdopter<
-  Options extends Record<string, unknown> = Record<string, unknown>,
-  Package extends string = string,
-> = Pick<
-  NativeKernelDeployment<Options, Package>,
-  'package' | 'ecosystem' | 'optionsSchema' | 'optionsFromClosure' | 'seal' | 'launchSet'
-> & {
-  /** Import the kernel and return its plugin factory. */
-  readonly load: () => Promise<NativeKernelPluginFactory<Options>>;
-};
-
-/**
- * Define a rev1 roster adopter. A shim kept until `@taucad/native-kernels` is deleted; use
- * {@link defineNativeKernelDeployment}.
- * @param adopter - The package's adopter.
- * @returns The same adopter.
- * @throws {TypeError} When `package` is not a scoped npm package name, or the launch set of an empty closure holds a
- *   path that is not closure-relative.
- * @public
- */
-export const defineNativeKernelAdopter = <Options extends Record<string, unknown>, Package extends string>(adopter: {
-  readonly package: Package;
-  readonly ecosystem: NativeKernelAdopter['ecosystem'];
-  readonly optionsSchema: z.ZodType<NoInfer<Options>>;
-  readonly optionsFromClosure: (closure: ClosureLaunch) => Options;
-  readonly seal?: PreparationPlugin['seal'];
-  readonly launchSet: NonNullable<PreparationPlugin['launchSet']>;
-  readonly load: () => Promise<NativeKernelPluginFactory<NoInfer<Options>>>;
-}): NativeKernelAdopter<Options, Package> => {
-  assertPackageName(adopter.package, 'adopter');
-  assertLaunchSet(adopter.package, adopter.launchSet);
-  return adopter;
 };

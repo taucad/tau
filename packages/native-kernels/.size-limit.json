@@ -1,7 +1,0 @@
-[
-  {
-    "name": "total (ESM JS) — measured 3.41 kB brotli on 2026-10-18; the adopter roster, the stand-in kernel, the composition schema, the static manifests and the payload-store composition",
-    "path": "dist/**/*.mjs",
-    "limit": "4 kB"
-  }
-]

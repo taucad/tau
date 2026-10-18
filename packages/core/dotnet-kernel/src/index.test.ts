@@ -49,7 +49,7 @@ describe('@taucad/dotnet-kernel-core', () => {
     ]);
   });
 
-  it('should keep the session out of the adopter entry, so a host roster stays light until load()', async () => {
+  it('should keep the session out of the adopter entry, so a `/native` subpath loads no kernel code', async () => {
     const sources = await Promise.all(
       ['adopter.ts', 'dotnet-kernel-adopter.ts', 'dotnet-closure.ts', 'dotnet.schemas.ts'].map(async (name) =>
         readFile(new URL(name, import.meta.url), 'utf8'),

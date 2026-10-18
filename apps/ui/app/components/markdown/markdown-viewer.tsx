@@ -1,8 +1,6 @@
 import 'katex/dist/katex.min.css';
 import { cjk } from '@streamdown/cjk';
-import { code } from '@streamdown/code';
 import { createMathPlugin } from '@streamdown/math';
-import { mermaid } from '@streamdown/mermaid';
 import { defaultRehypePlugins, defaultRemarkPlugins as streamdownRemarkPlugins, Streamdown } from 'streamdown';
 import type { Components, ControlsConfig, PluginConfig, StreamdownProps } from 'streamdown';
 import { memo, useMemo } from 'react';
@@ -56,11 +54,13 @@ const shikiThemes = {
   highContrast: ['github-light-high-contrast', 'github-dark-high-contrast'],
 } satisfies Record<string, NonNullable<StreamdownProps['shikiTheme']>>;
 
+/* D-UI-18: no `code` or `mermaid` plugin. `MarkdownCode` renders every fenced
+ * block (mermaid included) and `shikiTheme` is always passed, so Streamdown
+ * never reaches either plugin; they only added bundle weight and module-level
+ * highlighter caches that are never evicted. */
 const streamdownPlugins = {
   cjk,
-  code,
   math: createMathPlugin({ singleDollarTextMath: true }),
-  mermaid,
 } satisfies PluginConfig;
 
 export const MarkdownViewer = memo(function ({

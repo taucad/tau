@@ -237,13 +237,7 @@ catalogs:
     '@streamdown/cjk':
       specifier: ^1.0.3
       version: 1.0.4
-    '@streamdown/code':
-      specifier: ^1.1.1
-      version: 1.1.1
     '@streamdown/math':
-      specifier: ^1.0.2
-      version: 1.0.3
-    '@streamdown/mermaid':
       specifier: ^1.0.2
       version: 1.0.3
     '@swc-node/register':
@@ -1103,13 +1097,7 @@ importers:
       '@streamdown/cjk':
         specifier: 'catalog:'
         version: 1.0.4(@types/mdast@4.0.4)(micromark-util-types@2.0.3)(micromark@4.0.3)(react@19.2.7)(unified@11.0.5)
-      '@streamdown/code':
-        specifier: 'catalog:'
-        version: 1.1.1(react@19.2.7)
       '@streamdown/math':
-        specifier: 'catalog:'
-        version: 1.0.3(react@19.2.7)
-      '@streamdown/mermaid':
         specifier: 'catalog:'
         version: 1.0.3(react@19.2.7)
       '@tanstack/react-table':
@@ -12909,18 +12897,8 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
-  '@streamdown/code@1.1.1':
-    resolution: {integrity: sha512-i7HTNuDgZWb+VdrNVOam9gQhIc5MSSDXKWXgbUrn/4vSRaSMM+Rtl10MQj4wLWPNpF7p80waJsAqFP8HZfb0Jg==}
-    peerDependencies:
-      react: ^18.0.0 || ^19.0.0
-
   '@streamdown/math@1.0.3':
     resolution: {integrity: sha512-TOTRlPYs4LBNT8GaIWNCEVrcGVQsVcfc8WZ/x/0IyO+Rvsu6W+nF+YCS4Pl3JTVWQK8QX7LbWUChSilwlyzPZw==}
-    peerDependencies:
-      react: ^18.0.0 || ^19.0.0
-
-  '@streamdown/mermaid@1.0.3':
-    resolution: {integrity: sha512-TgdL9Evm4CiaBaADjQVCaXe5eEZpJpTZ7JYw/OY1OO2JCmlc/6DN2DISXj+KUYAzRw+GgJioCoorpuCN/OIXyA==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
@@ -33411,11 +33389,6 @@ snapshots:
       - supports-color
       - unified
 
-  '@streamdown/code@1.1.1(react@19.2.7)':
-    dependencies:
-      react: 19.2.7
-      shiki: 3.23.0
-
   '@streamdown/math@1.0.3(react@19.2.7)':
     dependencies:
       katex: 0.18.2
@@ -33424,11 +33397,6 @@ snapshots:
       remark-math: 6.0.0
     transitivePeerDependencies:
       - supports-color
-
-  '@streamdown/mermaid@1.0.3(react@19.2.7)':
-    dependencies:
-      mermaid: 11.17.2
-      react: 19.2.7
 
   '@svgr/babel-plugin-add-jsx-attribute@8.0.0(@babel/core@7.29.7)':
     dependencies:

@@ -321,10 +321,8 @@ catalog:
   fflate: 0.8.3
   portless: 0.15.6
   streamdown: ^2.6.0
-  '@streamdown/code': ^1.1.1
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
-  '@streamdown/mermaid': ^1.0.2
   '@napi-rs/cli': 3.8.6
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0

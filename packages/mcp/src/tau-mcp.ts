@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { dirname, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult, ServerNotification, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type {
+  CallToolResult,
+  JSONRPCMessage,
+  ServerNotification,
+  ToolAnnotations,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
@@ -23,6 +30,7 @@ import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schema
 import packageJson from '../package.json' with { type: 'json' };
 import { registerTauMcpViewer } from '#tau-mcp-viewer.js';
 import type { TauMcpViewer } from '#tau-mcp-viewer.js';
+import { codexClientName } from '#viewer-protocol.js';
 
 const exposedRpcNames = [
   rpcName.evaluateModel,
@@ -77,6 +85,136 @@ export const tauMcpInstructions = instructionsFor(true);
 /** The sentence a server with the viewer adds to {@link tauMcpInstructions}. */
 const viewerInstruction =
   'When the person should look at a model, call show_model after evaluate_model succeeds; it shows the model in the Tau viewer, or returns a viewer link to share with them.';
+
+/** {@link serverVersion}, read once. */
+let installedVersion: string | undefined;
+
+/**
+ * This package's version as installed. A preview release rewrites the manifest after the build inlined it, so the
+ * manifest beside the module is read first; a bundle with no manifest there keeps the inlined one.
+ *
+ * @returns The version `serverInfo` and the identity sentence name.
+ */
+const serverVersion = (): string => {
+  if (installedVersion === undefined) {
+    installedVersion = packageJson.version;
+    try {
+      const manifest: unknown = JSON.parse(
+        readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+      );
+      if (
+        typeof manifest === 'object' &&
+        manifest !== null &&
+        Reflect.get(manifest, 'name') === packageJson.name &&
+        typeof Reflect.get(manifest, 'version') === 'string'
+      ) {
+        installedVersion = String(Reflect.get(manifest, 'version'));
+      }
+    } catch {
+      /* No manifest beside this module: the inlined version stands. */
+    }
+  }
+  return installedVersion;
+};
+
+/**
+ * Which Tau CLI the agent plugin's launcher started, and why: the `TAU_LAUNCH` JSON the launcher hands the CLI
+ * (agent plugin install hardening, section 4.3). `tau mcp` names it in its `initialize` instructions.
+ */
+const tauLaunchSchema = z.object({
+  source: z
+    .enum(['explicit', 'workspace', 'installed', 'npx'])
+    .describe('TAU_CLI (explicit), a checkout build (workspace), a tau on PATH (installed), or npx'),
+  path: z.string().min(1).max(4096).optional().describe('The tau the launcher ran, for explicit and installed'),
+  cli: z.string().min(1).max(64).optional().describe('That CLI version, when known'),
+  plugin: z.string().min(1).max(64).describe('The agent plugin version'),
+  node: z.string().min(1).max(64).describe('The Node.js version running the launcher'),
+  skipped: z
+    .array(
+      z.object({
+        path: z.string().min(1).max(4096),
+        /* What a passed-over tau printed, which the launcher keeps up to 128 bytes of; it need not be a version. */
+        version: z.string().min(1).max(128).optional(),
+      }),
+    )
+    .describe('Installed tau executables passed over, with what each printed for --version'),
+});
+/**
+ * Inferred launcher descriptor.
+ * @public
+ */
+export type TauLaunch = z.infer<typeof tauLaunchSchema>;
+
+/** Which CLI serves, and how it was started: the identity `initialize` names (INS-2). @public */
+export type TauMcpRuntime = Readonly<{
+  /** The serving Tau CLI's version. */
+  version: string;
+  /** The agent plugin launcher's descriptor; absent when the CLI was started directly. */
+  launch?: TauLaunch | undefined;
+}>;
+
+/**
+ * The launcher descriptor the agent plugin hands `tau mcp` as `TAU_LAUNCH`.
+ *
+ * @param value - The variable's text, if set.
+ * @returns The descriptor, or `undefined` when it is unset or is not one.
+ * @public
+ */
+export const parseTauMcpLaunch = (value: string | undefined): TauLaunch | undefined => {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  try {
+    const parsed = tauLaunchSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The longest identity sentence; a longer one drops paths, then clauses, keeping the instructions budget. */
+const identityLimit = 250;
+
+/** A semantic version, as a matching `tau --version` prints it. */
+const versionLike = /^\d+\.\d+\.\d+(?:[-+][\w.+-]{1,48})?$/u;
+
+/**
+ * The sentence naming which CLI, launcher rung and Node.js started this server.
+ *
+ * @param runtime - The serving CLI and its launch.
+ * @returns One sentence for the `initialize` instructions.
+ */
+const identityInstruction = ({ version, launch }: TauMcpRuntime): string => {
+  const server = `server ${packageJson.name} ${serverVersion()}.`;
+  if (launch === undefined) {
+    return `Tau CLI ${version} started directly; ${server}`;
+  }
+  /* Each path is named while the sentence stays within its limit: the serving tau's first, then the skipped one's;
+   * then the skipped clause goes, and last the plugin and Node.js versions. */
+  const sentence = (paths: number, skippedClause: boolean): string => {
+    const at = (path: string | undefined, rank: number): string =>
+      rank <= paths && path !== undefined ? ` at ${path}` : '';
+    const chosen = {
+      explicit: `TAU_CLI${at(launch.path, 1)}`,
+      workspace: 'workspace build',
+      installed: `installed tau${at(launch.path, 1)}`,
+      npx: 'npx',
+    }[launch.source];
+    const [first, ...others] = launch.skipped;
+    /* A skipped tau printed what it printed; only a version is repeated to the agent. */
+    const printed =
+      first?.version !== undefined && versionLike.test(first.version) ? first.version : 'of unknown version';
+    const skipped =
+      first === undefined || !skippedClause
+        ? ''
+        : `; installed tau ${printed}${at(first.path, 2)}${others.length === 0 ? '' : ` and ${String(others.length)} more`} skipped`;
+    return `Tau CLI ${version} (${chosen}${skipped}) started by plugin ${launch.plugin} on Node.js ${launch.node}; ${server}`;
+  };
+  const fitting = [sentence(2, true), sentence(1, true), sentence(0, true), sentence(0, false)].find(
+    (named) => named.length <= identityLimit,
+  );
+  return fitting ?? `Tau CLI ${version} started by the agent plugin; ${server}`.slice(0, identityLimit);
+};
 
 /** RPC names exposed to external agents through Tau MCP. @public */
 export type TauMcpRpcName = (typeof exposedRpcNames)[number];
@@ -225,6 +363,11 @@ export type TauMcpServerOptions = Readonly<{
    * page's tools, presented per client (blueprint D5).
    */
   viewer?: TauMcpViewer | undefined;
+  /**
+   * The serving CLI and how it was started. With it, the `initialize` instructions end with one sentence naming the
+   * CLI version, the launcher's rung, the plugin and Node.js versions, and this server's version.
+   */
+  runtime?: TauMcpRuntime | undefined;
 }>;
 
 /** The streams {@link serveTauMcpStdio} speaks over, when not this process's own stdin and stdout. @public */
@@ -694,14 +837,15 @@ export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOpti
  * @returns A tool-only MCP server that has not yet been connected to a transport.
  */
 const createServer = (
-  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer' | 'cadTools'>,
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer' | 'cadTools' | 'runtime'>,
   hostTools: readonly SdkHostTool[],
 ): McpServer => {
-  const instructions = instructionsFor((options.cadTools ?? tauMcpToolNames).includes(toolName.testModel));
-  const server = new McpServer(
-    { name: packageJson.name, version: packageJson.version },
-    { instructions: options.viewer === undefined ? instructions : `${instructions} ${viewerInstruction}` },
-  );
+  const instructions = [
+    instructionsFor((options.cadTools ?? tauMcpToolNames).includes(toolName.testModel)),
+    ...(options.viewer === undefined ? [] : [viewerInstruction]),
+    ...(options.runtime === undefined ? [] : [identityInstruction(options.runtime)]),
+  ].join(' ');
+  const server = new McpServer({ name: packageJson.name, version: serverVersion() }, { instructions });
   registerTools(server, options, hostTools);
   return server;
 };
@@ -722,6 +866,45 @@ export const createTauMcpServer = (options: TauMcpServerOptions): McpServer =>
   createServer(options, toSdkHostTools(options.hostTools));
 
 /**
+ * Stdio whose `initialize` answer declares `codex/sandbox-state-meta` to Codex only.
+ *
+ * Capabilities cannot be registered once the server is connected, and the client's name is known only once its
+ * `initialize` arrives; the server records that name before it answers, so the answer is where the two meet.
+ */
+class CodexGatedStdioTransport extends StdioServerTransport {
+  readonly #clientName: () => string | undefined;
+
+  public constructor(stdin: Readable | undefined, stdout: Writable | undefined, clientName: () => string | undefined) {
+    super(stdin, stdout);
+    this.#clientName = clientName;
+  }
+
+  public override async send(message: JSONRPCMessage): Promise<void> {
+    if (!('result' in message) || !('serverInfo' in message.result) || this.#clientName() !== codexClientName) {
+      return super.send(message);
+    }
+    const { capabilities } = message.result;
+    if (typeof capabilities !== 'object' || capabilities === null) {
+      return super.send(message);
+    }
+    const experimental: unknown = Reflect.get(capabilities, 'experimental');
+    return super.send({
+      ...message,
+      result: {
+        ...message.result,
+        capabilities: {
+          ...capabilities,
+          experimental: {
+            ...(typeof experimental === 'object' && experimental !== null ? experimental : {}),
+            'codex/sandbox-state-meta': {},
+          },
+        },
+      },
+    });
+  }
+}
+
+/**
  * Serve one Tau MCP server over stdio.
  *
  * For a local agent that launches Tau as its own stdio server (a Codex or
@@ -729,9 +912,9 @@ export const createTauMcpServer = (options: TauMcpServerOptions): McpServer =>
  * to it, so a process whose other code may print passes a stream bound to its
  * original stdout and points `process.stdout` elsewhere.
  *
- * It declares Codex's `codex/sandbox-state-meta` capability, without which Codex
- * omits the thread's project folder from each call's `_meta`; the dispatcher
- * receives that `_meta` as `meta`.
+ * To Codex, and only to Codex, it declares the `codex/sandbox-state-meta`
+ * capability, without which Codex omits the thread's project folder from each
+ * call's `_meta`; the dispatcher receives that `_meta` as `meta`.
  *
  * @param options - Dispatch and host tools, as for {@link createTauMcpServer}.
  * @param streams - Input and output streams; default this process's stdin and stdout.
@@ -744,8 +927,9 @@ export const serveTauMcpStdio = async (
   streams: TauMcpStdioStreams = {},
 ): Promise<McpServer> => {
   const server = createTauMcpServer(options);
-  server.server.registerCapabilities({ experimental: { 'codex/sandbox-state-meta': {} } });
-  await server.connect(new StdioServerTransport(streams.stdin, streams.stdout));
+  await server.connect(
+    new CodexGatedStdioTransport(streams.stdin, streams.stdout, () => server.server.getClientVersion()?.name),
+  );
   return server;
 };
 

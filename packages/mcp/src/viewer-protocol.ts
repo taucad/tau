@@ -218,8 +218,8 @@ export type TauViewerClient = Readonly<{
   clientInfo?: Readonly<{ name: string }> | undefined;
 }>;
 
-/** The client name Codex's MCP client sends, from the desktop app and the CLI alike. */
-const codexClientName = 'codex-mcp-client';
+/** The client name Codex's MCP client sends, from the desktop app and the CLI alike. @public */
+export const codexClientName = 'codex-mcp-client';
 
 /**
  * Choose the presentation for one client (blueprint D5).

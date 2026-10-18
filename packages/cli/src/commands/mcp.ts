@@ -11,6 +11,7 @@ import {
   keyedResource,
   openLocalMachines,
   openLocalParameterActors,
+  parseTauMcpLaunch,
   serveLocalHostMcp,
 } from '@taucad/host';
 import type { LocalMachines } from '@taucad/host';
@@ -21,11 +22,14 @@ import { defineCommand } from 'citty';
 
 import { childEnvironment } from '#child-environment.js';
 import { exitNow } from '#exit-now.js';
+import { installedVersion } from '#installed-version.js';
 import { exitCodeFor } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
 
 /**
  * Milliseconds a stopping server waits for its kernels before it exits anyway.
@@ -490,6 +494,11 @@ export const mcpCommand = defineCommand({
           checkouts,
           viewerPage,
           runtimeClient: clientFor,
+          /* The agent plugin's launcher says which rung started this CLI; `initialize` names it with this version. */
+          runtime: {
+            version: installedVersion(import.meta.url, { name: packageJson.name, version: packageJson.version }),
+            launch: parseTauMcpLaunch(process.env['TAU_LAUNCH']),
+          },
           /* The direct share link packs the shown entry's source closure, as the Tau app does. */
           snapshotSource: async ({ root, entryPath, additionalPaths, signal }) => {
             const client = await clientFor(root);

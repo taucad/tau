@@ -53,6 +53,7 @@ const serve = async (
     readonly workspaceRoot?: string;
     readonly pinned?: boolean;
     readonly listed?: readonly HostToolDefinition[];
+    readonly runtime?: TauMcpServerOptions['runtime'];
   },
 ) => {
   const invocations: HostToolInvocation[] = [];
@@ -69,6 +70,7 @@ const serve = async (
     pinned: options?.pinned ?? false,
     registry,
     checkouts,
+    runtime: options?.runtime,
   });
   const dispatch = served.options?.dispatch;
   if (dispatch === undefined) {
@@ -114,6 +116,19 @@ describe('serveLocalHostMcp', () => {
     const { local } = await serve(ready, { listed: [] });
     try {
       expect(served.options?.cadTools).toEqual([toolName.evaluateModel, toolName.screenshot, toolName.exportModel]);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it('should hand the server the CLI and launch it names in initialize', async () => {
+    const runtime: TauMcpServerOptions['runtime'] = {
+      version: '0.1.0-beta.7',
+      launch: { source: 'npx', plugin: '0.1.0-beta.7', node: '24.20.0', skipped: [] },
+    };
+    const { local } = await serve(ready, { runtime });
+    try {
+      expect(served.options?.runtime).toEqual(runtime);
     } finally {
       await local.close();
     }

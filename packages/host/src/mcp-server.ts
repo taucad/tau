@@ -39,6 +39,7 @@ import type {
   TauMcpRpcFailure,
   TauMcpRpcName,
   TauMcpRpcSuccess,
+  TauMcpRuntime,
   TauMcpStdioStreams,
   TauMcpToolName,
 } from '@taucad/mcp';
@@ -840,6 +841,8 @@ export type LocalHostMcpOptions = {
    * link packs every project file git does not ignore.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
+  /** The serving CLI and how it was started, which the `initialize` instructions name (INS-2). */
+  readonly runtime?: TauMcpRuntime | undefined;
 };
 
 /** A local MCP server serving one agent. @public */
@@ -1018,6 +1021,7 @@ export const serveLocalHostMcp = async (
   const server = await serveTauMcpStdio(
     {
       ...(viewer === undefined ? {} : { viewer }),
+      runtime: options.runtime,
       cadTools,
       hostTools: options.registry
         .list()

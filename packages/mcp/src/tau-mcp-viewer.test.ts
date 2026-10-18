@@ -144,6 +144,32 @@ describe('resolveTauViewerPresentation', () => {
 });
 
 describe('Tau MCP viewer', () => {
+  it('should keep the instructions under 2,048 characters with the viewer and the identity sentence', async () => {
+    const server = createTauMcpServer({
+      dispatch: async () => ({ errorCode: 'UNUSED', message: 'unused' }),
+      viewer: createViewer(),
+      runtime: {
+        version: '0.1.0-beta.7',
+        launch: {
+          source: 'npx',
+          cli: '0.1.0-beta.7',
+          plugin: '0.1.0-beta.7',
+          node: '24.20.0',
+          skipped: [{ path: '/Users/someone/.nvm/versions/node/v24.20.0/bin/tau', version: '0.1.0-beta.6' }],
+        },
+      },
+    });
+    const client = new Client(clients.claudeCode.info, { capabilities: clients.claudeCode.capabilities });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const instructions = client.getInstructions() ?? '';
+    await client.close();
+
+    expect(instructions).toMatch(/^Use your native filesystem/u);
+    expect(instructions.slice(instructions.indexOf('Tau CLI 0.1.0-')).length).toBeLessThanOrEqual(250);
+    expect(instructions.length).toBeLessThan(2048);
+  });
+
   it('should give a text host show_model and view_state, returning a loopback link', async () => {
     const client = await connect(clients.claudeCode);
 

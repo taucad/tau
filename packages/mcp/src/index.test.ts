@@ -14,11 +14,13 @@ import { rpcName, toolName } from '@taucad/chat/constants';
 import {
   createTauMcpAdapter,
   createTauMcpServer,
+  parseTauMcpLaunch,
   serveTauMcpStdio,
+  tauMcpInstructions,
   tauMcpToolDefinitions,
   tauMcpToolNames,
 } from '#tau-mcp.js';
-import type { TauMcpConfirm, TauMcpDispatch, TauMcpServerOptions } from '#tau-mcp.js';
+import type { TauMcpConfirm, TauMcpDispatch, TauMcpRuntime, TauMcpServerOptions } from '#tau-mcp.js';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json.
 import packageJson from '../package.json' with { type: 'json' };
 
@@ -529,6 +531,173 @@ describe('@taucad/mcp', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('identity and client-gated capability (INS-2)', () => {
+  const installed: NonNullable<TauMcpRuntime['launch']> = {
+    source: 'installed',
+    path: '/opt/homebrew/bin/tau',
+    cli: '0.1.0-beta.7',
+    plugin: '0.1.0-beta.7',
+    node: '24.20.0',
+    skipped: [],
+  };
+
+  const instructionsOf = async (runtime?: TauMcpServerOptions['runtime']): Promise<string | undefined> => {
+    const client = await connect({ dispatch: async () => ({ success: true }), runtime });
+    try {
+      return client.getInstructions();
+    } finally {
+      await client.close();
+    }
+  };
+
+  it('should name the CLI, its rung, the plugin and Node.js after the guidance', async () => {
+    const instructions = await instructionsOf({ version: '0.1.0-beta.7', launch: installed });
+
+    expect(instructions).toMatch(/^Use your native filesystem/u);
+    expect(
+      instructions?.endsWith(
+        ` Tau CLI 0.1.0-beta.7 (installed tau at /opt/homebrew/bin/tau) started by plugin 0.1.0-beta.7 on Node.js 24.20.0; server @taucad/mcp ${packageJson.version}.`,
+      ),
+    ).toBe(true);
+  });
+
+  it('should name the installed tau the launcher passed over for npx', async () => {
+    const instructions = await instructionsOf({
+      version: '0.1.0-beta.7',
+      launch: {
+        source: 'npx',
+        cli: '0.1.0-beta.7',
+        plugin: '0.1.0-beta.7',
+        node: '24.20.0',
+        skipped: [{ path: '/usr/local/bin/tau', version: '0.1.0-beta.2' }, { path: '/opt/homebrew/bin/tau' }],
+      },
+    });
+
+    expect(instructions).toContain(
+      'Tau CLI 0.1.0-beta.7 (npx; installed tau 0.1.0-beta.2 at /usr/local/bin/tau and 1 more skipped) started by plugin 0.1.0-beta.7 on Node.js 24.20.0;',
+    );
+  });
+
+  it('should say the CLI started directly when no launcher named itself', async () => {
+    const instructions = await instructionsOf({ version: '0.1.0-beta.7' });
+
+    expect(instructions).toMatch(/ Tau CLI 0\.1\.0-beta\.7 started directly; server @taucad\/mcp \S+\.$/u);
+  });
+
+  it('should read an unparseable descriptor as none', async () => {
+    for (const value of [
+      undefined,
+      '',
+      'not json',
+      '{"source":"rocket"}',
+      JSON.stringify({ ...installed, node: 24 }),
+    ]) {
+      expect(parseTauMcpLaunch(value)).toBeUndefined();
+    }
+    expect(parseTauMcpLaunch(JSON.stringify(installed))).toEqual(installed);
+
+    const instructions = await instructionsOf({ version: '0.1.0-beta.7', launch: parseTauMcpLaunch('{') });
+    expect(instructions).toContain('Tau CLI 0.1.0-beta.7 started directly;');
+    expect(instructions).not.toContain('plugin');
+  });
+
+  it('should drop the paths from an identity sentence that would pass 250 characters, the skipped one first', async () => {
+    const deep = (name: string): string => `/home/${'nested/'.repeat(12)}${name}/tau`;
+    const identityOf = async (launch: NonNullable<TauMcpRuntime['launch']>): Promise<string> => {
+      const instructions = (await instructionsOf({ version: '0.1.0-beta.7', launch })) ?? '';
+      return instructions.slice(instructions.indexOf('Tau CLI'));
+    };
+
+    const one = await identityOf({ ...installed, path: deep('a'), skipped: [{ path: deep('b'), version: '0.1.0' }] });
+    expect(one).toMatch(
+      /^Tau CLI 0\.1\.0-beta\.7 \(installed tau at \/home\/\S+\/a\/tau; installed tau 0\.1\.0 skipped\)/u,
+    );
+    const none = await identityOf({ ...installed, path: `/home/${'nested/'.repeat(30)}bin/tau` });
+    expect(none).toMatch(/^Tau CLI 0\.1\.0-beta\.7 \(installed tau\) started by plugin/u);
+    expect(Math.max(one.length, none.length)).toBeLessThanOrEqual(250);
+  });
+
+  it('should keep the sentence within 250 characters whatever a skipped tau printed', async () => {
+    const instructions =
+      (await instructionsOf({
+        version: '0.1.0-beta.7',
+        launch: {
+          ...installed,
+          skipped: [
+            { path: '/usr/local/bin/tau', version: 'x'.repeat(120) },
+            { path: '/usr/bin/tau', version: '1.0.0' },
+          ],
+        },
+      })) ?? '';
+    const identity = instructions.slice(instructions.indexOf('Tau CLI'));
+
+    expect(identity).toContain('; installed tau of unknown version at /usr/local/bin/tau and 1 more skipped)');
+    expect(identity).not.toContain('xxx');
+    expect(identity.length).toBeLessThanOrEqual(250);
+  });
+
+  it('should drop clauses until the sentence fits, and read an oversized version as no descriptor', async () => {
+    const long = `0.1.0-${'a'.repeat(58)}`;
+    const identity = async (launch: NonNullable<TauMcpRuntime['launch']>): Promise<string> => {
+      const instructions = (await instructionsOf({ version: '0.1.0-beta.7', launch })) ?? '';
+      return instructions.slice(instructions.indexOf('Tau CLI'));
+    };
+    const crowded = await identity({
+      ...installed,
+      plugin: long,
+      node: long,
+      skipped: [{ path: '/usr/local/bin/tau', version: long }],
+    });
+
+    expect(crowded).not.toContain('skipped');
+    expect(crowded.length).toBeLessThanOrEqual(250);
+    expect(parseTauMcpLaunch(JSON.stringify({ ...installed, plugin: `${long}bbbbbbb` }))).toBeUndefined();
+  });
+
+  it('should leave the instructions as they were without a runtime', async () => {
+    expect(await instructionsOf()).toBe(tauMcpInstructions);
+  });
+
+  /**
+   * Initialize a stdio server as one client and read the capabilities it answers with.
+   *
+   * @param name - The client's `clientInfo.name`.
+   * @returns The `initialize` result's capabilities.
+   */
+  const capabilitiesFor = async (name: string): Promise<Record<string, unknown>> => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const server = await serveTauMcpStdio({ dispatch: async () => ({ success: true }) }, { stdin, stdout });
+    try {
+      stdout.setEncoding('utf8');
+      const reply = new Promise<string>((resolve) => {
+        stdout.once('data', resolve);
+      });
+      stdin.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name, version: '1' } },
+        })}\n`,
+      );
+      const answer = JSON.parse(await reply) as { result: { capabilities: Record<string, unknown> } };
+      return answer.result.capabilities;
+    } finally {
+      await server.close();
+    }
+  };
+
+  it('should declare codex/sandbox-state-meta to Codex only', async () => {
+    const codex = await capabilitiesFor('codex-mcp-client');
+    const claude = await capabilitiesFor('claude-code');
+
+    expect(codex).toMatchObject({ tools: {}, experimental: { 'codex/sandbox-state-meta': {} } });
+    expect(claude).toMatchObject({ tools: {} });
+    expect(claude).not.toHaveProperty('experimental');
   });
 });
 

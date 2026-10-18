@@ -177,7 +177,7 @@ Before `npx`, the launcher checks what `npx` needs. When a check fails it starts
 
 When the CLI cannot be started, the launcher exits 1. A host shows only that the server failed to start; run `node <plugin folder>/dist/launch.mjs </dev/null` to read the line.
 
-The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed if it answered within 2 seconds and 128 bytes).
+The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed if it answered within 2 seconds and 128 bytes). `tau mcp` names it in the last sentence of its `initialize` instructions, which the agent reads at session start.
 
 `resolveTauCli`, the package's one export, is that resolution as a pure function; its caller passes `versionOf`, which reads what `<path> --version` prints.
 

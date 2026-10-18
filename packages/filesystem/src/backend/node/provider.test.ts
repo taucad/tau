@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
 import parcelWatcher from '@parcel/watcher';
+import type { Event as ParcelEvent } from '@parcel/watcher';
 
 /* Every `statSync` the provider makes, so a case can show which events it never measured. */
 const statted = vi.hoisted(() => ({ paths: [] as string[] }));
@@ -165,7 +166,7 @@ describe('NodeFsProvider atomic writes', () => {
       /* The OS never reports a subtree that would only be filtered out afterwards. */
       expect(options.ignore).toEqual([join(directory, '.tau', 'cache')]);
 
-      const burst: Parameters<NonNullable<typeof onEvents>>[1] = [
+      const burst: ParcelEvent[] = [
         ...Array.from({ length: 50 }, (_, index) => ({
           path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
           type: 'create',

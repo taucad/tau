@@ -36,6 +36,10 @@
 (*   ServiceStops   the API process may stop mid-step (ApiServiceStop);    *)
 (*                  off in the configurations that predate it, which it    *)
 (*                  would triple                                           *)
+(*   CutSettles     a client cut is terminalized at once as absorbed under *)
+(*                  the admitting generation, as a stop is (taucad/tau#851;*)
+(*                  FALSE left it pending for recovery, and the chat's     *)
+(*                  next step waited on it: agent-host StopSettlement)     *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
@@ -70,6 +74,8 @@ CONSTANTS
     RefundHolds,
     \* @type: Bool;
     ServiceStops,
+    \* @type: Bool;
+    CutSettles,
     \* mutation knobs: TRUE is the code as written
     \* @type: Bool;
     FenceGen,
@@ -426,16 +432,23 @@ ApiObserve(k) ==
          /\ req' = [req EXCEPT ![k] = "finishing"]
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
-\* The relayed body's cancel after the API noticed the client left: cut, record, absorbed_unknown.
+\* The relayed body's cancel after the API noticed the client left: cut, record absorbed_unknown, and
+\* finish(clientLeft) terminalizes it under the admitting generation, as a stopping process does. A
+\* sweep claim that won the race fences it out, and recovery resolves the row as before.
 ApiClientCancel(k) ==
     /\ req[k] = "streaming"
     /\ conn[k] = "noticed"
     /\ sup' = IF sup[k] = "generating" THEN [sup EXCEPT ![k] = "cut"] ELSE sup
-    /\ row' = [row EXCEPT ![k].cancel = IF row[k].cust = "pending" /\ @ < 0 THEN now ELSE @,
-                          ![k].ev = @ \cup {"abort"}]
+    /\ IF CutSettles /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+       THEN /\ row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @, !.cust = "absorbed",
+                                              !.ev = @ \cup {"abort"}, !.rat = now, !.tgen = 1]]
+            /\ acctHeld' = acctHeld - 1
+       ELSE /\ row' = [row EXCEPT ![k].cancel = IF row[k].cust = "pending" /\ @ < 0 THEN now ELSE @,
+                                  ![k].ev = @ \cup {"abort"}]
+            /\ UNCHANGED acctHeld
     /\ fin' = [fin EXCEPT ![k] = "abort"]
     /\ req' = [req EXCEPT ![k] = "done"]
-    /\ UNCHANGED <<now, acctHeld, refundHeld, voided, conn, dispatches, claims, host, logVars>>
+    /\ UNCHANGED <<now, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
 \* The API process stops (R10 of the graceful-shutdown blueprint): a step still streaming, or one its
 \* deadline cut, is terminalized at once as absorbed instead of left for recovery, and a client that
@@ -634,9 +647,13 @@ ChargedReplyRecorded ==
 \* D-086: today's uncoded dead end is reachable; the target never reaches it
 NoUncodedDeadEnd == host.ph # "stuck"
 
-\* Vacuity for ApiServiceStop: only a stopping API absorbs under the admitting generation; every
-\* recovery absorb runs under a claimed one. Its witness must keep failing.
+\* Vacuity for ApiServiceStop and ApiClientCancel: only a stopping API or a client cut absorbs under
+\* the admitting generation; every recovery absorb runs under a claimed one. Its witness must keep failing.
 NoLiveAbsorb == \A k \in Keys : row[k].cust = "absorbed" => row[k].tgen > 1
+
+\* taucad/tau#851: a client cut under the live generation never waits for recovery, so the chat's next
+\* step finds it settled (agent-host StopSettlement). A claimed row is recovery's, as before.
+ClientCutSettled == \A k \in Keys : "abort" \in row[k].ev /\ row[k].gen = 1 => row[k].cust # "pending"
 
 -----------------------------------------------------------------------------
 (* GI-S7: the row's inductive invariant for Apalache (MC_GatewayInvocation). *)

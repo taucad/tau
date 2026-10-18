@@ -531,7 +531,7 @@
     },
     {
       "id": "E35",
-      "bound": "Waits between lookups of an earlier model attempt the gateway is still settling (about 15 s in all; then MODEL_ATTEMPT_PENDING)",
+      "bound": "Waits between lookups of an earlier model attempt the gateway is still settling, by a run's first step or a Resume (about 15 s in all; then MODEL_ATTEMPT_PENDING)",
       "site": "packages/agent-host/src/harness/session.ts",
       "token": "waitTimer",
       "class": "External edge",

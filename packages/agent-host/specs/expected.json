@@ -696,6 +696,37 @@
       "kind": "witness",
       "ref": "SC T13 (Keyed = FALSE): after a false suspicion a re-send to the same generation appends k1 twice, so keys land before replay (SC-S5 before SC-S6); 6-state trace"
     },
+    "StopSettlement.before-851-StopNeverPauses.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "StopNeverPauses" },
+      "kind": "defect",
+      "ref": "Send now cuts the live attempt and the successor's first lookup ends it RUN_ABANDONED (Chat paused)",
+      "fixedBy": "taucad/tau#851"
+    },
+    "StopSettlement.cut-only-StopNeverPauses.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "StopNeverPauses" },
+      "kind": "witness",
+      "ref": "StartWaits: Send now's lookup can beat the API noticing the cut"
+    },
+    "StopSettlement.resume-no-wait-StopNeverRefuses.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "StopNeverRefuses" },
+      "kind": "defect",
+      "ref": "Resume right after Stop is refused MODEL_ATTEMPT_PENDING: resolveInvocations never waited",
+      "fixedBy": "R1 (StopSettlement)"
+    },
+    "StopSettlement.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "R1: a stop's cut settles when the API notices it, both resolve-first lookups wait, a user who keeps resuming proceeds"
+    },
+    "StopSettlement.wait-only-StopNeverPauses.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "StopNeverPauses" },
+      "kind": "witness",
+      "ref": "ImmediateCut: the host's bounded wait alone cannot outlast the recovery sweep"
+    },
     "TurnSettlement.daemon.cfg": {
       "tier": "pr",
       "expect": "pass",

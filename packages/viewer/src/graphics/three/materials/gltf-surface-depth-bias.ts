@@ -2,11 +2,40 @@ import type { Material, Mesh, Object3D, WebGLProgramParametersWithUniforms } fro
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { gltfEdgeLineWidth } from '#graphics/three/materials/gltf-edges.js';
 
-const slopeScale = gltfEdgeLineWidth * 0.5 + 1;
+const webGpuSlopeScale = gltfEdgeLineWidth * 0.5 + 1;
 const constantDepthSteps = 2;
 const webGlDepthStep = constantDepthSteps / (2 ** 24 - 1);
 const webGlDepthClamp = 0.01;
-const shaderCacheKey = 'tau-gltf-surface-depth-bias-v2';
+const shaderCacheKey = 'tau-gltf-surface-depth-bias-v3';
+
+/**
+ * The WebGL slope margin, in device pixels of the surface's own depth gradient.
+ *
+ * An edge fragment off the line's spine carries the spine's depth while the face under it moves
+ * `|∇depth|` per pixel, so a coplanar edge needs the face to give up half the drawn stroke, plus
+ * the half pixel by which a fragment's centre (where `gl_FragDepth` is evaluated) can sit past the
+ * stroke's edge. Any margin beyond that lets a hidden edge that ends on the face's boundary, such
+ * as a far-side flank edge of a gear tooth, show through as a tick past the contour line. The
+ * stroke is {@link gltfEdgeLineWidth} CSS pixels wide, so the margin follows the renderer's pixel
+ * ratio. See `docs/research/viewer-edge-end-bleed-blueprint.md`.
+ */
+const webGlSlopeScale = { value: gltfEdgeLineWidth * 0.5 + 0.5 };
+
+/**
+ * The one render hook every biased material shares, so surface batching can still compare them.
+ * It reads the pixel ratio per draw because one material can serve renderers at different ratios.
+ * @param renderer - The renderer about to draw the material.
+ */
+function syncWebGlSlopeScale(renderer: Readonly<{ getPixelRatio: () => number }>): void {
+  webGlSlopeScale.value = gltfEdgeLineWidth * 0.5 * renderer.getPixelRatio() + 0.5;
+}
+
+/**
+ * Whether a material render hook is the shared one installed by {@link applyGltfSurfaceDepthBias}.
+ * @param hook - A material's `onBeforeRender`.
+ * @returns True for the depth bias's own hook.
+ */
+export const isGltfSurfaceDepthBiasRenderHook = (hook: unknown): boolean => hook === syncWebGlSlopeScale;
 
 type SurfaceDepthBiasState = {
   configuredBackend: ResolvedGraphicsBackend;
@@ -24,13 +53,19 @@ type SurfaceDepthBiasState = {
 /**
  * The rasterizer offset half of the separation, per backend.
  *
- * Live only where the renderer does not write `gl_FragDepth` — the WebGPU viewport. Exported so
+ * Live only on the WebGPU viewport. WebGL writes `gl_FragDepth` on every path, and the shader term owns
+ * the whole separation there: on the orthographic path Three writes `gl_FragCoord.z`, which some
+ * drivers return with the rasterizer offset already applied, so a WebGL offset doubled the margin
+ * exactly where it does the most harm. Exported so
  * generated surfaces (the section caps) can be asserted against the one separation rather than
  * carrying a second set of constants.
  */
 export const gltfSurfacePolygonOffset = {
-  webgl: { polygonOffsetFactor: slopeScale, polygonOffsetUnits: constantDepthSteps },
-  webgpu: { polygonOffsetFactor: -slopeScale, polygonOffsetUnits: -constantDepthSteps },
+  webgl: { polygonOffsetFactor: 0, polygonOffsetUnits: 0 },
+  webgpu: {
+    polygonOffsetFactor: -webGpuSlopeScale,
+    polygonOffsetUnits: -constantDepthSteps,
+  },
 } as const satisfies Record<ResolvedGraphicsBackend, { polygonOffsetFactor: number; polygonOffsetUnits: number }>;
 
 const states = new WeakMap<Material, SurfaceDepthBiasState>();
@@ -61,17 +96,21 @@ const composeSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasStat
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer): void => {
     previousHook.call(material, shader, renderer);
     if (state.backend === 'webgl') {
-      shader.fragmentShader = replaceExactlyOnce(
+      shader.uniforms['tauSurfaceDepthSlopeScale'] = webGlSlopeScale;
+      shader.fragmentShader = `uniform float tauSurfaceDepthSlopeScale;\n${replaceExactlyOnce(
         shader.fragmentShader,
         `#include <logdepthbuf_fragment>
         #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
-          float tauSurfaceDepthSlope = max(abs(dFdx(gl_FragDepth)), abs(dFdy(gl_FragDepth)));
-          float tauSurfaceDepthOffset = min(${webGlDepthClamp.toPrecision(8)}, tauSurfaceDepthSlope * ${slopeScale.toPrecision(8)} + ${webGlDepthStep.toPrecision(8)});
+          float tauSurfaceDepthSlope = length(vec2(dFdx(gl_FragDepth), dFdy(gl_FragDepth)));
+          float tauSurfaceDepthOffset = min(${webGlDepthClamp.toPrecision(8)}, tauSurfaceDepthSlope * tauSurfaceDepthSlopeScale + ${webGlDepthStep.toPrecision(8)});
           gl_FragDepth = min(1.0, gl_FragDepth + tauSurfaceDepthOffset);
         #endif`,
-      );
+      )}`;
     }
   };
+  if (material.onBeforeRender === Object.getPrototypeOf(material).onBeforeRender) {
+    material.onBeforeRender = syncWebGlSlopeScale;
+  }
   if (hookDerivedKey) {
     state.hookKeyPrefix = { previous: previousHookText, composed: material.onBeforeCompile.toString() };
   }
@@ -101,8 +140,8 @@ const deactivateSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasS
  *
  * Only one of the two mechanisms below is live per renderer. Where the renderer writes
  * `gl_FragDepth` (`logarithmicDepthBuffer: true`: the WebGL viewport, screenshot and offscreen
- * paths) the shader term separates the surface and `polygonOffset*` is inert, because a
- * shader-written depth discards the rasterizer's offset. The WebGPU viewport runs reversed-Z
+ * paths) the shader term separates the surface, sized to the drawn edge stroke at the renderer's
+ * pixel ratio, and the WebGL `polygonOffset*` is zero. The WebGPU viewport runs reversed-Z
  * without log depth, so there `polygonOffset*` is the whole mechanism.
  */
 export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedGraphicsBackend): void => {

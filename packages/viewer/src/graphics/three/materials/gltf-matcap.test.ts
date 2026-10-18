@@ -66,7 +66,7 @@ describe('applyMatcap', () => {
       expect(replacement.opacity).toBe(1);
       expect(replacement.transparent).toBe(false);
       expect(replacement.depthWrite).toBe(true);
-      expect(replacement.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+      expect(replacement.polygonOffsetFactor).toBe(backend === 'webgl' ? 0 : -1.5);
     },
   );
 

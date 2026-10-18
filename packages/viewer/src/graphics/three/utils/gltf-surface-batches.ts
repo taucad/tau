@@ -5,6 +5,7 @@ import { getCapturedModelMaterialAppearance } from '#graphics/three/materials/mo
 import {
   getGltfSurfaceDepthBiasCohort,
   isGltfSurfaceDepthBiasHookExtension,
+  isGltfSurfaceDepthBiasRenderHook,
 } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import type { Mesh } from 'three';
 import {
@@ -173,10 +174,14 @@ function materialKey(material: Material, owningCohort = false): string | undefin
     const bias = owningCohort ? getGltfSurfaceDepthBiasCohort(material, programCacheKey) : undefined;
     const descriptors = Object.getOwnPropertyDescriptors(material);
     for (const key of Object.keys(descriptors).sort()) {
-      if (ignoredMaterialFields.has(key)) {
+      const descriptor = descriptors[key]!;
+      // The depth bias's shared render hook follows the bias, which the cohort already normalizes.
+      if (
+        ignoredMaterialFields.has(key) ||
+        (key === 'onBeforeRender' && isGltfSurfaceDepthBiasRenderHook(descriptor.value))
+      ) {
         continue;
       }
-      const descriptor = descriptors[key]!;
       if (descriptor.get ?? descriptor.set) {
         return undefined;
       }

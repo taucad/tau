@@ -3,13 +3,14 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-17'
+updated: '2026-10-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
   - docs/research/webgpu-migration-graphics-stack.md
   - docs/research/screenshot-viewport-shared-material-state-bleed.md
   - docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md
+  - docs/research/viewer-edge-end-bleed-blueprint.md
   - docs/policy/webgpu-rendering-pipeline.md
   - docs/research/threejs-shader-foundation-and-testing-blueprint.md
   - docs/research/viewer-section-view-performance.md
@@ -62,7 +63,7 @@ Overlays must display identically on both backends. The WebGL canvas is premulti
 
 The WebGPU viewport enables reversed depth. Register `reversedDepthTransparentSort` so transparent objects remain back-to-front under reversed clip-space Z.
 
-GLTF lines retain their geometric depth. Resolve coplanar separation on the owning triangle material with bounded polygon offset; never pull a line toward the camera in view, clip, or depth space.
+GLTF lines retain their geometric depth. Resolve coplanar separation on the owning triangle material with bounded polygon offset; never pull a line toward the camera in view, clip, or depth space. Size the slope term to half the drawn edge stroke in device pixels, plus half a pixel where the depth is evaluated at fragment centres: the off-spine fragments of a coplanar edge need nothing more, and any larger margin shows hidden edges that end on a face boundary as ticks past its contour. On WebGL the shader term is the whole separation; leave the rasterizer offset at zero, because the orthographic log-depth path writes `gl_FragCoord.z`, which can already carry it.
 
 ### 6. Separate base capability from exact diagnostics
 

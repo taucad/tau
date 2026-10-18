@@ -5,6 +5,7 @@ import type { Material, WebGLProgramParametersWithUniforms, WebGLRenderer } from
 import {
   applyGltfSurfaceDepthBias,
   applyGltfSurfaceDepthBiasToScene,
+  isGltfSurfaceDepthBiasRenderHook,
   refreshGltfSurfaceDepthBias,
 } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import {
@@ -15,10 +16,11 @@ import { createSectionClip, installSectionClip } from '#graphics/three/materials
 
 type ShaderProbe = {
   fragmentShader: string;
+  uniforms: Record<string, { value: unknown }>;
 };
 
 const compile = (material: MeshStandardMaterial, fragmentShader = '#include <logdepthbuf_fragment>'): ShaderProbe => {
-  const shader = { fragmentShader };
+  const shader = { fragmentShader, uniforms: {} };
   material.onBeforeCompile(shader as unknown as WebGLProgramParametersWithUniforms, {} as unknown as WebGLRenderer);
   return shader;
 };
@@ -47,7 +49,7 @@ describe('GLTF surface depth bias', () => {
       applyModelMaterialAppearance(material, snapshot, 0.5);
       expect(material.version).toBe(dimVersion);
       applyModelMaterialAppearance(material, snapshot, 1);
-      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 0 : -1.5);
       expect(material.onBeforeCompile).toBe(hook);
       expect(material.customProgramCacheKey).toBe(key);
       expect((material as Material & { maskNode?: unknown }).maskNode).toBe(mask);
@@ -83,10 +85,38 @@ describe('GLTF surface depth bias', () => {
     const shader = compile(material);
 
     expect(material.polygonOffset).toBe(true);
-    expect(material.polygonOffsetFactor).toBe(1.5);
-    expect(material.polygonOffsetUnits).toBe(2);
+    expect(material.polygonOffsetFactor).toBe(0);
+    expect(material.polygonOffsetUnits).toBe(0);
     expect(shader.fragmentShader).toContain('tauSurfaceDepthSlope');
     expect(shader.fragmentShader).toContain('gl_FragDepth + tauSurfaceDepthOffset');
+  });
+
+  it('sizes the WebGL slope margin to half the drawn edge stroke at the renderer pixel ratio', () => {
+    const material = new MeshStandardMaterial();
+    applyGltfSurfaceDepthBias(material, 'webgl');
+    const scale = compile(material).uniforms['tauSurfaceDepthSlopeScale']!;
+    const render = material.onBeforeRender as (renderer: Pick<WebGLRenderer, 'getPixelRatio'>) => void;
+
+    // Half of the 1 CSS px stroke in device pixels, plus the half pixel a fragment's centre can sit past it.
+    for (const [pixelRatio, margin] of [
+      [1, 1],
+      [2, 1.5],
+      [3, 2],
+    ] as const) {
+      render({ getPixelRatio: () => pixelRatio });
+      expect(scale.value).toBe(margin);
+    }
+  });
+
+  it('shares one render hook across biased materials so they stay batchable', () => {
+    const first = new MeshStandardMaterial();
+    const second = new MeshStandardMaterial();
+    applyGltfSurfaceDepthBias(first, 'webgl');
+    applyGltfSurfaceDepthBias(second, 'webgpu');
+
+    expect(first.onBeforeRender).toBe(second.onBeforeRender);
+    expect(isGltfSurfaceDepthBiasRenderHook(first.onBeforeRender)).toBe(true);
+    expect(isGltfSurfaceDepthBiasRenderHook(new MeshStandardMaterial().onBeforeRender)).toBe(false);
   });
 
   it('also separates orthographic surfaces when the renderer writes fragment depth', () => {

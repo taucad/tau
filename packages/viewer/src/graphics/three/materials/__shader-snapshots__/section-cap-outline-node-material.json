@@ -1,12 +1,18 @@
 {
   "blendColor": 0,
+  "blendDstAlpha": 205,
+  "blendEquationAlpha": 100,
+  "blendSrcAlpha": 201,
+  "blending": 5,
   "color": 16777215,
   "depthWrite": false,
   "envMapRotation": [0, 0, 0, "XYZ"],
   "fog": false,
   "inputNodes": {
     "colorNode": "<nodeRef>",
-    "maskNode": "<nodeRef>"
+    "depthNode": "<nodeRef>",
+    "maskNode": "<nodeRef>",
+    "opacityNode": "<nodeRef>"
   },
   "metadata": {
     "generator": "Material.toJSON",
@@ -30,6 +36,49 @@
       "shared": false,
       "type": "UniformGroupNode",
       "version": 0
+    },
+    {
+      "components": "x",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": ">",
+      "type": "OperatorNode"
+    },
+    {
+      "nodeType": null,
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0,
+      "valueType": "float"
     },
     {
       "inputNodes": {

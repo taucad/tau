@@ -74,6 +74,17 @@ export const uiSsrOptions = {
 } as const satisfies UserConfig['ssr'];
 
 /**
+ * Dependency-optimizer policy, mirrored by `desktop/vite.config.ts`.
+ *
+ * `@classcad/smlibwasm` (loaded by `@taucad/smlib` in the runtime worker) finds
+ * its WebAssembly with `new URL('smlibwasm.wasm', import.meta.url)`; pre-bundling
+ * moves the module into `.vite/deps` and the dev server would then miss the file.
+ */
+const uiOptimizeDepsOptions = {
+  exclude: ['@classcad/smlibwasm'],
+} as const satisfies UserConfig['optimizeDeps'];
+
+/**
  * Module aliases shared with `desktop/vite.config.ts`.
  *
  * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
@@ -518,6 +529,7 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     ssr: uiSsrOptions,
+    optimizeDeps: { exclude: [...uiOptimizeDepsOptions.exclude] },
 
     server: {
       port: 3000,

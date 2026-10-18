@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { WebGPUBackend } from 'three/webgpu';
-import { resolveSectionPieces } from '#graphics/section-cuts.js';
+import { resolveSectionFaces, resolveSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionCut, SectionHalfSpace, SectionPiece } from '#graphics/section-cuts.js';
 import { applyGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
@@ -453,14 +453,16 @@ describe.each(['webgl', 'webgpu'] as const)('section stencil caps on %s', (backe
 });
 
 /**
- * How far from a face, in pixels at its depth, the surface under an outline pixel may lie: the line width, a pixel of
+ * How far from a face, in screen pixels, the surface under an outline pixel may lie: the line width, a pixel of
  * rasterization, and the tessellation.
  */
 const outlineReach = 2.5;
 
 /**
- * How far the surface nearest a face under a pixel lies from it, in pixels at the surface's depth. Every surface the
- * ray crosses counts, removed ones too: a pixel on the edge of a cut may sample the surface on either side.
+ * How far the surface nearest a face under a pixel lies from it, in screen pixels along the surface, at any point of the pixel: the plane
+ * distance over its change between this pixel and the next, on the surface's tangent plane. Every surface the ray
+ * crosses counts, removed ones and walls seen from inside too: a pixel on the edge of a cut may sample the surface on
+ * either side, and a wall seen through the cut draws its line on the cap's rim.
  */
 // oxlint-disable-next-line max-params -- The probe names its camera, scene, pieces and pixel.
 const outlineDistance = (
@@ -469,25 +471,76 @@ const outlineDistance = (
   pieces: readonly SectionPiece[],
   row: number,
   column: number,
+): number =>
+  // The pixel's centre and corners: at a silhouette the surface rasterized at the centre may end just short of it.
+  Math.min(
+    ...[
+      [0, 0],
+      [-0.5, -0.5],
+      [-0.5, 0.5],
+      [0.5, -0.5],
+      [0.5, 0.5],
+    ].map(([down, across]) => surfaceDistance(camera, scene, pieces, row + down!, column + across!)),
+  );
+
+// oxlint-disable-next-line max-params -- The probe names its camera, scene, pieces and point on the screen.
+const surfaceDistance = (
+  camera: THREE.Camera,
+  scene: THREE.Scene,
+  pieces: readonly SectionPiece[],
+  row: number,
+  column: number,
 ): number => {
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(new THREE.Vector2(((column + 0.5) / size) * 2 - 1, 1 - ((row + 0.5) / size) * 2), camera);
+  const rayAt = (pixelRow: number, pixelColumn: number): THREE.Ray => {
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(
+      new THREE.Vector2(((pixelColumn + 0.5) / size) * 2 - 1, 1 - ((pixelRow + 0.5) / size) * 2),
+      camera,
+    );
+    return raycaster.ray;
+  };
+  const ray = rayAt(row, column);
+  const neighbours = [rayAt(row, column + 1), rayAt(row + 1, column)];
+  const raycaster = new THREE.Raycaster(ray.origin, ray.direction);
   const pixelWorld = (distance: number): number =>
     camera instanceof THREE.PerspectiveCamera
       ? (2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / size
       : (2 * halfExtent) / size;
-  const distances = raycaster
-    .intersectObjects(scene.children, false)
-    .flatMap((hit) =>
-      pieces.flatMap(({ faces }) =>
-        faces
-          .filter(({ bounds }) =>
-            bounds.every((bound) => signed(bound, hit.point) >= -pixelWorld(hit.distance) * outlineReach),
-          )
-          .map(({ plane }) => Math.abs(signed(plane, hit.point)) / pixelWorld(hit.distance)),
-      ),
+  const distances = intersectBothSides(raycaster, scene).flatMap((hit) => {
+    const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld);
+    const tangent = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit.point);
+    const steps = neighbours.map((neighbour) => neighbour.intersectPlane(tangent, new THREE.Vector3()));
+    return pieces.flatMap(({ faces }) =>
+      faces
+        .filter(({ bounds }) =>
+          bounds.every((bound) => signed(bound, hit.point) >= -pixelWorld(hit.distance) * outlineReach),
+        )
+        .map(({ plane }) => {
+          const slope = Math.hypot(...steps.map((step) => (step ? signed(plane, step) - signed(plane, hit.point) : 0)));
+          return slope > 0 ? Math.abs(signed(plane, hit.point)) / slope : Number.POSITIVE_INFINITY;
+        }),
     );
+  });
   return Math.min(...distances);
+};
+
+/** Every hit along the ray, back faces included, whatever side the scene's materials draw. */
+const intersectBothSides = (raycaster: THREE.Raycaster, scene: THREE.Scene): THREE.Intersection[] => {
+  const sides = new Map<{ side: THREE.Side }, THREE.Side>();
+  for (const child of scene.children) {
+    const material: unknown = child instanceof THREE.Mesh ? child.material : undefined;
+    if (material instanceof THREE.Material) {
+      sides.set(material, material.side);
+      material.side = THREE.DoubleSide;
+    }
+  }
+  try {
+    return raycaster.intersectObjects(scene.children, false);
+  } finally {
+    for (const [material, side] of sides) {
+      material.side = side;
+    }
+  }
 };
 
 const compareOutline = (
@@ -617,3 +670,243 @@ const createFrameRenderer = (
     return renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size);
   };
 };
+
+/**
+ * A box cut through by one plane, from two sides: facing the cap, and from the kept side, where the cut walls meet the
+ * plane at a shallow angle. Along every visible cut edge the outline must be unbroken and antialiased like a model
+ * edge, at the line widths a 1x and a 2x screen draw.
+ */
+const outlineBoxExtents = [4, 6, 3] as const;
+const outlineBoxMatrix = placed(centre, new THREE.Euler(0, 0, 0.35));
+const outlineCut: SectionCut = { id: 'outline', kind: 'plane', plane: 'xz', offset: centre.y + 0.4, isFlipped: false };
+/** Below this a sample is a gap in the line. */
+const inkedThreshold = 0.4;
+/** Partly covered pixels sit between these. */
+const partialInk = [0.15, 0.85] as const;
+
+type OutlineView = Readonly<{ label: string; camera: () => THREE.Camera }>;
+
+/** The cut plane's corners on the box, in order around it. */
+const outlineCutCorners = (plane: SectionHalfSpace): THREE.Vector3[] => {
+  const [ex, ey, ez] = outlineBoxExtents.map((extent) => extent / 2) as [number, number, number];
+  const corners = [-1, 1].flatMap((x) =>
+    [-1, 1].flatMap((y) =>
+      [-1, 1].map((z) => new THREE.Vector3(x * ex, y * ey, z * ez).applyMatrix4(outlineBoxMatrix)),
+    ),
+  );
+  const points: THREE.Vector3[] = [];
+  for (const [i, a] of corners.entries()) {
+    for (const b of corners.slice(i + 1)) {
+      // Box edges join corners that differ along one local axis.
+      const differing = [a, b].map((corner) => corner.clone().applyMatrix4(outlineBoxMatrix.clone().invert()));
+      const axes = ['x', 'y', 'z'].filter(
+        (axis) => Math.abs(differing[0]![axis as 'x'] - differing[1]![axis as 'x']) > 1e-6,
+      );
+      if (axes.length !== 1) {
+        continue;
+      }
+      const da = signed(plane, a);
+      const db = signed(plane, b);
+      if (da * db < 0) {
+        points.push(a.clone().lerp(b, da / (da - db)));
+      }
+    }
+  }
+  const middle = new THREE.Vector3();
+  for (const point of points) {
+    middle.add(point);
+  }
+  middle.divideScalar(points.length);
+  const normal = new THREE.Vector3(...plane.normal);
+  const u = points[0]!.clone().sub(middle).normalize();
+  const v = normal.clone().cross(u);
+  return points.toSorted(
+    (left, right) =>
+      Math.atan2(left.clone().sub(middle).dot(v), left.clone().sub(middle).dot(u)) -
+      Math.atan2(right.clone().sub(middle).dot(v), right.clone().sub(middle).dot(u)),
+  );
+};
+
+type OutlineEdgeResult = Readonly<{
+  label: string;
+  samples: number;
+  gaps: number;
+  partialPixels: number;
+  inkedPixels: number;
+}>;
+
+describe.each(['webgl', 'webgpu'] as const)('section cap outline on %s', (backend) => {
+  const results: OutlineEdgeResult[] = [];
+  const disposables: Array<{ dispose: () => void }> = [];
+
+  beforeAll(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const renderer = await createRenderer('viewport', backend, canvas);
+    disposables.push(renderer);
+    const renderFrame = createFrameRenderer(renderer, disposables);
+    const calibration = new THREE.Scene();
+    const topHalf = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ color: 0xff_ff_ff }));
+    topHalf.position.set(0, 0.5, 0);
+    calibration.add(topHalf);
+    const calibrationCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    calibrationCamera.position.set(0, 0, 5);
+    calibrationCamera.updateMatrixWorld();
+    const calibrated = await renderFrame(calibration, calibrationCamera, () => undefined);
+    const isTopRowFirst = (calibrated[0] ?? 0) > 128;
+    disposables.push(topHalf.geometry, topHalf.material);
+
+    const pieces = resolveSectionPieces([outlineCut]);
+    const [face] = resolveSectionFaces(pieces);
+    const { plane } = face!;
+    const removedSide = new THREE.Vector3(...plane.normal);
+    const clip = createSectionClip(backend);
+    writeSectionClip(clip, pieces);
+    const surface = new THREE.MeshBasicMaterial({ color: 0x40_40_40, side: THREE.DoubleSide });
+    applyGltfSurfaceDepthBias(surface, backend);
+    installSectionClip(surface, clip);
+    const geometry = new THREE.BoxGeometry(...outlineBoxExtents);
+    const mesh = new THREE.Mesh(geometry, surface);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(outlineBoxMatrix);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x00_00_00);
+    scene.add(mesh);
+    scene.updateMatrixWorld(true);
+    const caps = createSectionStencilCaps(backend);
+    disposables.push(surface, geometry, caps);
+    const sources: SectionStencilCapSource[] = [
+      { key: 'box', ownerKey: 'box', meshes: [mesh], tintHex: 0x00_ff_00, edgeHex: 0xff_ff_ff },
+    ];
+    const corners = outlineCutCorners(plane);
+
+    const views: readonly OutlineView[] = [
+      {
+        label: 'facing the cap',
+        camera: () =>
+          lookFrom(
+            removedSide
+              .clone()
+              .multiplyScalar(11)
+              .add(new THREE.Vector3(5, 0, 6)),
+            'perspective',
+          ),
+      },
+      {
+        label: 'from the kept side',
+        camera: () =>
+          lookFrom(
+            removedSide
+              .clone()
+              .multiplyScalar(-9)
+              .add(new THREE.Vector3(7, 0, 8)),
+            'perspective',
+          ),
+      },
+    ];
+    for (const view of views) {
+      for (const width of [1, 2]) {
+        const camera = view.camera();
+        // oxlint-disable-next-line no-await-in-loop -- one renderer draws and reads back each frame in turn.
+        const pixels = await renderFrame(scene, camera, () => {
+          caps.render(renderer, {
+            camera,
+            pieces,
+            sources,
+            stripes: noStripes,
+            outlineWidthPixels: width,
+            viewportHeightPixels: size,
+          });
+        });
+        const frame = createFrame(pixels, isTopRowFirst);
+        // White ink over the grey surface, the green cap or the black background.
+        const ink = (row: number, column: number): number => {
+          if (row < 0 || column < 0 || row >= size || column >= size) {
+            return 0;
+          }
+          const [red, , blue] = frame.pixel(row, column);
+          return Math.max(0, Math.min(1, (Math.min(red, blue) - 0x40) / (0xff - 0x40)));
+        };
+        const touched = new Set<number>();
+        // The most ink in the 3 × 3 pixels around a point on the screen: the line may straddle a pixel boundary.
+        const inkAround = (at: THREE.Vector2): number => {
+          let best = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const row = Math.round(at.y) + dy;
+              const column = Math.round(at.x) + dx;
+              best = Math.max(best, ink(row, column));
+              touched.add(row * size + column);
+            }
+          }
+          return best;
+        };
+        const rayCamera = view.camera();
+        const raycaster = new THREE.Raycaster();
+        const eye = new THREE.Vector3().setFromMatrixPosition(rayCamera.matrixWorld);
+        const isVisible = (point: THREE.Vector3): boolean => {
+          raycaster.set(eye, point.clone().sub(eye).normalize());
+          const distance = point.distanceTo(eye);
+          const kept = raycaster.intersectObject(mesh, false).find((hit) => signed(plane, hit.point) <= 1e-4);
+          return !kept || kept.distance >= distance - 0.02;
+        };
+        let samples = 0;
+        let gaps = 0;
+        for (const [index, start] of corners.entries()) {
+          const end = corners[(index + 1) % corners.length]!;
+          const project = (point: THREE.Vector3): THREE.Vector2 => {
+            const ndc = point.clone().project(rayCamera);
+            return new THREE.Vector2(((ndc.x + 1) / 2) * size - 0.5, ((1 - ndc.y) / 2) * size - 0.5);
+          };
+          const from = project(start);
+          const to = project(end);
+          const steps = Math.ceil(from.distanceTo(to) * 2);
+          // Skip the corners, where two edges and the silhouette meet.
+          for (let step = 4; step <= steps - 4; step++) {
+            const t = step / steps;
+            const isGap = isVisible(start.clone().lerp(end, t))
+              ? inkAround(from.clone().lerp(to, t)) < inkedThreshold
+              : undefined;
+            samples += isGap === undefined ? 0 : 1;
+            gaps += isGap === true ? 1 : 0;
+          }
+        }
+        let partialPixels = 0;
+        let inkedPixels = 0;
+        for (const key of touched) {
+          const value = ink(Math.floor(key / size), key % size);
+          if (value > 0) {
+            inkedPixels++;
+          }
+          if (value > partialInk[0] && value < partialInk[1]) {
+            partialPixels++;
+          }
+        }
+        results.push({ label: `${view.label}, ${width} px`, samples, gaps, partialPixels, inkedPixels });
+      }
+    }
+  }, setupTimeout);
+
+  afterAll(() => {
+    for (const resource of disposables.splice(0).reverse()) {
+      resource.dispose();
+    }
+  });
+
+  it('should draw an unbroken line along every visible cut edge', () => {
+    expect(results).toHaveLength(4);
+    for (const { label, samples, gaps } of results) {
+      expect(samples, `${label} sees the cut edges`).toBeGreaterThan(size / 2);
+      expect(gaps, `${label}: ${gaps} of ${samples} samples have no line`).toBeLessThanOrEqual(samples * 0.02);
+    }
+  });
+
+  it('should antialias the line, as model edges are, rather than cut it off at whole pixels', () => {
+    for (const { label, partialPixels, inkedPixels } of results) {
+      expect(partialPixels, `${label}: ${partialPixels} of ${inkedPixels} inked pixels partly covered`).toBeGreaterThan(
+        inkedPixels * 0.15,
+      );
+    }
+  });
+});

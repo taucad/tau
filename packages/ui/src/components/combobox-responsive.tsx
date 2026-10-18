@@ -180,7 +180,8 @@ export function ComboBoxResponsive<T>({
           aria-describedby='drawer-description'
           {...properties}
           {...drawerProperties}
-          className={cn('[&_[data-slot=command]]:bg-transparent', className, drawerProperties?.className)}
+          /* A caller's width is for the popover; the drawer spans the screen. */
+          className={cn('[&_[data-slot=command]]:bg-transparent', className, 'w-auto', drawerProperties?.className)}
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);
@@ -207,7 +208,8 @@ export function ComboBoxResponsive<T>({
               emptyListMessage={emptyListMessage}
               isSearchEnabled={isSearchEnabled}
               withVirtualization={withVirtualization}
-              virtualizationHeight={virtualizationHeight}
+              // A phone's list fills the drawer, not the popover's fixed height.
+              virtualizationHeight='60dvh'
               isLoadingMore={isLoadingMore}
               onLoadMore={onLoadMore}
             />
@@ -291,7 +293,8 @@ function ItemList<T>({
   readonly emptyListMessage?: ReactNode;
   readonly isSearchEnabled?: boolean;
   readonly withVirtualization?: boolean;
-  readonly virtualizationHeight?: number;
+  /** Pixels, or a CSS length such as `60dvh`. */
+  readonly virtualizationHeight?: number | string;
   readonly isLoadingMore?: boolean;
   readonly onLoadMore?: () => void;
 }) {
@@ -419,7 +422,9 @@ function ItemList<T>({
             <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
           ) : (
             <Virtuoso
-              style={{ height: `${virtualizationHeight}px` }}
+              style={{
+                height: typeof virtualizationHeight === 'number' ? `${virtualizationHeight}px` : virtualizationHeight,
+              }}
               totalCount={filteredItems.length}
               itemContent={renderItem}
               endReached={onLoadMore}

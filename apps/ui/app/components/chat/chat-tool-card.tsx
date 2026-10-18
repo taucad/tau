@@ -295,8 +295,8 @@ function ChatToolCardActions({ children, className }: ChatToolCardActionsProps):
     <div
       className={cn(
         'ml-auto flex shrink-0 items-center gap-1',
-        // Only show on hover for card variant
-        'opacity-0 group-hover/chat-tool-card:opacity-100',
+        // Only show on hover for card variant; a touch screen has no hover.
+        'opacity-0 group-hover/chat-tool-card:opacity-100 pointer-coarse:opacity-100',
         className,
       )}
       onClick={(event) => {

@@ -122,7 +122,7 @@ describe('generateBundles', () => {
     expect(bundle?.files).toContain('kinematics-reference.md');
     const body = readFileSync(join(agent, 'cad-picovoxel/SKILL.md'), 'utf8');
     expect(body).toContain('kinematics-reference.md');
-    for (const kernel of ['picovoxel', 'replicad']) {
+    for (const kernel of ['picovoxel', 'replicad', 'smlib']) {
       const reference = readFileSync(
         join(scratch, `packages/plugins/${kernel}/agent/cad-${kernel}/kinematics-reference.md`),
         'utf8',

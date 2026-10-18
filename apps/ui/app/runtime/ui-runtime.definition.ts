@@ -20,6 +20,7 @@ import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
+import { smlib } from '@taucad/smlib';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
@@ -69,6 +70,8 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
         ? { kernels: { default: { wasm: 'serial', recycleHeapBytes: constrainedRecycleHeapBytes } } }
         : undefined,
     ),
+    // Claims only files importing @classcad/smlibwasm; the kernel's WebAssembly loads on first use.
+    smlib(),
     gltf(),
     brep(),
     rhino(),

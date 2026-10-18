@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-67 top-level symbols. Signatures are verbatim typescript.
+63 top-level symbols. Signatures are verbatim typescript.
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -8,6 +8,8 @@ LoadModelCodeOptions: {
     code: Code;
     /** Entry path to render from {@link code}. */
     file: keyof Code & string;
+    /** Not accepted: inline code has no project folder to resolve in, and a load naming one is refused. */
+    rootDir?: never;
     /** Geometry format to export. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
     /** Explicit parameters passed to the runtime. */
@@ -49,6 +51,9 @@ LoadModelCodeOptions: {
   // Entry path to render from {@link code }
   file: keyof Code & string
 
+  // Not accepted
+  rootDir?: never
+
   // Geometry format to export
   format?: GeoSpecModelFormat
 
@@ -84,8 +89,17 @@ LoadModelCodeOptions: {
 
 // Filesystem-backed model load options
 LoadModelFileOptions: {
-    /** Project-relative model file to render. */
+    /**
+     * Model file to render, as a path from the project root: the same root every tool's `targetFile` resolves
+     * against, which the result names as `projectRoot` where the host reports it, as `tau mcp` does.
+     */
     file: string;
+    /**
+     * Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root:
+     * `loadModel({ file: 'main.ts', rootDir: 'parts/gear' })` loads `parts/gear/main.ts`. Recorded in the load
+     * evidence.
+     */
+    rootDir?: string;
     /** Project root used by runtime integrations. */
     projectPath?: string;
     /** Geometry format to export. Defaults to `glb`. */
@@ -121,8 +135,11 @@ LoadModelFileOptions: {
     region?: GeoSpecLoadRegion;
 }
 
-  // Project-relative model file to render
+  // Model file to render, as a path from the project root
   file: string
+
+  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
+  rootDir?: string
 
   // Project root used by runtime integrations
   projectPath?: string
@@ -160,6 +177,9 @@ LoadModelFileOptions: {
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
 
+  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
+  rootDir?: string
+
   // Geometry format to export
   format?: GeoSpecModelFormat
 
@@ -190,6 +210,11 @@ LoadModelSourceOptions: {
         readonly name: string;
         readonly source: MeshSource | StepSource;
     }>;
+    /**
+     * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
+     * project root. Recorded in the load evidence.
+     */
+    rootDir?: string;
     /** Source geometry format. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
     /** Source path recorded in provenance. */
@@ -224,6 +249,9 @@ LoadModelSourceOptions: {
           readonly name: string;
           readonly source: MeshSource | StepSource;
       }>
+
+  // Project-relative folder a path `source` and each resource path resolve in
+  rootDir?: string
 
   // Source geometry format
   format?: GeoSpecModelFormat
@@ -669,6 +697,9 @@ GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
     /** Format-specific native ingest options. */
     readonly ingestOptions?: Readonly<Record<string, unknown>>;
 }
+
+  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
+  rootDir?: string
 
   // Geometry format to export
   format?: GeoSpecModelFormat
@@ -1494,67 +1525,3 @@ GeoSpecPmiQueryValue: {
   readonly subjectHash: string
 
   readonly provenance: Readonly<Record<string, unknown>>
-
-// Full native assertion result with the exact core-owned bytes retained
-GeoSpecCanonicalClaimReport: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-    readonly claim: Readonly<Record<string, JSONValue>>;
-    readonly claimId: string;
-    /** Engine diagnostics; a `MATCHER_TIMEOUT` row also carries `details.limit`, `details.used` and `details.maximumLimit`. */
-    readonly diagnostics: readonly JSONValue[];
-    readonly evidence?: JSONValue;
-    readonly polarity: GeoSpecClaimPolarity;
-    readonly result: Readonly<Record<string, JSONValue>>;
-    readonly status: GeoSpecCanonicalClaimStatus;
-}
-
-  readonly canonicalClaim: Uint8Array<ArrayBuffer>
-
-  readonly canonicalPlan: Uint8Array<ArrayBuffer>
-
-  readonly canonicalResult: Uint8Array<ArrayBuffer>
-
-  readonly claim: Readonly<Record<string, JSONValue>>
-
-  readonly claimId: string
-
-  // Engine diagnostics
-  readonly diagnostics: readonly JSONValue[]
-
-  readonly evidence?: JSONValue
-
-  readonly polarity: GeoSpecClaimPolarity
-
-  readonly result: Readonly<Record<string, JSONValue>>
-
-  readonly status: GeoSpecCanonicalClaimStatus
-
-// Exact core bytes of one claim evaluated in one engine call
-GeoSpecNativeClaimEvaluation: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-}
-
-  readonly canonicalClaim: Uint8Array<ArrayBuffer>
-
-  readonly canonicalPlan: Uint8Array<ArrayBuffer>
-
-  readonly canonicalResult: Uint8Array<ArrayBuffer>
-
-// Byte-only engine surface consumed by the runner-independent assertion client
-GeoSpecNativeEngine: {
-    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
-    processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-}
-
-  // GeoSpecNativeEngine.evaluateClaim (method)
-  evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
-
-  // GeoSpecNativeEngine.processRequest (method)
-  processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-
-// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'

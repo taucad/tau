@@ -13,8 +13,8 @@
     "@msgpack/msgpack": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
-    "@taucad/assimp": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
+    "@taucad/assimp": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/esbuild": "workspace:*",
@@ -35,14 +35,15 @@
     "@taucad/rolldown": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/smlib": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
+    "geospec-engine": "catalog:",
     "ws": "catalog:",
-    "xstate": "catalog:",
-    "geospec-engine": "catalog:"
+    "xstate": "catalog:"
   }
 }

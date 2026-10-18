@@ -13,6 +13,7 @@ Write tests before implementation; assert deterministic, measurable properties.
 - Await `loadModel`, then assert synchronously with `expectGeo(model)`. The host supplies the compiled binding; authoring does not select an engine.
 - Await or return the complete model-load chain from the test callback; detached future loads are not part of a completed test.
 - Omit `parameters` for model-code defaults; use `{ file, parameters }` for variants. Loaded subjects are opaque.
+- `loadModel({ file })` resolves `file` against the project root, the same root as every tool's `targetFile`; the result names that root as `projectRoot` where the host reports it, as `tau mcp` does. A suite in a subfolder names the model by its path from that root, or passes `rootDir`, the project-relative folder the model is in: `loadModel({ file: 'main.ts', rootDir: 'parts/gear' })` loads `parts/gear/main.ts`. A file the root does not hold refuses with `GEOSPEC_MODEL_SOURCE_NOT_FOUND`, which names the root and the path it looked for.
 
 Canonical TypeScript authoring:
 
@@ -87,6 +88,8 @@ export declare function loadModel<Code extends Record<string, string> = Record<s
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
+  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than…
+  rootDir?: string
   // Geometry format to export
   format?: GeoSpecModelFormat
   // Explicit parameters passed to the runtime
@@ -473,19 +476,16 @@ GeoSpecNumericExpectation: number | {
 // Point expectation accepted by center and feature matchers
 GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 
-// Shared scalar expectation used by geometry measurements
-GeoSpecNumericExpectation: number | {
-    value?: number;
-    greaterThan?: number;
-    greaterThanOrEqual?: number;
-    lessThan?: number;
-    lessThanOrEqual?: number;
-}
+// Point expectation accepted by center and feature matchers
+GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
+
+// Point expectation accepted by center and feature matchers
+GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 360 symbols by file.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 364 symbols by file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

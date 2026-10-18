@@ -193,7 +193,7 @@ function SegmentedControl({
         ref={listRef}
         aria-label={label}
         activeClassName='hidden'
-        className='relative w-full gap-0.5 p-0.5 data-[orientation=horizontal]:flex data-[orientation=horizontal]:min-h-7'
+        className='relative w-full gap-0.5 p-0.5 data-[orientation=horizontal]:flex data-[orientation=horizontal]:min-h-7 pointer-coarse:data-[orientation=horizontal]:min-h-10'
       >
         <span
           ref={thumbRef}
@@ -912,7 +912,7 @@ function ModelRow({
             isOn={pinned.isOn}
             tabIndex={-1}
             className={cn(
-              '-my-1 -mr-1',
+              '-my-1 -mr-1 pointer-coarse:size-9',
               !pinned.isOn && 'opacity-0 group-data-[selected=true]/row:opacity-100 pointer-coarse:opacity-100',
             )}
             onToggle={pinned.toggle}
@@ -1567,7 +1567,7 @@ export function ChatAgentSheet({
           <DrawerDescription className='sr-only'>
             Choose who runs the next turn, on which model, and how hard it thinks.
           </DrawerDescription>
-          <div className='pb-[env(safe-area-inset-bottom)]'>{sheet}</div>
+          {sheet}
         </DrawerContent>
       </Drawer>
     );

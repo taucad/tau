@@ -13,6 +13,7 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/opencascade` | TypeScript/JavaScript using OCCT bindings | Direct BRep and topology control                      |
 | `@taucad/manifold`    | TypeScript/JavaScript using Manifold      | Mesh-first robust booleans                            |
 | `@taucad/jscad`       | TypeScript/JavaScript using JSCAD         | CSG modeling                                          |
+| `@taucad/smlib`       | TypeScript/JavaScript using smlibwasm     | NURBS BRep with a build123d-style API                 |
 | `@taucad/openrscad`   | OpenSCAD                                  | `.scad` models in browser or Node                     |
 | `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution                       |
 | `@taucad/gltf`        | glTF/GLB                                  | glTF interchange with optional Draco                  |
@@ -34,7 +35,9 @@ import { esbuild } from '@taucad/esbuild';
 import { manifold } from '@taucad/manifold';
 import { replicad } from '@taucad/replicad';
 
-export const modelingRuntime = defineRuntime({ plugins: [esbuild(), replicad(), manifold()] });
+export const modelingRuntime = defineRuntime({
+  plugins: [esbuild(), replicad(), manifold()],
+});
 ```
 
 ## Configure a packaged capability
@@ -46,7 +49,11 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { zoo } from '@taucad/zoo';
 
 export const runtime = defineRuntime({
-  plugins: [zoo({ kernels: { default: { baseUrl: 'wss://example.com/v1/kernels/zoo' } } })],
+  plugins: [
+    zoo({
+      kernels: { default: { baseUrl: 'wss://example.com/v1/kernels/zoo' } },
+    }),
+  ],
 });
 ```
 
@@ -55,6 +62,10 @@ Use a direct role factory instead for app-local capabilities, isolated tests, or
 ## Choose Build123d only in a native host
 
 Build123d needs a packaged CPython payload and a project trust grant, so only a native host such as Tau Desktop can advertise it. Its `.py` files skip the JavaScript bundler entirely -- see [Build123d](../reference/build123d) for the authoring contract.
+
+## Choose SMLib for NURBS BRep in TypeScript
+
+SMLib claims a `.ts` or `.js` file only when it imports `@classcad/smlibwasm`, so it composes beside Replicad. Its 6.5 MB WebAssembly kernel loads on first use.
 
 ## Choose tscircuit for electronics
 

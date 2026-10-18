@@ -15,7 +15,7 @@ import { popoverSurfaceVariants } from '#components/popover.variants.js';
  * ```
  */
 export const menuItemVariants = cva(
-  "relative flex items-center gap-2 rounded-sm px-3 py-1 text-[13px] outline-hidden select-none hover:bg-menu-highlight hover:text-foreground hover:[&_svg:not([class*='text-'])]:text-foreground data-disabled:pointer-events-none data-disabled:text-muted-foreground/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-translate-y-[0.5px] [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
+  "relative flex items-center gap-2 rounded-sm px-3 py-1 text-[13px] outline-hidden pointer-coarse:min-h-10 select-none hover:bg-menu-highlight hover:text-foreground hover:[&_svg:not([class*='text-'])]:text-foreground data-disabled:pointer-events-none data-disabled:text-muted-foreground/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-translate-y-[0.5px] [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
   {
     variants: {
       variant: {
@@ -222,7 +222,7 @@ export const menuItemIconClass =
  * export const className = menuGroupHeadingClass;
  * ```
  */
-export const menuGroupHeadingClass = 'px-2 py-0.5 text-xs font-medium text-muted-foreground';
+export const menuGroupHeadingClass = 'px-2 py-0.5 text-xs font-medium text-muted-foreground pointer-coarse:py-1.5';
 
 /**
  * {@link menuGroupHeadingClass} expressed as child selectors for `[cmdk-group-heading]`,

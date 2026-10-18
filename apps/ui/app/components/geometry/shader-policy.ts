@@ -289,6 +289,8 @@ export const shaderEvidence = {
       `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
       `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,
       `${sectionStencilCapsBrowser}::should outline the cut edges, beside the caps`,
+      `${sectionStencilCapsBrowser}::should draw an unbroken line along every visible cut edge`,
+      `${sectionStencilCapsBrowser}::should antialias the line, as model edges are, rather than cut it off at whole pixels`,
     ],
     'backend-differential': [
       `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,

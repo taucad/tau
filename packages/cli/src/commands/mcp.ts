@@ -22,6 +22,7 @@ import { defineCommand } from 'citty';
 import { childEnvironment } from '#child-environment.js';
 import { exitNow } from '#exit-now.js';
 import { exitCodeFor } from '#output.js';
+import { resolveProjectRoot } from '#project-root.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
@@ -79,6 +80,9 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * A call works in the first of: `--project`; the folder Codex names with each
  * call (`_meta["codex/sandbox-state-meta"].sandboxCwd`); `CLAUDE_PROJECT_DIR`,
  * which Claude Code sets for the servers it launches; the working directory.
+ * That folder is the project root every `targetFile` and every GeoSpec
+ * `loadModel({ file })` resolves against: each result names it as
+ * `projectRoot`, and stderr names each root once, with where it came from.
  * Each project gets its own runtime thread on its first call: a model that
  * runs past `--operation-timeout` or ends its thread costs only that project
  * its thread, which its next call replaces, and a thread with no tool call
@@ -196,7 +200,16 @@ export const mcpCommand = defineCommand({
       /* The agent stopped reading. */
       stdout.once('error', stop);
 
-      const workspaceRoot = resolvePath(args.project ?? process.env['CLAUDE_PROJECT_DIR'] ?? process.cwd());
+      const started = resolveProjectRoot({
+        project: args.project,
+        claudeProjectDir: process.env['CLAUDE_PROJECT_DIR'],
+        cwd: process.cwd(),
+      });
+      const workspaceRoot = started.root;
+      const pinned = started.source === '--project';
+      process.stderr.write(
+        `tau mcp: project root ${workspaceRoot} (${started.source})${pinned ? '' : '; a call that names its own folder works there'}\n`,
+      );
       /* The native kernels every new runtime thread composes, read from the store's receipts once per generation; a
        * profile no host can honour leaves the native kernels out rather than every CAD tool. */
       let composition: Promise<NativeComposition> | undefined;
@@ -365,7 +378,7 @@ export const mcpCommand = defineCommand({
       const opened = args.machines
         ? await openLocalMachines({
             workspaceRoot,
-            requireProject: args.project !== undefined || process.env['CLAUDE_PROJECT_DIR'] !== undefined,
+            requireProject: started.source !== 'working directory',
             providers: await defaultMachineProviders(),
             actorId: 'tau-mcp',
             onWarning: ({ message }) => {
@@ -444,12 +457,17 @@ export const mcpCommand = defineCommand({
       };
       /* The idle release waits for a project's last tool call to settle, not its last operation: a call may work
        * between two operations (GeoSpec checks between a test's exports) for longer than the release. The project is
-       * found as the registry finds it. */
+       * found as the registry finds it, and a folder a call names is said once, as the start root was. */
+      const named = new Set([workspaceRoot]);
       const registry: typeof tools = {
         ...tools,
         invoke: async (invocation) => {
           const projectPath =
             (invocation.runId === undefined ? undefined : checkouts.get(invocation.runId)?.cwd) ?? workspaceRoot;
+          if (!named.has(projectPath)) {
+            named.add(projectPath);
+            process.stderr.write(`tau mcp: project root ${projectPath} (the folder a call named)\n`);
+          }
           inFlight.set(projectPath, (inFlight.get(projectPath) ?? 0) + 1);
           clearTimeout(idleTimers.get(projectPath));
           try {
@@ -467,7 +485,7 @@ export const mcpCommand = defineCommand({
       const local = await serveLocalHostMcp(
         {
           workspaceRoot,
-          pinned: args.project !== undefined,
+          pinned,
           registry,
           checkouts,
           viewerPage,

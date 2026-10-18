@@ -1561,6 +1561,42 @@
   {
     "kind": "model",
     "geometry": "3d",
+    "kernel": "smlib",
+    "name": "hinged-box",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "smlib",
+    "name": "parametric-plate",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "smlib",
+    "name": "pbr-materials",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "tscircuit",
     "name": "led-board",
     "mainFile": "main.tsx",

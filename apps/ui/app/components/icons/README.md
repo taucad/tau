@@ -71,6 +71,10 @@ pnpm nx run ui:generate-svg-sprite
 - `tscircuit.svg` is the official tscircuit mark (the vector of <https://tscircuit.com/tscircuit-logo.png>),
   `public/tsdot.svg` in [tscircuit/kicad-viewer](https://github.com/tscircuit/kicad-viewer) at commit
   `d8bc6f703cc7572c1cf0401933ad86447b4fdc70`, licensed under MIT (Copyright 2025 tscircuit Inc.).
+- `smlib.svg` is the official ClassCAD cube mark smlibpy's site serves for SMLib, copied verbatim
+  from <https://smlibpy.classcad.ch/img/favicon.svg> (retrieved 2026-10-17; Copyright AWV Informatik AG,
+  the smlibpy repository [awv-informatik/smlibpy](https://github.com/awv-informatik/smlibpy) is MIT).
+  No Lobe Icons entry exists and the mark is not in a public repository path.
 - `python.svg` uses the official Python Software Foundation two-snake glyph (vendored at
   `repos/convex-backend/npm-packages/docs/static/img/python-logo.svg`), its gradients
   flattened to the brand's `#FFD43B`/white and set on a `#306998` rounded square so it

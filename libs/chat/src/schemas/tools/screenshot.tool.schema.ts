@@ -139,6 +139,7 @@ export const screenshotMcpOutputSchema = z
     images: z.array(screenshotArtifactImageSchema).min(1),
     sourceRevision: sourceRevisionSchema.optional(),
     message: z.string().optional(),
+    projectRoot: z.string().min(1).optional(),
   })
   .strict();
 
@@ -156,6 +157,7 @@ export const screenshotOutputSchema = z
       .optional()
       .describe('Digests of the source the captured geometry was computed from (R4).'),
     message: z.string().optional().describe('What the images leave out of the viewer, such as a section cut.'),
+    projectRoot: z.string().min(1).optional().describe('Absolute project root targetFile resolved against.'),
   })
   .strict();
 /** @public */

@@ -1575,7 +1575,7 @@ export class ChatSessionStore {
     const session = this.#sessions.get(chatId);
     const projection = this.#projectionContext(chatId);
     if (session === undefined || projection === undefined || !selectCaughtUp(projection)) {
-      throw new Error('Wait for this chat to reconnect before steering.');
+      throw new Error('Wait for this chat to reconnect before sending.');
     }
     const run = selectCurrentRun(projection);
     await session.messageQueueStore.exclusive(async () =>

@@ -37,7 +37,7 @@ describe('message queue pane reflow', () => {
     );
     const row = screen.getByRole('listitem');
     const preview = screen.getByText('Keep the four-wheel bogie and show the complete retraction linkage.');
-    const steer = screen.getByRole('button', { name: 'Steer' });
+    const steer = screen.getByRole('button', { name: 'Send now' });
     const textBox = preview.getBoundingClientRect();
     const actionBox = steer.getBoundingClientRect();
     expect(Math.abs((textBox.top + textBox.bottom) / 2 - (actionBox.top + actionBox.bottom) / 2)).toBeLessThan(2);
@@ -89,7 +89,7 @@ describe('message queue busy and enlarged text', () => {
     if (sending) {
       expect(screen.getByRole('status').textContent).toBe('Sending…');
     }
-    expect(getComputedStyle(screen.getByRole('button', { name: 'Steer' })).opacity).toBe('1');
+    expect(getComputedStyle(screen.getByRole('button', { name: 'Send now' })).opacity).toBe('1');
   });
 });
 

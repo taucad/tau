@@ -43,6 +43,18 @@ describe('desktop runtime kernels', () => {
     }
   });
 
+  it('should compose SMLib after PicoVoxel and route only smlibwasm-importing files to it', async () => {
+    const { kernels } = await resolveDesktopRuntime();
+    const ids = kernels.map((kernel) => kernel.id);
+    const smlibKernel = kernels.find((kernel) => kernel.id === 'smlib')!;
+    const importMatcher = new RegExp(smlibKernel.detectImport!.source, smlibKernel.detectImport!.flags);
+
+    expect(ids.indexOf('smlib')).toBe(ids.indexOf('picovoxel') + 1);
+    expect(smlibKernel.extensions).toEqual(['ts', 'js']);
+    expect(importMatcher.test("import { Box } from '@classcad/smlibwasm';")).toBe(true);
+    expect(importMatcher.test("import { makeBox } from 'replicad';")).toBe(false);
+  });
+
   it('should run Build123d from the sealed closure main names in the store', async () => {
     const frame = nativeKernelsFixture({ picogk: false });
     const { root } = frame.kernels[0]!.closure!;

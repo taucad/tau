@@ -13,7 +13,6 @@
  * @module
  */
 import { readdir, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
 
 import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRunner, HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
@@ -22,6 +21,7 @@ import { defineCommand } from 'citty';
 
 import { composeNativeKernels } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
+import { resolveProjectRoot } from '#project-root.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 
@@ -138,6 +138,18 @@ const exitFor: Readonly<Record<TestRecord['status'], number>> = {
 };
 
 /**
+ * The run's one-line totals, naming the inconclusive tests that are neither passed nor failed.
+ *
+ * @internal
+ * @param record - The run's record.
+ * @returns The summary line.
+ */
+export const testSummary = (record: TestRecord): string => {
+  const inconclusive = record.tests.filter((test) => test.status === 'inconclusive').length;
+  return `${String(record.passed)} passed, ${String(record.failed)} failed of ${String(record.selected)} selected${inconclusive === 0 ? '' : `, ${String(inconclusive)} inconclusive`}`;
+};
+
+/**
  * `tau test` command.
  *
  * @example <caption>Run a project's GeoSpec suites in CI</caption>
@@ -187,7 +199,10 @@ export const testCommand = defineCommand({
   },
   async run({ args }) {
     const output = await createOutput();
-    const projectRoot = resolve(typeof args.project === 'string' ? args.project : process.cwd());
+    const { root: projectRoot } = resolveProjectRoot({
+      project: typeof args.project === 'string' ? args.project : undefined,
+      cwd: process.cwd(),
+    });
     try {
       const entry = await stat(projectRoot);
       if (!entry.isDirectory()) {
@@ -294,7 +309,7 @@ export const testCommand = defineCommand({
     for (const issue of record.issues) {
       output.error(`${issue.code}: ${issue.message}`);
     }
-    const summary = `${String(record.passed)} passed, ${String(record.failed)} failed of ${String(record.selected)} selected`;
+    const summary = testSummary(record);
     if (record.status === 'passed') {
       output.success(summary);
       return;

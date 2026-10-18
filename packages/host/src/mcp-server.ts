@@ -306,6 +306,7 @@ const present = async (
         images,
         ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
         ...(capture.message === undefined ? {} : { message: capture.message }),
+        ...(capture.projectRoot === undefined ? {} : { projectRoot: capture.projectRoot }),
       };
     }
     if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
@@ -323,6 +324,8 @@ const present = async (
           requirement: shortDiagnostic(failure.requirement),
           reason: shortDiagnostic(failure.reason),
           suggestion: shortDiagnostic(failure.suggestion),
+          ...(failure.category === undefined ? {} : { category: failure.category }),
+          ...(failure.limit === undefined ? {} : { limit: failure.limit }),
           targetFile: failure.targetFile,
         }));
         return {
@@ -332,6 +335,7 @@ const present = async (
           ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
           ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
           ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
+          ...(verdict.projectRoot === undefined ? {} : { projectRoot: verdict.projectRoot }),
           failures,
           passes: [],
           omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,

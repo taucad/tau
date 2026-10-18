@@ -6,6 +6,7 @@ Write tests before implementation; assert deterministic, measurable properties.
 - Await `loadModel`, then assert synchronously with `expectGeo(model)`. The host supplies the compiled binding; authoring does not select an engine.
 - Await or return the complete model-load chain from the test callback; detached future loads are not part of a completed test.
 - Omit `parameters` for model-code defaults; use `{ file, parameters }` for variants. Loaded subjects are opaque.
+- `loadModel({ file })` resolves `file` against the project root, the same root as every tool's `targetFile`; the result names that root as `projectRoot` where the host reports it, as `tau mcp` does. A suite in a subfolder names the model by its path from that root, or passes `rootDir`, the project-relative folder the model is in: `loadModel({ file: 'main.ts', rootDir: 'parts/gear' })` loads `parts/gear/main.ts`. A file the root does not hold refuses with `GEOSPEC_MODEL_SOURCE_NOT_FOUND`, which names the root and the path it looked for.
 
 Canonical TypeScript authoring:
 

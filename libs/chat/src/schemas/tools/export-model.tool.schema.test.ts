@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportModelInputSchema } from '#schemas/tools/export-model.tool.schema.js';
+import { exportModelInputSchema, exportModelOutputSchema } from '#schemas/tools/export-model.tool.schema.js';
 
 describe('exportModelInputSchema', () => {
   it('accepts declared target and JSON options while refusing obsolete request keys', () => {
@@ -26,5 +26,26 @@ describe('exportModelInputSchema', () => {
     for (const content of [{ includeMesh: true }, { includeTopology: 'yes' }, true]) {
       expect(exportModelInputSchema.safeParse({ targetFile: 'main.ts', to: 'glb', content }).success).toBe(false);
     }
+  });
+});
+
+describe('exportModelOutputSchema', () => {
+  it('should name the absolute project root its artifact paths resolve against', () => {
+    const exported = {
+      to: 'glb',
+      exportId: 'glb',
+      files: [
+        {
+          name: 'model.glb',
+          artifactPath: '.tau/artifacts/main/model.glb',
+          mimeType: 'model/gltf-binary',
+          byteLength: 12,
+        },
+      ],
+      projectRoot: '/work/gear',
+    };
+
+    expect(exportModelOutputSchema.parse(exported)).toEqual(exported);
+    expect(exportModelOutputSchema.safeParse({ ...exported, projectRoot: '' }).success).toBe(false);
   });
 });

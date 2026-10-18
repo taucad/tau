@@ -319,7 +319,13 @@ const ExpandedChatHistory = memo(function ({
                 <ChatMessageQueue key={`${activeChatId}:messages`} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
-              <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
+              <ChatTextarea
+                ref={chatTextareaRef}
+                enableMobileCollapse
+                mode='main'
+                enableAutoFocus={false}
+                onSubmit={onSubmit}
+              />
             </div>
           </FloatingPanelContent>
         </FloatingPanel>

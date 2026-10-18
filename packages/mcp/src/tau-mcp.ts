@@ -410,6 +410,7 @@ const screenshotInline = (result: ScreenshotDispatch): CallToolResult => ({
             `${[view, instance, angle].filter((part) => part !== undefined).join(' ')}: ${absolutePath} (${String(byteLength)} bytes)`,
         ),
         ...(result.sourceRevision === undefined ? [] : [`sourceRevision: ${JSON.stringify(result.sourceRevision)}`]),
+        ...(result.projectRoot === undefined ? [] : [`projectRoot: ${result.projectRoot}`]),
       ].join('\n'),
     },
     ...result.images.flatMap(({ dataUrl, mimeType }): CallToolResult['content'] =>

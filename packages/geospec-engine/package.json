@@ -79,6 +79,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/smlib": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "geospec": "workspace:*",
     "geospec-engine": "catalog:"

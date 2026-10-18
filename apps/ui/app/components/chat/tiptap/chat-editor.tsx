@@ -78,6 +78,8 @@ export const ChatEditor = memo(function ChatEditor({
           'w-full min-h-6',
           'px-3 pb-3',
           chatInputTextClassName,
+          // Touch: 16px, since iOS zooms into any field under 16px on focus.
+          'pointer-coarse:text-base pointer-coarse:leading-6',
           isLoading && tiptapShimmerOverrides,
           className,
         )}

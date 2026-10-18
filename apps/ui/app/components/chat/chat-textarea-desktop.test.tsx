@@ -371,6 +371,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       handleCancelClick?: () => void;
       mode?: 'main' | 'edit';
       enableAutoFocus?: boolean;
+      enableMobileCollapse?: boolean;
+      isFocused?: boolean;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
@@ -379,6 +381,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         <ChatTextareaDesktop
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
+          enableMobileCollapse={options.enableMobileCollapse}
+          isFocused={options.isFocused}
           dragKind={undefined}
           isSubmitting={options.isSubmitting ?? false}
           isAttaching={false}
@@ -447,6 +451,34 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       });
     },
   );
+
+  describe('enableMobileCollapse', () => {
+    const composerBox = (): HTMLElement =>
+      screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+
+    it('should rest collapsed while empty and unfocused', () => {
+      renderComposer('', codexSession, { enableMobileCollapse: true });
+      expect(composerBox()).toHaveAttribute('data-collapsed');
+      // Only the controls a collapsed row keeps stay outside the collapsible groups.
+      for (const group of document.querySelectorAll('[data-slot=composer-collapsible]')) {
+        expect(group).not.toContainElement(screen.getByRole('button', { name: 'Add' }));
+      }
+    });
+
+    it.each([
+      ['focused', '', { isFocused: true }],
+      ['holding a draft', 'A draft', {}],
+      ['sending', '', { isSubmitting: true }],
+    ] as const)('should unfold while %s', (_label, text, options) => {
+      renderComposer(text, codexSession, { enableMobileCollapse: true, ...options });
+      expect(composerBox()).not.toHaveAttribute('data-collapsed');
+    });
+
+    it('should never collapse without the flag', () => {
+      renderComposer('', codexSession);
+      expect(composerBox()).not.toHaveAttribute('data-collapsed');
+    });
+  });
 
   it('should show skill recovery in the functional composer after catalog closure', async () => {
     catalogHealth.status = 'closed';

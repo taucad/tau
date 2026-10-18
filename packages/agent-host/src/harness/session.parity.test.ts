@@ -130,7 +130,7 @@ class DeterministicToolCallingTransport implements ModelTransport {
 
 describe('pi full-turn parity fixture', () => {
   // EQ1: a terminal receipt continues the step under a new key (tau-agent-host.test.ts); a pending one never does.
-  it('should end MODEL_ATTEMPT_PENDING and never redispatch a bound attempt the gateway has not finished', async () => {
+  it('should wait, then end MODEL_ATTEMPT_PENDING and never redispatch a bound attempt the gateway has not finished', async () => {
     const log = await createMemoryEventLog([
       {
         version: 1,
@@ -173,6 +173,8 @@ describe('pi full-turn parity fixture', () => {
         modelTransport: { funding: fundedFacet(resolveInvocation), stream },
         toolRegistry: { list: () => [], invoke: vi.fn() },
         eventLog: resumedLog,
+        // The waits between lookups pass at once.
+        clock: { setTimeout: (callback: () => void) => setTimeout(callback), clearTimeout },
       });
 
       return session.prompt({
@@ -188,7 +190,8 @@ describe('pi full-turn parity fixture', () => {
     const firstEvents = await log.read();
     await resume(await createMemoryEventLog(firstEvents.slice(0, 2)), 'second');
 
-    expect(resolveInvocation).toHaveBeenCalledTimes(2);
+    // Each run asks once, then six more times while it waits for the gateway to finish.
+    expect(resolveInvocation).toHaveBeenCalledTimes(14);
     expect(stream).not.toHaveBeenCalled();
     const events = await log.read();
     expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);

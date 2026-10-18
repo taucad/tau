@@ -68,6 +68,8 @@ export default defineConfig({
   },
   resolve: { alias: [...uiResolveAlias] },
   ssr: uiSsrOptions,
+  // Mirrors `uiOptimizeDepsOptions` in the web config: smlibwasm resolves its WASM from import.meta.url.
+  optimizeDeps: { exclude: ['@classcad/smlibwasm'] },
   server: {
     // 3000 is the web dev server; 3001 keeps both runnable side by side.
     port: 3001,

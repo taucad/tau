@@ -88,10 +88,28 @@ export const resizeImageForChat = async (dataUrl: string): Promise<string> => {
 
 function compressWithCanvas(img: HTMLImageElement, origW: number, origH: number): string {
   const scale = Math.min(1, MAX_DIMENSION / Math.max(origW, origH));
-  let width = Math.round(origW * scale);
-  let height = Math.round(origH * scale);
+  const width = Math.round(origW * scale);
+  const height = Math.round(origH * scale);
 
   const canvas = document.createElement('canvas');
+  try {
+    return compressOnCanvas(canvas, img, width, height);
+  } finally {
+    /* D-UI-22: release the backing store now. iOS caps a page's total canvas
+     * memory, and a detached canvas holds its pixels until it is collected. */
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
+function compressOnCanvas(
+  canvas: HTMLCanvasElement,
+  img: HTMLImageElement,
+  fitWidth: number,
+  fitHeight: number,
+): string {
+  let width = fitWidth;
+  let height = fitHeight;
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d');

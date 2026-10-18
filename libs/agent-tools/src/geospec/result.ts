@@ -22,6 +22,7 @@ type RunGeoSpecTestsSuccess = Extract<RunGeoSpecTestsRpcResult, { success: true 
 type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
 type RunGeoSpecTestDiagnostic = NonNullable<RunGeoSpecTestFailure['diagnostics']>[number];
 type RunGeoSpecReport = NonNullable<RunGeoSpecTestFailure['reports']>[number];
+type RunGeoSpecLimit = NonNullable<RunGeoSpecTestFailure['limit']>;
 
 const fullGeoSpecTestName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
@@ -181,8 +182,24 @@ const weakeningSuggestion =
 /** Advice to reduce the design to fit a limit; a limit is met with resources, never less geometry. */
 const reducingSuggestion =
   /\b(?:coarsen|coarser|shrink|crop|simplify|decimate)\b|\bsmaller (?:part|model|subject|export)\b|\blower (?:the )?resolution\b/iu;
-const capacityAdvice =
-  'Provision more resources (raise the host limit or the work budget the diagnostic names, for example test_model workUnitLimit) and re-run; if this host cannot provide them, report the claim as not decided at this capacity. Keep the model as designed, at its full geometry and resolution, and never let a region load stand in for a whole-model claim.';
+const notDecided =
+  'No `test_model` argument raises it; keep the model and assertion as designed and report the claim as not decided.';
+const limitCategories: ReadonlySet<FailureCategory> = new Set(['analysis-limit', 'resource-limit', 'work-budget']);
+/** The engine configuration key behind each noun of an engine "the configured <noun> limit is" refusal. */
+const configuredLimitNames: ReadonlyMap<string, string> = new Map([
+  ['binary subject', 'maxSubjectBytes'],
+  ['binary resource', 'maxResourceBytes'],
+  ['total binary', 'maxTotalBinaryBytes'],
+  ['vertex', 'maxVertices'],
+  ['triangle', 'maxTriangles'],
+  ['occurrence', 'maxOccurrences'],
+  ['retained subject', 'maxRetainedSubjects'],
+  ['analysis retention', 'maxMeshBytes'],
+  ['mesh entry', 'maxMeshEntries'],
+]);
+const configuredLimitNoun = /; the configured (?<noun>[a-z ]+) limit is /u;
+/** The evidence an analysis refusal names before its verb, as in "Continuous evidence needs 35.6 MiB". */
+const refusedEvidence = /^(?:the |this |a )?(?<evidence>[a-z][\w -]*?) (?:needs|is|has|exceeds?) /iu;
 
 const meshMatchers = geoSpecMeshEvidenceMatchers.join(', ');
 
@@ -276,12 +293,131 @@ const evidenceSuggestion = (
     : `Keep the assertion and load evidence that can answer it. ${meshNote}`;
 };
 
+/** One diagnostic with the step it refused: a claim's matcher and load, or the admission of a load that threw. */
+type LimitEvidence = {
+  readonly diagnostic: GeometryDiagnostic;
+  readonly operation: string;
+  readonly subject?: string;
+};
+
+const count = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
+const limitIdentifier = (words: string): string =>
+  words
+    .split(/[^a-z\d]+/iu)
+    .filter((word) => word !== '')
+    .map((word, index) =>
+      index === 0 ? word.toLowerCase() : `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`,
+    )
+    .join('');
+
+/**
+ * Name a capacity limit the engine reports without a name: the configuration key its admission message names,
+ * else the evidence its analysis message names, in the limit's unit.
+ */
+const limitName = (message: string, details: Readonly<Record<string, unknown>>, unit: string): string => {
+  if (typeof details['name'] === 'string') {
+    return details['name'];
+  }
+  const noun = configuredLimitNoun.exec(message)?.groups?.['noun'];
+  const configured = noun === undefined ? undefined : configuredLimitNames.get(noun);
+  if (configured !== undefined) {
+    return configured;
+  }
+  const limitClass = typeof details['limitClass'] === 'string' ? details['limitClass'] : 'engine';
+  return limitIdentifier(`${refusedEvidence.exec(message)?.groups?.['evidence'] ?? limitClass} ${unit}`);
+};
+
+const typedLimit = (category: FailureCategory, evidence: LimitEvidence): RunGeoSpecLimit | undefined => {
+  const details: Readonly<Record<string, unknown>> = isRecord(evidence.diagnostic.details)
+    ? evidence.diagnostic.details
+    : {};
+  const declared = count(details['limit']);
+  const step = {
+    operation: evidence.operation,
+    ...(evidence.subject === undefined ? {} : { subject: evidence.subject }),
+  };
+  if (category === 'work-budget') {
+    const maximum = count(details['maximumLimit']);
+    if (declared === undefined || maximum === undefined) {
+      return undefined;
+    }
+    const used = count(details['used']);
+    return {
+      kind: 'budget',
+      name: 'workUnitLimit',
+      declared,
+      ...(used === undefined ? {} : { measured: used }),
+      unit: 'work-units',
+      ...step,
+      // The budget is a ceiling, not a cost, so the host maximum is the one value that can still decide the claim.
+      retry:
+        declared < maximum && (used === undefined || used <= maximum)
+          ? { parameter: 'workUnitLimit', value: maximum }
+          : null,
+      source: 'engine',
+    };
+  }
+  const { unit } = details;
+  if (typeof unit !== 'string') {
+    return undefined;
+  }
+  const measured = count(details['required']);
+  return {
+    kind: 'capacity',
+    name: limitName(evidence.diagnostic.message, details, unit),
+    ...(declared === undefined ? {} : { declared }),
+    ...(measured === undefined ? {} : { measured }),
+    unit,
+    ...step,
+    retry: null,
+    source: details['source'] === 'host' ? 'host' : 'engine',
+  };
+};
+
+/** The typed limit behind a limit row: the first diagnostic of the row's category that reports one. */
+const rowLimit = (category: FailureCategory, evidence: readonly LimitEvidence[]): RunGeoSpecLimit | undefined => {
+  if (!limitCategories.has(category)) {
+    return undefined;
+  }
+  for (const item of evidence) {
+    const limit = diagnosticCategory(item.diagnostic) === category ? typedLimit(category, item) : undefined;
+    if (limit !== undefined) {
+      return limit;
+    }
+  }
+  return undefined;
+};
+
+const capacitySuggestion = (category: FailureCategory, limit: RunGeoSpecLimit | undefined): string => {
+  if (limit === undefined) {
+    return `Not decided: the ${category === 'resource-limit' ? 'admission' : 'analysis'} limit the diagnostic names stops this claim. ${notDecided}`;
+  }
+  const usage =
+    limit.declared === undefined
+      ? ''
+      : ` (${limit.declared} ${limit.unit}${limit.measured === undefined ? '' : `; this subject ${limit.measured}`})`;
+  return `Not decided: ${limit.operation} needs more than ${limit.name}${usage}. ${notDecided}`;
+};
+
+const budgetSuggestion = (limit: RunGeoSpecLimit | undefined): string => {
+  if (limit === undefined) {
+    return 'Keep the assertion: the claim exhausted its deterministic work-unit budget (the diagnostic details give limit and used). Raise workUnitLimit for this claim (expectGeo or loadModel option, or test_model workUnitLimit for the whole run) or narrow its selection, then re-run.';
+  }
+  const usage = `(${limit.declared} work units${limit.measured === undefined ? '' : `; used ${limit.measured}`})`;
+  return limit.retry === null
+    ? `Not decided: ${limit.operation} needs more work units than this host allows ${usage}. ${notDecided}`
+    : `Not decided: ${limit.operation} exhausted its work-unit budget ${usage}. Raise workUnitLimit to ${limit.retry.value} where this claim's budget is set (test_model for the run, or its loadModel or expectGeo option) and re-run; keep the assertion.`;
+};
+
 const categorySuggestion = (options: {
   readonly category: FailureCategory;
   readonly diagnostics: readonly GeometryDiagnostic[];
   readonly kernels: readonly GeoSpecKernelEvidence[];
+  readonly limit: RunGeoSpecLimit | undefined;
 }): string => {
-  const { category, diagnostics, kernels } = options;
+  const { category, diagnostics, kernels, limit } = options;
   const own = diagnostics.find(
     (diagnostic) => diagnosticCategory(diagnostic) === category && keepsAssertion(diagnostic.suggestion),
   )?.suggestion;
@@ -300,17 +436,15 @@ const categorySuggestion = (options: {
     case 'timeout': {
       return (
         own ??
-        `Keep the assertion. Raise testTimeout so the requirement can finish, or re-run only it with testNamePattern. ${capacityAdvice}`
+        'Keep the assertion and the model as designed. Raise testTimeout so the requirement can finish, or re-run only it with testNamePattern; if this host cannot give it the time, report the claim as not decided.'
       );
     }
-    case 'analysis-limit': {
-      return `Keep the assertion: the analysis needs more than the engine limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
-    }
+    case 'analysis-limit':
     case 'resource-limit': {
-      return `Keep the assertion: the model exceeds the host admission limit named in the diagnostic, so the claim is not decided. ${capacityAdvice}`;
+      return capacitySuggestion(category, limit);
     }
     case 'work-budget': {
-      return 'Keep the assertion: the claim exhausted its deterministic work-unit budget (the diagnostic details give limit and used). Raise workUnitLimit for this claim (expectGeo or loadModel option, or test_model workUnitLimit for the whole run) or narrow its selection, then re-run.';
+      return budgetSuggestion(limit);
     }
     case 'unsupported-evidence': {
       return evidenceSuggestion(kernels, own ?? any);
@@ -397,13 +531,24 @@ export const projectGeoSpecTest = (
     // Worker structured-clone preserves these aliases. Never deduplicate by
     // code/message: separate failures can have identical text and locations.
     const mirrored = new Set(assertionDiagnostics);
-    const diagnostics = [
-      ...assertionDiagnostics,
-      ...test.diagnostics.filter((diagnostic) => !mirrored.has(diagnostic)),
-    ];
+    const thrown = test.diagnostics.filter((diagnostic) => !mirrored.has(diagnostic));
+    const diagnostics = [...assertionDiagnostics, ...thrown];
     const category = failureCategory(test, diagnostics);
+    const limit = rowLimit(category, [
+      ...test.assertions.flatMap((assertion): LimitEvidence[] => {
+        const capability = assertion.report?.claim['capability'];
+        const operation = typeof capability === 'string' ? capability : assertion.kind;
+        return (assertion.diagnostics ?? []).map((diagnostic) => ({
+          diagnostic,
+          operation,
+          ...(assertion.loadId === undefined ? {} : { subject: assertion.loadId }),
+        }));
+      }),
+      // A diagnostic no assertion carries was thrown by the test body: a load the engine or host refused to admit.
+      ...thrown.map((diagnostic) => ({ diagnostic, operation: 'ingestSubject' })),
+    ]);
     return {
-      test: testRow,
+      test: { ...testRow, ...(limit === undefined ? {} : { limit }) },
       failure: {
         id: `${file}:${requirement}`,
         requirement,
@@ -414,8 +559,10 @@ export const projectGeoSpecTest = (
           category,
           diagnostics,
           kernels: loadKernels(test, options.lineage, options.kernels),
+          limit,
         }),
         category,
+        ...(limit === undefined ? {} : { limit }),
         targetFile: file,
         diagnostics: transportDiagnostics(diagnostics),
         ...(reports === undefined ? {} : { reports }),
@@ -439,7 +586,8 @@ const issueRow = (issue: RunnerIssue, targetFile: string): RunGeoSpecTestFailure
       id: issue.code,
       requirement: 'Every selected GeoSpec file must finish within its wall-clock bound',
       reason: issue.message,
-      suggestion: `Keep the assertions. Re-run the timed-out file on its own or raise its timeout. ${capacityAdvice}`,
+      suggestion:
+        'Keep the assertions and the model as designed. Re-run the timed-out file on its own or raise its timeout; if this host cannot give it the time, report its claims as not decided.',
       category: 'timeout',
       targetFile,
     };

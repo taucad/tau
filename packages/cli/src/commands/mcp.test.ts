@@ -105,6 +105,7 @@ describe('mcpCommand', () => {
     }
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it.each(['operation-timeout', 'idle-release'])(
@@ -136,6 +137,51 @@ describe('mcpCommand', () => {
       'tau mcp: could not start: Error: Provider tool schema has a tuple that cannot use one items schema',
     );
     expect(serveLocalHostMcp).not.toHaveBeenCalled();
+  });
+
+  it('should name a --project root on stderr and pin every call to it', async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array<ArrayBuffer>) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
+    const server = await serve(['--project', '/fixture/project']);
+
+    expect(server.workspaceRoot).toBe('/fixture/project');
+    expect(server.pinned).toBe(true);
+    expect(written).toContain('tau mcp: project root /fixture/project (--project)\n');
+    await server.stop();
+  });
+
+  it('should name its start root and each folder a call names once, with where each came from', async () => {
+    vi.stubEnv('CLAUDE_PROJECT_DIR', '/fixture/claude');
+    const written: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array<ArrayBuffer>) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const server = await serve([]);
+    const call = async (runId?: string) =>
+      server.registry.invoke({
+        toolCallId: 'call-1',
+        toolName: 'evaluate_model',
+        ...(runId === undefined ? {} : { runId }),
+        input: {},
+        signal: new AbortController().signal,
+      });
+
+    server.checkouts.set('mcp:/fixture/codex', { cwd: '/fixture/codex' });
+    await call();
+    await call('mcp:/fixture/codex');
+    await call('mcp:/fixture/codex');
+
+    expect(server.pinned).toBe(false);
+    expect(written.filter((line) => line.startsWith('tau mcp: project root'))).toEqual([
+      'tau mcp: project root /fixture/claude (CLAUDE_PROJECT_DIR); a call that names its own folder works there\n',
+      'tau mcp: project root /fixture/codex (the folder a call named)\n',
+    ]);
+    await server.stop();
   });
 
   it('should keep a thread while its tool call works between two operations past the idle release', async () => {

@@ -102,6 +102,11 @@ export type LoadModelSourceOptions = {
   source: MeshSource | StepSource;
   /** Named external resources consumed alongside the direct geometry bytes. */
   resources?: ReadonlyArray<{ readonly name: string; readonly source: MeshSource | StepSource }>;
+  /**
+   * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
+   * project root. Recorded in the load evidence.
+   */
+  rootDir?: string;
   /** Source geometry format. Defaults to `glb`. */
   format?: GeoSpecModelFormat;
   /** Source path recorded in provenance. */
@@ -138,6 +143,8 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   code: Code;
   /** Entry path to render from {@link code}. */
   file: keyof Code & string;
+  /** Not accepted: inline code has no project folder to resolve in, and a load naming one is refused. */
+  rootDir?: never;
   /** Geometry format to export. Defaults to `glb`. */
   format?: GeoSpecModelFormat;
   /** Explicit parameters passed to the runtime. */
@@ -179,8 +186,17 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
  * @public
  */
 export type LoadModelFileOptions = {
-  /** Project-relative model file to render. */
+  /**
+   * Model file to render, as a path from the project root: the same root every tool's `targetFile` resolves
+   * against, which the result names as `projectRoot` where the host reports it, as `tau mcp` does.
+   */
   file: string;
+  /**
+   * Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root:
+   * `loadModel({ file: 'main.ts', rootDir: 'parts/gear' })` loads `parts/gear/main.ts`. Recorded in the load
+   * evidence.
+   */
+  rootDir?: string;
   /** Project root used by runtime integrations. */
   projectPath?: string;
   /** Geometry format to export. Defaults to `glb`. */

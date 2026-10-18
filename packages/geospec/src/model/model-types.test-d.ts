@@ -52,6 +52,17 @@ describe('geospec/model public types', () => {
     expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeoSpecSubject>>();
   });
 
+  it('should name a rootDir on file and path-source loads only', () => {
+    expectTypeOf<LoadModelFileOptions['rootDir']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<LoadModelSourceOptions['rootDir']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<LoadModelCodeOptions['rootDir']>().toEqualTypeOf<undefined>();
+    expectTypeOf(loadModel({ file: 'main.ts', rootDir: 'parts/gear' })).toEqualTypeOf<Promise<GeoSpecSubject>>();
+
+    const code = { 'main.ts': '' };
+    // @ts-expect-error -- inline code has no project folder to resolve in, so it takes no rootDir.
+    void loadModel({ code, file: 'main.ts', rootDir: 'parts' });
+  });
+
   it('should keep source-unit declarations on direct raw geometry only', () => {
     expectTypeOf(loadModel({ source: new Uint8Array(), format: 'glb', sourceUnit: 'mm' })).toEqualTypeOf<
       Promise<GeoSpecSubject>

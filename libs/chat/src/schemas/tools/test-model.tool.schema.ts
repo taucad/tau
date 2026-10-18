@@ -63,6 +63,7 @@ export const geoSpecRunLineageSchema = z
               ingestOptions: z.record(z.string(), jsonValueSchema),
               sourceRevision: sourceRevisionSchema.optional(),
               sourcePath: z.string().optional(),
+              rootDir: z.string().optional().describe('Project-relative folder this load resolved its paths in.'),
               workUnitLimit: z.number().int().positive().optional(),
               reused: z.literal(true).optional(),
               region: z
@@ -259,6 +260,41 @@ export const geoSpecFailureCategorySchema = z
 export type GeoSpecFailureCategory = z.infer<typeof geoSpecFailureCategorySchema>;
 
 /**
+ * The limit that left a requirement undecided, with the one retry that can
+ * change the outcome. Present on `analysis-limit`, `resource-limit` and
+ * `work-budget` rows when the refusal reports its numbers.
+ */
+const geoSpecLimitSchema = z
+  .object({
+    kind: z
+      .enum(['capacity', 'budget'])
+      .describe('capacity: an engine or host limit. budget: the claim work-unit budget (workUnitLimit).'),
+    name: z
+      .string()
+      .describe(
+        'The limit: the configuration key or fixed ceiling the refusal names (maxSubjectBytes, maxTotalBinaryBytes, maxTriangles, descriptorBytes, workUnitLimit) or, for an analysis limit, the evidence the engine names (continuousEvidenceBytes).',
+      ),
+    declared: observedCountSchema.optional().describe('The limit value, in unit.'),
+    measured: observedCountSchema.optional().describe('What the subject or claim needs or used, in unit.'),
+    unit: z
+      .string()
+      .describe('bytes, vertices, triangles, occurrences, retained subjects, mesh entries or work-units.'),
+    operation: z.string().describe('The refused step: ingestSubject for an admission limit, else the matcher.'),
+    subject: z.string().optional().describe('The loadId of the refused claim.'),
+    retry: z
+      .object({ parameter: z.literal('workUnitLimit'), value: z.number().int().positive() })
+      .strict()
+      .nullable()
+      .describe(
+        "The workUnitLimit value that can decide the claim, set where that claim's budget is set (test_model for the run, or its loadModel or expectGeo option); null when no argument raises the limit.",
+      ),
+    source: z
+      .enum(['engine', 'host'])
+      .describe('engine: the engine refused. host: the host refused before the engine.'),
+  })
+  .strict();
+
+/**
  * A browser run that outlived its run budget. The run is reported with the
  * requirements it completed; the rest are not run, never passed.
  *
@@ -290,6 +326,7 @@ const testFailureSchema = z.object({
   reason: z.string().describe('Why the test failed'),
   suggestion: z.string().describe('Actionable suggestion to fix the issue'),
   category: geoSpecFailureCategorySchema.optional(),
+  limit: geoSpecLimitSchema.optional(),
   targetFile: rootedFilePathSchema.describe('Source file whose geometry produced this failure'),
   diagnostics: z
     .array(geometryDiagnosticSchema)
@@ -366,6 +403,7 @@ export const testModelOutputSchema = z.object({
           targetFile: z.string(),
           status: geoSpecTestStatusSchema,
           ordinal: observedCountSchema.optional(),
+          limit: geoSpecLimitSchema.optional(),
         })
         .strict(),
     )
@@ -375,6 +413,11 @@ export const testModelOutputSchema = z.object({
     .array(sourceRevisionSchema)
     .optional()
     .describe('One entry per model the run loaded, naming the source it was evaluated from (R4).'),
+  projectRoot: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Absolute project root every targetFile and loadModel file resolved against.'),
   fullResult: testModelResultArtifactSchema
     .optional()
     .describe('Full result artifact when inline details were reduced'),

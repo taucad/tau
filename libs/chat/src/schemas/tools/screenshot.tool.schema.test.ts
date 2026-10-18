@@ -4,6 +4,7 @@ import { toProviderToolJsonSchema } from '#schemas/provider-tool-schemas.js';
 import { arrangeWorkbenchInputSchema } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import {
   screenshotInputSchema,
+  screenshotMcpOutputSchema,
   screenshotOutputSchema,
   screenshotSectionSchema,
 } from '#schemas/tools/screenshot.tool.schema.js';
@@ -174,5 +175,28 @@ describe('screenshotOutputSchema stored captures (D-UI-04)', () => {
     expect(
       screenshotOutputSchema.safeParse({ images: [{ ...stored, dataUrl: 'data:image/webp;base64,AQID' }] }).success,
     ).toBe(false);
+  });
+});
+
+describe('screenshot projectRoot', () => {
+  it('names the absolute project root on a capture and on its MCP result', () => {
+    const capture = { images: [{ view: '3d', dataUrl: 'data:image/webp;base64,AQID' }], projectRoot: '/work/gear' };
+    const filed = {
+      images: [
+        {
+          view: '3d',
+          path: `attachments/${'a'.repeat(64)}.webp`,
+          absolutePath: `/tmp/tau-mcp/attachments/${'a'.repeat(64)}.webp`,
+          mimeType: 'image/webp',
+          byteLength: 1024,
+          sha256: 'a'.repeat(64),
+        },
+      ],
+      projectRoot: '/work/gear',
+    };
+
+    expect(screenshotOutputSchema.parse(capture)).toEqual(capture);
+    expect(screenshotMcpOutputSchema.parse(filed)).toEqual(filed);
+    expect(screenshotMcpOutputSchema.safeParse({ ...filed, projectRoot: '' }).success).toBe(false);
   });
 });

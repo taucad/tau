@@ -8,6 +8,7 @@ import type {
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
 import type { GetParametersOutput } from '@taucad/chat/schemas/tools/parameter';
+import type { ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
 import {
   applyParameterOperationOutputSchema,
   getParametersOutputSchema,
@@ -23,6 +24,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
 
 import { projectParameterValues } from '#runtime/parameter-values.js';
+import { summarizeRenderedModel } from '#runtime/model-summary.js';
+import type { ModelAdmissionLimits } from '#runtime/model-summary.js';
 
 import {
   buildCaptureExportOptions,
@@ -119,6 +122,12 @@ export type CreateRuntimeAgentClientsInput = Readonly<{
   runtime: RuntimeAgentClient | (() => Promise<RuntimeAgentClient>);
   exportImage: RuntimeAgentImageExporter;
   mapRuntimeError: RuntimeAgentErrorMapper;
+  /**
+   * The admission limits of the GeoSpec engine `test_model` uses on this host, resolving `undefined`
+   * when unknown. `evaluate_model` estimates a whole-model load against them; omitted, its summary
+   * has no `admission`.
+   */
+  admissionLimits?: () => Promise<ModelAdmissionLimits | undefined>;
 }>;
 
 /** Inputs for adapting one host-owned parameter actor per source target. @public */
@@ -463,6 +472,7 @@ export const createRuntimeAgentClients = (
         let { sourceRevision } = evaluation;
         let ready = evaluation.success;
         let tessellation: TessellationReport | undefined;
+        let summary: ModelSummary | undefined;
         const [defaultView] = evaluation.success ? evaluation.views : [];
         if (evaluation.success && defaultView === undefined && options !== undefined) {
           return {
@@ -493,6 +503,13 @@ export const createRuntimeAgentClients = (
             sourceRevision = projected.rendering.sourceRevision ?? sourceRevision;
             ready = projected.rendering.success;
             tessellation = projected.rendering.success ? projected.rendering.artifact.tessellation : undefined;
+            summary = projected.rendering.success
+              ? await summarizeRenderedModel({
+                  artifact: projected.rendering.artifact,
+                  issues: projected.rendering.issues,
+                  admissionLimits: input.admissionLimits,
+                })
+              : undefined;
           } finally {
             view.close();
           }
@@ -538,6 +555,7 @@ export const createRuntimeAgentClients = (
           ...(sourceRevision === undefined ? {} : { sourceRevision }),
           ...offered,
           ...(tessellation === undefined ? {} : { tessellation }),
+          ...(summary === undefined ? {} : { summary }),
           ...capabilities,
         };
       } catch (error) {

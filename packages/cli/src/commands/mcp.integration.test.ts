@@ -490,7 +490,27 @@ describe('tau mcp over stdio', () => {
       const result = await call({ name: 'evaluate_model', arguments: { targetFile: 'main.ts' } });
 
       expect(result.isError ?? false, textOf(result)).toBe(false);
-      expect(result.structuredContent).toMatchObject({ status: 'ready' });
+      /* The admission limits are the native GeoSpec engine's own, as its initialize configuration reports them. */
+      expect(result.structuredContent).toMatchObject({
+        status: 'ready',
+        projectRoot: join(scratch, 'block'),
+        summary: {
+          bounds: {
+            min: { x: -10, y: -5, z: 0 },
+            max: { x: 10, y: 5, z: 4 },
+            size: { x: 20, y: 10, z: 4 },
+            unit: 'mm',
+          },
+          componentCount: 1,
+          admission: {
+            triangles: { limit: 4_000_000 },
+            vertices: { limit: 2_000_000 },
+            subjectBytes: { limit: 67_108_864 },
+          },
+        },
+      });
+      expect(result.structuredContent).not.toHaveProperty('summary.admission.warning');
+      expect(served.stderr()).toContain(`tau mcp: project root ${join(scratch, 'block')} (CLAUDE_PROJECT_DIR)`);
       /* The first call loads the runtime, which proves the module log sees kernels at all. */
       expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/replicad\.kernel\.ts$/u));
     },
@@ -512,6 +532,7 @@ describe('tau mcp over stdio', () => {
         mimeType: expect.stringMatching(/^image\/(?:png|webp)$/u) as string,
       });
       expect(image).toHaveProperty('data', expect.stringMatching(/^[A-Za-z0-9+/]{100,}=*$/u));
+      expect(textOf(result)).toContain(`\nprojectRoot: ${join(scratch, 'block')}`);
       screenshotPath =
         /: (\/\S+\/attachments\/[\da-f]{64}\.(?:png|webp)) \(\d+ bytes\)$/mu.exec(textOf(result))?.[1] ?? '';
       expect(screenshotPath.startsWith(join(tmpdir(), 'tau-mcp-'))).toBe(true);
@@ -566,8 +587,10 @@ describe('tau mcp over stdio', () => {
       const named = await call({ name: 'evaluate_model', arguments: { targetFile: 'lid.ts' }, _meta: meta });
       const unnamed = await call({ name: 'evaluate_model', arguments: { targetFile: 'lid.ts' } });
 
-      expect(named.structuredContent).toMatchObject({ status: 'ready' });
+      expect(named.structuredContent).toMatchObject({ status: 'ready', projectRoot: join(scratch, 'lid') });
+      expect(served.stderr()).toContain(`tau mcp: project root ${join(scratch, 'lid')} (the folder a call named)`);
       expect(unnamed.structuredContent).toMatchObject({
+        projectRoot: join(scratch, 'block'),
         status: 'error',
         kernelIssues: expect.arrayContaining([
           expect.objectContaining({ message: expect.stringContaining(join(scratch, 'block', 'lid.ts')) as string }),
@@ -640,7 +663,7 @@ describe('tau mcp over stdio', () => {
       const result = await call({ name: 'test_model', arguments: {} });
 
       expect(result.isError ?? false, textOf(result)).toBe(false);
-      expect(result.structuredContent).toMatchObject({ passed: 1, total: 1 });
+      expect(result.structuredContent).toMatchObject({ passed: 1, total: 1, projectRoot: join(scratch, 'block') });
     },
     kernelCallLimit,
   );

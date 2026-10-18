@@ -46,6 +46,11 @@ export const exportModelOutputSchema = z.object({
     .describe('Ordered files, primary first, followed by required companions.'),
   warnings: z.array(kernelIssueSchema).optional(),
   sourceRevision: sourceRevisionSchema.optional().describe('Digests of the pinned source exported.'),
+  projectRoot: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Absolute project root targetFile and artifactPath resolve against.'),
 });
 
 /** @public */

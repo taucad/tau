@@ -249,6 +249,57 @@ describe('createRuntimeAgentClients', () => {
     expect(result).not.toHaveProperty('tessellation');
   });
 
+  it('should summarize the default view mesh against the admission limits the host supplies', async () => {
+    const text = JSON.stringify({
+      nodes: [{ mesh: 0 }],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics are uppercase by specification.
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [{ componentType: 5126, type: 'VEC3', count: 3, min: [0, 0, 0], max: [0.02, 0.01, 0.03] }],
+    });
+    const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
+    const content = new Uint8Array(20 + json.byteLength);
+    const header = new DataView(content.buffer);
+    header.setUint32(0, 0x46_54_6c_67, true);
+    header.setUint32(4, 2, true);
+    header.setUint32(8, content.byteLength, true);
+    header.setUint32(12, json.byteLength, true);
+    header.setUint32(16, 0x4e_4f_53_4a, true);
+    content.set(json, 20);
+    const admissionLimits = vi.fn(async () => ({ maxTriangles: 4, maxVertices: 2, maxSubjectBytes: 64 }));
+    const fixture = runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content }) });
+    const clients = createRuntimeAgentClients({
+      runtime: fixture.runtime,
+      exportImage: async () => undefined,
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+      admissionLimits,
+    });
+
+    const result = await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    if (!result.success) {
+      expect.fail(result.message);
+    }
+
+    expect(result.status).toBe('ready');
+    expect(result.summary).toEqual({
+      bounds: { min: { x: 0, y: -30, z: 0 }, max: { x: 20, y: 0, z: 10 }, size: { x: 20, y: 30, z: 10 }, unit: 'mm' },
+      componentCount: 1,
+      triangles: 1,
+      vertices: 3,
+      admission: {
+        triangles: { estimated: 1, limit: 4 },
+        vertices: { estimated: 3, limit: 2 },
+        subjectBytes: { estimated: 72, limit: 64 },
+        warning: expect.stringContaining(
+          "the engine's admission limits (subject bytes about 72, limit 64; vertices about 3, limit 2).",
+        ) as string,
+      },
+    });
+    expect(admissionLimits).toHaveBeenCalledOnce();
+
+    const headerOnly = await clientsFor(runtimeFixture()).kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    expect(headerOnly).not.toHaveProperty('summary');
+  });
+
   it('should open every request-scoped document unwatched', async () => {
     const fixture = runtimeFixture();
     const clients = clientsFor(fixture);

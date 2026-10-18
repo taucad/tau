@@ -1,6 +1,70 @@
 # geospec — Types (3)
 
-10 top-level symbols. Signatures are verbatim typescript.
+14 top-level symbols. Signatures are verbatim typescript.
+
+// Full native assertion result with the exact core-owned bytes retained
+GeoSpecCanonicalClaimReport: {
+    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+    readonly canonicalResult: Uint8Array<ArrayBuffer>;
+    readonly claim: Readonly<Record<string, JSONValue>>;
+    readonly claimId: string;
+    /** Engine diagnostics; a `MATCHER_TIMEOUT` row also carries `details.limit`, `details.used` and `details.maximumLimit`. */
+    readonly diagnostics: readonly JSONValue[];
+    readonly evidence?: JSONValue;
+    readonly polarity: GeoSpecClaimPolarity;
+    readonly result: Readonly<Record<string, JSONValue>>;
+    readonly status: GeoSpecCanonicalClaimStatus;
+}
+
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
+
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
+
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
+
+  readonly claim: Readonly<Record<string, JSONValue>>
+
+  readonly claimId: string
+
+  // Engine diagnostics
+  readonly diagnostics: readonly JSONValue[]
+
+  readonly evidence?: JSONValue
+
+  readonly polarity: GeoSpecClaimPolarity
+
+  readonly result: Readonly<Record<string, JSONValue>>
+
+  readonly status: GeoSpecCanonicalClaimStatus
+
+// Exact core bytes of one claim evaluated in one engine call
+GeoSpecNativeClaimEvaluation: {
+    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+    readonly canonicalResult: Uint8Array<ArrayBuffer>;
+}
+
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
+
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
+
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
+
+// Byte-only engine surface consumed by the runner-independent assertion client
+GeoSpecNativeEngine: {
+    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
+    processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+}
+
+  // GeoSpecNativeEngine.evaluateClaim (method)
+  evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
+
+  // GeoSpecNativeEngine.processRequest (method)
+  processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+
+// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
+GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
 
 // Content-addressed subject accepted by a protocol-3 assertion plan
 GeoSpecNativeSubject: {

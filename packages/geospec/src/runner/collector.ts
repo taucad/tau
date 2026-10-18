@@ -101,9 +101,61 @@ class GeoSpecTestTimeoutError extends Error {
   }
 }
 
+/**
+ * Whether a thrown value is an engine or host `limit-exceeded` refusal. Thrown by a test or `describe` body, it is a
+ * load refused admission: like a claim refused for capacity, it leaves the test's claims undecided, never false.
+ *
+ * @param error - A thrown value.
+ * @returns Whether it carries the `limit-exceeded` code.
+ */
+const isAdmissionRefusal = (error: unknown): error is Readonly<Record<string, unknown>> =>
+  typeof error === 'object' && error !== null && Reflect.get(error, 'code') === 'limit-exceeded';
+
+/**
+ * A `limit-exceeded` thrown inside a claim, after its load was admitted: the engine or host ran out of room for the
+ * claim itself (engine handles or memory, or room to restore an evicted load), so it names no limit of the model. The
+ * claim fails as an engine failure, the way any other exception inside a claim does, not as a claim a limit left
+ * undecided.
+ *
+ * @param error - The refusal.
+ * @returns The claim's diagnostic, without the refusal code that would read as a limit.
+ */
+const claimRefusalDiagnostic = (error: Readonly<Record<string, unknown>>): GeometryDiagnostic => {
+  const { message, name } = error;
+  const text = typeof message === 'string' ? message : 'GeoSpec ran out of room for this claim.';
+  return {
+    code: 'TEST_FAILED',
+    severity: 'error',
+    message: text,
+    details: { name: typeof name === 'string' ? name : 'Error', message: text },
+  };
+};
+
+/**
+ * The refused admission as a capacity-refused claim reports it: the capacity code, with the numbers as details.
+ *
+ * @param error - The refusal: an engine `ProtocolError` or the native model loader's own `RangeError`.
+ * @returns The diagnostic the test carries.
+ */
+const admissionRefusalDiagnostic = (error: Readonly<Record<string, unknown>>): GeometryDiagnostic => {
+  const { capacity, message } = error;
+  const { code, ...details }: Record<string, unknown> =
+    typeof capacity === 'object' && capacity !== null ? { ...capacity } : {};
+  return diagnosticForTransport({
+    code: typeof code === 'string' ? code : 'GEOSPEC_RESOURCE_LIMIT',
+    severity: 'error',
+    message: typeof message === 'string' ? message : 'GeoSpec refused to admit this load.',
+    ...(Object.keys(details).length === 0 ? {} : { details }),
+  });
+};
+
 const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
   if (error instanceof GeoSpecAssertionError) {
     return [...error.diagnostics];
+  }
+
+  if (isAdmissionRefusal(error)) {
+    return [admissionRefusalDiagnostic(error)];
   }
 
   if (error instanceof GeoSpecTestTimeoutError) {
@@ -360,6 +412,10 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
       if (error instanceof GeoSpecAssertionError && assertion.report !== undefined) {
         nativeClaimFailures.add(error);
       }
+      if (isAdmissionRefusal(error)) {
+        // The claim's load was already admitted, so this refusal is no limit of the model.
+        return recordAssertion(assertion, [claimRefusalDiagnostic(error)]);
+      }
       assertion.passed = false;
       assertion.diagnostics ??= createErrorDiagnostics(error);
       throw error;
@@ -381,7 +437,7 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
                 suite: capturedSuite,
                 name,
                 assertions: [],
-                status: 'failed',
+                status: isAdmissionRefusal(error) ? 'inconclusive' : 'failed',
                 diagnostics: createErrorDiagnostics(error),
               });
             },
@@ -397,7 +453,7 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
           suite: [...suite],
           name,
           assertions: [],
-          status: 'failed',
+          status: isAdmissionRefusal(error) ? 'inconclusive' : 'failed',
           diagnostics: createErrorDiagnostics(error),
         });
       }
@@ -491,7 +547,9 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
             const { assertions } = scheduledTest.test;
             const infrastructureFailure =
               failures.some(
-                (failure) => !(failure instanceof GeoSpecAssertionError) || !nativeClaimFailures.has(failure),
+                (failure) =>
+                  !isAdmissionRefusal(failure) &&
+                  (!(failure instanceof GeoSpecAssertionError) || !nativeClaimFailures.has(failure)),
               ) ||
               assertions.some(
                 (assertion) =>
@@ -504,7 +562,8 @@ export function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollec
               const statuses = assertions.map((assertion) => assertion.report?.status);
               scheduledTest.test.status = statuses.includes('failed')
                 ? 'failed'
-                : statuses.some((status) => status !== undefined && status !== 'passed' && status !== 'unsupported')
+                : failures.some((failure) => isAdmissionRefusal(failure)) ||
+                    statuses.some((status) => status !== undefined && status !== 'passed' && status !== 'unsupported')
                   ? 'inconclusive'
                   : statuses.includes('unsupported')
                     ? 'unsupported'

@@ -35,6 +35,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./adopter": "./src/native-kernel-adopter.ts",
+    "./store": "./src/store.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -49,6 +50,11 @@
         "types": "./dist/native-kernel-adopter.d.mts",
         "import": "./dist/native-kernel-adopter.mjs",
         "default": "./dist/native-kernel-adopter.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
       },
       "./package.json": "./package.json"
     },

@@ -135,6 +135,24 @@ describe('createBambuStudioService', () => {
       expect(engine.loadBambuStudioCatalog).toHaveBeenCalledTimes(2);
     });
 
+    it('should release catalogs loaded under presets that have since changed', async () => {
+      const { dataDirectory, preset } = await dataDirectoryWithUserPreset();
+      const engine = fakeEngine({ ...install, dataDir: dataDirectory });
+      const service = serviceWith(engine);
+      const original = new Date(Date.now() - 60_000);
+      await utimes(preset, original, original);
+
+      await service.catalog({ model: 'X1C' });
+      const later = new Date(Date.now() + 60_000);
+      await utimes(preset, later, later);
+      await service.catalog({ model: 'X1C' });
+      /* Back to the first stamp: its catalog was released when the presets changed, so main loads it again. */
+      await utimes(preset, original, original);
+      await service.catalog({ model: 'X1C' });
+
+      expect(engine.loadBambuStudioCatalog).toHaveBeenCalledTimes(3);
+    });
+
     it('should answer a typed refusal when Bambu Studio is not installed', async () => {
       const answer = await serviceWith(fakeEngine(false)).catalog({});
 

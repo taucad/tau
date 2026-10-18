@@ -36,6 +36,7 @@
     ".": "./src/index.ts",
     "./browser/three-renderer-output": "./src/browser/three-renderer-output.ts",
     "./preparation": "./src/preparation/index.ts",
+    "./roster": "./src/roster/kernel-roster-coverage.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -55,6 +56,11 @@
         "types": "./dist/preparation/index.d.mts",
         "import": "./dist/preparation/index.mjs",
         "default": "./dist/preparation/index.mjs"
+      },
+      "./roster": {
+        "types": "./dist/roster/kernel-roster-coverage.d.mts",
+        "import": "./dist/roster/kernel-roster-coverage.mjs",
+        "default": "./dist/roster/kernel-roster-coverage.mjs"
       },
       "./package.json": "./package.json"
     },

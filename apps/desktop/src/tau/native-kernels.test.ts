@@ -8,9 +8,10 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { computeTreeIntegrity } from '@taucad/runtime/preparation/node';
 import type { ReceiptFile } from '@taucad/runtime/preparation/node';
-import { defineRuntime } from '@taucad/runtime/worker';
+import { defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
 import { nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
 import {
   awaitNativeKernels,
@@ -18,6 +19,12 @@ import {
   receiveNativeKernels,
   verifyDesktopClosure,
 } from '#tau/native-kernels.js';
+
+const composedKernels = async (frame: NativeKernelsFrame) => {
+  const plugins = await desktopNativeKernels(frame);
+  const definition = await resolveRuntimeDefinition(defineRuntime({ plugins: [...plugins] }), undefined);
+  return definition.kernels;
+};
 
 const refusal =
   'The @taucad/build123d closure in this app differs from its receipt (python/bin/python3); reinstall Tau.';
@@ -38,21 +45,21 @@ describe('desktop native kernels', () => {
     await expect(awaitNativeKernels()).resolves.toBe(frame);
   });
 
-  it('should map each sealed closure to its kernel options and stand in for none', () => {
+  it('should map each sealed closure to its kernel options, in roster order, and stand in for none', async () => {
     const frame = nativeKernelsFixture({ picogk: true });
-    const native = desktopNativeKernels(frame);
+    const kernels = await composedKernels(frame);
     const build123dRoot = frame.kernels[0]!.closure!.root;
     const picogkRoot = frame.kernels[1]!.closure!.root;
 
-    expect(native.unavailable).toBeUndefined();
-    expect(native.build123d).toMatchObject({ pythonSha256: '1'.repeat(64) });
-    expect(native.build123d?.supportFiles).toEqual([
+    expect(kernels.map(({ id }) => id)).toEqual(['build123d', 'picogk']);
+    expect(kernels[0]?.options).toMatchObject({ pythonSha256: '1'.repeat(64), runtimePath: build123dRoot });
+    expect(kernels[0]?.options).toHaveProperty('supportFiles', [
       { path: `${build123dRoot}/tau-worker/analyzer.py`, sha256: '2'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/glb.py`, sha256: '3'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/native_materials.py`, sha256: 'b'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/mechanisms.py`, sha256: 'c'.repeat(64) },
     ]);
-    expect(native.picogk).toMatchObject({
+    expect(kernels[1]?.options).toMatchObject({
       workerExecutable: `${picogkRoot}/dotnet/dotnet`,
       workerSha256: '5'.repeat(64),
       runtimePath: picogkRoot,
@@ -60,25 +67,25 @@ describe('desktop native kernels', () => {
     });
   });
 
-  it('should bound every native request and artifact so a runaway worker is recycled', () => {
-    const native = desktopNativeKernels(nativeKernelsFixture({ picogk: true }));
+  it('should bound every native request and artifact so a runaway worker is recycled', async () => {
+    const kernels = await composedKernels(nativeKernelsFixture({ picogk: true }));
 
     /* Unbounded defaults let one script hold all memory for as long as it runs. */
-    for (const options of [native.build123d, native.picogk]) {
-      expect(options?.requestTimeout).toBe(10 * 60_000);
-      expect(options?.maxArtifactBytes).toBe(1024 * 1024 * 1024);
+    expect(kernels).toHaveLength(2);
+    for (const { options } of kernels) {
+      expect(options).toMatchObject({ requestTimeout: 10 * 60_000, maxArtifactBytes: 1024 * 1024 * 1024 });
     }
   });
 
   it('should answer describe, render and export of a file whose kernel has no closure with main refusal', async () => {
-    const { unavailable, build123d } = desktopNativeKernels({
+    const plugins = await desktopNativeKernels({
       type: 'tau:native-kernels',
       kernels: [{ kernel: 'build123d', package: '@taucad/build123d', extensions: ['py'], refusal }],
     });
-    expect(build123d).toBeUndefined();
+    expect(plugins).toHaveLength(1);
     const client = createRuntimeClient<AnyRuntimeDefinition>({
       transport: inProcessTransport({
-        runtime: defineRuntime({ plugins: [unavailable!] }),
+        runtime: defineRuntime({ plugins: [...plugins] }),
         fileSystem: fromMemoryFs({ 'main.py': 'from build123d import Box\n' }),
       }),
     });
@@ -86,7 +93,7 @@ describe('desktop native kernels', () => {
     const issue = {
       code: 'KERNEL_NOT_PREPARED',
       message: refusal,
-      details: { kernel: 'build123d', package: '@taucad/build123d', entryPath: 'main.py' },
+      details: { kernel: 'build123d', package: '@taucad/build123d', extension: '.py' },
     };
 
     const description = await client.describe({ source: { path: 'main.py' } });

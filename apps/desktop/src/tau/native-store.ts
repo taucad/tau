@@ -16,12 +16,11 @@ import { access, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:f
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import build123dManifest from '@taucad/build123d/tau-plugin.json' with { type: 'json' };
-import picogkManifest from '@taucad/picogk/tau-plugin.json' with { type: 'json' };
+import { nativeKernelIdsSupportedOn, nativePreparationPlugins } from '@taucad/native-kernels/node';
 import {
   computeTreeIntegrity,
   createPreparationHost,
-  parsePluginDeployment,
+  detectHostIndicators,
   readManagedPreparation,
   reverifyClosure,
 } from '@taucad/runtime/preparation/node';
@@ -40,14 +39,23 @@ import type { NativeKernelsFrame, NativeKernelSlot } from '#tau/native-kernels-f
 
 const execFileAsync = promisify(execFile);
 
-/** The native packages the desktop composes, read from their `tau-plugin.json` without running plugin code. */
-export const desktopNativePlugins: readonly PreparationPlugin[] = [
-  {
-    package: '@taucad/build123d',
-    deployment: parsePluginDeployment(build123dManifest, '@taucad/build123d tau-plugin.json'),
-  },
-  { package: '@taucad/picogk', deployment: parsePluginDeployment(picogkManifest, '@taucad/picogk tau-plugin.json') },
-];
+/**
+ * The native packages the desktop composes: the roster's `tau-plugin.json` rows with their launch sets, without their
+ * seal steps. Main only seeds sealed closures from the bundle and reads their launch indexes; it never runs a seal.
+ */
+export const desktopNativePlugins: readonly PreparationPlugin[] = nativePreparationPlugins().map(
+  ({ seal: _seal, ...plugin }) => plugin,
+);
+
+/**
+ * The native kernels this machine can run, advertised to the renderer's product catalog: every roster kernel whose
+ * required dependencies declare a variant for this host.
+ * @returns Kernel names, in roster order; none when the host cannot be identified.
+ */
+export const desktopNativeKernelIds = (): readonly string[] => {
+  const indicators = detectHostIndicators();
+  return indicators === undefined ? [] : nativeKernelIdsSupportedOn(indicators);
+};
 
 /**
  * Open the preparation host main seeds and inspects through. It never downloads: main only seeds from the bundle and

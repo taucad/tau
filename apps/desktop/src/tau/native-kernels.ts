@@ -9,28 +9,14 @@
  *
  * @module
  */
-import { build123dOptionsFromClosure } from '@taucad/build123d';
-import type { Build123dClosureOptions } from '@taucad/build123d';
+import { nativeCompositionSchema, nativeKernelAdopters, unavailableKernelsPlugin } from '@taucad/native-kernels';
+import type { UnavailableNativeKernel } from '@taucad/native-kernels';
+import { composeNativePlugins, verifyStoreClosure } from '@taucad/native-kernels/node';
 import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
-import type { NativeRuntimeVerifier } from '@taucad/native-process-core';
-import { picogkOptionsFromClosure } from '@taucad/picogk';
-import type { PicogkKernelOptions } from '@taucad/picogk';
-import { createKernelError, defineKernel } from '@taucad/runtime/kernel';
-import type { KernelIssue } from '@taucad/runtime/kernel';
-import { definePlugin } from '@taucad/runtime/plugin';
 import type { PluginInstance } from '@taucad/runtime/plugin';
-import { reverifyClosure } from '@taucad/runtime/preparation/node';
 
 import { nativeKernelsFrameType } from '#tau/native-kernels-frame.js';
-import type { NativeKernelsFrame, NativeKernelSlot } from '#tau/native-kernels-frame.js';
-
-/** The native kernel options a desktop runtime composes. */
-export type DesktopNativeKernels = {
-  readonly build123d?: Build123dClosureOptions;
-  readonly picogk?: PicogkKernelOptions;
-  /** A stand-in for every declared native kernel without a closure, answering its files with the refusal. */
-  readonly unavailable?: PluginInstance;
-};
+import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
 
 /*
  * Desktop host policy for every native request (D-DT-02). The kernels default to
@@ -79,80 +65,47 @@ export const awaitNativeKernels = async (): Promise<NativeKernelsFrame> => recei
 /**
  * D8: a native worker that exits before its handshake re-verifies the closure it ran from against the receipt beside
  * it, so the refusal names the damaged file.
- * @param root - The worker's closure root.
- * @param signal - Aborts the re-verification.
- * @returns The damaged files and the remedy, or `undefined` when the closure is intact.
  */
-export const verifyDesktopClosure: NativeRuntimeVerifier = async (root, signal) => {
-  const files = await reverifyClosure(root, signal);
-  if (files?.length === 0) {
-    return undefined;
-  }
-  return {
-    files: files ?? ['receipt.json'],
-    remedy: `Quit Tau, remove ${root} and open Tau again to restore it from the app, or run \`tau prepare --verify\`.`,
-  };
-};
-
-const unavailableKernel = (slot: NativeKernelSlot) => {
-  const issue = (entryPath: string): KernelIssue => ({
-    code: 'KERNEL_NOT_PREPARED',
-    type: 'kernel',
-    severity: 'error',
-    message: slot.refusal ?? `The ${slot.kernel} runtime is not installed on this machine.`,
-    details: { kernel: slot.kernel, package: slot.package, entryPath },
-  });
-  return defineKernel({
-    id: slot.kernel,
-    extensions: slot.extensions as [string, ...string[]],
-    name: `${slot.kernel} (unavailable)`,
-    version: '0',
-    views: {},
-    exports: {},
-    async initialize() {
-      return undefined;
-    },
-    async resolve() {
-      return { resolved: [], unresolved: [] };
-    },
-    async describe({ entryPath }) {
-      return createKernelError([issue(entryPath)]);
-    },
-    async evaluate({ entryPath }) {
-      const error = new Error(issue(entryPath).message);
-      throw Object.assign(error, { issues: [issue(entryPath)] });
-    },
-  });
-};
+export const verifyDesktopClosure = verifyStoreClosure(
+  (_files, root) =>
+    `Quit Tau, remove ${root} and open Tau again to restore it from the app, or run \`tau prepare --verify\`.`,
+);
 
 /**
- * Map main's frame to kernel options: a sealed closure gives its kernel's options and installs the re-verifier; a
- * kernel without one is answered by a stand-in that refuses its files with main's reason.
+ * Map main's frame to plugins: a sealed closure gives its kernel's options through the roster's adopter, bounded by
+ * the desktop's policy, and installs the re-verifier; a kernel without one is answered by the roster's stand-in, which
+ * refuses its files with main's reason.
  * @param frame - What main posted.
- * @returns The options and the stand-in plugin, if any.
+ * @returns The native plugins in roster order, then the stand-in, if any.
  */
-export const desktopNativeKernels = (frame: NativeKernelsFrame): DesktopNativeKernels => {
-  const kernels: { build123d?: Build123dClosureOptions; picogk?: PicogkKernelOptions } = {};
-  const missing: NativeKernelSlot[] = [];
+export const desktopNativeKernels = async (frame: NativeKernelsFrame): Promise<readonly PluginInstance[]> => {
+  const composed: unknown[] = [];
+  const missing: UnavailableNativeKernel[] = [];
   for (const slot of frame.kernels) {
-    if (slot.closure !== undefined && slot.package === '@taucad/build123d') {
-      kernels.build123d = { ...build123dOptionsFromClosure(slot.closure), ...nativeBounds };
-    } else if (slot.closure !== undefined && slot.package === '@taucad/picogk') {
-      kernels.picogk = { ...picogkOptionsFromClosure(slot.closure), ...nativeBounds };
+    const adopter = nativeKernelAdopters.find((candidate) => candidate.package === slot.package);
+    if (slot.closure !== undefined && adopter !== undefined) {
+      composed.push({
+        package: adopter.package,
+        kernel: slot.kernel,
+        closureRoot: slot.closure.root,
+        options: adopter.optionsFromClosure(slot.closure),
+      });
     } else if (slot.extensions.length > 0) {
-      missing.push(slot);
+      missing.push({
+        kernel: slot.kernel,
+        package: slot.package,
+        extensions: slot.extensions,
+        reason: 'not-prepared',
+        byteLength: 0,
+        refusal: slot.refusal ?? `The ${slot.kernel} runtime is not installed on this machine.`,
+      });
     }
   }
-  if (kernels.build123d !== undefined || kernels.picogk !== undefined) {
+  /* Each row is checked against its adopter's options schema, which also types it by package. */
+  const { kernels } = nativeCompositionSchema.parse({ kernels: composed, unavailable: [], closureRoots: [] });
+  if (kernels.length > 0) {
     installNativeRuntimeVerifier(verifyDesktopClosure);
   }
-  if (missing.length === 0) {
-    return kernels;
-  }
-  const unavailable = definePlugin({
-    meta: { name: '@taucad/desktop/unavailable-native-kernels' },
-    kernels: Object.fromEntries(missing.map((slot) => [slot.kernel, unavailableKernel(slot)])),
-    presets: { default: missing.map((slot): `kernels.${string}` => `kernels.${slot.kernel}`) },
-  });
-  return { ...kernels, unavailable: unavailable() };
+  const unavailable = unavailableKernelsPlugin(missing);
+  return [...(await composeNativePlugins(kernels, nativeBounds)), ...(unavailable ? [unavailable] : [])];
 };

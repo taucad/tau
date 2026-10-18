@@ -117,6 +117,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('#tau/native-store.js', () => ({
+  desktopNativeKernelIds: () => ['build123d'],
   startNativeStore: vi.fn(async (options: unknown) => {
     state.nativeStoreOptions = options;
     return undefined;

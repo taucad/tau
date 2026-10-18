@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { assimp } from '@taucad/assimp';
-import { build123d } from '@taucad/build123d';
 import { brep } from '@taucad/brep';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
@@ -18,7 +17,6 @@ import {
 } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { createOpenrscadKernel } from '@taucad/openrscad';
-import { picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
@@ -95,7 +93,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
   defineRuntime({
     configSchema: desktopRuntimeConfigSchema,
     createRuntime: async (config) => {
-      const native = desktopNativeKernels(await (options.nativeKernels ?? awaitNativeKernels)());
+      const nativePlugins = await desktopNativeKernels(await (options.nativeKernels ?? awaitNativeKernels)());
       return {
         plugins: [
           esbuild(
@@ -117,9 +115,8 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
             preset: 'all',
             transcoders: { export: { backend: desktopAssimpBackend } },
           }),
-          ...(native.build123d === undefined ? [] : [build123d({ kernels: { default: native.build123d } })]),
-          ...(native.picogk === undefined ? [] : [picogk({ kernels: { default: native.picogk } })]),
-          ...(native.unavailable === undefined ? [] : [native.unavailable]),
+          /* Native kernels in roster order, then the stand-in for those without a closure. */
+          ...nativePlugins,
           replicad({
             kernels: {
               default: {

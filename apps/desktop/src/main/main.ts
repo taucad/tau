@@ -111,7 +111,7 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
-import { startNativeStore } from '#tau/native-store.js';
+import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
@@ -122,7 +122,6 @@ import {
   hostHandOffChannel,
   quitChannels,
   bootstrapArgumentPrefix,
-  desktopNativeKernelIds,
   computeControlChannels,
   servicesPortRelayTag,
   slicersChannels,
@@ -1457,7 +1456,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           `${bootstrapArgumentPrefix}${JSON.stringify({
             env: clientEnvironment(environment),
             homeRoot,
-            runtimeKernelIds: desktopNativeKernelIds,
+            runtimeKernelIds: desktopNativeKernelIds(),
           })}`,
         ],
       },

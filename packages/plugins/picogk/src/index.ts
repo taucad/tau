@@ -9,3 +9,4 @@ export type { PicogkClosureOptions } from '#picogk-closure.js';
 export { loadPicogkKernelOptions, picogkRuntimeManifestSchema } from '#picogk-resources.js';
 export type { PicogkKernelOptions, PicogkRuntimeManifest } from '#picogk-resources.js';
 export { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
+export { picogkNative } from '#native.js';

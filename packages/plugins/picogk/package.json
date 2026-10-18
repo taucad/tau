@@ -39,6 +39,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./native": "./src/native.ts",
     "./agent": {
       "types": "./agent/skills.d.cts",
       "default": "./agent/skills.json"
@@ -55,6 +56,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./native": {
+        "types": "./dist/native.d.mts",
+        "import": "./dist/native.mjs",
+        "default": "./dist/native.mjs"
       },
       "./agent": {
         "types": "./agent/skills.d.cts",

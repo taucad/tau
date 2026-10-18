@@ -347,7 +347,7 @@ describe('plugin generator', () => {
       peerDependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     }>(tree, `${root}/package.json`);
-    expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0', zod: '^4.0.0' });
+    expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0', zod: '^4.1.0' });
     expect(manifest.devDependencies).toEqual({ '@taucad/runtime': 'workspace:*', zod: 'catalog:' });
   });
 

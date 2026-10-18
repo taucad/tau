@@ -602,7 +602,7 @@
     "react-dom": "^19.0.0",
     "three": "^0.184.0",
     "xstate": "^6.0.0-alpha.59",
-    "zod": "^4.0.0"
+    "zod": "^4.1.0"
   },
   "devDependencies": {
     "@react-three/fiber": "^9.6.1",

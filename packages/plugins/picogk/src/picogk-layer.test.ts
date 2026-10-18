@@ -2,9 +2,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { manifestText } from '@taucad/dotnet-kernel-core/layer';
 import { describe, expect, it } from 'vitest';
 
-import { composeManifest, layerPayload, manifestText, picogkLayerRecordSchema } from '#picogk-layer.js';
+import { composeManifest, layerPayload, picogkLayerRecordSchema } from '#picogk-layer.js';
 import type { PicogkLayerRecord } from '#picogk-layer.js';
 
 const record: PicogkLayerRecord = {

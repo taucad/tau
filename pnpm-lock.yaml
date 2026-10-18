@@ -4638,6 +4638,9 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../../core/cache
+      '@taucad/dotnet-kernel-core':
+        specifier: workspace:*
+        version: link:../../core/dotnet-kernel
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

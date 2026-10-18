@@ -7,7 +7,10 @@ import { maximumRateLimitAutoResumes, resetRateLimitAutoResumes } from '#utils/r
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 
-const useChatActions = vi.fn(() => ({ continueChat, regenerate }));
+const useChatActions = vi.fn((): { continueChat: () => void; regenerate: () => void } => ({
+  continueChat,
+  regenerate,
+}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => useChatActions(),

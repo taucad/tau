@@ -9,6 +9,7 @@ import {
   createKernelSuccess,
   defineKernel,
 } from '@taucad/runtime/kernel';
+import { withNativeDeployment } from '@taucad/native-process-core/adopter';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
@@ -64,8 +65,7 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
-/** `picogk` native C# kernel capability. @public */
-export const picogkKernel = defineKernel({
+const picogkKernelDefinition = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
@@ -339,3 +339,10 @@ export const picogkKernel = defineKernel({
     }
   },
 });
+
+/**
+ * The `picogk` kernel capability. Every registration carries `picogkNative`, so a host that lists the plugin in a runtime
+ * definition prepares and binds the kernel from the definition alone.
+ * @public
+ */
+export const picogkKernel = withNativeDeployment(picogkKernelDefinition, picogkNative);

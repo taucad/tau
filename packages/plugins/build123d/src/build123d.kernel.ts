@@ -1,3 +1,4 @@
+import { withNativeDeployment } from '@taucad/native-process-core/adopter';
 import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type { ComputeAnnouncement, KernelIssue, KernelServices } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
@@ -241,8 +242,7 @@ const meshRequests = (
   },
 });
 
-/** `build123d` kernel capability. @public */
-export const build123dKernel = defineKernel({
+const build123dKernelDefinition = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
@@ -507,3 +507,10 @@ export const build123dKernel = defineKernel({
     }
   },
 });
+
+/**
+ * The `build123d` kernel capability. Every registration carries `build123dNative`, so a host that lists the plugin in a runtime
+ * definition prepares and binds the kernel from the definition alone.
+ * @public
+ */
+export const build123dKernel = withNativeDeployment(build123dKernelDefinition, build123dNative);

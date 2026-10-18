@@ -95,6 +95,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
     "zod": "catalog:"
   },
   "taucad": {

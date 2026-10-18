@@ -4372,6 +4372,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -4709,6 +4712,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)

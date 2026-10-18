@@ -1,5 +1,6 @@
-import { z } from 'zod';
 import { actionDigest, contentDigest, sceneDigest } from '@taucad/cache-core';
+import { pythonArtifactSchema } from '@taucad/python-kernel-core';
+import { z } from 'zod';
 
 const digestSchema = z.string().regex(/^sha256:[\da-f]{64}$/u);
 const actionDigestSchema = digestSchema.transform((value) => actionDigest({ value }));
@@ -38,36 +39,6 @@ export const build123dComputeActionSchema = z.object({
   arguments: z.json(),
   environment: z.json(),
   codec: z.object({ id: z.string().min(1), version: z.string().min(1) }),
-});
-
-/** Private protocol version shared with the checked-in Python worker. */
-export const build123dProtocolVersion = 1;
-
-export const build123dIssueSchema = z.object({
-  message: z.string(),
-  code: z.string(),
-  type: z.enum(['syntax', 'runtime', 'kernel', 'validation']),
-  severity: z.enum(['error', 'warning', 'info']),
-  location: z
-    .object({
-      fileName: z.string(),
-      startLineNumber: z.number().int().positive(),
-      startColumn: z.number().int().positive(),
-    })
-    .optional(),
-});
-
-export const build123dReadySchema = z.object({
-  protocolVersion: z.literal(build123dProtocolVersion),
-  type: z.literal('ready'),
-  pythonVersion: z.string(),
-});
-
-export const build123dResponseSchema = z.object({
-  protocolVersion: z.literal(build123dProtocolVersion),
-  requestId: z.string(),
-  result: z.unknown().optional(),
-  error: z.object({ issues: z.array(build123dIssueSchema).min(1) }).optional(),
 });
 
 const build123dParameterDeclarationSchema = z
@@ -113,15 +84,10 @@ export const build123dComputeDescriptorSchema = z.object({
 /** EQ16: one control frame carries at most this many descriptors. */
 export const build123dComputeDescriptorLimit = 512;
 
-const bundleSchema = z.object({
-  artifactPath: z.string().min(1),
-  byteLength: z.number().int().nonnegative(),
-});
-
 export const build123dComputeExportSchema = z.object({
   descriptors: z.array(build123dComputeDescriptorSchema).max(build123dComputeDescriptorLimit),
   omitted: z.array(z.string()),
-  bundle: bundleSchema.optional(),
+  bundle: pythonArtifactSchema.optional(),
 });
 
 export const build123dComputeImportSchema = z.object({
@@ -161,9 +127,7 @@ export const build123dBuildSchema = z.object({
     .optional(),
 });
 
-export const build123dArtifactSchema = z.object({
-  artifactPath: z.string().min(1),
-  byteLength: z.number().int().nonnegative(),
+export const build123dArtifactSchema = pythonArtifactSchema.extend({
   mechanism: z.unknown().optional(),
   mechanismIntent: z
     .object({
@@ -202,7 +166,3 @@ export type Build123dMesh = z.infer<typeof build123dMeshSchema>;
 export const build123dMeasureSchema = z.object({ diagonal: z.number().nonnegative() });
 
 export const build123dEmptySchema = z.object({});
-export const build123dShutdownSchema = z.object({ shutdown: z.literal(true) });
-
-/** Structured issue emitted by the private Python worker. */
-export type Build123dIssue = z.infer<typeof build123dIssueSchema>;

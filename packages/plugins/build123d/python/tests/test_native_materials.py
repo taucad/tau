@@ -19,7 +19,7 @@ from build123d import Box, Compound, Cylinder, Location, export_step, import_ste
 from PIL import Image
 from threejs_materials import PbrMaps, PbrProperties, PbrValues
 
-from glb import write_glb
+from tau_kernel.glb import write_glb
 from native_materials import material_dependencies, tessellate_surface
 
 
@@ -127,7 +127,7 @@ class NativeMaterialTest(unittest.TestCase):
             }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.glb"
-            write_glb(path, components, meshes, {"mechanismDiagnostics": [{"code": "test"}]})
+            write_glb(path, components, meshes, {"mechanismDiagnostics": [{"code": "test"}]}, generator="@taucad/build123d")
             payload = path.read_bytes()
         length = struct.unpack_from("<I", payload, 12)[0]
         doc = json.loads(payload[20:20+length])

@@ -1,42 +1,30 @@
-"""Warm native Build123d worker. Stdout is reserved for NDJSON protocol frames."""
+"""Warm native Build123d worker: dispatch over OCP objects. Stdout is reserved for NDJSON protocol frames."""
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 import base64
 from contextlib import nullcontext
-import dataclasses
 import hashlib
-import importlib
-import importlib.util
 import inspect
 import json
 import math
-import os
-import queue
 import re
-import signal
-import shutil
-import sys
-import threading
 import time
-import traceback
 import types
 import unicodedata
-import uuid
+import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from analyzer import AnalysisIssue, analyze_project
-from glb import write_glb
+from tau_kernel.analyzer import ParameterSchemaIdentity, analyze_project
+from tau_kernel.glb import write_glb
+from tau_kernel.model import load_entry
+from tau_kernel.protocol import Handles, WorkerContext, run_worker
 from native_materials import material_dependencies, tessellate_surface
 from mechanisms import project_mechanism
 
-PROTOCOL_VERSION = 1
-MAX_FRAME_BYTES = 1_048_576
 MAX_HANDLES = 32
 MAX_COMPUTE_BUNDLE_BYTES = 96 * 1024 * 1024
 # EQ16: one control frame carries at most this many descriptors under the 1 MiB frame cap.
@@ -52,151 +40,9 @@ MAX_COMPUTE_LINEAGE_DEPTH = 8
 COMPUTE_BASE_CHARGE_BYTES = 4096
 COMPUTE_FACE_CHARGE_BYTES = 512
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-_PROTOCOL_OUTPUT = sys.stdout
-
-
-def _is_cancel_frame(line: bytes) -> bool:
-    """Recognize the out-of-band cancel notification without consuming a request slot."""
-
-    try:
-        request = json.loads(line)
-    except ValueError:
-        return False
-    return isinstance(request, dict) and request.get("method") == "cancel"
-
-
-def _terminate_orphaned_process_tree(temporary_root: Path) -> None:
-    """Exit the detached worker group after its Node owner disappears."""
-
-    shutil.rmtree(temporary_root, ignore_errors=True)
-    if os.name == "posix":
-        try:
-            os.killpg(os.getpgrp(), signal.SIGKILL)
-        except OSError:
-            pass
-    os._exit(1)
-
-
-def _parent_is_alive(parent_pid: int) -> bool:
-    """Probe the supervising process without signalling it.
-
-    The sandbox reparents this worker through its wrapper chain, and denies signals to
-    processes outside the sandbox with EPERM; only ESRCH proves the supervisor is gone.
-    """
-    try:
-        os.kill(parent_pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _watch_parent(
-    parent_pid: int,
-    temporary_root: Path,
-    parent_is_alive: Any = _parent_is_alive,
-    wait: Any = time.sleep,
-    terminate: Any = _terminate_orphaned_process_tree,
-) -> None:
-    while parent_is_alive(parent_pid):
-        wait(0.25)
-    terminate(temporary_root)
-
-
-def _start_parent_watchdog(parent_pid: int, temporary_root: Path) -> None:
-    if not _parent_is_alive(parent_pid):
-        # A PID namespace (Linux Bubblewrap) hides the supervisor entirely; there the sandbox
-        # itself dies with its parent, and a supervisor already gone closes stdin instead.
-        return
-    threading.Thread(
-        target=_watch_parent,
-        args=(parent_pid, temporary_root),
-        name="tau-parent-watchdog",
-        daemon=True,
-    ).start()
-
-
-def _isolate_stdout() -> None:
-    """Reserve the original stdout descriptor for protocol output."""
-
-    global _PROTOCOL_OUTPUT
-    _PROTOCOL_OUTPUT = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
-    os.dup2(2, 1)
-    sys.stdout = os.fdopen(os.dup(2), "w", encoding="utf-8", buffering=1)
-
-
-def _send(frame: dict[str, Any]) -> None:
-    encoded = json.dumps(frame, separators=(",", ":"), ensure_ascii=False)
-    if len(encoded.encode("utf-8")) > MAX_FRAME_BYTES:
-        raise RuntimeError("Protocol response exceeds the maximum frame size")
-    _PROTOCOL_OUTPUT.write(encoded + "\n")
-
-
-def _runtime_issue(error: BaseException, workspace: Path, entry_path: str | None) -> dict[str, Any]:
-    workspace = workspace.resolve()
-    location: dict[str, Any] | None = None
-    for frame in reversed(traceback.extract_tb(error.__traceback__)):
-        try:
-            relative = Path(frame.filename).resolve().relative_to(workspace).as_posix()
-        except ValueError:
-            continue
-        location = {
-            "fileName": relative,
-            "startLineNumber": frame.lineno,
-            "startColumn": 1,
-        }
-        break
-    if location is None and entry_path is not None:
-        location = {"fileName": entry_path, "startLineNumber": 1, "startColumn": 1}
-    return {
-        "message": str(error) or type(error).__name__,
-        "code": "PYTHON_RUNTIME",
-        "type": "runtime",
-        "severity": "error",
-        **({"location": location} if location else {}),
-    }
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-_LOADED_PROJECT_MODULES: dict[str, str] = {}
-"""Project modules the previous build imported, as module name -> project-relative path.
-
-Memoised for the life of the interpreter so no build walks `sys.modules` (2,803 entries, 0.5 ms
-per walk). Every build evicts exactly these names and then re-records what it actually imported,
-so an edited project module is always dropped before it is re-imported. Only `_load_model` puts
-project modules into `sys.modules`, which is what makes the memo complete.
-"""
-
-
-def _record_project_modules(workspace: Path, known: frozenset[str]) -> None:
-    """Refresh the memo from the modules imported since `known` was captured. `workspace` is resolved."""
-
-    prefix = os.path.join(str(workspace), "")
-    _LOADED_PROJECT_MODULES.clear()
-    for name in sys.modules.keys() - known:
-        file_name = getattr(sys.modules[name], "__file__", None)
-        if not isinstance(file_name, str):
-            continue
-        if not os.path.isabs(file_name):
-            file_name = os.path.abspath(file_name)
-        if file_name.startswith(prefix) and file_name.endswith(".py") and os.path.basename(file_name) != ".py":
-            _LOADED_PROJECT_MODULES[name] = os.path.relpath(file_name, workspace).replace(os.sep, "/")
-
-
-def _evict_project_modules() -> None:
-    for name in _LOADED_PROJECT_MODULES:
-        sys.modules.pop(name, None)
-    _LOADED_PROJECT_MODULES.clear()
-    importlib.invalidate_caches()
+PARAMETERS = ParameterSchemaIdentity(id="urn:taucad:build123d:parameters", name="Build123dParameters")
+"""How the analyzer names Build123d's parameter declaration."""
+GLB_GENERATOR = "@taucad/build123d"
 
 
 class _ComputeBypass(Exception):
@@ -633,47 +479,6 @@ class _ComputeAdapter:
         self._patches.clear()
 
 
-def _validate_parameters(parameters: Any, schema: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(parameters, dict):
-        raise TypeError("Parameters must be an object")
-    properties = schema["properties"]
-    unknown = set(parameters) - set(properties)
-    if unknown:
-        raise TypeError(f"Unknown parameters: {', '.join(sorted(unknown))}")
-    validated = {name: definition["default"] for name, definition in properties.items()}
-    validated.update(parameters)
-    for name, value in validated.items():
-        definition = properties[name]
-        expected = definition["type"]
-        valid = {
-            "boolean": type(value) is bool,
-            "integer": type(value) is int,
-            "number": isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value),
-            "string": isinstance(value, str),
-        }[expected]
-        if not valid:
-            raise TypeError(f"Parameter '{name}' must be {expected}")
-        if "enum" in definition and value not in definition["enum"]:
-            raise ValueError(f"Parameter '{name}' must be one of {definition['enum']}")
-        for key, comparison in (
-            ("minimum", lambda left, right: left >= right),
-            ("maximum", lambda left, right: left <= right),
-            ("exclusiveMinimum", lambda left, right: left > right),
-            ("exclusiveMaximum", lambda left, right: left < right),
-        ):
-            if key in definition and not comparison(value, definition[key]):
-                raise ValueError(f"Parameter '{name}' violates {key}")
-        if "minLength" in definition and len(value) < definition["minLength"]:
-            raise ValueError(f"Parameter '{name}' violates minLength")
-        if "maxLength" in definition and len(value) > definition["maxLength"]:
-            raise ValueError(f"Parameter '{name}' violates maxLength")
-        if "pattern" in definition and re.search(definition["pattern"], value) is None:
-            raise ValueError(f"Parameter '{name}' violates pattern")
-        if "multipleOf" in definition and not math.isclose(value % definition["multipleOf"], 0.0, abs_tol=1e-12):
-            raise ValueError(f"Parameter '{name}' violates multipleOf")
-    return validated
-
-
 def _validate_results(values: tuple[Any, ...]) -> None:
     """Validate every final result (G-F13)."""
 
@@ -684,31 +489,8 @@ def _validate_results(values: tuple[Any, ...]) -> None:
 
 def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any = None, motion: Any = None) -> tuple[tuple[Any, ...], list[str]]:
     workspace = workspace.resolve()
-    analysis = analyze_project(workspace, entry_path)
-    validated = _validate_parameters(parameters, analysis["jsonSchema"])
-    _evict_project_modules()
-    known = frozenset(sys.modules)
-    entry = workspace / entry_path
-    module_name = f"_tau_build123d_{uuid.uuid4().hex}"
-    spec = importlib.util.spec_from_file_location(module_name, entry)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load Python entry: {entry_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-        params_type = getattr(module, "Params", None)
-        main = getattr(module, "main", None)
-        if not isinstance(params_type, type) or not dataclasses.is_dataclass(params_type):
-            raise TypeError("Params must be a dataclass")
-        if not params_type.__dataclass_params__.frozen:
-            raise TypeError("Params must be a frozen dataclass")
-        if not callable(main):
-            raise TypeError("Define a callable main(params) function")
-        result = main(params_type(**validated))
-        if asyncio.iscoroutine(result):
-            result.close()
-            raise TypeError("Async main functions are not supported")
+    with load_entry(workspace, entry_path, parameters, identity=PARAMETERS, module_prefix="_tau_build123d_") as entry:
+        result = entry.result
         from build123d import Shape
 
         # None or an empty list is an empty scene, like the TypeScript kernels' empty main().
@@ -721,19 +503,16 @@ def _load_model(workspace: Path, entry_path: str, parameters: Any, adapter: Any 
         else:
             raise TypeError("main(params) must return None, a Shape or a list/tuple of Shapes")
         _validate_results(values)
-        resources = material_dependencies(values, workspace, analysis["resolved"])
+        resources = material_dependencies(values, workspace, entry.analysis["resolved"])
         if motion is not None:
-            declaration = getattr(module, "motion", None)
+            declaration = getattr(entry.module, "motion", None)
             if declaration is not None and not callable(declaration):
                 raise TypeError("motion must be a callable motion(model) function")
             motion(declaration(result) if declaration is not None else None)
         for index, shape in enumerate(values):
             if not shape.label or not shape.label.strip():
                 shape.label = f"Shape {index + 1}"
-    finally:
-        _record_project_modules(workspace, known)
-        sys.modules.pop(module_name, None)
-    return values, sorted(set(_LOADED_PROJECT_MODULES.values()) | set(resources))
+    return values, sorted(set(entry.dependencies) | set(resources))
 
 
 def _component_id(label: str, fallback: str) -> str:
@@ -934,37 +713,15 @@ def _topology(
 
 
 class Worker:
-    def __init__(self, workspace: Path, artifacts: Path) -> None:
-        self.workspace = workspace.resolve()
-        self.artifacts = artifacts.resolve()
-        self.handles: dict[str, tuple[Any, ...]] = {}
+    """Build123d's dispatch: retained shapes, the resident compute cache and the requests over them."""
+
+    def __init__(self, context: WorkerContext) -> None:
+        self.workspace = context.workspace
+        self.artifacts = context.artifacts
+        self.cancelled = context.cancelled
+        self.handles = Handles(MAX_HANDLES, "Build123d")
         self.motion: dict[str, Any] = {}
-        self.seen_requests: set[str] = set()
         self.compute = _ComputeCache()
-        self.cancelled = threading.Event()
-
-    def _artifact(self, suffix: str) -> Path:
-        path = self.artifacts / f"{uuid.uuid4().hex}.{suffix}"
-        if not _is_relative_to(path.resolve(), self.artifacts):
-            raise RuntimeError("Artifact path escaped the private directory")
-        return path
-
-    def _confined(self, descriptor: Any) -> Path:
-        """Resolve one caller-named bundle inside the private artifact directory."""
-
-        if not isinstance(descriptor, dict):
-            raise TypeError("Build123d compute bundle must be an artifact descriptor")
-        path_value = descriptor.get("artifactPath")
-        byte_length = descriptor.get("byteLength")
-        if not isinstance(path_value, str) or type(byte_length) is not int or byte_length < 0:
-            raise TypeError("Build123d compute bundle descriptor is invalid")
-        path = Path(path_value)
-        resolved = path.resolve(strict=True)
-        if path.is_symlink() or resolved.parent != self.artifacts:
-            raise ValueError("Build123d compute bundle escaped the private artifact directory")
-        if byte_length > MAX_COMPUTE_BUNDLE_BYTES or resolved.stat().st_size != byte_length:
-            raise ValueError("Build123d compute bundle has an invalid size")
-        return resolved
 
     def _import_compute(self, params: dict[str, Any]) -> dict[str, Any]:
         """Adopt one bounded warm bundle; a malformed bundle imports nothing."""
@@ -972,7 +729,9 @@ class Worker:
         descriptors = params.get("descriptors")
         if not isinstance(descriptors, list) or len(descriptors) > MAX_COMPUTE_DESCRIPTORS:
             raise ValueError("Build123d compute import descriptors are invalid")
-        resolved = self._confined(params.get("bundle"))
+        resolved = self.artifacts.confined(
+            params.get("bundle"), max_bytes=MAX_COMPUTE_BUNDLE_BYTES, label="Build123d compute bundle"
+        )
         try:
             payload = resolved.read_bytes()
         finally:
@@ -1055,7 +814,7 @@ class Worker:
             )
         if not descriptors:
             return {"descriptors": [], "omitted": omitted}
-        artifact = self._artifact("compute-bundle.bin")
+        artifact = self.artifacts.create("compute-bundle.bin")
         payload = b"".join(chunks)
         artifact.write_bytes(payload)
         return {
@@ -1066,10 +825,10 @@ class Worker:
 
     def dispatch(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "analyze":
-            return analyze_project(self.workspace, params["entryPath"], params.get("observedDependencies"))
+            return analyze_project(
+                self.workspace, params["entryPath"], params.get("observedDependencies"), identity=PARAMETERS
+            )
         if method == "build":
-            if len(self.handles) >= MAX_HANDLES:
-                raise RuntimeError("Retained Build123d handle limit reached")
             adapter = (
                 _ComputeAdapter(self.compute, params["compute"], self.cancelled) if "compute" in params else None
             )
@@ -1078,8 +837,7 @@ class Worker:
                 shapes, observed = _load_model(
                     self.workspace, params["entryPath"], params.get("parameters", {}), adapter, motion.append
                 )
-            handle_id = uuid.uuid4().hex
-            self.handles[handle_id] = shapes
+            handle_id = self.handles.retain(shapes)
             self.motion[handle_id] = motion[0]
             return {
                 "handleId": handle_id,
@@ -1125,8 +883,8 @@ class Worker:
             triangles = sum(len(mesh["indices"]) // 3 for mesh in meshes.values())
             vertices = sum(len(mesh["positions"]) // 3 for mesh in meshes.values())
             projection = project_mechanism(shapes, components, self.motion.get(params["handleId"]), meshes=meshes)
-            artifact = self._artifact("glb")
-            write_glb(artifact, components, meshes, topology_metadata=projection)
+            artifact = self.artifacts.create("glb")
+            write_glb(artifact, components, meshes, topology_metadata=projection, generator=GLB_GENERATOR)
             return {
                 "artifactPath": str(artifact),
                 "byteLength": artifact.stat().st_size,
@@ -1143,7 +901,7 @@ class Worker:
                 raise ValueError("main(params) returned no shapes to export")
             from build123d import Compound, export_step
 
-            artifact = self._artifact("step")
+            artifact = self.artifacts.create("step")
             exported = shapes[0] if len(shapes) == 1 else Compound(children=list(shapes))
             if not export_step(exported, artifact):
                 raise RuntimeError("Build123d failed to export STEP")
@@ -1159,82 +917,9 @@ class Worker:
             return {"shutdown": True}
         raise ValueError(f"Unknown protocol method: {method}")
 
-    def _read_frames(self, frames: Any, stream: Any) -> None:
-        """Read protocol frames, observing out-of-band cancellation while a build runs."""
-
-        for line in stream:
-            if _is_cancel_frame(line):
-                self.cancelled.set()
-                continue
-            frames.put(line)
-        frames.put(None)
-
-    def run(self, stream: Any = None) -> bool:
-        importlib.import_module("build123d")
-        _send({"protocolVersion": PROTOCOL_VERSION, "type": "ready", "pythonVersion": sys.version.split()[0]})
-        frames: queue.Queue[bytes | None] = queue.Queue()
-        reader = threading.Thread(
-            target=self._read_frames, args=(frames, sys.stdin.buffer if stream is None else stream), daemon=True
-        )
-        reader.start()
-        for line in iter(frames.get, None):
-            self.cancelled.clear()
-            entry_path: str | None = None
-            request_id = "unknown"
-            try:
-                if len(line) > MAX_FRAME_BYTES:
-                    raise ValueError("Protocol request exceeds the maximum frame size")
-                request = json.loads(line)
-                if not isinstance(request, dict) or request.get("protocolVersion") != PROTOCOL_VERSION:
-                    raise ValueError("Unsupported protocol frame or version")
-                request_id = request.get("requestId")
-                method = request.get("method")
-                params = request.get("params", {})
-                if not isinstance(request_id, str) or not isinstance(method, str) or not isinstance(params, dict):
-                    raise ValueError("Protocol request has invalid fields")
-                if request_id in self.seen_requests:
-                    raise ValueError(f"Duplicate protocol request id: {request_id}")
-                self.seen_requests.add(request_id)
-                entry_path = params.get("entryPath") if isinstance(params.get("entryPath"), str) else None
-                result = self.dispatch(method, params)
-                _send({"protocolVersion": PROTOCOL_VERSION, "requestId": request_id, "result": result})
-                if method == "shutdown":
-                    return True
-            except AnalysisIssue as error:
-                _send(
-                    {
-                        "protocolVersion": PROTOCOL_VERSION,
-                        "requestId": request_id,
-                        "error": {"issues": [error.as_dict(entry_path or "main.py")]},
-                    }
-                )
-            except BaseException as error:
-                _send(
-                    {
-                        "protocolVersion": PROTOCOL_VERSION,
-                        "requestId": request_id,
-                        "error": {"issues": [_runtime_issue(error, self.workspace, entry_path)]},
-                    }
-                )
-        return False
-
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--artifacts", type=Path, required=True)
-    parser.add_argument("--parent-pid", type=int, required=True)
-    arguments = parser.parse_args()
-    arguments.workspace.mkdir(parents=True, exist_ok=True)
-    arguments.artifacts.mkdir(parents=True, exist_ok=True)
-    temporary_root = arguments.workspace.resolve().parent
-    if arguments.artifacts.resolve().parent != temporary_root or not temporary_root.name.startswith("tau-build123d-"):
-        parser.error("workspace and artifacts must share a tau-build123d-* private root")
-    sys.path.insert(0, str(arguments.workspace))
-    _isolate_stdout()
-    _start_parent_watchdog(arguments.parent_pid, temporary_root)
-    if not Worker(arguments.workspace, arguments.artifacts).run():
-        shutil.rmtree(temporary_root, ignore_errors=True)
+    run_worker(lambda context: Worker(context).dispatch, temporary_prefix="tau-build123d-", import_check="build123d")
 
 
 if __name__ == "__main__":

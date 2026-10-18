@@ -52,7 +52,7 @@ describe('definePythonKernelAdopter', () => {
       projectLibraries: { example: '1.0.0' },
     });
     expect(typeof adopter.seal).toBe('function');
-    expect(adopter.launchSet([])).toEqual(closure.files.map(({ path }) => path));
+    expect(adopter.launchSet()).toEqual(closure.files.map(({ path }) => path));
     expect(adopter.optionsSchema.parse(options)).toMatchObject({ ...options, requestTimeout: 0 });
     expect(adopter.optionsSchema.safeParse({ ...options, runtimePath: undefined }).success).toBe(false);
     expect((await adopter.load())(options)).toBe(plugin);

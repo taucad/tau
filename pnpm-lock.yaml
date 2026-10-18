@@ -4322,6 +4322,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
+      '@taucad/python-kernel-core':
+        specifier: workspace:*
+        version: link:../../core/python-kernel
     devDependencies:
       '@taucad/agent-tools':
         specifier: workspace:*

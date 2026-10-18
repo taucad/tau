@@ -21,10 +21,12 @@ const closure: ClosureLaunch = {
   files: [
     row('python/bin/python3', 'a'),
     row('tau-worker/worker.py', 'b'),
-    row('tau-worker/analyzer.py', 'c'),
-    row('tau-worker/glb.py', 'd'),
     row('tau-worker/native_materials.py', 'e'),
     row('tau-worker/mechanisms.py', 'f'),
+    row('tau-worker/tau_kernel/analyzer.py', 'c'),
+    row('tau-worker/tau_kernel/glb.py', 'd'),
+    row('tau-worker/tau_kernel/model.py', '1'),
+    row('tau-worker/tau_kernel/protocol.py', '2'),
   ],
 };
 

@@ -1,4 +1,4 @@
-"""Small deterministic GLB writer for Build123d topology meshes."""
+"""Small deterministic GLB writer for topology meshes given as plain arrays, with Tau's `TAU_cad_topology` payload."""
 
 from __future__ import annotations
 
@@ -87,8 +87,10 @@ def write_glb(
     topology_components: list[dict[str, Any]],
     mesh_data: dict[str, dict[str, Any]],
     topology_metadata: dict[str, Any] | None = None,
+    *,
+    generator: str,
 ) -> None:
-    """Write meshes and their canonical TAU_cad_topology payload."""
+    """Write meshes and their canonical TAU_cad_topology payload; `generator` names the kernel package in `asset`."""
 
     binary = _Buffer()
     accessors: list[dict[str, Any]] = []
@@ -242,7 +244,7 @@ def write_glb(
     ).encode("utf-8")
     topology_view = binary.add(topology)
     document = {
-        "asset": {"version": "2.0", "generator": "@taucad/build123d"},
+        "asset": {"version": "2.0", "generator": generator},
         "scene": 0,
         "scenes": [{"nodes": list(range(len(nodes)))}],
         "nodes": nodes,

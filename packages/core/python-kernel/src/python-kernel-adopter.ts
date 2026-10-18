@@ -18,6 +18,8 @@ export type PythonKernelAdopter<Package extends string = string> = NativeKernelA
   Package
 > & {
   readonly seal: NonNullable<PreparationPlugin['seal']>;
+  /** The interpreter and every worker module; a Python closure's launch set reads none of its receipt. */
+  readonly launchSet: () => readonly string[];
   /** The kernel's worker: its id, display name and the modules its closure carries beside `tau_kernel`. */
   readonly worker: PythonKernelWorker;
   /** The modules the seal's self-test imports to prove the closure loads on the host. */
@@ -46,6 +48,7 @@ export const definePythonKernelAdopter = <Package extends string>(adopter: {
   readonly load: () => Promise<NativeKernelPluginFactory<PythonClosureOptions>>;
 }): PythonKernelAdopter<Package> => {
   const seal = createPythonSeal({ worker: adopter.worker, selfTestImports: adopter.selfTestImports });
+  const launchSet = pythonLaunchSet(adopter.worker);
   const native = defineNativeKernelAdopter<PythonClosureOptions, Package>({
     package: adopter.package,
     ecosystem: 'pypi',
@@ -56,12 +59,13 @@ export const definePythonKernelAdopter = <Package extends string>(adopter: {
       }),
     optionsFromClosure: pythonOptionsFromClosure(adopter.worker),
     seal,
-    launchSet: pythonLaunchSet(adopter.worker),
+    launchSet,
     load: adopter.load,
   });
   return {
     ...native,
     seal,
+    launchSet,
     worker: adopter.worker,
     selfTestImports: adopter.selfTestImports,
     projectLibraries: adopter.projectLibraries,

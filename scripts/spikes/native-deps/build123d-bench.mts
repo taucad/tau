@@ -26,7 +26,8 @@ import {
   build123dBuildSchema,
   build123dEmptySchema,
 } from '../../../packages/plugins/build123d/src/build123d.protocol.ts';
-import { PythonSession } from '../../../packages/plugins/build123d/src/python-session.ts';
+import { build123dNative } from '../../../packages/plugins/build123d/src/native.ts';
+import { createPythonSession } from '../../../packages/core/python-kernel/src/python-session.ts';
 import { emit, parseFlags, requiredFlag } from './spike-common.mts';
 /* eslint-enable @nx/enforce-module-boundaries -- end of the spike-only import block. */
 /* oxlint-enable no-restricted-imports */
@@ -83,7 +84,8 @@ const main = async (): Promise<void> => {
   mkdirSync(workspacePath);
   mkdirSync(artifactPath);
   writeFileSync(join(workspacePath, 'main.py'), boxSource(40));
-  const session = new PythonSession({
+  const session = createPythonSession({
+    worker: build123dNative.worker,
     pythonExecutable: join(resourceRoot, manifest.pythonRelativePath),
     pythonSha256: manifest.pythonSha256,
     workerPath: join(resourceRoot, manifest.workerPath),

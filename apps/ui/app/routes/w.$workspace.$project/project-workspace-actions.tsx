@@ -1,55 +1,21 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { DownloadIcon, PanelLeft, Share2 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
 import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
-import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
+import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 export const WorkbenchToggleSlot = (): React.JSX.Element => (
   <span aria-hidden className='size-7 shrink-0' data-testid='workbench-toggle-slot' />
 );
 
-/**
- * Share or Export: a labelled `PaneButton` while the viewer is roomy, folding
- * to its icon below `@xl/viewer` (Q5).
- */
-const ProjectPaneAction = ({
-  icon: Icon,
-  label,
-  tooltip,
-  panel,
-  ref,
-}: {
-  readonly ref?: React.Ref<HTMLButtonElement>;
-  readonly icon: LucideIcon;
-  readonly label: string;
-  readonly tooltip: string;
-  readonly panel: WorkbenchPanelId;
-}): React.JSX.Element => {
-  const { openPanel } = useProjectWorkspace();
-  return (
-    <PaneButton
-      ref={ref}
-      size='label'
-      aria-label={label}
-      tooltip={tooltip}
-      className='@max-xl/viewer:w-7 @max-xl/viewer:px-0'
-      onClick={() => {
-        openPanel(panel);
-      }}
-    >
-      <Icon aria-hidden className='size-3.5' />
-      <span className='hidden @xl/viewer:inline'>{label}</span>
-    </PaneButton>
-  );
-};
+/** Share and Export fold to their icons below `@xl/viewer` (Q5). */
+const foldClasses = { className: '@max-xl/viewer:w-7 @max-xl/viewer:px-0', labelClassName: 'hidden @xl/viewer:inline' };
 
 // The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height.
 const GroupSeparator = (): React.JSX.Element => (
@@ -68,7 +34,7 @@ const GroupSeparator = (): React.JSX.Element => (
  * @returns The cluster in the top-right group, nothing in every other.
  */
 export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
-  const { registerRecordRecoveryFocus, restoreRecordRecoveryFocus } = useProjectWorkspace();
+  const { openPanel, registerRecordRecoveryFocus, restoreRecordRecoveryFocus } = useProjectWorkspace();
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
   const { projectRef } = useProject();
   const { workbench: workbenchVisible } = useWorkspaceLanes();
@@ -95,14 +61,25 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
       <RevisionStatusAction />
       {/* Settings records that need a person; nothing while every record is fine. */}
       <RecordIssuesAction fallbackFocus={restoreRecordRecoveryFocus} />
-      <ProjectPaneAction
+      <PaneAction
         ref={registerRecordRecoveryFocus}
         icon={Share2}
         label='Share'
         tooltip='Share project'
-        panel='share'
+        onClick={() => {
+          openPanel('share');
+        }}
+        {...foldClasses}
       />
-      <ProjectPaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' panel='export' />
+      <PaneAction
+        icon={DownloadIcon}
+        label='Export'
+        tooltip='Open exporter'
+        onClick={() => {
+          openPanel('export');
+        }}
+        {...foldClasses}
+      />
 
       {!isMobile && !workbenchVisible ? (
         <>

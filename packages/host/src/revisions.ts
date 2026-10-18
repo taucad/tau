@@ -1039,6 +1039,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const watchRoot = (key: WatchKey, root: string): void => {
     watchedRoots.set(key, root);
     try {
+      // oxlint-disable-next-line node-js/prefer-promises/fs -- Node 24 recursive promise watches lose Linux burst events without overflow errors; retain FSWatcher delivery and close/error ownership.
       const watcher = watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
         if (filename === null) {
           lose(key);

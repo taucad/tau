@@ -294,17 +294,60 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
 };
 
 /**
- * Wait until the page draws a model: the preview is up and Add to chat is live.
+ * Wait until the page draws a model: the preview is up and an action that needs the model is live.
  *
  * @param root - The frame or page the viewer is in.
- * @param action - The name of the reference action.
+ * @param action - The card's reference action, or `Export` in the tab's header.
  */
 const drawn = async (root: Frame | Page, action: string): Promise<void> => {
   await root.getByRole('img', { name: '3D model preview' }).waitFor({ timeout: 120_000 });
   await root.locator('canvas').waitFor();
   await expect
-    .poll(async () => root.getByRole('button', { name: action }).isEnabled(), { timeout: 120_000 })
+    .poll(async () => root.getByRole('button', { name: action, exact: true }).isEnabled(), { timeout: 120_000 })
     .toBe(true);
+};
+
+/**
+ * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the header carries
+ * Share, Export and the one workbench toggle, which hides and shows the lane, and Export opens its pane.
+ *
+ * @param root - The frame or page the viewer is in, drawn in the tab composition.
+ * @param isOpenAtLoad - Whether the lane is open when the page loads (the tab is at least 720 px wide).
+ */
+const checkTabChrome = async (root: Frame | Page, isOpenAtLoad: boolean): Promise<void> => {
+  const bar = root.getByRole('group', { name: 'Viewer controls' });
+  const barSnapshot = await bar.ariaSnapshot();
+  expect(barSnapshot.trimEnd()).toMatch(/- button "Viewer settings"$/u);
+  for (const name of ['Add to chat', 'Send to chat', 'Copy prompt', 'Hide panes', 'Show panes', 'Hide workbench']) {
+    // oxlint-disable-next-line no-await-in-loop -- one name at a time.
+    expect(await root.getByRole('button', { name, exact: true }).count()).toBe(0);
+  }
+  const header = root.getByRole('group', { name: 'Workbench actions' });
+  const toggle = header.getByRole('button', { name: 'Toggle Workbench lane' });
+  expect(await header.ariaSnapshot()).toBe(
+    [
+      '- group "Workbench actions":',
+      '  - button "Share"',
+      '  - button "Export"',
+      `  - button "Toggle Workbench lane"${isOpenAtLoad ? ' [pressed]' : ''}`,
+    ].join('\n'),
+  );
+  const lane = root.getByRole('complementary', { name: 'Workbench' });
+  expect(await lane.count()).toBe(isOpenAtLoad ? 1 : 0);
+
+  if (isOpenAtLoad) {
+    await toggle.click();
+    await expect.poll(async () => lane.count()).toBe(0);
+    expect(await toggle.getAttribute('aria-pressed')).toBe('false');
+  }
+  /* Export opens the closed lane on its pane. */
+  await header.getByRole('button', { name: 'Export', exact: true }).click();
+  await lane.getByRole('tabpanel', { name: 'Export' }).waitFor();
+  expect(await toggle.getAttribute('aria-pressed')).toBe('true');
+  await header.getByRole('button', { name: 'Share', exact: true }).click();
+  await lane.getByRole('tabpanel', { name: 'Share' }).waitFor();
+  await toggle.click();
+  await expect.poll(async () => lane.count()).toBe(0);
 };
 
 /**
@@ -438,6 +481,7 @@ describe('the viewer page in an MCP Apps host', () => {
       await frame.getByRole('group', { name: 'Viewer controls' }).waitFor();
       expect(await frame.getByRole('button', { name: 'Open full view' }).count()).toBe(0);
       await capture(page, 'basic-host-fullscreen');
+      await checkTabChrome(frame, true);
 
       await page.evaluate(() => {
         globalThis.tauHost.setHostContext({ theme: 'dark' });
@@ -504,7 +548,7 @@ describe('the viewer page in an MCP Apps host', () => {
       const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
       const frame = viewerFrame(page);
 
-      await drawn(frame, 'Add to chat');
+      await drawn(frame, 'Export');
       const calls = await recorded(page, 'toolCalls');
       const reads = calls.filter((call) => call.name === 'app_read');
       expect(reads.length).toBe(Math.ceil(model.byteLength / tauViewerReadLimit));
@@ -531,7 +575,7 @@ describe('exchange formats (W7)', () => {
       }
       const result = await callTool(client, 'show_model', { targetFile: 'cylinders.step' });
       const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
-      await drawn(viewerFrame(page), 'Add to chat');
+      await drawn(viewerFrame(page), 'Export');
       await capture(page, 'step-converted');
       expect(pageErrors).toEqual([]);
       await page.close();
@@ -553,7 +597,7 @@ describe("the tab's panels (W10)", () => {
       const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
       const page = await mountInHarness(client, first, { displayMode: 'fullscreen' });
       const frame = viewerFrame(page);
-      await drawn(frame, 'Add to chat');
+      await drawn(frame, 'Export');
       const panels = frame.getByRole('complementary', { name: 'Workbench' });
       await panels.waitFor();
       const before = (first.structuredContent as { model: { id: string } }).model.id;
@@ -650,7 +694,7 @@ describe("the tab's panels (W10)", () => {
             ? { isError: true, content: [{ type: 'text', text: `MCP error -32602: Tool ${name} not found` }] }
             : undefined,
       });
-      await drawn(viewerFrame(older), 'Add to chat');
+      await drawn(viewerFrame(older), 'Export');
       const olderPanel = await openPane(viewerFrame(older), 'Export');
       const mismatch = olderPanel.getByRole('alert', { name: 'Export formats could not be loaded' });
       await expect
@@ -671,7 +715,7 @@ describe("the tab's panels (W10)", () => {
             ? { isError: true, content: [{ type: 'text', text: 'NO_KERNEL: No kernel exports main.ts.' }] }
             : undefined,
       });
-      await drawn(viewerFrame(failing), 'Add to chat');
+      await drawn(viewerFrame(failing), 'Export');
       const panel = await openPane(viewerFrame(failing), 'Export');
       const failure = panel.getByRole('alert', { name: 'Export formats could not be loaded' });
       await expect.poll(async () => failure.textContent()).toContain('No kernel exports main.ts.');
@@ -700,7 +744,7 @@ describe('the live view (W6)', () => {
       const cardClient = await connect('claude-ai', mcpAppsCapabilities);
       const first = await callTool(cardClient, 'show_model', { targetFile: 'main.ts' });
       const page = await mountInHarness(cardClient, first, { displayMode: 'fullscreen' });
-      await drawn(viewerFrame(page), 'Add to chat');
+      await drawn(viewerFrame(page), 'Export');
       /* The card reports its view once its model is drawn, which can land after its actions are live. */
       await expect
         .poll(
@@ -735,7 +779,7 @@ describe('the live view (W6)', () => {
       /* A thread tab opens without a tool result and follows what the agent shows. */
       const page = await mountInHarness(client, undefined, { displayMode: 'fullscreen' });
       const frame = viewerFrame(page);
-      await drawn(frame, 'Add to chat');
+      await drawn(frame, 'Export');
 
       /* The person picks the box in the middle of the canvas. */
       const canvasBox = await frame.locator('canvas').first().boundingBox();
@@ -841,11 +885,36 @@ describe('the viewer page from a text host', () => {
       const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
       await page.goto(viewerUrl ?? '');
 
-      await drawn(page, 'Copy prompt');
+      await drawn(page, 'Export');
       /* The workbench's file tab names the source the link shows. */
       expect(await page.getByTitle('main.ts', { exact: true }).count()).toBe(1);
       await page.getByRole('group', { name: 'Viewer controls' }).waitFor();
       await capture(page, 'loopback');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should carry Share, Export and the workbench toggle in the header of a narrow tab, and no host actions in the bar',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'main.ts' }));
+      /* Below 720 px the tab opens with the canvas whole; the header is the only way to the panes. */
+      const page = await launched().newPage({ viewport: { width: 700, height: 640 } });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+
+      await checkTabChrome(page, false);
+      const share = page.getByRole('group', { name: 'Workbench actions' }).getByRole('button', { name: 'Share' });
+      const shareLabel = share.getByText('Share', { exact: true });
+      expect(await shareLabel.isVisible()).toBe(true);
+      await capture(page, 'loopback-header');
+      /* A narrower tab folds the labels to their icons; the names stay. */
+      await page.setViewportSize({ width: 480, height: 640 });
+      await expect.poll(async () => shareLabel.isVisible()).toBe(false);
+      const folded = await share.boundingBox();
+      expect(folded?.width).toBe(28);
       await page.close();
     },
     kernelCallLimit,
@@ -865,7 +934,7 @@ describe('the viewer page from a text host', () => {
           : route.continue());
       });
       await page.goto(viewerUrl ?? '');
-      await drawn(page, 'Copy prompt');
+      await drawn(page, 'Export');
 
       const { version } = packageJson;
       const panel = await openPane(page, 'Export');
@@ -889,13 +958,13 @@ describe('the viewer page from a text host', () => {
       const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
       const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
       await page.goto(viewerUrl ?? '');
-      await drawn(page, 'Copy prompt');
+      await drawn(page, 'Export');
 
       const lane = page.getByRole('complementary', { name: 'Workbench' });
       const tablist = lane.getByRole('tablist', { name: 'Open panes' });
       const tabs = tablist.getByRole('tab');
       expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model', 'Kinematics']);
-      await lane.getByRole('button', { name: 'Hide workbench' }).waitFor();
+      expect(await lane.getByRole('button', { name: 'Hide workbench' }).count()).toBe(0);
       expect(await tablist.evaluate((list) => list.scrollWidth <= list.clientWidth)).toBe(true);
       /* Each tab's centre hits the tab, never a header button drawn over it. */
       const hits = await tabs.evaluateAll((elements) =>

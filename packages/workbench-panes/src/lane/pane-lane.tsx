@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { PanelRightClose, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,8 +36,6 @@ export type PaneLaneProps = Readonly<{
   initialOpen: readonly WorkbenchPaneId[];
   /** Draws one pane's body. */
   renderPane: (pane: WorkbenchPaneId) => ReactNode;
-  /** Hides the lane; the lane offers the action only when given one. */
-  onHide?: () => void;
   /** Opens `pane` and makes it the active tab each time `requestId` changes (a part menu's "Show kinematics"). */
   openRequest?: Readonly<{ pane: WorkbenchPaneId; requestId: number }>;
   className?: string;
@@ -62,20 +60,14 @@ const groupLabels = { design: 'Design', project: 'Project' } as const;
 
 /**
  * The workbench lane outside the Tau app: a tab per open pane, the same `+` menu of panes (grouped, with their
- * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time.
+ * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time. Showing and hiding the lane is
+ * the host's: a header's `WorkbenchToggleButton` (`components/workbench-toggle`).
  *
  * @param props - The offered panes, the opening tabs and how to draw a pane.
  * @returns The lane.
  * @public
  */
-export function PaneLane({
-  panes,
-  initialOpen,
-  renderPane,
-  onHide,
-  openRequest,
-  className,
-}: PaneLaneProps): React.JSX.Element {
+export function PaneLane({ panes, initialOpen, renderPane, openRequest, className }: PaneLaneProps): React.JSX.Element {
   const [open, setOpen] = useState<readonly WorkbenchPaneId[]>(() =>
     initialOpen.filter((pane) => panes.includes(pane)),
   );
@@ -258,11 +250,6 @@ export function PaneLane({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {onHide === undefined ? null : (
-          <PaneButton aria-label='Hide workbench' tooltip='Hide workbench' className='ml-auto' onClick={onHide}>
-            <PanelRightClose className='size-3.5' />
-          </PaneButton>
-        )}
       </div>
       <div className='min-h-0 flex-1 overflow-hidden'>
         {open.map((pane) => (

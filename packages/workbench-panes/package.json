@@ -40,7 +40,9 @@
     "./component-menu/component-actions": "./src/component-menu/component-actions.ts",
     "./component-menu/viewer-component-action-menu": "./src/component-menu/viewer-component-action-menu.tsx",
     "./component-menu/viewer-secondary-gesture": "./src/component-menu/viewer-secondary-gesture.ts",
+    "./components/pane-action": "./src/components/pane-action.tsx",
     "./components/pane-button": "./src/components/pane-button.tsx",
+    "./components/workbench-toggle": "./src/components/workbench-toggle.tsx",
     "./export/export-pane": "./src/export/export-pane.tsx",
     "./export/export-source": "./src/export/export-source.ts",
     "./host/workbench-host": "./src/host/workbench-host.tsx",
@@ -94,10 +96,20 @@
         "import": "./dist/component-menu/viewer-secondary-gesture.mjs",
         "default": "./dist/component-menu/viewer-secondary-gesture.mjs"
       },
+      "./components/pane-action": {
+        "types": "./dist/components/pane-action.d.mts",
+        "import": "./dist/components/pane-action.mjs",
+        "default": "./dist/components/pane-action.mjs"
+      },
       "./components/pane-button": {
         "types": "./dist/components/pane-button.d.mts",
         "import": "./dist/components/pane-button.mjs",
         "default": "./dist/components/pane-button.mjs"
+      },
+      "./components/workbench-toggle": {
+        "types": "./dist/components/workbench-toggle.d.mts",
+        "import": "./dist/components/workbench-toggle.mjs",
+        "default": "./dist/components/workbench-toggle.mjs"
       },
       "./export/export-pane": {
         "types": "./dist/export/export-pane.d.mts",

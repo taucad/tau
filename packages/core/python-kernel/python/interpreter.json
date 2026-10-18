@@ -1,0 +1,57 @@
+{
+  "//": "The CPython pin and the targets every Python kernel's tau-plugin.json declares, unless the kernel ships its own python/interpreter.json; one interpreter payload is then shared by digest across every Python closure (D3). Each interpreter is python-build-standalone's install_only_stripped asset, pinned by (release, asset, size, sha256 from the release's SHA256SUMS and the asset's GitHub digest); the generator verifies the bytes before it writes an integrity. deploymentTarget and glibcCeiling bound the wheels chosen at lock time; interpreterFloor is the archive's own floor. Edit, then run each Python kernel's generate-tau-plugin target, such as pnpm nx run build123d:generate-tau-plugin.",
+  "python": "3.13.15",
+  "release": "20260901",
+  "targets": [
+    {
+      "key": "darwin-arm64",
+      "os": "darwin",
+      "arch": "arm64",
+      "deploymentTarget": "12.0",
+      "interpreterFloor": "11.0",
+      "interpreter": {
+        "asset": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+        "sha256": "d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+        "byteLength": 25147663
+      }
+    },
+    {
+      "key": "darwin-x64",
+      "os": "darwin",
+      "arch": "x64",
+      "deploymentTarget": "12.0",
+      "interpreterFloor": "10.13",
+      "interpreter": {
+        "asset": "cpython-3.13.15+20260901-x86_64-apple-darwin-install_only_stripped.tar.gz",
+        "sha256": "f712a9143c8a5d248438ec7921a0b48d548bca4f1337d33c690d28c2d0504137",
+        "byteLength": 24912286
+      }
+    },
+    {
+      "key": "linux-arm64-glibc",
+      "os": "linux",
+      "arch": "arm64",
+      "libc": "glibc",
+      "glibcCeiling": "2.31",
+      "interpreterFloor": "2.17",
+      "interpreter": {
+        "asset": "cpython-3.13.15+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        "sha256": "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e",
+        "byteLength": 29222533
+      }
+    },
+    {
+      "key": "linux-x64-glibc",
+      "os": "linux",
+      "arch": "x64",
+      "libc": "glibc",
+      "glibcCeiling": "2.31",
+      "interpreterFloor": "2.17",
+      "interpreter": {
+        "asset": "cpython-3.13.15+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        "sha256": "8a689a077337bea6d1c4bc0b7df1d52fcaa28f5f67e50df8bf417c1e3f9d8874",
+        "byteLength": 34810677
+      }
+    }
+  ]
+}

@@ -3317,6 +3317,9 @@ importers:
 
   libs/tau-examples:
     dependencies:
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../../packages/plugins/build123d
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -3332,15 +3335,18 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
-      '@taucad/native-kernels':
+      '@taucad/native-process-core':
         specifier: workspace:*
-        version: link:../../packages/native-kernels
+        version: link:../../packages/core/native-process
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../../packages/plugins/opencascade
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/picogk':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picogk
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../../packages/plugins/picovoxel
@@ -4009,9 +4015,15 @@ importers:
         specifier: 'catalog:'
         version: 0.2.0
     devDependencies:
-      '@taucad/native-kernels':
+      '@taucad/build123d':
         specifier: workspace:*
-        version: link:../native-kernels
+        version: link:../plugins/build123d
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../core/native-process
+      '@taucad/picogk':
+        specifier: workspace:*
+        version: link:../plugins/picogk
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../runtime-testing

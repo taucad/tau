@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CreateGeoSpecNativeModelLoaderOptions } from 'geospec/runner/native';
 import { startNativePoolWorker } from '#runner/node/native-pool-worker-entry.js';
 
@@ -6,10 +6,13 @@ const owner = vi.hoisted(() => ({
   loader: vi.fn<(options: CreateGeoSpecNativeModelLoaderOptions) => void>(),
   close: vi.fn(),
   client: vi.fn(async () => ({})),
-  composition: { kernels: [] as unknown[], unavailable: [], closureRoots: [] as string[] },
-  compose: vi.fn(async (_input: { store: string; managed: unknown }) => owner.composition),
-  plugins: vi.fn(async (rows: readonly unknown[]) => rows.map((_row, index) => ({ id: `native-${String(index)}` }))),
-  definition: vi.fn((options: unknown) => options),
+  resolved: { kernels: [{ id: 'kernel', extensions: ['ts'] }] },
+  resolve: vi.fn(async (_runtime: unknown, _config: unknown) => owner.resolved),
+  deployments: [] as unknown[],
+  deploymentsOf: vi.fn((_runtime: unknown) => owner.deployments),
+  resolver: vi.fn(),
+  storeResolver: vi.fn((_input: { managed: unknown }) => owner.resolver),
+  install: vi.fn(),
   defaults: { kernels: ['kernel'], middleware: ['middleware'], bundlers: ['bundler'], transcoders: ['transcoder'] },
 }));
 
@@ -22,11 +25,11 @@ vi.mock('geospec-engine/node', () => ({
 }));
 vi.mock('geospec/runner/native', () => ({ createGeoSpecNativeModelLoader: owner.loader }));
 vi.mock('@taucad/runtime/node', () => ({ createNodeClient: owner.client }));
-vi.mock('@taucad/runtime/worker', () => ({ defineRuntime: owner.definition }));
-vi.mock('@taucad/native-kernels/node', () => ({
-  composeNativeKernels: owner.compose,
-  composeNativePlugins: owner.plugins,
-  defaultPayloadStore: () => '/store',
+vi.mock('@taucad/runtime/worker', () => ({ resolveRuntimeDefinition: owner.resolve }));
+vi.mock('@taucad/native-process-core/store', () => ({
+  nativeDeploymentsOf: owner.deploymentsOf,
+  storeClosureResolver: owner.storeResolver,
+  installNativeClosureResolver: owner.install,
 }));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
 vi.mock('#runner/node/node-vm-filesystem.js', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
@@ -41,6 +44,11 @@ const runtimeFactory = () => {
   return factory;
 };
 
+// The managed-profile reader is the one real import the factory makes; load it once, outside the tests' time budget.
+beforeAll(async () => {
+  await import('@taucad/runtime/preparation/node');
+}, 60_000);
+
 afterEach(() => {
   owner.close();
   vi.unstubAllEnvs();
@@ -48,27 +56,28 @@ afterEach(() => {
 });
 
 describe('configured native Node worker Runtime', () => {
-  it('keeps the portable defaults when the payload store holds no sealed native closure', async () => {
-    owner.composition = { kernels: [], unavailable: [], closureRoots: [] };
+  it('serves the default runtime unchanged when it lists no native kernel', async () => {
+    owner.deployments = [];
     await runtimeFactory()();
-    expect(owner.compose).toHaveBeenCalledWith({ store: '/store', managed: expect.any(Object) as unknown });
-    expect(owner.definition).not.toHaveBeenCalled();
+    expect(owner.resolve).toHaveBeenCalledWith(owner.defaults, undefined);
+    expect(owner.deploymentsOf).toHaveBeenCalledWith(owner.resolved);
+    expect(owner.install).not.toHaveBeenCalled();
     expect(owner.client).toHaveBeenCalledWith({ runtime: owner.defaults, projectPath: '/project' });
   });
 
-  it('adds every prepared native kernel from the roster and preserves every default bucket', async () => {
-    owner.composition = { kernels: [{ kernel: 'a' }, { kernel: 'b' }], unavailable: [], closureRoots: ['/a', '/b'] };
+  it('binds the native kernels the default runtime lists to the payload store before the client starts', async () => {
+    owner.deployments = [{ deployment: { package: '@taucad/picogk' }, kernels: [] }];
     await runtimeFactory()();
-    const plugins = [{ id: 'native-0' }, { id: 'native-1' }];
-    expect(owner.plugins).toHaveBeenCalledWith(owner.composition.kernels);
-    expect(owner.definition).toHaveBeenCalledWith({ ...owner.defaults, plugins });
-    expect(owner.client).toHaveBeenCalledWith({ runtime: { ...owner.defaults, plugins }, projectPath: '/project' });
+    expect(owner.storeResolver).toHaveBeenCalledWith({ managed: expect.any(Object) as unknown });
+    expect(owner.install).toHaveBeenCalledWith(owner.resolver);
+    expect(owner.install.mock.invocationCallOrder[0]).toBeLessThan(owner.client.mock.invocationCallOrder[0]!);
+    expect(owner.client).toHaveBeenCalledWith({ runtime: owner.defaults, projectPath: '/project' });
   });
 
   it('refuses a malformed managed profile without falling back to another Runtime', async () => {
     vi.stubEnv('TAU_ACQUISITION', 'sometimes');
     await expect(runtimeFactory()()).rejects.toThrow('TAU_ACQUISITION');
-    expect(owner.compose).not.toHaveBeenCalled();
+    expect(owner.install).not.toHaveBeenCalled();
     expect(owner.client).not.toHaveBeenCalled();
   });
 });

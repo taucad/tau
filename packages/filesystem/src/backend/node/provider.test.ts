@@ -169,9 +169,9 @@ describe('NodeFsProvider atomic writes', () => {
       onEvents?.(null, [
         ...Array.from({ length: 50 }, (_, index) => ({
           path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
-          type: 'create',
+          type: 'create' as const,
         })),
-        { path: join(directory, 'target.txt'), type: 'update' },
+        { path: join(directory, 'target.txt'), type: 'update' as const },
       ]);
       expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);
       /* A bulk change under an excluded tree costs no syscall on the services utility's event loop. */

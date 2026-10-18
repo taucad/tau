@@ -643,9 +643,10 @@ class WorkerTest(unittest.TestCase):
             floored, compute_config()
         ) as cheap:
             tracked = Solid.make_box(1, 1, 1)
+            # Lineage lives for the build that produced it (D-DT-03), so identity is checked while it runs.
+            self.assertIsNotNone(cheap.lineage(tracked))
         self.assertEqual(cheap.announcements, [])
         self.assertEqual(floored.stats()["entries"], 0)
-        self.assertIsNotNone(cheap.lineage(tracked))
 
     def test_native_metadata_and_history_survive_resident_and_restored_primitive_reuse(self) -> None:
         from bd_materials import metals

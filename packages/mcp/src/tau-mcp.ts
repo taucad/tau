@@ -17,7 +17,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
-import { rpcName, toolName } from '@taucad/chat/constants';
+import { rpcName, testModelStatusRule, toolName } from '@taucad/chat/constants';
 import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
 import {
@@ -26,6 +26,7 @@ import {
   screenshotMcpOutputSchema,
 } from '@taucad/chat/schemas/tools/screenshot';
 import { tauLaunchSchema, testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
+import { summarizeTestModelOutput } from '@taucad/chat/schemas/tools/test-model-summary';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../package.json' with { type: 'json' };
 import { registerTauMcpViewer } from '#tau-mcp-viewer.js';
@@ -52,7 +53,7 @@ const sourceRevisionRule =
 
 const descriptions = {
   evaluateModel: `Evaluate one CAD source file (targetFile) and its default view, list offered views, instances and export IDs, and inspect every issue even when status is ready. Request includeCapabilities for option schemas and reachable targets. Pass parameters to evaluate other parameter values for this call only, merged over the active group and never saved. ${sourceRevisionRule}`,
-  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
+  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${testModelStatusRule} ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
   screenshot: `Capture a declared kernel view of one CAD source file (targetFile) and optional instance with its own options. A 3D view yields one isometric image (mode single, the default) or six camera angles (mode multi_angle); a 2D view yields one image. Each image echoes view, instance and any angle. Pass section, e.g. { plane: 'xy', offset: 0.006 } for 6 mm above the origin, to cut a 3D view open along one axis plane, and parameters to capture other parameter values for this call only. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
   exportModel: `Export one CAD source by offered ID or unambiguous reachable extension to persisted files under .tau/artifacts, echoing exportId and pinned sourceRevision. Pass parameters to export other parameter values for this call only, never saved. For a design question, only a declared text/JSON export whose every output is text/JSON may be used as evidence; read its artifact with your native file reader and compare sourceRevision. Binary or mixed deliverables require the person's export request.`,
 } as const;
@@ -475,14 +476,9 @@ const testModelSuccess = (result: z.infer<typeof testModelOutputSchema>): CallTo
   content: [
     {
       type: 'text',
-      text: `GeoSpec passed ${String(result.passed)} of ${String(result.total)} requirements.${
-        result.failures.length === 0
-          ? ''
-          : ` Failing IDs: ${result.failures
-              .slice(0, 20)
-              .map((failure) => failure.id)
-              .join(', ')}${result.failures.length > 20 ? ` and ${String(result.failures.length - 20)} more` : ''}.`
-      }${result.fullResult ? ` Full report: ${result.fullResult.absolutePath ?? result.fullResult.path}.` : ''}`,
+      text: `${summarizeTestModelOutput(result).line}${
+        result.fullResult ? ` Full report: ${result.fullResult.absolutePath ?? result.fullResult.path}.` : ''
+      }`,
     },
   ],
   structuredContent: result,

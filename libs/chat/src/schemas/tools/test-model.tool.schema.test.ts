@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { geoSpecDefaultMaxRunBudget, geoSpecDefaultMaxWorkUnitLimit } from '#constants/rpc.constants.js';
-import { toolDescriptions } from '#constants/tool-description.constants.js';
+import { testModelStatusRule, toolDescriptions } from '#constants/tool-description.constants.js';
 import {
   geoSpecFailureCategorySchema,
   geoSpecRunLineageSchema,
@@ -143,6 +143,56 @@ describe('testModelOutputSchema limit', () => {
   });
 });
 
+describe('testModelOutputSchema per-assertion rows', () => {
+  const output = {
+    passed: 0,
+    total: 1,
+    passes: [],
+    failures: [
+      {
+        id: 'main.geospec.ts:gears',
+        requirement: 'gears',
+        reason: 'Continuous evidence needs 35.6 MiB; the analysis limit is 32 MiB.',
+        suggestion: 'Not decided.',
+        status: 'inconclusive',
+        category: 'analysis-limit',
+        targetFile: 'main.geospec.ts',
+      },
+    ],
+    tests: [
+      {
+        id: 'main.geospec.ts:0',
+        requirement: 'gears',
+        targetFile: 'main.geospec.ts',
+        status: 'inconclusive',
+        assertions: [
+          { ordinal: 0, status: 'passed', matcher: 'boundingBox' },
+          {
+            ordinal: 1,
+            status: 'inconclusive',
+            matcher: 'componentInterference',
+            code: 'GEOSPEC_ANALYSIS_LIMIT',
+            message: 'Continuous evidence needs 35.6 MiB; the analysis limit is 32 MiB.',
+          },
+        ],
+      },
+    ],
+  };
+
+  it('should carry the requirement status and one row per claim', () => {
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+  });
+
+  it.each([{ status: 'skipped' }, { status: 'not-run' }, { extra: true }])(
+    'should refuse an assertion row outside its contract (%o)',
+    (change) => {
+      const [test] = output.tests;
+      const changed = { ...output, tests: [{ ...test, assertions: [{ ...test?.assertions[0], ...change }] }] };
+      expect(testModelOutputSchema.safeParse(changed).success).toBe(false);
+    },
+  );
+});
+
 describe('geoSpecRunFilterInputSchema testTimeout', () => {
   it('should leave the maximum to host policy and keep only finite positive integers', () => {
     expect(geoSpecRunFilterInputSchema.safeParse({ testTimeout: geoSpecDefaultMaxRunBudget + 1 }).success).toBe(true);
@@ -176,8 +226,9 @@ describe('geoSpecRunFilterInputSchema workUnitLimit', () => {
 });
 
 describe('test_model description', () => {
-  it('should tell the agent that only geometry failures are decided claims and how a timeout reads', () => {
-    expect(toolDescriptions.test_model).toContain("category: 'geometry'");
+  it('should tell the agent that only a failed geometry row is a decided claim and how a timeout reads', () => {
+    expect(toolDescriptions.test_model).toContain(testModelStatusRule);
+    expect(testModelStatusRule).toContain('only category geometry is a claim decided false');
     expect(toolDescriptions.test_model).toContain('OPERATION_TIMEOUT');
   });
 });

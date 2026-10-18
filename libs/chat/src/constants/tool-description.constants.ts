@@ -17,6 +17,14 @@ const parameterOverrideRule =
 const writeRevisionRule =
   'Returns `revision`: the path and the digest now at it (`"missing"` once deleted), comparable with the `sourceRevision` of any later kernel result.';
 
+/**
+ * VER-2: how to read a `test_model` failure row, in the native description and the MCP one alike.
+ *
+ * @public
+ */
+export const testModelStatusRule =
+  "Only a failure row with status failed is a failure, and only category geometry is a claim decided false; inconclusive, unsupported and not-run requirements are undecided, never passes: keep the assertion and follow the row's suggestion.";
+
 /** Canonical provider-facing descriptions shared by API and portable browser hosts. @public */
 export const toolDescriptions = {
   [toolName.testModel]: `Run GeoSpec tests against the current 3D model(s).
@@ -30,7 +38,7 @@ Filter examples:
 - Select a named requirement: { testNamePattern: 'intended envelope' }
 - Exclude an explicitly out-of-scope fixture: { exclude: ['**/fixtures/**'] }
 
-Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. Unsupported, inconclusive, skipped and not-run requirements are not passes. Only a failure with \`category: 'geometry'\` is a decided claim; for any other category keep the assertion and follow its \`suggestion\`. A run that outlives its host budget returns \`timeout\` (\`OPERATION_TIMEOUT\`) with only the requirements it completed. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
+Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. A skipped requirement is not a pass. ${testModelStatusRule} A run that outlives its host budget returns \`timeout\` (\`OPERATION_TIMEOUT\`) with only the requirements it completed. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:
 - NOT as a substitute for \`evaluate_model\` when you only need build status; \`test_model\` measures geometry against requirements.`,

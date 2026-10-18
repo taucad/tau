@@ -10,6 +10,7 @@ import {
   screenshotInputSchema,
   testModelInputSchema,
 } from '@taucad/chat';
+import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import {
   createTauMcpAdapter,
@@ -298,6 +299,62 @@ describe('@taucad/mcp', () => {
       },
       { toolCallId: 'tool-2', signal },
     );
+  });
+
+  it('summarizes an undecided GeoSpec run without calling its requirements failing', async () => {
+    const failure = (
+      id: string,
+      category: 'analysis-limit' | 'unsupported-evidence',
+    ): TestModelOutput['failures'][number] => ({
+      id,
+      requirement: id,
+      reason: 'Not decided.',
+      suggestion: 'Keep the assertion and report the claim as not decided.',
+      status: 'inconclusive',
+      category,
+      targetFile: 'main.ts',
+    });
+    const output: TestModelOutput = {
+      passed: 5,
+      total: 10,
+      runStatus: 'inconclusive',
+      accounting: {
+        discovered: 10,
+        selected: 10,
+        completed: 10,
+        passed: 5,
+        failed: 0,
+        unsupported: 0,
+        inconclusive: 5,
+        skipped: 0,
+        notRun: 0,
+        requestedFiles: ['main.geospec.ts'],
+        completedFiles: ['main.geospec.ts'],
+        notRunFiles: [],
+        discoveryComplete: true,
+        cancelled: false,
+        bailed: false,
+      },
+      passes: [],
+      failures: [
+        failure('sun', 'analysis-limit'),
+        failure('planets', 'analysis-limit'),
+        failure('ring', 'analysis-limit'),
+        failure('bore', 'unsupported-evidence'),
+        failure('trim', 'unsupported-evidence'),
+      ],
+    };
+    const adapter = createTauMcpAdapter({ dispatch: async () => ({ success: true, ...output }) });
+
+    const result = await adapter.call({ name: toolName.testModel, arguments: {}, toolCallId: 'tool-geospec' });
+
+    expect(result.structuredContent).toStrictEqual(output);
+    expect(result.content).toStrictEqual([
+      {
+        type: 'text',
+        text: 'GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10. Undecided: sun (analysis-limit), planets (analysis-limit), ring (analysis-limit), bore (unsupported-evidence), trim (unsupported-evidence).',
+      },
+    ]);
   });
 
   it('does not dispatch invalid input and preserves typed RPC failures', async () => {

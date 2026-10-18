@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { testRecord, testSummary } from '#commands/test.js';
+import { exitFor, testRecord, testSummary } from '#commands/test.js';
 
 const test = (name: string, status: string, message?: string) => ({
   name,
@@ -95,7 +95,35 @@ describe('testSummary', () => {
       ],
     });
 
-    expect(testSummary(passing)).toBe('1 passed, 0 failed of 1 selected');
-    expect(testSummary(undecided)).toBe('0 passed, 0 failed of 2 selected, 2 inconclusive');
+    expect(testSummary(passing)).toBe('GeoSpec passed: 1 passed, 0 failed of 1.');
+    expect(testSummary(undecided)).toBe('GeoSpec inconclusive: 0 passed, 0 failed, 2 inconclusive of 2.');
+  });
+});
+
+describe('testRecord status', () => {
+  const run = (statuses: readonly string[], failed = 0): ReturnType<typeof testRecord> =>
+    testRecord('/project', ['main.geospec.ts'], {
+      success: false,
+      passed: statuses.filter((status) => status === 'passed').length,
+      failed,
+      selectedTests: statuses.length,
+      files: [
+        {
+          file: 'main.geospec.ts',
+          result: { tests: statuses.map((status, index) => test(`t${String(index)}`, status, 'not decided')) },
+        },
+      ],
+    });
+
+  it('should record a run with no failure and an undecided test as inconclusive, still exiting 1', () => {
+    expect(run(['passed', 'inconclusive']).status).toBe('inconclusive');
+    expect(run(['unsupported', 'not-run']).status).toBe('inconclusive');
+    expect(exitFor.inconclusive).toBe(exitFor.failed);
+    expect(exitFor.inconclusive).toBe(1);
+  });
+
+  it('should record a run with any failed test as failed', () => {
+    expect(run(['failed', 'inconclusive'], 1).status).toBe('failed');
+    expect(run(['inconclusive'], 1).status).toBe('failed');
   });
 });

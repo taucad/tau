@@ -565,11 +565,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
                   ...summary,
                   failures: failures
                     .slice(0, 20)
-                    .map(({ id, requirement, reason, suggestion, category, limit, targetFile }) => ({
+                    .map(({ id, requirement, reason, suggestion, status, category, limit, targetFile }) => ({
                       id: id.slice(0, 512),
                       requirement: requirement.slice(0, 512),
                       reason: reason.slice(0, 512),
                       suggestion: suggestion.slice(0, 512),
+                      ...(status === undefined ? {} : { status }),
                       ...(category === undefined ? {} : { category }),
                       ...(limit === undefined ? {} : { limit }),
                       targetFile,

@@ -325,6 +325,7 @@ const present = async (
           requirement: shortDiagnostic(failure.requirement),
           reason: shortDiagnostic(failure.reason),
           suggestion: shortDiagnostic(failure.suggestion),
+          ...(failure.status === undefined ? {} : { status: failure.status }),
           ...(failure.category === undefined ? {} : { category: failure.category }),
           ...(failure.limit === undefined ? {} : { limit: failure.limit }),
           targetFile: failure.targetFile,

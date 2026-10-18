@@ -1648,6 +1648,7 @@ describe('createChatToolRegistry GeoSpec evidence normalization', () => {
             requirement: `requirement-${index}`,
             reason: 'x'.repeat(7000),
             suggestion: 'Inspect complete evidence',
+            status: 'inconclusive',
             category: 'analysis-limit',
             limit,
             targetFile: 'main.geospec.ts',
@@ -1668,9 +1669,9 @@ describe('createChatToolRegistry GeoSpec evidence normalization', () => {
     expect(compact).toMatchObject({ passed: 1, total: 26, omittedFailures: 5, omittedPasses: 1 });
     expect(compact.failures).toHaveLength(20);
     expect(compact.failures[0]?.reason).toHaveLength(512);
-    expect(compact.failures.map((row) => ({ category: row.category, limit: row.limit }))).toStrictEqual(
-      Array.from({ length: 20 }, () => ({ category: 'analysis-limit', limit })),
-    );
+    expect(
+      compact.failures.map((row) => ({ status: row.status, category: row.category, limit: row.limit })),
+    ).toStrictEqual(Array.from({ length: 20 }, () => ({ status: 'inconclusive', category: 'analysis-limit', limit })));
     expect(compact.passes).toEqual([]);
     expect(recordWrite).toHaveBeenCalledOnce();
     expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);

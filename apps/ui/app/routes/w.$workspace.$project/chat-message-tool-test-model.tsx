@@ -1,6 +1,12 @@
-import { FlaskConical, X, Lightbulb, Check, ChevronRight } from 'lucide-react';
+import { FlaskConical, X, Lightbulb, Check, ChevronRight, CircleDashed } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import type { TestFailure, TestModelOutput, TestPass } from '@taucad/chat/schemas/tools/test-model';
+import {
+  formatTestModelCounts,
+  isUndecidedFailure,
+  summarizeTestModelOutput,
+} from '@taucad/chat/schemas/tools/test-model-summary';
+import type { TestModelSummary } from '@taucad/chat/schemas/tools/test-model-summary';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { toolName } from '@taucad/chat/constants';
 import { useChatSelector } from '#hooks/use-chat.js';
@@ -40,10 +46,16 @@ function TestFailureItem({
   readonly failure: TestFailure;
   readonly index: number;
 }): React.JSX.Element {
+  const undecided = isUndecidedFailure(failure);
   return (
-    <div className='flex min-w-0 items-start gap-2 text-xs'>
+    <div className='flex min-w-0 items-start gap-2 text-xs' data-undecided={undecided}>
       <div className='mt-0.5 shrink-0'>
-        <X className='size-3.5 text-feature' />
+        {undecided ? (
+          <CircleDashed aria-hidden className='size-3.5 text-warning' />
+        ) : (
+          <X aria-hidden className='size-3.5 text-feature' />
+        )}
+        <span className='sr-only'>{undecided ? 'Not decided' : 'Failed'}</span>
       </div>
       <div className='min-w-0 flex-1'>
         <div className='wrap-break-word text-foreground'>
@@ -102,6 +114,7 @@ const groupByTargetFile = (passes: readonly TestPass[], failures: readonly TestF
 function FileGroupSection({ group }: { readonly group: FileGroup }): React.JSX.Element {
   const { targetFile, passes, failures } = group;
   const hasFailures = failures.length > 0;
+  const undecidedCount = failures.filter((failure) => isUndecidedFailure(failure)).length;
 
   return (
     <div data-target-file={targetFile} className='min-w-0 space-y-2 rounded-md border border-border/40 p-2'>
@@ -111,7 +124,11 @@ function FileGroupSection({ group }: { readonly group: FileGroup }): React.JSX.E
             <span>{targetFile}</span>
           </FileLink>
         </div>
-        <RequirementIndicator failedCount={failures.length} passedCount={passes.length} />
+        <RequirementIndicator
+          failedCount={failures.length - undecidedCount}
+          passedCount={passes.length}
+          undecidedCount={undecidedCount}
+        />
       </div>
 
       {hasFailures && (
@@ -139,14 +156,13 @@ function FileGroupSection({ group }: { readonly group: FileGroup }): React.JSX.E
  * The card names what the JSON holds and its size, so the download is not a guess.
  */
 function FullReportDownload({
-  result,
+  summary: { counts },
   fullResult,
 }: {
-  readonly result: TestModelOutput;
+  readonly summary: TestModelSummary;
   readonly fullResult: NonNullable<TestModelOutput['fullResult']>;
 }): React.JSX.Element {
-  const failed = result.total - result.passed;
-  const summary = `All ${result.total} requirements (${result.passed} passed, ${failed} failed) with run accounting, lineage and source revisions · ${formatBytes(fullResult.byteLength)}`;
+  const summary = `All ${counts.total} requirements (${formatTestModelCounts(counts)}) with run accounting, lineage and source revisions · ${formatBytes(fullResult.byteLength)}`;
 
   return (
     <Collapsible className='text-xs text-muted-foreground'>
@@ -199,7 +215,9 @@ export function ChatMessageToolTestModel({
       const groups = groupByTargetFile(passes, failures);
       const totalRequirements = result.total;
       const requirementNoun = totalRequirements === 1 ? 'requirement' : 'requirements';
-      const hasFailures = result.passed < result.total;
+      const summary = summarizeTestModelOutput(result);
+      const hasFailures = summary.counts.failed > 0;
+      const allPassed = !hasFailures && summary.decided && result.passed === result.total;
       const fullResult = isDebug ? result.fullResult : undefined;
 
       return (
@@ -207,11 +225,11 @@ export function ChatMessageToolTestModel({
           key='output'
           variant='minimal'
           status={isLoading ? 'loading' : 'ready'}
-          isDefaultOpen={hasFailures}
+          isDefaultOpen={!allPassed}
           isCollapsible={totalRequirements > 0 || fullResult !== undefined}
         >
           <ChatToolCardHeader>
-            <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'error' : undefined} />
+            <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'error' : allPassed ? undefined : 'warning'} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Tested'>
                 <ChatToolDescription>
@@ -226,7 +244,7 @@ export function ChatMessageToolTestModel({
                 {groups.map((group) => (
                   <FileGroupSection key={group.targetFile} group={group} />
                 ))}
-                {fullResult ? <FullReportDownload result={result} fullResult={fullResult} /> : null}
+                {fullResult ? <FullReportDownload summary={summary} fullResult={fullResult} /> : null}
               </div>
             </ChatToolCardContent>
           )}

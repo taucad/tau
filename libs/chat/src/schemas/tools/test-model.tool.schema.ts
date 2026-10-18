@@ -294,6 +294,21 @@ const geoSpecLimitSchema = z
   })
   .strict();
 
+/** The status of a requirement row that did not pass, as its test reports it. */
+const geoSpecNonPassingStatusSchema = z.enum(['failed', 'inconclusive', 'unsupported', 'not-run']);
+
+/** One `expectGeo` claim of a requirement, in assertion order. */
+const geoSpecAssertionRowSchema = z
+  .object({
+    ordinal: observedCountSchema,
+    status: z.enum(['passed', 'failed', 'inconclusive', 'unsupported']),
+    matcher: z.string(),
+    code: z.string().optional().describe('The first diagnostic code of a claim that did not pass.'),
+    message: z.string().optional(),
+    limit: geoSpecLimitSchema.optional(),
+  })
+  .strict();
+
 /**
  * A browser run that outlived its run budget. The run is reported with the
  * requirements it completed; the rest are not run, never passed.
@@ -325,6 +340,9 @@ const testFailureSchema = z.object({
   requirement: z.string().describe('Description of the requirement that failed'),
   reason: z.string().describe('Why the test failed'),
   suggestion: z.string().describe('Actionable suggestion to fix the issue'),
+  status: geoSpecNonPassingStatusSchema
+    .optional()
+    .describe('The requirement status: only failed is a failure; inconclusive, unsupported and not-run are undecided.'),
   category: geoSpecFailureCategorySchema.optional(),
   limit: geoSpecLimitSchema.optional(),
   targetFile: rootedFilePathSchema.describe('Source file whose geometry produced this failure'),
@@ -450,6 +468,10 @@ export const testModelOutputSchema = z.object({
           status: geoSpecTestStatusSchema,
           ordinal: observedCountSchema.optional(),
           limit: geoSpecLimitSchema.optional(),
+          assertions: z
+            .array(geoSpecAssertionRowSchema)
+            .optional()
+            .describe('Each claim the test made, in order, with its own status.'),
         })
         .strict(),
     )

@@ -487,6 +487,65 @@ const loadKernels = (
   });
 };
 
+type AssertionRow = NonNullable<TestRow['assertions']>[number];
+
+/** A claim's own status: the engine's verdict, or failed when it never reached one (a thrown or invalid claim). */
+const assertionStatus = (assertion: GeoSpecTestCase['assertions'][number]): AssertionRow['status'] => {
+  const status = assertion.report?.status;
+  if (status === undefined) {
+    return assertion.passed === true ? 'passed' : 'failed';
+  }
+  if (status === 'passed') {
+    return 'passed';
+  }
+  if (status === 'unsupported') {
+    return 'unsupported';
+  }
+  return status === 'failed' || status === 'invalid' || status === 'engine-error' ? 'failed' : 'inconclusive';
+};
+
+/** The worst status among a test's claims that did not pass: failed, then inconclusive, then unsupported. */
+const worstAssertionStatus = (test: GeoSpecTestCase): 'failed' | 'inconclusive' | 'unsupported' => {
+  const statuses = new Set(test.assertions.map((assertion) => assertionStatus(assertion)));
+  if (statuses.has('inconclusive') && !statuses.has('failed')) {
+    return 'inconclusive';
+  }
+  if (statuses.has('unsupported') && !statuses.has('failed')) {
+    return 'unsupported';
+  }
+  return 'failed';
+};
+
+/** One row per claim the test made, in order, so a passed claim stays visible beside a refused one. */
+const assertionRows = (test: GeoSpecTestCase): Pick<TestRow, 'assertions'> => {
+  if (test.assertions.length === 0) {
+    return {};
+  }
+  return {
+    assertions: test.assertions.map((assertion, ordinal): AssertionRow => {
+      const status = assertionStatus(assertion);
+      const [first] = status === 'passed' ? [] : (assertion.diagnostics ?? []);
+      const category = first === undefined ? undefined : diagnosticCategory(first);
+      const capability = assertion.report?.claim['capability'];
+      const limit =
+        first === undefined || category === undefined || !limitCategories.has(category)
+          ? undefined
+          : typedLimit(category, {
+              diagnostic: first,
+              operation: typeof capability === 'string' ? capability : assertion.kind,
+              ...(assertion.loadId === undefined ? {} : { subject: assertion.loadId }),
+            });
+      return {
+        ordinal,
+        status,
+        matcher: assertion.kind,
+        ...(first === undefined ? {} : { code: first.code, message: first.message }),
+        ...(limit === undefined ? {} : { limit }),
+      };
+    }),
+  };
+};
+
 /**
  * Project one settled test onto its `test_model` rows.
  *
@@ -547,11 +606,14 @@ export const projectGeoSpecTest = (
       // A diagnostic no assertion carries was thrown by the test body: a load the engine or host refused to admit.
       ...thrown.map((diagnostic) => ({ diagnostic, operation: 'ingestSubject' })),
     ]);
+    // A passed test lands here only through a claim that did not pass: report that claim's worst status.
+    const failureStatus = test.status === 'passed' ? worstAssertionStatus(test) : test.status;
     return {
-      test: { ...testRow, ...(limit === undefined ? {} : { limit }) },
+      test: { ...testRow, ...(limit === undefined ? {} : { limit }), ...assertionRows(test) },
       failure: {
         id: `${file}:${requirement}`,
         requirement,
+        status: failureStatus,
         reason:
           diagnosticText(diagnostics) ??
           (nonPassingReport ? `GeoSpec evidence status: ${nonPassingReport.status}.` : 'GeoSpec test failed.'),
@@ -570,7 +632,7 @@ export const projectGeoSpecTest = (
     };
   }
   return {
-    test: testRow,
+    test: { ...testRow, ...assertionRows(test) },
     pass: {
       id: `${file}:${requirement}`,
       requirement,

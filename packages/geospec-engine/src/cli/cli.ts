@@ -217,6 +217,16 @@ export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCom
 
 const fullName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
+/** The per-test label: only a failed test prints `fail`; an undecided one names its status. */
+const testLabel: Readonly<Record<GeoSpecTestCase['status'], string>> = {
+  passed: 'pass',
+  failed: 'fail',
+  inconclusive: 'inconclusive',
+  unsupported: 'unsupported',
+  'not-run': 'not-run',
+  skipped: 'skip',
+};
+
 /**
  * Render one file's result as human-readable lines.
  *
@@ -237,7 +247,7 @@ export const formatFileReport = (file: string, result: GeoSpecRunResult): string
     if (test.status === 'passed') {
       continue;
     }
-    lines.push(`  ${test.status === 'skipped' ? 'skip' : 'fail'} ${fullName(test)}`);
+    lines.push(`  ${testLabel[test.status]} ${fullName(test)}`);
     // The collector copies an assertion's diagnostics onto the test, so the two
     // lists overlap; printing both verbatim doubles every line.
     const seen = new Set<string>();
@@ -270,12 +280,54 @@ export const formatRunReport = (result: GeoSpecRunnerResult): string[] => {
   for (const issue of result.issues ?? []) {
     lines.push(`${issue.code}: ${issue.message}`);
   }
-  // An inconclusive test is neither passed nor failed, so the totals name it.
-  const inconclusive = result.accounting?.inconclusive ?? 0;
-  lines.push(
-    `${result.passed} passed, ${result.failed} failed, ${result.selectedTests} selected${inconclusive === 0 ? '' : `, ${inconclusive} inconclusive`}`,
-  );
+  lines.push(formatRunHeadline(result));
   return lines;
+};
+
+/**
+ * The run's headline: its status, passed and failed, then each non-zero undecided or skipped count. It is the line
+ * `test_model` prints over MCP (`formatTestModelHeadline` in `@taucad/chat`, which this published CLI cannot import),
+ * and both test suites pin the same text.
+ *
+ * @param result - The aggregate result.
+ * @returns For example `GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.`
+ * @internal
+ */
+export const formatRunHeadline = (result: GeoSpecRunnerResult): string => {
+  const { accounting } = result;
+  const counts = {
+    passed: accounting?.passed ?? result.passed,
+    failed: accounting?.failed ?? result.failed,
+    inconclusive: accounting?.inconclusive ?? 0,
+    unsupported: accounting?.unsupported ?? 0,
+    notRun: accounting?.notRun ?? 0,
+    skipped: accounting?.skipped ?? 0,
+    total: accounting?.selected ?? result.selectedTests,
+  };
+  const status =
+    counts.failed > 0
+      ? 'failed'
+      : counts.inconclusive > 0 || accounting?.cancelled === true
+        ? 'inconclusive'
+        : counts.unsupported > 0
+          ? 'unsupported'
+          : counts.total === counts.skipped
+            ? 'not-run'
+            : result.success
+              ? 'passed'
+              : 'inconclusive';
+  const parts = [`${String(counts.passed)} passed`, `${String(counts.failed)} failed`];
+  for (const [count, label] of [
+    [counts.inconclusive, 'inconclusive'],
+    [counts.unsupported, 'unsupported'],
+    [counts.notRun, 'not run'],
+    [counts.skipped, 'skipped'],
+  ] as const) {
+    if (count > 0) {
+      parts.push(`${String(count)} ${label}`);
+    }
+  }
+  return `GeoSpec ${status}: ${parts.join(', ')} of ${String(counts.total)}.`;
 };
 
 /**

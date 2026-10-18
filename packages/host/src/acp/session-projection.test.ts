@@ -269,7 +269,7 @@ it.each([false, true])('should validate Grok GeoSpec summary and JSON blocks (in
           type: 'MCP',
           tool_name: 'test_model',
           server_name: 'tau',
-          output: { OkayOutput: `GeoSpec passed 0 of 0 requirements.\n${JSON.stringify(output)}` },
+          output: { OkayOutput: `GeoSpec not-run: 0 passed, 0 failed of 0.\n${JSON.stringify(output)}` },
         },
       },
     ],

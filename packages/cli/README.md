@@ -35,7 +35,7 @@ tau check main.py --json          # {"v":1,"kind":"evaluation","status":"refused
 tau check main.ts --params='{"width":20}'
 ```
 
-`tau test [project]` runs the project's GeoSpec suites (`*.geospec.ts`) headlessly with the same runner `tau mcp`'s `test_model` uses. Exit `0` means every selected test passed, `1` that a test failed, `3` that nothing could run (no suite, no GeoSpec engine, a kernel not prepared).
+`tau test [project]` runs the project's GeoSpec suites (`*.geospec.ts`) headlessly with the same runner `tau mcp`'s `test_model` uses. Exit `0` means every selected test passed, `1` that a test failed or was left undecided (with `--json`, the record's `status` is `inconclusive` when nothing failed), `3` that nothing could run (no suite, no GeoSpec engine, a kernel not prepared).
 
 ```bash
 tau test

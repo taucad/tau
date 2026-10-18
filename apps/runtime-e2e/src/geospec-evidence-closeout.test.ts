@@ -121,7 +121,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
       if (summary?.type !== 'text') {
         throw new Error('missing MCP summary text');
       }
-      expect(summary.text).toContain('GeoSpec passed 1 of 5 requirements.');
+      expect(summary.text).toContain('GeoSpec failed: 1 passed, 4 failed of 5.');
       for (const failure of output.failures) {
         expect(summary.text).toContain(failure.id);
       }

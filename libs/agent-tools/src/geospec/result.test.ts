@@ -282,6 +282,7 @@ describe('canonical reports', () => {
         requirement: 'before crash',
         targetFile: 'gear.geospec.ts',
         status: 'passed',
+        assertions: [{ ordinal: 0, status: 'passed', matcher: 'watertight' }],
       },
     ]);
     expect(output.passes[0]?.reports?.[0]?.canonical?.result).toEqual([...report.canonicalResult]);
@@ -448,6 +449,7 @@ describe('canonical reports', () => {
           requirement: 'legacy pass',
           targetFile: 'gear.geospec.ts',
           status: 'passed',
+          assertions: [{ ordinal: 0, status: 'passed', matcher: 'watertight' }],
         },
       ],
     });
@@ -464,6 +466,7 @@ describe('canonical reports', () => {
         {
           id: 'gear.geospec.ts:legacy fail',
           requirement: 'legacy fail',
+          status: 'failed',
           reason: 'GeoSpec test failed.',
           suggestion:
             'Change the model so it meets this requirement, using the expected and actual values in the diagnostics. Keep the assertion and its tolerance.',
@@ -483,9 +486,140 @@ describe('canonical reports', () => {
           requirement: 'legacy fail',
           targetFile: 'gear.geospec.ts',
           status: 'failed',
+          assertions: [{ ordinal: 0, status: 'failed', matcher: 'watertight' }],
         },
       ],
     });
+  });
+});
+
+describe('per-assertion results', () => {
+  it('should keep a passed claim beside the refused claim of the same requirement', () => {
+    const refusal: GeometryDiagnostic = {
+      code: 'GEOSPEC_ANALYSIS_LIMIT',
+      severity: 'error',
+      message: 'Continuous evidence needs 35.6 MiB (37290112 bytes); the analysis limit is 32 MiB (33554432 bytes).',
+      details: { limit: 33_554_432, limitClass: 'analysis', required: 37_290_112, unit: 'bytes' },
+    };
+    const passed = claimReport({ claimId: 'bounds', polarity: 'positive', seed: 1, status: 'passed' });
+    const refused = claimReport({ claimId: 'interference', polarity: 'positive', seed: 4, status: 'refused' });
+    const output = project({
+      suite: ['gears'],
+      name: 'mesh without interference',
+      status: 'inconclusive',
+      assertions: [
+        { kind: 'boundingBox', subject: null, expected: {}, passed: true, diagnostics: [], report: passed },
+        {
+          kind: 'componentInterference',
+          subject: null,
+          expected: {},
+          passed: false,
+          diagnostics: [refusal],
+          report: { ...refused, claim: { claimId: 'interference', capability: 'toHaveNoComponentInterference' } },
+          loadId: 'load-1',
+        },
+      ],
+      diagnostics: [refusal],
+    });
+
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+    expect(output.failures[0]?.status).toBe('inconclusive');
+    expect(output.tests?.[0]?.assertions).toStrictEqual([
+      { ordinal: 0, status: 'passed', matcher: 'boundingBox' },
+      {
+        ordinal: 1,
+        status: 'inconclusive',
+        matcher: 'componentInterference',
+        code: 'GEOSPEC_ANALYSIS_LIMIT',
+        message: refusal.message,
+        limit: {
+          kind: 'capacity',
+          name: 'continuousEvidenceBytes',
+          declared: 33_554_432,
+          measured: 37_290_112,
+          unit: 'bytes',
+          operation: 'toHaveNoComponentInterference',
+          subject: 'load-1',
+          retry: null,
+          source: 'engine',
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    ['failed', 'failed'],
+    ['unsupported', 'unsupported'],
+    ['invalid', 'failed'],
+    ['engine-error', 'failed'],
+    ['cancelled', 'inconclusive'],
+  ] as const)('should read a %s claim as %s', (reportStatus, status) => {
+    const report = {
+      ...claimReport({ claimId: 'c', polarity: 'positive', seed: 1, status: 'failed' }),
+      status: reportStatus,
+    };
+    const output = project({
+      suite: [],
+      name: 'claim',
+      status,
+      assertions: [{ kind: 'volume', subject: null, expected: {}, passed: false, report }],
+      diagnostics: [],
+    });
+
+    expect(output.tests?.[0]?.assertions?.[0]?.status).toBe(status);
+  });
+
+  it.each([
+    ['unsupported', 'unsupported'],
+    ['refused', 'inconclusive'],
+    ['failed', 'failed'],
+  ] as const)(
+    'should give a passed test whose %s claim did not pass that claim status, not failed',
+    (reportStatus, status) => {
+      const output = project({
+        suite: [],
+        name: 'claim',
+        status: 'passed',
+        assertions: [
+          {
+            kind: 'boundingBox',
+            subject: null,
+            expected: {},
+            passed: true,
+            report: claimReport({ claimId: 'a', polarity: 'positive', seed: 1, status: 'passed' }),
+          },
+          {
+            kind: 'volume',
+            subject: null,
+            expected: {},
+            passed: true,
+            report: {
+              ...claimReport({ claimId: 'b', polarity: 'positive', seed: 2, status: 'failed' }),
+              status: reportStatus,
+            },
+          },
+        ],
+        diagnostics: [],
+      });
+
+      expect(output.failures[0]?.status).toBe(status);
+    },
+  );
+
+  it('should fail a claim that threw before the engine reported', () => {
+    const thrown: GeometryDiagnostic = { code: 'TEST_FAILED', severity: 'error', message: 'threw' };
+    const output = project({
+      suite: [],
+      name: 'claim',
+      status: 'failed',
+      assertions: [{ kind: 'volume', subject: null, expected: {}, passed: false, diagnostics: [thrown] }],
+      diagnostics: [thrown],
+    });
+
+    expect(output.failures[0]?.status).toBe('failed');
+    expect(output.tests?.[0]?.assertions).toStrictEqual([
+      { ordinal: 0, status: 'failed', matcher: 'volume', code: 'TEST_FAILED', message: 'threw' },
+    ]);
   });
 });
 

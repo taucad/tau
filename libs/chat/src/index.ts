@@ -3,6 +3,7 @@ export * from '#schemas/tools/web-search.tool.schema.js';
 export * from '#schemas/tools/web-browser.tool.schema.js';
 export * from '#schemas/tools/edit-file.tool.schema.js';
 export * from '#schemas/tools/test-model.tool.schema.js';
+export * from '#schemas/tools/test-model-summary.js';
 export * from '#schemas/tools/test-model-input-normalizer.js';
 export * from '#schemas/tools/project-path-input-normalizer.js';
 export * from '#schemas/tools/parameter.tool.schema.js';

@@ -746,7 +746,38 @@ describe('serializeMessage', () => {
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="test_model">\n</tool_call>\n<tool_result>\n2/4 passed\n- FAIL [main.scad]: req-main\n  main failed\n- FAIL [lib/bracket.scad]: req-lib\n  lib failed\n</tool_result>',
+        '<tool_call name="test_model">\n</tool_call>\n<tool_result>\nGeoSpec unqualified: 2 passed, 2 failed of 4. Failed: f1, f2.\n- FAIL [main.scad]: req-main\n  main failed\n  suggestion: fix main\n- FAIL [lib/bracket.scad]: req-lib\n  lib failed\n  suggestion: fix lib\n</tool_result>',
+      );
+    });
+
+    it('serializes an inconclusive test_model row as undecided, never as a failure', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-test_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: {},
+          output: {
+            passed: 1,
+            total: 2,
+            runStatus: 'inconclusive',
+            passes: [{ id: 'p1', requirement: 'r1', targetFile: 'main.ts' }],
+            failures: [
+              {
+                id: 'f1',
+                requirement: 'no interference',
+                reason: 'Continuous evidence needs 35.6 MiB; the analysis limit is 32 MiB.',
+                suggestion: 'Not decided: report the claim as not decided.',
+                status: 'inconclusive',
+                category: 'analysis-limit',
+                targetFile: 'main.ts',
+              },
+            ],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="test_model">\n</tool_call>\n<tool_result>\nGeoSpec inconclusive: 1 passed, 0 failed, 1 inconclusive of 2. Undecided: f1 (analysis-limit).\n- UNDECIDED (analysis-limit) [main.ts]: no interference\n  Continuous evidence needs 35.6 MiB; the analysis limit is 32 MiB.\n  suggestion: Not decided: report the claim as not decided.\n</tool_result>',
       );
     });
 

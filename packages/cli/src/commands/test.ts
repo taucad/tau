@@ -7,14 +7,15 @@
  * composed from the payload store's receipts and nothing is downloaded (I5): a suite over an unprepared `.py` model
  * fails with the kernel's `KERNEL_NOT_PREPARED` refusal and exits 3.
  *
- * Exit codes: 0 every selected test passed, 1 a test failed, 2 an unusable request, 3 nothing ran because the runtime
- * declined (no GeoSpec engine, no suite found, a kernel not prepared).
+ * Exit codes: 0 every selected test passed, 1 a test failed or was left undecided (record status `inconclusive`), 2 an
+ * unusable request, 3 nothing ran because the runtime declined (no GeoSpec engine, no suite found, a kernel not
+ * prepared).
  *
  * @module
  */
 import { readdir, stat } from 'node:fs/promises';
 
-import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
+import { createHostGeoSpecRunner, formatTestModelHeadline, runStatusFromCounts } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRunner, HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineCommand } from 'citty';
@@ -37,7 +38,8 @@ export type TestCaseRecord = Readonly<{
 export type TestRecord = Readonly<{
   kind: 'test';
   ok: boolean;
-  status: 'passed' | 'failed' | 'refused';
+  /** `inconclusive`: nothing failed, but a selected test was left inconclusive, unsupported or not run. */
+  status: 'passed' | 'failed' | 'inconclusive' | 'refused';
   project: string;
   files: readonly string[];
   passed: number;
@@ -49,6 +51,9 @@ export type TestRecord = Readonly<{
 
 /** Issue codes that mean the runtime declined the request rather than a test failing. */
 const refusedCodes = new Set(['KERNEL_CAPABILITY_MISSING', 'TRANSCODER_CAPABILITY_MISSING', 'KERNEL_NOT_PREPARED']);
+
+/** Test statuses that are neither passed nor decided false. */
+const undecidedStatuses: ReadonlySet<string> = new Set(['inconclusive', 'unsupported', 'not-run']);
 
 /** A diagnostic as GeoSpec reports it on a test, an assertion or a run. */
 type Diagnostic = Readonly<{ code: string; message: string; severity?: string }>;
@@ -79,6 +84,17 @@ type RunResult = Readonly<{
   >;
 }>;
 
+const recordStatus = (result: RunResult, tests: readonly TestCaseRecord[], refused: boolean): TestRecord['status'] => {
+  if (result.success) {
+    return 'passed';
+  }
+  if (refused) {
+    return 'refused';
+  }
+  const failed = result.failed > 0 || tests.some((test) => test.status === 'failed');
+  return !failed && tests.some((test) => undecidedStatuses.has(test.status)) ? 'inconclusive' : 'failed';
+};
+
 /**
  * Project a GeoSpec run into the `test` record.
  *
@@ -86,7 +102,8 @@ type RunResult = Readonly<{
  * @param project - The project root.
  * @param files - The project-relative suites that ran.
  * @param result - The runner's result.
- * @returns The record, `refused` when nothing passed and a diagnostic names a request the runtime declined.
+ * @returns The record, `refused` when nothing passed and a diagnostic names a request the runtime declined, and
+ *   `inconclusive` when no test failed but one was left undecided.
  */
 export const testRecord = (project: string, files: readonly string[], result: RunResult): TestRecord => {
   const diagnostics: Diagnostic[] = [];
@@ -120,7 +137,7 @@ export const testRecord = (project: string, files: readonly string[], result: Ru
   return {
     kind: 'test',
     ok: result.success,
-    status: result.success ? 'passed' : refused ? 'refused' : 'failed',
+    status: recordStatus(result, tests, refused),
     project,
     files,
     passed: result.passed,
@@ -131,22 +148,39 @@ export const testRecord = (project: string, files: readonly string[], result: Ru
   };
 };
 
-const exitFor: Readonly<Record<TestRecord['status'], number>> = {
+/**
+ * The exit code of each record status.
+ *
+ * @internal
+ */
+export const exitFor: Readonly<Record<TestRecord['status'], number>> = {
   passed: exitCodes.ok,
   failed: exitCodes.error,
+  // Not a pass, so CI still stops; the record says the run was undecided rather than failed.
+  inconclusive: exitCodes.error,
   refused: exitCodes.refused,
 };
 
 /**
- * The run's one-line totals, naming the inconclusive tests that are neither passed nor failed.
+ * The run's headline, the line `test_model` prints over MCP: an inconclusive, unsupported or not-run test is counted
+ * as such, never as failed.
  *
  * @internal
  * @param record - The run's record.
  * @returns The summary line.
  */
 export const testSummary = (record: TestRecord): string => {
-  const inconclusive = record.tests.filter((test) => test.status === 'inconclusive').length;
-  return `${String(record.passed)} passed, ${String(record.failed)} failed of ${String(record.selected)} selected${inconclusive === 0 ? '' : `, ${String(inconclusive)} inconclusive`}`;
+  const tally = (status: string): number => record.tests.filter((test) => test.status === status).length;
+  const counts = {
+    passed: record.passed,
+    failed: record.failed,
+    inconclusive: tally('inconclusive'),
+    unsupported: tally('unsupported'),
+    notRun: tally('not-run'),
+    skipped: tally('skipped'),
+    total: record.selected,
+  };
+  return formatTestModelHeadline(runStatusFromCounts(counts, { completed: record.ok }), counts);
 };
 
 /**
@@ -298,12 +332,24 @@ export const testCommand = defineCommand({
     }
     for (const test of record.tests) {
       const line = `${test.file} › ${test.name}${test.message === undefined ? '' : `: ${test.message}`}`;
-      if (test.status === 'passed') {
-        output.success(line);
-      } else if (test.status === 'skipped' || test.status === 'todo') {
-        output.info(`${line} (${test.status})`);
-      } else {
-        output.error(line);
+      switch (test.status) {
+        case 'passed': {
+          output.success(line);
+          break;
+        }
+        case 'skipped':
+        case 'todo': {
+          output.info(`${line} (${test.status})`);
+          break;
+        }
+        case 'failed': {
+          output.error(line);
+          break;
+        }
+        default: {
+          // Inconclusive, unsupported and not-run tests were not decided false.
+          output.warn(`${line} (${test.status})`);
+        }
       }
     }
     for (const issue of record.issues) {
@@ -315,7 +361,7 @@ export const testCommand = defineCommand({
       return;
     }
     /* Exactly one record on stdout, as `tau check` reports it. */
-    process.stderr.write(`GeoSpec ${record.status === 'refused' ? 'refused' : 'failed'}: ${summary}\n`);
+    process.stderr.write(`${record.status === 'refused' ? 'Refused. ' : ''}${summary}\n`);
     process.exitCode = exitFor[record.status];
   },
 });

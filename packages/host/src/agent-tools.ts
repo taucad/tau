@@ -39,6 +39,10 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import { toolName } from '@taucad/chat/constants';
 import { toRpcError } from '@taucad/chat/rpc';
+import {
+  formatTestModelHeadline as chatFormatTestModelHeadline,
+  runStatusFromCounts as chatRunStatusFromCounts,
+} from '@taucad/chat/schemas/tools/test-model-summary';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 import {
@@ -75,6 +79,53 @@ import type { ProjectRevisions } from '#revisions.js';
 import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
+
+/** A GeoSpec run's qualification, as `test_model` reports it in `runStatus`. @public */
+export type HostTestModelRunStatus = 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-run';
+
+/** A GeoSpec run's requirement counts by status; `total` counts the selected requirements, skipped ones included. @public */
+export type HostTestModelCounts = {
+  readonly passed: number;
+  readonly failed: number;
+  readonly inconclusive: number;
+  readonly unsupported: number;
+  readonly notRun: number;
+  readonly skipped: number;
+  readonly total: number;
+};
+
+/**
+ * The GeoSpec run headline `test_model` prints over MCP, for a host that prints it elsewhere (`tau test`). The
+ * private `@taucad/chat` is bundled here, so a consumer of this published package reads it from this entry.
+ *
+ * @example <caption>The planetary run's headline</caption>
+ * ```typescript
+ * formatTestModelHeadline('inconclusive', { passed: 5, failed: 0, inconclusive: 5, unsupported: 0, notRun: 0, skipped: 0, total: 10 });
+ * // 'GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.'
+ * ```
+ * @param runStatus - The run qualification; absent reads as unqualified.
+ * @param counts - The run's requirement counts.
+ * @returns The headline.
+ * @public
+ */
+export const formatTestModelHeadline = (
+  runStatus: HostTestModelRunStatus | undefined,
+  counts: HostTestModelCounts,
+): string => chatFormatTestModelHeadline(runStatus, counts);
+
+/**
+ * The run status a GeoSpec run's counts imply, ordered as `test_model`'s `runStatus`: failed, then inconclusive (or
+ * cancelled), unsupported, not run, and passed only when the run completed.
+ *
+ * @param counts - The run's requirement counts.
+ * @param run - Whether every selected requirement ran to a verdict, and whether the run was cancelled.
+ * @returns The run status.
+ * @public
+ */
+export const runStatusFromCounts = (
+  counts: HostTestModelCounts,
+  run: { readonly completed: boolean; readonly cancelled?: boolean },
+): HostTestModelRunStatus => chatRunStatusFromCounts(counts, run);
 
 /**
  * Runtime surface the host's GeoSpec runner borrows. It never terminates it, so termination is not required.

@@ -17,6 +17,7 @@ import {
   parseCadReferenceTokens,
 } from '@taucad/chat/references';
 import type { CadReference } from '@taucad/chat/references';
+import { isUndecidedFailure, summarizeTestModelOutput } from '@taucad/chat/schemas/tools/test-model-summary';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -149,9 +150,16 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.testModel]: {
     input: () => '',
     output(output) {
-      const lines = [`${output.passed}/${output.total} passed`];
+      const lines = [summarizeTestModelOutput(output).line];
       for (const failure of output.failures) {
-        lines.push(`- FAIL [${failure.targetFile}]: ${failure.requirement}`, `  ${failure.reason}`);
+        const label = isUndecidedFailure(failure)
+          ? `UNDECIDED (${failure.category ?? failure.status ?? 'undecided'})`
+          : `FAIL${failure.category === undefined ? '' : ` (${failure.category})`}`;
+        lines.push(
+          `- ${label} [${failure.targetFile}]: ${failure.requirement}`,
+          `  ${failure.reason}`,
+          `  suggestion: ${failure.suggestion}`,
+        );
       }
 
       return joinLines(...lines);

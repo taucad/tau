@@ -786,7 +786,7 @@ const mcpResult = (
         // Grok joins Tau's summary text and the final structured JSON block into one string.
         const json =
           (tool.toolName === toolName.screenshot && /^Captured \d+ CAD views?\./u.test(text)) ||
-          (tool.toolName === toolName.testModel && /^GeoSpec passed \d+ of \d+ requirements\./u.test(text))
+          (tool.toolName === toolName.testModel && /^GeoSpec [a-z-]+: \d+ passed, \d+ failed/u.test(text))
             ? text.slice(text.lastIndexOf('\n') + 1)
             : text;
         structuredContent = JSON.parse(json);

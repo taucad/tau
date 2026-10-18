@@ -91,7 +91,7 @@ public partial class Library : IDisposable
   // This is the one library function that you call to run your code it…
   public static void Go(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath = "", bool bEndAppWithTask = false, string strWindowTitle = "PicoGK", string strLightsFile = "")
   public static void Log(string strFormat, params object[] args)
-  // … 34 more members in the API reference
+  // … 34 more members in the API reference: nStringLength, fVoxelSize, GlobalInstance, fVoxelSizeMM, strLogFolder, nTotalMemUsage, nMeshesMemUsage, nLatticesMemUsage, nPolyLinesMemUsage, nVoxelsMemUsage, nVdbFilesMemUsage, nScalarFieldsMemUsage, nVectorFieldsMemUsage, nVdbMetasMemUsage, nMeshesAllocated, nLatticesAllocated, nPolyLinesAllocated, nVoxelsAllocated, nVdbFilesAllocated, and 15 more
 
 public partial class Voxels : IFieldWithMetadata, IDisposable
   // Create a new empty voxels object, using the global library instance
@@ -150,7 +150,7 @@ public partial class Voxels : IFieldWithMetadata, IDisposable
   public void CalculateProperties(out float fVolumeCubicMM, out BBox3 oBBox)
   // Returns whether the location specified lies inside the solid domain of the voxel field…
   public bool bIsInside(Vector3 vecTestPoint)
-  // … 48 more members in the API reference
+  // … 48 more members in the API reference: fVoxelSize, ESliceMode, ESliceAxis, m_oMetadata, oMetaData, voxCombineAll, voxFromVdbFile, voxDuplicate, bIsEmpty, nMemUsage, BoolAddAll, voxBoolAddAll, BoolSubtractAll, voxBoolSubtractAll, op_Addition, op_Subtraction, op_BitwiseAnd, voxTrim, DoubleOffset, voxDoubleOffset, TripleOffset, voxTripleOffset, Smoothen, voxSmoothen, OverOffset, voxOverOffset, and 22 more
 
 public interface IFieldWithMetadata
   // Return metadata borrowed from this field owner
@@ -201,7 +201,7 @@ public partial class Mesh : IDisposable
   public void SaveToStlFile(FileStream oFile, EStlUnit eUnit = EStlUnit.AUTO, Vector3? vecOffsetMM = null, float fScale = 1.0f)
   public void Dispose()
   protected virtual void Dispose(bool bDisposing)
-  // … 9 more members in the API reference
+  // … 9 more members in the API reference: EStlUnit, m_strLoadHeaderData, m_eLoadUnits, mshCreateMirrored, AddVertices, oBoundingBox, mshFromStlFile, bFindTriangleFromSurfacePoint, bPointLiesOnTriangle
 
 // A lattice of beams (and spheres)
 public partial class Lattice : IDisposable
@@ -232,7 +232,7 @@ public partial class Viewer : IDisposable
   public void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
   // Sets the background color of the viewer
   public void SetBackgroundColor(ColorFloat clr)
-  // … 42 more members in the API reference
+  // … 42 more members in the API reference: InfoCallback, UpdateCallback, KeyPressedCallback, MouseMovedCallback, MouseButtonCallback, ScrollWheelCallback, WindowSizelCallback, GpuTex, ImageQuad, SideBar, bIsHosted, qOrientation, qOrientationHome, qOrientationTop, qOrientationBottom, qOrientationFront, qOrientationLeft, qOrientationBack, qOrientationRight, IViewerAction, AnimGroupMatrixRotate, and 21 more
 
 // 3D bounding box
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -244,46 +244,7 @@ public partial class Viewer : IDisposable
   public void Include(Vector3 vec)
   public void Include(BBox3 oBox)
   public void Include(BBox2 oBox, float fZ = 0.0f)
-  // … 11 more members in the API reference
-
-// Typed Material appearance
-public sealed record Material
-  public string? Name { get; init; }
-  public ColorFloat Color { get; init; } = new("FFFFFF");
-  public float Metallic { get; init; }
-  public float Roughness { get; init; } = .35f;
-  public MaterialVolume? Volume { get; init; }
-  public Material()
-  // … 21 more members in the API reference
-
-// A floating point color value with R,G,B,A values
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-  // Blue value (1 is full color)
-  public float B;
-  // Alpha value (1 is opaque, 0 is transparent)
-  public float A;
-  // Create a color from a hex string #FF0000 is red, for example (# is…
-  public ColorFloat(string strHex)
-  public ColorFloat(float fGray, float fAlpha = 1.0f)
-  public ColorFloat(float fR, float fG, float fB, float fAlpha = 1.0f)
-  public ColorFloat(ColorRgb24 clr)
-  public ColorFloat(ColorRgba32 clr)
-  public ColorFloat(ColorBgr24 clr)
-  public ColorFloat(ColorBgra32 clr)
-  public ColorFloat(ColorFloat clr, float fAlphaOverride)
-  public ColorFloat(ColorHSV clrHSV)
-  public ColorFloat(ColorHLS clrHLS)
-  public ColorFloat()
-  // Allows you to pass a hex string to any function that requires a FloatColor
-  public static implicit operator ColorFloat(string hex)
-  // … 7 more members in the API reference
-
-public class AnimationQueue
-  public AnimationQueue()
-  public void Clear()
-  public bool bPulse()
-  public bool bIsIdle()
-  public void Add(Animation oAnim)
+  // … 11 more members in the API reference: vecMin, vecMax, vecSize, bIsEmpty, bContains, Grow, vecCenter, oFitInto, vecRandomVectorInside, oAsBoundingBox2, ToString
 ```
 
 ### Advanced embedding/native — PicoGK
@@ -302,7 +263,7 @@ public interface IViewerBackend : IDisposable
   void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
   void SetGroupMaterial(int groupId, Material material)
   BBox3 GetBoundingBox()
-  // … 16 more members in the API reference
+  // … 16 more members in the API reference: IsIdle, Orientation, Poll, RequestUpdate, LoadLightSetup, SetFieldOfView, ZoomToFit, Remove, SetObjectMatrix, RemoveAllObjects, RequestScreenShot, EnableExperimental, SetGroupVisible, SetGroupMatrix, EnableOverhangWarning, DisableOverhangWarning
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
   public int A;
@@ -310,11 +271,6 @@ public interface IViewerBackend : IDisposable
   public int C;
   public Triangle(int a, int b, int c)
   public Triangle()
-
-public readonly record struct GpuTexHandle(IntPtr Value)
-  public nint Value { get; init; }
-  public GpuTexHandle(nint Value)
-  public GpuTexHandle()
 ```
 
 ### Advanced embedding/native — PicoGK.Library
@@ -328,7 +284,7 @@ public static void RegisterGlobalLibrary(Library oLibrary)
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 1990 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 1990 symbols by file with the lines that hold each, and read that range of the named file.
 
 - 14 reference files, named in `api-index.md`
 

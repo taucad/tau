@@ -171,7 +171,7 @@ class BuildSketch(Builder)
   solid(*args)
   # Unify pending edges into one or more Wires
   consolidate_edges() -> Wire | list[Wire]
-  # … 1 more members in the API reference
+  # … 1 more members in the API reference: sketch
 ```
 
 ### objects_part
@@ -241,56 +241,7 @@ class Axis
   Axis(edge: Edge) -> None
   # Return self as Location
   location: Location
-  # … 14 more members in the API reference
-
-# Color object based on OCCT Quantity_ColorRGBA
-class Color
-  Color(color_like: ColorLike)
-  Color(name: str, alpha: float = 1.0)
-  Color(red: float, green: float, blue: float, alpha: float = 1.0)
-  Color(color_code: int, alpha: int = 255)
-  # Generate a palette of evenly spaced colors
-  categorical_set(color_count: int, starting_hue: ColorLike | float = 0.0, alpha: float | Iterable[float] = 1.0) -> list[Color]
-
-# Plane
-class Plane
-  # XY Plane
-  XY: Plane
-  # Create a plane from either an OCCT gp_pln, Face, Location, or coordinates
-  Plane(gp_pln: gp_Pln) -> None
-  Plane(points: Iterable[VectorLike]) -> None
-  Plane(origin: VectorLike, x_dir: VectorLike | None = None, z_dir: VectorLike = (0, 0, 1)) -> None
-  Plane(origin: VectorLike, x_dir: VectorLike, *, y_dir: VectorLike) -> None
-  Plane(face: Face, x_dir: VectorLike | None = None) -> None
-  Plane(location: Location) -> None
-  Plane(axis: Axis, x_dir: VectorLike | None = None) -> None
-  # Move the Plane by amount in the direction of z_dir
-  offset(amount: float) -> Plane
-  # Change the position & orientation of self by applying a relative location
-  move(loc: Location | Plane) -> Plane
-  # Return Location representing the origin and z direction
-  location: Location
-  # … 35 more members in the API reference
-
-# Create a 3-dimensional vector
-class Vector
-  Vector(X: float, Y: float, Z: float)
-  Vector(X: float, Y: float)
-  Vector(v: Vector)
-  Vector(v: Sequence[float])
-  Vector(v: gp_Vec | gp_Pnt | gp_Dir | gp_XYZ)
-  Vector()
-  # Get x value
-  X: float
-  # Get z value
-  Z: float
-  # Vector length
-  length: float
-  # center
-  center() -> Vector
-  # Rotate about axis
-  rotate(axis: Axis, angle: float) -> Vector
-  # … 27 more members in the API reference
+  # … 14 more members in the API reference: wrapped, position, direction, located, is_coaxial, is_normal, is_opposite, is_parallel, is_skew, angle_between, reverse, __neg__, __and__, intersect
 ```
 
 ### build_common
@@ -366,7 +317,7 @@ class Shape(NodeMixin, Generic)
   translate(vector: VectorLike, transform: bool = False) -> Self
   # Return the Wire
   wire() -> Wire
-  # … 71 more members in the API reference
+  # … 71 more members in the API reference: topo_parent, topo_owner, wrapped, area, material, convexity, geom_type, is_manifold, is_null, is_valid, global_location, matrix_of_inertia, orientation, position, principal_properties, shape_type, static_moments, register_shape_constructor, register_geometry_constructor, as_shape, cast, combined_center, get_shape_list, get_single_shape, and 47 more
 
 # How much of a shape a selector returns
 class Select(Enum)
@@ -394,7 +345,7 @@ class Solid(Mixin3D)
   revolve(section: Face | Wire, angle: float, axis: Axis, inner_wires: list[Wire] | None = None) -> Solid
   # Sweep
   sweep(section: Face | Wire, path: Wire | Edge, inner_wires: list[Wire] | None = None, make_solid: bool = True, is_frenet: bool = False, mode: Vector | Wire | Edge | None = None, transition: Transition = Transition.TRANSFORMED) -> Solid
-  # … 14 more members in the API reference
+  # … 14 more members in the API reference: volume, mass, touch, extrude_linear_with_rotation, extrude_taper, extrude_until, from_bounding_box, make_cone, make_sphere, make_torus, make_wedge, sweep_multi, thicken, draft
 
 # Sweep discontinuity handling option
 class Transition(Enum)
@@ -428,7 +379,7 @@ class Face(Mixin2D)
   fillet_2d(radius: float, vertices: Iterable[Vertex]) -> Face
   # Return the outerwire, generate a warning if inner_wires present
   wire() -> Wire
-  # … 37 more members in the API reference
+  # … 37 more members in the API reference: area_without_holes, axis_of_rotation, axes_of_symmetry, center_location, geometry, convexity, is_circular_convex, is_circular_concave, is_planar, radii, radius, seams, semi_angle, uv_face, volume, mass, make_bezier_surface, make_gordon_surface, make_rect, make_surface_from_array_of_points, make_surface_from_curves, make_surface_patch, sew_faces, chamfer_2d, and 13 more
 
 # Center Options
 class CenterOf(Enum)
@@ -458,7 +409,7 @@ class Edge(Mixin1D)
   make_spline(points: list[VectorLike], tangents: list[VectorLike] | None = None, periodic: bool = False, parameters: list[float] | None = None, scale: bool = True, tol: float = 1e-06) -> Edge
   # Three Point Arc
   make_three_point_arc(point1: VectorLike, point2: VectorLike, point3: VectorLike) -> Edge
-  # … 25 more members in the API reference
+  # … 25 more members in the API reference: arc_center, make_constrained_arcs, make_constrained_lines, make_parabola, make_hyperbola, make_helix, make_mid_way, make_bspline, make_spline_approx, make_tangent_arc, close, distribute_locations, find_intersection_points, find_tangent, geom_adaptor, geom_equal, param_at, param_at_point, project_to_shape, reversed, trim, trim_to_length, trim_to_other, and 2 more
 
 # Angular rotation direction
 class AngularDirection(Enum)
@@ -484,12 +435,12 @@ class Wire(Mixin1D)
   edges(select: Select = Select.ALL) -> ShapeList[Edge]
   # fillet_2d
   fillet_2d(radius: float, vertices: Iterable[Vertex]) -> Wire
-  # … 15 more members in the API reference
+  # … 15 more members in the API reference: combine, make_convex_hull, make_rect, order_chamfer_edges, chamfer_2d, close, fix_degenerate_edges, geom_adaptor, order_edges, geom_equal, param_at, param_at_point, project_to_shape, stitch, trim
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 1067 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 1067 symbols by file with the lines that hold each, and read that range of the named file.
 
 - 32 reference files, named in `api-index.md`
 

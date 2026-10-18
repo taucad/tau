@@ -86,6 +86,9 @@ AxisName: (typeof AXIS_NAMES)[number]
 
 // Creates a box with the given corner points
 export declare function makeBox(corner1: Point, corner2: Point): Solid;
+
+// Creates the `Drawing` of an polygon in a defined plane
+export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
 ```
 
 ### Classes
@@ -133,7 +136,7 @@ export declare class Sketch implements SketchInterface
   sweepSketch(sketchOnPlane: (plane: Plane, origin: Point) => this, sweepConfig?: GenericSweepConfig): Shape3D;
   // Loft between this sketch and another sketch (or an array of them)
   loftWith(otherSketches: this | this[], loftConfig?: LoftConfig, returnShell?: boolean): Shape3D;
-  // … 2 more members in the API reference
+  // … 2 more members in the API reference: defaultOrigin, defaultDirection
 
 Shape3D: Shell | Solid | CompSolid | Compound
 
@@ -184,7 +187,7 @@ export declare class Drawing implements DrawingInterface
   toSVGPaths(): string[] | string[][];
   offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
   readonly blueprint: Blueprint
-  // … 7 more members in the API reference
+  // … 7 more members in the API reference: serialize, stretch, repr, punchHole, toSVG, toSVGViewBox, approximate
 
 Shape2D: Blueprint | Blueprints | CompoundBlueprint | null
 
@@ -238,7 +241,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
   fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
   // Creates a new shapes with some edges chamfered, as specified in the radius config
   chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
-  // … 3 more members in the API reference
+  // … 3 more members in the API reference: cutPlane, meshShape, draft
 
 export declare interface BooleanOperationOptions
   optimisation?: "none" | "commonFace" | "sameFace"
@@ -289,7 +292,7 @@ export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type>
   readonly faces: Face[]
   readonly wires: Wire[]
   readonly boundingBox: BoundingBox
-  // … 11 more members in the API reference
+  // … 11 more members in the API reference: serialize, hashCode, isNull, isSame, isEqual, edges, solids, mesh, meshEdges, blobSTEP, blobSTL
 
 // Pieces grouped by their position relative to an oriented plane
 export declare interface PlaneSplitResult<T>
@@ -322,7 +325,7 @@ export declare class BaseSketcher2d
   smoothSplineTo(end: Point2D, config?: SplineConfig): this;
   // Changes the corner between the previous and next segments
   customCorner(radius: number | ((first: Curve2D, second: Curve2D) => Curve2D[]), mode?: "fillet" | "chamfer" | "dogbone"): this;
-  // … 16 more members in the API reference
+  // … 16 more members in the API reference: pointer, pendingCurves, penPosition, penAngle, saveCurve, polarLineTo, polarLine, tangentLine, sagittaArc, vSagittaArc, bulgeArc, vBulgeArc, hBulgeArc, ellipseTo, halfEllipseTo, smoothSpline
 
 SplineConfig: SplineTangent | {
     endTangent?: SplineTangent;
@@ -349,36 +352,6 @@ export declare class Sketches
           angle?: number;
       }): Shape3D;
 
-// The FaceSketcher allows you to sketch on a plane
-export declare class Sketcher implements GenericSketcher<Sketch>
-  constructor(plane: Plane);
-  constructor(plane?: PlaneName, origin?: Point | number);
-  // Changes the point to start your drawing from
-  movePointerTo([x, y]: Point2D): this;
-  // Draws a line from the current point to the point given in argument
-  lineTo([x, y]: Point2D): this;
-  // Draws a line at the horizontal distance xDist and the vertical distance yDist of…
-  line(xDist: number, yDist: number): this;
-  // Draws a vertical line of length distance from the current point
-  vLine(distance: number): this;
-  // Draws an horizontal line of length distance from the current point
-  hLine(distance: number): this;
-  // Draws an arc of circle by defining its end point and a third point…
-  threePointsArcTo(end: Point2D, innerPoint: Point2D): this;
-  // Draws an arc of circle from the current point as a tangent to the…
-  tangentArcTo(end: Point2D): this;
-  // Draws an arc of circle from the current point as a tangent to the…
-  tangentArc(xDist: number, yDist: number): this;
-  // Draws a generic bezier curve to the end point, going using a set of…
-  bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
-  // Draws a cubic bezier curve to the end point, attempting to make the line…
-  smoothSplineTo(end: Point2D, config?: SplineConfig): this;
-  // Stop drawing and returns the sketch
-  done(): Sketch;
-  // Stop drawing, make sure the sketch is closed (by adding a straight line to…
-  close(): Sketch;
-  // … 28 more members in the API reference
-
 export declare class BoundingBox extends WrappingObj<Bnd_Box>
   constructor(wrapped?: Bnd_Box);
   static fromBounds(min: Point, max: Point): BoundingBox;
@@ -391,34 +364,50 @@ export declare class BoundingBox extends WrappingObj<Bnd_Box>
   add(other: BoundingBox): void;
   isOut(other: BoundingBox): boolean;
 
-export declare class BoundingBox2d extends WrappingObj<Bnd_Box2d>
-  constructor(wrapped?: Bnd_Box2d);
-  readonly repr: string
-  readonly bounds: [Point2D, Point2D]
-  readonly center: Point2D
-  readonly width: number
-  readonly height: number
-  outsidePoint(paddingPercent?: number): Point2D;
-  add(other: BoundingBox2d): void;
-  isOut(other: BoundingBox2d): boolean;
-  containsPoint(other: Point2D): boolean;
+// With a FaceFinder you can apply a set of filters to find specific faces…
+export declare class FaceFinder extends Finder3d<Face>
+  clone(): FaceFinder;
+  // Filter to find faces that are parallel to plane or another face
+  parallelTo(plane: Plane | StandardPlane | Face): this;
+  // Filter to find faces that are of a cetain surface type
+  ofSurfaceType(surfaceType: SurfaceType): this;
+  // Filter to find faces that are contained in a plane
+  inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
+  // Check if a particular element should be filtered or not according to the current…
+  shouldKeep(element: Face): boolean;
+  protected applyFilter(shape: AnyShape): Face[];
+
+SurfaceType: "PLANE" | "CYLINDRE" | "CONE" | "SPHERE" | "TORUS" | "BEZIER_SURFACE" | "BSPLINE_SURFACE" | "REVOLUTION_SURFACE" | "EXTRUSION_SURFACE" | "OFFSET_SURFACE" | "OTHER_SURFACE"
+
+export declare class LinearPhysicalProperties extends PhysicalProperties
+  readonly length: number
 ```
 
 ### Types
 
 ```ts
+// A shape with optional display and material metadata for rendering
 ShapeConfig: {
   shape: AnyShape
-  color?: string
-  alpha?: number
   name?: string
-  // PBR metalness factor (0 = dielectric, 1 = metal)
-  metalness?: number
-  // PBR roughness factor — threaded to GLTF only (not STEP
-  roughness?: number
-  // Material density in g/cm3, written as the shape's STEP material
+  strokeType?: string
+  // Physical density in g/cm³ for STEP mass computation
   density?: number
+  interfaces?: InterfaceDeclarations
+  // CSS color, converted from sRGB to linear glTF base color
+  color?: string
+  opacity?: number
+  metalness?: number
+  roughness?: number
+  material?: never
 }
+
+// Map of interface names to annotation declarations
+InterfaceDeclarations: Record<string, InterfaceDeclaration>
+
+// Replicad interface annotation declaration accepted by Tau's STEP exporter
+InterfaceDeclaration: FaceDeclaration | AxisDeclaration | DatumDeclaration | GroupDeclaration
+  kind: 'face'
 
 ManifoldBox: Box
   min: Vec3
@@ -427,7 +416,7 @@ ManifoldBox: Box
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 804 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 804 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-classes.md` — Classes

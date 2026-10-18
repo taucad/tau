@@ -2,11 +2,11 @@
 
 @taucad/replicad 0.1.0-beta.6 · 61 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
+Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
 ## Types — `tau-api-types.md`
 
-ShapeConfig (type) [10 members] — A shape with optional display and material metadata for rendering
+ShapeConfig (type) [lines 5-63] [10 members] — A shape with optional display and material metadata for rendering
   ShapeConfig.shape (property)
   ShapeConfig.name (property)
   ShapeConfig.strokeType (property)
@@ -17,12 +17,12 @@ ShapeConfig (type) [10 members] — A shape with optional display and material m
   ShapeConfig.metalness (property)
   ShapeConfig.roughness (property)
   ShapeConfig.material (property)
-Model (type) [4 members] — Model-level textures and images shared by the returned BRep shapes
+Model (type) [lines 65-78] [4 members] — Model-level textures and images shared by the returned BRep shapes
   Model.textures (property) — An array of textures
   Model.samplers (property) — An array of samplers
   Model.images (property)
   Model.shapes (property)
-Material (type) [11 members] — Standard glTF 2.0 material properties, including the ratified physical material…
+Material (type) [lines 80-223] [11 members] — Standard glTF 2.0 material properties, including the ratified physical material…
   Material.pbrMetallicRoughness (property) — A set of parameter values that are used to define…
   Material.normalTexture (property) — The normal map texture
   Material.occlusionTexture (property) — The occlusion map texture
@@ -34,42 +34,42 @@ Material (type) [11 members] — Standard glTF 2.0 material properties, includin
   Material.name (property) — The user-defined name of this object
   Material.extras (property)
   Material.extensions (property)
-Image (type) [3 members] — An image encoded into a GLB's binary buffer
+Image (type) [lines 225-236] [3 members] — An image encoded into a GLB's binary buffer
   Image.name (property)
   Image.mimeType (property)
   Image.data (property)
-Resources (type) [3 members] — Shared image, texture and sampler resources referenced by standard glTF…
+Resources (type) [lines 238-249] [3 members] — Shared image, texture and sampler resources referenced by standard glTF…
   Resources.textures (property) — An array of textures
   Resources.samplers (property) — An array of samplers
   Resources.images (property)
-FaceDeclaration (type) [2 members] — Named face selector declaration resolved by the Tau Replicad kernel…
+FaceDeclaration (type) [lines 251-259] [2 members] — Named face selector declaration resolved by the Tau Replicad kernel…
   FaceDeclaration.kind (property)
   FaceDeclaration.select (property)
-AxisDeclaration (type) [2 members] — Named cylindrical or conical axis selector declaration resolved from a…
+AxisDeclaration (type) [lines 261-269] [2 members] — Named cylindrical or conical axis selector declaration resolved from a…
   AxisDeclaration.kind (property)
   AxisDeclaration.select (property)
-DatumDeclaration (type) [4 members] — Named orthonormal datum frame declaration exported as an AP242 placement
+DatumDeclaration (type) [lines 271-285] [4 members] — Named orthonormal datum frame declaration exported as an AP242 placement
   DatumDeclaration.kind (property)
   DatumDeclaration.origin (property)
   DatumDeclaration.xAxis (property)
   DatumDeclaration.zAxis (property)
-GroupDeclaration (type) [2 members] — Named group of face and axis declarations
+GroupDeclaration (type) [lines 287-295] [2 members] — Named group of face and axis declarations
   GroupDeclaration.kind (property)
   GroupDeclaration.members (property)
-InterfaceDeclaration (type) [1 members] — Replicad interface annotation declaration accepted by Tau's STEP exporter
+InterfaceDeclaration (type) [lines 297-300] [1 members] — Replicad interface annotation declaration accepted by Tau's STEP exporter
   InterfaceDeclaration.kind (property)
-InterfaceDeclarations (type) — Map of interface names to annotation declarations
+InterfaceDeclarations (type) [lines 302-303] — Map of interface names to annotation declarations
 
 ## Functions — `tau-api-functions.md`
 
-face (function) — Declare a named face selected from a Replicad `FaceFinder`
-axis (function) — Declare a named cylindrical or conical axis selected from a…
-frame (function) — Declare a named coordinate frame exported as AP242 supplemental geometry
-datum (function) — Declare a named coordinate frame exported as AP242 supplemental geometry
-group (function) — Declare a named group of face and axis annotations
-isValidInterfaceName (function) — Return whether a candidate interface path is valid for STEP…
-isValidAuthoringKey (function) — Return whether a candidate top-level authoring key can appear in…
+face (function) [lines 5-8] — Declare a named face selected from a Replicad `FaceFinder`
+axis (function) [lines 10-13] — Declare a named cylindrical or conical axis selected from a…
+frame (function) [lines 15-21] — Declare a named coordinate frame exported as AP242 supplemental geometry
+datum (function) [lines 23-30] — Declare a named coordinate frame exported as AP242 supplemental geometry
+group (function) [lines 32-35] — Declare a named group of face and axis annotations
+isValidInterfaceName (function) [lines 37-40] — Return whether a candidate interface path is valid for STEP…
+isValidAuthoringKey (function) [lines 42-45] — Return whether a candidate top-level authoring key can appear in…
 
 ## Constants — `tau-api-constants.md`
 
-INTERFACE_NAME_REGEX (constant) — Supported GeoSpec interface name grammar
+INTERFACE_NAME_REGEX (constant) [lines 5-6] — Supported GeoSpec interface name grammar

@@ -16,7 +16,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 
 ## Kernel rules
 
-- `voxelSize` is the voxel edge h in millimetres. Choose about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds.
+- `voxelSize` is the voxel edge h in millimetres. Choose about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds. A GeoSpec `loadModel` of the part sends about 72 bytes per triangle, so above about 930,000 triangles its claims are refused admission and reported not decided; that is a test ceiling, never a reason to coarsen the design.
 - Iterate with per-call `parameters`, e.g. `{ "voxelSize": 1.5 }` on `evaluate_model`, `screenshot` or `export_model`; they are never saved. Stay coarse while iterating and export at the author's value. Tau never changes `voxelSize` itself; edit the source value only when the author asks.
 - `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A view or capture over 2 M triangles shows a mesh simplified within half a voxel and warns `DISPLAY_SIMPLIFIED`; only the picture changes. The grid, exports and GeoSpec subjects stay exact.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
@@ -26,7 +26,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 
 Route TypeScript PicoGK requests here; native C# `main.cs` uses desktop `cad-picogk`.
 
-Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means coarsen `voxelSize` or shrink the bounds.
+Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means the model cannot be built at this `voxelSize` and bounds: coarsen `voxelSize` only while the thinnest wall still spans about three voxels, or shrink the bounds to the part, and tell the author. A GeoSpec limit is different: keep the model and report the claim as not decided.
 
 ## Part names
 
@@ -83,11 +83,14 @@ interface Pico
   readonly handle: bigint
   // Deterministic teardown
   dispose(): void;
-  // … 14 more members in the API reference
+  // … 14 more members in the API reference: lane, name, version, buildInfo, voxelToMm, mmToVoxel, createPolyLine, vdbVoxelSize, voxelsFromVdb, meshFromStl, memory, allocated, module, [Symbol.dispose]
 
-CreateVoxelsOptions: {
-  shape: 'empty'
-}
+CreateVoxelsOptions:
+  | { shape: 'empty' }
+  | { shape: 'sphere'; center?: Vec3; radius: number }
+  | { shape: 'beam'; start: Vec3; end: Vec3; radius?: number; startRadius?: number; endRadius?: number }
+  | { shape: 'capsule'; start: Vec3; end: Vec3; radius?: number; startRadius?: number; endRadius?: number }
+  | { shape: 'implicit'; boundsMin: Vec3; boundsMax: Vec3; sdf: SdfFunction | SdfExpression }
 
 interface Lattice
   addSphere(options: {
@@ -104,11 +107,9 @@ interface Lattice
   dispose(): void;
   [Symbol.dispose](): void;
 
-CreateScalarFieldOptions: {
-  from: Voxels
-  value?: number
-  sdThreshold?: number
-}
+CreateScalarFieldOptions:
+  | { from: Voxels; value?: number; sdThreshold?: number }
+  | Record<string, never>
 
 interface ScalarField extends FieldBase
   // Sets (and activates) the value at a position in mm
@@ -133,11 +134,9 @@ interface ScalarField extends FieldBase
   signedDistanceAt(position: Vec3): number | null;
   clone(): ScalarField;
 
-CreateVectorFieldOptions: {
-  from: Voxels
-  value?: Vec3
-  sdThreshold?: number
-}
+CreateVectorFieldOptions:
+  | { from: Voxels; value?: Vec3; sdThreshold?: number }
+  | Record<string, never>
 
 interface VectorField extends FieldBase
   set(position: Vec3, value: Vec3): void;
@@ -172,6 +171,12 @@ interface VdbFile
 // A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
 Vec3: readonly [number, number, number]
 
+// Signed distance in millimetres at (x, y, z) — scalars, never a vector object
+SdfFunction: (x: number, y: number, z: number) => number
+
+// A serializable SDF
+SdfExpression: number | 'x' | 'y' | 'z' | readonly [SdfOperator, ...SdfExpression[]]
+
 interface AddBeamOptions
   start: Vec3
   end: Vec3
@@ -181,9 +186,6 @@ interface AddBeamOptions
   endRadius?: number
   // Hemispherical end caps (default true, as upstream)
   roundCap?: boolean
-
-// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
-Vec3: readonly [number, number, number]
 
 interface ScalarFieldSlice
   width: number
@@ -195,12 +197,6 @@ interface ScalarFieldSlice
 interface Bounds
   min: Vec3
   max: Vec3
-
-// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
-Vec3: readonly [number, number, number]
-
-// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
-Vec3: readonly [number, number, number]
 
 VdbFieldType: 'voxels' | 'scalarField' | 'vectorField' | 'unsupported'
 
@@ -254,13 +250,7 @@ interface Voxels
   readonly handle: bigint
   // Optional
   dispose(): void;
-  // … 24 more members in the API reference
-
-// Signed distance in millimetres at (x, y, z) — scalars, never a vector object
-SdfFunction: (x: number, y: number, z: number) => number
-
-// A serializable SDF
-SdfExpression: number | 'x' | 'y' | 'z' | readonly [SdfOperator, ...SdfExpression[]]
+  // … 24 more members in the API reference: clone, equals, isEmpty, doubleOffset, shell, withMesh, withLattice, withImplicit, gridHash, densifyInterior, isInside, surfaceNormal, closestPointOnSurface, raycastToSurface, raycastBatch, closestPointsOnSurface, dimensions, sliceCount, sliceOrigin, getSlice, toScalarField, memUsage, lane, [Symbol.dispose]
 
 interface Metadata
   // Number of entries in the table
@@ -280,8 +270,6 @@ interface Metadata
   dispose(): void;
   [Symbol.dispose](): void;
 
-SdfOperator: '+' | '-' | '*' | '/' | 'abs' | 'sqrt' | 'sin' | 'cos' | 'floor' | 'exp' | 'log' | 'mod' | 'pow' | 'min' | 'max'
-
 MetadataType: 'string' | 'float' | 'vector' | 'unknown'
 
 MetadataValue: string | number | Vec3
@@ -300,7 +288,7 @@ declare class BaseBox extends BaseShape implements MeshBaseShape, SurfaceBaseSha
   // C# `SetDepth` — modulated depth bumps depth+length sampling to 500
   setDepth(modulation: LineModulation): void;
   voxConstruct(pk: Pico): Voxels;
-  // … 14 more members in the API reference
+  // … 14 more members in the API reference: lengthSteps, widthSteps, depthSteps, widthModulation, depthModulation, frames, setWidthSteps, setDepthSteps, setLengthSteps, mshConstruct, depthRatioFromStep, widthRatioFromStep, lengthRatioFromStep, surfacePoint
 
 // A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
 interface Frame
@@ -339,7 +327,7 @@ localFrame: {
   readonly rotated: (f: Frame, deltaPhi: number, axis: Vec3) => Frame
   // Selected axes negated, position unchanged (C# `oGetInvertFrame`
   readonly inverted: (f: Frame, mirrorZ: boolean, mirrorX: boolean) => Frame
-  // … 2 more members in the API reference
+  // … 2 more members in the API reference: at, localY
 }
 
 // ShapeKernel `VecOperations` (Hungarian prefixes dropped)
@@ -362,7 +350,7 @@ vecOps: {
   readonly rotateAroundZ: (pt: Vec3, deltaPhi: number, axisOrigin?: Vec3) => Vec3
   // Rotate a point about an arbitrary axis through an optional origin (C# `vecRotateAroundAxis`)
   readonly rotateAroundAxis: (pt: Vec3, deltaPhi: number, axis: Vec3, axisOrigin?: Vec3) => Vec3
-  // … 15 more members in the API reference
+  // … 15 more members in the API reference: sphPoint, theta, setPhi, setZ, updatePhi, updateZ, checkAlignment, orthogonalDir, angleBetween, signedAngleBetween, directionToAxis, radiusToAxis, phiToAxis, cylindricalInterpolation, sphericalInterpolation
 }
 
 // C# `BaseShape` — the vertex-transformation seam every shape shares
@@ -386,7 +374,7 @@ declare class BasePipe extends BaseShape implements MeshBaseShape, SurfaceBaseSh
   voxConstruct(pk: Pico): Voxels;
   // Surface point
   surfacePoint(lengthRatio: number, phiRatio: number, radiusRatio: number): Vec3;
-  // … 15 more members in the API reference
+  // … 15 more members in the API reference: lengthSteps, polarSteps, radialSteps, outerRadiusModulation, innerRadiusModulation, frames, mshConstruct, addTopSurface, addBottomSurface, addOuterMantle, addInnerMantle, radiusRatioFromStep, phiRatioFromStep, lengthRatioFromStep, axesAt
 
 // 2D modulation over (phi, lengthRatio) (C# `SurfaceModulation`
 declare class SurfaceModulation
@@ -415,7 +403,7 @@ declare class BaseCylinder extends BaseShape implements MeshBaseShape, SurfaceBa
   setPolarSteps(steps: number): void;
   setLengthSteps(steps: number): void;
   voxConstruct(pk: Pico): Voxels;
-  // … 13 more members in the API reference
+  // … 13 more members in the API reference: lengthSteps, polarSteps, radialSteps, radiusModulation, frames, mshConstruct, addTopSurface, addBottomSurface, addOuterMantle, radiusRatioFromStep, phiRatioFromStep, lengthRatioFromStep, surfacePoint
 
 declare class Frames implements Spline
   // Tangential Z along the spline, X aligned to a const target direction, then NURBS…
@@ -428,9 +416,33 @@ declare class Frames implements Spline
   frameAt(lengthRatio: number): Frame;
   // The spine points (C# `aGetPoints()`)
   points(samples?: number): Vec3[];
-  // … 8 more members in the API reference
+  // … 8 more members in the API reference: alongLine, alongSpline, applyToFrame, alignWithTargetX, targetXFor, localXAt, localYAt, localZAt
 
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
+
+// Lens/washer
+declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  radialSteps: number
+  polarSteps: number
+  heightSteps: number
+  readonly innerRadius: number
+  readonly outerRadius: number
+  upperModulation: SurfaceModulation
+  lowerModulation: SurfaceModulation
+  readonly frame: Frame
+  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
+  // C# `SetHeight` — modulated faces bump radial sampling to 500
+  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
+  setRadialSteps(steps: number): void;
+  setPolarSteps(steps: number): void;
+  setHeightSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  mshConstruct(pk: Pico): Mesh;
+  protected radiusRatioFromStep(step: number): number;
+  protected phiRatioFromStep(step: number): number;
+  protected heightRatioFromStep(step: number): number;
+  // Surface point (C# `vecGetSurfacePoint`
+  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
 
 // BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`)
 declare class ControlPointSpline implements Spline
@@ -439,6 +451,8 @@ declare class ControlPointSpline implements Spline
   points(samples?: number): Vec3[];
   // Sample dynamically at a length ratio (C# `vecGetPointAt`)
   pointAt(lengthRatio: number): Vec3;
+
+SplineEnds: 'open' | 'closed'
 ```
 
 ### `picovoxel/numerics`
@@ -462,27 +476,13 @@ vec3: {
   readonly safeNormalized: (v: Vec3) => Vec3
   // All components finite (C# `Vector3.bIsFinite`)
   readonly isFinite: (v: Vec3) => boolean
-  // … 11 more members in the API reference
+  // … 11 more members in the API reference: unitY, one, lengthSquared, distanceSquared, distance, lerp, stripZ, transformed, mirrored, almostEqual, almostZero
 }
-
-// `Frame` factories and operations (C# `Frame3d` surface
-frame: {
-  // The world coordinate system (C# `frmWorld`)
-  readonly world: Frame
-  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
-  readonly ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
-  // World point → local coordinates (C# `vecPtFromWorld`)
-  readonly ptFromWorld: (f: Frame, world: Vec3) => Vec3
-  // … 22 more members in the API reference
-}
-
-// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
-Vec2: readonly [number, number]
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 964 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 964 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-interfaces.md` — Interfaces
 - `api-interfaces-2.md` — Interfaces (2)

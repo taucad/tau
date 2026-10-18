@@ -4,6 +4,25 @@
   "sourceRoot": "libs/api-extractor",
   "projectType": "library",
   "tags": ["scope:shared", "type:tool"],
+  "implicitDependencies": [
+    "geospec",
+    "workbench",
+    "kinematics",
+    "spatial",
+    "geometry-core",
+    "types",
+    "replicad",
+    "jscad",
+    "manifold",
+    "opencascade",
+    "build123d",
+    "picogk",
+    "picovoxel",
+    "smlib",
+    "openrscad",
+    "zoo",
+    "tscircuit"
+  ],
   "targets": {
     "extract-replicad": {
       "executor": "nx:run-commands",
@@ -232,6 +251,16 @@
         "sharedGlobals"
       ],
       "outputs": ["{projectRoot}/src/generated/build123d"]
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/packages/plugins/*/agent/**/*.md",
+        "{workspaceRoot}/packages/geospec/agent/**/*.md",
+        "{workspaceRoot}/packages/workbench/agent/**/*.md",
+        "{workspaceRoot}/pnpm-lock.yaml"
+      ]
     }
   }
 }

@@ -361,7 +361,7 @@ parent_module(index)
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 88 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 88 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-3d-primitives.md` — 3D primitives
 - `api-2d-primitives.md` — 2D primitives

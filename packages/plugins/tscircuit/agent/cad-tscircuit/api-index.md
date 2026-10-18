@@ -2,15 +2,15 @@
 
 @tscircuit/core 0.0.1844 · 1741 symbols · extracted by TypeScript 5.9.3 over @tscircuit/props 0.0.646 and @tscircuit/footprinter 0.0.426.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
+Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
 ## Components — `api-components.md`
 
-<antenna> (interface) [3 members] [category: Components] — JSX element <antenna> with AntennaProps, required name
+<antenna> (interface) [lines 5-16] [3 members] [category: Components] — JSX element <antenna> with AntennaProps, required name
   <antenna>.antennaShape (property) — Band-qualified PCB-trace topology to generate
   <antenna>.frequencyBand (property) — Nominal operating band or multiband configuration
   <antenna>.pcbPath (property) — Explicit antenna path
-<resistor> (interface) [9 members] [category: Components] — JSX element <resistor> with ResistorProps, required resistance, name
+<resistor> (interface) [lines 18-38] [9 members] [category: Components] — JSX element <resistor> with ResistorProps, required resistance, name
   <resistor>.resistance (property)
   <resistor>.tolerance (property)
   <resistor>.pullupFor (property)
@@ -20,7 +20,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <resistor>.schOrientation (property)
   <resistor>.schSize (property)
   <resistor>.connections (property)
-<capacitor> (interface) [12 members] [category: Components] — JSX element <capacitor> with CapacitorProps, required capacitance, name
+<capacitor> (interface) [lines 40-67] [12 members] [category: Components] — JSX element <capacitor> with CapacitorProps, required capacitance, name
   <capacitor>.capacitance (property)
   <capacitor>.maxVoltageRating (property)
   <capacitor>.schShowRatings (property)
@@ -33,12 +33,12 @@ Every symbol appears here exactly once. The heading above each block names the f
   <capacitor>.schOrientation (property)
   <capacitor>.schSize (property)
   <capacitor>.connections (property)
-<inductor> (interface) [4 members] [category: Components] — JSX element <inductor> with InductorProps, required inductance, name
+<inductor> (interface) [lines 69-79] [4 members] [category: Components] — JSX element <inductor> with InductorProps, required inductance, name
   <inductor>.inductance (property)
   <inductor>.maxCurrentRating (property)
   <inductor>.schOrientation (property)
   <inductor>.connections (property)
-<pushbutton> (interface) [16 members] [category: Components] — JSX element <pushbutton> with PushButtonProps, required name
+<pushbutton> (interface) [lines 81-120] [16 members] [category: Components] — JSX element <pushbutton> with PushButtonProps, required name
   <pushbutton>.pinLabels (property)
   <pushbutton>.showPinAliases (property) — Whether to show pin aliases in the schematic
   <pushbutton>.pcbPinLabels (property) — Labels for PCB pins
@@ -55,7 +55,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pushbutton>.connections (property)
   <pushbutton>.spiceModel (property)
   <pushbutton>.internalCircuit (property) — Functional components contained inside this physical chip package, wrapped in…
-<diode> (interface) [10 members] [category: Components] — JSX element <diode> with DiodeProps, required name
+<diode> (interface) [lines 122-144] [10 members] [category: Components] — JSX element <diode> with DiodeProps, required name
   <diode>.pinLabels (property)
   <diode>.connections (property)
   <diode>.variant (property)
@@ -66,13 +66,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <diode>.photo (property)
   <diode>.tvs (property)
   <diode>.schOrientation (property)
-<fuse> (interface) [5 members] [category: Components] — JSX element <fuse> with FuseProps, required currentRating, name
+<fuse> (interface) [lines 146-162] [5 members] [category: Components] — JSX element <fuse> with FuseProps, required currentRating, name
   <fuse>.currentRating (property) — Current rating of the fuse in amperes
   <fuse>.voltageRating (property) — Voltage rating of the fuse
   <fuse>.schShowRatings (property) — Whether to show ratings on schematic
   <fuse>.schOrientation (property)
   <fuse>.connections (property) — Connections to other components
-<led> (interface) [7 members] [category: Components] — JSX element <led> with LedProps, required name
+<led> (interface) [lines 164-180] [7 members] [category: Components] — JSX element <led> with LedProps, required name
   <led>.connections (property)
   <led>.pinLabels (property)
   <led>.schOrientation (property)
@@ -80,7 +80,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <led>.wavelength (property)
   <led>.schDisplayValue (property)
   <led>.laser (property)
-<jumper> (interface) [10 members] [category: Components] — JSX element <jumper> with JumperProps, required name
+<jumper> (interface) [lines 182-208] [10 members] [category: Components] — JSX element <jumper> with JumperProps, required name
   <jumper>.pinLabels (property)
   <jumper>.schPinStyle (property)
   <jumper>.schWidth (property)
@@ -91,11 +91,11 @@ Every symbol appears here exactly once. The heading above each block names the f
   <jumper>.pinCount (property) — Number of pins on the jumper (2 or 3)
   <jumper>.internallyConnectedPins (property) — Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
   <jumper>.connections (property) — Connections to other components
-<interconnect> (interface) [3 members] [category: Components] — JSX element <interconnect> with InterconnectProps, required name
+<interconnect> (interface) [lines 210-219] [3 members] [category: Components] — JSX element <interconnect> with InterconnectProps, required name
   <interconnect>.standard (property)
   <interconnect>.pinLabels (property)
   <interconnect>.internallyConnectedPins (property) — Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
-<solderjumper> (interface) [12 members] [category: Components] — JSX element <solderjumper> with SolderJumperProps, required name
+<solderjumper> (interface) [lines 221-253] [12 members] [category: Components] — JSX element <solderjumper> with SolderJumperProps, required name
   <solderjumper>.bridgedPins (property) — Pins that are bridged with solder by default
   <solderjumper>.bridged (property) — If true, all pins are connected with cuttable traces
   <solderjumper>.pinLabels (property)
@@ -108,11 +108,11 @@ Every symbol appears here exactly once. The heading above each block names the f
   <solderjumper>.pinCount (property) — Number of pins on the jumper (2 or 3)
   <solderjumper>.internallyConnectedPins (property) — Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
   <solderjumper>.connections (property) — Connections to other components
-<potentiometer> (interface) [3 members] [category: Components] — JSX element <potentiometer> with PotentiometerProps, required maxResistance, name
+<potentiometer> (interface) [lines 255-263] [3 members] [category: Components] — JSX element <potentiometer> with PotentiometerProps, required maxResistance, name
   <potentiometer>.maxResistance (property)
   <potentiometer>.pinVariant (property)
   <potentiometer>.connections (property)
-<chip> (interface) [16 members] [category: Components] — JSX element <chip> with ChipProps, required name
+<chip> (interface) [lines 265-304] [16 members] [category: Components] — JSX element <chip> with ChipProps, required name
   <chip>.pinLabels (property)
   <chip>.showPinAliases (property) — Whether to show pin aliases in the schematic
   <chip>.pcbPinLabels (property) — Labels for PCB pins
@@ -129,7 +129,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <chip>.connections (property)
   <chip>.spiceModel (property)
   <chip>.internalCircuit (property) — Functional components contained inside this physical chip package, wrapped in…
-<pinout> (interface) [16 members] [category: Components] — JSX element <pinout> with PinoutProps, required name
+<pinout> (interface) [lines 306-345] [16 members] [category: Components] — JSX element <pinout> with PinoutProps, required name
   <pinout>.pinLabels (property)
   <pinout>.showPinAliases (property) — Whether to show pin aliases in the schematic
   <pinout>.pcbPinLabels (property) — Labels for PCB pins
@@ -146,12 +146,12 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pinout>.connections (property)
   <pinout>.spiceModel (property)
   <pinout>.internalCircuit (property) — Functional components contained inside this physical chip package, wrapped in…
-<powersource> (interface) [1 members] [category: Components] — JSX element <powersource> with PowerSourceProps, required name, voltage
+<powersource> (interface) [lines 347-351] [1 members] [category: Components] — JSX element <powersource> with PowerSourceProps, required name, voltage
   <powersource>.voltage (property)
-<opamp> (interface) [1 members] [category: Components] — JSX element <opamp> with OpAmpProps, required name
+<opamp> (interface) [lines 353-357] [1 members] [category: Components] — JSX element <opamp> with OpAmpProps, required name
   <opamp>.connections (property)
-<component> (interface) [category: Components] — JSX element <component> with ComponentProps, required name
-<crystal> (interface) [7 members] [category: Components] — JSX element <crystal> with CrystalProps, required frequency, loadCapacitance, name
+<component> (interface) [lines 359-361] [category: Components] — JSX element <component> with ComponentProps, required name
+<crystal> (interface) [lines 363-380] [7 members] [category: Components] — JSX element <crystal> with CrystalProps, required frequency, loadCapacitance, name
   <crystal>.frequency (property)
   <crystal>.loadCapacitance (property)
   <crystal>.maxTraceLength (property) — Maximum allowed PCB trace length between the crystal and its…
@@ -159,13 +159,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <crystal>.pinVariant (property)
   <crystal>.schOrientation (property)
   <crystal>.connections (property)
-<battery> (interface) [5 members] [category: Components] — JSX element <battery> with BatteryProps, required name
+<battery> (interface) [lines 382-394] [5 members] [category: Components] — JSX element <battery> with BatteryProps, required name
   <battery>.capacity (property)
   <battery>.voltage (property)
   <battery>.standard (property)
   <battery>.schOrientation (property)
   <battery>.connections (property)
-<connector> (interface) [18 members] [category: Components] — JSX element <connector> with ConnectorProps, required name
+<connector> (interface) [lines 396-441] [18 members] [category: Components] — JSX element <connector> with ConnectorProps, required name
   <connector>.standard (property) — Connector interface or product family, e.g
   <connector>.pinCount (property) — Number of electrical circuits in the connector
   <connector>.pinLabels (property)
@@ -184,7 +184,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <connector>.connections (property)
   <connector>.spiceModel (property)
   <connector>.internalCircuit (property) — Functional components contained inside this physical chip package, wrapped in…
-<pinheader> (interface) [20 members] [category: Components] — JSX element <pinheader> with PinHeaderProps, required pinCount, name
+<pinheader> (interface) [lines 443-505] [20 members] [category: Components] — JSX element <pinheader> with PinHeaderProps, required pinCount, name
   <pinheader>.pinCount (property) — Number of pins in the header
   <pinheader>.pitch (property) — Distance between pins
   <pinheader>.schFacingDirection (property) — Schematic facing direction
@@ -205,14 +205,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pinheader>.schPinStyle (property) — Schematic pin style (margins, etc)
   <pinheader>.schWidth (property) — Schematic width
   <pinheader>.schHeight (property) — Schematic height
-<resonator> (interface) [3 members] [category: Components] — JSX element <resonator> with ResonatorProps, required frequency, loadCapacitance, name
+<resonator> (interface) [lines 507-515] [3 members] [category: Components] — JSX element <resonator> with ResonatorProps, required frequency, loadCapacitance, name
   <resonator>.frequency (property)
   <resonator>.loadCapacitance (property)
   <resonator>.pinVariant (property)
-<transistor> (interface) [2 members] [category: Components] — JSX element <transistor> with TransistorProps, required type, name
+<transistor> (interface) [lines 517-523] [2 members] [category: Components] — JSX element <transistor> with TransistorProps, required type, name
   <transistor>.type (property)
   <transistor>.connections (property)
-<switch> (interface) [13 members] [category: Components] — JSX element <switch> with SwitchProps, required name
+<switch> (interface) [lines 525-553] [13 members] [category: Components] — JSX element <switch> with SwitchProps, required name
   <switch>.type (property)
   <switch>.pinLabels (property)
   <switch>.isNormallyClosed (property)
@@ -226,14 +226,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <switch>.simStartClosed (property)
   <switch>.simStartOpen (property)
   <switch>.connections (property)
-<mosfet> (interface) [6 members] [category: Components] — JSX element <mosfet> with MosfetProps, required channelType, mosfetMode, name
+<mosfet> (interface) [lines 555-572] [6 members] [category: Components] — JSX element <mosfet> with MosfetProps, required channelType, mosfetMode, name
   <mosfet>.channelType (property)
   <mosfet>.mosfetMode (property)
   <mosfet>.symbolDrainSide (property) — The side of the schematic symbol where the drain port…
   <mosfet>.symbolSourceSide (property) — The side of the schematic symbol where the source port…
   <mosfet>.symbolGateSide (property) — The side of the schematic symbol where the gate port…
   <mosfet>.connections (property)
-<testpoint> (interface) [7 members] [category: Components] — JSX element <testpoint> with TestpointProps, required name
+<testpoint> (interface) [lines 574-596] [7 members] [category: Components] — JSX element <testpoint> with TestpointProps, required name
   <testpoint>.footprintVariant (property) — The footprint variant of the testpoint either a surface pad…
   <testpoint>.padShape (property) — The shape of the pad if using a pad variant
   <testpoint>.padDiameter (property) — Diameter of the copper pad (applies to both SMD pads…
@@ -241,7 +241,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <testpoint>.width (property) — Width of the pad when padShape is rect
   <testpoint>.height (property) — Height of the pad when padShape is rect
   <testpoint>.connections (property)
-<voltagesource> (interface) [14 members] [category: Components] — JSX element <voltagesource> with VoltageSourceProps, required name
+<voltagesource> (interface) [lines 598-630] [14 members] [category: Components] — JSX element <voltagesource> with VoltageSourceProps, required name
   <voltagesource>.voltage (property)
   <voltagesource>.frequency (property)
   <voltagesource>.peakToPeakVoltage (property)
@@ -256,7 +256,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <voltagesource>.acMagnitude (property) — Small-signal AC magnitude
   <voltagesource>.acPhase (property) — Small-signal AC phase
   <voltagesource>.connections (property)
-<currentsource> (interface) [9 members] [category: Components] — JSX element <currentsource> with CurrentSourceProps, required name
+<currentsource> (interface) [lines 632-654] [9 members] [category: Components] — JSX element <currentsource> with CurrentSourceProps, required name
   <currentsource>.current (property)
   <currentsource>.frequency (property)
   <currentsource>.peakToPeakCurrent (property)
@@ -266,14 +266,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <currentsource>.acMagnitude (property) — Small-signal AC magnitude
   <currentsource>.acPhase (property) — Small-signal AC phase
   <currentsource>.connections (property)
-<ammeter> (interface) [6 members] [category: Components] — JSX element <ammeter> with AmmeterProps, required connections, name
+<ammeter> (interface) [lines 656-670] [6 members] [category: Components] — JSX element <ammeter> with AmmeterProps, required connections, name
   <ammeter>.connections (property)
   <ammeter>.color (property)
   <ammeter>.graphDisplayName (property)
   <ammeter>.graphCenter (property)
   <ammeter>.graphVerticalOffset (property)
   <ammeter>.graphCurrentPerDiv (property)
-<voltageprobe> (interface) [7 members] [category: Components] — JSX element <voltageprobe> with VoltageProbeProps, required connectsTo
+<voltageprobe> (interface) [lines 672-688] [7 members] [category: Components] — JSX element <voltageprobe> with VoltageProbeProps, required connectsTo
   <voltageprobe>.connectsTo (property)
   <voltageprobe>.referenceTo (property)
   <voltageprobe>.color (property)
@@ -281,14 +281,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <voltageprobe>.graphCenter (property)
   <voltageprobe>.graphVerticalOffset (property)
   <voltageprobe>.graphVoltagePerDiv (property)
-<fiducial> (interface) [2 members] [category: Components] — JSX element <fiducial> with FiducialProps, required padDiameter, name
+<fiducial> (interface) [lines 690-696] [2 members] [category: Components] — JSX element <fiducial> with FiducialProps, required padDiameter, name
   <fiducial>.soldermaskPullback (property)
   <fiducial>.padDiameter (property)
-<bug> (interface) [category: Components] — Same props as <chip>
+<bug> (interface) [lines 698-700] [category: Components] — Same props as <chip>
 
 ## Boards, groups and layout — `api-boards-groups-and-layout.md`
 
-<board> (interface) [19 members] [category: Boards, groups and layout] — JSX element <board> with BoardProps
+<board> (interface) [lines 5-57] [19 members] [category: Boards, groups and layout] — JSX element <board> with BoardProps
   <board>.title (property)
   <board>.material (property)
   <board>.layers (property) — Number of layers for the PCB
@@ -308,10 +308,10 @@ Every symbol appears here exactly once. The heading above each block names the f
   <board>.isViaInPadAllowed (property) — Whether vias may be placed inside PCB pads
   <board>.automaticPoursEnabled (property) — Whether implicit copper pours should be generated automatically
   <board>.schematicDisabled (property) — Whether this board should be omitted from the schematic view
-<drccheck> (interface) [2 members] [category: Boards, groups and layout] — JSX element <drccheck> with DrcCheckProps, required checkFn
+<drccheck> (interface) [lines 59-65] [2 members] [category: Boards, groups and layout] — JSX element <drccheck> with DrcCheckProps, required checkFn
   <drccheck>.name (property)
   <drccheck>.checkFn (property)
-<mountedboard> (interface) [10 members] [category: Boards, groups and layout] — JSX element <mountedboard> with MountedBoardProps
+<mountedboard> (interface) [lines 67-91] [10 members] [category: Boards, groups and layout] — JSX element <mountedboard> with MountedBoardProps
   <mountedboard>.boardToBoardDistance (property)
   <mountedboard>.mountOrientation (property)
   <mountedboard>.manufacturerPartNumber (property)
@@ -322,7 +322,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <mountedboard>.noSchematicRepresentation (property)
   <mountedboard>.internallyConnectedPins (property)
   <mountedboard>.externallyConnectedPins (property)
-<panel> (interface) [16 members] [category: Boards, groups and layout] — JSX element <panel> with PanelProps
+<panel> (interface) [lines 93-130] [16 members] [category: Boards, groups and layout] — JSX element <panel> with PanelProps
   <panel>.anchorAlignment (property)
   <panel>.noSolderMask (property) — If true, prevent a solder mask from being applied to…
   <panel>.panelizationMethod (property) — Method used to separate boards in the panel
@@ -339,7 +339,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <panel>.edgePaddingRight (property)
   <panel>.edgePaddingTop (property)
   <panel>.edgePaddingBottom (property)
-<subpanel> (interface) [16 members] [category: Boards, groups and layout] — JSX element <subpanel> with SubpanelProps
+<subpanel> (interface) [lines 132-169] [16 members] [category: Boards, groups and layout] — JSX element <subpanel> with SubpanelProps
   <subpanel>.anchorAlignment (property)
   <subpanel>.noSolderMask (property) — If true, prevent a solder mask from being applied to…
   <subpanel>.panelizationMethod (property) — Method used to separate boards in the panel
@@ -356,17 +356,17 @@ Every symbol appears here exactly once. The heading above each block names the f
   <subpanel>.edgePaddingRight (property)
   <subpanel>.edgePaddingTop (property)
   <subpanel>.edgePaddingBottom (property)
-<group> (interface) [1 members] [category: Boards, groups and layout] — JSX element <group> with GroupProps
+<group> (interface) [lines 171-175] [1 members] [category: Boards, groups and layout] — JSX element <group> with GroupProps
   <group>.subcircuit (property)
-<breakout> (interface) [5 members] [category: Boards, groups and layout] — JSX element <breakout> with BreakoutProps
+<breakout> (interface) [lines 177-194] [5 members] [category: Boards, groups and layout] — JSX element <breakout> with BreakoutProps
   <breakout>.fanoutMargin (property) — Minimum clearance between this fanout boundary and another fanout boundary
   <breakout>.busFanoutDirections (property) — Fanout direction and boundary position for each named bus
   <breakout>.fanoutBoundaryPadding (property) — Padding between the union of the fanout source pads and…
   <breakout>.fanoutRoutingLayers (property) — Copper layers available to boundary-terminated fanout buses
   <breakout>.fanoutPourNetMap (property) — Maps copper layers to the net or nets poured on…
-<breakoutpoint> (interface) [1 members] [category: Boards, groups and layout] — JSX element <breakoutpoint> with BreakoutPointProps, required connection
+<breakoutpoint> (interface) [lines 196-200] [1 members] [category: Boards, groups and layout] — JSX element <breakoutpoint> with BreakoutPointProps, required connection
   <breakoutpoint>.connection (property)
-<autoroutingphase> (interface) [20 members] [category: Boards, groups and layout] — JSX element <autoroutingphase> with AutoroutingPhaseProps
+<autoroutingphase> (interface) [lines 202-248] [20 members] [category: Boards, groups and layout] — JSX element <autoroutingphase> with AutoroutingPhaseProps
   <autoroutingphase>.name (property)
   <autoroutingphase>.autorouter (property)
   <autoroutingphase>.phaseIndex (property)
@@ -387,7 +387,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <autoroutingphase>.fanoutBoundaryPadding (property) — Padding between the union of the fanout source pads and…
   <autoroutingphase>.fanoutRoutingLayers (property) — Copper layers available to boundary-terminated fanout buses
   <autoroutingphase>.fanoutPourNetMap (property) — Maps copper layers to the net or nets poured on…
-<constraint> (interface) [12 members] [category: Boards, groups and layout] — JSX element <constraint> with ConstraintProps
+<constraint> (interface) [lines 250-283] [12 members] [category: Boards, groups and layout] — JSX element <constraint> with ConstraintProps
   <constraint>.pcb (property)
   <constraint>.xDist (property)
   <constraint>.left (property) — Selector for left component, e.g
@@ -400,11 +400,11 @@ Every symbol appears here exactly once. The heading above each block names the f
   <constraint>.sameY (property)
   <constraint>.for (property) — Selector for components, e.g
   <constraint>.sameX (property)
-<constrainedlayout> (interface) [3 members] [category: Boards, groups and layout] — JSX element <constrainedlayout> with ConstrainedLayoutProps
+<constrainedlayout> (interface) [lines 285-293] [3 members] [category: Boards, groups and layout] — JSX element <constrainedlayout> with ConstrainedLayoutProps
   <constrainedlayout>.name (property)
   <constrainedlayout>.pcbOnly (property)
   <constrainedlayout>.schOnly (property)
-<subcircuit> (interface) [30 members] [category: Boards, groups and layout] — JSX element <subcircuit> with SubcircuitGroupProps
+<subcircuit> (interface) [lines 295-368] [30 members] [category: Boards, groups and layout] — JSX element <subcircuit> with SubcircuitGroupProps
   <subcircuit>.manualEdits (property)
   <subcircuit>.routingDisabled (property)
   <subcircuit>.placementDrcChecksDisabled (property) — Skip the PCB placement design rule checks for this subcircuit
@@ -435,16 +435,16 @@ Every symbol appears here exactly once. The heading above each block names the f
   <subcircuit>.minViaEdgeToPadEdgeClearance (property)
   <subcircuit>.minViaHoleDiameter (property)
   <subcircuit>.minViaPadDiameter (property)
-<fanout> (interface) [category: Boards, groups and layout] — Same props as <breakout>
-<fanoutpoint> (interface) [category: Boards, groups and layout] — Same props as <breakoutpoint>
+<fanout> (interface) [lines 370-372] [category: Boards, groups and layout] — Same props as <breakout>
+<fanoutpoint> (interface) [lines 374-376] [category: Boards, groups and layout] — Same props as <breakoutpoint>
 
 ## Schematic drawing — `api-schematic-drawing.md`
 
-<schematicsection> (interface) [3 members] [category: Schematic drawing] — JSX element <schematicsection> with SchematicSectionProps, required name
+<schematicsection> (interface) [lines 5-13] [3 members] [category: Schematic drawing] — JSX element <schematicsection> with SchematicSectionProps, required name
   <schematicsection>.displayName (property)
   <schematicsection>.name (property)
   <schematicsection>.sectionTitleFontSize (property)
-<schematicsheet> (interface) [7 members] [category: Schematic drawing] — JSX element <schematicsheet> with SchematicSheetProps
+<schematicsheet> (interface) [lines 15-34] [7 members] [category: Schematic drawing] — JSX element <schematicsheet> with SchematicSheetProps
   <schematicsheet>.name (property)
   <schematicsheet>.displayName (property)
   <schematicsheet>.sheetIndex (property)
@@ -452,12 +452,12 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicsheet>.sheetWidth (property) — Explicit schematic sheet width
   <schematicsheet>.sheetHeight (property) — Explicit schematic sheet height
   <schematicsheet>.children (property)
-<schematicgraphic> (interface) [4 members] [category: Schematic drawing] — JSX element <schematicgraphic> with SchematicGraphicProps
+<schematicgraphic> (interface) [lines 36-50] [4 members] [category: Schematic drawing] — JSX element <schematicgraphic> with SchematicGraphicProps
   <schematicgraphic>.imageUrl (property) — URL or static-file import for the canonical source SVG asset
   <schematicgraphic>.svgContent (property) — Complete SVG markup, including its dimensions or viewBox
   <schematicgraphic>.width (property) — Optional rendered width of the graphic
   <schematicgraphic>.height (property) — Optional rendered height of the graphic
-<schematicbox> (interface) [23 members] [category: Schematic drawing] — JSX element <schematicbox> with SchematicBoxProps
+<schematicbox> (interface) [lines 52-101] [23 members] [category: Schematic drawing] — JSX element <schematicbox> with SchematicBoxProps
   <schematicbox>.name (property)
   <schematicbox>.chipRef (property)
   <schematicbox>.pinLabels (property)
@@ -481,7 +481,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicbox>.titleFontSize (property)
   <schematicbox>.titleInside (property)
   <schematicbox>.strokeStyle (property)
-<schematicsymbol> (interface) [10 members] [category: Schematic drawing] — JSX element <schematicsymbol> with SchematicSymbolProps, required name, symbolName
+<schematicsymbol> (interface) [lines 103-130] [10 members] [category: Schematic drawing] — JSX element <schematicsymbol> with SchematicSymbolProps, required name, symbolName
   <schematicsymbol>.name (property) — Stable name for this representation, such as `A` or `B`
   <schematicsymbol>.displayName (property) — Optional human-facing name shown in the schematic
   <schematicsymbol>.chipRef (property) — Selector for the physical component represented by this symbol
@@ -492,7 +492,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicsymbol>.schRotation (property)
   <schematicsymbol>.schSectionName (property)
   <schematicsymbol>.schSheetName (property)
-<schematicline> (interface) [9 members] [category: Schematic drawing] — JSX element <schematicline> with SchematicLineProps, required x1, y1, x2, y2
+<schematicline> (interface) [lines 132-152] [9 members] [category: Schematic drawing] — JSX element <schematicline> with SchematicLineProps, required x1, y1, x2, y2
   <schematicline>.x1 (property)
   <schematicline>.y1 (property)
   <schematicline>.x2 (property)
@@ -502,7 +502,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicline>.isDashed (property)
   <schematicline>.dashLength (property)
   <schematicline>.dashGap (property)
-<schematicrect> (interface) [10 members] [category: Schematic drawing] — JSX element <schematicrect> with SchematicRectProps, required width, height
+<schematicrect> (interface) [lines 154-176] [10 members] [category: Schematic drawing] — JSX element <schematicrect> with SchematicRectProps, required width, height
   <schematicrect>.schX (property)
   <schematicrect>.schY (property)
   <schematicrect>.width (property)
@@ -513,7 +513,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicrect>.isFilled (property)
   <schematicrect>.fillColor (property)
   <schematicrect>.isDashed (property)
-<schematicarc> (interface) [8 members] [category: Schematic drawing] — JSX element <schematicarc> with SchematicArcProps, required center, radius, startAngleDegrees, endAngleDegrees
+<schematicarc> (interface) [lines 178-196] [8 members] [category: Schematic drawing] — JSX element <schematicarc> with SchematicArcProps, required center, radius, startAngleDegrees, endAngleDegrees
   <schematicarc>.center (property)
   <schematicarc>.radius (property)
   <schematicarc>.startAngleDegrees (property)
@@ -522,7 +522,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicarc>.strokeWidth (property)
   <schematicarc>.color (property)
   <schematicarc>.isDashed (property)
-<schematiccircle> (interface) [7 members] [category: Schematic drawing] — JSX element <schematiccircle> with SchematicCircleProps, required center, radius
+<schematiccircle> (interface) [lines 198-214] [7 members] [category: Schematic drawing] — JSX element <schematiccircle> with SchematicCircleProps, required center, radius
   <schematiccircle>.center (property)
   <schematiccircle>.radius (property)
   <schematiccircle>.strokeWidth (property)
@@ -530,7 +530,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematiccircle>.isFilled (property)
   <schematiccircle>.fillColor (property)
   <schematiccircle>.isDashed (property)
-<schematicpath> (interface) [8 members] [category: Schematic drawing] — JSX element <schematicpath> with SchematicPathProps
+<schematicpath> (interface) [lines 216-234] [8 members] [category: Schematic drawing] — JSX element <schematicpath> with SchematicPathProps
   <schematicpath>.points (property)
   <schematicpath>.svgPath (property)
   <schematicpath>.strokeWidth (property)
@@ -539,7 +539,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematicpath>.dashGap (property)
   <schematicpath>.isFilled (property)
   <schematicpath>.fillColor (property)
-<schematictext> (interface) [7 members] [category: Schematic drawing] — JSX element <schematictext> with SchematicTextProps, required text
+<schematictext> (interface) [lines 236-252] [7 members] [category: Schematic drawing] — JSX element <schematictext> with SchematicTextProps, required text
   <schematictext>.schX (property)
   <schematictext>.schY (property)
   <schematictext>.text (property)
@@ -547,7 +547,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematictext>.anchor (property)
   <schematictext>.color (property)
   <schematictext>.schRotation (property)
-<schematictable> (interface) [7 members] [category: Schematic drawing] — JSX element <schematictable> with SchematicTableProps
+<schematictable> (interface) [lines 254-270] [7 members] [category: Schematic drawing] — JSX element <schematictable> with SchematicTableProps
   <schematictable>.schX (property)
   <schematictable>.schY (property)
   <schematictable>.children (property)
@@ -555,10 +555,10 @@ Every symbol appears here exactly once. The heading above each block names the f
   <schematictable>.borderWidth (property)
   <schematictable>.anchor (property)
   <schematictable>.fontSize (property)
-<schematicrow> (interface) [2 members] [category: Schematic drawing] — JSX element <schematicrow> with SchematicRowProps
+<schematicrow> (interface) [lines 272-278] [2 members] [category: Schematic drawing] — JSX element <schematicrow> with SchematicRowProps
   <schematicrow>.children (property)
   <schematicrow>.height (property)
-<schematiccell> (interface) [8 members] [category: Schematic drawing] — JSX element <schematiccell> with SchematicCellProps
+<schematiccell> (interface) [lines 280-298] [8 members] [category: Schematic drawing] — JSX element <schematiccell> with SchematicCellProps
   <schematiccell>.children (property)
   <schematiccell>.horizontalAlign (property)
   <schematiccell>.verticalAlign (property)
@@ -570,7 +570,7 @@ Every symbol appears here exactly once. The heading above each block names the f
 
 ## PCB, footprint and CAD primitives — `api-pcb-footprint-and-cad-primitives.md`
 
-<via> (interface) [8 members] [category: PCB, footprint and CAD primitives] — JSX element <via> with ViaProps
+<via> (interface) [lines 5-23] [8 members] [category: PCB, footprint and CAD primitives] — JSX element <via> with ViaProps
   <via>.name (property)
   <via>.fromLayer (property)
   <via>.toLayer (property)
@@ -579,7 +579,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <via>.outerDiameter (property)
   <via>.connectsTo (property)
   <via>.netIsAssignable (property)
-<smtpad> (interface) [17 members] [category: PCB, footprint and CAD primitives] — JSX element <smtpad> with SmtPadProps, required shape
+<smtpad> (interface) [lines 25-61] [17 members] [category: PCB, footprint and CAD primitives] — JSX element <smtpad> with SmtPadProps, required shape
   <smtpad>.name (property)
   <smtpad>.shape (property)
   <smtpad>.width (property)
@@ -597,7 +597,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <smtpad>.radius (property)
   <smtpad>.ccwRotation (property)
   <smtpad>.points (property)
-<platedhole> (interface) [22 members] [category: PCB, footprint and CAD primitives] — JSX element <platedhole> with PlatedHoleProps, required shape
+<platedhole> (interface) [lines 63-109] [22 members] [category: PCB, footprint and CAD primitives] — JSX element <platedhole> with PlatedHoleProps, required shape
   <platedhole>.name (property)
   <platedhole>.connectsTo (property)
   <platedhole>.shape (property)
@@ -620,14 +620,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <platedhole>.holeShape (property)
   <platedhole>.padShape (property)
   <platedhole>.padOutline (property)
-<keepout> (interface) [6 members] [category: PCB, footprint and CAD primitives] — JSX element <keepout> with PcbKeepoutProps, required shape
+<keepout> (interface) [lines 111-125] [6 members] [category: PCB, footprint and CAD primitives] — JSX element <keepout> with PcbKeepoutProps, required shape
   <keepout>.shape (property)
   <keepout>.radius (property)
   <keepout>.layers (property)
   <keepout>.excludeRefs (property)
   <keepout>.width (property)
   <keepout>.height (property)
-<hole> (interface) [8 members] [category: PCB, footprint and CAD primitives] — JSX element <hole> with HoleProps
+<hole> (interface) [lines 127-145] [8 members] [category: PCB, footprint and CAD primitives] — JSX element <hole> with HoleProps
   <hole>.name (property)
   <hole>.shape (property)
   <hole>.diameter (property)
@@ -636,7 +636,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <hole>.coveredWithSolderMask (property)
   <hole>.width (property)
   <hole>.height (property)
-<cadmodel> (interface) [21 members] [category: PCB, footprint and CAD primitives] — JSX element <cadmodel> with CadModelProps, required modelUrl
+<cadmodel> (interface) [lines 147-192] [21 members] [category: PCB, footprint and CAD primitives] — JSX element <cadmodel> with CadModelProps, required modelUrl
   <cadmodel>.modelUrl (property)
   <cadmodel>.stepUrl (property)
   <cadmodel>.pcbX (property)
@@ -658,10 +658,10 @@ Every symbol appears here exactly once. The heading above each block names the f
   <cadmodel>.pcbRotationOffset (property)
   <cadmodel>.zOffsetFromSurface (property)
   <cadmodel>.showAsTranslucentModel (property)
-<cadassembly> (interface) [2 members] [category: PCB, footprint and CAD primitives] — JSX element <cadassembly> with CadAssemblyProps
+<cadassembly> (interface) [lines 194-201] [2 members] [category: PCB, footprint and CAD primitives] — JSX element <cadassembly> with CadAssemblyProps
   <cadassembly>.originalLayer (property) — The layer that the CAD assembly is designed for
   <cadassembly>.children (property)
-<footprint> (interface) [7 members] [category: PCB, footprint and CAD primitives] — JSX element <footprint> with FootprintProps & {name?
+<footprint> (interface) [lines 203-224] [7 members] [category: PCB, footprint and CAD primitives] — JSX element <footprint> with FootprintProps & {name?
   <footprint>.children (property)
   <footprint>.name (property)
   <footprint>.originalLayer (property) — The layer that the footprint is designed for
@@ -669,7 +669,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <footprint>.src (property) — Can be a footprint or kicad string
   <footprint>.insertionDirection (property) — Direction a cable or mating part is attached from, in…
   <footprint>.cutoutApertureDirection (property) — Direction the part's enclosure opening faces, named the same way…
-<silkscreentext> (interface) [11 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreentext> with SilkscreenTextProps, required text
+<silkscreentext> (interface) [lines 226-250] [11 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreentext> with SilkscreenTextProps, required text
   <silkscreentext>.text (property)
   <silkscreentext>.font (property)
   <silkscreentext>.layers (property)
@@ -681,11 +681,11 @@ Every symbol appears here exactly once. The heading above each block names the f
   <silkscreentext>.knockoutPaddingRight (property)
   <silkscreentext>.knockoutPaddingTop (property)
   <silkscreentext>.knockoutPaddingBottom (property)
-<silkscreengraphic> (interface) [3 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreengraphic> with SilkscreenGraphicProps, required imageUrl, width, height
+<silkscreengraphic> (interface) [lines 252-263] [3 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreengraphic> with SilkscreenGraphicProps, required imageUrl, width, height
   <silkscreengraphic>.imageUrl (property) — URL or static-file import for the source image
   <silkscreengraphic>.width (property) — Width of the rendered silkscreen graphic on the PCB
   <silkscreengraphic>.height (property) — Height of the rendered silkscreen graphic on the PCB
-<coppertext> (interface) [7 members] [category: PCB, footprint and CAD primitives] — JSX element <coppertext> with CopperTextProps, required text
+<coppertext> (interface) [lines 265-281] [7 members] [category: PCB, footprint and CAD primitives] — JSX element <coppertext> with CopperTextProps, required text
   <coppertext>.text (property)
   <coppertext>.font (property)
   <coppertext>.layers (property)
@@ -693,14 +693,14 @@ Every symbol appears here exactly once. The heading above each block names the f
   <coppertext>.anchorAlignment (property)
   <coppertext>.knockout (property)
   <coppertext>.mirrored (property)
-<cutout> (interface) [6 members] [category: PCB, footprint and CAD primitives] — JSX element <cutout> with CutoutProps, required shape
+<cutout> (interface) [lines 283-297] [6 members] [category: PCB, footprint and CAD primitives] — JSX element <cutout> with CutoutProps, required shape
   <cutout>.name (property)
   <cutout>.shape (property)
   <cutout>.width (property)
   <cutout>.height (property)
   <cutout>.radius (property)
   <cutout>.points (property)
-<silkscreenpath> (interface) [16 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenpath> with SilkscreenPathProps, required route
+<silkscreenpath> (interface) [lines 299-333] [16 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenpath> with SilkscreenPathProps, required route
   <silkscreenpath>.route (property)
   <silkscreenpath>.layer (property)
   <silkscreenpath>.pcbPositionAnchor (property)
@@ -717,7 +717,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <silkscreenpath>.pcbRelative (property)
   <silkscreenpath>.relative (property)
   <silkscreenpath>.strokeWidth (property)
-<silkscreenline> (interface) [23 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenline> with SilkscreenLineProps, required strokeWidth, x1, y1, x2,…
+<silkscreenline> (interface) [lines 335-383] [23 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenline> with SilkscreenLineProps, required strokeWidth, x1, y1, x2,…
   <silkscreenline>.strokeWidth (property)
   <silkscreenline>.x1 (property)
   <silkscreenline>.y1 (property)
@@ -741,21 +741,21 @@ Every symbol appears here exactly once. The heading above each block names the f
   <silkscreenline>.pcbSx (property)
   <silkscreenline>.pcbRelative (property)
   <silkscreenline>.relative (property)
-<silkscreenrect> (interface) [6 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenrect> with SilkscreenRectProps, required width, height
+<silkscreenrect> (interface) [lines 385-399] [6 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreenrect> with SilkscreenRectProps, required width, height
   <silkscreenrect>.width (property)
   <silkscreenrect>.height (property)
   <silkscreenrect>.strokeWidth (property)
   <silkscreenrect>.cornerRadius (property)
   <silkscreenrect>.filled (property)
   <silkscreenrect>.stroke (property)
-<silkscreencircle> (interface) [4 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreencircle> with SilkscreenCircleProps, required radius
+<silkscreencircle> (interface) [lines 401-411] [4 members] [category: PCB, footprint and CAD primitives] — JSX element <silkscreencircle> with SilkscreenCircleProps, required radius
   <silkscreencircle>.radius (property)
   <silkscreencircle>.strokeWidth (property)
   <silkscreencircle>.isFilled (property)
   <silkscreencircle>.isOutline (property)
-<courtyardcircle> (interface) [1 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardcircle> with CourtyardCircleProps, required radius
+<courtyardcircle> (interface) [lines 413-417] [1 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardcircle> with CourtyardCircleProps, required radius
   <courtyardcircle>.radius (property)
-<courtyardoutline> (interface) [19 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardoutline> with CourtyardOutlineProps, required outline
+<courtyardoutline> (interface) [lines 419-459] [19 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardoutline> with CourtyardOutlineProps, required outline
   <courtyardoutline>.outline (property)
   <courtyardoutline>.layer (property)
   <courtyardoutline>.pcbPositionAnchor (property)
@@ -775,7 +775,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <courtyardoutline>.color (property)
   <courtyardoutline>.isStrokeDashed (property)
   <courtyardoutline>.isClosed (property)
-<courtyardrect> (interface) [7 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardrect> with CourtyardRectProps, required width, height
+<courtyardrect> (interface) [lines 461-477] [7 members] [category: PCB, footprint and CAD primitives] — JSX element <courtyardrect> with CourtyardRectProps, required width, height
   <courtyardrect>.width (property)
   <courtyardrect>.height (property)
   <courtyardrect>.strokeWidth (property)
@@ -783,7 +783,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <courtyardrect>.isFilled (property)
   <courtyardrect>.hasStroke (property)
   <courtyardrect>.isStrokeDashed (property)
-<fabricationnoterect> (interface) [8 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnoterect> with FabricationNoteRectProps, required width, height
+<fabricationnoterect> (interface) [lines 479-497] [8 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnoterect> with FabricationNoteRectProps, required width, height
   <fabricationnoterect>.width (property)
   <fabricationnoterect>.height (property)
   <fabricationnoterect>.strokeWidth (property)
@@ -792,7 +792,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <fabricationnoterect>.isFilled (property)
   <fabricationnoterect>.hasStroke (property)
   <fabricationnoterect>.isStrokeDashed (property)
-<pcbnoteline> (interface) [21 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnoteline> with PcbNoteLineProps, required x1, y1, x2, y2
+<pcbnoteline> (interface) [lines 499-545] [21 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnoteline> with PcbNoteLineProps, required x1, y1, x2, y2
   <pcbnoteline>.x1 (property)
   <pcbnoteline>.y1 (property)
   <pcbnoteline>.x2 (property)
@@ -814,7 +814,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pcbnoteline>.layer (property)
   <pcbnoteline>.relative (property) — If true, both pcb and schematic coordinates will be interpreted…
   <pcbnoteline>.pcbRelative (property) — If true, pcbX/pcbY will be interpreted relative to the parent…
-<pcbnoterect> (interface) [8 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnoterect> with PcbNoteRectProps, required width, height
+<pcbnoterect> (interface) [lines 547-565] [8 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnoterect> with PcbNoteRectProps, required width, height
   <pcbnoterect>.width (property)
   <pcbnoterect>.height (property)
   <pcbnoterect>.strokeWidth (property)
@@ -823,13 +823,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pcbnoterect>.isStrokeDashed (property)
   <pcbnoterect>.color (property)
   <pcbnoterect>.cornerRadius (property)
-<pcbnotetext> (interface) [5 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotetext> with PcbNoteTextProps, required text
+<pcbnotetext> (interface) [lines 567-579] [5 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotetext> with PcbNoteTextProps, required text
   <pcbnotetext>.text (property)
   <pcbnotetext>.anchorAlignment (property)
   <pcbnotetext>.font (property)
   <pcbnotetext>.fontSize (property)
   <pcbnotetext>.color (property)
-<pcbnotepath> (interface) [17 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotepath> with PcbNotePathProps, required route
+<pcbnotepath> (interface) [lines 581-619] [17 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotepath> with PcbNotePathProps, required route
   <pcbnotepath>.route (property)
   <pcbnotepath>.strokeWidth (property)
   <pcbnotepath>.color (property)
@@ -847,7 +847,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pcbnotepath>.layer (property)
   <pcbnotepath>.relative (property) — If true, both pcb and schematic coordinates will be interpreted…
   <pcbnotepath>.pcbRelative (property) — If true, pcbX/pcbY will be interpreted relative to the parent…
-<pcbnotedimension> (interface) [26 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotedimension> with PcbNoteDimensionProps, required from, to
+<pcbnotedimension> (interface) [lines 621-677] [26 members] [category: PCB, footprint and CAD primitives] — JSX element <pcbnotedimension> with PcbNoteDimensionProps, required from, to
   <pcbnotedimension>.from (property)
   <pcbnotedimension>.to (property)
   <pcbnotedimension>.text (property)
@@ -874,13 +874,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <pcbnotedimension>.layer (property)
   <pcbnotedimension>.relative (property) — If true, both pcb and schematic coordinates will be interpreted…
   <pcbnotedimension>.pcbRelative (property) — If true, pcbX/pcbY will be interpreted relative to the parent…
-<fabricationnotetext> (interface) [5 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotetext> with FabricationNoteTextProps, required text
+<fabricationnotetext> (interface) [lines 679-691] [5 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotetext> with FabricationNoteTextProps, required text
   <fabricationnotetext>.text (property)
   <fabricationnotetext>.anchorAlignment (property)
   <fabricationnotetext>.font (property)
   <fabricationnotetext>.fontSize (property)
   <fabricationnotetext>.color (property)
-<fabricationnotepath> (interface) [17 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotepath> with FabricationNotePathProps, required route
+<fabricationnotepath> (interface) [lines 693-729] [17 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotepath> with FabricationNotePathProps, required route
   <fabricationnotepath>.route (property)
   <fabricationnotepath>.layer (property)
   <fabricationnotepath>.pcbPositionAnchor (property)
@@ -898,7 +898,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <fabricationnotepath>.relative (property)
   <fabricationnotepath>.strokeWidth (property)
   <fabricationnotepath>.color (property)
-<fabricationnotedimension> (interface) [26 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotedimension> with FabricationNoteDimensionProps, required from, to
+<fabricationnotedimension> (interface) [lines 731-787] [26 members] [category: PCB, footprint and CAD primitives] — JSX element <fabricationnotedimension> with FabricationNoteDimensionProps, required from, to
   <fabricationnotedimension>.from (property)
   <fabricationnotedimension>.to (property)
   <fabricationnotedimension>.text (property)
@@ -925,7 +925,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <fabricationnotedimension>.layer (property)
   <fabricationnotedimension>.relative (property) — If true, both pcb and schematic coordinates will be interpreted…
   <fabricationnotedimension>.pcbRelative (property) — If true, pcbX/pcbY will be interpreted relative to the parent…
-<copperpour> (interface) [12 members] [category: PCB, footprint and CAD primitives] — JSX element <copperpour> with CopperPourProps, required layer, connectsTo
+<copperpour> (interface) [lines 789-816] [12 members] [category: PCB, footprint and CAD primitives] — JSX element <copperpour> with CopperPourProps, required layer, connectsTo
   <copperpour>.name (property)
   <copperpour>.layer (property)
   <copperpour>.connectsTo (property)
@@ -941,7 +941,7 @@ Every symbol appears here exactly once. The heading above each block names the f
 
 ## Connectivity — `api-connectivity.md`
 
-<port> (interface) [10 members] [category: Connectivity] — JSX element <port> with PortProps
+<port> (interface) [lines 5-27] [10 members] [category: Connectivity] — JSX element <port> with PortProps
   <port>.name (property)
   <port>.connectsTo (property)
   <port>.layers (property)
@@ -952,7 +952,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <port>.aliases (property)
   <port>.kicadPinMetadata (property)
   <port>.hasInversionCircle (property)
-<netlabel> (interface) [8 members] [category: Connectivity] — JSX element <netlabel> with NetLabelProps
+<netlabel> (interface) [lines 29-48] [8 members] [category: Connectivity] — JSX element <netlabel> with NetLabelProps
   <netlabel>.net (property)
   <netlabel>.connection (property)
   <netlabel>.connectsTo (property)
@@ -961,7 +961,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <netlabel>.schY (property)
   <netlabel>.schRotation (property)
   <netlabel>.anchorSide (property)
-<net> (interface) [7 members] [category: Connectivity] — JSX element <net> with NetProps, required name
+<net> (interface) [lines 50-66] [7 members] [category: Connectivity] — JSX element <net> with NetProps, required name
   <net>.name (property)
   <net>.connectsTo (property)
   <net>.routingPhaseIndex (property)
@@ -969,7 +969,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <net>.isPowerNet (property)
   <net>.isGroundNet (property)
   <net>.nominalTraceWidth (property)
-<trace> (interface) [22 members] [category: Connectivity] — JSX element <trace> with TraceProps
+<trace> (interface) [lines 68-114] [22 members] [category: Connectivity] — JSX element <trace> with TraceProps
   <trace>.path (property)
   <trace>.width (property)
   <trace>.name (property)
@@ -992,7 +992,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <trace>.to (property)
   <trace>.start (property)
   <trace>.end (property)
-<bus> (interface) [9 members] [category: Connectivity] — JSX element <bus> with BusProps, required connections
+<bus> (interface) [lines 116-144] [9 members] [category: Connectivity] — JSX element <bus> with BusProps, required connections
   <bus>.name (property)
   <bus>.connections (property) — One or more trace names or port selectors for the…
   <bus>.routingPhaseIndex (property) — If set, every trace in this bus is assigned to…
@@ -1002,7 +1002,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <bus>.pcbAllowedLayers (property) — PCB layers on which the bus may be routed
   <bus>.preferredLayer (property) — Preferred PCB layer for routing the bus
   <bus>.preferredLayers (property) — Preferred PCB layers for routing the bus, in priority order
-<differentialpair> (interface) [7 members] [category: Connectivity] — JSX element <differentialpair> with DifferentialPairProps, required positiveConnection, negativeConnection
+<differentialpair> (interface) [lines 146-168] [7 members] [category: Connectivity] — JSX element <differentialpair> with DifferentialPairProps, required positiveConnection, negativeConnection
   <differentialpair>.name (property)
   <differentialpair>.positiveConnection (property) — Name of the trace or pin carrying the positive signal
   <differentialpair>.negativeConnection (property) — Name of the trace or pin carrying the negative signal
@@ -1010,20 +1010,20 @@ Every symbol appears here exactly once. The heading above each block names the f
   <differentialpair>.targetDifferentialImpedance (property) — Intended differential characteristic impedance
   <differentialpair>.pcbTraceGap (property) — Edge-to-edge PCB copper gap between the pair
   <differentialpair>.maxUncoupledLength (property) — Maximum length over which the pair may be routed without…
-<tracehint> (interface) [5 members] [category: Connectivity] — JSX element <tracehint> with TraceHintProps
+<tracehint> (interface) [lines 170-182] [5 members] [category: Connectivity] — JSX element <tracehint> with TraceHintProps
   <tracehint>.offset (property)
   <tracehint>.offsets (property)
   <tracehint>.for (property)
   <tracehint>.order (property)
   <tracehint>.traceWidth (property)
-<pcbtrace> (interface) [3 members] [category: Connectivity] — JSX element <pcbtrace> with PcbTraceProps, required route
+<pcbtrace> (interface) [lines 184-192] [3 members] [category: Connectivity] — JSX element <pcbtrace> with PcbTraceProps, required route
   <pcbtrace>.route (property)
   <pcbtrace>.thickness (property)
   <pcbtrace>.layer (property)
 
 ## Simulation — `api-simulation.md`
 
-<analogsimulation> (interface) [8 members] [category: Simulation] — JSX element <analogsimulation> with AnalogSimulationProps
+<analogsimulation> (interface) [lines 5-23] [8 members] [category: Simulation] — JSX element <analogsimulation> with AnalogSimulationProps
   <analogsimulation>.name (property)
   <analogsimulation>.simulationType (property)
   <analogsimulation>.duration (property)
@@ -1032,7 +1032,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <analogsimulation>.spiceEngine (property)
   <analogsimulation>.spiceOptions (property)
   <analogsimulation>.graphIndependentAxes (property)
-<analogtransientsimulation> (interface) [8 members] [category: Simulation] — JSX element <analogtransientsimulation> with AnalogTransientSimulationProps
+<analogtransientsimulation> (interface) [lines 25-51] [8 members] [category: Simulation] — JSX element <analogtransientsimulation> with AnalogTransientSimulationProps
   <analogtransientsimulation>.duration (property) — Simulation duration
   <analogtransientsimulation>.startTime (property) — Time at which recording starts
   <analogtransientsimulation>.timePerStep (property) — Maximum simulation timestep
@@ -1041,13 +1041,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <analogtransientsimulation>.spiceOptions (property) — Numerical solver settings forwarded to the selected SPICE engine
   <analogtransientsimulation>.graphIndependentAxes (property) — Render each probe with an independent vertical graph scale
   <analogtransientsimulation>.children (property) — Optional nested sweep parameter for repeated analysis runs
-<analogdcoperatingpointsimulation> (interface) [5 members] [category: Simulation] — JSX element <analogdcoperatingpointsimulation> with AnalogDcOperatingPointSimulationProps
+<analogdcoperatingpointsimulation> (interface) [lines 53-70] [5 members] [category: Simulation] — JSX element <analogdcoperatingpointsimulation> with AnalogDcOperatingPointSimulationProps
   <analogdcoperatingpointsimulation>.name (property) — Stable identity for the simulation experiment
   <analogdcoperatingpointsimulation>.spiceEngine (property) — SPICE implementation used to run this analysis
   <analogdcoperatingpointsimulation>.spiceOptions (property) — Numerical solver settings forwarded to the selected SPICE engine
   <analogdcoperatingpointsimulation>.graphIndependentAxes (property) — Render each probe with an independent vertical graph scale
   <analogdcoperatingpointsimulation>.children (property) — Optional nested sweep parameter for repeated analysis runs
-<analogdcsweepsimulation> (interface) [9 members] [category: Simulation] — JSX element <analogdcsweepsimulation> with AnalogDcSweepSimulationProps, required sweepSource, sweepStart, sweepStop, sweepStep
+<analogdcsweepsimulation> (interface) [lines 72-101] [9 members] [category: Simulation] — JSX element <analogdcsweepsimulation> with AnalogDcSweepSimulationProps, required sweepSource, sweepStart, sweepStop, sweepStep
   <analogdcsweepsimulation>.sweepSource (property) — Selector for the independent voltage or current source being swept
   <analogdcsweepsimulation>.sweepStart (property) — First source level
   <analogdcsweepsimulation>.sweepStop (property) — Last source level
@@ -1057,7 +1057,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <analogdcsweepsimulation>.spiceOptions (property) — Numerical solver settings forwarded to the selected SPICE engine
   <analogdcsweepsimulation>.graphIndependentAxes (property) — Render each probe with an independent vertical graph scale
   <analogdcsweepsimulation>.children (property) — Optional nested sweep parameter for repeated analysis runs
-<analogacsweepsimulation> (interface) [10 members] [category: Simulation] — JSX element <analogacsweepsimulation> with AnalogAcSweepSimulationProps, required sweepType, startFrequency, stopFrequency
+<analogacsweepsimulation> (interface) [lines 103-135] [10 members] [category: Simulation] — JSX element <analogacsweepsimulation> with AnalogAcSweepSimulationProps, required sweepType, startFrequency, stopFrequency
   <analogacsweepsimulation>.sweepType (property) — Frequency spacing used by the AC analysis
   <analogacsweepsimulation>.startFrequency (property) — First positive frequency
   <analogacsweepsimulation>.stopFrequency (property) — Last frequency, which must be greater than startFrequency
@@ -1068,7 +1068,7 @@ Every symbol appears here exactly once. The heading above each block names the f
   <analogacsweepsimulation>.spiceOptions (property) — Numerical solver settings forwarded to the selected SPICE engine
   <analogacsweepsimulation>.graphIndependentAxes (property) — Render each probe with an independent vertical graph scale
   <analogacsweepsimulation>.children (property) — Optional nested sweep parameter for repeated analysis runs
-<analogsweepparameter> (interface) [11 members] [category: Simulation] — JSX element <analogsweepparameter> with AnalogSweepParameterProps, required parameterType
+<analogsweepparameter> (interface) [lines 137-171] [11 members] [category: Simulation] — JSX element <analogsweepparameter> with AnalogSweepParameterProps, required parameterType
   <analogsweepparameter>.parameterType (property)
   <analogsweepparameter>.resistorRef (property) — Selector for the resistor whose simulation-only resistance is swept
   <analogsweepparameter>.name (property) — Stable identity for this sweep parameter
@@ -1080,13 +1080,13 @@ Every symbol appears here exactly once. The heading above each block names the f
   <analogsweepparameter>.inductorRef (property) — Selector for the inductor whose simulation-only inductance is swept
   <analogsweepparameter>.net (property) — Net whose simulation-only voltage is swept
   <analogsweepparameter>.currentSourceRef (property) — Selector for the current source whose simulation-only current is swept
-<spicemodel> (interface) [2 members] [category: Simulation] — JSX element <spicemodel> with SpiceModelProps, required source
+<spicemodel> (interface) [lines 173-179] [2 members] [category: Simulation] — JSX element <spicemodel> with SpiceModelProps, required source
   <spicemodel>.source (property)
   <spicemodel>.spicePinMapping (property)
 
 ## Shared props — `api-shared-props.md`
 
-CommonComponentProps (interface) [18 members] [category: Shared props] — Props every element extending CommonComponentProps accepts
+CommonComponentProps (interface) [lines 5-48] [18 members] [category: Shared props] — Props every element extending CommonComponentProps accepts
   CommonComponentProps.name (property)
   CommonComponentProps.displayName (property)
   CommonComponentProps.datasheetUrl (property)
@@ -1105,7 +1105,7 @@ CommonComponentProps (interface) [18 members] [category: Shared props] — Props
   CommonComponentProps.manufacturerPartNumber (property)
   CommonComponentProps.schSectionName (property) — This component will be drawn as part of this section…
   CommonComponentProps.schSheetName (property) — This component will be drawn as part of this sheet…
-SubcircuitGroupProps (interface) [30 members] [category: Shared props] — Props every element extending SubcircuitGroupProps accepts
+SubcircuitGroupProps (interface) [lines 50-123] [30 members] [category: Shared props] — Props every element extending SubcircuitGroupProps accepts
   SubcircuitGroupProps.manualEdits (property)
   SubcircuitGroupProps.routingDisabled (property)
   SubcircuitGroupProps.placementDrcChecksDisabled (property) — Skip the PCB placement design rule checks for this subcircuit
@@ -1136,7 +1136,7 @@ SubcircuitGroupProps (interface) [30 members] [category: Shared props] — Props
   SubcircuitGroupProps.minViaEdgeToPadEdgeClearance (property)
   SubcircuitGroupProps.minViaHoleDiameter (property)
   SubcircuitGroupProps.minViaPadDiameter (property)
-BaseGroupProps (interface) [97 members] [category: Shared props] — Props every element extending BaseGroupProps accepts
+BaseGroupProps (interface) [lines 125-328] [97 members] [category: Shared props] — Props every element extending BaseGroupProps accepts
   BaseGroupProps.name (property)
   BaseGroupProps.children (property)
   BaseGroupProps.schTitle (property) — Title to display above this group in the schematic view
@@ -1234,7 +1234,7 @@ BaseGroupProps (interface) [97 members] [category: Shared props] — Props every
   BaseGroupProps.height (property)
   BaseGroupProps.matchAdapt (property)
   BaseGroupProps.matchAdaptTemplate (property)
-CommonLayoutProps (interface) [13 members] [category: Shared props] — Props every element extending CommonLayoutProps accepts
+CommonLayoutProps (interface) [lines 330-359] [13 members] [category: Shared props] — Props every element extending CommonLayoutProps accepts
   CommonLayoutProps.schMarginTop (property)
   CommonLayoutProps.schMarginRight (property)
   CommonLayoutProps.schMarginBottom (property)
@@ -1248,7 +1248,7 @@ CommonLayoutProps (interface) [13 members] [category: Shared props] — Props ev
   CommonLayoutProps.symbol (property)
   CommonLayoutProps.schStyle (property)
   CommonLayoutProps.schRelative (property) — If true, schX/schY will be interpreted relative to the parent…
-PcbLayoutProps (interface) [23 members] [category: Shared props] — Props every element extending PcbLayoutProps accepts
+PcbLayoutProps (interface) [lines 361-412] [23 members] [category: Shared props] — Props every element extending PcbLayoutProps accepts
   PcbLayoutProps.pcbX (property)
   PcbLayoutProps.pcbY (property)
   PcbLayoutProps.pcbLeftEdgeX (property) — Position the left, right, top, or bottom edge of the…
@@ -1275,11 +1275,11 @@ PcbLayoutProps (interface) [23 members] [category: Shared props] — Props every
 
 ## Prop types — `api-prop-types.md`
 
-AmmeterPinLabels (type) [category: Prop types]
-AntennaFrequencyBand (type) [category: Prop types]
-AntennaShape (type) [category: Prop types]
-AutocompleteString<T extends string> (type) [category: Prop types]
-AutorouterConfig (interface) [13 members] [category: Prop types]
+AmmeterPinLabels (type) [lines 5-6] [category: Prop types]
+AntennaFrequencyBand (type) [lines 8-9] [category: Prop types]
+AntennaShape (type) [lines 11-12] [category: Prop types]
+AutocompleteString<T extends string> (type) [lines 14-15] [category: Prop types]
+AutorouterConfig (interface) [lines 17-45] [13 members] [category: Prop types]
   AutorouterConfig.serverUrl (property)
   AutorouterConfig.inputFormat (property)
   AutorouterConfig.serverMode (property)
@@ -1293,21 +1293,21 @@ AutorouterConfig (interface) [13 members] [category: Prop types]
   AutorouterConfig.algorithmFn (property)
   AutorouterConfig.implicitBreakoutPointSolverFn (property) — Override the solver used to place implicit breakout points
   AutorouterConfig.preset (property)
-AutorouterPreset (type) [category: Prop types]
-AutorouterProp (type) [category: Prop types]
-BasicFootprint (type) [category: Prop types]
-BatteryPinLabels (type) [category: Prop types]
-BoardColor (type) [category: Prop types]
-BoardColorPreset (type) [category: Prop types]
-Border (interface) [3 members] [category: Prop types]
+AutorouterPreset (type) [lines 47-48] [category: Prop types]
+AutorouterProp (type) [lines 50-51] [category: Prop types]
+BasicFootprint (type) [lines 53-54] [category: Prop types]
+BatteryPinLabels (type) [lines 56-57] [category: Prop types]
+BoardColor (type) [lines 59-60] [category: Prop types]
+BoardColorPreset (type) [lines 62-63] [category: Prop types]
+Border (interface) [lines 65-72] [3 members] [category: Prop types]
   Border.strokeWidth (property)
   Border.dashed (property)
   Border.solid (property)
-BusFanoutDirection (type) [category: Prop types]
-BusFanoutDirectionLiteral (type) [category: Prop types]
-BusName (type) [category: Prop types]
-CadModelAxisDirection (type) [category: Prop types]
-CadModelBase (interface) [11 members] [category: Prop types]
+BusFanoutDirection (type) [lines 74-75] [category: Prop types]
+BusFanoutDirectionLiteral (type) [lines 77-78] [category: Prop types]
+BusName (type) [lines 80-81] [category: Prop types]
+CadModelAxisDirection (type) [lines 83-84] [category: Prop types]
+CadModelBase (interface) [lines 86-110] [11 members] [category: Prop types]
   CadModelBase.rotationOffset (property)
   CadModelBase.positionOffset (property)
   CadModelBase.modelOriginPosition (property)
@@ -1319,119 +1319,119 @@ CadModelBase (interface) [11 members] [category: Prop types]
   CadModelBase.zOffsetFromSurface (property)
   CadModelBase.showAsTranslucentModel (property)
   CadModelBase.stepUrl (property)
-CadModelFootprinterString (type) [category: Prop types] — A Footprinter string used to procedurally generate the component's CAD…
-CadModelGlb (interface) [1 members] [category: Prop types] — Required glbUrl
+CadModelFootprinterString (type) [lines 112-114] [category: Prop types] — A Footprinter string used to procedurally generate the component's CAD…
+CadModelGlb (interface) [lines 116-120] [1 members] [category: Prop types] — Required glbUrl
   CadModelGlb.glbUrl (property)
-CadModelGltf (interface) [1 members] [category: Prop types] — Required gltfUrl
+CadModelGltf (interface) [lines 122-126] [1 members] [category: Prop types] — Required gltfUrl
   CadModelGltf.gltfUrl (property)
-CadModelJscad (interface) [1 members] [category: Prop types] — Required jscad
+CadModelJscad (interface) [lines 128-132] [1 members] [category: Prop types] — Required jscad
   CadModelJscad.jscad (property)
-CadModelObj (interface) [2 members] [category: Prop types] — Required objUrl
+CadModelObj (interface) [lines 134-140] [2 members] [category: Prop types] — Required objUrl
   CadModelObj.objUrl (property)
   CadModelObj.mtlUrl (property)
-CadModelProp (type) [category: Prop types]
-CadModelStep (interface) [1 members] [category: Prop types] — Required stepUrl
+CadModelProp (type) [lines 142-143] [category: Prop types]
+CadModelStep (interface) [lines 145-149] [1 members] [category: Prop types] — Required stepUrl
   CadModelStep.stepUrl (property)
-CadModelStl (interface) [1 members] [category: Prop types] — Required stlUrl
+CadModelStl (interface) [lines 151-155] [1 members] [category: Prop types] — Required stlUrl
   CadModelStl.stlUrl (property)
-CadModelWrl (interface) [1 members] [category: Prop types] — Required wrlUrl
+CadModelWrl (interface) [lines 157-161] [1 members] [category: Prop types] — Required wrlUrl
   CadModelWrl.wrlUrl (property)
-CanonicalBusFanoutDirection (type) [category: Prop types]
-CapacitorPinLabels (type) [category: Prop types]
-CircuitJsonWarning (type) [category: Prop types]
-Connections<PinLabel extends string = string> (type) [category: Prop types] — Defines a mapping of strings to connection paths e.g
-ConnectionTarget (type) [category: Prop types]
-ConnectorStandard (type) [category: Prop types]
-CrystalPinLabels (type) [category: Prop types]
-CurrentSourcePinLabels (type) [category: Prop types]
-CustomDrcCheckContext (interface) [6 members] [category: Prop types] — Required select, selectAll, isConnected, isPulledUp, isPulledDown, getResistanceBetween
+CanonicalBusFanoutDirection (type) [lines 163-164] [category: Prop types]
+CapacitorPinLabels (type) [lines 166-167] [category: Prop types]
+CircuitJsonWarning (type) [lines 169-170] [category: Prop types]
+Connections<PinLabel extends string = string> (type) [lines 172-174] [category: Prop types] — Defines a mapping of strings to connection paths e.g
+ConnectionTarget (type) [lines 176-177] [category: Prop types]
+ConnectorStandard (type) [lines 179-180] [category: Prop types]
+CrystalPinLabels (type) [lines 182-183] [category: Prop types]
+CurrentSourcePinLabels (type) [lines 185-186] [category: Prop types]
+CustomDrcCheckContext (interface) [lines 188-202] [6 members] [category: Prop types] — Required select, selectAll, isConnected, isPulledUp, isPulledDown, getResistanceBetween
   CustomDrcCheckContext.select (property)
   CustomDrcCheckContext.selectAll (property)
   CustomDrcCheckContext.isConnected (property)
   CustomDrcCheckContext.isPulledUp (property)
   CustomDrcCheckContext.isPulledDown (property)
   CustomDrcCheckContext.getResistanceBetween (property)
-CustomDrcCheckFn (type) [category: Prop types]
-CustomDrcCheckInput (type) [category: Prop types]
-CustomDrcConnectable (type) [category: Prop types]
-CustomDrcSelect (interface) [category: Prop types]
-CustomDrcSelectAll (interface) [category: Prop types]
-DiodePinLabels (type) [category: Prop types]
-DiodePinLabelsProp<PinLabel extends string = string> (type) [category: Prop types]
-DirectionalFanoutBoundaryPadding (interface) [4 members] [category: Prop types]
+CustomDrcCheckFn (type) [lines 204-205] [category: Prop types]
+CustomDrcCheckInput (type) [lines 207-208] [category: Prop types]
+CustomDrcConnectable (type) [lines 210-211] [category: Prop types]
+CustomDrcSelect (interface) [lines 213-214] [category: Prop types]
+CustomDrcSelectAll (interface) [lines 216-217] [category: Prop types]
+DiodePinLabels (type) [lines 219-220] [category: Prop types]
+DiodePinLabelsProp<PinLabel extends string = string> (type) [lines 222-223] [category: Prop types]
+DirectionalFanoutBoundaryPadding (interface) [lines 225-234] [4 members] [category: Prop types]
   DirectionalFanoutBoundaryPadding.top (property)
   DirectionalFanoutBoundaryPadding.right (property)
   DirectionalFanoutBoundaryPadding.bottom (property)
   DirectionalFanoutBoundaryPadding.left (property)
-Distance (type) [category: Prop types]
-FanoutBoundaryPadding (type) [category: Prop types] — Padding between the union of the fanout source pads and…
-FanoutPourNetMap (type) [category: Prop types]
-FootprinterStringAutocomplete (type) [category: Prop types]
-FootprinterStringExample (type) [category: Prop types]
-FootprintInsertionDirection (type) [category: Prop types] — Direction a cable or mating part is attached from, named…
-FootprintProp (type) [category: Prop types]
-FootprintSoupElements (type) [category: Prop types] — This is an abbreviated definition of the soup elements that…
-ImplicitBreakoutBounds (interface) [4 members] [category: Prop types] — Required minX, maxX, minY, maxY
+Distance (type) [lines 236-237] [category: Prop types]
+FanoutBoundaryPadding (type) [lines 239-241] [category: Prop types] — Padding between the union of the fanout source pads and…
+FanoutPourNetMap (type) [lines 243-244] [category: Prop types]
+FootprinterStringAutocomplete (type) [lines 246-247] [category: Prop types]
+FootprinterStringExample (type) [lines 249-250] [category: Prop types]
+FootprintInsertionDirection (type) [lines 252-254] [category: Prop types] — Direction a cable or mating part is attached from, named…
+FootprintProp (type) [lines 256-257] [category: Prop types]
+FootprintSoupElements (type) [lines 259-261] [category: Prop types] — This is an abbreviated definition of the soup elements that…
+ImplicitBreakoutBounds (interface) [lines 263-273] [4 members] [category: Prop types] — Required minX, maxX, minY, maxY
   ImplicitBreakoutBounds.minX (property)
   ImplicitBreakoutBounds.maxX (property)
   ImplicitBreakoutBounds.minY (property)
   ImplicitBreakoutBounds.maxY (property)
-ImplicitBreakoutBus (interface) [3 members] [category: Prop types] — Required busId, connectionIds
+ImplicitBreakoutBus (interface) [lines 275-284] [3 members] [category: Prop types] — Required busId, connectionIds
   ImplicitBreakoutBus.busId (property)
   ImplicitBreakoutBus.connectionIds (property)
   ImplicitBreakoutBus.targetLayers (property) — Ordered candidate layers that the solver may distribute this bus…
-ImplicitBreakoutConnection (interface) [2 members] [category: Prop types] — Required connectionId, endpoints
+ImplicitBreakoutConnection (interface) [lines 286-292] [2 members] [category: Prop types] — Required connectionId, endpoints
   ImplicitBreakoutConnection.connectionId (property)
   ImplicitBreakoutConnection.endpoints (property)
-ImplicitBreakoutConnectionEndpoint (interface) [3 members] [category: Prop types] — Required regionId, position
+ImplicitBreakoutConnectionEndpoint (interface) [lines 294-303] [3 members] [category: Prop types] — Required regionId, position
   ImplicitBreakoutConnectionEndpoint.regionId (property)
   ImplicitBreakoutConnectionEndpoint.position (property)
   ImplicitBreakoutConnectionEndpoint.externalDestination (property) — Optional PCB world-space routing destination, in millimeters, beyond this breakout…
-ImplicitBreakoutConnectionOrDifferentialPair (type) [category: Prop types]
-ImplicitBreakoutDifferentialPair (interface) [2 members] [category: Prop types] — Required type, connections
+ImplicitBreakoutConnectionOrDifferentialPair (type) [lines 305-306] [category: Prop types]
+ImplicitBreakoutDifferentialPair (interface) [lines 308-314] [2 members] [category: Prop types] — Required type, connections
   ImplicitBreakoutDifferentialPair.type (property)
   ImplicitBreakoutDifferentialPair.connections (property)
-ImplicitBreakoutEdge (type) [category: Prop types]
-ImplicitBreakoutPoint (interface) [2 members] [category: Prop types] — Required x, y
+ImplicitBreakoutEdge (type) [lines 316-317] [category: Prop types]
+ImplicitBreakoutPoint (interface) [lines 319-325] [2 members] [category: Prop types] — Required x, y
   ImplicitBreakoutPoint.x (property)
   ImplicitBreakoutPoint.y (property)
-ImplicitBreakoutPointSolverFn (type) [category: Prop types]
-ImplicitBreakoutPointSolverInput (interface) [4 members] [category: Prop types] — Required regions, connections, buses, boundaryPointSpacing
+ImplicitBreakoutPointSolverFn (type) [lines 327-328] [category: Prop types]
+ImplicitBreakoutPointSolverInput (interface) [lines 330-340] [4 members] [category: Prop types] — Required regions, connections, buses, boundaryPointSpacing
   ImplicitBreakoutPointSolverInput.regions (property)
   ImplicitBreakoutPointSolverInput.connections (property)
   ImplicitBreakoutPointSolverInput.buses (property)
   ImplicitBreakoutPointSolverInput.boundaryPointSpacing (property)
-ImplicitBreakoutPointSolverOutput (interface) [1 members] [category: Prop types] — Required breakoutPoints
+ImplicitBreakoutPointSolverOutput (interface) [lines 342-346] [1 members] [category: Prop types] — Required breakoutPoints
   ImplicitBreakoutPointSolverOutput.breakoutPoints (property)
-ImplicitBreakoutRegion (interface) [3 members] [category: Prop types] — Required regionId, bounds, edge
+ImplicitBreakoutRegion (interface) [lines 348-356] [3 members] [category: Prop types] — Required regionId, bounds, edge
   ImplicitBreakoutRegion.regionId (property)
   ImplicitBreakoutRegion.bounds (property)
   ImplicitBreakoutRegion.edge (property)
-ImplicitBreakoutSolverPoint (interface) [3 members] [category: Prop types] — Required regionId, connectionId, layer
+ImplicitBreakoutSolverPoint (interface) [lines 358-366] [3 members] [category: Prop types] — Required regionId, connectionId, layer
   ImplicitBreakoutSolverPoint.regionId (property)
   ImplicitBreakoutSolverPoint.connectionId (property)
   ImplicitBreakoutSolverPoint.layer (property)
-InductorPinLabels (type) [category: Prop types]
-InternalCircuitElement (type) [category: Prop types]
-InternalCircuitProps (interface) [1 members] [category: Prop types] — Props for a semantic container that groups the functional components…
+InductorPinLabels (type) [lines 368-369] [category: Prop types]
+InternalCircuitElement (type) [lines 371-372] [category: Prop types]
+InternalCircuitProps (interface) [lines 374-378] [1 members] [category: Prop types] — Props for a semantic container that groups the functional components…
   InternalCircuitProps.children (property)
-JlcpcbAutocompleteStringPath (type) [category: Prop types]
-KicadAt (interface) [3 members] [category: Prop types] — Required x, y
+JlcpcbAutocompleteStringPath (type) [lines 380-381] [category: Prop types]
+KicadAt (interface) [lines 383-391] [3 members] [category: Prop types] — Required x, y
   KicadAt.x (property)
   KicadAt.y (property)
   KicadAt.rotation (property)
-KicadAutocompleteStringPath (type) [category: Prop types]
-KicadEffects (interface) [1 members] [category: Prop types]
+KicadAutocompleteStringPath (type) [lines 393-394] [category: Prop types]
+KicadEffects (interface) [lines 396-399] [1 members] [category: Prop types]
   KicadEffects.font (property)
-KicadFont (interface) [2 members] [category: Prop types]
+KicadFont (interface) [lines 401-406] [2 members] [category: Prop types]
   KicadFont.size (property)
   KicadFont.thickness (property)
-KicadFootprintAttributes (interface) [4 members] [category: Prop types]
+KicadFootprintAttributes (interface) [lines 408-417] [4 members] [category: Prop types]
   KicadFootprintAttributes.through_hole (property)
   KicadFootprintAttributes.smd (property)
   KicadFootprintAttributes.exclude_from_pos_files (property)
   KicadFootprintAttributes.exclude_from_bom (property)
-KicadFootprintMetadata (interface) [10 members] [category: Prop types]
+KicadFootprintMetadata (interface) [lines 419-440] [10 members] [category: Prop types]
   KicadFootprintMetadata.footprintName (property)
   KicadFootprintMetadata.version (property)
   KicadFootprintMetadata.generator (property)
@@ -1442,12 +1442,12 @@ KicadFootprintMetadata (interface) [10 members] [category: Prop types]
   KicadFootprintMetadata.pads (property)
   KicadFootprintMetadata.embeddedFonts (property)
   KicadFootprintMetadata.model (property)
-KicadFootprintModel (interface) [4 members] [category: Prop types] — Required path
+KicadFootprintModel (interface) [lines 442-452] [4 members] [category: Prop types] — Required path
   KicadFootprintModel.path (property)
   KicadFootprintModel.offset (property)
   KicadFootprintModel.scale (property)
   KicadFootprintModel.rotate (property)
-KicadFootprintPad (interface) [9 members] [category: Prop types] — Required name, type
+KicadFootprintPad (interface) [lines 454-474] [9 members] [category: Prop types] — Required name, type
   KicadFootprintPad.name (property)
   KicadFootprintPad.type (property)
   KicadFootprintPad.shape (property)
@@ -1457,23 +1457,23 @@ KicadFootprintPad (interface) [9 members] [category: Prop types] — Required na
   KicadFootprintPad.layers (property)
   KicadFootprintPad.removeUnusedLayers (property)
   KicadFootprintPad.uuid (property)
-KicadFootprintProperties (interface) [4 members] [category: Prop types]
+KicadFootprintProperties (interface) [lines 476-485] [4 members] [category: Prop types]
   KicadFootprintProperties.Reference (property)
   KicadFootprintProperties.Value (property)
   KicadFootprintProperties.Datasheet (property)
   KicadFootprintProperties.Description (property)
-KicadProperty (interface) [6 members] [category: Prop types] — Required value
+KicadProperty (interface) [lines 487-501] [6 members] [category: Prop types] — Required value
   KicadProperty.value (property)
   KicadProperty.at (property)
   KicadProperty.layer (property)
   KicadProperty.uuid (property)
   KicadProperty.hide (property)
   KicadProperty.effects (property)
-KicadSymbolEffects (interface) [3 members] [category: Prop types]
+KicadSymbolEffects (interface) [lines 503-510] [3 members] [category: Prop types]
   KicadSymbolEffects.font (property)
   KicadSymbolEffects.justify (property)
   KicadSymbolEffects.hide (property)
-KicadSymbolMetadata (interface) [9 members] [category: Prop types]
+KicadSymbolMetadata (interface) [lines 512-531] [9 members] [category: Prop types]
   KicadSymbolMetadata.symbolName (property)
   KicadSymbolMetadata.extends (property)
   KicadSymbolMetadata.pinNumbers (property)
@@ -1483,12 +1483,12 @@ KicadSymbolMetadata (interface) [9 members] [category: Prop types]
   KicadSymbolMetadata.onBoard (property)
   KicadSymbolMetadata.properties (property)
   KicadSymbolMetadata.embeddedFonts (property)
-KicadSymbolPinNames (interface) [2 members] [category: Prop types]
+KicadSymbolPinNames (interface) [lines 533-538] [2 members] [category: Prop types]
   KicadSymbolPinNames.offset (property)
   KicadSymbolPinNames.hide (property)
-KicadSymbolPinNumbers (interface) [1 members] [category: Prop types]
+KicadSymbolPinNumbers (interface) [lines 540-543] [1 members] [category: Prop types]
   KicadSymbolPinNumbers.hide (property)
-KicadSymbolProperties (interface) [7 members] [category: Prop types]
+KicadSymbolProperties (interface) [lines 545-560] [7 members] [category: Prop types]
   KicadSymbolProperties.Reference (property)
   KicadSymbolProperties.Value (property)
   KicadSymbolProperties.Footprint (property)
@@ -1496,12 +1496,12 @@ KicadSymbolProperties (interface) [7 members] [category: Prop types]
   KicadSymbolProperties.Description (property)
   KicadSymbolProperties.ki_keywords (property)
   KicadSymbolProperties.ki_fp_filters (property)
-KicadSymbolProperty (interface) [4 members] [category: Prop types] — Required value
+KicadSymbolProperty (interface) [lines 562-572] [4 members] [category: Prop types] — Required value
   KicadSymbolProperty.value (property)
   KicadSymbolProperty.id (property)
   KicadSymbolProperty.at (property)
   KicadSymbolProperty.effects (property)
-LayoutConfig (interface) [32 members] [category: Prop types]
+LayoutConfig (interface) [lines 574-639] [32 members] [category: Prop types]
   LayoutConfig.layoutMode (property)
   LayoutConfig.position (property)
   LayoutConfig.grid (property)
@@ -1534,36 +1534,36 @@ LayoutConfig (interface) [32 members] [category: Prop types]
   LayoutConfig.height (property)
   LayoutConfig.matchAdapt (property)
   LayoutConfig.matchAdaptTemplate (property)
-ManualEditsFileInput (type) [category: Prop types]
-MaybePromise<T> (type) [category: Prop types]
-MosfetPinLabels (type) [category: Prop types]
-NinePointAnchor (type) [category: Prop types]
-OpAmpPinLabels (type) [category: Prop types] — Pin labels for an op-amp component
-PcbOrientation (type) [category: Prop types]
-PcbPath (type) [category: Prop types]
-PcbPathPoint (interface) [3 members] [category: Prop types]
+ManualEditsFileInput (type) [lines 641-642] [category: Prop types]
+MaybePromise<T> (type) [lines 644-645] [category: Prop types]
+MosfetPinLabels (type) [lines 647-648] [category: Prop types]
+NinePointAnchor (type) [lines 650-651] [category: Prop types]
+OpAmpPinLabels (type) [lines 653-655] [category: Prop types] — Pin labels for an op-amp component
+PcbOrientation (type) [lines 657-658] [category: Prop types]
+PcbPath (type) [lines 660-661] [category: Prop types]
+PcbPathPoint (interface) [lines 663-670] [3 members] [category: Prop types]
   PcbPathPoint.via (property)
   PcbPathPoint.fromLayer (property)
   PcbPathPoint.toLayer (property)
-PcbPositionMode (type) [category: Prop types]
-PcbRouteCache (interface) [2 members] [category: Prop types] — Required pcbTraces, cacheKey
+PcbPositionMode (type) [lines 672-673] [category: Prop types]
+PcbRouteCache (interface) [lines 675-681] [2 members] [category: Prop types] — Required pcbTraces, cacheKey
   PcbRouteCache.pcbTraces (property)
   PcbRouteCache.cacheKey (property)
-PcbStyle (interface) [5 members] [category: Prop types]
+PcbStyle (interface) [lines 683-694] [5 members] [category: Prop types]
   PcbStyle.silkscreenFontSize (property)
   PcbStyle.viaPadDiameter (property)
   PcbStyle.viaHoleDiameter (property)
   PcbStyle.silkscreenTextPosition (property)
   PcbStyle.silkscreenTextVisibility (property)
-PcbSx (type) [category: Prop types]
-PcbSxBase (type) [category: Prop types]
-PcbSxSelector (type) [category: Prop types]
-PcbSxValue (interface) [4 members] [category: Prop types]
+PcbSx (type) [lines 696-697] [category: Prop types]
+PcbSxBase (type) [lines 699-700] [category: Prop types]
+PcbSxSelector (type) [lines 702-703] [category: Prop types]
+PcbSxValue (interface) [lines 705-714] [4 members] [category: Prop types]
   PcbSxValue.fontSize (property)
   PcbSxValue.pcbX (property)
   PcbSxValue.pcbY (property)
   PcbSxValue.visibility (property)
-PinAttributeMap (interface) [26 members] [category: Prop types]
+PinAttributeMap (interface) [lines 716-769] [26 members] [category: Prop types]
   PinAttributeMap.capabilities (property)
   PinAttributeMap.activeCapabilities (property)
   PinAttributeMap.activeCapability (property)
@@ -1590,77 +1590,77 @@ PinAttributeMap (interface) [26 members] [category: Prop types]
   PinAttributeMap.shouldHaveDecouplingCapacitor (property)
   PinAttributeMap.recommendedDecouplingCapacitorCapacitance (property)
   PinAttributeMap.isGpio (property)
-PinCapability (type) [category: Prop types]
-PinCompatibleVariant (interface) [2 members] [category: Prop types]
+PinCapability (type) [lines 771-772] [category: Prop types]
+PinCompatibleVariant (interface) [lines 774-779] [2 members] [category: Prop types]
   PinCompatibleVariant.manufacturerPartNumber (property)
   PinCompatibleVariant.supplierPartNumber (property)
-PinLabelsProp<PinNumber extends string = string, PinLabel extends string = string> (type) [category: Prop types]
-PinSideDefinition (interface) [2 members] [category: Prop types] — Required pins, direction
+PinLabelsProp<PinNumber extends string = string, PinLabel extends string = string> (type) [lines 781-782] [category: Prop types]
+PinSideDefinition (interface) [lines 784-790] [2 members] [category: Prop types] — Required pins, direction
   PinSideDefinition.pins (property)
   PinSideDefinition.direction (property)
-PinSideDefinitionInput (type) [category: Prop types]
-PinVariant (type) [category: Prop types]
-Point (type) [category: Prop types]
-PortHints (type) [category: Prop types]
-PotentiometerPinLabels (type) [category: Prop types]
-PotentiometerPinVariant (type) [category: Prop types]
-ResistorPinLabels (type) [category: Prop types]
-ResonatorPinVariant (type) [category: Prop types]
-SchematicOrientation (type) [category: Prop types]
-SchematicPinArrangement (type) [category: Prop types]
-SchematicPinLabel (type) [category: Prop types]
-SchematicPinStyle (type) [category: Prop types]
-SchematicPortArrangement (interface) [category: Prop types]
-SchematicPortArrangementWithPinCounts (interface) [4 members] [category: Prop types] — Specifies the number of pins on each side of the…
+PinSideDefinitionInput (type) [lines 792-793] [category: Prop types]
+PinVariant (type) [lines 795-796] [category: Prop types]
+Point (type) [lines 798-799] [category: Prop types]
+PortHints (type) [lines 801-802] [category: Prop types]
+PotentiometerPinLabels (type) [lines 804-805] [category: Prop types]
+PotentiometerPinVariant (type) [lines 807-808] [category: Prop types]
+ResistorPinLabels (type) [lines 810-811] [category: Prop types]
+ResonatorPinVariant (type) [lines 813-814] [category: Prop types]
+SchematicOrientation (type) [lines 816-817] [category: Prop types]
+SchematicPinArrangement (type) [lines 819-820] [category: Prop types]
+SchematicPinLabel (type) [lines 822-823] [category: Prop types]
+SchematicPinStyle (type) [lines 825-826] [category: Prop types]
+SchematicPortArrangement (interface) [lines 828-829] [category: Prop types]
+SchematicPortArrangementWithPinCounts (interface) [lines 831-841] [4 members] [category: Prop types] — Specifies the number of pins on each side of the…
   SchematicPortArrangementWithPinCounts.leftPinCount (property)
   SchematicPortArrangementWithPinCounts.topPinCount (property)
   SchematicPortArrangementWithPinCounts.rightPinCount (property)
   SchematicPortArrangementWithPinCounts.bottomPinCount (property)
-SchematicPortArrangementWithSides (interface) [4 members] [category: Prop types]
+SchematicPortArrangementWithSides (interface) [lines 843-852] [4 members] [category: Prop types]
   SchematicPortArrangementWithSides.leftSide (property)
   SchematicPortArrangementWithSides.topSide (property)
   SchematicPortArrangementWithSides.rightSide (property)
   SchematicPortArrangementWithSides.bottomSide (property)
-SchematicPortArrangementWithSizes (interface) [4 members] [category: Prop types]
+SchematicPortArrangementWithSizes (interface) [lines 854-863] [4 members] [category: Prop types]
   SchematicPortArrangementWithSizes.leftSize (property)
   SchematicPortArrangementWithSizes.topSize (property)
   SchematicPortArrangementWithSizes.rightSize (property)
   SchematicPortArrangementWithSizes.bottomSize (property)
-SchematicSheetSize (type) [category: Prop types]
-SchematicSymbolSize (type) [category: Prop types]
-SchStyle (interface) [2 members] [category: Prop types]
+SchematicSheetSize (type) [lines 865-866] [category: Prop types]
+SchematicSymbolSize (type) [lines 868-869] [category: Prop types]
+SchStyle (interface) [lines 871-876] [2 members] [category: Prop types]
   SchStyle.defaultPassiveSize (property)
   SchStyle.defaultCapacitorOrientation (property)
-SelectionResult (type) [category: Prop types]
-SelectionResultComponent (interface) [4 members] [category: Prop types] — Required getPort, getPorts, getPcbComponent, getSourceComponent
+SelectionResult (type) [lines 878-879] [category: Prop types]
+SelectionResultComponent (interface) [lines 881-891] [4 members] [category: Prop types] — Required getPort, getPorts, getPcbComponent, getSourceComponent
   SelectionResultComponent.getPort (property)
   SelectionResultComponent.getPorts (property)
   SelectionResultComponent.getPcbComponent (property)
   SelectionResultComponent.getSourceComponent (property)
-SelectionResultNet (interface) [1 members] [category: Prop types] — Required getSourceNet
+SelectionResultNet (interface) [lines 893-897] [1 members] [category: Prop types] — Required getSourceNet
   SelectionResultNet.getSourceNet (property)
-SelectionResultPort (interface) [2 members] [category: Prop types] — Required getPcbPort, getSourcePort
+SelectionResultPort (interface) [lines 899-905] [2 members] [category: Prop types] — Required getPcbPort, getSourcePort
   SelectionResultPort.getPcbPort (property)
   SelectionResultPort.getSourcePort (property)
-SpiceModelElement (type) [category: Prop types]
-SpiceModelProps (interface) [2 members] [category: Prop types] — Required source
+SpiceModelElement (type) [lines 907-908] [category: Prop types]
+SpiceModelProps (interface) [lines 910-916] [2 members] [category: Prop types] — Required source
   SpiceModelProps.source (property)
   SpiceModelProps.spicePinMapping (property)
-SpiceOptions (interface) [4 members] [category: Prop types]
+SpiceOptions (interface) [lines 918-927] [4 members] [category: Prop types]
   SpiceOptions.method (property)
   SpiceOptions.reltol (property)
   SpiceOptions.abstol (property)
   SpiceOptions.vntol (property)
-SupplierName (type) [category: Prop types]
-SupplierPartNumbers (type) [category: Prop types]
-SymbolProp (type) [category: Prop types]
-TestpointConnections (type) [category: Prop types]
-VoltageSourcePinLabels (type) [category: Prop types]
-WaveShape (type) [category: Prop types]
+SupplierName (type) [lines 929-930] [category: Prop types]
+SupplierPartNumbers (type) [lines 932-933] [category: Prop types]
+SymbolProp (type) [lines 935-936] [category: Prop types]
+TestpointConnections (type) [lines 938-939] [category: Prop types]
+VoltageSourcePinLabels (type) [lines 941-942] [category: Prop types]
+WaveShape (type) [lines 944-945] [category: Prop types]
 
 ## Footprint strings — `api-footprint-strings.md`
 
-footprint strings (type) [104 members] [category: Footprint strings] — Valid footprint functions — a footprint string is a function…
+footprint strings (type) [lines 5-215] [104 members] [category: Footprint strings] — Valid footprint functions — a footprint string is a function…
   footprint strings.dip (property)
   footprint strings.dpak (property)
   footprint strings.d2pak (property)
@@ -1768,9 +1768,9 @@ footprint strings (type) [104 members] [category: Footprint strings] — Valid f
 
 ## Helpers — `api-helpers.md`
 
-sel (function) [category: Helpers] — Typed selector builder — sel.U1.VCC is ".U1 > .VCC", sel.net.GND…
-useChip (function) [category: Helpers]
-useResistor (function) [category: Helpers]
-useCapacitor (function) [category: Helpers]
-useDiode (function) [category: Helpers]
-createUseComponent (function) [category: Helpers]
+sel (function) [lines 5-8] [category: Helpers] — Typed selector builder — sel.U1.VCC is ".U1 > .VCC", sel.net.GND…
+useChip (function) [lines 10-12] [category: Helpers]
+useResistor (function) [lines 14-16] [category: Helpers]
+useCapacitor (function) [lines 18-20] [category: Helpers]
+useDiode (function) [lines 22-24] [category: Helpers]
+createUseComponent (function) [lines 26-29] [category: Helpers]

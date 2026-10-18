@@ -103,7 +103,7 @@ export declare class Manifold
   static difference(manifolds: readonly Manifold[]): Manifold;
   // If you copy a manifold, but you want this new copy to have new…
   asOriginal(): Manifold;
-  // … 44 more members in the API reference
+  // … 44 more members in the API reference: tetrahedron, ofMesh, smooth, levelSet, transform, mirror, warp, smoothByNormals, smoothOut, refine, refineToLength, refineToTolerance, setProperties, calculateCurvature, intersection, split, splitByPlane, trimByPlane, minkowskiSum, minkowskiDifference, slice, project, hull, compose, decompose, isEmpty, numVert, numTri, numEdge, numProp, numPropVert, and 13 more
 
 // A vector in three dimensional space
 Vec3: [number, number, number]
@@ -121,7 +121,7 @@ export declare class CrossSection
   static square(size?: Readonly<Vec2>|number, center?: boolean): CrossSection;
   // Constructs a circle of a given radius
   static circle(radius: number, circularSegments?: number): CrossSection;
-  // … 28 more members in the API reference
+  // … 28 more members in the API reference: constructor, extrude, revolve, transform, translate, rotate, scale, mirror, warp, offset, simplify, add, subtract, intersect, union, difference, intersection, hull, compose, decompose, ofPolygons, toPolygons, area, isEmpty, numVert, numContour, bounds, delete
 
 // Position a manifold model for later export
 export declare class GLTFNode extends BaseGLTFNode
@@ -178,7 +178,7 @@ export declare function setMaterial(manifold: Manifold, material: GLTFMaterial):
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 208 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 208 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-types.md` — Types

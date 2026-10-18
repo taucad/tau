@@ -80,7 +80,7 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
   // Number of layers for the PCB
   layers?: 1 | 2 | 4 | 6 | 8 | 10
   thickness?: Distance
-  // … 16 more members in the API reference
+  // … 16 more members in the API reference: material, allowBlindAndBuriedVias, borderRadius, boardAnchorPosition, anchorAlignment, boardAnchorAlignment, solderMaskColor, topSolderMaskColor, bottomSolderMaskColor, silkscreenColor, topSilkscreenColor, bottomSilkscreenColor, doubleSidedAssembly, isViaInPadAllowed, automaticPoursEnabled, schematicDisabled
 
 Distance: number | string
 ```
@@ -96,7 +96,7 @@ interface BaseGroupProps extends CommonLayoutProps
   minTraceWidth?: Distance
   width?: Distance
   height?: Distance
-  // … 92 more members in the API reference
+  // … 92 more members in the API reference: children, schTitle, schSheetName, showAsSchematicBox, schPinArrangement, schPinStyle, pcbWidth, pcbHeight, nominalTraceWidth, schWidth, schHeight, pcbLayout, schLayout, cellBorder, border, schPadding, schPaddingLeft, schPaddingRight, schPaddingTop, schPaddingBottom, pcbPadding, pcbPaddingLeft, pcbPaddingRight, pcbPaddingTop, pcbPaddingBottom, and 67 more
 
 // Props every element extending CommonLayoutProps accepts
 interface CommonLayoutProps extends PcbLayoutProps
@@ -463,7 +463,7 @@ CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
   pinLabels?: Record<string, SchematicPinLabel> | SchematicPinLabel[]
   // Connections to other components
   connections?: Connections<string>
-  // … 16 more members in the API reference
+  // … 16 more members in the API reference: pitch, schFacingDirection, gender, connectsFromAbove, connectsFromBelow, showSilkscreenPinLabels, pcbPinLabels, doubleRow, rightAngle, pcbOrientation, platedDiameter, facingDirection, schPinArrangement, schPinStyle, schWidth, schHeight
 ```
 
 ### PCB, footprint and CAD primitives
@@ -479,7 +479,7 @@ CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 1741 symbols by file.
+To read any other signature, find its name in `api-index.md`, which lists all 1741 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-components.md` — Components
 - `api-boards-groups-and-layout.md` — Boards, groups and layout

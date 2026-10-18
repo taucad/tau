@@ -359,6 +359,8 @@ export const bundleOwners: readonly BundleOwner[] = [
         'EdgeFinder',
         'ShapeConfig',
       ],
+      // `main()` returns Tau's `ShapeConfig` (`@taucad/replicad`), not replicad's own record of the same name.
+      exclude: (entry) => entry.name === 'ShapeConfig' && entry.source?.file === 'replicad/dist/replicad.d.ts',
     },
   },
   {

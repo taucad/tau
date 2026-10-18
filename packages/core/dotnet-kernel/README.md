@@ -62,17 +62,20 @@ options schema follow.
 import { defineDotnetKernelAdopter } from '@taucad/dotnet-kernel-core/adopter';
 
 export const sampleNative = defineDotnetKernelAdopter({
-  package: '@taucad/sample',
+  package: '@acme/sample',
   kernel: 'sample',
   displayName: 'Sample',
   workerAssembly: 'tau-worker/Tau.Sample.Worker.dll',
   resources: [{ pattern: /^tau-worker\/Sample\.dll$/u, required: 'tau-worker/Sample.dll' }],
-  load: async () => {
-    const { sample } = await import('#sample.plugin.js');
-    return (options) => sample({ kernels: { default: options } });
-  },
+  manifest, // import manifest from '@acme/sample/tau-plugin.json' with { type: 'json' }
+  moduleUrl: import.meta.url,
 });
 ```
+
+The kernel registration carries it (`withNativeDeployment(defineKernel(...), sampleNative)`), and the kernel's
+`initialize()` resolves its options `{ closure?, requestTimeout, maxArtifactBytes }` with
+`bindDotnetKernel({ adopter: sampleNative, options })`: an explicit `closure` as given, otherwise the prepared closure
+from the host's resolver or the local payload store.
 
 Its layer pin is rewritten by a three-line script over the layer rule, which the release job runs:
 
@@ -94,18 +97,18 @@ process.exitCode = await runComposeTauPlugin({
 });
 ```
 
-The kernel then joins the host roster in `@taucad/native-kernels` (one import, one tuple entry, one manifest row).
+A host discovers the deployment from the runtime definition that lists the kernel, so no Tau package changes.
 The C# side stays in the kernel: `@taucad/picogk`'s `dotnet/Tau.PicoGK.Worker` (`Protocol.cs`, `Program.cs`) is the
 reference shape of the framing, request loop, parent watchdog and artifact confinement. It is extracted into a shared
 `dotnet/Tau.Kernel.Protocol` project when a second C# worker exists.
 
 ## API
 
-| Entry                                | Holds                                                                                                                                                                                                       |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@taucad/dotnet-kernel-core`         | `createDotnetSession` (the worker session on `NativeProcessSession`) and `createDotnetWorkspaceMirror` (the mirror without `bin`, `obj`, `.vs` and compiled binaries)                                       |
-| `@taucad/dotnet-kernel-core/adopter` | `defineDotnetKernelAdopter`, `dotnetLaunchSet`, `dotnetOptionsFromClosure`, `dotnetKernelOptionsSchema`, `dotnetClosureOptionsSchema`. Imports no session code, so a host roster stays light until `load()` |
-| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, CDN and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `payloadCdnBase`, `payloadKey`, `manifestText`                                |
+| Entry                                | Holds                                                                                                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@taucad/dotnet-kernel-core`         | `createDotnetSession` (the worker session on `NativeProcessSession`), `createDotnetWorkspaceMirror` (the mirror without `bin`, `obj`, `.vs` and compiled binaries) and `bindDotnetKernel`                                                  |
+| `@taucad/dotnet-kernel-core/adopter` | `defineDotnetKernelAdopter`, `dotnetLaunchSet`, `dotnetOptionsFromClosure`, `dotnetKernelOptionsSchema`, `dotnetClosureSchema`, `dotnetClosureOptionsSchema`. Imports no session code, so a host reads deployments without loading kernels |
+| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, CDN and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `payloadCdnBase`, `payloadKey`, `manifestText`                                                               |
 
 ## Rust or other single-binary kernel
 
@@ -118,14 +121,18 @@ and the adopter contract directly. Its package holds:
    ```typescript
    import { join } from 'node:path';
 
-   import { defineNativeKernelAdopter } from '@taucad/native-process-core/adopter';
+   import { defineNativeKernelDeployment } from '@taucad/native-process-core/adopter';
+
+   import manifest from '@acme/sample/tau-plugin.json' with { type: 'json' };
 
    const binary = 'bin/sample';
 
-   export const sampleNative = defineNativeKernelAdopter({
-     package: '@taucad/sample',
+   export const sampleNative = defineNativeKernelDeployment({
+     package: '@acme/sample',
      ecosystem: 'none',
-     optionsSchema: sampleClosureOptionsSchema, // executable, sha256, runtimePath, plus the bounds
+     manifest,
+     moduleUrl: import.meta.url,
+     optionsSchema: sampleClosureSchema, // executable, sha256, runtimePath
      optionsFromClosure: (closure) => {
        const row = closure.files.find(({ path, symlinkTarget }) => path === binary && symlinkTarget === undefined);
        if (row === undefined) {
@@ -136,14 +143,13 @@ and the adopter contract directly. Its package holds:
        return { executable: join(closure.root, binary), sha256: row.sha256, runtimePath: closure.root };
      },
      launchSet: () => [binary],
-     load: async () => {
-       const { sample } = await import('#sample.plugin.js');
-       return (options) => sample({ kernels: { default: options } });
-     },
    });
    ```
 
-2. `src/sample.kernel.ts`, whose `initialize` creates `createWorkspaceMirror(...)` and
+2. `src/sample.kernel.ts`, which exports `withNativeDeployment(defineKernel(...), sampleNative)` with options
+   `{ closure?: sampleClosureSchema, requestTimeout, maxArtifactBytes }`, and whose `initialize` resolves them with
+   `bindNativeKernel({ deployment: sampleNative, kernel: 'sample', options })` from
+   `@taucad/native-process-core/store`, then creates `createWorkspaceMirror(...)` and
    `new NativeProcessSession({ executablePath, executableSha256, arguments: ['--workspace', mirror.workspacePath,
 '--artifacts', mirror.artifactPath, '--parent-pid', String(process.pid)], runtimePath, resources: [],
 protocolVersion, parseReady, parseResponse, requestTimeout, maxArtifactBytes, logger, sessionName,
@@ -155,7 +161,7 @@ executableName, shutdown })`, both from `@taucad/native-process-core`.
    `{ protocolVersion, requestId, result }` or `{ protocolVersion, requestId, error: { issues } }`; an out-of-band
    cancel frame; and `shutdown`.
 
-Then add the adopter and its manifest to `@taucad/native-kernels`, as for a C# kernel.
+Listing the plugin in a runtime definition is then enough: hosts read the deployment from the registration.
 
 ## Versioning and stability
 

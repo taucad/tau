@@ -50,7 +50,7 @@ describe('build123dOptionsFromClosure', () => {
   it('should map a sealed closure to options the kernel schema accepts', () => {
     const options = build123dOptionsFromClosure(receiptOf(closureFiles));
 
-    expect(build123dOptionsSchema.parse(options)).toMatchObject({
+    expect(build123dOptionsSchema.parse({ closure: options }).closure).toMatchObject({
       pythonExecutable: `${root}/python/bin/python3`,
       pythonSha256: hex('a'),
       workerPath: `${root}/tau-worker/worker.py`,

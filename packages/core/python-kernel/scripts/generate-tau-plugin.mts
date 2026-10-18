@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Purpose: Generate a Python kernel package's `tau-plugin.json`, its per-target `pylock.<target>.toml` files, its
  * CycloneDX SBOM and its pinned copy of the core's `tau_kernel` modules from `python/requirements.lock` and
@@ -8,12 +6,12 @@
  * SRI only from bytes this script downloaded and verified against the publisher's own digest (D2, R1), so nothing is
  * re-hashed or hand-copied, and `--check` catches any drift, `tau_kernel` included, as a reviewed diff (I13).
  * Environment: Node 24+, network access to pypi.org, files.pythonhosted.org and github.com (generate, check, seed).
- * Usage:
- *   node --import @oxc-node/core/register packages/core/python-kernel/scripts/generate-tau-plugin.mts --package <dir> [--check]
- *   node --import @oxc-node/core/register packages/core/python-kernel/scripts/generate-tau-plugin.mts seed --package <dir> [--target <key>]
- *   node --import @oxc-node/core/register packages/core/python-kernel/scripts/generate-tau-plugin.mts golden --package <dir>
- *   Options: --seed <dir> (default out/cache/<kernel id>-seed; the download cache and the payload seed are one
- *   digest-addressed directory, `blobs/sha256/<hex>`), --store <dir> (golden only).
+ * Usage (through `tau-python-kernel`, see tau-python-kernel.mts):
+ *   tau-python-kernel generate --package <dir>     (`check` for --check)
+ *   tau-python-kernel seed --package <dir> [--target <key>]
+ *   tau-python-kernel golden --package <dir>
+ *   Options: --seed <dir> (default out/cache/<kernel id>-seed under the working directory; the download cache and the
+ *   payload seed are one digest-addressed directory, `blobs/sha256/<hex>`), --store <dir> (golden only).
  *   The kernel's own `python/interpreter.json` overrides the core's, which every Python kernel shares by default (D3).
  * Exit codes: 0 on success or when `--check` finds the committed files current; 1 when `--check` finds a difference
  * or any download, digest or lock check fails.
@@ -49,7 +47,7 @@ import type { IndexFile, LockPin, SelectedWheel, TargetConfig } from '#generator
 import { pythonKernelModules } from '#python-kernel.js';
 
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
-import { coreRoot, readPythonKernelPackage, repoRoot, takePackageArgument } from './python-kernel-package.mjs';
+import { coreRoot, readPythonKernelPackage, takePackageArgument } from './python-kernel-package.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
 import type { PythonKernelPackage } from './python-kernel-package.mjs';
 
@@ -99,9 +97,11 @@ const pathsOf = (kernel: PythonKernelPackage): Paths => ({
 });
 
 const usage =
-  'Usage: generate-tau-plugin.mts --package <dir> [--check] | seed --package <dir> [--target <key>] | golden --package <dir> [--store <dir>]; each with [--seed <dir>]';
+  'Usage: tau-python-kernel generate|check --package <dir> | seed --package <dir> [--target <key>] | golden --package <dir> [--store <dir>]; each with [--seed <dir>]';
 
-const parseArguments = (): {
+const parseArguments = (
+  args: readonly string[],
+): {
   readonly mode: 'generate' | 'seed' | 'golden';
   readonly packageDirectory: string;
   readonly check: boolean;
@@ -109,7 +109,7 @@ const parseArguments = (): {
   readonly store?: string;
   readonly target?: string;
 } => {
-  const { packageDirectory, rest: argv } = takePackageArgument(process.argv.slice(2));
+  const { packageDirectory, rest: argv } = takePackageArgument(args);
   const mode = argv[0] === 'seed' || argv[0] === 'golden' ? argv.shift()! : 'generate';
   let check = false;
   let seed: string | undefined;
@@ -588,7 +588,7 @@ const currentGolden = async (
   return { kept, stale };
 };
 
-const display = (path: string): string => relative(repoRoot, path);
+const display = (path: string): string => relative(process.cwd(), path);
 
 /** The kernel package a run is for, where its generated files live, and the payload seed. */
 type Context = { readonly kernel: PythonKernelPackage; readonly paths: Paths; readonly seed: string };
@@ -731,11 +731,15 @@ const runGolden = async ({ kernel, paths, seed }: Context, storeOption?: string)
   }
 };
 
-const run = async (): Promise<void> => {
-  const options = parseArguments();
+/**
+ * Generate, check, seed or record golden receipts for a Python kernel package.
+ * @param args - The arguments after the command name.
+ */
+export const runGenerateTauPlugin = async (args: readonly string[]): Promise<void> => {
+  const options = parseArguments(args);
   const kernel = await readPythonKernelPackage(options.packageDirectory);
   const paths = pathsOf(kernel);
-  const seed = options.seed ?? resolve(repoRoot, `out/cache/${kernel.adopter.worker.kernelId}-seed`);
+  const seed = options.seed ?? resolve(`out/cache/${kernel.adopter.worker.kernelId}-seed`);
   const context: Context = { kernel, paths, seed };
   switch (options.mode) {
     case 'seed': {
@@ -751,8 +755,3 @@ const run = async (): Promise<void> => {
     }
   }
 };
-
-await run().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});

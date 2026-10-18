@@ -51,20 +51,14 @@ const unavailable = {
 };
 
 describe('nativeCompositionSchema', () => {
-  it("should parse each composed row with its own adopter's options schema, applying its defaults", () => {
+  it("should parse each composed row with its own adopter's closure options schema", () => {
     const parsed = nativeCompositionSchema.parse({
       kernels: [build123dRow, picogkRow],
       unavailable: [unavailable],
       closureRoots: [build123dRow.closureRoot, picogkRow.closureRoot],
     });
 
-    expect(parsed.kernels).toEqual([
-      {
-        ...build123dRow,
-        options: { ...build123dRow.options, requestTimeout: 0, maxArtifactBytes: Number.MAX_SAFE_INTEGER },
-      },
-      { ...picogkRow, options: { ...picogkRow.options, requestTimeout: 0, maxArtifactBytes: Number.MAX_SAFE_INTEGER } },
-    ]);
+    expect(parsed.kernels).toEqual([build123dRow, picogkRow]);
     expect(parsed.unavailable).toEqual([unavailable]);
   });
 

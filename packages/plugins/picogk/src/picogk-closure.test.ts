@@ -60,7 +60,7 @@ describe('picogkOptionsFromClosure', () => {
     expect(options.workerSha256).toBe(digest('b'));
     expect(options.workerArguments).toEqual([join(root, 'tau-worker/Tau.PicoGK.Worker.dll')]);
     expect(options.runtimePath).toBe(root);
-    expect(picogkOptionsSchema.parse(options)).toEqual(options);
+    expect(picogkOptionsSchema.parse({ closure: options }).closure).toEqual(options);
   });
 
   it('names the files the process loads first as its launch set, and maps its launch index as its receipt', () => {

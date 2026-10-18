@@ -47,11 +47,11 @@ const sha256 = z.string().regex(/^[\da-f]{64}$/i, 'Expected a SHA-256 digest');
 const endsWithModule = (path: string, module: string): boolean => path.replaceAll('\\', '/').endsWith(`/${module}`);
 
 /**
- * The options schema of a worker whose launch verifies `required` support modules.
+ * The closure schema of a worker whose launch verifies `required` support modules.
  * @param required - Every support module, relative to the worker directory.
  * @returns The schema.
  */
-const optionsSchemaOf = (required: readonly string[]) =>
+const closureSchemaOf = (required: readonly string[]) =>
   z.object({
     pythonExecutable: absolutePath,
     workerPath: absolutePath,
@@ -70,6 +70,40 @@ const optionsSchemaOf = (required: readonly string[]) =>
      * preparation host sealed). Absent, it is the interpreter's prefix, which must then hold the worker too.
      */
     runtimePath: absolutePath.optional(),
+  });
+
+/**
+ * The files a Python kernel's worker launches from: the interpreter, the worker and its support modules with the
+ * digests a launch verifies, and the root the sandbox may read.
+ *
+ * @param options - The kernel's own support modules (not the entry), relative to the worker directory; the
+ *   `tau_kernel` modules are required too.
+ * @returns The closure schema.
+ * @public
+ */
+export const pythonClosureSchema = (options: {
+  readonly supportModules: readonly string[];
+}): ReturnType<typeof closureSchemaOf> => closureSchemaOf([...options.supportModules, ...pythonKernelModules]);
+
+/**
+ * An explicit closure a Python kernel's options may name.
+ * @public
+ */
+export type PythonClosure = z.input<ReturnType<typeof pythonClosureSchema>>;
+
+/**
+ * The kernel options schema over a closure schema.
+ * @param closure - The closure schema.
+ * @returns The schema.
+ */
+const optionsSchemaOf = (closure: ReturnType<typeof closureSchemaOf>) =>
+  // Strict, so options in the closure's flat shape fail instead of being dropped and binding to the store.
+  z.strictObject({
+    /**
+     * An explicit closure (tests, producer trees, a desktop-prepared interpreter). Absent, the kernel binds in
+     * `initialize` to the sealed closure the installed resolver, or the payload store, finds.
+     */
+    closure: closure.optional(),
     /** Milliseconds. Zero waits for completion or cancellation. */
     requestTimeout: z.number().int().nonnegative().default(0),
     /** Optional host policy; by default only the representable byte length is bounded. */
@@ -77,8 +111,8 @@ const optionsSchemaOf = (required: readonly string[]) =>
   });
 
 /**
- * The options every Python kernel takes: the interpreter, the worker and its support modules with the digests a
- * launch verifies, the root the sandbox may read and the host's bounds.
+ * The options every Python kernel takes: an optional explicit closure and the host's bounds. A listing with no
+ * options is valid; the kernel then binds to its sealed closure when it initializes.
  *
  * @param options - The kernel's own support modules (not the entry), relative to the worker directory; the
  *   `tau_kernel` modules are required too.
@@ -92,7 +126,7 @@ const optionsSchemaOf = (required: readonly string[]) =>
  */
 export const pythonKernelOptionsSchema = (options: {
   readonly supportModules: readonly string[];
-}): ReturnType<typeof optionsSchemaOf> => optionsSchemaOf([...options.supportModules, ...pythonKernelModules]);
+}): ReturnType<typeof optionsSchemaOf> => optionsSchemaOf(pythonClosureSchema(options));
 
 /**
  * The options a Python kernel's schema accepts.

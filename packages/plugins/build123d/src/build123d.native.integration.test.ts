@@ -48,7 +48,7 @@ const runtime = defineRuntime({
       ? []
       : [
           build123d({
-            kernels: { default: { ...build123dOptionsFromClosure(receipt), requestTimeout: 120_000 } },
+            kernels: { default: { closure: build123dOptionsFromClosure(receipt), requestTimeout: 120_000 } },
           }),
         ],
 });

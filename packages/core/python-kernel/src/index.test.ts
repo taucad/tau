@@ -13,12 +13,14 @@ describe('@taucad/python-kernel-core', () => {
     expect(entry).not.toHaveProperty('plugin');
     expect(Object.keys(entry).toSorted()).toEqual([
       'PythonWorkerError',
+      'bindPythonKernel',
       'createPythonSeal',
       'createPythonSession',
       'createPythonWorkspaceMirror',
       'definePythonKernelAdopter',
       'pyprojectPath',
       'pythonArtifactSchema',
+      'pythonClosureSchema',
       'pythonIssueSchema',
       'pythonKernelModules',
       'pythonKernelOptionsSchema',

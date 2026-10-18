@@ -35,11 +35,7 @@ describe('tau-plugin.json', () => {
   });
 
   it('declares the kernel the plugin registers', () => {
-    const { id, extensions } = picogkKernel({
-      workerExecutable: '/closure/dotnet/dotnet',
-      workerSha256: '0'.repeat(64),
-      resourceFiles: [{ path: '/closure/tau-worker/PicoGK.dll', sha256: '0'.repeat(64), label: 'PicoGK' }],
-    });
+    const { id, extensions } = picogkKernel();
 
     expect(deployment.kernels).toEqual({ [id]: { requires: ['runtime'], extensions } });
   });

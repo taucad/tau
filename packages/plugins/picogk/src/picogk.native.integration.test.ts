@@ -33,7 +33,7 @@ const runtime = defineRuntime({
     picogk({
       kernels: {
         default: {
-          ...nativeKernelOptions,
+          closure: nativeKernelOptions,
           requestTimeout: 120_000,
         },
       },

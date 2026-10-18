@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Purpose: Run Python unit tests under a strict 100% line and branch coverage gate: the core's own `tau_kernel` tests,
  * or a Python kernel's worker tests with the interpreter of the sealed closure `tau prepare <kernel>` installs,
@@ -8,10 +6,10 @@
  * needs only CPython 3.13, numpy and coverage, which uv provides at the closure's versions.
  * Environment: Node 24+. Core mode: uv on PATH with access to pypi.org, unless `--python` names an interpreter that has
  * numpy and coverage. Kernel mode: the seed filled by the kernel's `seed` target; TAU_<KERNEL>_TEST_STORE optionally
- * selects an isolated native test store (default out/cache/<kernel id>-store).
- * Usage:
- *   node --import @oxc-node/core/register packages/core/python-kernel/scripts/test-python.mts [--python <exe>]
- *   node --import @oxc-node/core/register packages/core/python-kernel/scripts/test-python.mts --package <dir> [--python <exe>]
+ * selects an isolated native test store (default out/cache/<kernel id>-store under the working directory).
+ * Usage (through `tau-python-kernel`, see tau-python-kernel.mts):
+ *   tau-python-kernel test [--python <exe>]
+ *   tau-python-kernel test --package <dir> [--python <exe>]
  * Exit codes: 0 when the tests pass with 100% line and branch coverage; 1 when preparation, tests or coverage fail.
  */
 
@@ -23,7 +21,7 @@ import process from 'node:process';
 import { createPreparationHost, parsePluginDeployment } from '@taucad/runtime/preparation/node';
 
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
-import { coreRoot, readPythonKernelPackage, repoRoot, takePackageArgument } from './python-kernel-package.mjs';
+import { coreRoot, readPythonKernelPackage, takePackageArgument } from './python-kernel-package.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
 import type { PythonKernelPackage } from './python-kernel-package.mjs';
 
@@ -39,7 +37,7 @@ const runCoverage = (interpreter: Interpreter, reportRoot: string, arguments_: r
   const [executable, ...prefix] = interpreter;
   // A sealed closure is verified file by file; nothing may write bytecode into it.
   const result = spawnSync(executable, [...prefix, '-I', '-B', '-m', 'coverage', ...arguments_], {
-    cwd: repoRoot,
+    cwd: process.cwd(),
     env: environment,
     stdio: 'inherit',
   });
@@ -69,8 +67,8 @@ const closureInterpreter = async (kernel: PythonKernelPackage): Promise<string> 
         launchSet: kernel.adopter.launchSet,
       },
     ],
-    store: resolve(process.env[storeVariable] ?? resolve(repoRoot, `out/cache/${kernelId}-store`)),
-    seed: resolve(repoRoot, `out/cache/${kernelId}-seed`),
+    store: resolve(process.env[storeVariable] ?? `out/cache/${kernelId}-store`),
+    seed: resolve(`out/cache/${kernelId}-seed`),
   });
   try {
     const outcome = await host.prepare({
@@ -89,12 +87,17 @@ const closureInterpreter = async (kernel: PythonKernelPackage): Promise<string> 
   }
 };
 
-const main = async (): Promise<void> => {
-  const { packageDirectory, rest } = takePackageArgument(process.argv.slice(2));
+/**
+ * Run a Python kernel package's worker tests, or without `--package` the core's `tau_kernel` tests, under the
+ * coverage gate.
+ * @param args - The arguments after the command name.
+ */
+export const runTestPython = async (args: readonly string[]): Promise<void> => {
+  const { packageDirectory, rest } = takePackageArgument(args);
   const pythonFlag = rest.indexOf('--python');
   const python = pythonFlag === -1 ? undefined : rest[pythonFlag + 1];
   if (rest.length !== (pythonFlag === -1 ? 0 : 2) || (pythonFlag !== -1 && python === undefined)) {
-    throw new TypeError('Usage: test-python.mts [--package <dir>] [--python <exe>]');
+    throw new TypeError('Usage: tau-python-kernel test [--package <dir>] [--python <exe>]');
   }
 
   let pythonRoot: string;
@@ -125,11 +128,7 @@ const main = async (): Promise<void> => {
     interpreter = [python === undefined ? await closureInterpreter(kernel) : resolve(python)];
   }
 
-  const reportRoot = resolve(
-    repoRoot,
-    'out/reports/coverage',
-    `${relative(repoRoot, resolve(pythonRoot, '..'))}-python`,
-  );
+  const reportRoot = resolve('out/reports/coverage', `${relative(process.cwd(), resolve(pythonRoot, '..'))}-python`);
   mkdirSync(reportRoot, { recursive: true });
   runCoverage(interpreter, reportRoot, ['erase']);
   runCoverage(interpreter, reportRoot, [
@@ -148,8 +147,3 @@ const main = async (): Promise<void> => {
   runCoverage(interpreter, reportRoot, ['json', '-o', resolve(reportRoot, 'coverage.json'), ...measured]);
   runCoverage(interpreter, reportRoot, ['report', '--show-missing', '--fail-under=100', ...measured]);
 };
-
-await main().catch((error: unknown) => {
-  console.error('Python tests failed:', error);
-  process.exitCode = 1;
-});

@@ -61,19 +61,21 @@ describe('pythonOptionsFromClosure', () => {
   it('should map a sealed closure to options the kernel schema accepts', () => {
     const options = pythonOptionsFromClosure(worker)(receiptOf(closureFiles));
 
-    expect(pythonKernelOptionsSchema({ supportModules: ['helpers.py'] }).parse(options)).toEqual({
-      pythonExecutable: `${root}/python/bin/python3`,
-      pythonSha256: hex('a'),
-      workerPath: `${root}/tau-worker/example_worker.py`,
-      workerSha256: hex('b'),
-      supportFiles: [
-        { path: `${root}/tau-worker/helpers.py`, sha256: hex('c') },
-        { path: `${root}/tau-worker/tau_kernel/analyzer.py`, sha256: hex('d') },
-        { path: `${root}/tau-worker/tau_kernel/glb.py`, sha256: hex('e') },
-        { path: `${root}/tau-worker/tau_kernel/model.py`, sha256: hex('f') },
-        { path: `${root}/tau-worker/tau_kernel/protocol.py`, sha256: hex('1') },
-      ],
-      runtimePath: root,
+    expect(pythonKernelOptionsSchema({ supportModules: ['helpers.py'] }).parse({ closure: options })).toEqual({
+      closure: {
+        pythonExecutable: `${root}/python/bin/python3`,
+        pythonSha256: hex('a'),
+        workerPath: `${root}/tau-worker/example_worker.py`,
+        workerSha256: hex('b'),
+        supportFiles: [
+          { path: `${root}/tau-worker/helpers.py`, sha256: hex('c') },
+          { path: `${root}/tau-worker/tau_kernel/analyzer.py`, sha256: hex('d') },
+          { path: `${root}/tau-worker/tau_kernel/glb.py`, sha256: hex('e') },
+          { path: `${root}/tau-worker/tau_kernel/model.py`, sha256: hex('f') },
+          { path: `${root}/tau-worker/tau_kernel/protocol.py`, sha256: hex('1') },
+        ],
+        runtimePath: root,
+      },
       requestTimeout: 0,
       maxArtifactBytes: Number.MAX_SAFE_INTEGER,
     });

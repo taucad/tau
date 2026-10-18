@@ -1,7 +1,7 @@
 import { contentDigest } from '@taucad/cache-core';
 import { createComputeWorkerTransport } from '#compute-worker-transport.js';
 import { transformGltfExportBytes } from '@taucad/geometry-core';
-import { createDotnetWorkspaceMirror } from '@taucad/dotnet-kernel-core';
+import { bindDotnetKernel, createDotnetWorkspaceMirror } from '@taucad/dotnet-kernel-core';
 import {
   asBuffer,
   createKernelError,
@@ -16,6 +16,7 @@ import { picogkArtifactToGlb, picogkTessellation, picogkTessellationSchema } fro
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { picogkNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
@@ -95,13 +96,16 @@ export const picogkKernel = defineKernel({
   },
 
   async initialize(options, services) {
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
+    const { options: bound } = await bindDotnetKernel({ adopter: picogkNative, options });
     const mirror = await createDotnetWorkspaceMirror({
       temporaryPrefix: 'tau-picogk-',
       displayName: 'PicoGK',
       excludedPaths: ['thumbnail.webp'],
     });
     const session = new PicogkSession({
-      ...options,
+      ...bound,
       ...mirror,
       logger: services.logger,
     });
@@ -109,7 +113,7 @@ export const picogkKernel = defineKernel({
       producer: {
         id: 'picogk',
         version: 'operation-v1.codec2.layout1',
-        implementationAssets: [options.workerSha256, ...options.resourceFiles.map(({ sha256 }) => sha256)]
+        implementationAssets: [bound.workerSha256, ...bound.resourceFiles.map(({ sha256 }) => sha256)]
           .sort()
           .map((hash) => contentDigest({ value: `sha256:${hash.toLowerCase()}` })),
       },

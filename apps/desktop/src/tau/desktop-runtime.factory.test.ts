@@ -63,10 +63,12 @@ describe('desktop runtime kernels', () => {
 
     expect(build123dKernel?.extensions).toEqual(['py']);
     expect(build123dKernel?.options).toMatchObject({
-      pythonExecutable: `${root}/python/bin/python3`,
-      pythonSha256: '1'.repeat(64),
-      workerPath: `${root}/tau-worker/worker.py`,
-      runtimePath: root,
+      closure: {
+        pythonExecutable: `${root}/python/bin/python3`,
+        pythonSha256: '1'.repeat(64),
+        workerPath: `${root}/tau-worker/worker.py`,
+        runtimePath: root,
+      },
     });
   });
 
@@ -79,7 +81,7 @@ describe('desktop runtime kernels', () => {
     const standIn = kernels.find((kernel) => kernel.id === 'build123d');
 
     expect(standIn?.extensions).toEqual(['py']);
-    expect(standIn).not.toHaveProperty('options.pythonExecutable');
+    expect(standIn).not.toHaveProperty('options.closure');
   });
 
   it('should route KCL to Zoo through the configured Tau proxy with the sign-in copy', async () => {

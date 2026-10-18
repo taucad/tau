@@ -17,4 +17,17 @@ const packageConfig: UserConfig = {
   outDir: 'dist',
 };
 
-export default defineConfig(packageConfig);
+/** The published `tau-python-kernel` command: the generator scripts, bundled into one file beside the library. */
+const binConfig: UserConfig = {
+  entry: { 'tau-python-kernel': 'scripts/tau-python-kernel.mts' },
+  sourcemap: false,
+  clean: false,
+  dts: false,
+  minify: true,
+  platform: 'node',
+  tsconfig: 'tsconfig.spec.json',
+  format: 'esm',
+  outDir: 'dist/bin',
+};
+
+export default defineConfig([packageConfig, binConfig]);

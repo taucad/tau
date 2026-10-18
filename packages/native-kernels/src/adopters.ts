@@ -5,20 +5,63 @@
  * @module
  */
 import { build123dNative } from '@taucad/build123d/native';
-import type { NativeKernelAdopter } from '@taucad/native-process-core/adopter';
+import type {
+  NativeKernelAdopter,
+  NativeKernelBounds,
+  NativeKernelDeployment,
+} from '@taucad/native-process-core/adopter';
+import type { PluginInstance } from '@taucad/runtime/plugin';
 import type { ClosureLaunch } from '@taucad/runtime/preparation/node';
 import { picogkNative } from '@taucad/picogk/native';
 
 import type { UnavailableNativeKernel } from '#unavailable-kernels.js';
 
 /**
- * Every native kernel package's adopter, in roster order. Typed through each binding, so the declaration names every
- * adopter by its package's public `/native` subpath.
+ * A roster adopter over a package's deployment: `load()` binds the plugin to the composed closure explicitly, as the
+ * kernel's `closure` option.
+ * @param deployment - The package's deployment.
+ * @param plugin - Import the package's plugin factory.
+ * @returns The adopter.
+ */
+const rosterAdopter = <Options extends Record<string, unknown>, Package extends string>(
+  deployment: NativeKernelDeployment<Options, Package>,
+  plugin: () => Promise<(options: { readonly closure: Options } & NativeKernelBounds) => PluginInstance>,
+): NativeKernelAdopter<Options, Package> => ({
+  package: deployment.package,
+  ecosystem: deployment.ecosystem,
+  optionsSchema: deployment.optionsSchema,
+  optionsFromClosure: deployment.optionsFromClosure,
+  ...(deployment.seal && { seal: deployment.seal }),
+  launchSet: deployment.launchSet,
+  load: async () => {
+    const factory = await plugin();
+    return ({ requestTimeout, maxArtifactBytes, ...closure }) =>
+      factory({
+        closure: closure as unknown as Options,
+        ...(requestTimeout === undefined ? {} : { requestTimeout }),
+        ...(maxArtifactBytes === undefined ? {} : { maxArtifactBytes }),
+      });
+  },
+});
+
+const build123dAdopter = rosterAdopter(build123dNative, async () => {
+  const { build123d } = await import('@taucad/build123d');
+  return (options) => build123d({ kernels: { default: options } });
+});
+
+const picogkAdopter = rosterAdopter(picogkNative, async () => {
+  const { picogk } = await import('@taucad/picogk');
+  return (options) => picogk({ kernels: { default: options } });
+});
+
+/**
+ * Every native kernel package's adopter, in roster order. A shim over each package's deployment until hosts compose
+ * natives from their runtime definitions; deleted with this package.
  * @public
  */
-export const nativeKernelAdopters: readonly [typeof build123dNative, typeof picogkNative] = [
-  build123dNative,
-  picogkNative,
+export const nativeKernelAdopters: readonly [typeof build123dAdopter, typeof picogkAdopter] = [
+  build123dAdopter,
+  picogkAdopter,
 ];
 
 /**

@@ -32,26 +32,47 @@ seal step follow from it:
 ```typescript
 import { definePythonKernelAdopter } from '@taucad/python-kernel-core';
 
+import manifest from '@acme/example/tau-plugin.json' with { type: 'json' };
+
 export const exampleNative = definePythonKernelAdopter({
-  package: '@taucad/example',
+  package: '@acme/example',
+  manifest,
+  moduleUrl: import.meta.url,
   worker: { kernelId: 'example', kernelName: 'Example', workerModules: ['example_worker.py'] },
   selfTestImports: ['example'],
   projectLibraries: { example: '1.0.0' },
-  load: async () => {
-    const { example } = await import('./example.plugin.js');
-    return (options) => example({ kernels: { default: options } });
-  },
 });
 ```
 
-Its kernel's `initialize()` opens a session over the same worker with `createPythonWorkspaceMirror` and
-`createPythonSession`, and its `python/example_worker.py` serves requests with `tau_kernel.protocol.run_worker`.
+The kernel registration carries it (`withNativeDeployment(defineKernel(...), exampleNative)` from
+`@taucad/native-process-core/adopter`), so a host discovers it from the runtime definition alone. The kernel's options
+are `{ closure?, requestTimeout, maxArtifactBytes }`: its `initialize()` calls
+`bindPythonKernel({ adopter: exampleNative, options })`, which takes an explicit `closure` as given and otherwise
+resolves the prepared closure from the host's resolver or the local payload store, then opens a session over the same
+worker with `createPythonWorkspaceMirror` and `createPythonSession`. Its `python/example_worker.py` serves requests
+with `tau_kernel.protocol.run_worker`.
+
+### The `tau-python-kernel` command
+
+The generators a Python kernel's payloads come from ship as a bin, so a kernel outside the Tau repository keeps its
+files current without a Tau checkout. Each command takes `--package <dir>`; relative paths resolve against the working
+directory. A TypeScript `/native` entry needs a loader (`node --import @oxc-node/core/register`).
+
+| Command                 | Effect                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| `generate` / `check`    | Write, or fail on any difference in, `tau-plugin.json`, the pylocks, SBOM and `tau_kernel` |
+| `seed [--target <key>]` | Fill the payload seed                                                                      |
+| `golden`                | Record this host's golden receipt                                                          |
+| `template [--check]`    | Write, or check, the project template                                                      |
+| `test [--python <exe>]` | The Python unit tests under the 100% coverage gate (without `--package`: `tau_kernel`'s)   |
 
 ## API
 
 | Entry                                  | Purpose                                                                                                |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `definePythonKernelAdopter`            | A kernel's `/native` adopter: `pypi` ecosystem, options schema, launch set, seal step and lazy `load`. |
+| `definePythonKernelAdopter`            | A kernel's `/native` deployment: `pypi` ecosystem, options schema, launch set and seal step.           |
+| `bindPythonKernel`                     | Resolve a kernel's options in `initialize()`: an explicit closure, or the prepared one.                |
+| `pythonClosureSchema`                  | The closure a Python kernel launches from: interpreter, worker and support files with digests.         |
 | `createPythonSession`                  | One sandboxed, generation-scoped CPython worker session over `NativeProcessSession`.                   |
 | `PythonWorkerError`                    | The issues a worker reported for one request.                                                          |
 | `pythonKernelOptionsSchema`            | Options every Python kernel takes, over the kernel's own support modules and `tau_kernel`'s.           |

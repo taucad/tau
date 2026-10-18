@@ -52,8 +52,10 @@ describe('desktop native kernels', () => {
     const picogkRoot = frame.kernels[1]!.closure!.root;
 
     expect(kernels.map(({ id }) => id)).toEqual(['build123d', 'picogk']);
-    expect(kernels[0]?.options).toMatchObject({ pythonSha256: '1'.repeat(64), runtimePath: build123dRoot });
-    expect(kernels[0]?.options).toHaveProperty('supportFiles', [
+    expect(kernels[0]?.options).toMatchObject({
+      closure: { pythonSha256: '1'.repeat(64), runtimePath: build123dRoot },
+    });
+    expect(kernels[0]?.options).toHaveProperty('closure.supportFiles', [
       { path: `${build123dRoot}/tau-worker/native_materials.py`, sha256: 'b'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/mechanisms.py`, sha256: 'c'.repeat(64) },
       { path: `${build123dRoot}/tau-worker/tau_kernel/analyzer.py`, sha256: '2'.repeat(64) },
@@ -62,10 +64,12 @@ describe('desktop native kernels', () => {
       { path: `${build123dRoot}/tau-worker/tau_kernel/protocol.py`, sha256: 'e'.repeat(64) },
     ]);
     expect(kernels[1]?.options).toMatchObject({
-      workerExecutable: `${picogkRoot}/dotnet/dotnet`,
-      workerSha256: '5'.repeat(64),
-      runtimePath: picogkRoot,
-      workerArguments: [`${picogkRoot}/tau-worker/Tau.PicoGK.Worker.dll`],
+      closure: {
+        workerExecutable: `${picogkRoot}/dotnet/dotnet`,
+        workerSha256: '5'.repeat(64),
+        runtimePath: picogkRoot,
+        workerArguments: [`${picogkRoot}/tau-worker/Tau.PicoGK.Worker.dll`],
+      },
     });
   });
 

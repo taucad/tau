@@ -235,8 +235,8 @@ describe('composeNativePlugins', () => {
       'picogk',
     ]);
     expect(plugins.map(({ capabilities }) => capabilities.kernels[0]?.options)).toEqual([
-      expect.objectContaining({ requestTimeout: 120_000, maxArtifactBytes: 1024, runtimePath: rows[0]?.closureRoot }),
-      expect.objectContaining({ requestTimeout: 120_000, maxArtifactBytes: 1024, runtimePath: rows[1]?.closureRoot }),
+      { requestTimeout: 120_000, maxArtifactBytes: 1024, closure: rows[0]?.options },
+      { requestTimeout: 120_000, maxArtifactBytes: 1024, closure: rows[1]?.options },
     ]);
   });
 

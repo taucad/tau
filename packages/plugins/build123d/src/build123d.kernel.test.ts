@@ -101,7 +101,8 @@ const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syn
     },
   ]);
 
-const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
+const loadDefinition = async () =>
+  resolveRuntimePluginDefinition('kernel', build123dKernel({ closure: kernelOptions }));
 // The hook tests use focused session/mirror doubles; this is their checked context boundary.
 const createContext = () =>
   createContextData() as ReturnType<typeof createContextData> &

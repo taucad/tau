@@ -3,20 +3,20 @@
  * the adopter its `/native` subpath exports, which names its worker, seal step, launch set and project libraries.
  * Why: The tau-plugin generator, the project template generator and the Python test runner are shared by every Python
  * kernel; each kernel supplies only what its adopter and its `python/` directory declare.
- * Environment: Node 24+ with `@oxc-node/core/register`, so the kernel's TypeScript `/native` entry imports directly.
- * Usage: imported by the sibling scripts; not run directly.
+ * Environment: Node 24+; a kernel's TypeScript `/native` entry needs `@oxc-node/core/register`, a built one nothing.
+ * Usage: imported by the sibling scripts, which `tau-python-kernel` runs; not run directly.
  */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { PythonKernelAdopter } from '#python-kernel-adopter.js';
 
-/** The workspace root: scripts run from it, and every relative `--package` resolves against it. */
-export const repoRoot = resolve(import.meta.dirname, '../../../..');
-/** The core package: its `python/tau_kernel` modules and its default `python/interpreter.json`. */
-export const coreRoot = resolve(import.meta.dirname, '..');
+/** The core package: its `python/tau_kernel` modules and its default `python/interpreter.json`, wherever it installed. */
+export const coreRoot = dirname(createRequire(import.meta.url).resolve('@taucad/python-kernel-core/package.json'));
 
 /** One Python kernel package, as the core scripts see it. */
 export type PythonKernelPackage = {
@@ -24,7 +24,10 @@ export type PythonKernelPackage = {
   readonly root: string;
   /** The npm package name, such as `@taucad/build123d`. */
   readonly packageName: string;
-  /** The Nx project name, such as `build123d`, whose targets run the scripts. */
+  /**
+   * The Nx project name, such as `build123d`, whose targets run the scripts; for a package outside an Nx workspace,
+   * its unscoped npm name. Generated files name it.
+   */
   readonly project: string;
   /** The adopter the package's `/native` subpath exports. */
   readonly adopter: PythonKernelAdopter;
@@ -39,19 +42,35 @@ const isPythonKernelAdopter = (value: unknown): value is PythonKernelAdopter =>
   'projectLibraries' in value;
 
 /**
+ * The file a package's `./native` export names: a string target, or the `import` (else `default`) condition.
+ * @param target - The export's target.
+ * @returns The relative file, or `undefined`.
+ */
+const nativeTarget = (target: unknown): string | undefined => {
+  if (typeof target === 'string' || typeof target !== 'object' || target === null) {
+    return typeof target === 'string' ? target : undefined;
+  }
+  const conditions = target as Readonly<Record<string, unknown>>;
+  return nativeTarget(conditions['import'] ?? conditions['default']);
+};
+
+/**
  * Read the kernel package at `directory`.
- * @param directory - The package directory, absolute or relative to the workspace root.
+ * @param directory - The package directory, absolute or relative to the working directory.
  * @returns Its name, project and adopter.
  */
 export const readPythonKernelPackage = async (directory: string): Promise<PythonKernelPackage> => {
-  const root = resolve(repoRoot, directory);
+  const root = resolve(directory);
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as {
     readonly name: string;
     readonly exports?: Readonly<Record<string, unknown>>;
   };
-  const project = (JSON.parse(await readFile(resolve(root, 'project.json'), 'utf8')) as { readonly name: string }).name;
-  const native = manifest.exports?.['./native'];
-  if (typeof native !== 'string') {
+  const projectFile = resolve(root, 'project.json');
+  const project = existsSync(projectFile)
+    ? (JSON.parse(await readFile(projectFile, 'utf8')) as { readonly name: string }).name
+    : manifest.name.replace(/^@[^/]+\//u, '');
+  const native = nativeTarget(manifest.exports?.['./native']);
+  if (native === undefined) {
     throw new TypeError(`${manifest.name} exports no ./native subpath, so it declares no Python kernel adopter.`);
   }
   const module = (await import(pathToFileURL(resolve(root, native)).href)) as Record<string, unknown>;

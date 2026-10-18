@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { picogkLaunchSet, picogkOptionsFromClosure } from '#picogk-closure.js';
 import { picogkNative } from '#native.js';
+import { picogk } from '#picogk.plugin.js';
 
 const row = (path: string, digit: string): ReceiptFile => ({
   path,
@@ -55,14 +56,14 @@ describe('picogkNative', () => {
     expect(picogkNative.launchSet(closure.files).every((path) => listed.has(path))).toBe(true);
   });
 
-  it('should load the kernel plugin bound to the closure options and host bounds', async () => {
-    const factory = await picogkNative.load();
+  it('should give the kernel plugin an explicit closure and host bounds as its options', () => {
+    const closureOptions = picogkNative.optionsFromClosure(closure);
 
-    const { capabilities } = factory({ ...picogkNative.optionsFromClosure(closure), maxArtifactBytes: 1024 });
+    const { capabilities } = picogk({ kernels: { default: { closure: closureOptions, maxArtifactBytes: 1024 } } });
 
     expect(capabilities.kernels.map(({ id, extensions }) => ({ id, extensions }))).toEqual([
       { id: 'picogk', extensions: ['cs'] },
     ]);
-    expect(capabilities.kernels[0]?.options).toMatchObject({ maxArtifactBytes: 1024, runtimePath: closure.root });
+    expect(capabilities.kernels[0].options).toMatchObject({ maxArtifactBytes: 1024, closure: closureOptions });
   });
 });

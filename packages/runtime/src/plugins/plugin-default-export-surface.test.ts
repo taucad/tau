@@ -97,7 +97,9 @@ const collectSourceFiles = (relativeRoot: string): readonly string[] => {
   return files;
 };
 
+// A JSON module, such as a package's `tau-plugin.json`, has only a default export; it is data, not a plugin module.
 const isPluginImport = (specifier: string): boolean =>
+  !specifier.endsWith('.json') &&
   pluginImportPrefixes.some((prefix) => specifier === prefix || specifier.startsWith(prefix));
 
 const collectDefaultPluginImportLocations = (sourceFile: ts.SourceFile): readonly string[] => {

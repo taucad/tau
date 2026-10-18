@@ -3867,6 +3867,9 @@ importers:
 
   packages/core/python-kernel:
     dependencies:
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../archive
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../native-process
@@ -3874,9 +3877,6 @@ importers:
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
-      '@taucad/archive-core':
-        specifier: workspace:*
-        version: link:../archive
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime

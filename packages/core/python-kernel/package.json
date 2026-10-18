@@ -16,6 +16,9 @@
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
+  "bin": {
+    "tau-python-kernel": "./dist/bin/tau-python-kernel.mjs"
+  },
   "files": [
     "dist",
     "python/interpreter.json",
@@ -61,7 +64,10 @@
       },
       "./package.json": "./package.json"
     },
-    "imports": {}
+    "imports": {},
+    "bin": {
+      "tau-python-kernel": "./dist/bin/tau-python-kernel.mjs"
+    }
   },
   "imports": {
     "#*.js": "./src/*.ts",
@@ -73,12 +79,12 @@
   },
   "devDependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:",
-    "@taucad/archive-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"
   },
   "dependencies": {
+    "@taucad/archive-core": "workspace:*",
     "@taucad/native-process-core": "workspace:*"
   },
   "taucad": {

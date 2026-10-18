@@ -251,7 +251,7 @@ describe('createCliRuntime', () => {
       builtInKernelIds.at(-1),
     ]);
     expect(runtime.kernels.find(({ id }) => id === 'build123d')?.options).toMatchObject({
-      runtimePath: '/store/closures/sha256/abc',
+      closure: { runtimePath: '/store/closures/sha256/abc' },
     });
     expect(deriveImportExtensions(runtime)).toContain('py');
   });

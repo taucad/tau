@@ -4,7 +4,7 @@
  * Purpose: Run Build123d's Python tests and strict coverage gate with the prepared desktop interpreter, including on
  * Windows, where the registry closure is not yet declared.
  * Why: The desktop ships its own interpreter; its tests and coverage gate are the shared runner's
- * (`@taucad/python-kernel-core`'s `scripts/test-python.mts --package <dir>`), which `build123d:test-python` runs with
+ * (`@taucad/python-kernel-core`'s `tau-python-kernel test --package <dir>`), which `build123d:test-python` runs with
  * the sealed closure's interpreter instead.
  * Environment: the prepared desktop resources (`pnpm nx run desktop:prepare-build123d-python`).
  * Usage: pnpm nx run build123d:test-python-desktop
@@ -45,7 +45,8 @@ const { status, error } = spawnSync(
   [
     '--import',
     '@oxc-node/core/register',
-    resolve(coreRoot, 'scripts/test-python.mts'),
+    resolve(coreRoot, 'scripts/tau-python-kernel.mts'),
+    'test',
     '--package',
     packageRoot,
     '--python',

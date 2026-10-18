@@ -139,7 +139,7 @@ const endedSpanAttributes = (name: string): Record<string, unknown> | undefined 
   return end.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 };
 
-const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
+const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', picogkKernel({ closure: kernelOptions }));
 // These hook tests need only the mirror and session methods they exercise.
 const context = () =>
   contextData() as ReturnType<typeof contextData> &
@@ -171,7 +171,7 @@ describe('PicoGK kernel', () => {
         : [],
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
-    const value = await definition.initialize(picogkOptionsSchema.parse(kernelOptions), mirrorRuntime);
+    const value = await definition.initialize(picogkOptionsSchema.parse({ closure: kernelOptions }), mirrorRuntime);
     vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
       sources: ['main.cs'],
     });

@@ -13,7 +13,7 @@ import type {
 } from '@taucad/runtime/preparation/node';
 
 import { pythonSupportModules } from '#python-kernel.js';
-import type { PythonKernelOptions, PythonKernelWorker } from '#python-kernel.js';
+import type { PythonClosure, PythonKernelWorker } from '#python-kernel.js';
 
 /** Closure-relative POSIX path of the interpreter python-build-standalone ships. */
 const pythonPath = 'python/bin/python3';
@@ -24,10 +24,10 @@ const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
 const reportedOutput = 2000;
 
 /**
- * Python kernel options for a closure the preparation host sealed: the closure root is always the runtime path.
+ * The closure of a Python kernel the preparation host sealed: its root is always the runtime path.
  * @public
  */
-export type PythonClosureOptions = PythonKernelOptions & { readonly runtimePath: string };
+export type PythonClosureOptions = PythonClosure & { readonly runtimePath: string };
 
 const workerPaths = (worker: PythonKernelWorker): { readonly entry: string; readonly support: readonly string[] } => ({
   entry: `${workerDirectory}/${worker.workerModules[0]}`,

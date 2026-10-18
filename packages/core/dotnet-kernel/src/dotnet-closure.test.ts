@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { dotnetLaunchSet, dotnetOptionsFromClosure } from '#dotnet-closure.js';
 import type { DotnetClosureLayout } from '#dotnet-closure.js';
-import { dotnetKernelOptionsSchema } from '#dotnet.schemas.js';
+import { dotnetClosureOptionsSchema } from '#dotnet.schemas.js';
 
 // The PicoGK layout, as its kernel package states it.
 const layout: DotnetClosureLayout = {
@@ -74,7 +74,7 @@ describe('dotnetOptionsFromClosure', () => {
     expect(options.workerSha256).toBe(digest('b'));
     expect(options.workerArguments).toEqual([join(root, 'tau-worker/Tau.PicoGK.Worker.dll')]);
     expect(options.runtimePath).toBe(root);
-    expect(dotnetKernelOptionsSchema.parse(options)).toEqual(options);
+    expect(dotnetClosureOptionsSchema.parse(options)).toEqual(options);
   });
 
   it('should name the files the process loads first as its launch set, and map its launch index as its receipt', () => {

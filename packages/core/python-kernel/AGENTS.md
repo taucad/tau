@@ -16,7 +16,7 @@ Shared Python language-kernel worker, session, closure and payload-generator hel
 - `src/index.ts` (root), `src/generator.ts` (`./generator`), `src/template.ts` (`./template`)
 - `python/tau_kernel/*.py`: the worker side; `pythonKernelModules` lists them and a test keeps the list equal to the directory
 - `python/interpreter.json`: the default CPython pin of every Python kernel
-- `scripts/generate-tau-plugin.mts`, `scripts/generate-project-template.mts`, `scripts/test-python.mts`: run by each kernel's Nx targets with `--package <dir>`; `test-python.mts` without `--package` runs the `tau_kernel` tests
+- `scripts/tau-python-kernel.mts`: the published `tau-python-kernel` bin (`dist/bin/`), dispatching to `scripts/generate-tau-plugin.mts`, `scripts/generate-project-template.mts` and `scripts/test-python.mts`; each kernel's Nx targets run it with `--package <dir>`, and `test` without `--package` runs the `tau_kernel` tests. Paths resolve against the working directory.
 - `package.json`, `project.json`
 
 ## Commands

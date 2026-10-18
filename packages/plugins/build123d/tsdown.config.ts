@@ -23,6 +23,11 @@ export default defineConfig(async () => {
     ...baseConfig,
     format: 'esm',
     outDir: 'dist',
-    deps: { alwaysBundle: [pattern], dts: { neverBundle: [pattern] } },
+    // The package's own tau-plugin.json stays a runtime import of the published file, not a bundled copy.
+    deps: {
+      alwaysBundle: [pattern],
+      neverBundle: [/^@taucad\/build123d\/tau-plugin\.json$/u],
+      dts: { neverBundle: [pattern] },
+    },
   } satisfies UserConfig;
 });

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { defineDotnetKernelAdopter } from '#adopter.js';
 
@@ -26,9 +26,8 @@ const closure: ClosureLaunch = {
   ],
 };
 
-const load = vi.fn(async () => () => {
-  throw new Error('not composed in this test');
-});
+const manifest = { schemaVersion: 1, kernels: { sample: { requires: ['runtime'], extensions: ['cs'] } } };
+const moduleUrl = 'file:///packages/sample/dist/native.mjs';
 
 const sample = defineDotnetKernelAdopter({
   package: '@taucad/sample',
@@ -36,14 +35,22 @@ const sample = defineDotnetKernelAdopter({
   displayName: 'Sample',
   workerAssembly: 'tau-worker/Tau.Sample.Worker.dll',
   resources: [{ pattern: /^tau-worker\/Sample\.dll$/u, required: 'tau-worker/Sample.dll' }],
-  load,
+  manifest,
+  moduleUrl,
 });
 
 describe('defineDotnetKernelAdopter', () => {
-  it('should adopt a NuGet kernel with no seal step and the load the package gave', () => {
-    expect(sample).toMatchObject({ package: '@taucad/sample', ecosystem: 'nuget', load });
+  it('should deploy a NuGet kernel with no seal step, its manifest, entry and package root', () => {
+    expect(sample).toMatchObject({
+      package: '@taucad/sample',
+      kernel: 'sample',
+      ecosystem: 'nuget',
+      manifest,
+      entry: moduleUrl,
+      packageRoot: 'file:///packages/sample/',
+    });
     expect(sample).not.toHaveProperty('seal');
-    expect(load).not.toHaveBeenCalled();
+    expect(sample).not.toHaveProperty('load');
   });
 
   it('should derive the launch set and the options from the layout, and validate them with its schema', () => {
@@ -73,7 +80,8 @@ describe('defineDotnetKernelAdopter', () => {
         displayName: 'Sample',
         workerAssembly: 'tau-worker/Tau.Sample.Worker.dll',
         resources: [],
-        load,
+        manifest,
+        moduleUrl,
       }),
     ).toThrow(TypeError);
   });

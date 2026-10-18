@@ -12,7 +12,6 @@ import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 import { picogkLaunchSet, picogkOptionsFromClosure } from '#picogk-closure.js';
 import { composeManifest, picogkLayerRecordSchema } from '#picogk-layer.js';
 import type { PicogkClosureOptions } from '#picogk-closure.js';
-import { picogkOptionsSchema } from '#picogk.schemas.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const layerRoot = resolve(workspaceRoot, 'out/picogk-layer');
@@ -88,8 +87,8 @@ const prepareClosure = async (): Promise<PicogkClosureOptions> => {
 export const nativeEngineAvailable = process.platform === 'darwin' && process.arch === 'arm64';
 
 /**
- * Kernel options for the prepared closure; on a host that skips the native suites, schema-valid options that name no
- * file, so the suites still define their runtimes and launch nothing.
+ * The prepared closure the suites pass as the kernel's `closure` option; on a host that skips the native suites, a
+ * schema-valid closure that names no file, so the suites still define their runtimes and launch nothing.
  */
 /** The pinned closure's receipt, on a native host under `TAU_PICOGK_CLOSURE=pinned`; otherwise `undefined`. */
 export const pinnedReceipt: ClosureReceipt | undefined =
@@ -100,17 +99,15 @@ export const nativeKernelOptions: PicogkClosureOptions = nativeEngineAvailable
     ? await prepareClosure()
     : picogkOptionsFromClosure(pinnedReceipt)
   : {
-      ...picogkOptionsSchema.parse({
-        workerExecutable: resolve(layerRoot, 'unavailable/dotnet/dotnet'),
-        workerSha256: '0'.repeat(64),
-        resourceFiles: [
-          {
-            path: resolve(layerRoot, 'unavailable/tau-worker/PicoGK.dll'),
-            sha256: '0'.repeat(64),
-            label: 'unavailable',
-          },
-        ],
-      }),
+      workerExecutable: resolve(layerRoot, 'unavailable/dotnet/dotnet'),
+      workerSha256: '0'.repeat(64),
+      resourceFiles: [
+        {
+          path: resolve(layerRoot, 'unavailable/tau-worker/PicoGK.dll'),
+          sha256: '0'.repeat(64),
+          label: 'unavailable',
+        },
+      ],
       runtimePath: resolve(layerRoot, 'unavailable'),
       workerArguments: [],
     };

@@ -1,8 +1,15 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
 export { definePythonKernelAdopter } from '#python-kernel-adopter.js';
 export type { PythonKernelAdopter } from '#python-kernel-adopter.js';
-export { pythonKernelModules, pythonKernelOptionsSchema, pythonSupportModules } from '#python-kernel.js';
-export type { PythonKernelOptions, PythonKernelWorker } from '#python-kernel.js';
+export { bindPythonKernel } from '#python-kernel-binding.js';
+export type { ParsedPythonKernelOptions } from '#python-kernel-binding.js';
+export {
+  pythonClosureSchema,
+  pythonKernelModules,
+  pythonKernelOptionsSchema,
+  pythonSupportModules,
+} from '#python-kernel.js';
+export type { PythonClosure, PythonKernelOptions, PythonKernelWorker } from '#python-kernel.js';
 export { createPythonSeal, pythonLaunchSet, pythonOptionsFromClosure } from '#python-closure.js';
 export type { PythonClosureOptions, PythonSandboxRunner } from '#python-closure.js';
 export { createPythonSession, PythonWorkerError } from '#python-session.js';

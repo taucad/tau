@@ -8,6 +8,7 @@ import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
 import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
 import {
+  bindPythonKernel,
   createPythonSession,
   createPythonWorkspaceMirror,
   pyprojectPath,
@@ -32,6 +33,7 @@ import {
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { createBuild123dResidentBinding } from '#build123d-resident.js';
 import { build123dWorker } from '#build123d-worker.js';
+import { build123dNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
 const computeNamespace = 'build123d.operation.v1';
@@ -265,9 +267,12 @@ export const build123dKernel = defineKernel({
   },
 
   async initialize(options, runtime) {
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
+    const { options: bound } = await bindPythonKernel({ adopter: build123dNative, options });
     const mirror = await createPythonWorkspaceMirror(build123dWorker);
     const session = createPythonSession({
-      ...options,
+      ...bound,
       ...mirror,
       worker: build123dWorker,
       logger: runtime.logger,
@@ -284,9 +289,9 @@ export const build123dKernel = defineKernel({
         id: '@taucad/build123d',
         version: computeProducerVersion,
         implementationAssets: [
-          options.pythonSha256,
-          options.workerSha256,
-          ...options.supportFiles.map(({ sha256 }) => sha256),
+          bound.pythonSha256,
+          bound.workerSha256,
+          ...bound.supportFiles.map(({ sha256 }) => sha256),
         ].map((sha256) => contentDigest({ value: `sha256:${sha256}` })),
       },
     };

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
 
-import { dotnetKernelOptionsSchema } from '#dotnet.schemas.js';
+import { dotnetClosureSchema } from '#dotnet.schemas.js';
 import type { DotnetClosureOptions } from '#dotnet.schemas.js';
 
 /** Microsoft's `dotnet` muxer, unpacked from the runtime archive (a `dotnet` payload with destination `dotnet`). */
@@ -115,7 +115,7 @@ export const dotnetOptionsFromClosure = (
         throw missing(required);
       }
     }
-    const options = dotnetKernelOptionsSchema.parse({
+    const options = dotnetClosureSchema.parse({
       workerExecutable: join(receipt.root, muxerPath),
       workerSha256: muxerSha256,
       resourceFiles: resourceFiles.map(({ relativePath, path, sha256 }) => ({

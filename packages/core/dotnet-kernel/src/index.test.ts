@@ -27,10 +27,15 @@ describe('@taucad/dotnet-kernel-core', () => {
 
   it('should keep a non-plugin root and give each entry its own exports', () => {
     expect(entry).not.toHaveProperty('plugin');
-    expect(Object.keys(entry).toSorted()).toEqual(['createDotnetSession', 'createDotnetWorkspaceMirror']);
+    expect(Object.keys(entry).toSorted()).toEqual([
+      'bindDotnetKernel',
+      'createDotnetSession',
+      'createDotnetWorkspaceMirror',
+    ]);
     expect(Object.keys(adopter).toSorted()).toEqual([
       'defineDotnetKernelAdopter',
       'dotnetClosureOptionsSchema',
+      'dotnetClosureSchema',
       'dotnetKernelOptionsSchema',
       'dotnetLaunchSet',
       'dotnetOptionsFromClosure',

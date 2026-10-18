@@ -1,4 +1,5 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
+export { bindDotnetKernel } from '#dotnet-kernel-binding.js';
 export { createDotnetSession } from '#dotnet-session.js';
 export type {
   DotnetRequest,

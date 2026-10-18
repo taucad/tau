@@ -4,6 +4,7 @@ import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/nod
 import { describe, expect, it } from 'vitest';
 
 import { build123dLaunchSet, build123dOptionsFromClosure, sealBuild123dClosure } from '#build123d-closure.js';
+import { build123d } from '#build123d.plugin.js';
 import { build123dNative } from '#native.js';
 
 const row = (path: string, digit: string): ReceiptFile => ({
@@ -48,11 +49,7 @@ describe('build123dNative', () => {
   it('should validate the options a sealed closure maps to, including its root', () => {
     const options = build123dNative.optionsFromClosure(closure);
 
-    expect(build123dNative.optionsSchema.parse(options)).toMatchObject({
-      ...options,
-      requestTimeout: 0,
-      runtimePath: closure.root,
-    });
+    expect(build123dNative.optionsSchema.parse(options)).toEqual({ ...options, runtimePath: closure.root });
     expect(build123dNative.optionsSchema.safeParse({ ...options, runtimePath: undefined }).success).toBe(false);
   });
 
@@ -62,14 +59,14 @@ describe('build123dNative', () => {
     expect(build123dNative.launchSet(closure.files).every((path) => listed.has(path))).toBe(true);
   });
 
-  it('should load the kernel plugin bound to the closure options and host bounds', async () => {
-    const factory = await build123dNative.load();
+  it('should give the kernel plugin an explicit closure and host bounds as its options', () => {
+    const closureOptions = build123dNative.optionsFromClosure(closure);
 
-    const { capabilities } = factory({ ...build123dNative.optionsFromClosure(closure), requestTimeout: 60_000 });
+    const { capabilities } = build123d({ kernels: { default: { closure: closureOptions, requestTimeout: 60_000 } } });
 
     expect(capabilities.kernels.map(({ id, extensions }) => ({ id, extensions }))).toEqual([
       { id: 'build123d', extensions: ['py'] },
     ]);
-    expect(capabilities.kernels[0]?.options).toMatchObject({ requestTimeout: 60_000, runtimePath: closure.root });
+    expect(capabilities.kernels[0].options).toMatchObject({ requestTimeout: 60_000, closure: closureOptions });
   });
 });

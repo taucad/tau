@@ -38,20 +38,7 @@ const lockedWheels = (key: string): Map<string, { readonly size: number; readonl
 describe('Build123d tau-plugin.json', () => {
   it('should declare one engine variant per pinned target, the kernel row matching the kernel', () => {
     expect(variants.map(({ target }) => targetKey(target))).toEqual(interpreter.targets.map(({ key }) => key));
-    const kernel = build123dKernel({
-      pythonExecutable: '/closure/python/bin/python3',
-      pythonSha256: 'a'.repeat(64),
-      workerPath: '/closure/tau-worker/worker.py',
-      workerSha256: 'b'.repeat(64),
-      supportFiles: [
-        { path: '/closure/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
-        { path: '/closure/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
-        { path: '/closure/tau-worker/tau_kernel/analyzer.py', sha256: 'c'.repeat(64) },
-        { path: '/closure/tau-worker/tau_kernel/glb.py', sha256: 'd'.repeat(64) },
-        { path: '/closure/tau-worker/tau_kernel/model.py', sha256: 'd'.repeat(64) },
-        { path: '/closure/tau-worker/tau_kernel/protocol.py', sha256: 'd'.repeat(64) },
-      ],
-    });
+    const kernel = build123dKernel();
     expect(deployment.kernels).toEqual({ [kernel.id]: { requires: ['engine'], extensions: [...kernel.extensions] } });
   });
 

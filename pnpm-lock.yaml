@@ -4113,6 +4113,28 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/native-kernels:
+    dependencies:
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../plugins/build123d
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../core/native-process
+      '@taucad/picogk':
+        specifier: workspace:*
+        version: link:../plugins/picogk
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/parameters:
     dependencies:
       '@cfworker/json-schema':

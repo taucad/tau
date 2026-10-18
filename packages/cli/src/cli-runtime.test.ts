@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
+import { nativeDeploymentsOf } from '@taucad/native-process-core/store';
 import { definePlugin, deriveImportExtensions } from '@taucad/runtime/plugin';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
@@ -28,6 +29,8 @@ const builtInKernelIds = [
   'rhino',
   'tscircuit',
   'zoo',
+  'build123d',
+  'picogk',
   'assimp',
 ];
 
@@ -43,32 +46,6 @@ const taucadImports = (source: string): string[] => [
       .map((specifier) => specifier.split('/').slice(0, 2).join('/')),
   ),
 ];
-
-const picogkOptions = {
-  workerExecutable: '/picogk/dotnet/dotnet',
-  workerSha256: 'a'.repeat(64),
-  workerArguments: ['/picogk/tau-worker/Tau.PicoGK.Worker.dll'],
-  resourceFiles: [{ path: '/picogk/tau-worker/PicoGK.dll', sha256: 'b'.repeat(64), label: 'PicoGK' }],
-  runtimePath: '/picogk',
-  requestTimeout: 120_000,
-  maxArtifactBytes: 512 * 1024 * 1024,
-};
-
-const build123dOptions = {
-  pythonExecutable: '/store/closures/sha256/abc/python/bin/python3',
-  pythonSha256: 'a'.repeat(64),
-  workerPath: '/store/closures/sha256/abc/tau-worker/worker.py',
-  workerSha256: 'b'.repeat(64),
-  supportFiles: [
-    { path: '/store/closures/sha256/abc/tau-worker/native_materials.py', sha256: 'e'.repeat(64) },
-    { path: '/store/closures/sha256/abc/tau-worker/mechanisms.py', sha256: 'f'.repeat(64) },
-    ...['analyzer', 'glb', 'model', 'protocol'].map((module, index) => ({
-      path: `/store/closures/sha256/abc/tau-worker/tau_kernel/${module}.py`,
-      sha256: String(index).repeat(64),
-    })),
-  ],
-  runtimePath: '/store/closures/sha256/abc',
-};
 
 const novelPlugin = definePlugin({
   meta: { name: '@example/novel' },
@@ -176,84 +153,25 @@ describe('createCliRuntime', () => {
     expect(extensions).toContain('obj');
   });
 
-  it('covers the product catalog, composing native kernels from the payload store', async () => {
-    assertKernelRosterCoverage({
-      runtime: await composeCli(),
-      catalog: kernelConfigurations,
-      omitted: {
-        build123d: 'native: composed from the payload store once `tau prepare build123d` seals its closure',
-        picogk: 'native: composed from the payload store once `tau prepare picogk` seals its closure',
-      },
-    });
+  it('covers the product catalog, native kernels included', async () => {
+    assertKernelRosterCoverage({ runtime: await composeCli(), catalog: kernelConfigurations });
   });
 
-  it('answers an unavailable native kernel’s files with the stand-in, before assimp', async () => {
-    const runtime = await composeCli({
-      native: {
-        kernels: [],
-        unavailable: [
-          {
-            kernel: 'build123d',
-            package: '@taucad/build123d',
-            extensions: ['py'],
-            reason: 'not-prepared',
-            byteLength: 1,
-          },
-        ],
-        closureRoots: [],
-      },
-    });
+  it('lists the native kernels as ordinary plugins that carry their deployments, before assimp', async () => {
+    const runtime = await composeCli();
 
-    expect(runtime.kernels.map(({ id }) => id)).toEqual([
-      ...builtInKernelIds.slice(0, -1),
-      'build123d',
-      builtInKernelIds.at(-1),
+    expect(
+      nativeDeploymentsOf(runtime).map(({ deployment, kernels }) => ({
+        package: deployment.package,
+        kernels: kernels.map(({ id, extensions }) => ({ id, extensions })),
+      })),
+    ).toEqual([
+      { package: '@taucad/build123d', kernels: [{ id: 'build123d', extensions: ['py'] }] },
+      { package: '@taucad/picogk', kernels: [{ id: 'picogk', extensions: ['cs'] }] },
     ]);
-    expect(runtime.kernels.find(({ id }) => id === 'build123d')?.extensions).toEqual(['py']);
-  });
-
-  it('registers PicoGK when the payload store holds its sealed closure', async () => {
-    const runtime = await composeCli({
-      native: {
-        kernels: [{ package: '@taucad/picogk', kernel: 'picogk', closureRoot: '/picogk', options: picogkOptions }],
-        unavailable: [],
-        closureRoots: ['/picogk'],
-      },
-    });
-
-    expect(runtime.kernels.map(({ id }) => id)).toEqual([
-      ...builtInKernelIds.slice(0, -1),
-      'picogk',
-      builtInKernelIds.at(-1),
-    ]);
-    expect(deriveImportExtensions(runtime)).toContain('cs');
-  });
-
-  it('registers Build123d when the payload store holds its sealed closure', async () => {
-    const runtime = await composeCli({
-      native: {
-        kernels: [
-          {
-            package: '@taucad/build123d',
-            kernel: 'build123d',
-            closureRoot: build123dOptions.runtimePath,
-            options: build123dOptions,
-          },
-        ],
-        unavailable: [],
-        closureRoots: [build123dOptions.runtimePath],
-      },
-    });
-
-    expect(runtime.kernels.map(({ id }) => id)).toEqual([
-      ...builtInKernelIds.slice(0, -1),
-      'build123d',
-      builtInKernelIds.at(-1),
-    ]);
-    expect(runtime.kernels.find(({ id }) => id === 'build123d')?.options).toMatchObject({
-      closure: { runtimePath: '/store/closures/sha256/abc' },
-    });
-    expect(deriveImportExtensions(runtime)).toContain('py');
+    /* Listed with no closure: each binds to the sealed closure the payload store holds when it initializes. */
+    expect(runtime.kernels.find(({ id }) => id === 'build123d')).not.toHaveProperty('options.closure');
+    expect(deriveImportExtensions(runtime)).toEqual(expect.arrayContaining(['py', 'cs']));
   });
 
   it('rejects an explicit plugin that duplicates a built-in', async () => {

@@ -81,12 +81,30 @@ export type RuntimeChildRuntimeDamage = {
 };
 
 /**
+ * One kernel's request for its sealed closure, as a runtime child sends it: the package and kernel, the dependencies
+ * its closure is sealed from, and the package's unparsed `tau-plugin.json` with its root, which the child's runtime
+ * definition reported. No kernel code crosses: the daemon reads the store's launch index from this data alone.
+ *
+ * @public
+ */
+export type RuntimeChildClosureRequest = {
+  readonly package: string;
+  readonly kernel: string;
+  readonly dependencies: readonly string[];
+  readonly manifest: unknown;
+  /** `file:` URL of the package root, which payloads shipped inside the package resolve against. */
+  readonly packageRoot: string;
+};
+
+/**
  * The native kernels a daemon serves through its runtime children (D37).
  *
- * The runtime child runs project code under Node's permission model and may not spawn, so the daemon starts each
- * native worker on its behalf (North Star S2): only from a closure sealed in the payload store, only through the OS
- * sandbox, and with the sandbox granting only a directory the daemon created for that child, which holds the child's
- * private directory and which neither the child nor its workers can replace.
+ * A child lists its native kernels in its own runtime definition and reports their deployments once it has built it.
+ * It cannot read the payload store, so each kernel asks the daemon for its sealed closure when it binds. The child runs
+ * project code under Node's permission model and may not spawn, so the daemon starts each native worker on its behalf
+ * (North Star S2): only from a closure it answered that child with, only through the OS sandbox, and with the sandbox
+ * granting only a directory the daemon created for that child, which holds the child's private directory and which
+ * neither the child nor its workers can replace.
  *
  * @public
  */
@@ -104,12 +122,19 @@ export type RuntimeChildNativeKernels = {
    */
   readonly store: string;
   /**
-   * What a new child composes, handed over in its `start` frame as `native`: read from the store's receipts, never
-   * downloading. Read again for every child, so a child started after a preparation composes the prepared kernel.
+   * Answer one kernel's closure request from the store's launch index, never downloading: read again on every
+   * request, so a kernel prepared meanwhile binds on its next operation.
+   * @returns The serialisable answer the child's kernel binds with, and the closure roots it names as sealed, which
+   *   are the only roots that child may launch from. A rejection answers the kernel as not prepared.
    */
-  readonly compose: () => Promise<unknown>;
-  /** The roots of the closures sealed in the store, read again for every launch; a launch from any other is refused. */
-  readonly closureRoots: () => Promise<readonly string[]>;
+  readonly inspect: (
+    request: RuntimeChildClosureRequest,
+  ) => Promise<{ readonly answer: unknown; readonly roots: readonly string[] }>;
+  /**
+   * Called with each child's report of the native deployments its runtime definition lists, unparsed, once it has
+   * built its runtime: what `prepare_kernel` names and prepares.
+   */
+  readonly reported?: ((report: unknown) => void) | undefined;
   /**
    * Verify, sandbox and spawn one accepted launch in this process (`startNativeWorker`). `sandboxRoot` is the
    * daemon-created directory the sandbox grants in place of the launch's workspace and artifact paths.
@@ -123,6 +148,20 @@ export type RuntimeChildNativeKernels = {
    */
   readonly verify: (runtimePath: string, signal: AbortSignal) => Promise<RuntimeChildRuntimeDamage | undefined>;
 };
+
+const deploymentsMessageSchema = z.object({ type: z.literal('native-deployments'), report: z.unknown() });
+
+const inspectMessageSchema = z.object({
+  type: z.literal('native-closure:inspect'),
+  id: z.string().min(1).max(128),
+  request: z.object({
+    package: z.string().min(1).max(256),
+    kernel: z.string().min(1).max(256),
+    dependencies: z.array(z.string().min(1).max(256)).max(64),
+    manifest: z.unknown(),
+    packageRoot: z.string().min(1),
+  }),
+});
 
 const workerLaunchMessageSchema = z.object({
   type: z.literal('native-worker:launch'),
@@ -163,13 +202,13 @@ const isWithin = (root: string, candidate: string): boolean => {
 
 /**
  * Why a child's launch is refused, or nothing: the runtime root must be a sealed closure in the store, spelled as the
- * daemon composed it or as its real path, whose real path lies inside the store's; everything the worker runs must lie
+ * daemon answered it or as its real path, whose real path lies inside the store's; everything the worker runs must lie
  * inside it, and the worker's workspace and writable root inside the child's own directory.
  * The child can still rewrite its directory after this check, so the sandbox never grants these two paths: it grants
  * the daemon's directory that holds them ({@link startRuntimeChild}).
  *
  * @param launch - The child's request.
- * @param closureRoots - The store's sealed closures, now, as the daemon composed them.
+ * @param closureRoots - The sealed closures the daemon answered this child's kernels with.
  * @param directories - The store's real path, or `undefined` when it could not be resolved, and the child's private
  *   temp directory (a real path).
  * @returns The refusal, or `undefined` to start it.
@@ -218,27 +257,30 @@ const launchRefusal = async (
 };
 
 /**
- * Serve one child's native worker launches until it exits: refuse what {@link launchRefusal} refuses, start the
- * rest, carry each worker's pipes over the IPC channel, and stop every worker the child leaves behind. A child whose
- * worker exited before its handshake asks for its closure to be re-verified here, where the store is readable.
+ * Serve one child's native kernels until it exits: answer each kernel's closure request from the store, refuse what
+ * {@link launchRefusal} refuses, start the rest, carry each worker's pipes over the IPC channel, and stop every worker
+ * the child leaves behind. A child whose worker exited before its handshake asks for its closure to be re-verified
+ * here, where the store is readable.
  *
  * @param child - The forked runtime child.
  * @param native - The daemon's native kernels.
- * @param directories - The store's real path (`undefined` when it could not be resolved), the child's private temp
- *   directory, and either the daemon-created directory that holds it (each worker's sandbox root) or why there is none
+ * @param directories - The store's real path, resolved until it exists (a child started on an empty store launches
+ *   once a kernel is prepared), the child's private temp directory, and either the daemon-created directory that holds it (each worker's sandbox root) or why there is none
  *   safe to grant.
  */
 const brokerNativeWorkers = (
   child: ChildProcess,
   native: RuntimeChildNativeKernels,
   directories: {
-    readonly store: string | undefined;
+    readonly store: () => Promise<string | undefined>;
     readonly privateDirectory: string;
     readonly sandboxRoot: string | { readonly refusal: string };
   },
 ): void => {
-  const { store, privateDirectory, sandboxRoot } = directories;
+  const { privateDirectory, sandboxRoot } = directories;
   const workers = new Map<string, Promise<RuntimeChildWorker | undefined>>();
+  /* The closures this child's kernels were answered with: the only roots it may launch from. */
+  const answeredRoots = new Set<string>();
   const send = (frame: Readonly<Record<string, unknown>>): void => {
     if (child.connected) {
       child.send(frame);
@@ -249,7 +291,7 @@ const brokerNativeWorkers = (
     try {
       const refusal =
         typeof sandboxRoot === 'string'
-          ? await launchRefusal(request, await native.closureRoots(), { store, privateDirectory })
+          ? await launchRefusal(request, [...answeredRoots], { store: await directories.store(), privateDirectory })
           : sandboxRoot.refusal;
       if (refusal !== undefined || typeof sandboxRoot !== 'string') {
         throw new Error(`Tau Host refused a native worker launch: ${refusal}`);
@@ -290,7 +332,7 @@ const brokerNativeWorkers = (
   const childGone = new AbortController();
   const verification = async (runtimePath: string): Promise<Readonly<Record<string, unknown>>> => {
     try {
-      const real = await realpath(runtimePath).catch(() => undefined);
+      const [real, store] = await Promise.all([realpath(runtimePath).catch(() => undefined), directories.store()]);
       if (store === undefined || real === undefined || !isWithin(store, real)) {
         return { message: `Tau Host refused to verify ${runtimePath}: it is not inside the payload store.` };
       }
@@ -318,7 +360,30 @@ const brokerNativeWorkers = (
       send({ type: 'native-worker:verified', id, ...(await pending) });
     })();
   };
+  const inspect = async (id: string, request: RuntimeChildClosureRequest): Promise<void> => {
+    let reply: Readonly<Record<string, unknown>>;
+    try {
+      const { answer, roots } = await native.inspect(request);
+      for (const root of roots) {
+        answeredRoots.add(root);
+      }
+      reply = { answer };
+    } catch (error) {
+      reply = { message: error instanceof Error ? error.message : String(error) };
+    }
+    send({ type: 'native-closure:answer', id, ...reply });
+  };
   child.on('message', (message: unknown) => {
+    const reported = deploymentsMessageSchema.safeParse(message);
+    if (reported.success) {
+      native.reported?.(reported.data.report);
+      return;
+    }
+    const inspectRequest = inspectMessageSchema.safeParse(message);
+    if (inspectRequest.success) {
+      void inspect(inspectRequest.data.id, inspectRequest.data.request);
+      return;
+    }
     const verifyRequest = verifyMessageSchema.safeParse(message);
     if (verifyRequest.success) {
       verify(verifyRequest.data.id, verifyRequest.data.runtimePath);
@@ -524,12 +589,10 @@ const killChild = async (child: ChildProcess): Promise<void> => {
 export const startRuntimeChild = async (options: {
   readonly modulePath: string;
   readonly args?: readonly string[];
-  /** The native kernels this child composes, whose workers the caller starts on its behalf. */
+  /** The native kernels this child's runtime lists, whose closures the caller answers and whose workers it starts. */
   readonly native?: RuntimeChildNativeKernels;
 }): Promise<RuntimeChildHandle> => {
   const authorizationToken = randomBytes(32).toString('base64url');
-  /* A composition that cannot be read leaves this child without native kernels, never without a runtime. */
-  const native = await options.native?.compose().catch(() => undefined);
   /* The real path: importing a module resolves symlinks component by component (macOS's `/var` is a link to
    * `/private/var`), and the grants cover only this directory, not its symlinked ancestors. A child with native
    * kernels gets its directory inside one the daemon creates outside every grant: that outer directory is what a
@@ -559,8 +622,6 @@ export const startRuntimeChild = async (options: {
   if (options.native !== undefined) {
     await mkdir(temporaryDirectory);
   }
-  /* Resolved once: a store that does not exist yet holds no closure, and a child composed then launches none. */
-  const store = options.native === undefined ? undefined : await realpath(options.native.store).catch(() => undefined);
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
     env: {
@@ -580,7 +641,19 @@ export const startRuntimeChild = async (options: {
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   if (options.native !== undefined) {
-    brokerNativeWorkers(child, options.native, { store, privateDirectory: temporaryDirectory, sandboxRoot });
+    const storePath = options.native.store;
+    /* Resolved once it exists: a store that does not exist yet holds no closure, and the child's kernels bind once one
+     * is prepared, without the child restarting. */
+    let store: string | undefined;
+    const resolveStore = async (): Promise<string | undefined> => {
+      store ??= await realpath(storePath).catch(() => undefined);
+      return store;
+    };
+    brokerNativeWorkers(child, options.native, {
+      store: resolveStore,
+      privateDirectory: temporaryDirectory,
+      sandboxRoot,
+    });
   }
   const exited = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
     child.once('exit', (exitCode, signal) => {
@@ -631,7 +704,8 @@ export const startRuntimeChild = async (options: {
       new Error(`Tau Host runtime child exited before ready (code ${String(exitCode)}, signal ${String(signal)}).`),
     );
   });
-  child.send({ type: 'start', authorizationToken, ...(native === undefined ? {} : { native }) });
+  /* `native`: this daemon answers the child's closure requests and brokers its workers. */
+  child.send({ type: 'start', authorizationToken, ...(options.native === undefined ? {} : { native: true }) });
 
   const message = await Promise.race([
     ready.promise,

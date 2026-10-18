@@ -2445,7 +2445,7 @@ describe('startHostDaemon runtime child per root and session', () => {
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
   }, 30_000);
 
-  it('offers prepare_kernel, composes every child from the store, and replaces each root child once a kernel is ready (D37)', async () => {
+  it('offers prepare_kernel with the kernels its children report, and keeps each root child once a kernel is ready (D37)', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-native-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
     process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -2455,7 +2455,6 @@ describe('startHostDaemon runtime child per root and session', () => {
       deviceId: 'device-1',
       credential: 'secret-credential-value-that-never-enters-a-url',
     });
-    const compose = vi.fn(async () => ({ unavailable: [] }));
     const outcomes: Array<Awaited<ReturnType<HostPrepareKernel>>> = [
       { status: 'blocked', kernel: 'picogk', reason: 'offline-miss', message: 'offline' },
       { status: 'ready', kernel: 'picogk' },
@@ -2470,13 +2469,16 @@ describe('startHostDaemon runtime child per root and session', () => {
         native: {
           directory: join(temporaryDirectory, 'children'),
           store: join(temporaryDirectory, 'store'),
-          compose,
-          closureRoots: async () => [],
+          inspect: async () => ({ answer: {}, roots: [] }),
           start: vi.fn(),
           verify: vi.fn(),
         },
       },
-      agent: { ...(await agentOptionsIn(temporaryDirectory)), prepareKernel },
+      agent: {
+        ...(await agentOptionsIn(temporaryDirectory)),
+        prepareKernel,
+        preparableKernels: () => [{ kernel: 'picogk', extensions: ['cs'] }],
+      },
     });
     try {
       await daemon.ready;
@@ -2486,9 +2488,13 @@ describe('startHostDaemon runtime child per root and session', () => {
         throw new TypeError('Expected the daemon to hand its project host prepare_kernel.');
       }
       expect(typeof registrySpy.mock.lastCall?.[0]?.prepareKernel).toBe('function');
+      /* Read when the tool list is, so kernels a child reports later are named. */
+      const preparable = registrySpy.mock.lastCall?.[0]?.preparableKernels;
+      expect(typeof preparable === 'function' ? preparable() : preparable).toEqual([
+        { kernel: 'picogk', extensions: ['cs'] },
+      ]);
       const root = join(temporaryDirectory, 'workspace');
       const before = runtimeChildren.length;
-      const composedBefore = compose.mock.calls.length;
       await options.runtimeClient(root);
       const [first] = runtimeChildren.slice(before);
       const context = { signal: new AbortController().signal, onProgress: () => undefined };
@@ -2496,11 +2502,11 @@ describe('startHostDaemon runtime child per root and session', () => {
       await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'blocked' });
       expect(await exitOf(first!.handle, 200)).toBe('open');
       await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'ready' });
-      expect(await exitOf(first!.handle)).toBe('closed');
+      /* The kernel asks for its closure again on its next operation, so the child that refused it is kept. */
+      expect(await exitOf(first!.handle, 200)).toBe('open');
       await options.runtimeClient(root);
 
-      expect(runtimeChildren.slice(before)).toHaveLength(2);
-      expect(compose.mock.calls.length - composedBefore).toBe(2);
+      expect(runtimeChildren.slice(before)).toHaveLength(1);
       expect(prepareKernel).toHaveBeenCalledWith({ kernel: 'picogk' }, context);
     } finally {
       await daemon.close();

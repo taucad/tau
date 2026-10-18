@@ -397,7 +397,7 @@ export type HostPrepareKernelProgress = Readonly<{ progress: number; total: numb
  *
  * Resolves with the outcome (`ready`, `blocked`, `cancelled` or `failed`, each naming the kernel); rejects for a
  * kernel no installed package declares, with an `UNKNOWN_KERNEL` code and a message naming the kernels that can be
- * prepared. A `ready` outcome is reported only once the host composes the kernel on its next call.
+ * prepared. After a `ready` outcome the kernel binds to the prepared closure on its next operation.
  *
  * @public
  */
@@ -501,8 +501,12 @@ export type HostToolRegistryOptions = {
    * in their own process. Omit it and the tool is not offered, and an unprepared kernel's refusal names `tau prepare`.
    */
   readonly prepareKernel?: HostPrepareKernel | undefined;
-  /** The kernels `prepareKernel` takes, which `prepare_kernel`'s description and input schema name. */
-  readonly preparableKernels?: readonly HostPreparableKernel[] | undefined;
+  /**
+   * The kernels `prepareKernel` takes, which `prepare_kernel`'s description and input schema name: a list, or a
+   * function the tool list reads each time, for a host that learns them from a runtime thread or child once it
+   * reports the native deployments its runtime definition lists.
+   */
+  readonly preparableKernels?: readonly HostPreparableKernel[] | (() => readonly HostPreparableKernel[]) | undefined;
   /**
    * The managed acquisition profile (D25) `install_packages` runs under. Under `locked` it refuses with a
    * `registry-unavailable` issue, contacts no registry and writes nothing. Defaults to `TAU_ACQUISITION` in this
@@ -891,6 +895,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       ? rootedRegistry(options.workspaceRoot, options.projectId)
       : registryFor(options.workspaceRoot, 'proj_listed-only').registry;
   const { prepareKernel } = options;
+  const preparable = (): readonly HostPreparableKernel[] =>
+    typeof options.preparableKernels === 'function' ? options.preparableKernels() : (options.preparableKernels ?? []);
   return {
     /* The tool *list* is the host's, not the turn's: every root serves the same
      * names, descriptions and schemas, and the list is read before any run
@@ -902,8 +908,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
             ...live.list(),
             {
               name: prepareKernelToolName,
-              description: prepareKernelDescription(options.preparableKernels ?? []),
-              inputSchema: prepareKernelInputSchema(options.preparableKernels ?? []),
+              description: prepareKernelDescription(preparable()),
+              inputSchema: prepareKernelInputSchema(preparable()),
               /* It writes the shared store, outside every workspace. */
               executionMode: 'sequential',
             },

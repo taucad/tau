@@ -1,9 +1,6 @@
 import type { PluginFactory, PluginInstance } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
-import { unavailableKernelsPlugin } from '@taucad/native-kernels';
-import type { NativeKernelComposition } from '@taucad/native-kernels';
-import { composeNativePlugins } from '@taucad/native-kernels/node';
 import { cliZooCloseErrors } from '#zoo-proxy.js';
 import type { Acquisition } from '#acquisition.js';
 
@@ -17,12 +14,6 @@ export type DefaultInvocablePluginFactory = {
 export type CliRuntimeOptions = {
   readonly explicitFactories?: readonly DefaultInvocablePluginFactory[];
   readonly configuredPlugins?: readonly PluginInstance[];
-  /**
-   * The native kernels composed from the payload store: each sealed closure's kernel is composed, and each declared
-   * kernel that is not (not prepared, or no runtime for this host) answers its files with the typed refusal instead
-   * of "no kernel handles this extension" (D7). Absent, no native kernel is composed.
-   */
-  readonly native?: NativeKernelComposition;
   /** The Zoo proxy the KCL kernel connects to; defaults to Tau Cloud's (see `cliZooProxyUrl`). */
   readonly zooProxyUrl?: string;
   /** `locked` (`TAU_ACQUISITION=locked`): the bundler refuses every import it would download (`package-not-locked`). */
@@ -30,12 +21,13 @@ export type CliRuntimeOptions = {
 };
 
 /**
- * Build the CLI runtime from built-ins, configured instances, and default-invoked `--plugin` factories.
+ * The CLI runtime's plugin list: built-ins, configured instances in place of or after them, then default-invoked
+ * `--plugin` factories.
  *
  * @param options - Explicit and config-module plugins loaded from the invoking project.
- * @returns The CLI's complete runtime definition.
+ * @returns The invoked plugins, in kernel-selection precedence.
  */
-export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise<AnyRuntimeDefinition> => {
+export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise<readonly PluginInstance[]> => {
   /*
    * Array order is kernel-selection precedence. Extensions and routes stay owned by the packages.
    */
@@ -55,13 +47,13 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, nativePlugins] = await Promise.all([
+  const [{ assimp }, { image }, { zoo }, { build123d }, { picogk }] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
     import('@taucad/zoo'),
-    composeNativePlugins(options.native?.kernels ?? []),
+    import('@taucad/build123d'),
+    import('@taucad/picogk'),
   ]);
-  const unavailable = unavailableKernelsPlugin(options.native?.unavailable ?? []);
   const builtIns = [
     middlewareModule.plugin(),
     esbuildModule.plugin(
@@ -77,9 +69,9 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
         },
       },
     }),
-    /* Native kernels in roster order, each loaded only when its closure is sealed. */
-    ...nativePlugins,
-    ...(unavailable ? [unavailable] : []),
+    /* Native kernels bind to their sealed closures themselves, and refuse with `KERNEL_NOT_PREPARED` until then. */
+    build123d(),
+    picogk(),
     assimp({ preset: 'all' }),
     image(),
   ];
@@ -120,5 +112,14 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     plugins.push(instance);
   }
 
-  return defineRuntime({ plugins });
+  return plugins;
 };
+
+/**
+ * Build the CLI runtime from built-ins, configured instances, and default-invoked `--plugin` factories.
+ *
+ * @param options - Explicit and config-module plugins loaded from the invoking project.
+ * @returns The CLI's complete runtime definition.
+ */
+export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise<AnyRuntimeDefinition> =>
+  defineRuntime({ plugins: await createCliPlugins(options) });

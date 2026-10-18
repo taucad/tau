@@ -4,6 +4,6 @@ cadquery-ocp-novtk==8.0.1.0.0
 # `glb.py` imports numpy itself, so it is a direct dependency and not build123d's to drop.
 numpy==2.5.2
 # Native material resource validation and GLB PBR serialization use the public library directly.
-threejs-materials==1.2.4
+threejs-materials==1.2.5
 # Test instrumentation is bundled so release-matrix tests use the exact shipped interpreter offline.
 coverage==7.10.7

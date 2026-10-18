@@ -475,17 +475,17 @@
           },
           {
             "name": "pillow",
-            "integrity": "sha256-VrJTNvUCtu0C6In07OiUpyYS/ohYiaboxMgCOf9uX18=",
-            "byteLength": 4695402,
+            "integrity": "sha256-1pFBUUzDC3dM7qXj7TpmNcjYqW7fZkaJuJD0CJER+zU=",
+            "byteLength": 4780109,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/71/43/905a14a8b17fdb1ccb58d282454490662d2cb89a6bfec26af6d3520da5ec/pillow-12.2.0-cp313-cp313-macosx_11_0_arm64.whl"
+                "https://files.pythonhosted.org/packages/10/76/8803c13605b763d33d156c4678fc77f8443389c0c51c8aef707bb02015f4/pillow-12.3.0-cp313-cp313-macosx_11_0_arm64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 13178885
+            "unpackedByteLength": 13265700
           },
           {
             "name": "platformdirs",
@@ -727,17 +727,17 @@
           },
           {
             "name": "threejs-materials",
-            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
-            "byteLength": 89793013,
+            "integrity": "sha256-5iImQ4gEX6NWErUU3a7eyyE4McmKoLFAoQG78/3VJ6Y=",
+            "byteLength": 89793030,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d5/ea/d2980e85afcc62e2a9c032c012009e3d50ec15f9b66ec1097463e65aa55e/threejs_materials-1.2.5-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 90053685
+            "unpackedByteLength": 90053711
           },
           {
             "name": "traitlets",
@@ -1381,17 +1381,17 @@
           },
           {
             "name": "pillow",
-            "integrity": "sha256-XS/Q+mtdnR3kFQYDY0M/KNqLFSbBwSkCBDXhhnlLN5U=",
-            "byteLength": 5308094,
+            "integrity": "sha256-enQ/9xb3RvwZqVV/YNqxYA1GEyVfinrrPN3k236xWmY=",
+            "byteLength": 5345889,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/34/46/6c717baadcd62bc8ed51d238d521ab651eaa74838291bda1f86fe1f864c9/pillow-12.2.0-cp313-cp313-macosx_10_13_x86_64.whl"
+                "https://files.pythonhosted.org/packages/42/92/2fc3ffad878ae8dd5469ec1bc8eb83b71f48e13efdf68f02709003982a32/pillow-12.3.0-cp313-cp313-macosx_10_13_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 14155523
+            "unpackedByteLength": 14229451
           },
           {
             "name": "platformdirs",
@@ -1633,17 +1633,17 @@
           },
           {
             "name": "threejs-materials",
-            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
-            "byteLength": 89793013,
+            "integrity": "sha256-5iImQ4gEX6NWErUU3a7eyyE4McmKoLFAoQG78/3VJ6Y=",
+            "byteLength": 89793030,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d5/ea/d2980e85afcc62e2a9c032c012009e3d50ec15f9b66ec1097463e65aa55e/threejs_materials-1.2.5-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 90053685
+            "unpackedByteLength": 90053711
           },
           {
             "name": "traitlets",
@@ -2274,17 +2274,17 @@
           },
           {
             "name": "pillow",
-            "integrity": "sha256-XN/r11LsUr9btONdnGS0CCa8W0ChPffDzaIKLAOg9e0=",
-            "byteLength": 6395194,
+            "integrity": "sha256-90Aa69f1gdf4OkOdh9R0mZMX7gmSGOWtJdElKQmQumU=",
+            "byteLength": 6263736,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/4b/6e/3ccb54ce8ec4ddd1accd2d89004308b7b0b21c4ac3d20fa70af4760a4330/pillow-12.2.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+                "https://files.pythonhosted.org/packages/1f/01/e18aff37cb0b4aac47ac90f016d347a49aca667ef97f190b06ac2aabc928/pillow-12.3.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 22481087
+            "unpackedByteLength": 22886254
           },
           {
             "name": "platformdirs",
@@ -2540,17 +2540,17 @@
           },
           {
             "name": "threejs-materials",
-            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
-            "byteLength": 89793013,
+            "integrity": "sha256-5iImQ4gEX6NWErUU3a7eyyE4McmKoLFAoQG78/3VJ6Y=",
+            "byteLength": 89793030,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d5/ea/d2980e85afcc62e2a9c032c012009e3d50ec15f9b66ec1097463e65aa55e/threejs_materials-1.2.5-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 90053685
+            "unpackedByteLength": 90053711
           },
           {
             "name": "traitlets",
@@ -3195,17 +3195,17 @@
           },
           {
             "name": "pillow",
-            "integrity": "sha256-7t9LdO2itaSysvtMAG1ild878p5FnhmMkOpI4TDcdcM=",
-            "byteLength": 7082423,
+            "integrity": "sha256-CEenY6/vtpW8kS18Ex5+BjLU7cHYaY9Y3avsjka4ttM=",
+            "byteLength": 6937129,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/67/ee/21d4e8536afd1a328f01b359b4d3997b291ffd35a237c877b331c1c3b71c/pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+                "https://files.pythonhosted.org/packages/f7/62/de5bdd77d935331f4f802edc11e4d82950f642caad6cb2f949837b8560e2/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 19517482
+            "unpackedByteLength": 19663320
           },
           {
             "name": "platformdirs",
@@ -3447,17 +3447,17 @@
           },
           {
             "name": "threejs-materials",
-            "integrity": "sha256-eR5G/DclR06OvPSD6BVwD0uvbn1716AE2YJc0N6tC2A=",
-            "byteLength": 89793013,
+            "integrity": "sha256-5iImQ4gEX6NWErUU3a7eyyE4McmKoLFAoQG78/3VJ6Y=",
+            "byteLength": 89793030,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
+                "https://files.pythonhosted.org/packages/d5/ea/d2980e85afcc62e2a9c032c012009e3d50ec15f9b66ec1097463e65aa55e/threejs_materials-1.2.5-py3-none-any.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 90053685
+            "unpackedByteLength": 90053711
           },
           {
             "name": "traitlets",

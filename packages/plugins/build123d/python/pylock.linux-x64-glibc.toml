@@ -359,14 +359,14 @@ hashes = { sha256 = "7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e2
 
 [[packages]]
 name = "pillow"
-version = "12.2.0"
+version = "12.3.0"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/67/ee/21d4e8536afd1a328f01b359b4d3997b291ffd35a237c877b331c1c3b71c/pillow-12.2.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-size = 7082423
-hashes = { sha256 = "eedf4b74eda2b5a4b2b2fb4c006d6295df3bf29e459e198c90ea48e130dc75c3" }
+name = "pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/f7/62/de5bdd77d935331f4f802edc11e4d82950f642caad6cb2f949837b8560e2/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+size = 6937129
+hashes = { sha256 = "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3" }
 
 [[packages]]
 name = "platformdirs"
@@ -557,14 +557,14 @@ hashes = { sha256 = "43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c
 
 [[packages]]
 name = "threejs-materials"
-version = "1.2.4"
+version = "1.2.5"
 index = "https://pypi.org/simple"
 
 [[packages.wheels]]
-name = "threejs_materials-1.2.4-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/ec/ae/bd040384fb244d112467e45a63b470ac1c6b09b998a457675d31db7aac13/threejs_materials-1.2.4-py3-none-any.whl"
-size = 89793013
-hashes = { sha256 = "791e46fc3725474e8ebcf483e815700f4baf6e7d7bd7a004d9825cd0dead0b60" }
+name = "threejs_materials-1.2.5-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/d5/ea/d2980e85afcc62e2a9c032c012009e3d50ec15f9b66ec1097463e65aa55e/threejs_materials-1.2.5-py3-none-any.whl"
+size = 89793030
+hashes = { sha256 = "e622264388045fa35612b514ddaedecb213831c98aa0b140a101bbf3fdd527a6" }
 
 [[packages]]
 name = "traitlets"

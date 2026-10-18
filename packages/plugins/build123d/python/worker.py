@@ -46,7 +46,10 @@ COMPUTE_ADMISSION_FLOOR = 5.0
 # EQ12: resident bounds for the Build123d worker.
 MAX_COMPUTE_RESIDENT_BYTES = 256 * 1024 * 1024
 MAX_COMPUTE_RESIDENT_ENTRIES = 4096
+# Lineage stamps across every native TShape key; each holds that TShape alive until the build ends.
 MAX_COMPUTE_STAMPS = 16384
+# Recent request ids remembered to refuse a replayed frame; ids only grow, so older ones cannot recur.
+MAX_SEEN_REQUESTS = 4096
 MAX_COMPUTE_LINEAGE_DEPTH = 8
 # D18: cheap conservative provisional charge, reconciled by the exported length off-path.
 COMPUTE_BASE_CHARGE_BYTES = 4096
@@ -361,6 +364,7 @@ class _ComputeCache:
         self.actions: dict[str, dict[str, Any]] = {}
         self.charges: dict[str, int] = {}
         self.stamps: dict[int, list[tuple[Any, str]]] = {}
+        self.stamp_count = 0
         self.logical_bytes = 0
         self.evictions = 0
         self.omissions = 0
@@ -369,10 +373,31 @@ class _ComputeCache:
     def stamp(self, shape: Any, digest: str) -> None:
         """Record lineage against the native TShape, holding a reference so it cannot be aliased."""
 
-        wrapped = shape.wrapped
-        while len(self.stamps) >= MAX_COMPUTE_STAMPS:
-            self.stamps.pop(next(iter(self.stamps)))
-        self.stamps.setdefault(_tshape_key(wrapped), []).append((_detached(wrapped), digest))
+        self.stamp_native(shape.wrapped, digest)
+
+    def stamp_native(self, wrapped: Any, digest: str) -> None:
+        """Stamp one native shape once, evicting the oldest keys past the entry bound."""
+
+        key = _tshape_key(wrapped)
+        if any(
+            stamped_digest == digest and stamped.IsEqual(wrapped)
+            for stamped, stamped_digest in self.stamps.get(key, ())
+        ):
+            return
+        while self.stamps and self.stamp_count >= MAX_COMPUTE_STAMPS:
+            self.stamp_count -= len(self.stamps.pop(next(iter(self.stamps))))
+        self.stamps.setdefault(key, []).append((_detached(wrapped), digest))
+        self.stamp_count += 1
+
+    def release_lineage(self) -> None:
+        """Drop every stamp when a build ends.
+
+        Each build re-imports the project, so no shape a stamp names outlives it except a resident, which a later
+        hit stamps again. Kept, stamps would hold every boolean result of the session alive.
+        """
+
+        self.stamps.clear()
+        self.stamp_count = 0
 
     def partners(self, wrapped: Any) -> list[tuple[Any, str]]:
         """Stamped shapes sharing this native TShape, verified past the hash bucket."""
@@ -422,7 +447,7 @@ class _ComputeCache:
         self.residents.clear()
         self.actions.clear()
         self.charges.clear()
-        self.stamps.clear()
+        self.release_lineage()
         self.logical_bytes = 0
         self.generation = generation
 
@@ -512,7 +537,7 @@ class _ComputeAdapter:
             "codec": {"id": "build123d.bintools-brep", "version": "1"},
         }
         digest = _action_digest(action)
-        self.cache.stamps.setdefault(_tshape_key(wrapped), []).append((_detached(wrapped), digest))
+        self.cache.stamp_native(wrapped, digest)
         return digest
 
     def _checkpoint(self) -> None:
@@ -631,6 +656,7 @@ class _ComputeAdapter:
         for shape_type, name, descriptor in reversed(self._patches):
             setattr(shape_type, name, descriptor)
         self._patches.clear()
+        self.cache.release_lineage()
 
 
 def _validate_parameters(parameters: Any, schema: dict[str, Any]) -> dict[str, Any]:
@@ -939,7 +965,7 @@ class Worker:
         self.artifacts = artifacts.resolve()
         self.handles: dict[str, tuple[Any, ...]] = {}
         self.motion: dict[str, Any] = {}
-        self.seen_requests: set[str] = set()
+        self.seen_requests: dict[str, None] = {}
         self.compute = _ComputeCache()
         self.cancelled = threading.Event()
 
@@ -1194,7 +1220,9 @@ class Worker:
                     raise ValueError("Protocol request has invalid fields")
                 if request_id in self.seen_requests:
                     raise ValueError(f"Duplicate protocol request id: {request_id}")
-                self.seen_requests.add(request_id)
+                self.seen_requests[request_id] = None
+                while len(self.seen_requests) > MAX_SEEN_REQUESTS:
+                    self.seen_requests.pop(next(iter(self.seen_requests)))
                 entry_path = params.get("entryPath") if isinstance(params.get("entryPath"), str) else None
                 result = self.dispatch(method, params)
                 _send({"protocolVersion": PROTOCOL_VERSION, "requestId": request_id, "result": result})

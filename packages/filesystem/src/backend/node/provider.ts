@@ -67,6 +67,7 @@ type NativeWatcher = {
   subscribe(
     directory: string,
     handler: (error: unknown, events: Array<{ path: string; type: string }>) => void,
+    options?: { ignore?: string[] },
   ): Promise<NativeSubscription>;
 };
 type WatchClosures = { pending: Set<Promise<void>>; admissions: Set<Promise<void>>; failures: unknown[] };
@@ -144,6 +145,28 @@ const isExcluded = (rootedPath: string, excludes: readonly string[]): boolean =>
   });
 
 const joinRooted = (base: string, child: string): string => (base === '' ? child : `${base}/${child}`);
+
+/**
+ * Absolute directories under one watched directory that `excludes` drop whole.
+ *
+ * Only a `prefix/**` pattern names a subtree; it becomes a native ignore when the prefix lies strictly inside the
+ * watched path. Matching stays authoritative in {@link isExcluded}: this only keeps the OS from reporting them.
+ *
+ * @param rootedPath - Rooted path of the watched directory.
+ * @param directory - Its absolute host path.
+ * @param excludes - The request's exclude patterns.
+ * @returns Absolute paths for the native watcher's `ignore`.
+ */
+const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly string[]): string[] =>
+  excludes.flatMap((pattern) => {
+    if (!pattern.endsWith('/**')) {
+      return [];
+    }
+    const prefix = pattern.slice(0, -3);
+    const inside =
+      rootedPath === '' ? prefix : prefix.startsWith(`${rootedPath}/`) ? prefix.slice(rootedPath.length + 1) : '';
+    return inside === '' ? [] : [path.join(directory, ...inside.split('/'))];
+  });
 
 /**
  * Disk-backed provider rooted at one absolute host directory.
@@ -407,19 +430,22 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     };
     const entries: Entry[] = [];
 
+    const ignored = (rootedPath: string): boolean =>
+      isExcluded(rootedPath, excludes) || inFlightTemporaryName.test(path.basename(rootedPath));
     const emit = (event: NodeFsWatchEvent): void => {
       if (unsubscribed) {
         return;
       }
-      if (
-        event.type !== 'reset' &&
-        (isExcluded(event.path, excludes) || inFlightTemporaryName.test(path.basename(event.path)))
-      ) {
+      if (event.type !== 'reset' && ignored(event.path)) {
         return;
       }
       handler(event);
     };
+    /* Filtered before the `stat`: a bulk change under an excluded tree must cost no syscall per event. */
     const classify = (rootedPath: string, absolute: string): void => {
+      if (ignored(rootedPath)) {
+        return;
+      }
       try {
         emit({ type: 'change', path: rootedPath, kind: statSync(absolute).isDirectory() ? 'dir' : 'file' });
       } catch (error) {
@@ -446,54 +472,61 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (entry.native && entry.directory === directory && entry.targetIsDirectory === targetIsDirectory) {
         return;
       }
-      const subscription = await native.subscribe(directory, (error, events) => {
-        if (unsubscribed) {
-          return;
-        }
-        if (error) {
-          if (admitting) {
-            admissionFailure =
-              error instanceof Error ? error : new Error('Native watch admission failed.', { cause: error });
+      /* Excluded subtrees of a watched directory are never watched natively, so a bulk change under one (a cache
+       * rebuild, an install) neither spends inotify watches nor reaches this process at all. */
+      const ignore = targetIsDirectory ? nativeIgnores(entry.rootedPath, directory, excludes) : [];
+      const subscription = await native.subscribe(
+        directory,
+        (error, events) => {
+          if (unsubscribed) {
             return;
           }
-          emit({ type: 'reset' });
-          return;
-        }
-        const current = desiredDirectory(entry);
-        if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
-          entry.rearming ??= open(entry)
-            .then(
-              () => {
-                emit({ type: 'reset' });
-              },
-              () => {
-                emit({ type: 'reset' });
-              },
-            )
-            .finally(() => {
-              entry.rearming = undefined;
-            });
-          trackWatchAdmission(this, entry.rearming);
-        }
-        for (const event of events) {
-          if (!isContained(watchBase, event.path)) {
+          if (error) {
+            if (admitting) {
+              admissionFailure =
+                error instanceof Error ? error : new Error('Native watch admission failed.', { cause: error });
+              return;
+            }
             emit({ type: 'reset' });
-            continue;
+            return;
           }
-          if (entry.targetIsDirectory) {
-            const relative = path.relative(entry.target, event.path);
-            if (relative === '' || !isContained(entry.target, event.path)) {
+          const current = desiredDirectory(entry);
+          if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
+            entry.rearming ??= open(entry)
+              .then(
+                () => {
+                  emit({ type: 'reset' });
+                },
+                () => {
+                  emit({ type: 'reset' });
+                },
+              )
+              .finally(() => {
+                entry.rearming = undefined;
+              });
+            trackWatchAdmission(this, entry.rearming);
+          }
+          for (const event of events) {
+            if (!isContained(watchBase, event.path)) {
+              emit({ type: 'reset' });
               continue;
             }
-            if (!request.recursive && relative.includes(path.sep)) {
-              continue;
+            if (entry.targetIsDirectory) {
+              const relative = path.relative(entry.target, event.path);
+              if (relative === '' || !isContained(entry.target, event.path)) {
+                continue;
+              }
+              if (!request.recursive && relative.includes(path.sep)) {
+                continue;
+              }
+              classify(joinRooted(entry.rootedPath, relative.split(path.sep).join('/')), event.path);
+            } else if (event.path === entry.target) {
+              classify(entry.rootedPath, entry.target);
             }
-            classify(joinRooted(entry.rootedPath, relative.split(path.sep).join('/')), event.path);
-          } else if (event.path === entry.target) {
-            classify(entry.rootedPath, entry.target);
           }
-        }
-      });
+        },
+        ignore.length === 0 ? undefined : { ignore },
+      );
       if (unsubscribed) {
         close(subscription);
         return;

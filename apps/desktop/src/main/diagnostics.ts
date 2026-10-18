@@ -371,12 +371,14 @@ export const kernelUtilityDiagnostics = (
   onUtilityStderr: ({ hostId, chunk }) => {
     log.log('warn', 'kernel.stderr', { hostId, chunk: chunk.trimEnd() });
   },
-  onUtilityExit: ({ hostId, exitCode, released, stderrTail }) => {
+  onUtilityExit: ({ hostId, exitCode, released, stderrTail, peakResidentBytes }) => {
     log.log(exitCode === 0 || released ? 'info' : 'error', 'kernel.exit', {
       hostId,
       code: exitCode,
       released,
       stderrTail,
+      /* D-DT-15e: how large the utility grew, so a field log shows which kernels approach the resident limit. */
+      peakResidentBytes,
     });
   },
 });

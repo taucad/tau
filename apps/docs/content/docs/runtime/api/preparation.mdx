@@ -51,7 +51,7 @@ A plugin may also name a `launchSet`: the few files its kernel's process loads f
 
 ## Native kernel deployments
 
-A native kernel package binds a deployment (its `tau-plugin.json`, seal step and launch set) to its kernel registrations, so listing the plugin is the whole integration. `nativeDeploymentsOf` in `@taucad/native-process-core/store` reads them from a resolved runtime.
+A native kernel package binds its deployment (`tau-plugin.json`, seal step, launch set) to its registrations, so listing the plugin is the whole integration; `nativeDeploymentsOf` reads deployments from a resolved runtime.
 
 ## Receipts
 

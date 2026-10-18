@@ -251,7 +251,7 @@ catalog:
   oxc-transform-react: 0.148.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
-  replicad: npm:@taulabs/replicad@1.1.0-taulabs.0
+  replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0

@@ -2166,7 +2166,7 @@ export declare type ShapeConfig = {
 };
 
 export declare interface ShapeEdgeMesh {
-    lines: number[];
+    lines: Float32Array;
     edgeGroups: {
         start: number;
         count: number;
@@ -2177,9 +2177,9 @@ export declare interface ShapeEdgeMesh {
 declare type ShapeExtremumFilter = <Type extends FaceOrEdge>(filter: FilterFcn<Type>) => boolean;
 
 export declare interface ShapeMesh {
-    triangles: number[];
-    vertices: number[];
-    normals: number[];
+    triangles: Uint32Array;
+    vertices: Float32Array;
+    normals: Float32Array;
     faceGroups: {
         start: number;
         count: number;

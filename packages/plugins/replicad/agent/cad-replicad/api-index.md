@@ -1,6 +1,6 @@
 # replicad API index
 
-replicad 1.1.0-taulabs.0 · 804 symbols · extracted by TypeScript 5.9.3.
+replicad 1.1.0-taulabs.1 · 804 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 

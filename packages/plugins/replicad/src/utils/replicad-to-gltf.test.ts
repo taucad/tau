@@ -17,12 +17,12 @@ function createSimpleGeometry(overrides: Partial<GeometryReplicad> = {}): Geomet
     format: 'replicad',
     name: 'TestShape',
     faces: {
-      vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-      triangles: [0, 1, 2],
-      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+      vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      triangles: new Uint32Array([0, 1, 2]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
       faceGroups: [],
     },
-    edges: { lines: [], edgeGroups: [] },
+    edges: { lines: new Float32Array([]), edgeGroups: [] },
     ...overrides,
   };
 }
@@ -96,16 +96,16 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should assign stable per-component occurrence topology identifiers', () => {
     const first = createSimpleGeometry({
       faces: {
-        triangles: [0, 1, 2, 0, 2, 3],
-        vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+        triangles: new Uint32Array([0, 1, 2, 0, 2, 3]),
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [
           { start: 0, count: 3, faceId: 123_456 },
           { start: 3, count: 3, faceId: 654_321 },
         ],
       },
       edges: {
-        lines: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+        lines: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0]),
         edgeGroups: [
           { start: 0, count: 2, edgeId: 111_111 },
           { start: 2, count: 2, edgeId: 222_222 },
@@ -144,9 +144,9 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should produce a mesh with correct triangle count', async () => {
     const geometry = createSimpleGeometry({
       faces: {
-        vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
-        triangles: [0, 1, 2, 0, 2, 3],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+        triangles: new Uint32Array([0, 1, 2, 0, 2, 3]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [],
       },
     });
@@ -163,9 +163,9 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should omit zero-area triangles and preserve the remaining face group', async () => {
     const geometry = createSimpleGeometry({
       faces: {
-        vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0],
-        triangles: [0, 1, 3, 0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0]),
+        triangles: new Uint32Array([0, 1, 3, 0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [
           { start: 0, count: 3, faceId: 1 },
           { start: 3, count: 3, faceId: 2 },
@@ -357,7 +357,7 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should include edge line primitives when edges are provided', async () => {
     const geometry = createSimpleGeometry({
       edges: {
-        lines: [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
+        lines: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]),
         edgeGroups: [
           { start: 0, count: 6, edgeId: 1 },
           { start: 6, count: 6, edgeId: 2 },
@@ -395,13 +395,13 @@ describe('convertReplicadGeometriesToGltf', () => {
     const geometry = createSimpleGeometry({
       name: 'planet gear',
       faces: {
-        vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-        triangles: [0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [{ start: 0, count: 3, faceId: 7 }],
       },
       edges: {
-        lines: [0, 0, 0, 1, 0, 0],
+        lines: new Float32Array([0, 0, 0, 1, 0, 0]),
         edgeGroups: [{ start: 0, count: 6, edgeId: 11 }],
       },
     });
@@ -434,13 +434,13 @@ describe('convertReplicadGeometriesToGltf', () => {
     const geometry = createSimpleGeometry({
       name: 'Housing',
       faces: {
-        vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-        triangles: [0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [{ start: 0, count: 3, faceId: 123 }],
       },
       edges: {
-        lines: [0, 0, 0, 1, 0, 0],
+        lines: new Float32Array([0, 0, 0, 1, 0, 0]),
         edgeGroups: [{ start: 0, count: 6, edgeId: 456 }],
       },
     });
@@ -470,13 +470,13 @@ describe('convertReplicadGeometriesToGltf', () => {
     const geometry = createSimpleGeometry({
       name: 'ExportShape',
       faces: {
-        vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-        triangles: [0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [{ start: 0, count: 3, faceId: 123 }],
       },
       edges: {
-        lines: [0, 0, 0, 1, 0, 0],
+        lines: new Float32Array([0, 0, 0, 1, 0, 0]),
         edgeGroups: [{ start: 0, count: 6, edgeId: 456 }],
       },
     });
@@ -515,9 +515,9 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should transform coordinates from z-up to y-up and mm to meters', async () => {
     const geometry = createSimpleGeometry({
       faces: {
-        vertices: [1000, 2000, 3000, 0, 0, 0, 1000, 0, 0],
-        triangles: [0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([1000, 2000, 3000, 0, 0, 0, 1000, 0, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [],
       },
     });
@@ -535,9 +535,9 @@ describe('convertReplicadGeometriesToGltf', () => {
   it('should export z-up millimeter coordinates when requested', async () => {
     const geometry = createSimpleGeometry({
       faces: {
-        vertices: [50, 25, 10, 0, 0, 0, 50, 0, 0],
-        triangles: [0, 1, 2],
-        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        vertices: new Float32Array([50, 25, 10, 0, 0, 0, 50, 0, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         faceGroups: [],
       },
     });
@@ -592,9 +592,9 @@ describe('convertReplicadGeometriesToGltf', () => {
       createSimpleGeometry({
         name: 'Base',
         faces: {
-          vertices: [12, -34, 56, 0, 0, 0, 12, 0, 0],
-          triangles: [0, 1, 2],
-          normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+          vertices: new Float32Array([12, -34, 56, 0, 0, 0, 12, 0, 0]),
+          triangles: new Uint32Array([0, 1, 2]),
+          normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
           faceGroups: [],
         },
       }),

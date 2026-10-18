@@ -335,13 +335,13 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
     roughness,
     material,
     faces: {
-      triangles: [],
-      vertices: [],
-      normals: [],
+      triangles: new Uint32Array(0),
+      vertices: new Float32Array(0),
+      normals: new Float32Array(0),
       faceGroups: [],
     },
     edges: {
-      lines: [],
+      lines: new Float32Array(0),
       edgeGroups: [],
     },
   };
@@ -400,13 +400,13 @@ function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): Geomet
     roughness,
     material,
     faces: {
-      triangles: [],
-      vertices: [],
-      normals: [],
+      triangles: new Uint32Array(0),
+      vertices: new Float32Array(0),
+      normals: new Float32Array(0),
       faceGroups: [],
     },
     edges: {
-      lines: [],
+      lines: new Float32Array(0),
       edgeGroups: [],
     },
   };

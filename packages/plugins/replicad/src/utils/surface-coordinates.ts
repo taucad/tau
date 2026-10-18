@@ -60,7 +60,9 @@ export function addSurfaceCoordinates(
                 derivatives.D1U.Transform(inverseLocation);
                 derivatives.D1V.Transform(inverseLocation);
               }
-              const [nx, ny, nz] = mesh.normals.slice(vertex * 3, vertex * 3 + 3) as [number, number, number];
+              const nx = mesh.normals[vertex * 3]!;
+              const ny = mesh.normals[vertex * 3 + 1]!;
+              const nz = mesh.normals[vertex * 3 + 2]!;
               let tx = derivatives.D1U.X();
               let ty = derivatives.D1U.Y();
               let tz = derivatives.D1U.Z();

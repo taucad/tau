@@ -7,6 +7,13 @@ import { sha256StringSync } from '@taucad/utils/hash';
 import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
 import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
+import {
+  createPythonSession,
+  createPythonWorkspaceMirror,
+  pyprojectPath,
+  PythonWorkerError,
+} from '@taucad/python-kernel-core';
+import type { PythonSession } from '@taucad/python-kernel-core';
 
 import {
   build123dAnalysisSchema,
@@ -23,9 +30,9 @@ import {
   meshPreviewWithinBudget,
 } from '#build123d-tessellation.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
-import { Build123dWorkerError, PythonSession } from '#python-session.js';
-import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
-import { libraryVersionMismatches, pyprojectPath } from '#project-manifest.js';
+import { createBuild123dResidentBinding } from '#build123d-resident.js';
+import { build123dWorker } from '#build123d-worker.js';
+import { libraryVersionMismatches } from '#project-manifest.js';
 
 const computeNamespace = 'build123d.operation.v1';
 const computeProducerVersion = 'build123d@0.13.0|python@3.13|ocp@8.0.1.0.0|occt@8.0.1|worker-protocol@1|adapter@3';
@@ -74,7 +81,7 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   if (error instanceof Build123dTessellationRefusal) {
     return [error.issue];
   }
-  if (error instanceof Build123dWorkerError) {
+  if (error instanceof PythonWorkerError) {
     return error.issues.map(({ code: pythonCode, type: pythonType, ...issue }) => ({
       ...issue,
       code: 'RUNTIME',
@@ -258,10 +265,11 @@ export const build123dKernel = defineKernel({
   },
 
   async initialize(options, runtime) {
-    const mirror = await createWorkspaceMirror();
-    const session = new PythonSession({
+    const mirror = await createPythonWorkspaceMirror(build123dWorker);
+    const session = createPythonSession({
       ...options,
       ...mirror,
+      worker: build123dWorker,
       logger: runtime.logger,
     });
     const observedDependencies: string[] = [];
@@ -269,7 +277,7 @@ export const build123dKernel = defineKernel({
     return {
       mirror,
       session,
-      resident: session.createResidentBinding(),
+      resident: createBuild123dResidentBinding(session),
       observedDependencies,
       warmCandidates,
       computeProducer: {
@@ -388,7 +396,7 @@ export const build123dKernel = defineKernel({
             });
           }
           context.resident.track(admitted);
-          context.session.observeResidentBytes(result.compute.stats.logicalBytes);
+          context.resident.observeResidentBytes(result.compute.stats.logicalBytes);
           scope.announce({ entries: announcements });
           context.warmCandidates = [...new Set([...context.warmCandidates, ...admitted])].slice(
             -build123dComputeDescriptorLimit,

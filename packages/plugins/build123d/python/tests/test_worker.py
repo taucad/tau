@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import base64
-import hashlib
-import importlib.util
 import inspect
 import io
 import json
 import os
-import queue
 import runpy
 import sys
 import tempfile
@@ -22,8 +17,13 @@ from unittest.mock import MagicMock, PropertyMock, patch
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PYTHON_ROOT))
 
-import glb
 import worker
+from tau_kernel import glb
+from tau_kernel.protocol import Artifacts, WorkerContext
+
+
+def make_worker(root: Path, artifacts: Path) -> worker.Worker:
+    return worker.Worker(WorkerContext(root.resolve(), Artifacts(artifacts), threading.Event()))
 
 
 MODEL = """from dataclasses import dataclass
@@ -77,224 +77,6 @@ def compute_config() -> dict[str, object]:
 
 
 class WorkerTest(unittest.TestCase):
-    def test_parent_watchdog_terminates_an_orphaned_worker_group(self) -> None:
-        temporary_root = Path("/tmp/tau-build123d-test")
-        liveness = iter((True, True, False))
-        waits: list[float] = []
-        terminations: list[Path] = []
-        worker._watch_parent(42, temporary_root, lambda _pid: next(liveness), waits.append, terminations.append)
-        self.assertEqual(waits, [0.25, 0.25])
-        self.assertEqual(terminations, [temporary_root])
-
-        with patch("worker.os.kill") as kill:
-            self.assertTrue(worker._parent_is_alive(42))
-            kill.assert_called_once_with(42, 0)
-        with patch("worker.os.kill", side_effect=PermissionError):
-            self.assertTrue(worker._parent_is_alive(42))
-        with patch("worker.os.kill", side_effect=ProcessLookupError):
-            self.assertFalse(worker._parent_is_alive(42))
-
-        with (
-            patch("worker.os.name", "posix"),
-            patch("worker.signal.SIGKILL", 9, create=True),
-            patch("worker.shutil.rmtree") as remove_tree,
-            patch("worker.os.killpg", create=True) as kill_group,
-            patch("worker.os.getpgrp", return_value=7, create=True),
-            patch("worker.os._exit") as exit_process,
-        ):
-            worker._terminate_orphaned_process_tree(temporary_root)
-        remove_tree.assert_called_once_with(temporary_root, ignore_errors=True)
-        kill_group.assert_called_once_with(7, 9)
-        exit_process.assert_called_once_with(1)
-
-        with (
-            patch("worker.os.name", "posix"),
-            patch("worker.signal.SIGKILL", 9, create=True),
-            patch("worker.os.getpgrp", return_value=7, create=True),
-            patch("worker.shutil.rmtree"),
-            patch("worker.os.killpg", side_effect=OSError, create=True),
-            patch("worker.os._exit") as exit_process,
-        ):
-            worker._terminate_orphaned_process_tree(temporary_root)
-        exit_process.assert_called_once_with(1)
-
-        with (
-            patch("worker.shutil.rmtree"),
-            patch.object(worker.os, "name", "nt"),
-            patch("worker.os.killpg", create=True) as kill_group,
-            patch("worker.os._exit") as exit_process,
-        ):
-            worker._terminate_orphaned_process_tree(temporary_root)
-        kill_group.assert_not_called()
-        exit_process.assert_called_once_with(1)
-
-        thread = MagicMock()
-        with (
-            patch("worker.threading.Thread", return_value=thread) as thread_type,
-            patch("worker._parent_is_alive", return_value=False),
-        ):
-            worker._start_parent_watchdog(42, temporary_root)
-        thread_type.assert_not_called()
-        with (
-            patch("worker.threading.Thread", return_value=thread) as thread_type,
-            patch("worker._parent_is_alive", return_value=True),
-        ):
-            worker._start_parent_watchdog(42, temporary_root)
-        thread_type.assert_called_once_with(
-            target=worker._watch_parent,
-            args=(42, temporary_root),
-            name="tau-parent-watchdog",
-            daemon=True,
-        )
-        thread.start.assert_called_once()
-
-    def test_protocol_output_and_stdout_isolation(self) -> None:
-        output = io.StringIO()
-        with patch.object(worker, "_PROTOCOL_OUTPUT", output):
-            worker._send({"ok": True})
-            self.assertEqual(output.getvalue(), '{"ok":true}\n')
-            with patch.object(worker, "MAX_FRAME_BYTES", 1), self.assertRaisesRegex(RuntimeError, "exceeds"):
-                worker._send({"long": True})
-
-        protocol = io.StringIO()
-        redirected = io.StringIO()
-        with (
-            patch("worker.os.dup", side_effect=[10, 11]),
-            patch("worker.os.dup2") as dup2,
-            patch("worker.os.fdopen", side_effect=[protocol, redirected]),
-            patch.object(worker.sys, "stdout", io.StringIO()),
-        ):
-            worker._isolate_stdout()
-            dup2.assert_called_once_with(2, 1)
-            self.assertIs(worker._PROTOCOL_OUTPUT, protocol)
-            self.assertIs(worker.sys.stdout, redirected)
-
-    def test_runtime_issue_locations(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            code = compile("raise ValueError('boom')", str(root / "main.py"), "exec")
-            try:
-                exec(code, {})
-            except ValueError as error:
-                issue = worker._runtime_issue(error, root, "fallback.py")
-            self.assertEqual(issue["location"]["fileName"], "main.py")
-            error = ValueError("outside")
-            self.assertEqual(worker._runtime_issue(error, root, "fallback.py")["location"]["fileName"], "fallback.py")
-            self.assertNotIn("location", worker._runtime_issue(ValueError(), root, None))
-
-    def test_project_modules_and_eviction(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            parent = Path(directory).resolve()
-            root = parent / "workspace"
-            root.mkdir()
-            (root / "package").mkdir()
-            (root / "real").mkdir()
-            (root / "link").symlink_to(root / "real", target_is_directory=True)
-            sibling = parent / "workspace-sibling"
-            sibling.mkdir()
-            known = frozenset(sys.modules)
-            module_paths = {
-                "tau_test_project": root / "module.py",
-                "tau_test_package": root / "package" / "module.py",
-                "tau_test_linked": root / "link" / "module.py",
-                "tau_test_sibling": sibling / "module.py",
-            }
-            loaded_modules = []
-            for name, path in module_paths.items():
-                path.write_text("VALUE = 1\n", encoding="utf-8")
-                spec = importlib.util.spec_from_file_location(name, path)
-                assert spec is not None and spec.loader is not None
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[name] = module
-                spec.loader.exec_module(module)
-                loaded_modules.append(module)
-            project_module, package_module, linked_module, sibling_module = loaded_modules
-            native_module = types.ModuleType("tau_test_native")
-            native_module.__file__ = str(root / "module.so")
-            no_file = types.ModuleType("tau_test_none")
-            relative_module = types.ModuleType("tau_test_relative")
-            relative_module.__file__ = "relative.py"
-            dot_py_module = types.ModuleType("tau_test_dot_py")
-            dot_py_module.__file__ = str(root / ".py")
-            modules = (
-                project_module,
-                package_module,
-                linked_module,
-                sibling_module,
-                native_module,
-                no_file,
-                relative_module,
-                dot_py_module,
-            )
-            for module in modules:
-                sys.modules[module.__name__] = module
-            try:
-                worker._record_project_modules(root, known)
-                self.assertEqual(
-                    dict(worker._LOADED_PROJECT_MODULES),
-                    {
-                        project_module.__name__: "module.py",
-                        package_module.__name__: "package/module.py",
-                        linked_module.__name__: "link/module.py",
-                    },
-                )
-                # Modules already loaded when the build started are never the build's own imports.
-                worker._record_project_modules(root, frozenset(sys.modules))
-                self.assertEqual(dict(worker._LOADED_PROJECT_MODULES), {})
-
-                worker._record_project_modules(root, known)
-                with patch("worker.importlib.invalidate_caches") as invalidate:
-                    worker._evict_project_modules()
-                    invalidate.assert_called_once()
-                self.assertEqual(dict(worker._LOADED_PROJECT_MODULES), {})
-                self.assertNotIn(project_module.__name__, sys.modules)
-                self.assertNotIn(package_module.__name__, sys.modules)
-                self.assertNotIn(linked_module.__name__, sys.modules)
-                self.assertIn(sibling_module.__name__, sys.modules)
-            finally:
-                worker._LOADED_PROJECT_MODULES.clear()
-                for module in modules:
-                    sys.modules.pop(module.__name__, None)
-
-    def test_parameter_validation(self) -> None:
-        schema = {
-            "properties": {
-                "enabled": {"type": "boolean", "default": True},
-                "count": {"type": "integer", "default": 2, "minimum": 1, "maximum": 3, "multipleOf": 1},
-                "ratio": {"type": "number", "default": 1.5, "exclusiveMinimum": 0, "exclusiveMaximum": 2},
-                "name": {"type": "string", "default": "part", "enum": ["part"], "minLength": 1, "maxLength": 5, "pattern": "^p"},
-            }
-        }
-        self.assertEqual(worker._validate_parameters({"count": 3}, schema)["count"], 3)
-        cases = (
-            ([], "object"),
-            ({"other": 1}, "Unknown"),
-            ({"enabled": 1}, "must be boolean"),
-            ({"count": True}, "must be integer"),
-            ({"ratio": float("inf")}, "must be number"),
-            ({"name": "other"}, "one of"),
-            ({"count": 0}, "minimum"),
-            ({"count": 4}, "maximum"),
-            ({"ratio": 0}, "exclusiveMinimum"),
-            ({"ratio": 2}, "exclusiveMaximum"),
-            ({"name": "partsx"}, "one of"),
-        )
-        for value, message in cases:
-            with self.subTest(value=value), self.assertRaisesRegex((TypeError, ValueError), message):
-                worker._validate_parameters(value, schema)
-        string_schema = {
-            "properties": {"name": {"type": "string", "default": "a", "minLength": 1, "maxLength": 1, "pattern": "^a"}}
-        }
-        with self.assertRaisesRegex(ValueError, "minLength"):
-            worker._validate_parameters({"name": ""}, string_schema)
-        with self.assertRaisesRegex(ValueError, "maxLength"):
-            worker._validate_parameters({"name": "aa"}, string_schema)
-        with self.assertRaisesRegex(ValueError, "pattern"):
-            worker._validate_parameters({"name": "b"}, string_schema)
-        multiple_schema = {"properties": {"count": {"type": "integer", "default": 2, "multipleOf": 2}}}
-        with self.assertRaisesRegex(ValueError, "multipleOf"):
-            worker._validate_parameters({"count": 3}, multiple_schema)
-
     def test_load_model_success_and_contract_errors(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -336,23 +118,6 @@ class WorkerTest(unittest.TestCase):
             )
             self.assertEqual([shape.label for shape in worker._load_model(root, "main.py", {})[0]], ["left", "right"])
 
-            with patch("worker.importlib.util.spec_from_file_location", return_value=None), self.assertRaisesRegex(RuntimeError, "Unable"):
-                entry.write_text(MODEL, encoding="utf-8")
-                worker._load_model(root, "main.py", {})
-
-            analysis = {"jsonSchema": {"properties": {}}, "defaultParameters": {}, "resolved": [], "unresolved": []}
-            for source, message in (
-                ("Params = 1\ndef main(params): return 1\n", "dataclass"),
-                ("from dataclasses import dataclass\n@dataclass\nclass Params: pass\ndef main(params): return 1\n", "frozen"),
-            ):
-                entry.write_text(source, encoding="utf-8")
-                with (
-                    self.subTest(message=message),
-                    patch("worker.analyze_project", return_value=analysis),
-                    self.assertRaisesRegex(TypeError, message),
-                ):
-                    worker._load_model(root, "main.py", {})
-
     def test_duplicate_root_labels_have_distinct_stable_occurrence_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -378,41 +143,6 @@ class WorkerTest(unittest.TestCase):
             entry.write_text(MODEL + "\nmotion = 42\n")
             with self.assertRaisesRegex(TypeError, "motion must be a callable"):
                 worker._load_model(root, "main.py", {}, motion=captured.append)
-
-    def test_project_module_memo_is_invalidated_by_an_edited_dependency(self) -> None:
-        """W14: the per-interpreter memo evicts the modules the previous build imported, failed builds included."""
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            helper = root / "helper.py"
-            entry = root / "main.py"
-            helper.write_text("WIDTH = 2.0\n", encoding="utf-8")
-            entry.write_text(HELPER_MODEL, encoding="utf-8")
-            sys.path.insert(0, str(root))
-            try:
-                # The worker runs as `python -I -B` (python-session.ts:110); without that, edits inside one
-                # mtime tick would be served from a stale __pycache__ entry instead of from the memo.
-                with patch.object(sys, "dont_write_bytecode", True):
-                    shapes, observed = worker._load_model(root, "main.py", {})
-                    self.assertEqual(observed, ["helper.py", "main.py"])
-                    self.assertAlmostEqual(shapes[0].bounding_box().size.X, 2.0)
-
-                    # A build that imports the dependency and then fails still records it for the next eviction.
-                    helper.write_text("WIDTH = 7.0\n", encoding="utf-8")
-                    entry.write_text(
-                        HELPER_MODEL.replace("return Box", "raise ValueError('boom')\n    return Box"), encoding="utf-8"
-                    )
-                    with self.assertRaisesRegex(ValueError, "boom"):
-                        worker._load_model(root, "main.py", {})
-
-                    helper.write_text("WIDTH = 9.0\n", encoding="utf-8")
-                    entry.write_text(HELPER_MODEL, encoding="utf-8")
-                    shapes, observed = worker._load_model(root, "main.py", {})
-                    self.assertAlmostEqual(shapes[0].bounding_box().size.X, 9.0)
-                    self.assertEqual(observed, ["helper.py", "main.py"])
-            finally:
-                sys.path.remove(str(root))
-                worker._evict_project_modules()
 
     def test_geometry_helpers_and_worker_dispatch(self) -> None:
         from build123d import Axis, Box, Compound, Cylinder, Sphere
@@ -451,9 +181,7 @@ class WorkerTest(unittest.TestCase):
             artifacts = root / "artifacts"
             artifacts.mkdir()
             (root / "main.py").write_text(MODEL, encoding="utf-8")
-            runtime = worker.Worker(root, artifacts)
-            with self.assertRaisesRegex(RuntimeError, "escaped"):
-                runtime._artifact("../../../../escape")
+            runtime = make_worker(root, artifacts)
             analysis = runtime.dispatch("analyze", {"entryPath": "main.py"})
             self.assertEqual(analysis["defaultParameters"], {"width": 2.0})
             built = runtime.dispatch("build", {"entryPath": "main.py", "parameters": {"width": 4}})
@@ -504,7 +232,8 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(runtime.dispatch("shutdown", {}), {"shutdown": True})
             with self.assertRaisesRegex(ValueError, "Unknown"):
                 runtime.dispatch("other", {})
-            runtime.handles = {str(index): () for index in range(worker.MAX_HANDLES)}
+            while len(runtime.handles) < worker.MAX_HANDLES:
+                runtime.handles.retain(())
             with self.assertRaisesRegex(RuntimeError, "limit"):
                 runtime.dispatch("build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config()})
 
@@ -546,7 +275,7 @@ class WorkerTest(unittest.TestCase):
             root = Path(directory)
             artifacts = root / "artifacts"
             artifacts.mkdir()
-            runtime = worker.Worker(root, artifacts)
+            runtime = make_worker(root, artifacts)
             runtime.handles["small"] = (Sphere(5),)
             runtime.handles["large"] = (Sphere(500),)
             runtime.handles["empty"] = ()
@@ -875,11 +604,6 @@ class WorkerTest(unittest.TestCase):
 
         from build123d import Solid
 
-        self.assertTrue(worker._is_cancel_frame(b'{"method":"cancel"}'))
-        self.assertFalse(worker._is_cancel_frame(b'{"method":"build"}'))
-        self.assertFalse(worker._is_cancel_frame(b"not json"))
-        self.assertFalse(worker._is_cancel_frame(b"[]"))
-
         cache = worker._ComputeCache()
         cancelled = threading.Event()
         with patch.object(worker, "COMPUTE_ADMISSION_FLOOR", 0.0), worker._ComputeAdapter(cache, compute_config(), cancelled) as adapter:
@@ -905,7 +629,7 @@ class WorkerTest(unittest.TestCase):
             root = Path(directory)
             artifacts = root / "artifacts"
             artifacts.mkdir()
-            runtime = worker.Worker(root, artifacts)
+            runtime = make_worker(root, artifacts)
             digest = worker._action_digest({"operation": "Solid.make_box"})
             runtime.compute.put(digest, Solid.make_box(6, 7, 8), {"operation": "Solid.make_box"}, 4096)
 
@@ -940,7 +664,7 @@ class WorkerTest(unittest.TestCase):
                 path.write_bytes(data)
                 return {"artifactPath": str(path), "byteLength": len(data)}
 
-            fresh = worker.Worker(root, artifacts)
+            fresh = make_worker(root, artifacts)
             imported = fresh.dispatch(
                 "compute.import", {"descriptors": exported["descriptors"], "bundle": bundle(payload)}
             )
@@ -953,7 +677,7 @@ class WorkerTest(unittest.TestCase):
 
             corrupt = [{**exported["descriptors"][0], "contentDigest": f"sha256:{'0' * 64}"}]
             self.assertEqual(
-                worker.Worker(root, artifacts).dispatch(
+                make_worker(root, artifacts).dispatch(
                     "compute.import", {"descriptors": corrupt, "bundle": bundle(payload)}
                 ),
                 {"imported": [], "omitted": [digest]},
@@ -962,7 +686,7 @@ class WorkerTest(unittest.TestCase):
             unreadable[0]["contentDigest"] = worker._content_digest(payload[:4])
             unreadable[0]["actionDigest"] = worker._action_digest(unreadable[0]["action"])
             self.assertEqual(
-                worker.Worker(root, artifacts).dispatch(
+                make_worker(root, artifacts).dispatch(
                     "compute.import", {"descriptors": unreadable, "bundle": bundle(payload[:4])}
                 ),
                 {"imported": [], "omitted": [digest]},
@@ -978,7 +702,7 @@ class WorkerTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "descriptor is invalid"):
                 runtime.dispatch("compute.import", {"descriptors": [None], "bundle": bundle(b"")})
             with self.assertRaisesRegex(ValueError, "descriptor is invalid"):
-                partial = worker.Worker(root, artifacts)
+                partial = make_worker(root, artifacts)
                 partial.dispatch(
                     "compute.import",
                     {
@@ -988,7 +712,7 @@ class WorkerTest(unittest.TestCase):
                 )
             self.assertEqual(partial.compute.stats()["entries"], 0)
             with self.assertRaisesRegex(ValueError, "trailing bytes"):
-                partial = worker.Worker(root, artifacts)
+                partial = make_worker(root, artifacts)
                 partial.dispatch(
                     "compute.import",
                     {"descriptors": exported["descriptors"], "bundle": bundle(payload + b"x")},
@@ -1026,14 +750,14 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(runtime.compute.stats()["entries"], 0)
 
     def test_build_announces_bounded_admissions_and_cancels_out_of_band(self) -> None:
-        """The build result carries bounded descriptors; a cancel frame never consumes a request slot."""
+        """The build result carries bounded descriptors and its stats; a build without compute carries none."""
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
             artifacts.mkdir()
             (root / "main.py").write_text(CUT_MODEL, encoding="utf-8")
-            runtime = worker.Worker(root, artifacts)
+            runtime = make_worker(root, artifacts)
             with patch.object(worker, "COMPUTE_ADMISSION_FLOOR", 0.0):
                 result = runtime.dispatch(
                     "build", {"entryPath": "main.py", "parameters": {}, "compute": compute_config()}
@@ -1047,128 +771,6 @@ class WorkerTest(unittest.TestCase):
             self.assertGreaterEqual(warm["compute"]["hits"], 1)
             self.assertEqual(warm["compute"]["announcements"], [])
             self.assertNotIn("compute", runtime.dispatch("build", {"entryPath": "main.py", "parameters": {}}))
-
-            frames: queue.Queue = queue.Queue()
-            runtime.cancelled.clear()
-            runtime._read_frames(frames, iter([b'{"method":"cancel"}\n', b'{"method":"mesh"}\n']))
-            self.assertTrue(runtime.cancelled.is_set())
-            self.assertEqual(frames.get(), b'{"method":"mesh"}\n')
-            self.assertIsNone(frames.get())
-
-    def test_run_protocol_errors_and_shutdown(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            artifacts = root / "artifacts"
-            artifacts.mkdir()
-            (root / "main.py").write_text(MODEL, encoding="utf-8")
-            frames = [
-                {"protocolVersion": 1, "requestId": "a", "method": "analyze", "params": {"entryPath": "main.py"}},
-                {"protocolVersion": 1, "requestId": "syntax", "method": "analyze", "params": {"entryPath": "bad.py"}},
-                {"protocolVersion": 1, "requestId": "a", "method": "analyze", "params": {}},
-                {"protocolVersion": 2},
-                {"protocolVersion": 1, "requestId": 1, "method": "x", "params": []},
-                {"protocolVersion": 1, "requestId": "z", "method": "other", "params": {"entryPath": "main.py"}},
-                {"protocolVersion": 1, "requestId": "end", "method": "shutdown", "params": {}},
-            ]
-            (root / "bad.py").write_text("(", encoding="utf-8")
-            stdin = types.SimpleNamespace(buffer=io.BytesIO(b"".join(json.dumps(frame).encode() + b"\n" for frame in frames)))
-            sent: list[dict[str, object]] = []
-            with (
-                patch.object(worker.sys, "stdin", stdin),
-                patch("worker._send", side_effect=sent.append),
-                patch("worker.importlib.import_module", wraps=worker.importlib.import_module) as import_module,
-            ):
-                self.assertTrue(worker.Worker(root, artifacts).run())
-            import_module.assert_any_call("build123d")
-            self.assertEqual(sent[0]["type"], "ready")
-            self.assertIn("result", sent[1])
-            self.assertEqual(sent[-1]["result"], {"shutdown": True})
-            self.assertGreaterEqual(sum("error" in frame for frame in sent), 4)
-
-            oversized = types.SimpleNamespace(buffer=[b"x" * (worker.MAX_FRAME_BYTES + 1)])
-            sent.clear()
-            with patch.object(worker.sys, "stdin", oversized), patch("worker._send", side_effect=sent.append):
-                self.assertFalse(worker.Worker(root, artifacts).run())
-            self.assertIn("error", sent[-1])
-
-    def test_main_creates_directories_and_runs_worker(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="tau-build123d-") as directory:
-            root = Path(directory)
-            workspace = root / "workspace"
-            artifacts = root / "artifacts"
-            fake_worker = MagicMock()
-            fake_worker.run.return_value = True
-            with (
-                patch.object(
-                    sys,
-                    "argv",
-                    [
-                        "worker.py",
-                        "--workspace",
-                        str(workspace),
-                        "--artifacts",
-                        str(artifacts),
-                        "--parent-pid",
-                        str(os.getppid()),
-                    ],
-                ),
-                patch("worker._isolate_stdout"),
-                patch("worker._start_parent_watchdog") as start_watchdog,
-                patch("worker.Worker", return_value=fake_worker),
-            ):
-                worker.main()
-            self.assertTrue(workspace.is_dir())
-            self.assertTrue(artifacts.is_dir())
-            start_watchdog.assert_called_once_with(os.getppid(), root.resolve())
-            fake_worker.run.assert_called_once()
-
-            orphan_root = root / "tau-build123d-orphan"
-            orphan_worker = MagicMock()
-            orphan_worker.run.return_value = False
-            with (
-                patch.object(
-                    sys,
-                    "argv",
-                    [
-                        "worker.py",
-                        "--workspace",
-                        str(orphan_root / "workspace"),
-                        "--artifacts",
-                        str(orphan_root / "artifacts"),
-                        "--parent-pid",
-                        str(os.getppid()),
-                    ],
-                ),
-                patch("worker._isolate_stdout"),
-                patch("worker._start_parent_watchdog"),
-                patch("worker.Worker", return_value=orphan_worker),
-            ):
-                worker.main()
-            self.assertFalse(orphan_root.exists())
-
-            invalid_roots = (
-                (root / "other-workspace", root / "other-parent" / "artifacts"),
-                (root / "not-private" / "workspace", root / "not-private" / "artifacts"),
-            )
-            for invalid_workspace, invalid_artifacts in invalid_roots:
-                with (
-                    self.subTest(workspace=invalid_workspace),
-                    patch.object(
-                        sys,
-                        "argv",
-                        [
-                            "worker.py",
-                            "--workspace",
-                            str(invalid_workspace),
-                            "--artifacts",
-                            str(invalid_artifacts),
-                            "--parent-pid",
-                            str(os.getppid()),
-                        ],
-                    ),
-                    self.assertRaises(SystemExit),
-                ):
-                    worker.main()
 
     def test_module_entrypoint(self) -> None:
         with tempfile.TemporaryDirectory(prefix="tau-build123d-") as directory:

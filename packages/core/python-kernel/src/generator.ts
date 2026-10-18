@@ -1,11 +1,14 @@
 /**
- * The pure half of Build123d's `tau-plugin.json` generator: the universal `requirements.lock` is compacted into one
+ * The pure half of a Python kernel's `tau-plugin.json` generator: the universal `requirements.lock` is compacted into one
  * PEP 751 `pylock.<target>.toml` per target (environment markers evaluated, one wheel chosen per package by wheel-tag
  * priority at lock time), and the manifest and CycloneDX SBOM are rendered from those choices. No function here
  * touches the network or the file system, so every rendering is byte-deterministic for the same inputs.
  */
 
-/** One `name==version` pin of the universal lock, with every wheel and sdist digest uv recorded for it. */
+/**
+ * One `name==version` pin of the universal lock, with every wheel and sdist digest uv recorded for it.
+ * @public
+ */
 export type LockPin = {
   readonly name: string;
   readonly version: string;
@@ -14,7 +17,10 @@ export type LockPin = {
   readonly marker?: string;
 };
 
-/** A target as `python/interpreter.json` declares it. */
+/**
+ * A target as `python/interpreter.json` declares it.
+ * @public
+ */
 export type TargetConfig = {
   /** Canonical `<os>-<arch>[-<libc>]` key, as the preparation host's `targetKey` spells it. */
   readonly key: string;
@@ -34,7 +40,10 @@ export type TargetConfig = {
   };
 };
 
-/** One file PyPI serves for a pinned release. */
+/**
+ * One file PyPI serves for a pinned release.
+ * @public
+ */
 export type IndexFile = {
   readonly filename: string;
   readonly url: string;
@@ -44,7 +53,10 @@ export type IndexFile = {
   readonly yanked: boolean;
 };
 
-/** The wheel a target installs for one pin. */
+/**
+ * The wheel a target installs for one pin.
+ * @public
+ */
 export type SelectedWheel = {
   readonly pin: LockPin;
   readonly file: IndexFile;
@@ -78,6 +90,7 @@ const compareVersions = (left: string, right: string): number => {
  * @param left - A dotted version.
  * @param right - A dotted version.
  * @returns The greater one.
+ * @public
  */
 export const maximumVersion = (left: string, right: string): string =>
   compareVersions(left, right) >= 0 ? left : right;
@@ -86,6 +99,7 @@ export const maximumVersion = (left: string, right: string): string =>
  * Normalise a distribution name as PEP 503 does.
  * @param name - A distribution name.
  * @returns The lowercase, dash-separated name.
+ * @public
  */
 export const normalizeName = (name: string): string => name.toLowerCase().replaceAll(/[-_.]+/gu, '-');
 
@@ -93,6 +107,7 @@ export const normalizeName = (name: string): string => name.toLowerCase().replac
  * Parse uv's universal `requirements.lock` (`name==version ; marker` followed by `--hash=sha256:` lines).
  * @param text - The lock file.
  * @returns The pins, in file order.
+ * @public
  */
 export const parseRequirementsLock = (text: string): LockPin[] => {
   const pins: Array<{ name: string; version: string; hashes: Set<string>; marker?: string }> = [];
@@ -130,7 +145,8 @@ export const parseRequirementsLock = (text: string): LockPin[] => {
 /**
  * The PEP 508 marker variables of a target's CPython 3.13 interpreter.
  * @param target - A target.
- * @returns The marker environment.
+ * @returns Each marker variable's value, such as `sys_platform` → `darwin`.
+ * @public
  */
 export const markerEnvironment = (target: TargetConfig): Readonly<Record<string, string>> => ({
   ...markerEnvironmentBase,
@@ -158,6 +174,7 @@ const markerTokens = (marker: string): string[] =>
  * @param marker - The marker text after `;`.
  * @param environment - The marker variables.
  * @returns Whether the pin applies.
+ * @public
  */
 export const evaluateMarker = (marker: string, environment: Readonly<Record<string, string>>): boolean => {
   const tokens = markerTokens(marker);
@@ -260,7 +277,8 @@ const macosBinaryFormats = (major: number, minor: number, arch: string): string[
  * The platform tags a target accepts, best first, as `packaging.tags` orders them for a host at the target's
  * deployment target (macOS) or glibc ceiling (Linux).
  * @param target - A target.
- * @returns The platform tags.
+ * @returns Platform tags such as `macosx_12_0_arm64` or `manylinux_2_31_x86_64`, best first.
+ * @public
  */
 export const platformTags = (target: TargetConfig): string[] => {
   if (target.os === 'darwin') {
@@ -302,7 +320,8 @@ export const platformTags = (target: TargetConfig): string[] => {
  * Every `python-abi-platform` tag a CPython 3.13 interpreter on the target accepts, best first (PEP 425 order as
  * `packaging.tags.sys_tags` yields it).
  * @param target - A target.
- * @returns The tags.
+ * @returns Tags such as `cp313-cp313-macosx_12_0_arm64`, best first.
+ * @public
  */
 export const supportedTags = (target: TargetConfig): string[] => {
   const platforms = platformTags(target);
@@ -330,6 +349,7 @@ export const supportedTags = (target: TargetConfig): string[] => {
  * The tags a wheel's file name declares, with compressed tag sets (`a.b`) expanded.
  * @param filename - A `.whl` file name.
  * @returns The expanded `python-abi-platform` tags.
+ * @public
  */
 export const wheelTags = (filename: string): string[] => {
   const parts = filename.replace(/\.whl$/u, '').split('-');
@@ -361,11 +381,12 @@ const platformFloor = (platform: string): string | undefined => {
  * Choose the wheel a target installs for one pin: among the files whose digest the lock pins and PyPI does not mark
  * yanked, the one whose best tag ranks highest for the target. The choice is made here, at lock time, never at run
  * time (I8).
- * @param pin - The pin.
+ * @param pin - One `name==version` line of the universal lock, with the digests it allows.
  * @param files - Every file PyPI serves for the pin's release.
- * @param target - The target.
+ * @param target - The interpreter target the wheel must install on.
  * @returns The selected wheel and its floor.
  * @throws {Error} When no pinned wheel fits the target, or a pinned file is yanked.
+ * @public
  */
 export const selectWheel = (pin: LockPin, files: readonly IndexFile[], target: TargetConfig): SelectedWheel => {
   const supported = supportedTags(target);
@@ -409,8 +430,9 @@ export const selectWheel = (pin: LockPin, files: readonly IndexFile[], target: T
  * Every pin a target installs, in lock order, with its wheel.
  * @param pins - The universal lock.
  * @param index - PyPI's files per `name==version`.
- * @param target - The target.
+ * @param target - The interpreter target whose markers and tags select the pins and wheels.
  * @returns The compacted selection.
+ * @public
  */
 export const compactLock = (
   pins: readonly LockPin[],
@@ -431,9 +453,10 @@ export const compactLock = (
 
 /**
  * The target's floor: the interpreter's and every chosen wheel's, whichever is highest (D15).
- * @param target - The target.
+ * @param target - The interpreter target, whose own floor is the lowest the result can be.
  * @param wheels - Its compacted selection.
  * @returns The dotted floor.
+ * @public
  */
 export const variantFloor = (target: TargetConfig, wheels: readonly SelectedWheel[]): string => {
   let floor = target.interpreterFloor;
@@ -448,20 +471,33 @@ export const variantFloor = (target: TargetConfig, wheels: readonly SelectedWhee
 const tomlString = (value: string): string => JSON.stringify(value);
 
 /**
- * PEP 751 `pylock.<target>.toml` for one target: one package per pin, one wheel per package.
- * @param target - The target.
- * @param wheels - Its compacted selection.
- * @returns The file's text.
+ * Which kernel package a generated file belongs to: its npm name and its Nx project, whose targets regenerate it.
+ * @public
  */
-export const renderPylock = (target: TargetConfig, wheels: readonly SelectedWheel[]): string => {
+export type GeneratedFor = {
+  /** The npm package name, such as `@taucad/build123d`. */
+  readonly packageName: string;
+  /** The Nx project name, such as `build123d`. */
+  readonly project: string;
+};
+
+/**
+ * PEP 751 `pylock.<target>.toml` for one target: one package per pin, one wheel per package.
+ * @param target - The interpreter target, whose marker environment the file declares.
+ * @param wheels - Its compacted selection.
+ * @param owner - The kernel package the file belongs to.
+ * @returns The file's text.
+ * @public
+ */
+export const renderPylock = (target: TargetConfig, wheels: readonly SelectedWheel[], owner: GeneratedFor): string => {
   const environment = markerEnvironment(target);
   const lines = [
-    `# Generated by packages/plugins/build123d/scripts/generate-tau-plugin.mts from requirements.lock; do not edit.`,
+    `# Generated by \`pnpm nx run ${owner.project}:generate-tau-plugin\` from requirements.lock; do not edit.`,
     `# The wheels ${target.key} installs: environment markers evaluated and one wheel per package chosen at lock time.`,
     'lock-version = "1.0"',
     `environments = [${tomlString(`sys_platform == '${environment['sys_platform']!}' and platform_machine == '${environment['platform_machine']!}' and implementation_name == 'cpython'`)}]`,
     `requires-python = "==3.${String(cpythonMinor)}.*"`,
-    'created-by = "@taucad/build123d tau-plugin generator"',
+    `created-by = ${tomlString(`${owner.packageName} tau-plugin generator`)}`,
   ];
   for (const { pin, file } of wheels) {
     lines.push(
@@ -484,7 +520,8 @@ export const renderPylock = (target: TargetConfig, wheels: readonly SelectedWhee
 /**
  * The wheels a committed `pylock.<target>.toml` names, as `filename → sha256`. Reads only what `renderPylock` writes.
  * @param text - The file's text.
- * @returns The wheels.
+ * @returns Each wheel's URL, SHA-256 and size, keyed by file name.
+ * @public
  */
 export const readPylockWheels = (
   text: string,

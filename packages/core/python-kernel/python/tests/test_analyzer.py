@@ -10,7 +10,17 @@ from unittest.mock import patch
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PYTHON_ROOT))
 
-import analyzer
+from tau_kernel import analyzer
+
+IDENTITY = analyzer.ParameterSchemaIdentity(id="urn:taucad:test:parameters", name="TestParameters")
+
+
+def analyze_source(source: str) -> dict[str, object]:
+    return analyzer.analyze_source(source, IDENTITY)
+
+
+def analyze_project(root: Path, entry_path: str, observed: list[str] | None = None) -> dict[str, object]:
+    return analyzer.analyze_project(root, entry_path, observed, identity=IDENTITY)
 
 
 def model(fields: str = "width: float = 2.5", metadata: str = "") -> str:
@@ -28,7 +38,7 @@ class Params:
 class AnalyzerTest(unittest.TestCase):
     def assert_issue(self, source: str, message: str) -> analyzer.AnalysisIssue:
         with self.assertRaisesRegex(analyzer.AnalysisIssue, message) as caught:
-            analyzer.analyze_source(source)
+            analyze_source(source)
         return caught.exception
 
     def test_supported_parameters_metadata_and_issue_shape(self) -> None:
@@ -39,7 +49,7 @@ class AnalyzerTest(unittest.TestCase):
             "'description': 'Display', 'examples': ['part'], 'enum': ['part']}}, "
             "'dependencies': ['profile.json']}",
         )
-        result = analyzer.analyze_source(source)
+        result = analyze_source(source)
         self.assertEqual(
             result["defaultParameters"],
             {"enabled": True, "count": 2, "ratio": -2, "name": "part", "mode": "a"},
@@ -51,7 +61,7 @@ class AnalyzerTest(unittest.TestCase):
         self.assertEqual(issue.as_dict("main.py")["location"]["startColumn"], 4)
 
     def test_native_unit_declaration_preserves_values_and_constraints(self) -> None:
-        result = analyzer.analyze_source(
+        result = analyze_source(
             model(
                 "length: float = 25.4\n    angle: float = 30.0",
                 "__tau__ = {'parameters': {"
@@ -64,6 +74,9 @@ class AnalyzerTest(unittest.TestCase):
         )
 
         declaration = result["declaration"]
+        self.assertEqual(
+            (declaration["schema"]["$id"], declaration["schema"]["name"]), ("urn:taucad:test:parameters", "TestParameters")
+        )
         self.assertEqual(declaration["defaults"], {"length": 25.4, "angle": 30.0})
         self.assertEqual(
             declaration["schema"]["properties"]["length"],
@@ -99,14 +112,14 @@ class AnalyzerTest(unittest.TestCase):
 
     def test_large_source_and_wide_syntax_tree(self) -> None:
         source = model() + "\n#" + "x" * (1024 * 1024) + "\n" + "value = 1\n" * 20_000
-        result = analyzer.analyze_source(source)
+        result = analyze_source(source)
         self.assertEqual(result["jsonSchema"]["properties"]["width"]["default"], 2.5)
 
     def test_parse_limits_and_syntax(self) -> None:
         self.assertEqual(self.assert_issue("(", "was never closed").code, "PYTHON_SYNTAX")
         with patch.object(analyzer, "MAX_AST_DEPTH", 1):
             self.assertEqual(self.assert_issue(model(), "syntax tree").code, "PYTHON_AST_LIMIT")
-        with patch("analyzer.ast.parse", side_effect=MemoryError):
+        with patch("tau_kernel.analyzer.ast.parse", side_effect=MemoryError):
             self.assertEqual(self.assert_issue(model(), "deeply nested").code, "PYTHON_AST_LIMIT")
 
     def test_literal_bounds_and_rejections(self) -> None:
@@ -242,7 +255,7 @@ class AnalyzerTest(unittest.TestCase):
     def test_names_annotations_and_decorator_forms(self) -> None:
         self.assertEqual(analyzer._name(ast.parse("typing.Literal", mode="eval").body), "typing.Literal")
         self.assertIsNone(analyzer._name(ast.parse("pkg.typing.Literal", mode="eval").body))
-        result = analyzer.analyze_source(
+        result = analyze_source(
             "import dataclasses\nimport typing\n@dataclasses.dataclass(frozen=True)\nclass Params:\n"
             "    'ignored'\n    mode: typing.Literal[1, 2] = 1\n__tau__: dict = {}\n"
         )
@@ -263,7 +276,7 @@ class AnalyzerTest(unittest.TestCase):
                 model(metadata="__tau__ = {'dependencies': ['asset.json']}") + "\nfrom pkg import child\n",
                 encoding="utf-8",
             )
-            result = analyzer.analyze_project(root, "main.py", ["observed.py", "missing-observed.py"])
+            result = analyze_project(root, "main.py", ["observed.py", "missing-observed.py"])
             self.assertEqual(
                 result["resolved"],
                 ["asset.json", "helper.py", "main.py", "observed.py", "pkg/__init__.py", "pkg/child.py"],
@@ -271,7 +284,7 @@ class AnalyzerTest(unittest.TestCase):
             self.assertEqual(result["unresolved"], [])
 
             (root / "main.py").write_text(model() + "\nfrom .missing import value\n", encoding="utf-8")
-            unresolved = analyzer.analyze_project(root, "main.py")
+            unresolved = analyze_project(root, "main.py")
             self.assertEqual(unresolved["unresolved"], ["missing.py"])
 
     def test_imported_parts_carry_their_declared_texture_dependencies(self) -> None:
@@ -280,17 +293,17 @@ class AnalyzerTest(unittest.TestCase):
             (root / "main.py").write_text(model() + "\nimport part\n")
             (root / "part.py").write_text("__tau__ = {'dependencies': ['finish.png']}\n")
             (root / "finish.png").write_bytes(b"image-v1")
-            self.assertEqual(analyzer.analyze_project(root, "main.py")["resolved"], ["finish.png", "main.py", "part.py"])
+            self.assertEqual(analyze_project(root, "main.py")["resolved"], ["finish.png", "main.py", "part.py"])
             # Explicitly declaring an imported module must not suppress parsing its own imports/resources.
             (root / "main.py").write_text(model(metadata="__tau__ = {'dependencies': ['part.py']}") + "\nimport part\n")
             (root / "part.py").write_text("import detail\n__tau__ = {'dependencies': ['finish.png']}\n")
             (root / "detail.py").write_text("size = 1\n")
-            self.assertEqual(analyzer.analyze_project(root, "main.py")["resolved"], ["detail.py", "finish.png", "main.py", "part.py"])
+            self.assertEqual(analyze_project(root, "main.py")["resolved"], ["detail.py", "finish.png", "main.py", "part.py"])
             (root / "finish.png").unlink()
-            self.assertEqual(analyzer.analyze_project(root, "main.py")["unresolved"], ["finish.png"])
+            self.assertEqual(analyze_project(root, "main.py")["unresolved"], ["finish.png"])
             (root / "part.py").write_text("__tau__ = {'dependencies': 1}\n")
             with self.assertRaisesRegex(analyzer.AnalysisIssue, "must be a list"):
-                analyzer.analyze_project(root, "main.py")
+                analyze_project(root, "main.py")
 
     def test_dependency_path_and_dynamic_import_rejections(self) -> None:
         for path in ("", "../secret", "/absolute", "a\\b", "bad\0path"):
@@ -301,9 +314,9 @@ class AnalyzerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with self.assertRaisesRegex(analyzer.AnalysisIssue, "does not exist"):
-                analyzer.analyze_project(root, "missing.py")
+                analyze_project(root, "missing.py")
             (root / "main.py").write_text(model(metadata="__tau__ = {'dependencies': ['missing.json']}"), encoding="utf-8")
-            self.assertEqual(analyzer.analyze_project(root, "main.py")["unresolved"], ["missing.json"])
+            self.assertEqual(analyze_project(root, "main.py")["unresolved"], ["missing.json"])
 
 
 if __name__ == "__main__":

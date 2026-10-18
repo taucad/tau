@@ -1,0 +1,5 @@
+---
+python-kernel-core: minor
+---
+
+Add `@taucad/python-kernel-core`, the shared half of every native Python kernel. The root exports `definePythonKernelAdopter` (a `pypi` `/native` adopter whose options schema, launch set, closure-to-options mapping and seal step follow from its `PythonKernelWorker`), `createPythonSession` and `PythonWorkerError`, `pythonKernelOptionsSchema`, `pythonLaunchSet`, `pythonOptionsFromClosure`, `createPythonSeal`, `createPythonWorkspaceMirror`, the worker protocol schemas (`pythonProtocolVersion`, `pythonIssueSchema`, `pythonReadySchema`, `pythonResponseSchema`, `pythonArtifactSchema`) and `pythonLibraryVersionMismatches`. `/generator` and `/template` export the pure lock, pylock and project template functions. The package ships `python/tau_kernel` (`protocol.run_worker`, `model.load_entry`, `analyzer`, `glb.write_glb`) and the default `python/interpreter.json`; its scripts generate a kernel's `tau-plugin.json`, project template and Python coverage run with `--package <dir>`.

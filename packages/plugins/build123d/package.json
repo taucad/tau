@@ -96,7 +96,8 @@
     "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
-    "@taucad/parameters": "workspace:*"
+    "@taucad/parameters": "workspace:*",
+    "@taucad/python-kernel-core": "workspace:*"
   },
   "taucad": {
     "hostTarget": "node"

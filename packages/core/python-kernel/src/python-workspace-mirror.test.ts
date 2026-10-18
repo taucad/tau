@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { createMockFileSystem } from '@taucad/runtime-testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
+import { createPythonWorkspaceMirror } from '#python-workspace-mirror.js';
 
-const mirrors: Array<Awaited<ReturnType<typeof createWorkspaceMirror>>> = [];
+const mirrors: Array<Awaited<ReturnType<typeof createPythonWorkspaceMirror>>> = [];
 
 afterEach(async () => {
   await Promise.all(
@@ -33,12 +33,12 @@ const mockListing = (
 };
 
 const mirror = async () => {
-  const value = await createWorkspaceMirror();
+  const value = await createPythonWorkspaceMirror({ kernelId: 'example', kernelName: 'Example' });
   mirrors.push(value);
   return value;
 };
 
-describe('Build123d workspace mirror', () => {
+describe('createPythonWorkspaceMirror', () => {
   it('projects sorted rooted files atomically, skips private/cache content, and removes stale files', async () => {
     const files = new Map([
       ['main.py', new TextEncoder().encode('print(1)')],
@@ -60,6 +60,8 @@ describe('Build123d workspace mirror', () => {
           : { type: 'file', size: files.get(path)?.byteLength ?? 0, mtimeMs: 0 },
     );
     const projection = await mirror();
+    // `tau_kernel.protocol.run_worker` checks the private root by this prefix.
+    expect(projection.workspacePath).toMatch(/tau-example-/u);
     expect(await projection.sync(filesystem)).toEqual(['lib/model.py', 'main.py']);
     expect(await readFile(join(projection.workspacePath, 'lib/model.py'), 'utf8')).toBe('value = 1');
 

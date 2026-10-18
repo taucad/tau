@@ -5,13 +5,15 @@ import math
 import struct
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PYTHON_ROOT))
 
-import glb
+from tau_kernel import glb
 
 
 def component() -> dict[str, object]:
@@ -69,26 +71,95 @@ class GlbTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.glb"
             topology = [component(), {**component(), "id": "component:missing", "name": "No mesh"}]
-            glb.write_glb(path, topology, {"component:node-0": mesh()})
+            glb.write_glb(path, topology, {"component:node-0": mesh()}, generator="@taucad/test-kernel")
             payload = path.read_bytes()
             glb.validate_glb(payload)
             parsed = document(payload)
-            self.assertEqual(parsed["asset"]["generator"], "@taucad/build123d")
+            self.assertEqual(parsed["asset"]["generator"], "@taucad/test-kernel")
             self.assertNotIn("name", parsed["scenes"][0])
             self.assertTrue(all("name" not in material for material in parsed["materials"]))
             self.assertEqual(parsed["nodes"][0]["name"], parsed["meshes"][0]["name"])
             self.assertEqual(topology[0]["primitiveIndices"], [0, 1])
             self.assertEqual(topology[0]["color"], (1.2, -1.0, 0.5, 0.5))
 
-            glb.write_glb(path, [component()], {"component:node-0": mesh(lines=False)})
+            glb.write_glb(path, [component()], {"component:node-0": mesh(lines=False)}, generator="@taucad/test-kernel")
             self.assertEqual(len(document(path.read_bytes())["meshes"][0]["primitives"]), 1)
-            glb.write_glb(path, [component()], {"component:node-0": mesh(triangles=False)})
+            glb.write_glb(path, [component()], {"component:node-0": mesh(triangles=False)}, generator="@taucad/test-kernel")
             self.assertEqual(document(path.read_bytes())["meshes"][0]["primitives"][0]["mode"], glb.GLTF_LINES)
+
+    def test_native_pbr_materials_texture_only_their_surfaces(self) -> None:
+        """A component whose mesh carries a native PBR material gets the material threejs-materials collected."""
+
+        collected_json = {
+            "materials": [{"name": "component:textured", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+            "bufferViews": [{"buffer": 0, "byteOffset": 2, "byteLength": 3}, {"buffer": 0, "byteLength": 2}],
+            "images": [{"bufferView": 1, "mimeType": "image/png"}],
+            "textures": [{"source": 0}],
+            "extensionsUsed": ["KHR_texture_transform"],
+        }
+        calls: list[tuple[dict[str, object], bool]] = []
+
+        class Collected:
+            def __init__(self, document: dict[str, object], blob: bytes | None) -> None:
+                self.document = document
+                self.blob = blob
+
+            def to_json(self) -> str:
+                return json.dumps(self.document)
+
+            def binary_blob(self) -> bytes | None:
+                return self.blob
+
+        results = iter((Collected(collected_json, b"abcdef"), Collected({"materials": []}, None)))
+
+        def collect_gltf_textures(pbrs: dict[str, object], binary: bool) -> Collected:
+            calls.append((pbrs, binary))
+            return next(results)
+
+        fake = types.ModuleType("threejs_materials")
+        fake.collect_gltf_textures = collect_gltf_textures  # type: ignore[attr-defined]
+        textured = {**component(), "id": "component:textured", "selector": "node/0"}
+        untextured = {**component(), "id": "component:untextured", "selector": "node/1"}
+        plain = {**component(), "id": "component:plain", "selector": "node/2"}
+        meshes = {
+            "component:textured": {
+                **mesh(),
+                "uvs": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                "nativeMaterial": types.SimpleNamespace(pbr="pbr"),
+            },
+            "component:untextured": {**mesh(), "nativeMaterial": types.SimpleNamespace(pbr=None)},
+            "component:plain": mesh(),
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules, {"threejs_materials": fake}):
+            path = Path(directory) / "model.glb"
+            glb.write_glb(path, [textured, untextured, plain], meshes, generator="@taucad/test-kernel")
+            payload = path.read_bytes()
+            glb.validate_glb(payload)
+            parsed = document(payload)
+            self.assertEqual(calls, [({"component:textured": "pbr"}, True)])
+            self.assertEqual(parsed["textures"], [{"source": 0}])
+            self.assertIn("KHR_texture_transform", parsed["extensionsUsed"])
+            image_view = parsed["bufferViews"][parsed["images"][0]["bufferView"]]
+            self.assertEqual(image_view["byteLength"], 2)
+            surfaces = [mesh_entry["primitives"][0]["material"] for mesh_entry in parsed["meshes"]]
+            self.assertEqual(parsed["materials"][surfaces[0]]["name"], "component:textured")
+            self.assertTrue(all("name" not in parsed["materials"][index] for index in surfaces[1:]))
+            self.assertIn("TEXCOORD_0", parsed["meshes"][0]["primitives"][0]["attributes"])
+
+            glb.write_glb(
+                path,
+                [{**textured}],
+                {"component:textured": meshes["component:textured"]},
+                generator="@taucad/test-kernel",
+            )
+            reparsed = document(path.read_bytes())
+            self.assertNotIn("images", reparsed)
+            self.assertNotIn("name", reparsed["materials"][reparsed["meshes"][0]["primitives"][0]["material"]])
 
     def test_validator_rejects_each_container_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.glb"
-            glb.write_glb(path, [component()], {"component:node-0": mesh()})
+            glb.write_glb(path, [component()], {"component:node-0": mesh()}, generator="@taucad/test-kernel")
             valid = path.read_bytes()
 
         mutations: list[tuple[bytearray, str]] = []

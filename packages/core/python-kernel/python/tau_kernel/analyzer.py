@@ -1,4 +1,4 @@
-"""Bounded, non-executing analysis for Tau's Build123d authoring contract."""
+"""Bounded, non-executing analysis of Tau's Python authoring contract: `Params`, `main(params)` and `__tau__`."""
 
 from __future__ import annotations
 
@@ -52,6 +52,14 @@ BIPM_UNIT_TO_UCUM = {
 UCUM_CODE = re.compile(r"^[!-~]+$")
 QUDT_KIND = re.compile(r"^http://qudt\.org/vocab/quantitykind/[A-Za-z][A-Za-z0-9]*$")
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
+
+
+@dataclass(frozen=True)
+class ParameterSchemaIdentity:
+    """How one kernel names its parameter declaration, such as `urn:taucad:build123d:parameters`."""
+
+    id: str
+    name: str
 
 
 @dataclass
@@ -314,7 +322,9 @@ def _metadata(tree: ast.Module) -> dict[str, Any]:
     return value
 
 
-def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _parameters(
+    tree: ast.Module, metadata: dict[str, Any], identity: ParameterSchemaIdentity
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     classes = [
         node
         for node in tree.body
@@ -390,9 +400,9 @@ def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, A
     declaration = {
         "schema": {
             "$schema": "https://json-structure.org/meta/extended/v0/#",
-            "$id": "urn:taucad:build123d:parameters",
+            "$id": identity.id,
             "$uses": ["JSONSchemaUnits"],
-            "name": "Build123dParameters",
+            "name": identity.name,
             "type": "object",
             "properties": native_fields,
             "additionalProperties": False,
@@ -422,12 +432,12 @@ def _imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
     return imports
 
 
-def analyze_source(source: str) -> dict[str, Any]:
+def analyze_source(source: str, identity: ParameterSchemaIdentity) -> dict[str, Any]:
     """Return parameters and import nodes without executing source."""
 
     tree = _parse(source)
     metadata = _metadata(tree)
-    defaults, schema, declaration = _parameters(tree, metadata)
+    defaults, schema, declaration = _parameters(tree, metadata, identity)
     dependencies = metadata.get("dependencies", [])
     if not isinstance(dependencies, list) or any(not isinstance(path, str) for path in dependencies):
         raise AnalysisIssue("__tau__.dependencies must be a list of paths", "PYTHON_DEPENDENCIES")
@@ -475,7 +485,9 @@ def _module_candidates(current: str, node: ast.Import | ast.ImportFrom) -> tuple
     return list(dict.fromkeys(candidates)), relative
 
 
-def analyze_project(workspace: Path, entry_path: str, observed: list[str] | None = None) -> dict[str, Any]:
+def analyze_project(
+    workspace: Path, entry_path: str, observed: list[str] | None = None, *, identity: ParameterSchemaIdentity
+) -> dict[str, Any]:
     """Analyze one project entry and its statically resolvable local imports."""
 
     entry = _canonical_relative(entry_path)
@@ -496,7 +508,7 @@ def analyze_project(workspace: Path, entry_path: str, observed: list[str] | None
         analyzed.add(relative_path)
         source = absolute.read_text(encoding="utf-8")
         if relative_path == entry:
-            analysis = analyze_source(source)
+            analysis = analyze_source(source, identity)
             entry_analysis = analysis
         else:
             tree = _parse(source)

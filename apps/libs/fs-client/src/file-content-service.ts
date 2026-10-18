@@ -15,6 +15,7 @@ import type { ComposedViewClient } from '#composed-view-client.js';
 import type { FileWriteSource } from '#file-write-source.js';
 import { headSniffByteLength, seemsBinary } from '#seems-binary.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
+import type { FileContentBudget, FileContentBudgetMember } from '#file-content-budget.js';
 
 /**
  * Content-side mutation / read notifications for subscribers.
@@ -148,9 +149,18 @@ type FileContentServiceInit = {
   openSizeBytes?: number;
   /** Reader-side shared file pool for zero-IPC cached reads across threads. */
   filePool?: SharedPool;
+  /**
+   * The document-wide budget this service retains bytes against, beside its own
+   * `cacheOptions` bounds. Omitted, the service bounds only itself.
+   */
+  budget?: FileContentBudget;
 };
 
 const defaultMaxEntries = 500;
+
+/** Bytes one retained outcome holds: a text file's content, a binary file's head. */
+const retainedBytesOf = (result: FileContentResult): number =>
+  result.kind === 'text' ? result.content.byteLength : result.kind === 'binary' ? result.head.byteLength : 0;
 const defaultMaxTotalBytes = 128 * 1024 * 1024;
 const defaultOpenSizeBytes = 50 * 1024 * 1024;
 /* The mutation pipeline refuses a checked write whose bytes and expected bytes pass 8 MiB (RV-W5b2 N3). */
@@ -259,6 +269,14 @@ export class FileContentService {
   private readonly filePool: SharedPool | undefined;
   private readonly retainedOutcomeEntries: number;
   private readonly retainedOutcomeBytes: number;
+  /** A released outcome larger than this is not retained: the cache would refuse it too (D-UI-07). */
+  private readonly retainedSingleFileBytes: number;
+  private readonly budget: FileContentBudget | undefined;
+  private readonly budgetMember: FileContentBudgetMember = {
+    retainedBytes: () => this.retainedBytes(),
+    shed: (bytes) => this.shedReleased(bytes),
+  };
+  private readonly leaveBudget: () => void;
   private readonly openSizeBytes: number;
   private readonly paths: WorkspacePathResolver;
   private readonly refreshGuard: RefreshGenerationGuard;
@@ -295,11 +313,14 @@ export class FileContentService {
     this.retainedOutcomeEntries = init.cacheOptions?.maxEntries ?? defaultMaxEntries;
     this.retainedOutcomeBytes = init.cacheOptions?.maxTotalBytes ?? defaultMaxTotalBytes;
     this.openSizeBytes = init.openSizeBytes ?? defaultOpenSizeBytes;
+    this.retainedSingleFileBytes = init.cacheOptions?.maxSingleFileBytes ?? this.openSizeBytes;
     this.cache = new BoundedFileCache({
       maxEntries: init.cacheOptions?.maxEntries ?? defaultMaxEntries,
       maxTotalBytes: init.cacheOptions?.maxTotalBytes ?? defaultMaxTotalBytes,
-      maxSingleFileBytes: init.cacheOptions?.maxSingleFileBytes ?? this.openSizeBytes,
+      maxSingleFileBytes: this.retainedSingleFileBytes,
     });
+    this.budget = init.budget;
+    this.leaveBudget = init.budget?.join(this.budgetMember) ?? (() => undefined);
     this.unsubscribeChannel = [
       init.channel.onFileWritten({
         handler: (event) => {
@@ -571,7 +592,10 @@ export class FileContentService {
   }
 
   /**
-   * Write file content. Clones buffer before transfer to prevent detachment.
+   * Write file content. Copies the caller's bytes once: that copy is what the
+   * service retains, and the bridge clones it again before the transfer, so
+   * neither the caller's buffer nor the retained one is ever detached
+   * (filesystem policy: clone once at the boundary).
    *
    * `path` **MUST** be workspace-relative; absolute keys that escape the
    * workspace root throw {@link WorkspaceScopeViolationError} synchronously.
@@ -586,11 +610,10 @@ export class FileContentService {
   public async write(path: string, data: Uint8Array<ArrayBuffer>, source: FileWriteSource): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('write', path);
     const localCopy = new Uint8Array(data);
-    const wireCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
     const prepared: PreparedWrittenOutcome =
       source === 'editor' ? { kind: 'text' } : await this.prepareWrittenOutcome(localCopy, source);
-    await this.proxy.writeFile(absolutePath, wireCopy);
+    await this.proxy.writeFile(absolutePath, localCopy);
     this.recordWrite(key, localCopy, { source, prepared });
   }
 
@@ -663,7 +686,8 @@ export class FileContentService {
   }
 
   /**
-   * Write multiple files. Clones each buffer before transfer.
+   * Write multiple files. Copies each caller buffer once, as in {@link write}:
+   * the bridge clones the batch before its transfer.
    *
    * Map keys **MUST** be workspace-relative; absolute keys that escape the
    * workspace root throw {@link WorkspaceScopeViolationError} synchronously
@@ -685,9 +709,8 @@ export class FileContentService {
     for (const [path, file] of Object.entries(files)) {
       const key = this.paths.toWorkspaceRelativeKey('writeFiles', path);
       const localCopy = new Uint8Array(file.content);
-      const wireCopy = new Uint8Array(file.content);
       clones.set(key, localCopy);
-      absoluteFiles[this.paths.toAbsolutePath(key)] = { content: wireCopy };
+      absoluteFiles[this.paths.toAbsolutePath(key)] = { content: localCopy };
       paths.push(key);
     }
 
@@ -1038,8 +1061,7 @@ export class FileContentService {
     const destinationKey = this.paths.toWorkspaceRelativeKey('duplicate', destinationPath);
     const data = await this.resolveBytes(sourceKey);
     const localCopy = new Uint8Array(data);
-    const wireCopy = new Uint8Array(data);
-    await this.proxy.writeFile(this.paths.toAbsolutePath(destinationKey), wireCopy);
+    await this.proxy.writeFile(this.paths.toAbsolutePath(destinationKey), localCopy);
     this.refreshGuard.begin(destinationKey);
     this.cache.set(destinationKey, localCopy);
     this.setOrphaned(destinationKey, false);
@@ -1164,6 +1186,7 @@ export class FileContentService {
    * Release workers, caches, and subscriptions owned by this service.
    */
   public dispose(): void {
+    this.leaveBudget();
     this._cancelEditorPendingWork();
     this.clearObservations();
     for (const unsubscribe of this.unsubscribeChannel) {
@@ -1259,10 +1282,11 @@ export class FileContentService {
       await this.write(key, data, 'editor');
       return;
     }
+    /* The bridge clones both payloads before the transfer; `data` is this service's own copy. */
     const result = await this.proxy.writeFileChecked({
       path: absolutePath,
-      data: new Uint8Array(data),
-      preconditions: [{ path: absolutePath, expected: base === null ? null : new Uint8Array(base) }],
+      data,
+      preconditions: [{ path: absolutePath, expected: base }],
     });
     if (result.status === 'conflict') {
       throw this._refuseEditorSave(
@@ -1820,28 +1844,90 @@ export class FileContentService {
   }
 
   private pruneRetainedOutcomes(): void {
-    const bytesOf = (result: FileContentResult): number =>
-      result.kind === 'text' ? result.content.byteLength : result.kind === 'binary' ? result.head.byteLength : 0;
     let bytes = 0;
     for (const result of this.outcomes.values()) {
-      bytes += bytesOf(result);
+      bytes += retainedBytesOf(result);
     }
     for (const [path, result] of this.outcomes) {
-      if (this.outcomes.size <= this.retainedOutcomeEntries && bytes <= this.retainedOutcomeBytes) {
-        break;
-      }
-      if (
-        this.pathNotifyRegistry.hasPathSubscribers(path) ||
-        (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
-        this.editorSaves.has(path) ||
-        this.pendingResolves.has(path)
-      ) {
+      if (this.isOutcomeHeld(path)) {
         continue;
       }
+      const resultBytes = retainedBytesOf(result);
+      if (
+        resultBytes > this.retainedSingleFileBytes ||
+        this.outcomes.size > this.retainedOutcomeEntries ||
+        bytes > this.retainedOutcomeBytes
+      ) {
+        this.outcomes.delete(path);
+        this.orphanedPaths.delete(path);
+        bytes -= resultBytes;
+      }
+    }
+    this.budget?.reclaim(this.budgetMember);
+  }
+
+  /** Whether a subscriber, lease, save or pending read still holds this path's outcome. */
+  private isOutcomeHeld(path: string): boolean {
+    return (
+      this.pathNotifyRegistry.hasPathSubscribers(path) ||
+      (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
+      this.editorSaves.has(path) ||
+      this.pendingResolves.has(path)
+    );
+  }
+
+  /**
+   * Bytes this service retains: every outcome, and every cached buffer no
+   * outcome already holds (a read's outcome and its cache entry are one buffer).
+   */
+  private retainedBytes(): number {
+    let bytes = 0;
+    for (const result of this.outcomes.values()) {
+      bytes += retainedBytesOf(result);
+    }
+    for (const [path, data] of this.cache.entries()) {
+      const outcome = this.outcomes.get(path);
+      if (outcome?.kind !== 'text' || outcome.content !== data) {
+        bytes += data.byteLength;
+      }
+    }
+    return bytes;
+  }
+
+  /**
+   * Release up to `target` bytes nobody holds, least recently used first: cache
+   * entries without an outcome, then released outcomes with their cache entries.
+   * @param target - Bytes the budget asks for.
+   * @returns Bytes released.
+   */
+  private shedReleased(target: number): number {
+    let shed = 0;
+    for (const [path, data] of this.cache.entries()) {
+      if (shed >= target) {
+        return shed;
+      }
+      if (!this.outcomes.has(path) && !this.isOutcomeHeld(path)) {
+        this.cache.delete(path);
+        shed += data.byteLength;
+      }
+    }
+    for (const [path, result] of this.outcomes) {
+      if (shed >= target) {
+        return shed;
+      }
+      if (this.isOutcomeHeld(path)) {
+        continue;
+      }
+      const cached = this.cache.peek(path);
       this.outcomes.delete(path);
       this.orphanedPaths.delete(path);
-      bytes -= bytesOf(result);
+      shed += retainedBytesOf(result);
+      if (cached !== undefined) {
+        this.cache.delete(path);
+        shed += result.kind === 'text' && result.content === cached ? 0 : cached.byteLength;
+      }
     }
+    return shed;
   }
 
   private setOrphaned(path: string, orphaned: boolean): void {

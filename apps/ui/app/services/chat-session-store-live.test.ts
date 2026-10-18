@@ -267,6 +267,29 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     },
   );
 
+  /* D-UI-10: every streamed chunk woke every chat subscriber, so a long answer
+   * re-rendered the transcript once per token. */
+  it('should coalesce a burst of message updates into one leading and one trailing notification', async () => {
+    const store = createStore();
+    const { chat } = store.acquire('chat', 'project');
+    await vi.waitFor(() => {
+      expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const listener = vi.fn();
+    const unsubscribe = store.subscribeChat('chat', listener);
+    const message = (text: string): MyUIMessage => ({ id: 'a', role: 'assistant', parts: [{ type: 'text', text }] });
+    for (let index = 1; index <= 20; index++) {
+      chat.messages = [message('x'.repeat(index))];
+    }
+    expect(listener.mock.calls.length).toBeLessThanOrEqual(1);
+    await vi.waitFor(() => {
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+    expect(visible(store.get('chat')!.messages)).toEqual([{ id: 'a', text: 'x'.repeat(20) }]);
+    unsubscribe();
+    store.release('chat');
+  });
+
   it('keeps durable steering between preceding and subsequent output throughout the live watch', async () => {
     const store = createStore();
     const { chat } = store.acquire('chat', 'project');

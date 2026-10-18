@@ -899,6 +899,40 @@ describe('resident worker death', () => {
     await client.close();
   }, 15_000);
 
+  /* D-UI-23: a replacement re-reads every open log, and a worker blocked past the bound by that replay was
+   * replaced again, re-reading them again. Each unresponsive retirement doubles the next worker's bound. */
+  it('should give the replacement of an unresponsive worker a longer liveness bound', async () => {
+    const frozen = new FakeResidentWorker();
+    const slow = new FakeResidentWorker();
+    const spare = new FakeResidentWorker();
+    const workers = [frozen, slow, spare];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    await startRun(client, 'chat-slow', 'run-1', 'Build.');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    frozen.freeze();
+    const cancelled = cancelRun(client, 'chat-slow', 'run-1');
+    await vi.waitFor(
+      () => {
+        expect(frozen.terminate).toHaveBeenCalled();
+      },
+      { timeout: 8000 },
+    );
+    await expect(cancelled).resolves.toMatchObject({ status: 'applied' });
+
+    /* Longer than the first bound, shorter than the doubled one. */
+    slow.freeze();
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 5000);
+    });
+    slow.thaw();
+
+    expect(slow.terminate).not.toHaveBeenCalled();
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    await client.close();
+  }, 25_000);
+
   it('should not replace the worker when its tab thaws after a freeze', async () => {
     const worker = new FakeResidentWorker();
     const createWorker = vi.fn(workerOf(worker));

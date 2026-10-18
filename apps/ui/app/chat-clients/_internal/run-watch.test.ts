@@ -558,3 +558,37 @@ it.each([false, true])(
     );
   },
 );
+
+/* D-UI-10: the SDK re-parses a tool call's whole accumulated input on every
+ * `tool-input-delta`, so a large file write cost O(n²) parse work. Deltas that
+ * reach the stream together are one chunk. */
+it('should hand the SDK one tool-input delta for the deltas one drain carries', async () => {
+  let projection = reduceChatProjection(initialChatProjection, {
+    type: 'batch',
+    answer: batch([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 0),
+  }).state;
+  const live = (event: AgentLiveEvent): void => {
+    projection = reduceChatProjection(projection, { type: 'live', event }).state;
+  };
+  const call = {
+    chatId: 'chat_1',
+    runId: 'run_1',
+    messageId: 'tool-message',
+    contentIndex: 0,
+    toolCallId: 'call',
+    toolName: 'read',
+  } as const;
+  live({ ...call, type: 'tool-input-start' });
+  for (const delta of ['{"fi', 'le":"a', '.ts"}']) {
+    live({ ...call, type: 'tool-input-delta', delta });
+  }
+  const watch = openRunWatch({ runId: 'run_1', getProjection: () => projection, subscribe: () => () => undefined });
+  watch.detach();
+  const chunks: unknown[] = [];
+  for await (const chunk of watch.stream) {
+    chunks.push(chunk);
+  }
+  expect(chunks.filter((chunk) => (chunk as { type: string }).type === 'tool-input-delta')).toEqual([
+    { type: 'tool-input-delta', toolCallId: 'call', inputTextDelta: '{"file":"a.ts"}' },
+  ]);
+});

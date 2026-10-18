@@ -202,3 +202,44 @@ describe('getFirstChangedLine', () => {
     expect(getFirstChangedLine('a', 'a')).toBe(1);
   });
 });
+
+/* D-UI-17: every streamed revision of a file re-ran the diff and highlighted
+ * every segment synchronously in render. */
+describe('DiffViewer highlighting cost', () => {
+  it('should highlight the latest revision of a streaming file, not every revision', async () => {
+    const highlighter = await getHighlighter();
+    const { rerender, container } = render(
+      <DiffViewer originalContent='alpha' modifiedContent='alpha\nstep-0' language='typescript' />,
+    );
+    await waitFor(() => {
+      expect(container.innerHTML).toContain('shiki');
+    });
+    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
+
+    for (let step = 1; step <= 10; step++) {
+      rerender(<DiffViewer originalContent='alpha' modifiedContent={`alpha\nstep-${step}`} language='typescript' />);
+    }
+
+    await waitFor(() => {
+      expect(codeToHtml).toHaveBeenCalledWith(expect.stringContaining('step-10'), expect.anything());
+    });
+    expect(codeToHtml).not.toHaveBeenCalledWith(expect.stringContaining('step-5'), expect.anything());
+    await waitFor(() => {
+      expect(container.textContent).toContain('step-10');
+    });
+  });
+
+  it('should leave a diff past the highlight cap as plain diff lines', async () => {
+    const highlighter = await getHighlighter();
+    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
+    const large = Array.from({ length: 4000 }, (_, index) => `line ${index} ${'x'.repeat(32)}`).join('\n');
+
+    const { container } = render(<DiffViewer originalContent='' modifiedContent={large} language='typescript' />);
+
+    await waitFor(() => {
+      expectDiffViewerShikiReady(container);
+    });
+    expect(codeToHtml).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('.line.diff.add')).toHaveLength(4000);
+  });
+});

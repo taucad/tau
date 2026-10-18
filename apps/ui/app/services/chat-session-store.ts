@@ -298,6 +298,8 @@ const emptyHistoricalUsage: ChatHistoricalUsage = {
 
 const inactiveProjectionLimit = 4;
 const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
+/** Milliseconds between chat message notifications while a stream writes (D-UI-10). */
+const chatMessagesThrottle = 50;
 
 /** Approximate retained representation weight, bounded at retirement rather than during streaming. */
 const projectionWeight = (projection: ChatProjection): number => {
@@ -3695,6 +3697,9 @@ export class ChatSessionStore {
     // sets. `~registerMessagesCallback` etc. are public (the `~` prefix is
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
+    // Message changes are throttled (leading and trailing, D-UI-10): a stream
+    // writes one snapshot per chunk, and every subscriber re-rendered on each.
+    // Status and error callbacks stay immediate.
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
       if (
         session.presentationHold !== undefined &&
@@ -3703,7 +3708,7 @@ export class ChatSessionStore {
         session.presentationHold = undefined;
       }
       this.#chatTopics.get(chatId)?.emit();
-    });
+    }, chatMessagesThrottle);
     const unregisterStatus = chat['~registerStatusCallback'](() => {
       const next = chat.status;
       if (session.status !== next) {

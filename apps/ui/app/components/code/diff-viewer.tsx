@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { diffLines } from 'diff';
 import type { ShikiTransformer } from 'shiki/types';
 import { addClassToHast } from 'shiki/core';
@@ -11,6 +11,47 @@ import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';
 
 /** Number of context lines to show above and below each change group. */
 const contextLines = 1;
+/** Milliseconds between re-diffs of a file that is still changing; `CodeViewer` uses the same bound. */
+const diffThrottle = 150;
+/**
+ * Characters of shown lines past which the diff stays plain text (D-UI-17).
+ * Shiki's HTML is several times its source, and a whole-file rewrite is mostly
+ * read for its shape, which the per-line diff classes already draw.
+ */
+const maxHighlightedCharacters = 100_000;
+
+type DiffInput = Readonly<{ originalContent: string; modifiedContent: string }>;
+
+/**
+ * The diff input, at most once per {@link diffThrottle} while it keeps changing.
+ *
+ * A file the agent is still writing changes on every streamed chunk; the diff
+ * and its highlighting follow the latest revision instead of each one (D-UI-17).
+ * The first input is used at once, so the first frame has the diff's full height.
+ */
+function useThrottledDiffInput(input: DiffInput): DiffInput {
+  const [settled, setSettled] = useState(input);
+  const nextAllowed = useRef(0);
+  const { originalContent, modifiedContent } = input;
+
+  useEffect(() => {
+    if (settled.originalContent === originalContent && settled.modifiedContent === modifiedContent) {
+      return undefined;
+    }
+    const settleTimeout = setTimeout(
+      () => {
+        nextAllowed.current = Date.now() + diffThrottle;
+        setSettled({ originalContent, modifiedContent });
+      },
+      Math.max(0, nextAllowed.current - Date.now()),
+    );
+    return () => {
+      clearTimeout(settleTimeout);
+    };
+  }, [originalContent, modifiedContent, settled]);
+
+  return settled;
+}
 
 type DiffLine = {
   content: string;
@@ -241,10 +282,22 @@ export function DiffViewer({
     void loadHighlighter();
   }, []);
 
+  const diffInput = useThrottledDiffInput({ originalContent, modifiedContent });
   const segments = useMemo(
-    () => processDiffWithContext(originalContent, modifiedContent),
-    [originalContent, modifiedContent],
+    () => processDiffWithContext(diffInput.originalContent, diffInput.modifiedContent),
+    [diffInput],
   );
+  const highlightable = useMemo(() => {
+    let characters = 0;
+    for (const segment of segments) {
+      if (segment.type === 'code') {
+        for (const line of segment.lines) {
+          characters += line.content.length + 1;
+        }
+      }
+    }
+    return characters <= maxHighlightedCharacters;
+  }, [segments]);
   const resolvedLanguage = useMemo(() => resolveHighlightLanguage(language), [language]);
 
   // Until the highlighter loads, lines render as plain text in the same line boxes, so the diff has its full
@@ -257,7 +310,7 @@ export function DiffViewer({
       }
 
       const sourceText = segment.lines.map((line) => line.content).join('\n');
-      const html = highlighter?.codeToHtml(sourceText, {
+      const html = (highlightable ? highlighter : undefined)?.codeToHtml(sourceText, {
         lang: resolvedLanguage.shikiLanguage,
         theme: `github-${theme}${isHighContrast ? '-high-contrast' : ''}`,
         transformers: [buildDiffLineTransformer(segment.lines)],
@@ -316,7 +369,7 @@ export function DiffViewer({
         </div>
       );
     });
-  }, [segments, resolvedLanguage.shikiLanguage, theme, isHighContrast, highlighter]);
+  }, [segments, highlightable, resolvedLanguage.shikiLanguage, theme, isHighContrast, highlighter]);
 
   // Outer container w-max min-w-full ensures all segments extend to longest line across all groups
   return (

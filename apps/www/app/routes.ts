@@ -2,6 +2,7 @@ import { index, route } from '@react-router/dev/routes';
 import type { RouteConfig } from '@react-router/dev/routes';
 export default [
   route('robots.txt', 'routes/robots.ts'),
+  route('llms.txt', 'routes/llms.ts'),
   route('sitemap.xml', 'routes/sitemap.ts'),
   index('routes/home.tsx', { id: 'www-home' }),
   route('product', 'routes/product.tsx', { id: 'www-product' }),

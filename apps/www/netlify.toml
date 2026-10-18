@@ -36,6 +36,13 @@ for = "/_www/assets/*"
 Cache-Control = "public, max-age=0, must-revalidate"
 Netlify-CDN-Cache-Control = "public, durable, s-maxage=86400"
 
+# The agent page changes with each deploy; browsers revalidate and the CDN keeps it an hour.
+[[headers]]
+for = "/llms.txt"
+[headers.values]
+Cache-Control = "public, max-age=0, must-revalidate"
+Netlify-CDN-Cache-Control = "public, durable, s-maxage=3600"
+
 [[headers]]
 for = "/*"
 [headers.values]

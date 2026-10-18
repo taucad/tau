@@ -23,6 +23,8 @@ import { validateArticles } from '#www/editorial.js';
 import { siteConfiguration } from '#app/config.server.js';
 import { loader as sitemap } from '#app/routes/sitemap.js';
 import { loader as robots } from '#app/routes/robots.js';
+import { loader as llms } from '#app/routes/llms.js';
+import { agentPage } from '#www/agent-page.js';
 const bodies = [
   home,
   product,
@@ -112,6 +114,30 @@ test('should exclude preview pages from the sitemap and advertise launch sitemap
   } finally {
     vi.unstubAllEnvs();
   }
+});
+test('should serve the agent page as plain-text Markdown naming the configured origin', async () => {
+  vi.stubEnv('WWW_ORIGIN', 'https://taucad.dev');
+  try {
+    const response = llms();
+    expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    const text = await response.text();
+    expect(text.startsWith('# Tau\n\n> Tau is code-CAD')).toBe(true);
+    expect(text.match(/^# /gmu)).toHaveLength(1);
+    expect(text).toContain('[Tau app](https://taucad.dev) and [Tau Desktop](https://taucad.dev/download/)');
+    // Lighthouse's llms-txt audit needs a Markdown link, as llmstxt.org lists its links.
+    expect(text).toMatch(/^- \[.+\]\(https:\/\/.+\)/mu);
+    expect(text).toContain('    npm install -g @taucad/cli@beta\n');
+    expect(text).not.toMatch(/\{(?:origin|release)\}|\n\n\n/u);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+test('should fall back to the app origin and print a release line only when given one', () => {
+  expect(agentPage({ origin: '' })).toContain(
+    '[Tau app](https://tau.new) and [Tau Desktop](https://tau.new/download/)',
+  );
+  const released = agentPage({ origin: 'https://tau.new', release: 'Current release: 0.1.0-beta.7 (npm tag `beta`).' });
+  expect(released).toContain('folder.\n\nCurrent release: 0.1.0-beta.7 (npm tag `beta`).\n\n## Install');
 });
 test('should reject unreviewed prose, unsafe slugs, invalid dates and duplicate articles', () => {
   const article = {

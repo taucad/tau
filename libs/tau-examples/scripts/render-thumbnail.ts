@@ -5,11 +5,10 @@
 
 import sharp from 'sharp';
 import { asKnownArtifact } from '@taucad/runtime';
-import type { createExampleRuntimeClient, createWorkspaceRuntimeClient } from '#scripts/runtime.js';
+import type { createExampleRuntimeClient } from '#scripts/runtime.js';
 
-type ThumbnailClient =
-  | Awaited<ReturnType<typeof createExampleRuntimeClient>>
-  | Awaited<ReturnType<typeof createWorkspaceRuntimeClient>>;
+/* The example and workspace runtime clients share one type: they differ only in the native kernels they compose. */
+type ThumbnailClient = Awaited<ReturnType<typeof createExampleRuntimeClient>>;
 
 /** Card thumbnails are 1536 × 1152: twice the largest card slot, so 2× displays stay sharp. */
 export const thumbnailOptions = { width: 1536, height: 1152 } as const;

@@ -49,7 +49,7 @@
           "env": "TAU_EXAMPLE_PATTERN"
         },
         {
-          "env": "TAU_PICOGK_RESOURCE_ROOT"
+          "env": "TAU_CONFIG_DIR"
         },
         {
           "env": "GEOSPEC_TURBOFAN_NATIVE"
@@ -59,10 +59,10 @@
     "native-turbofan": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-picogk-dotnet-macos" }],
+      "dependsOn": [{ "projects": ["cli"], "target": "build" }],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "GEOSPEC_TURBOFAN_NATIVE=1 TAU_PICOGK_RESOURCE_ROOT=\"$PWD/../../apps/desktop/resources/picogk\" vitest run src/picogk-turbofan-native.test.ts"
+        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && GEOSPEC_TURBOFAN_NATIVE=1 vitest run src/picogk-turbofan-native.test.ts"
       }
     },
     "example-health": {

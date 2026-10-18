@@ -3335,15 +3335,15 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
+      '@taucad/native-kernels':
+        specifier: workspace:*
+        version: link:../../packages/native-kernels
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../../packages/plugins/opencascade
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
-      '@taucad/picogk':
-        specifier: workspace:*
-        version: link:../../packages/plugins/picogk
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../../packages/plugins/picovoxel
@@ -3369,15 +3369,15 @@ importers:
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
-      '@taucad/build123d':
-        specifier: workspace:*
-        version: link:../../packages/plugins/build123d
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../packages/core/geometry
       '@taucad/kinematics':
         specifier: workspace:*
         version: link:../../packages/kinematics
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../packages/runtime-testing
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
@@ -3974,9 +3974,15 @@ importers:
         specifier: 'catalog:'
         version: 0.2.0
     devDependencies:
-      '@taucad/picogk':
+      '@taucad/native-kernels':
         specifier: workspace:*
-        version: link:../plugins/picogk
+        version: link:../native-kernels
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../runtime-testing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))

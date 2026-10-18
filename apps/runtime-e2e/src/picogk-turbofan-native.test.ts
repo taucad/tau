@@ -1,4 +1,7 @@
-/** Compiled GeoSpec admission and sampled motion evidence for the recovered TF-2000. */
+/**
+ * Compiled GeoSpec admission and sampled motion evidence for the recovered TF-2000. PicoGK runs from the closure
+ * `tau prepare picogk` seals in this machine's payload store; `runtime-e2e:native-turbofan` prepares it first.
+ */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

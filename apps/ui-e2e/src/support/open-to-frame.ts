@@ -150,9 +150,7 @@ const launchDesktop = async (userData: string, picked: string) => {
   if (desktopExecutable !== undefined) {
     delete inheritedEnvironment['NODE_OPTIONS'];
     delete inheritedEnvironment['NODE_PATH'];
-    delete inheritedEnvironment['TAU_BUILD123D_RESOURCE_ROOT'];
     delete inheritedEnvironment['TAU_DESKTOP_CLIENT_ROOT'];
-    delete inheritedEnvironment['TAU_PICOGK_RESOURCE_ROOT'];
   }
   return electron.launch({
     args: [

@@ -257,13 +257,7 @@ export const observeDesktopNavigation = (
   return write('installed');
 };
 
-const completedArtifactForbiddenEnvironment = [
-  'NODE_OPTIONS',
-  'NODE_PATH',
-  'TAU_BUILD123D_RESOURCE_ROOT',
-  'TAU_DESKTOP_CLIENT_ROOT',
-  'TAU_PICOGK_RESOURCE_ROOT',
-] as const;
+const completedArtifactForbiddenEnvironment = ['NODE_OPTIONS', 'NODE_PATH', 'TAU_DESKTOP_CLIENT_ROOT'] as const;
 
 /**
  * WebGPU launch profile. The default is the hardware adapter this Mac has;
@@ -468,9 +462,7 @@ export const launchDesktopApp = async (options: {
   if (desktopE2ECompletedArtifact) {
     delete inheritedEnvironment['NODE_OPTIONS'];
     delete inheritedEnvironment['NODE_PATH'];
-    delete inheritedEnvironment['TAU_BUILD123D_RESOURCE_ROOT'];
     delete inheritedEnvironment['TAU_DESKTOP_CLIENT_ROOT'];
-    delete inheritedEnvironment['TAU_PICOGK_RESOURCE_ROOT'];
   }
   if (options.useProductionEndpointDefaults) {
     delete inheritedEnvironment['TAU_API_URL'];

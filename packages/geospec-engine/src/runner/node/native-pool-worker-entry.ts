@@ -1,11 +1,12 @@
 /** Compiled Node pool worker: owns one protocol-3 engine per isolate. @module */
 
 import { memoryUsage } from 'node:process';
-import { resolve } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Engine } from 'geospec-engine/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { RuntimeDefinition } from '@taucad/runtime';
+import type { PluginInstance } from '@taucad/runtime/plugin';
+import type * as NativeKernelRoster from '@taucad/native-kernels/node';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
@@ -16,6 +17,30 @@ export type NativePoolWorkerOptions = { projectPath: string; grant: number };
 export type NativePoolPort = {
   postMessage(message: GeoSpecPoolWorkerMessage): void;
   on(event: 'message', listener: (message: GeoSpecPoolHostMessage) => void): void;
+};
+
+/**
+ * Every native kernel whose closure the shared payload store holds sealed, loaded through the roster in
+ * `@taucad/native-kernels`, an optional peer: without it, or with nothing prepared, the portable defaults run alone.
+ * Launch indexes only, so nothing is downloaded.
+ * @returns The prepared native kernels' plugins, in roster order.
+ */
+const preparedNativePlugins = async (): Promise<readonly PluginInstance[]> => {
+  let roster: typeof NativeKernelRoster;
+  try {
+    roster = await import('@taucad/native-kernels/node');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {
+      return [];
+    }
+    throw error;
+  }
+  const { readManagedPreparation } = await import('@taucad/runtime/preparation/node');
+  const { kernels } = await roster.composeNativeKernels({
+    store: roster.defaultPayloadStore(),
+    managed: readManagedPreparation(process.env),
+  });
+  return roster.composeNativePlugins(kernels);
 };
 
 /**
@@ -32,23 +57,15 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
       engine,
       projectPath: options.projectPath,
       runtime: async () => {
-        const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
+        const [{ createNodeClient }, { defaultRuntime }, nativePlugins] = await Promise.all([
           import('@taucad/runtime/node'),
           import('#model/default-runtime.js'),
+          preparedNativePlugins(),
         ]);
         let runtime: RuntimeDefinition = defaultRuntime;
-        const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
-        if (resourceRoot) {
-          const [{ defineRuntime }, { loadPicogkKernelOptions, picogk }] = await Promise.all([
-            import('@taucad/runtime/worker'),
-            import('@taucad/picogk'),
-          ]);
-          runtime = defineRuntime({
-            ...defaultRuntime,
-            plugins: [
-              picogk({ kernels: { default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot) }) } }),
-            ],
-          });
+        if (nativePlugins.length > 0) {
+          const { defineRuntime } = await import('@taucad/runtime/worker');
+          runtime = defineRuntime({ ...defaultRuntime, plugins: [...nativePlugins] });
         }
         return createNodeClient({ runtime, projectPath: options.projectPath });
       },

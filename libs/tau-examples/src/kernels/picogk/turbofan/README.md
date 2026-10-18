@@ -22,14 +22,12 @@ References: [NASA TM 4741](https://ntrs.nasa.gov/api/citations/19970008124/downl
 - `main.geospec.ts` covers every family: closed meshes, finite coordinates, degenerate/duplicate triangles, instance count, positive volume, axial/radial placement for turned parts, box dimensions and cavity volume, analytic annular volumes, perforated-liner material removal, blade-row interference, section caps, resolution variants, complete envelope, and full-assembly interference.
 - `python3 verify.py` audits the SysML leaf multiplicities/selectors against CAD, NACA assignments, stage completeness and manifest invariants. The C# runtime also checks independent NACA reference ordinates before constructing any model.
 
-From the Tau repository root, run the source census, native GLB/pose evidence, and model health gate. The native target prepares its pinned PicoGK and GeoSpec dependencies; the health gate uses the prepared PicoGK resource:
+From the Tau repository root, run the source census, native GLB/pose evidence, and model health gate. The native target prepares PicoGK into the payload store with `tau prepare picogk`; the health gate composes it from there:
 
 ```bash
 python3 libs/tau-examples/src/kernels/picogk/turbofan/verify.py
 pnpm nx run runtime-e2e:native-turbofan
-TAU_PICOGK_RESOURCE_ROOT="$PWD/apps/desktop/resources/picogk" \
-  TAU_EXAMPLE_PATTERN='picogk\.turbofan$' \
-  pnpm nx run runtime-e2e:example-health
+TAU_EXAMPLE_PATTERN='picogk\.turbofan$' pnpm nx run runtime-e2e:example-health
 ```
 
 ## Engineering scope

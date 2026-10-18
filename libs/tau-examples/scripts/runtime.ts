@@ -1,38 +1,40 @@
-import { readFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
-import { build123d } from '@taucad/build123d';
 import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
 import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
+import type { NativeKernelComposition } from '@taucad/native-kernels';
+import { composeNativeKernels, composeNativePlugins, defaultPayloadStore } from '@taucad/native-kernels/node';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
-import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { smlib } from '@taucad/smlib';
 import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
+import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 
-const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
-const nativePlugins = resourceRoot
-  ? [
-      picogk({
-        kernels: {
-          default: loadPicogkKernelOptions({
-            resourceRoot: resolve(resourceRoot),
-          }),
-        },
-      }),
-    ]
-  : [];
+/*
+ * The native kernels whose closures this machine's payload store holds sealed (`tau prepare <kernel>`), read from
+ * launch indexes only: nothing is downloaded, and an empty store composes none.
+ */
+const nativeComposition: NativeKernelComposition = await composeNativeKernels({
+  store: defaultPayloadStore(),
+  managed: readManagedPreparation(process.env),
+});
 
-const examplePlugins = () => [
+/*
+ * Per-host omission: Build123d's examples ship no checked-in thumbnails yet, so the example-thumbnail runtime leaves
+ * it out even when it is prepared; the workspace runtime composes it.
+ */
+const exampleNativeKernels = nativeComposition.kernels.filter(({ kernel }) => kernel !== 'build123d');
+
+const examplePlugins = async (native: NativeKernelComposition['kernels']) => [
   replicad(),
   opencascade(),
   manifold(),
@@ -42,51 +44,20 @@ const examplePlugins = () => [
   openrscad(),
   esbuild(),
   image(),
-  ...nativePlugins,
+  ...(await composeNativePlugins(native)),
   tscircuit(),
 ];
 const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()];
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
-export const exampleRuntime = defineRuntime({ plugins: examplePlugins(), middleware: exampleMiddleware() });
+export const exampleRuntime = defineRuntime({
+  plugins: await examplePlugins(exampleNativeKernels),
+  middleware: exampleMiddleware(),
+});
 
-/** Read the desktop's prepared Build123d payload for this host, as the desktop shell does. */
-const loadBuild123dKernelOptions = (resourceRoot: string) => {
-  const target = `${process.platform}-${process.arch}`;
-  const targetRoot = resolve(resourceRoot, target);
-  const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as {
-    readonly target: string;
-    readonly pythonRelativePath: string;
-    readonly pythonSha256: string;
-    readonly workerPath: string;
-    readonly workerSha256: string;
-    readonly supportFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
-  };
-  if (manifest.target !== target) {
-    throw new Error(`Build123d resource target mismatch: ${manifest.target}`);
-  }
-  return {
-    pythonExecutable: resolve(targetRoot, manifest.pythonRelativePath),
-    workerPath: resolve(targetRoot, manifest.workerPath),
-    pythonSha256: manifest.pythonSha256,
-    workerSha256: manifest.workerSha256,
-    supportFiles: manifest.supportFiles.map(({ path, sha256 }) => ({ path: resolve(targetRoot, path), sha256 })),
-  };
-};
-
-const build123dResourceRoot = process.env['TAU_BUILD123D_RESOURCE_ROOT'];
-
-/**
- * The example kernels plus Build123d when `TAU_BUILD123D_RESOURCE_ROOT` names the desktop's prepared
- * Python payload: regenerates thumbnails for user projects. @public
- */
+/** The example kernels plus every native kernel the payload store holds: regenerates thumbnails for user projects. @public */
 export const workspaceRuntime = defineRuntime({
-  plugins: [
-    ...examplePlugins(),
-    ...(build123dResourceRoot
-      ? [build123d({ kernels: { default: loadBuild123dKernelOptions(resolve(build123dResourceRoot)) } })]
-      : []),
-  ],
+  plugins: await examplePlugins(nativeComposition.kernels),
   middleware: exampleMiddleware(),
 });
 

@@ -6,9 +6,9 @@ const owner = vi.hoisted(() => ({
   loader: vi.fn<(options: CreateGeoSpecNativeModelLoaderOptions) => void>(),
   close: vi.fn(),
   client: vi.fn(async () => ({})),
-  resourceOptions: { workerExecutable: '/resources/worker' },
-  resources: vi.fn((_options: { resourceRoot: string }) => ({ workerExecutable: '/resources/worker' })),
-  plugin: vi.fn((_options: unknown) => ({ id: 'configured-picogk' })),
+  composition: { kernels: [] as unknown[], unavailable: [], closureRoots: [] as string[] },
+  compose: vi.fn(async (_input: { store: string; managed: unknown }) => owner.composition),
+  plugins: vi.fn(async (rows: readonly unknown[]) => rows.map((_row, index) => ({ id: `native-${String(index)}` }))),
   definition: vi.fn((options: unknown) => options),
   defaults: { kernels: ['kernel'], middleware: ['middleware'], bundlers: ['bundler'], transcoders: ['transcoder'] },
 }));
@@ -23,7 +23,11 @@ vi.mock('geospec-engine/node', () => ({
 vi.mock('geospec/runner/native', () => ({ createGeoSpecNativeModelLoader: owner.loader }));
 vi.mock('@taucad/runtime/node', () => ({ createNodeClient: owner.client }));
 vi.mock('@taucad/runtime/worker', () => ({ defineRuntime: owner.definition }));
-vi.mock('@taucad/picogk', () => ({ loadPicogkKernelOptions: owner.resources, picogk: owner.plugin }));
+vi.mock('@taucad/native-kernels/node', () => ({
+  composeNativeKernels: owner.compose,
+  composeNativePlugins: owner.plugins,
+  defaultPayloadStore: () => '/store',
+}));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
 vi.mock('#runner/node/node-vm-filesystem.js', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
 vi.mock('#runner/pool/worker-host.js', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
@@ -44,33 +48,27 @@ afterEach(() => {
 });
 
 describe('configured native Node worker Runtime', () => {
-  it('keeps the portable defaults when no PicoGK resource root is configured', async () => {
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '');
+  it('keeps the portable defaults when the payload store holds no sealed native closure', async () => {
+    owner.composition = { kernels: [], unavailable: [], closureRoots: [] };
     await runtimeFactory()();
-    expect(owner.resources).not.toHaveBeenCalled();
-    expect(owner.plugin).not.toHaveBeenCalled();
+    expect(owner.compose).toHaveBeenCalledWith({ store: '/store', managed: expect.any(Object) as unknown });
+    expect(owner.definition).not.toHaveBeenCalled();
     expect(owner.client).toHaveBeenCalledWith({ runtime: owner.defaults, projectPath: '/project' });
   });
 
-  it('adds only the explicitly configured PicoGK plugin and preserves every default bucket', async () => {
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '/resources');
+  it('adds every prepared native kernel from the roster and preserves every default bucket', async () => {
+    owner.composition = { kernels: [{ kernel: 'a' }, { kernel: 'b' }], unavailable: [], closureRoots: ['/a', '/b'] };
     await runtimeFactory()();
-    expect(owner.resources).toHaveBeenCalledWith({ resourceRoot: '/resources' });
-    expect(owner.plugin).toHaveBeenCalledWith({ kernels: { default: owner.resourceOptions } });
-    expect(owner.definition).toHaveBeenCalledWith({ ...owner.defaults, plugins: [{ id: 'configured-picogk' }] });
-    expect(owner.client).toHaveBeenCalledWith({
-      runtime: { ...owner.defaults, plugins: [{ id: 'configured-picogk' }] },
-      projectPath: '/project',
-    });
+    const plugins = [{ id: 'native-0' }, { id: 'native-1' }];
+    expect(owner.plugins).toHaveBeenCalledWith(owner.composition.kernels);
+    expect(owner.definition).toHaveBeenCalledWith({ ...owner.defaults, plugins });
+    expect(owner.client).toHaveBeenCalledWith({ runtime: { ...owner.defaults, plugins }, projectPath: '/project' });
   });
 
-  it('refuses rejected configured resources without falling back to another Runtime', async () => {
-    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '/invalid-resources');
-    owner.resources.mockImplementationOnce(() => {
-      throw new Error('PicoGK resource target mismatch');
-    });
-    await expect(runtimeFactory()()).rejects.toThrow('PicoGK resource target mismatch');
+  it('refuses a malformed managed profile without falling back to another Runtime', async () => {
+    vi.stubEnv('TAU_ACQUISITION', 'sometimes');
+    await expect(runtimeFactory()()).rejects.toThrow('TAU_ACQUISITION');
+    expect(owner.compose).not.toHaveBeenCalled();
     expect(owner.client).not.toHaveBeenCalled();
-    expect(owner.plugin).not.toHaveBeenCalled();
   });
 });

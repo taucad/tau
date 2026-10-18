@@ -4,7 +4,9 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
 import { projectManifestSchema } from '@taucad/types';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import {
@@ -37,6 +39,20 @@ describe('generated example artifacts', () => {
       'parameterUnits',
       'gltfEdgeDetection',
     ]);
+  });
+
+  it('covers the product catalog, composing native kernels only from the payload store', () => {
+    assertKernelRosterCoverage({
+      runtime: exampleRuntime,
+      catalog: kernelConfigurations,
+      omitted: {
+        zoo: 'credentialed: example thumbnails render offline, with no Zoo proxy token',
+        build123d: 'no checked-in thumbnails: the example runtime leaves Build123d out even when it is prepared',
+        ...(exampleKernelIds.has('picogk')
+          ? {}
+          : { picogk: "native: composed once `tau prepare picogk` seals its closure in this machine's payload store" }),
+      },
+    });
   });
 
   it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {

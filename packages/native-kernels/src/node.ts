@@ -8,7 +8,8 @@
  */
 import { realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { homedir, platform } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import type { NativeKernelBounds } from '@taucad/native-process-core/adopter';
 import { installNativeRuntimeVerifier } from '@taucad/native-process-core';
@@ -83,6 +84,33 @@ export const verifyStoreClosure =
 
 const defaultRemedy = (files: readonly string[] | undefined): string =>
   files === undefined ? 'Run `tau prepare` for the kernel to rebuild it.' : 'Run `tau prepare --verify` to repair it.';
+
+/**
+ * The digest-keyed payload store every Tau host on this computer shares, for a host that does not depend on
+ * `@taucad/host` (which resolves the same root): the per-OS data root (Application Support on macOS,
+ * `$XDG_DATA_HOME/tau` on Linux, `%LOCALAPPDATA%\tau` on Windows), or `<TAU_CONFIG_DIR>/payloads` when the one
+ * override is set.
+ * @returns Absolute store root.
+ * @public
+ */
+export const defaultPayloadStore = (): string => {
+  if (process.env['TAU_CONFIG_DIR']) {
+    return join(process.env['TAU_CONFIG_DIR'], 'payloads');
+  }
+  if (platform() === 'win32') {
+    return join(process.env['LOCALAPPDATA'] ?? join(homedir(), 'AppData', 'Local'), 'tau', 'payloads');
+  }
+  if (platform() === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'tau', 'payloads');
+  }
+  // An empty XDG_DATA_HOME means the default, as the XDG Base Directory specification says.
+  const dataHome = process.env['XDG_DATA_HOME'];
+  return join(
+    dataHome === undefined || dataHome === '' ? join(homedir(), '.local', 'share') : dataHome,
+    'tau',
+    'payloads',
+  );
+};
 
 /**
  * Where a host's payload store is and which managed profile applies to it.

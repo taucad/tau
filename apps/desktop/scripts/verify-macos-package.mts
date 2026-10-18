@@ -33,6 +33,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
+import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
@@ -57,7 +58,6 @@ const {
   unsigned,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
-const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
 const { computeClosureIntegrity, parsePluginDeployment, reverifyClosure, targetKey } =
   await import('@taucad/runtime/preparation/node');
 /** The PicoGK worker protocol, which the prepared resource manifest also records. */

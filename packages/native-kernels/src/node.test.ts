@@ -14,6 +14,7 @@ import { fixtureClosure } from '#native-kernels.fixture.js';
 import {
   composeNativeKernels,
   composeNativePlugins,
+  defaultPayloadStore,
   nativeKernelFor,
   nativeKernelIdsSupportedOn,
   nativePreparationPlugins,
@@ -263,5 +264,23 @@ describe('nativeKernelIdsSupportedOn', () => {
     expect(nativeKernelIdsSupportedOn(linux)).toEqual(['build123d']);
     expect(nativeKernelIdsSupportedOn(mac)).toEqual(['build123d', 'picogk']);
     expect(nativeKernelIdsSupportedOn(windows)).toEqual([]);
+  });
+});
+
+describe('defaultPayloadStore', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should put the store under TAU_CONFIG_DIR when it is set, and under the data root otherwise', () => {
+    vi.stubEnv('TAU_CONFIG_DIR', '/config/tau');
+
+    expect(defaultPayloadStore()).toBe(join('/config/tau', 'payloads'));
+
+    vi.stubEnv('TAU_CONFIG_DIR', '');
+    vi.stubEnv('XDG_DATA_HOME', '/data');
+    vi.stubEnv('LOCALAPPDATA', String.raw`C:\Local`);
+
+    expect(defaultPayloadStore()).toMatch(/[/\\]tau[/\\]payloads$/);
   });
 });

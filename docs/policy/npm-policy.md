@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-10-16'
+updated: '2026-10-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -300,26 +300,26 @@ export { default } from './plugin';
 
 Every publishable package must declare these fields. Missing fields fail `publint`.
 
-| Field                   | Required value                                                                                          |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| `name`                  | `@taucad/<pkg>`                                                                                         |
-| `version`               | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                      |
-| `description`           | One-line, ≤120 chars, shown on npmjs.com search                                                         |
-| `keywords`              | At least 3 relevant terms                                                                               |
-| `license`               | `Apache-2.0` per the repository-wide rule in Rule 12                                                    |
-| `author`                | Same canonical author across all packages                                                               |
-| `repository`            | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "<package directory>" }` |
-| `homepage`              | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                              |
-| `bugs`                  | `{ "url": "https://github.com/taucad/tau/issues" }`                                                     |
-| `type`                  | `"module"`                                                                                              |
-| `engines`               | `{ "node": ">=24.0.0" }` (matches the workspace's minimum supported Node release)                       |
-| `sideEffects`           | `false` unless the package has top-level side effects (rare)                                            |
-| `files`                 | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                       |
-| `main`                  | `./dist/index.mjs` for packages with a root runtime export                                              |
-| `types`                 | `./dist/index.d.mts` for packages with a root export                                                    |
-| `exports`               | Map every public subpath to its source `.ts` (workspace dev)                                            |
-| `publishConfig.exports` | Map every public subpath to its ESM output (publish-time override)                                      |
-| `publishConfig.access`  | `"public"` for scoped packages                                                                          |
+| Field                   | Required value                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `name`                  | `@taucad/<pkg>`                                                                                                 |
+| `version`               | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                              |
+| `description`           | One-line, ≤120 chars, shown on npmjs.com search                                                                 |
+| `keywords`              | At least 3 relevant terms                                                                                       |
+| `license`               | `Apache-2.0` per the repository-wide rule in Rule 12                                                            |
+| `author`                | Same canonical author across all packages                                                                       |
+| `repository`            | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "<package directory>" }`         |
+| `homepage`              | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                                      |
+| `bugs`                  | `{ "url": "https://github.com/taucad/tau/issues" }`                                                             |
+| `type`                  | `"module"`                                                                                                      |
+| `engines`               | `{ "node": ">=24.0.0" }` (published runtime minimum; private workspace tooling has a separate Node requirement) |
+| `sideEffects`           | `false` unless the package has top-level side effects (rare)                                                    |
+| `files`                 | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                               |
+| `main`                  | `./dist/index.mjs` for packages with a root runtime export                                                      |
+| `types`                 | `./dist/index.d.mts` for packages with a root export                                                            |
+| `exports`               | Map every public subpath to its source `.ts` (workspace dev)                                                    |
+| `publishConfig.exports` | Map every public subpath to its ESM output (publish-time override)                                              |
+| `publishConfig.access`  | `"public"` for scoped packages                                                                                  |
 
 No `prepublishOnly` hook by default: `nx.json` `targetDefaults["nx-release-publish"].dependsOn` includes `pkgcheck`, so the gate runs as a native dependency of publish for every package. Bucket F's `@taucad/tscircuit` is a narrow exception while its vendored-code licence inventory contains held or unreviewed entries. Its source-package `prepublishOnly` runs the same licence checker as its required `nx-release-publish` dependency, guarding direct source publish as well as the workspace release path. The Nx dependency remains authoritative because package managers may strip lifecycle scripts from packed manifests. Remove the source hook with the held-code distribution gate when every inventory entry is cleared and EQ5 output-level exclusion is proved; do not treat this hook as distribution approval.
 

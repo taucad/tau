@@ -37,13 +37,13 @@ describe('geoSpecSessionFailure', () => {
 
   it('should accept a session that lists test_model and passes the suite', () => {
     expect(
-      geoSpecSessionFailure({ initialized, tools, testModel: { structuredContent: { passed: 1, total: 1 } } }),
+      geoSpecSessionFailure({ initialized, tools, called: { structuredContent: { passed: 1, total: 1 } } }),
     ).toBeUndefined();
   });
 
   it('should name a server that does not list test_model (audit H-01)', () => {
     expect(
-      geoSpecSessionFailure({ initialized, tools: ['evaluate_model', 'screenshot'], testModel: undefined }),
+      geoSpecSessionFailure({ initialized, tools: ['evaluate_model', 'screenshot'], called: undefined }),
     ).toContain('listed no test_model');
   });
 
@@ -52,7 +52,7 @@ describe('geoSpecSessionFailure', () => {
       geoSpecSessionFailure({
         initialized,
         tools,
-        testModel: { isError: true, content: [{ type: 'text', text: 'TOOL_NOT_FOUND: Unknown tool: test_model' }] },
+        called: { isError: true, content: [{ type: 'text', text: 'TOOL_NOT_FOUND: Unknown tool: test_model' }] },
       }),
     ).toContain('TOOL_NOT_FOUND');
   });

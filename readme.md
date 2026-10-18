@@ -1,6 +1,6 @@
 [![Apache 2.0 License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](license)
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-7289da?logo=discord&logoColor=white)](https://discord.gg/6pfSAN3t7A)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node.js tooling](https://img.shields.io/badge/tooling%20node-%3E%3D24.15.0-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
 
 # Tau
 

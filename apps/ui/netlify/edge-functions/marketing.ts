@@ -28,6 +28,9 @@ const marketingPrefixes = [
   '/_www',
 ];
 
+/** Single files owned by apps/www: its sitemap, served under another name, and the agent page. */
+const marketingFiles = new Set(['/sitemap-marketing.xml', '/llms.txt']);
+
 /** Query parameters a shared marketing link may carry without leaving `/`. */
 const campaignParameters = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']);
 
@@ -53,7 +56,7 @@ export function resolveMarketingUrl(requestUrl: URL, method: string, origin: str
       return undefined;
     }
   } else if (
-    pathname !== '/sitemap-marketing.xml' &&
+    !marketingFiles.has(pathname) &&
     !marketingPrefixes.some(
       (prefix) => pathname === prefix || pathname === `${prefix}.data` || pathname.startsWith(`${prefix}/`),
     )
@@ -193,6 +196,7 @@ export const config = {
     '/',
     '/_root.data',
     '/sitemap-marketing.xml',
+    '/llms.txt',
     '/robots.txt',
     ...marketingPrefixes.flatMap((prefix) => [prefix, `${prefix}.data`, `${prefix}/*`]),
   ],

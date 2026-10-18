@@ -3,7 +3,7 @@ title: 'Platform Compatibility Policy'
 description: 'Canonical capability matrix for Tau browsers, runtime hosts, WebAssembly artifacts, filesystems, workers, and graphics.'
 status: active
 created: '2026-07-21'
-updated: '2026-09-05'
+updated: '2026-10-18'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -170,9 +170,11 @@ API presence is weaker than operational availability. Private browsing, quota pr
 
 This Tau-owned table records product support rather than MDN browser support.
 
+Private workspace tooling follows the root `engines.node` requirement; maintained CI tooling must meet that floor. Published package engines declare a separate runtime minimum.
+
 | Surface                    | Source of truth                                                        | Support contract                                                                         | Proof                                                                                     | Failure/fallback                                                                                     | Verified             |
 | -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------- |
-| Node                       | Root and package `engines.node`                                        | `>=24.0.0`; universal output must not require hidden V8 flags                            | Package tests at the minimum Node line                                                    | Reject unsupported Node before relying on a newer engine feature                                     | 2026-07-21           |
+| Node                       | Published package `engines.node`                                       | `>=24.0.0`; universal output must not require hidden V8 flags                            | Package tests at the minimum Node line                                                    | Reject unsupported Node before relying on a newer engine feature                                     | 2026-07-21           |
 | Electron                   | Runtime peer range and first-party applications                        | `@taucad/runtime` peer `>=37.0.0`; `apps/desktop` and both examples pin `^43.5.1`        | Package, example, and desktop-shell smoke tests on the pinned Electron                    | Report the unsupported peer/host; do not assume Chrome-stable parity                                 | 2026-09-02           |
 | Browser ESM                | Package exports and npm policy                                         | Import is side-effect-safe before optional browser globals are probed                    | Import smoke tests with optional globals absent                                           | Typed capability failure after import                                                                | 2026-07-21           |
 | Workers                    | Literal `new URL(..., import.meta.url)` or explicit consumer-owned URL | Bundlers must see the worker entry; no opaque runtime URL guessing                       | Production bundle plus worker handshake                                                   | Framework adapter or explicit consumer URL                                                           | 2026-07-21           |

@@ -83,7 +83,22 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/libs/oxlint/src/**/*",
         {
-          "externalDependencies": ["eslint", "oxlint"]
+          "externalDependencies": [
+            "eslint",
+            "oxlint",
+            "eslint-plugin-unicorn",
+            "eslint-plugin-n",
+            "eslint-plugin-no-use-extend-native",
+            "@eslint-community/eslint-plugin-eslint-comments",
+            "eslint-plugin-jsdoc",
+            "eslint-plugin-no-barrel-files",
+            "@protontech/eslint-plugin-enforce-uint8array-arraybuffer",
+            "eslint-plugin-react",
+            "typescript-eslint",
+            "@nx/eslint-plugin",
+            "eslint-plugin-import-x",
+            "eslint-plugin-max-params-no-constructor"
+          ]
         }
       ]
     },

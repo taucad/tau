@@ -60,7 +60,7 @@ jobs:
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          node-version: '24.20.0'
           save-pnpm-store: 'false'
 
       - &install-uv
@@ -410,11 +410,21 @@ jobs:
       - name: Bundle the benchmark for both Node architectures
         run: |
           exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
-          echo "ARM_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          echo "S6_TOOLING_NODE=$(command -v node)" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/bench"
           node_modules/.bin/esbuild scripts/spikes/native-deps/build123d-bench.mts --bundle --platform=node --format=esm \
             --target=node24 --outfile="$RUNNER_TEMP/bench/build123d-bench.mjs" \
             "--banner:js=import { createRequire as __spikeCreateRequire } from 'node:module'; const require = __spikeCreateRequire(import.meta.url);"
+
+      # Keep the measured runtimes on the same release; workspace tooling uses Node 24.20.
+      - name: Setup arm64 benchmark Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.10.0'
+          architecture: arm64
+
+      - name: Capture arm64 benchmark Node
+        run: echo "ARM_NODE=$(command -v node)" >> "$GITHUB_ENV"
 
       - name: Setup x64 Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -440,8 +450,8 @@ jobs:
               "$OUT/s6/arm64-$run.json" "$OUT/s6/x64-rosetta-$run.json"
           done
 
-      - name: Restore arm64 Node for the summary
-        run: echo "$(dirname "$ARM_NODE")" >> "$GITHUB_PATH"
+      - name: Restore tooling Node for the summary
+        run: echo "$(dirname "$S6_TOOLING_NODE")" >> "$GITHUB_PATH"
       - *summarize
       - *annotate
       - *upload-records

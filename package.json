@@ -327,7 +327,7 @@
   },
   "author": "Richard Fontein",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.15.0"
   },
   "lint-staged": {
     "*": "oxfmt --no-error-on-unmatched-pattern"

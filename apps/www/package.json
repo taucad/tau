@@ -54,6 +54,7 @@
     "#app/routes/*.js": "./app/routes/*.tsx",
     "#app/routes/sitemap.js": "./app/routes/sitemap.ts",
     "#app/routes/robots.js": "./app/routes/robots.ts",
+    "#app/routes/llms.js": "./app/routes/llms.ts",
     "#app/hydrate.client.js": "./app/hydrate.client.tsx"
   }
 }

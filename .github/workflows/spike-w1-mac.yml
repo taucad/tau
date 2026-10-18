@@ -177,10 +177,11 @@ jobs:
             const metadataUrl = 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json';
             const metadata = await (await fetch(metadataUrl)).json();
             const release = metadata.releases.find((entry) => entry.runtime?.version === '10.0.11');
-            const candidates = release.runtime.files.filter((entry) => entry.rid === 'osx-arm64').map((entry) => entry.name);
-            console.log(`releases.json osx-arm64 runtime files: ${candidates.join(', ')}`);
-            const file = release.runtime.files.find((entry) => entry.rid === 'osx-arm64' && entry.name === 'dotnet-runtime-osx-arm64.tar.gz');
-            if (!file) throw new Error('releases.json lists no dotnet-runtime-osx-arm64.tar.gz for 10.0.11');
+            const candidates = release?.runtime?.files.filter((entry) => entry.rid === 'osx-arm64') ?? [];
+            console.log(`releases.json osx-arm64 runtime files: ${candidates.map((entry) => entry.name).join(', ')}`);
+            const runtimes = candidates.filter((entry) => entry.name === 'dotnet-runtime-osx-arm64.tar.gz');
+            if (runtimes.length !== 1) throw new Error('Missing or ambiguous .NET runtime 10.0.11 osx-arm64 archive');
+            const [file] = runtimes;
             const { bytes, milliseconds } = await fetchBytes(file.url);
             const sha512 = hex('sha512', bytes);
             if (sha512 !== file.hash.toLowerCase()) throw new Error(`.NET runtime digest mismatch ${sha512}`);
@@ -651,7 +652,7 @@ jobs:
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          node-version: '24.20.0'
           save-pnpm-store: 'false'
 
       - &install-uv

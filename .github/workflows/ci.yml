@@ -756,6 +756,24 @@ jobs:
       - name: Apply the protected migration job
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
 
+      - name: Qualify focused database mock consumers without silent skips
+        env:
+          DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
+          TAU_CLOUD_ENABLED: 'false'
+          TAU_S3_ENDPOINT: http://localhost:9000
+          TAU_S3_REGION: us-east-1
+          TAU_S3_ACCESS_KEY_ID: tau-api
+          TAU_S3_SECRET_ACCESS_KEY: tau-api-dev-secret
+          TAU_S3_FORCE_PATH_STYLE: 'true'
+          TAU_S3_BUCKET: tau-content
+          TAU_S3_PRIVATE_BUCKET: tau-content-private
+          TAU_S3_PUBLIC_BASE_URL: http://localhost:9000/tau-content
+        run: |
+          rm -f -- out/reports/api-focused-db.json
+          node apps/api/scripts/qualify-db-fixtures.mts preflight
+          TAU_JOBS_INTEGRATION=1 pnpm nx run-many -t test --projects tag:scope:api --exclude tag:type:e2e --parallel=1 --skipNxCache -- app/api/jobs/jobs.service.integration.test.ts app/api/durable-events/durable-events.revision-stream.test.ts app/api/git/lfs-retirement.test.ts --watch=false --maxWorkers=1 --reporter=verbose --reporter=json --outputFile=../../out/reports/api-focused-db.json
+          node apps/api/scripts/qualify-db-fixtures.mts admit out/reports/api-focused-db.json
+
       # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
       # is named here rather than left to `apps/api/.env` — which the step above
       # copies from `.env.example` and which carries the same URL — so the database

@@ -255,7 +255,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          node-version: '24.20.0'
           save-pnpm-store: 'false'
 
       # The build123d desktop producer installs its wheels with uv.
@@ -357,7 +357,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          node-version: '24.20.0'
 
       - name: Prepare current installed GeoSpec consumer
         run: |

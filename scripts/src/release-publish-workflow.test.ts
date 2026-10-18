@@ -99,6 +99,17 @@ describe('release publish workflow', () => {
     expect(publishLines[1]).not.toContain('--dry-run');
   });
 
+  it('installs and starts the published CLI and plugin once the publish succeeds', () => {
+    const document = load(workflow) as {
+      jobs: Record<string, { needs?: string; steps?: ReadonlyArray<{ run?: string }> }>;
+    };
+    const verify = document.jobs['verify-published'];
+    expect(verify?.needs).toBe('publish');
+    expect(
+      verify?.steps?.some(({ run }) => run?.includes('node scripts/src/verify-published-packages.ts --node22')),
+    ).toBe(true);
+  });
+
   it('reads the Nx Cloud cache the CI run wrote', () => {
     expect(workflow).toContain(`NX_CLOUD_ACCESS_TOKEN: \${{ secrets.NX_CLOUD_ACCESS_TOKEN }}`);
   });

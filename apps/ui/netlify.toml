@@ -101,12 +101,6 @@ status = 301
 force = true
 
 [[redirects]]
-from = "/llms.txt"
-to = "https://docs.tau.new/llms.txt"
-status = 301
-force = true
-
-[[redirects]]
 from = "/llms-full.txt"
 to = "https://docs.tau.new/llms-full.txt"
 status = 301

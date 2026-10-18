@@ -347,7 +347,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Resume in 30 seconds.')).toBeInTheDocument();
+    // A provider's transient pacing resumes on its own, counting down beside Resume.
+    expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 30 seconds');
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });

@@ -424,6 +424,8 @@ export type TurnPlacement = {
 export type RunLifecycleEvent = LogEventBase & {
   readonly type: 'run.lifecycle';
   readonly state: RunLifecycleState;
+  /** Model selected for this running attempt when resuming an existing run. */
+  readonly selection?: TurnModelConfig | undefined;
   /** Attempt 1's `running` row only: the placement of record. A placement on any other row is ignored. */
   readonly placement?: TurnPlacement | undefined;
   readonly storageDurability?: StorageDurabilityClass | undefined;

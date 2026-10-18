@@ -2,7 +2,7 @@ import { definePlugin } from '@taucad/runtime/plugin';
 import { displaySimplification } from '#display-simplification.middleware.js';
 import { geometryCache } from '#geometry-cache.middleware.js';
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
-import { parameterCache } from '#parameter-cache.middleware.js';
+import { parameterCacheDefinition } from '#parameter-cache.middleware.js';
 import { parameterFileResolver } from '#parameter-file-resolver.middleware.js';
 import { parameterUnits } from '#parameter-units.middleware.js';
 
@@ -14,7 +14,7 @@ export const middleware = definePlugin({
 
   middleware: {
     parameterFileResolver,
-    parameterCache,
+    parameterCache: parameterCacheDefinition,
     parameterUnits,
     geometryCache,
     gltfEdgeDetection,

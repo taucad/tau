@@ -118,19 +118,22 @@ const buildOutputPart = (overrides: {
   readonly linesRemoved: number;
   readonly originalContent?: string;
   readonly modifiedContent?: string;
-}): EditFileOutputAvailable => ({
-  toolCallId: 'tc_1',
-  state: 'output-available',
-  input: { targetFile: overrides.targetFile, codeEdit: 'noop' },
-  output: {
-    diffStats: {
-      linesAdded: overrides.linesAdded,
-      linesRemoved: overrides.linesRemoved,
-      originalContent: overrides.originalContent ?? 'unchanged',
-      modifiedContent: overrides.modifiedContent ?? overrides.originalContent ?? 'unchanged',
+}): EditFileOutputAvailable => {
+  const legacyInput = { targetFile: overrides.targetFile, codeEdit: 'noop' };
+  return {
+    toolCallId: 'tc_1',
+    state: 'output-available',
+    input: legacyInput,
+    output: {
+      diffStats: {
+        linesAdded: overrides.linesAdded,
+        linesRemoved: overrides.linesRemoved,
+        originalContent: overrides.originalContent ?? 'unchanged',
+        modifiedContent: overrides.modifiedContent ?? overrides.originalContent ?? 'unchanged',
+      },
     },
-  },
-});
+  };
+};
 
 afterEach(() => {
   cleanup();
@@ -193,5 +196,5 @@ it('should preview deterministic replacement text while input streams', () => {
       }}
     />,
   );
-  expect(screen.getByRole('region', { name: 'File operation preview' })).toHaveTextContent('replacement in progress');
+  expect(screen.getByRole('region', { name: 'File operation preview' })).toMatchTextContent('replacement in progress');
 });

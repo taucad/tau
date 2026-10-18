@@ -7,6 +7,7 @@
 import { describe, it, assertType, expectTypeOf } from 'vitest';
 
 import type { fromNodeFs } from '#filesystem/from-node-fs.js';
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { webSocketTransport } from '#transport/web-socket-transport.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
@@ -26,9 +27,10 @@ describe('webSocketTransport type inference', () => {
   });
 
   it('accepts an inline filesystem handle', () => {
+    const fileSystem: ReturnType<typeof fromNodeFs> = fromMemoryFs();
     const plugin = webSocketTransport({
       url: 'ws://127.0.0.1:8080',
-      fileSystem: undefined as unknown as ReturnType<typeof fromNodeFs>,
+      fileSystem,
     });
     expectTypeOf(plugin.id).toEqualTypeOf<'web-socket'>();
   });

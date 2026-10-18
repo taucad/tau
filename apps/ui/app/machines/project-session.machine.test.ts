@@ -28,7 +28,7 @@ const recordingParent = (): {
   const received: Array<EventObject & Record<string, unknown>> = [];
   const ref = createActor(
     createCallbackLogic<EventObject>(({ receive }) => {
-      receive((event) => received.push(event as EventObject & Record<string, unknown>));
+      receive((event) => received.push(event));
     }),
   );
   ref.start();

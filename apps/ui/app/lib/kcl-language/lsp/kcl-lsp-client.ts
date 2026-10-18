@@ -428,7 +428,7 @@ export class KclLspClient {
   }
 
   private async initializeLsp(): Promise<void> {
-    const initializeParameters: LSP.InitializeParams = {
+    const initializeParameters = {
       processId: null,
       clientInfo: { name: 'monaco-kcl-lsp', version: '1.0.0' },
       capabilities: clientCapabilities,
@@ -437,7 +437,10 @@ export class KclLspClient {
     };
 
     log.debug('Sending initialize request...');
-    const result = await this.request<LSP.InitializeResult>('initialize', initializeParameters);
+    const result = await this.request<LSP.InitializeResult>(
+      'initialize',
+      initializeParameters satisfies LSP.InitializeParams,
+    );
     log.debug('Initialize response received:', result);
     this.serverCapabilities = result.capabilities;
     log.debug('Server capabilities:', this.serverCapabilities);

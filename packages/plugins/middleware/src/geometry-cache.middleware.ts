@@ -3,7 +3,7 @@ import { contentDigest, digestContent } from '@taucad/cache-core';
 import type { CacheCodec, ComputeAction, EncodedContent } from '@taucad/cache-core';
 import { z } from 'zod';
 import { defineMiddleware, nativeBuildInputSymbol } from '@taucad/runtime/middleware';
-import type { NativeBuildInput, NativeBuildInputCarrier } from '@taucad/runtime/middleware';
+import type { NativeBuildInput } from '@taucad/runtime/middleware';
 import type {
   Artifact,
   EvaluateResult,
@@ -14,8 +14,6 @@ import type {
 import { kernelIssueCodeValues } from '@taucad/runtime/types';
 import { nonemptyExportFiles } from '@taucad/runtime/kernel';
 import { traceCacheOperation } from '#_internal/cache-span.js';
-
-type BuildCacheResult = Extract<EvaluateResult, { success: true }> & NativeBuildInputCarrier;
 
 const binaryReferenceSchema = z
   .object({
@@ -321,8 +319,7 @@ const buildCodec: CacheCodec<EvaluateResult> = {
       signal,
       readContent,
     });
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- Zod validates every persisted field before restoring the symbol carrier.
-    return { ...entry.result, serializedHandle, [nativeBuildInputSymbol]: entry.nativeBuildInput } as BuildCacheResult;
+    return { ...entry.result, serializedHandle, [nativeBuildInputSymbol]: entry.nativeBuildInput };
   },
 };
 

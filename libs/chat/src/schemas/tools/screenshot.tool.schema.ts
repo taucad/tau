@@ -18,6 +18,20 @@ const sectionKeep = z
     'The side to retain along the normal axis: negative keeps coordinates at or below offset. Defaults to the side whose cut face looks at the single-mode camera.',
   );
 
+const screenshotSectionShape = {
+  plane: sectionPlane,
+  offset: sectionOffset.optional(),
+  /**
+   * @deprecated Send `offset` in metres instead: `offsetMm: 6` is `offset: 0.006`, the millimetres divided by 1000.
+   * Removed in 0.1.0-beta.8.
+   */
+  offsetMm: z
+    .number()
+    .optional()
+    .describe('Deprecated, kept for one release: the same position in millimetres. Send offset instead.'),
+  keep: sectionKeep.optional(),
+};
+
 /**
  * One axis-aligned section cut through a 3D view, in metres in `tau:root` (Z-up), the frame `arrange_workbench`
  * writes its cuts in. The renderer clips surfaces and lines and caps the cut. `offsetMm`, the millimetre spelling it
@@ -26,19 +40,7 @@ const sectionKeep = z
  * @public
  */
 export const screenshotSectionSchema = z
-  .object({
-    plane: sectionPlane,
-    offset: sectionOffset.optional(),
-    /**
-     * @deprecated Send `offset` in metres instead: `offsetMm: 6` is `offset: 0.006`, the millimetres divided by 1000.
-     * Removed in 0.1.0-beta.8.
-     */
-    offsetMm: z
-      .number()
-      .optional()
-      .describe('Deprecated, kept for one release: the same position in millimetres. Send offset instead.'),
-    keep: sectionKeep.optional(),
-  })
+  .object(screenshotSectionShape)
   .strict()
   // oxlint-disable-next-line typescript/no-deprecated -- The alias is read only here, to parse it into offset.
   .transform(({ offset, offsetMm, ...section }, context) => {

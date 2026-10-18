@@ -273,7 +273,7 @@ describe('ProjectLibrary', () => {
     it('should preserve local projects while reporting a failed cloud catalog', () => {
       cloudListing.isFailed = true;
       renderLibrary();
-      expect(screen.getByRole('alert')).toHaveTextContent('Tau Cloud projects could not be loaded');
+      expect(screen.getByRole('alert')).toMatchTextContent('Tau Cloud projects could not be loaded');
       expect(screen.getByRole('button', { name: 'Retry Tau Cloud' })).toBeEnabled();
       expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
     });
@@ -327,11 +327,11 @@ describe('ProjectLibrary', () => {
       ];
       renderLibrary();
 
-      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also on Tau Cloud');
-      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also on Tau Cloud');
+      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toMatchTextContent('Also on Tau Cloud');
+      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toMatchTextContent('Also on Tau Cloud');
       const cloudOnly = screen.getByRole('row', { name: /Hinge Delta/u });
-      expect(cloudOnly).toHaveTextContent('Tau Cloud');
-      expect(cloudOnly).not.toHaveTextContent('Backed up on');
+      expect(cloudOnly).toMatchTextContent('Tau Cloud');
+      expect(cloudOnly).not.toMatchTextContent('Backed up on');
       expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
     });
 
@@ -395,8 +395,8 @@ describe('ProjectLibrary', () => {
       renderLibrary();
 
       const card = screen.getByRole('row', { name: /Reference Jig/u });
-      expect(card).toHaveTextContent('Can view');
-      expect(card).not.toHaveTextContent('This device does not have it yet.');
+      expect(card).toMatchTextContent('Can view');
+      expect(card).not.toMatchTextContent('This device does not have it yet.');
     });
 
     it('should show a Tau-Cloud-only project instead of the empty state when this device has none', () => {

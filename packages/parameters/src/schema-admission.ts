@@ -499,7 +499,7 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
       if (Array.isArray(item.value)) {
         fail('INVALID_SCHEMA', item.pointer, 'schema must be an object or boolean');
       }
-      schemaNodes.add(item.value as Record<string, unknown>);
+      schemaNodes.add(item.value);
       assertQuantityClaims(item.value as JsonSchema, item.pointer);
     }
     if (item.role === 'schema-array' && !Array.isArray(item.value)) {

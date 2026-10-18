@@ -375,7 +375,7 @@ function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): Topo
   }
 
   if (Array.isArray(extension['components'])) {
-    return extension as TopologyPayload;
+    return extension;
   }
 
   const { topologyBufferView } = extension;

@@ -126,7 +126,7 @@ describe('GLTF surface depth bias', () => {
       shader.fragmentShader = `prior\n${shader.fragmentShader}`;
     });
     material.clippingPlanes = [clippingPlane];
-    material.onBeforeCompile = priorHook as unknown as Material['onBeforeCompile'];
+    material.onBeforeCompile = priorHook;
 
     applyGltfSurfaceDepthBias(material, 'webgl');
     const shader = compile(material);

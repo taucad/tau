@@ -111,7 +111,7 @@ catalog:
   '@react-router/fs-routes': 7.18.2
   '@react-router/node': 7.18.2
   '@size-limit/file': ^12.1.0
-  '@tanstack/react-pacer': ^0.22.1
+  '@tanstack/react-pacer': ^0.24.1
   '@tanstack/react-query': ^5.101.0
   # tscircuit EDA kernel (@taucad/tscircuit): exact pins by charter D1 — every package is
   # 0.0.x with no semver guarantee. The @tscircuit/core peers are the modules its published
@@ -157,7 +157,7 @@ catalog:
   spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.191
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.3.2
+  '@testing-library/react': 16.3.3
   '@tiptap/core': ^3.30.5
   '@tiptap/extension-document': ^3.30.5
   '@tiptap/extension-hard-break': ^3.30.5
@@ -174,15 +174,15 @@ catalog:
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
   '@types/node': ~24.0.15
-  '@types/react': 19.2.17
-  '@types/react-dom': 19.2.3
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
   '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@typescript/native-preview': 7.0.0-dev.20260223.1
-  '@vitejs/plugin-react': 6.1.1
-  '@vitest/coverage-v8': 4.1.11
-  '@vitest/browser-playwright': 4.1.11
-  '@vitest/ui': 4.1.11
+  '@vitejs/plugin-react': 6.1.2
+  '@vitest/coverage-v8': 5.0.3
+  '@vitest/browser-playwright': 5.0.3
+  '@vitest/ui': 5.0.3
   '@xyflow/react': ^12.11.0
   axe-core: ^4.12.1
   better-auth: 1.7.7
@@ -203,7 +203,7 @@ catalog:
   es-module-lexer: ^2.1.0
   esbuild: 0.28.2
   esbuild-wasm: 0.28.2
-  eslint: 9.32.0
+  eslint: 9.39.5
   eslint-plugin-import-x: ^4.16.2
   eslint-plugin-jsdoc: ^65.2.4
   eslint-plugin-max-params-no-constructor: ^0.0.4
@@ -247,8 +247,8 @@ catalog:
   '@taulabs/openrscad-engine': 0.11.0-beta.4
   oxfmt: ^0.36.0
   oxlint: ^1.80.0
-  oxlint-tsgolint: ^0.16.0
-  oxc-transform-react: 0.148.0
+  oxlint-tsgolint: 7.0.2004
+  oxc-transform-react: 0.152.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
   replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
@@ -256,9 +256,9 @@ catalog:
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
   radix-ui: ^1.6.0
-  react: 19.2.7
+  react: 19.3.0
   react-day-picker: ^10.0.0
-  react-dom: 19.2.7
+  react-dom: 19.3.0
   react-email: ^6.6.3
   react-router: 7.18.2
   rehype-sanitize: ^6.0.0
@@ -293,7 +293,7 @@ catalog:
   vite-plugin-mkcert: 2.0.0
   vite-plugin-singlefile: 2.3.3
   vite-plugin-static-copy: ^4.1.1
-  vitest: 4.1.11
+  vitest: 5.0.3
   vitest-mock-extended: ^5.1.1
   vscode-uri: 3.1.0
   web-vitals: ^5.3.0
@@ -339,6 +339,7 @@ catalog:
   '@better-auth-ui/core': 1.7.29
   '@better-auth-ui/react': 1.7.29
   smol-toml: 1.9.1
+  google-auth-library: 11.2.0
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0
@@ -437,23 +438,25 @@ patchedDependencies:
   n8ao@1.10.2: tools/pnpm/patches/n8ao@1.10.2.patch
   vaul@1.1.2: tools/pnpm/patches/vaul@1.1.2.patch
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
-  '@react-three/fiber@9.6.1': tools/pnpm/patches/@react-three__fiber@9.6.1.patch
   monaco-editor@0.55.1: tools/pnpm/patches/monaco-editor@0.55.1.patch
+  '@react-three/fiber@9.8.1': tools/pnpm/patches/@react-three__fiber@9.8.1.patch
 overrides:
+  circuit-json-to-bom-csv@0.0.17>react-dom: 19.2.7
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2
   '@langchain/cerebras@1.0.4>uuid': 11.1.1
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
-  '@react-three/fiber': 9.6.1
+  '@react-three/fiber': 9.8.1
   '@streamdown/math>katex': 0.18.2
   '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6
   '@types/express': 'catalog:'
-  '@types/react-dom@>=19.0.0 <20.0.0': 19.2.3
-  '@types/react@>=19.0.0 <20.0.0': 19.2.17
+  '@types/react-dom@>=19.0.0 <20.0.0': 19.3.0
+  '@types/react@>=19.0.0 <20.0.0': 19.3.0
   fastify: 'catalog:'
   graphics-debug@0.0.100>react-router-dom: 7.18.2
   graphics-debug@0.0.99>react-router-dom: 7.18.2
   ipx@3.1.1>sharp: 0.35.5
+  ipx@3.1.1>unstorage: 1.17.6
   mermaid>dompurify: 3.4.16
   mermaid>katex: 0.18.2
   micromark-extension-math>katex: 0.18.2

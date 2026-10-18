@@ -546,8 +546,7 @@ const refusedSettlement = (
     attempt: key.attempt,
     ...refusal,
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stated attempt rides the body (N4).
-  return row as LogRowBody;
+  return row;
 };
 
 const sameAttempt = (slot: Slot, key: TurnAttemptKey): boolean =>
@@ -1182,8 +1181,7 @@ export const chatRunMachine = setup({
               enq(actions.prepareResume, {
                 commandId: event.commandId,
                 runId: event.payload.runId,
-                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a validated wire payload is JSON.
-                payload: event.payload as JsonValue,
+                payload: event.payload,
               });
               return {
                 target: '#validating',
@@ -1347,8 +1345,7 @@ export const chatRunMachine = setup({
               enq(actions.prepareResume, {
                 commandId: event.commandId,
                 runId: event.payload.runId,
-                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a validated wire payload is JSON.
-                payload: event.payload as JsonValue,
+                payload: event.payload,
               });
               return {
                 target: '#validating',
@@ -2185,7 +2182,7 @@ export const chatRunMachine = setup({
             const { runId, ...body } = row;
             enq(actions.appendRows, {
               key: `settle:${runId}:${String(key.attempt)}`,
-              rows: [{ runId, body: body as LogRowBody }],
+              rows: [{ runId, body }],
             });
           },
           on: {

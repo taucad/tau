@@ -330,7 +330,7 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
         nestedSchema &&
         typeof nestedSchema === 'object' &&
         !Array.isArray(nestedSchema) &&
-        isSchemaMatchingSearch(nestedSchema as RJSFSchema, searchTerm, nestedName)
+        isSchemaMatchingSearch(nestedSchema, searchTerm, nestedName)
       ) {
         return true;
       }
@@ -343,7 +343,7 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
     schema.items &&
     typeof schema.items === 'object' &&
     !Array.isArray(schema.items) &&
-    isSchemaMatchingSearch(schema.items as RJSFSchema, searchTerm)
+    isSchemaMatchingSearch(schema.items, searchTerm)
   ) {
     return true;
   }

@@ -40,6 +40,7 @@ import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import { toolName } from '@taucad/chat/constants';
 import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
+import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 import {
   createChatToolRegistry,
   createProviderRpcFileSystem,
@@ -224,8 +225,16 @@ const nativeGeoSpecEngineLimits: HostEngineLimits = { maxMeshBytes: 1024 * 1024 
 
 let nativeSession: NativeGeoSpecSession | undefined;
 let nativeTail: Promise<void> = Promise.resolve();
-let nativeAdmission: Promise<ModelAdmissionLimits | undefined> | undefined;
+/** The engine a `test_model` result names. */
+type GeoSpecEngineIdentity = NonNullable<TestModelOutput['engine']>;
 
+/** What the `test_model` engine says of itself and its limits; either is absent when the engine cannot report it. */
+type NativeEngineFacts = Readonly<{
+  admission?: ModelAdmissionLimits | undefined;
+  engine?: GeoSpecEngineIdentity | undefined;
+}>;
+
+let nativeFacts: Promise<NativeEngineFacts> | undefined;
 /** The engine's `initialize` request, in the canonical form the engine reads; its configuration names the limits. */
 const engineConfigurationRequest =
   '{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":5,"requestId":"configuration"}';
@@ -242,43 +251,77 @@ const engineConfigurationSchema = z.object({
     }),
   }),
 });
+const engineIdentitySchema = z.object({
+  result: z.object({
+    protocolVersion: z.number().int().positive(),
+    numericProfile: z.string().min(1),
+    qualification: z.string().min(1),
+  }),
+});
+const engineManifestSchema = z.object({ name: z.string().min(1), version: z.string().min(1) });
 
 /**
- * The limits the `test_model` engine admits one subject within, read once per process from the
- * `initialize` configuration of an engine built with the same limits and closed at once, so the
- * shared session engine and its retained subjects are never touched. `evaluate_model` estimates a
- * whole-model load against them.
+ * What the `test_model` engine reports of itself, read once per process from the `initialize` answer of an engine
+ * built with the same limits and closed at once, so the shared session engine and its retained subjects are never
+ * touched: the limits it admits one subject within, which `evaluate_model` estimates a whole-model load against, and
+ * its identity, which every `test_model` result names.
  *
- * @returns The engine's admission limits, or `undefined`, with one warning, when it cannot report them.
+ * @returns The facts it reported; each one it cannot report is absent, with one warning.
  */
-const nativeAdmissionLimits = async (): Promise<ModelAdmissionLimits | undefined> => {
-  nativeAdmission ??= (async () => {
+const nativeEngineFacts = async (): Promise<NativeEngineFacts> => {
+  nativeFacts ??= (async () => {
+    let answer: unknown;
     try {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
       const { Engine } = await import('geospec-engine/node');
       const engine = new Engine(undefined, undefined, nativeGeoSpecEngineLimits);
-      let limits: ModelAdmissionLimits;
       try {
-        const response = engine.processRequest(new TextEncoder().encode(engineConfigurationRequest));
-        const answer: unknown = JSON.parse(new TextDecoder().decode(response));
-        const { maxTriangles, maxVertices, maxSubjectBytes } =
-          engineConfigurationSchema.parse(answer).result.configuration.binaryAdmissionLimits;
-        limits = { maxTriangles, maxVertices, maxSubjectBytes };
+        answer = JSON.parse(
+          new TextDecoder().decode(engine.processRequest(new TextEncoder().encode(engineConfigurationRequest))),
+        );
       } finally {
         try {
           engine.close();
         } catch (error) {
-          // The limits it already reported stand; a probe engine that fails to close leaks only itself.
+          // The answer it already gave stands; a probe engine that fails to close leaks only itself.
           console.warn('GeoSpec admission probe engine failed to close:', error);
         }
       }
-      return limits;
     } catch (error) {
-      console.warn('GeoSpec admission limits unavailable; evaluate_model reports no admission:', error);
-      return undefined;
+      answer = error;
     }
+    const configuration = engineConfigurationSchema.safeParse(answer);
+    if (!configuration.success) {
+      console.warn(
+        'GeoSpec admission limits unavailable; evaluate_model reports no admission:',
+        answer instanceof Error ? answer : configuration.error,
+      );
+    }
+    const identity = engineIdentitySchema.safeParse(answer);
+    if (configuration.success && !identity.success) {
+      // A failed probe already warned above; this names an engine that answered without its identity.
+      console.warn('GeoSpec engine identity unavailable; test_model names no engine:', identity.error);
+    }
+    let engine: GeoSpecEngineIdentity | undefined;
+    try {
+      const manifest = engineManifestSchema.parse(
+        JSON.parse(await readFile(new URL(import.meta.resolve('geospec-engine/package.json')), 'utf8')),
+      );
+      if (identity.success) {
+        const { protocolVersion, numericProfile, qualification } = identity.data.result;
+        engine = { ...manifest, protocol: protocolVersion, numericProfile, qualification };
+      }
+    } catch (error) {
+      console.warn('GeoSpec engine version unavailable; test_model names no engine:', error);
+    }
+    if (configuration.success) {
+      const { maxTriangles, maxVertices, maxSubjectBytes } =
+        configuration.data.result.configuration.binaryAdmissionLimits;
+      return { admission: { maxTriangles, maxVertices, maxSubjectBytes }, engine };
+    }
+    return { engine };
   })();
-  return nativeAdmission;
+  return nativeFacts;
 };
 
 /**
@@ -688,7 +731,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     const { kernelClient, graphics, images } = createRuntimeAgentClients({
       runtime: async () => requireRuntime(),
       mapRuntimeError: runtimeFailure,
-      admissionLimits: async () => (runsNativeGeoSpec(options) ? nativeAdmissionLimits() : undefined),
+      admissionLimits: async () => {
+        if (!runsNativeGeoSpec(options)) {
+          return undefined;
+        }
+        const { admission } = await nativeEngineFacts();
+        return admission;
+      },
       async exportImage(job) {
         const client = await requireRuntime(job);
         const bytes = job.sourceFormat === 'svg' ? new TextEncoder().encode(job.content) : job.content;
@@ -773,6 +822,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
           context?.signal?.addEventListener('abort', abortRunner, { once: true });
           try {
             context?.signal?.throwIfAborted();
+            const onProgress = context?.onProgress;
+            let started = 0;
             const output = await runGeoSpecTests({
               discovery: {
                 readdir: async (path) => readdir(path),
@@ -784,9 +835,28 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               runner,
               projectPath: workspaceRoot,
               args,
+              /* One report as the run starts and one as each test starts, counting the tests started, so a client
+               * sees which requirement a long claim belongs to. */
+              ...(onProgress === undefined
+                ? {}
+                : {
+                    onProgress: (event) => {
+                      if (event.type === 'run-start') {
+                        onProgress({
+                          progress: 0,
+                          message: `Running ${String(event.files.length)} GeoSpec ${event.files.length === 1 ? 'file' : 'files'}`,
+                        });
+                      } else if (event.type === 'test-start') {
+                        started += 1;
+                        onProgress({ progress: started, message: `${event.test.requirement} (${event.file})` });
+                      }
+                    },
+                  }),
             });
             context?.signal?.throwIfAborted();
-            return { success: true, ...output };
+            /* The default runner decides on this host's native engine, which names itself; another runner's is unknown. */
+            const { engine } = options.geospecRunner === undefined ? await nativeEngineFacts() : {};
+            return { success: true, ...output, ...(engine === undefined ? {} : { engine }) };
           } finally {
             context?.signal?.removeEventListener('abort', abortRunner);
             await runner.close();

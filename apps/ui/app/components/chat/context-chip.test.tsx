@@ -194,7 +194,7 @@ describe('ContextChip', () => {
 
       await user.hover(screen.getByText('index.ts'));
 
-      expect(await screen.findByRole('tooltip')).toHaveTextContent('src/parts/index.ts');
+      expect(await screen.findByRole('tooltip')).toMatchTextContent('src/parts/index.ts');
     });
 
     it('shortens long file names in the middle so the extension survives', () => {

@@ -22,7 +22,7 @@ const dependencies = {
 const resolveOptions = async (computeMode: ComputeReuseMode): Promise<unknown> => {
   const { localKernelOptions } = await import('#constants/local-kernel-options.js');
   const build = await localKernelOptions('project-1', undefined, computeMode)();
-  return build(dependencies as unknown as Parameters<typeof build>[0]);
+  return build(dependencies);
 };
 
 describe('localKernelOptions', () => {

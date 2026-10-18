@@ -77,12 +77,10 @@ export const MarkdownViewer = memo(function ({
 }: MarkdownViewerProps): React.JSX.Element {
   const { isHighContrast } = useTheme();
   const memoizedComponents = useMemo<Components>(
-    () =>
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
-      ({
-        ...defaultMarkdownComponents,
-        ...components,
-      }) as Components,
+    () => ({
+      ...defaultMarkdownComponents,
+      ...components,
+    }),
     [components],
   );
 

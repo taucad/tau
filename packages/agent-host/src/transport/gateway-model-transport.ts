@@ -2,7 +2,6 @@ import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messag
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import type {
-  Api,
   AnthropicOptions,
   AssistantMessage,
   AssistantMessageEvent,
@@ -771,7 +770,7 @@ const replayInterruptedCalls = (messages: readonly ProviderMessage[]): readonly 
 const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
   const identities = new MessageIdentities(() => 'transport-message');
   const messages = replayInterruptedCalls(request.messages).flatMap((message) => {
-    const hydrated = providerMessageToPi(message, model as Model<Api>, identities);
+    const hydrated = providerMessageToPi(message, model, identities);
     return hydrated ? [hydrated as Context['messages'][number]] : [];
   });
   const tools: PiTool[] = request.tools.map((tool) => ({
@@ -1056,7 +1055,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const { reasoning } = request;
     const events =
       request.providerKind === 'anthropic'
-        ? anthropicMessagesApi().stream(model as Model<'anthropic-messages'>, context, {
+        ? anthropicMessagesApi().stream(model, context, {
             ...commonOptions,
             ...(reasoning === undefined
               ? {}
@@ -1068,12 +1067,12 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                 }),
           } satisfies AnthropicOptions)
         : isOpenAiResponsesProviderKind(request.providerKind)
-          ? openAIResponsesApi().stream(model as Model<'openai-responses'>, context, {
+          ? openAIResponsesApi().stream(model, context, {
               ...commonOptions,
               ...(reasoning?.effort === undefined ? {} : { reasoningEffort: reasoning.effort }),
               ...(reasoning?.summary === undefined ? {} : { reasoningSummary: reasoning.summary }),
             } satisfies OpenAIResponsesOptions)
-          : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
+          : openAICompletionsApi().stream(model, context, {
               ...commonOptions,
               ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
                 ? {

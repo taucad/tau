@@ -61,7 +61,7 @@ const inputJsonSchema = (schema: unknown): RJSFSchema => {
   if (typeof active !== 'object' || Array.isArray(active)) {
     throw new TypeError('Expected an object JSON Schema');
   }
-  return active as RJSFSchema;
+  return active;
 };
 
 const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
@@ -79,7 +79,7 @@ const requireRjsfSchema = (value: unknown, message: string): RJSFSchema => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError(message);
   }
-  return value as RJSFSchema;
+  return value;
 };
 
 describe('RJSF form-state policy', () => {
@@ -206,10 +206,10 @@ describe('RJSF form-state policy', () => {
   it('should derive a complete default for a newly added production object-array item', () => {
     const jsonSchema = inputJsonSchema(imageEdgeSchemas.png);
     const visiblePrimitives = requireRjsfSchema(
-      jsonSchema.properties?.['visiblePrimitives'] as unknown,
+      jsonSchema.properties?.['visiblePrimitives'],
       'Expected the visible-primitives schema',
     );
-    const itemSchema = requireRjsfSchema(visiblePrimitives.items as unknown, 'Expected the visible-primitives item');
+    const itemSchema = requireRjsfSchema(visiblePrimitives.items, 'Expected the visible-primitives item');
 
     const item = schemaUtilsFor(jsonSchema).getDefaultFormState(itemSchema);
 

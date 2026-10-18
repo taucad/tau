@@ -25,7 +25,7 @@ import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
  * "single RR config" reconsider item), which is a change to
  * `apps/ui/desktop/**` and therefore not this lane's to make.
  */
-export default flatRoutes({
+const routes: Promise<RouteConfigEntry[]> = flatRoutes({
   rootDirectory: '../../app/routes',
   ignoredRouteFiles: [
     // Co-located route tests would otherwise become live routes (and generate
@@ -65,5 +65,6 @@ export default flatRoutes({
     // why the AV-4 vertical drives the real composer rather than a seed route.
     '../../app/routes/[[]__e2e[]].*/**',
   ],
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
-}) as Promise<RouteConfigEntry[]>;
+});
+
+export default routes;

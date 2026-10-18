@@ -151,7 +151,7 @@ async function fixture(
     await run({
       sql: client,
       database,
-      service: new BillingTaxService({ database } as DatabaseService, fixtureFx),
+      service: new BillingTaxService({ database }, fixtureFx),
       suffix,
       stripeAccountId,
     });
@@ -504,7 +504,7 @@ describe.runIf(databaseUrl !== undefined)('tax PostgreSQL source and registratio
       const owner = await ownedAccount(sql, suffix);
       const claim = await source(sql, { id: `source-${suffix}`, stripeAccountId, sourceId: `in-${suffix}` });
       // Production wires no reporting-rate resolver, so a monitored consumer sale projects without FX.
-      const service = new BillingTaxService({ database } as DatabaseService);
+      const service = new BillingTaxService({ database });
       const observed = await service.observePaidSource({
         claim,
         accountId: owner.accountId,

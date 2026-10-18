@@ -215,8 +215,8 @@ describe('ViewerSettings', () => {
       await user.hover(screen.getByRole('spinbutton', { name: fieldOfViewName }));
 
       const tooltip = await screen.findByRole('tooltip', { name: /Drag for field of view/ });
-      expect(tooltip).toHaveTextContent('Drag for field of view · 0° is orthographic');
-      expect(tooltip).toHaveTextContent('Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic');
+      expect(tooltip).toMatchTextContent('Drag for field of view · 0° is orthographic');
+      expect(tooltip).toMatchTextContent('Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic');
     });
 
     it('should reach the row from the keyboard, explain it, and step it with ArrowRight', async () => {

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { JWT } from 'google-auth-library';
 // oxlint-disable-next-line typescript/consistent-type-imports -- Nest DI needs runtime constructor metadata.
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
@@ -147,6 +148,15 @@ export class ProviderService {
             throw new Error('GOOGLE_VERTEX_AI_CREDENTIALS is required for Vertex AI');
           }
 
+          if (credentials.type !== 'service_account') {
+            throw new Error('Vertex AI requires service-account credentials');
+          }
+          const authClient = new JWT({
+            scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+            transporterOptions: { fetchImplementation: globalThis.fetch },
+          });
+          authClient.fromJSON(credentials);
+
           return new ChatVertexAI({
             ...options,
             maxOutputTokens: runtimeOptions?.maximumOutputTokens ?? options.maxOutputTokens,
@@ -163,7 +173,7 @@ export class ProviderService {
              * same reason plus a mid-stream serializer cancel (blueprint
              * Finding 1). */
             authOptions: {
-              credentials,
+              authClient,
               projectId: credentials.project_id,
               clientOptions: {
                 transporterOptions: {

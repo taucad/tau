@@ -1,4 +1,6 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import { createThreeResourceDisposer } from '#resources.js';
 
-expectTypeOf(createThreeResourceDisposer).returns.toEqualTypeOf<() => void>();
+it('preserves the complete resources type contracts', () => {
+  expectTypeOf(createThreeResourceDisposer).returns.toEqualTypeOf<() => void>();
+});

@@ -427,13 +427,14 @@ describe('Tau publication metadata', () => {
       files: { ...sampleLoaderData.files, [thumbnailPath]: thumbnail },
     };
 
-    const tags = meta({
+    const metaArguments = {
       data: loaderData,
       loaderData,
       params: { id: 'pub_1' },
       location: {} as unknown as Parameters<typeof meta>[0]['location'],
       matches: [],
-    });
+    };
+    const tags = meta(metaArguments);
 
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -445,13 +446,14 @@ describe('Tau publication metadata', () => {
   });
 
   it('does not treat the API fallback thumbnail URL as evidence of a published thumbnail', () => {
-    const tags = meta({
+    const metaArguments = {
       data: sampleLoaderData,
       loaderData: sampleLoaderData,
       params: { id: 'pub_1' },
       location: {} as unknown as Parameters<typeof meta>[0]['location'],
       matches: [],
-    });
+    };
+    const tags = meta(metaArguments);
 
     expect(tags?.some((tag) => 'property' in tag && tag.property === 'og:image')).toBe(false);
     expect(tags?.some((tag) => 'name' in tag && typeof tag.name === 'string' && tag.name.startsWith('twitter:'))).toBe(
@@ -460,13 +462,14 @@ describe('Tau publication metadata', () => {
   });
 
   it('adds noindex and no-referrer for private publications', () => {
-    const tags = meta({
+    const metaArguments = {
       data: sampleLoaderData,
       loaderData: sampleLoaderData,
       params: { id: 'pub_1' },
       location: {} as unknown as Parameters<typeof meta>[0]['location'],
       matches: [],
-    });
+    };
+    const tags = meta(metaArguments);
 
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -482,13 +485,14 @@ describe('Tau publication metadata', () => {
       publication: { ...sampleLoaderData.publication, visibility: 'public' },
     };
 
-    const tags = meta({
+    const metaArguments = {
       data: loaderData,
       loaderData,
       params: { id: 'pub_1' },
       location: {} as unknown as Parameters<typeof meta>[0]['location'],
       matches: [],
-    });
+    };
+    const tags = meta(metaArguments);
 
     expect(tags?.some((t) => 'name' in t && t.name === 'robots')).toBe(false);
   });

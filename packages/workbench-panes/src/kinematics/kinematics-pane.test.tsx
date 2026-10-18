@@ -261,7 +261,7 @@ describe('KinematicsPane', () => {
         },
       },
     });
-    expect(field('Slide')).toHaveAccessibleDescription(expect.stringContaining('Range 0 mm to unbounded'));
+    expect(field('Slide')).toHaveAccessibleDescription(/Range 0 mm to unbounded/);
     for (const slider of screen.queryAllByRole('slider')) {
       expect(slider.getAttribute('aria-valuemin')).not.toBe('-Infinity');
       expect(slider.getAttribute('aria-valuemax')).not.toBe('Infinity');
@@ -277,7 +277,7 @@ describe('KinematicsPane', () => {
     expect(field('Arm')).not.toHaveAttribute('readonly');
     expect(field('Slide')).toBeInTheDocument();
     expect(screen.queryByRole('spinbutton', { name: 'Carrier' })).not.toBeInTheDocument();
-    expect(follower('carrier')).toHaveTextContent('Carrier0.25×0°');
+    expect(follower('carrier')).toMatchTextContent('Carrier0.25×0°');
     expect(relation('carrier')).toHaveAccessibleName('Follows Sun: = 0.25 × Sun');
     expect(field('Arm')).toHaveAccessibleDescription(
       'Revolute joint · driver · arm. Range -45° to 90°. On Base (ground). Moves 1 part: component:arm',
@@ -285,9 +285,9 @@ describe('KinematicsPane', () => {
     expect(field('Slide')).toHaveAccessibleDescription(
       'Prismatic joint · driver · slide. Range 0 mm to 50 mm. On Base (ground). Moves 1 part: component:slide',
     );
-    expect(trigger(/^Structure/u)).toHaveTextContent('Structure5 links · 4 joints');
+    expect(trigger(/^Structure/u)).toMatchTextContent('Structure5 links · 4 joints');
     expect(screen.queryByText(/Drag parts in the viewer/)).not.toBeInTheDocument();
-    expect(statusRegion()).toHaveTextContent('Ready');
+    expect(statusRegion()).toMatchTextContent('Ready');
   });
 
   it('should open the relation card on focus with how the follower follows, its range, its carrier and its parts', async () => {
@@ -301,10 +301,10 @@ describe('KinematicsPane', () => {
 
     const card = await screen.findByText(/^Revolute follower/u);
     const content = card.closest('[data-slot=hover-card-content]')!;
-    expect(content).toHaveTextContent('Follows0.25 × SunTurns with Sun');
-    expect(content).toHaveTextContent('RangeUnlimited');
-    expect(content).toHaveTextContent('OnBase (ground)');
-    expect(content).toHaveTextContent('Moves1 partCarrier plate');
+    expect(content).toMatchTextContent('Follows0.25 × SunTurns with Sun');
+    expect(content).toMatchTextContent('RangeUnlimited');
+    expect(content).toMatchTextContent('OnBase (ground)');
+    expect(content).toMatchTextContent('Moves1 partCarrier plate');
   });
 
   it('should list each link under the joint that carries it in the Structure disclosure', async () => {
@@ -325,7 +325,7 @@ describe('KinematicsPane', () => {
 
     expect(trigger('Group: Sun')).toHaveAttribute('aria-expanded', 'true');
     expect(trigger('Followers of Sun')).toHaveAttribute('aria-expanded', 'false');
-    expect(trigger('Followers of Sun')).toHaveTextContent('Followers1');
+    expect(trigger('Followers of Sun')).toMatchTextContent('Followers1');
     expect(screen.queryByRole('button', { name: 'Group: Arm' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('kinematics-dof-carrier')).not.toBeInTheDocument();
     // Inside its group the driver's control is labelled by what it sets.
@@ -337,11 +337,11 @@ describe('KinematicsPane', () => {
     }
 
     await openSunFollowers(user);
-    expect(relation('carrier')).toHaveTextContent('0.25×');
+    expect(relation('carrier')).toMatchTextContent('0.25×');
 
     await user.click(trigger('Group: Sun'));
     expect(screen.queryByRole('spinbutton', { name: 'Sun' })).not.toBeInTheDocument();
-    expect(trigger('Group: Sun')).toHaveTextContent('0°');
+    expect(trigger('Group: Sun')).toMatchTextContent('0°');
   });
 
   it('should read joint names from the mechanism and keep the id in the details', () => {
@@ -349,7 +349,7 @@ describe('KinematicsPane', () => {
       loaded: { ...mechanism, joints: { ...mechanism.joints, arm: { ...mechanism.joints['arm']!, name: 'Shoulder' } } },
     });
 
-    expect(field('Shoulder')).toHaveAccessibleDescription(expect.stringContaining('Revolute joint · driver · arm'));
+    expect(field('Shoulder')).toHaveAccessibleDescription(/Revolute joint · driver · arm/);
     expect(screen.queryByRole('spinbutton', { name: 'Arm' })).not.toBeInTheDocument();
   });
 
@@ -377,7 +377,7 @@ describe('KinematicsPane', () => {
     });
 
     await user.click(trigger('Followers of Arm'));
-    expect(follower('vane-12')).toHaveTextContent('Vane 12');
+    expect(follower('vane-12')).toMatchTextContent('Vane 12');
     expect(screen.queryByTestId('kinematics-dof-vane-13')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Show 2 more' }));
@@ -414,7 +414,7 @@ describe('KinematicsPane', () => {
     });
 
     expect(relation('carrier')).toHaveAccessibleName('Follows Sun: = -0.03333 × Sun');
-    expect(relation('carrier')).toHaveTextContent('-0.03333×');
+    expect(relation('carrier')).toMatchTextContent('-0.03333×');
   });
 
   it('should describe a curve follower by its driver', async () => {
@@ -450,7 +450,7 @@ describe('KinematicsPane', () => {
 
     expect(unit().coordinates['sun']).toBeCloseTo(90 * degrees);
     expect(unit().coordinates['slide']).toBeCloseTo(0.0125);
-    expect(follower('carrier')).toHaveTextContent('22.5°');
+    expect(follower('carrier')).toMatchTextContent('22.5°');
   });
 
   it('should step with arrow keys and jump to the limits with unmodified Home and End only', async () => {
@@ -488,7 +488,7 @@ describe('KinematicsPane', () => {
     await user.keyboard('{ArrowUp}');
 
     expect(unit().coordinates['sun']).toBeCloseTo(901 * degrees);
-    expect(follower('carrier')).toHaveTextContent('225.25°');
+    expect(follower('carrier')).toMatchTextContent('225.25°');
 
     // A joint without limits has no range ends, so End leaves it where it is.
     await user.keyboard('{End}');
@@ -521,7 +521,7 @@ describe('KinematicsPane', () => {
 
     await user.click(playback.getByRole('button', { name: 'Play' }));
     expect(unit().playback).toMatchObject({ status: 'playing', animationId: 'four-sun-turns' });
-    expect(statusRegion()).toHaveTextContent('Playing Four sun turns');
+    expect(statusRegion()).toMatchTextContent('Playing Four sun turns');
 
     act(() => {
       kinematics.send({ type: 'tick', unitId, elapsed: 1 });
@@ -530,7 +530,7 @@ describe('KinematicsPane', () => {
     expect(playback.getByText('1.0 / 4.0 s')).toBeInTheDocument();
     await user.click(playback.getByRole('button', { name: 'Pause' }));
     expect(unit().playback).toMatchObject({ status: 'paused', time: 1 });
-    expect(statusRegion()).toHaveTextContent('Paused at 1.0 s');
+    expect(statusRegion()).toMatchTextContent('Paused at 1.0 s');
 
     await user.click(screen.getByRole('button', { name: 'Reset pose to as built' }));
     expect(unit().coordinates).toEqual({ sun: 0, arm: 0, slide: 0 });
@@ -693,7 +693,7 @@ describe('KinematicsPane', () => {
     });
 
     expect(screen.getByRole('status', { name: 'Drag notice' })).toBe(notice);
-    expect(notice).toHaveTextContent(
+    expect(notice).toMatchTextContent(
       'Drag blocked: a joint reached its limit. The part follows as far as the mechanism allows.',
     );
   });
@@ -728,9 +728,9 @@ describe('KinematicsPane', () => {
     });
 
     expect(alertRegion()).toBe(alert);
-    expect(alert).toHaveTextContent(/^Pose not applied: .*The last valid pose is kept\.$/);
+    expect(alert).toMatchTextContent(/^Pose not applied: .*The last valid pose is kept\.$/);
     expect(statusRegion()).toBe(status);
-    expect(status).toHaveTextContent('Ready');
+    expect(status).toMatchTextContent('Ready');
   });
 
   it('should filter joints by name', async () => {
@@ -793,7 +793,7 @@ describe('KinematicsPane', () => {
       renderPane({ withMechanism: false, isBuilding: true });
 
       expect(statusRegion()).toHaveAttribute('aria-busy', 'true');
-      expect(statusRegion()).toHaveTextContent('Building the model');
+      expect(statusRegion()).toMatchTextContent('Building the model');
       expect(screen.queryByText('This model declares no mechanism')).not.toBeInTheDocument();
     });
 
@@ -802,8 +802,8 @@ describe('KinematicsPane', () => {
         'Mechanism /links/arm/components/0: No returned shape is named "Armm". Name a shape main() returns.';
       renderPane({ withMechanism: false, mechanismIssue: { message } });
 
-      expect(alertRegion()).toHaveTextContent('The mechanism could not be loaded');
-      expect(alertRegion()).toHaveTextContent(message);
+      expect(alertRegion()).toMatchTextContent('The mechanism could not be loaded');
+      expect(alertRegion()).toMatchTextContent(message);
       expect(screen.queryByText('This model declares no mechanism')).not.toBeInTheDocument();
     });
 
@@ -880,6 +880,6 @@ describe('KinematicsPane without optional host pieces', () => {
 
     expect(field('Sun')).toBeInTheDocument();
     expect(unit().dragEnabled).toBe(true);
-    expect(statusRegion()).toHaveTextContent('Ready');
+    expect(statusRegion()).toMatchTextContent('Ready');
   });
 });

@@ -53,7 +53,7 @@ const field = (message: unknown, name: string): unknown =>
  * ```
  */
 export const createRuntimeChildWorkerLauncher = (
-  channel: RuntimeChildChannel = process as RuntimeChildChannel,
+  channel: RuntimeChildChannel = process,
 ): ((launch: RuntimeChildWorkerLaunch) => Promise<RuntimeChildWorker>) => {
   const workers = new Map<string, Pending>();
   let launches = 0;
@@ -165,7 +165,7 @@ export const createRuntimeChildWorkerLauncher = (
  * ```
  */
 export const createRuntimeChildRuntimeVerifier = (
-  channel: RuntimeChildChannel = process as RuntimeChildChannel,
+  channel: RuntimeChildChannel = process,
 ): ((runtimePath: string, signal: AbortSignal) => Promise<RuntimeChildRuntimeDamage | undefined>) => {
   const pending = new Map<string, (damage: RuntimeChildRuntimeDamage | undefined) => void>();
   let requests = 0;

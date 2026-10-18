@@ -304,14 +304,8 @@ export default function ImportRoute(): React.JSX.Element {
 
   // GitHub machine selectors
   const gitHubState = useSelector(gitHubActorRef, (snapshot) => snapshot);
-  const downloadProgress = useSelector(
-    gitHubActorRef,
-    (snapshot) => snapshot.context.downloadProgress as { loaded: number; total: number },
-  );
-  const gitHubExtractProgress = useSelector(
-    gitHubActorRef,
-    (snapshot) => snapshot.context.extractProgress as { processed: number; total: number },
-  );
+  const downloadProgress = useSelector(gitHubActorRef, (snapshot) => snapshot.context.downloadProgress);
+  const gitHubExtractProgress = useSelector(gitHubActorRef, (snapshot) => snapshot.context.extractProgress);
   const gitHubError = useSelector(gitHubActorRef, (snapshot) => snapshot.context.error);
   const gitHubProjectId = useSelector(gitHubActorRef, (snapshot) => snapshot.context.projectId);
   const gitHubFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.files);

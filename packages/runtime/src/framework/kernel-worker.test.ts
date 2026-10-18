@@ -2203,7 +2203,7 @@ public static class Params
 
       expect(result.success).toBe(true);
       expect(watch).toHaveBeenCalledOnce();
-      const watchRequest = watch.mock.calls[0]?.[0] as { paths: readonly string[] } | undefined;
+      const watchRequest: { paths: readonly string[] } | undefined = watch.mock.calls[0]?.[0];
       expect(watchRequest?.paths).toContain('main.ts');
     });
 

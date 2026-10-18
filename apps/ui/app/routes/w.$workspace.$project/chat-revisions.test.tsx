@@ -183,7 +183,7 @@ describe('Revisions pane', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Current')).toHaveLength(1);
     });
-    expect(screen.getByRole('listitem', { current: true })).toHaveTextContent('main');
+    expect(screen.getByRole('listitem', { current: true })).toMatchTextContent('main');
   });
 
   it('shows the branch region only once a second branch exists', async () => {
@@ -252,7 +252,7 @@ describe('Revisions pane', () => {
     renderPane();
 
     expect(await screen.findByRole('heading', { name: 'Choose a version' })).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Needs your decision on main');
+    expect(screen.getByRole('status', { name: 'Revision status' })).toMatchTextContent('Needs your decision on main');
     expect(screen.getByLabelText('Needs your decision')).toHaveClass('text-warning');
     expect(screen.queryByText(/Needs resolution/u)).toBeNull();
     expect(screen.getByText('src/bracket.ts')).toBeInTheDocument();
@@ -393,15 +393,15 @@ describe('Revisions pane', () => {
       }
     });
 
-    expect(await screen.findByTestId('conflict-buffer')).toHaveTextContent('thick = 6');
+    expect(await screen.findByTestId('conflict-buffer')).toMatchTextContent('thick = 6');
 
     /* P43: the block's two verbs rewrite the buffer, and *Mark resolved* is
        refused until no marker is left — handing back a buffer that still held
        `<<<<<<<` would write the markers into the tree (A22). */
     expect(screen.getByRole('button', { name: 'Mark src/bracket.ts resolved' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Keep theirs in change 1 of src/bracket.ts' }));
-    expect(screen.getByTestId('conflict-buffer')).toHaveTextContent('thick = 6');
-    expect(screen.getByTestId('conflict-buffer')).not.toHaveTextContent('<<<<<<<');
+    expect(screen.getByTestId('conflict-buffer')).toMatchTextContent('thick = 6');
+    expect(screen.getByTestId('conflict-buffer')).not.toMatchTextContent('<<<<<<<');
 
     await user.click(screen.getByRole('button', { name: 'Mark src/bracket.ts resolved' }));
     expect(revisionStatusHarness.commands.resolveFileInEditor).toHaveBeenCalledWith(
@@ -477,7 +477,7 @@ describe('Revisions pane', () => {
 
     /* And the moment it does, the refusal is the server's own sentence. */
     const alert = await screen.findByRole('alert', { name: 'Conflict view for src/bracket.ts' });
-    expect(alert).toHaveTextContent('That file is no longer in this revision.');
+    expect(alert).toMatchTextContent('That file is no longer in this revision.');
     expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Conflict view for src/bracket.ts' })).not.toBeInTheDocument();
   });
@@ -489,7 +489,7 @@ describe('Revisions pane', () => {
     renderPane();
 
     const alert = screen.getByRole('alert', { name: 'Turn outcome' });
-    expect(alert).toHaveTextContent('Tau could not save this project’s earlier edits first.');
+    expect(alert).toMatchTextContent('Tau could not save this project’s earlier edits first.');
     expect(alert.textContent).not.toMatch(/checkout/iu);
   });
 
@@ -864,7 +864,7 @@ describe('Revisions pane closeout', () => {
 
     const badges = await screen.findAllByText('Linked');
     expect(badges).toHaveLength(1);
-    expect(badges[0]!.closest('li')).toHaveTextContent('bracket-fillet');
+    expect(badges[0]!.closest('li')).toMatchTextContent('bracket-fillet');
   });
 
   it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
@@ -890,7 +890,7 @@ describe('Revisions pane closeout', () => {
     const badge = await screen.findByText('Remote only');
     const remote = badge.closest('li');
     expect(remote).not.toBeNull();
-    expect(remote).not.toHaveTextContent('Sketch lid');
+    expect(remote).not.toMatchTextContent('Sketch lid');
   });
 
   it('asks for no diff it does not render, and shows twelve rows before Show more (C52)', async () => {
@@ -1129,7 +1129,7 @@ describe('Revisions pane vocabulary and History', () => {
 
       const strip = await screen.findByRole('status', { name: 'Revision status' });
       await waitFor(() => {
-        expect(strip).toHaveTextContent(sentence);
+        expect(strip).toMatchTextContent(sentence);
       });
       expect(strip.textContent).toBe(sentence);
       const trigger = screen.getByRole('button', { name: /^Open Revisions\./u });
@@ -1141,7 +1141,7 @@ describe('Revisions pane vocabulary and History', () => {
         expect(found).not.toBeNull();
         return found!;
       });
-      expect(card).toHaveTextContent(sentence);
+      expect(card).toMatchTextContent(sentence);
     },
   );
 
@@ -1154,7 +1154,7 @@ describe('Revisions pane vocabulary and History', () => {
     expect(await screen.findByRole('status', { name: 'Loading history' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No revisions yet')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
+    expect(screen.getByRole('region', { name: 'Where you are' })).not.toMatchTextContent('main');
     /* HQ7: nothing is offered over a line nobody has located yet. */
     expect(screen.queryByRole('button', { name: 'New branch' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
@@ -1174,8 +1174,8 @@ describe('Revisions pane vocabulary and History', () => {
     const strip = await screen.findByRole('region', { name: 'Where you are' });
     await user.click(within(strip).getByRole('button', { name: 'Details' }));
     const details = within(strip).getByLabelText('Details of where you are');
-    expect(details).toHaveTextContent(/Headrev-4/u);
-    expect(details).toHaveTextContent(`This device${device}`);
+    expect(details).toMatchTextContent(/Headrev-4/u);
+    expect(details).toMatchTextContent(`This device${device}`);
     vi.unstubAllEnvs();
   });
 
@@ -1252,11 +1252,11 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Access removed');
+      expect(screen.getByRole('status', { name: 'Revision status' })).toMatchTextContent('Saved · Access removed');
     });
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Access removed');
-    expect(backup).toHaveTextContent('Ask them to add you again');
+    expect(backup).toMatchTextContent('Access removed');
+    expect(backup).toMatchTextContent('Ask them to add you again');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
@@ -1295,10 +1295,10 @@ describe('Backup by default (D19)', () => {
       renderPane();
 
       const line = await screen.findByRole('group', { name: 'Backup by default' });
-      expect(line).toHaveTextContent('Backs up to Tau Cloud automatically.');
+      expect(line).toMatchTextContent('Backs up to Tau Cloud automatically.');
       /* Nothing is on Tau Cloud yet, so no copy there is promised (W10-L B-1). */
-      expect(line).toHaveTextContent('Turning it off keeps this project on this device.');
-      expect(line).not.toHaveTextContent('The copy already on Tau Cloud stays.');
+      expect(line).toMatchTextContent('Turning it off keeps this project on this device.');
+      expect(line).not.toMatchTextContent('The copy already on Tau Cloud stays.');
       await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
 
       /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
@@ -1345,7 +1345,7 @@ describe('Backup by default (D19)', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Backed up');
+      expect(screen.getByRole('status', { name: 'Revision status' })).toMatchTextContent('Saved · Backed up');
     });
     expect(screen.getByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
     expect(screen.getByText('Stops backing up. The copy already on Tau Cloud stays.')).toBeInTheDocument();
@@ -1375,7 +1375,7 @@ describe('Backup by default (D19)', () => {
   it('should show the pending inline offer immediately before the first save', async () => {
     tauCloudIntent.set('p', 'noticed');
     renderPane();
-    expect(await screen.findByRole('group', { name: 'Backup by default' })).toHaveTextContent('Turn off backup');
+    expect(await screen.findByRole('group', { name: 'Backup by default' })).toMatchTextContent('Turn off backup');
   });
 
   it('shows no line for a project nothing is owed on', () => {

@@ -70,7 +70,7 @@ const programInputs = (material: Material, source: ShaderSource) => {
 
 /** The WebGPU render object's material cache key, from three's own implementation. */
 const webGpuMaterialCacheKey = (material: Material): number =>
-  (RenderObject.prototype.getMaterialCacheKey as (this: unknown) => number).call({
+  RenderObject.prototype.getMaterialCacheKey.call({
     object: new Mesh(new BoxGeometry(), material),
     material,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- three's own renderer flag

@@ -81,7 +81,7 @@ describe('root error containment', () => {
   it('should render the root error page without re-entering a failed project host', async () => {
     renderRootApp('/');
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Application error');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Application error');
     const settledRenders = projectHost.renders;
     await Promise.resolve();
     await Promise.resolve();
@@ -95,7 +95,7 @@ describe('root error containment', () => {
     projectHost.shouldThrow = false;
     renderRootApp('/__e2e/remote-host', true);
 
-    expect(await screen.findByRole('main')).toHaveTextContent('Application page');
+    expect(await screen.findByRole('main')).toMatchTextContent('Application page');
     expect(projectHost.renders).toBe(0);
     expect(page.renders).toBe(1);
   });

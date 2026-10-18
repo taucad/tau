@@ -307,7 +307,7 @@ describe('model component action menu', () => {
       const partRow = screen.getByRole('menuitem', {
         name: /Planetary housing/,
       });
-      expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
+      expect(screen.getByRole('menu')).toMatchTextContent(/^Planetary housing/);
       expect(partRow).toHaveAttribute('aria-expanded', 'false');
       expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
       expect(

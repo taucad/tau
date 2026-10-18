@@ -59,13 +59,13 @@ export function createRenameProvider(monaco: typeof Monaco, client: KclLspClient
         // Handle different return types
         if ('range' in result) {
           // PrepareRenameResult with range
-          const prepareResult = result as {
+          const prepareResult: {
             range: {
               start: { line: number; character: number };
               end: { line: number; character: number };
             };
             placeholder: string;
-          };
+          } = result;
 
           return {
             range: lspToMonacoRange(monaco, prepareResult.range),
@@ -75,10 +75,10 @@ export function createRenameProvider(monaco: typeof Monaco, client: KclLspClient
 
         if ('start' in result && 'end' in result) {
           // Plain Range
-          const range = result as {
+          const range: {
             start: { line: number; character: number };
             end: { line: number; character: number };
-          };
+          } = result;
 
           return {
             range: lspToMonacoRange(monaco, range),

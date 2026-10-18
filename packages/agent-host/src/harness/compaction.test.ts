@@ -685,7 +685,7 @@ describe('Compaction', () => {
       summarize: async () => 'Earlier work.',
     });
     const compacted = await firstCompaction.prepareTurn();
-    const carried = compactionFoldOf(durable as unknown as readonly AgentLogEvent[]).anchor;
+    const carried = compactionFoldOf(durable).anchor;
     expect(carried).toMatchObject({ messageId: 'message-6', tokens: expect.any(Number) as unknown });
 
     /* The next admission: a new session over the compacted history and a large new request. */

@@ -22,6 +22,9 @@ ${code
 export const foo = 1;
 `;
 
+// Node examples explicitly opt into Node ambient declarations; browser examples do not.
+const publicNodeTypescriptBlock = (code) => publicTypescriptBlock(`/// <reference types="node" />\n${code}`);
+
 describe('validate-jsdoc-codeblocks', () => {
   describe('language tag requirement', () => {
     it('should report codeblocks without a language tag', () => {
@@ -215,6 +218,7 @@ export const foo = 1;
 /**
  * @public
  * \`\`\`typescript
+ * /// <reference types="node" />
  * import type { ParsedPath } from 'node:path';
  * import { parse } from 'node:path';
  * \`\`\`
@@ -262,11 +266,13 @@ export const foo = 1;
         valid: [
           {
             name: 'type-only imports use a top-level import type declaration',
-            code: publicTypescriptBlock("import type { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+            code: publicNodeTypescriptBlock(
+              "import type { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;",
+            ),
           },
           {
             name: 'imports precede executable statements',
-            code: publicTypescriptBlock("import { parse } from 'node:path';\nparse('value');"),
+            code: publicNodeTypescriptBlock("import { parse } from 'node:path';\nparse('value');"),
           },
           {
             name: 'const replaces var and never-reassigned let',
@@ -294,13 +300,13 @@ export const foo = 1;
           },
           {
             name: 'Node built-ins use the node protocol',
-            code: publicTypescriptBlock("import { join } from 'node:path';\njoin('directory', 'file');"),
+            code: publicNodeTypescriptBlock("import { join } from 'node:path';\njoin('directory', 'file');"),
           },
         ],
         invalid: [
           {
             name: 'value import used only as a type',
-            code: publicTypescriptBlock("import { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+            code: publicNodeTypescriptBlock("import { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
             errors: [
               {
                 messageId: 'invalidCodeblock',
@@ -313,7 +319,9 @@ export const foo = 1;
           },
           {
             name: 'inline type import specifier',
-            code: publicTypescriptBlock("import { type ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+            code: publicNodeTypescriptBlock(
+              "import { type ParsedPath } from 'node:path';\nexport type Path = ParsedPath;",
+            ),
             errors: [
               {
                 messageId: 'invalidCodeblock',
@@ -326,7 +334,9 @@ export const foo = 1;
           },
           {
             name: 'import after executable statement',
-            code: publicTypescriptBlock("const value = 1;\nimport { parse } from 'node:path';\nparse(String(value));"),
+            code: publicNodeTypescriptBlock(
+              "const value = 1;\nimport { parse } from 'node:path';\nparse(String(value));",
+            ),
             errors: [
               {
                 messageId: 'invalidCodeblock',
@@ -401,7 +411,7 @@ export const foo = 1;
           },
           {
             name: 'bare Node built-in import',
-            code: publicTypescriptBlock("import { parse } from 'path';\nparse('value');"),
+            code: publicNodeTypescriptBlock("import { parse } from 'path';\nparse('value');"),
             errors: [
               {
                 messageId: 'invalidCodeblock',
@@ -483,7 +493,7 @@ export const foo = 1;
           },
           {
             name: 'deprecated Node declaration is called',
-            code: publicTypescriptBlock("import { parse } from 'node:url';\nparse('https://example.com');"),
+            code: publicNodeTypescriptBlock("import { parse } from 'node:url';\nparse('https://example.com');"),
             errors: [
               {
                 messageId: 'invalidCodeblock',

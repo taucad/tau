@@ -17,7 +17,7 @@ import { cadMaterialDefaults } from '@taucad/runtime/types';
 
 import type { InputShape } from '#utils/render-output.js';
 import { inspectReplicadShapeIdentity } from '#utils/tessellation-instancing.js';
-import type { Meshable, ReplicadShapeIdentityInfo } from '#utils/tessellation-instancing.js';
+import type { ReplicadShapeIdentityInfo } from '#utils/tessellation-instancing.js';
 
 /**
  * Serializable interface evidence resolved while Replicad shapes are still live.
@@ -355,7 +355,7 @@ const prepareStepProducts = (oc: OpenCascadeInstance, shapes: StepShapeEntry[]):
       throw new TypeError(`GeoSpec: entry ${index} must declare a finite positive density in g/cm3`);
     }
 
-    const identity = inspectReplicadShapeIdentity({ openCascade: oc, shape: shape as Meshable });
+    const identity = inspectReplicadShapeIdentity({ openCascade: oc, shape });
     const { prototypeHash = `entry-${index}` } = identity;
     const prototypeInterfaces = transformInterfacesToProductFrame(oc, shape, resolvedInterfaces);
     const signature = interfaceSignature(prototypeInterfaces);
@@ -581,7 +581,7 @@ export const exportSTEP = (
     // post-Perform supplemental items must be scaled the same way.
     phase('step.writer.finalize', () => {
       const unitScale = stepUnitScale(effectiveModelUnit, effectiveWriteUnit);
-      appendDatumPlacements(oc, writer.Writer().Model(false) as unknown as StepModelLike, entryDatums, unitScale);
+      appendDatumPlacements(oc, writer.Writer().Model(false), entryDatums, unitScale);
       const status = writer.Write(filename);
       if (status !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
         throw new Error(`WRITE STEP FILE FAILED (${status}).`);

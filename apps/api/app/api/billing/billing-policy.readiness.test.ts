@@ -24,7 +24,7 @@ const effectiveOf = (policy: ReturnType<typeof composeTariff>) => ({
 /* Nest's own `Logger.warn` is typed `(message: any, ...optionalParams: any[])`; this check only ever
    passes it one JSON line, and narrowing it here keeps the assertions free of `any`. */
 const spyOnLogger = (method: 'warn' | 'log'): MockInstance<(message: string) => void> =>
-  vi.spyOn(Logger.prototype, method).mockReturnValue() as unknown as MockInstance<(message: string) => void>;
+  vi.spyOn(Logger.prototype, method).mockReturnValue();
 
 const readinessOf = (
   effective: () => Promise<ReturnType<typeof effectiveOf>>,

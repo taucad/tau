@@ -351,11 +351,9 @@ export const sealShareArchiveWithPassword = async (
     failLimit('The compressed project exceeds the portable-share limit.');
   }
   const passwordBytes = encodePassword(password);
-  const p2s = new Uint8Array(16);
-  crypto.getRandomValues(p2s);
   const compactJwe = await new CompactEncrypt(archive)
     .setProtectedHeader(passwordProtectedHeader)
-    .setKeyManagementParameters({ p2c: passwordIterations, p2s })
+    .setKeyManagementParameters({ p2c: passwordIterations })
     .encrypt(passwordBytes);
   throwIfAborted(signal);
   if (compactJwe.length > shareArtifactLimits.maxEncodedJweCharacters) {

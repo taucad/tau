@@ -219,7 +219,7 @@ describe('eventLine', () => {
         content: 'Filleted the top edge.',
         metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', model: 'gpt-5.3-codex' } },
       },
-    } as AgentLogEvent);
+    });
 
     expect(line).toBe('7\tmessage.envelope-replaced\tassistant Filleted the top edge. [codex gpt-5.3-codex]');
   });

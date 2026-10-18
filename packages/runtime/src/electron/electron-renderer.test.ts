@@ -290,7 +290,7 @@ describe('Electron renderer runtime helpers', () => {
   );
 
   afterEach(() => {
-    Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'taucad');
+    Reflect.deleteProperty(globalThis, 'taucad');
   });
 
   it('fails loudly when the preload bridge is unavailable', () => {
@@ -689,7 +689,7 @@ describe('Electron renderer runtime helpers', () => {
             ports: [port],
             origin: location.origin,
             source: { note: 'a frame that is not this window' },
-          } as unknown as MessageEvent);
+          });
         }
       }),
       releaseRuntimeHost: vi.fn(),

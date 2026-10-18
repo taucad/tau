@@ -20,7 +20,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { wrapMessagePort } from '#port.js';
 import { createChannelClient, createChannelServer } from '#channel.js';
-import type { ChannelServer } from '#channel.js';
 import { WireValidationError, isWireValidationError } from '#wire-validation-error.js';
 import type { WireValidator, WireValidationResult, WireProtocolSchemas } from '#wire-validation-error.js';
 
@@ -313,7 +312,7 @@ describe('Wire-protocol validation (C14)', () => {
       hello,
       protocolSchemas,
       impl: {
-        call: handler as unknown as ChannelServer<Protocol>['call'],
+        call: handler,
         listen: () => {
           throw new Error('not impl');
         },

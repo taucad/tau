@@ -202,6 +202,6 @@ export class BillingService {
         sanitized[key] = value;
       }
     }
-    return sanitized as Partial<Entitlements>;
+    return sanitized;
   }
 }

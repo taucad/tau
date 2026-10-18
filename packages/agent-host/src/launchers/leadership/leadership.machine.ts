@@ -241,7 +241,7 @@ const run = <Name extends keyof LeadershipEffectArgs>(
   name: Name,
   args: LeadershipEffectArgs[Name],
 ): void => {
-  (enq as Enq)(actions[name] as (args: never) => void, args);
+  (enq as Enq)(actions[name], args);
 };
 
 /** The delayed `closedHostBound` event of one write refused by a draining holder. */

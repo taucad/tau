@@ -8,6 +8,8 @@ export default defineConfig({
     // `test-macos-package-mode` target, so vitest only claims the src suites.
     include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     environment: 'node',
+    // Keep mock matchers on this runner's Vitest instance instead of a second external peer.
+    server: { deps: { inline: ['vitest-mock-extended'] } },
     /* ponytail: Node 24's V8 can abort a fork with `Check failed: jit_page.has_value()` when it tiers up a
      * wasm-to-JS wrapper after a worker thread that used it has exited (nodejs/node#66366). `main.test.ts` boots real
      * compute-store workers. An unreachable tiering budget keeps wrappers untiered; V8 flags are process-wide, so

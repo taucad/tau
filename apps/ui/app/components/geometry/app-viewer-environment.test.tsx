@@ -44,19 +44,19 @@ const mountAt = (path: string): ReturnType<typeof createMemoryRouter> => {
 describe('AppViewerEnvironment', () => {
   it('switches the backend when a client-side navigation adds the override', async () => {
     const router = mountAt('/__e2e/user-project-thumbnail-generation');
-    expect(screen.getByLabelText('graphics backend')).toHaveTextContent('webgl');
+    expect(screen.getByLabelText('graphics backend')).toMatchTextContent('webgl');
 
     await act(async () => router.navigate('/w/workspace/project?graphicsBackend=webgpu'));
 
-    expect(screen.getByLabelText('graphics backend')).toHaveTextContent('webgpu');
+    expect(screen.getByLabelText('graphics backend')).toMatchTextContent('webgpu');
   });
 
   it('falls back to the flag when a navigation removes the override', async () => {
     const router = mountAt('/w/workspace/project?graphicsBackend=webgpu');
-    expect(screen.getByLabelText('graphics backend')).toHaveTextContent('webgpu');
+    expect(screen.getByLabelText('graphics backend')).toMatchTextContent('webgpu');
 
     await act(async () => router.navigate('/w/workspace/project'));
 
-    expect(screen.getByLabelText('graphics backend')).toHaveTextContent('webgl');
+    expect(screen.getByLabelText('graphics backend')).toMatchTextContent('webgl');
   });
 });

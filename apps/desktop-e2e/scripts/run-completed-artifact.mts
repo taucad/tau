@@ -183,8 +183,7 @@ const main = async (): Promise<void> => {
 
   const composeAvailable =
     spawnSync('docker', ['compose', 'version'], {
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Tool environment intentionally excludes application credentials.
-      env: toolEnvironment as NodeJS.ProcessEnv,
+      env: toolEnvironment,
       stdio: 'ignore',
     }).status === 0;
   const composeCommand = composeAvailable ? 'docker' : 'docker-compose';
@@ -194,8 +193,7 @@ const main = async (): Promise<void> => {
   const run = (command: string, arguments_: readonly string[], environment = toolEnvironment): string => {
     const result = spawnSync(command, arguments_, {
       cwd: workspaceRoot,
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each caller supplies a bounded generated environment.
-      env: environment as NodeJS.ProcessEnv,
+      env: environment,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -316,8 +314,7 @@ const main = async (): Promise<void> => {
     cleaned = true;
     await stopActiveChild();
     spawnSync(composeCommand, [...composeArguments, 'down', '--volumes', '--remove-orphans'], {
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cleanup receives only tool discovery variables.
-      env: toolEnvironment as NodeJS.ProcessEnv,
+      env: toolEnvironment,
       stdio: 'ignore',
       timeout: 40_000,
     });

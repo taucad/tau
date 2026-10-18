@@ -30,8 +30,6 @@ describe('RevisionSaltController', () => {
   });
 
   it('refuses a request that names no workspace', () => {
-    expect(() => controller('secret-a').salt(undefined, 'user-1')).toThrow(
-      expect.objectContaining({ status: 400 }) as unknown as Error,
-    );
+    expect(() => controller('secret-a').salt(undefined, 'user-1')).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

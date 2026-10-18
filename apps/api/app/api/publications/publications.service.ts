@@ -1122,7 +1122,7 @@ export class PublicationsService {
         const key = blobKeyFromSha256Hex(this.sha256HexFromManifestRef(relativePath, shaRef));
         const contentType = relativePath === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
         const existing = await this.storage.headBlob({ namespace: 'blobs', key, tier: targetTier });
-        if (existing && existing.contentType === contentType) {
+        if (existing?.contentType === contentType) {
           return;
         }
 

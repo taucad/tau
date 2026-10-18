@@ -204,7 +204,7 @@ describe('Section row', () => {
 
     await user.hover(add);
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Up to 4 cuts');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Up to 4 cuts');
 
     await user.click(add);
     await user.keyboard('{Enter}');

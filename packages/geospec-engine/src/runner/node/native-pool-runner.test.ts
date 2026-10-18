@@ -18,11 +18,11 @@ const stubWorker = () => {
   let terminations = 0;
   const worker: NodeWorkerLike = {
     postMessage: (value) => posted.push(value),
-    on: ((event: string, listener: (value: never) => void) => {
+    on: (event: string, listener: (value: never) => void) => {
       const bucket = listeners.get(event) ?? [];
       bucket.push(listener);
       listeners.set(event, bucket);
-    }) as NodeWorkerLike['on'],
+    },
     terminate: () => {
       terminations += 1;
       return 0;
@@ -125,7 +125,7 @@ describe('createGeoSpecNativeNodePoolRunner', () => {
        });`,
       { eval: true },
     );
-    const handle = createNodeWorkerHandle(worker as unknown as NodeWorkerLike);
+    const handle = createNodeWorkerHandle(worker);
     const messages: GeoSpecPoolWorkerMessage[] = [];
     handle.onMessage((message) => messages.push(message));
 

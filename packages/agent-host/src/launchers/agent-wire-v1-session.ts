@@ -232,8 +232,7 @@ export const createV1Session = (
         if (outcome === 'resume' && (await launcher.host.waitForAdmission(chatId, input.runId)) === undefined) {
           await execute({ type: 'resume', commandId: key(), payload: { chatId, runId: input.runId } });
         } else if (outcome !== 'settled' && outcome !== 'resume') {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- SC-G8: the v1 schema's message is the log's message.
-          await execute({ type: 'start', commandId: key(), payload } as HostCommand);
+          await execute({ type: 'start', commandId: key(), payload });
         }
         return { type: 'result', operation: 'start', snapshot: await launcher.host.snapshot(chatId) };
       }

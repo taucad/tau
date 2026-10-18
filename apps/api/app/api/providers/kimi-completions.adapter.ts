@@ -171,7 +171,7 @@ const convertKimiMessage = (
   const { usage, modelProvider } = options;
   const converted = convertCompletionsMessageToBaseMessage({
     message,
-    rawResponse: rawResponse as OpenAIClient.Chat.Completions.ChatCompletion,
+    rawResponse,
   });
   if (!AIMessage.isInstance(converted)) {
     throw new TypeError(`Kimi returned unsupported message role: ${message.role}`);
@@ -214,7 +214,7 @@ const convertKimiDelta = (
   const { modelProvider, defaultRole } = options;
   const converted = convertCompletionsDeltaToBaseMessageChunk({
     delta,
-    rawResponse: rawResponse as OpenAIClient.Chat.Completions.ChatCompletionChunk,
+    rawResponse,
     defaultRole,
   });
   if (!AIMessageChunk.isInstance(converted)) {
@@ -363,7 +363,7 @@ export class TauChatKimiCompletions extends ChatOpenAICompletions {
         continue;
       }
 
-      const chunk = convertKimiDelta(choice.delta as unknown as Record<string, unknown>, data, {
+      const chunk = convertKimiDelta(choice.delta, data, {
         modelProvider: this.modelProvider,
         defaultRole,
       });

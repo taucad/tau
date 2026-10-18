@@ -26,7 +26,7 @@ if (tauSentryDsn) {
   Sentry.init({
     dsn: tauSentryDsn,
     environment: 'production',
-    sendDefaultPii: false,
+    // Sentry 10 defaults to PII off; partial dataCollection options change those defaults.
     beforeSend: scrubDesktopEvent,
   });
 }

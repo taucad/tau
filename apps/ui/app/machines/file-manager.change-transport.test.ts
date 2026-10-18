@@ -39,10 +39,9 @@ import {
 } from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import type { ComposedViewClient, ComposedViewProxy } from '@taucad/fs-client/composed-view-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { WorkspaceAuthorityClient } from '@taucad/fs-client/file-system-client';
 import { joinPath } from '@taucad/utils/path';
 
 const projectRoot = '/projects/w12b-change-transport';
@@ -141,8 +140,8 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   channel.onFileWritten({ handler: (event) => announced.push(event.path) });
 
   const client = createComposedViewClient({
-    workspace: workspaceProxy as unknown as WorkspaceAuthorityClient,
-    view: viewProxy as unknown as ComposedViewProxy,
+    workspace: workspaceProxy,
+    view: viewProxy,
     /* No dependency mount in this fixture; the arm is wired so the composition is
      * the production one (W11). */
     dependencies: await openRooted(),

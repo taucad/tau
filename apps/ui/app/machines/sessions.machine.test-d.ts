@@ -1,9 +1,11 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
 import { sessionsMachine } from './sessions.machine.js';
 import type { SessionsMachineContext, SessionsMachineEmitted } from './sessions.machine.js';
 
-expectTypeOf(sessionsMachine).toExtend<AnyStateMachine>();
-expectTypeOf<SessionsMachineContext['budget']>().toEqualTypeOf<number>();
-expectTypeOf<SessionsMachineEmitted['type']>().toEqualTypeOf<'liveSetChanged' | 'budgetRefused' | 'quiesced'>();
+it('preserves the complete sessions.machine type contracts', () => {
+  expectTypeOf(sessionsMachine).toExtend<AnyStateMachine>();
+  expectTypeOf<SessionsMachineContext['budget']>().toEqualTypeOf<number>();
+  expectTypeOf<SessionsMachineEmitted['type']>().toEqualTypeOf<'liveSetChanged' | 'budgetRefused' | 'quiesced'>();
+});

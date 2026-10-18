@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import type { Duplex } from 'node:stream';
+import type { Server as HttpServer } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
@@ -22,7 +21,7 @@ const setup = () => {
   const upgrade = (url: string) => {
     // oxlint-disable-next-line unicorn/prefer-event-target -- stands in for a Node Duplex
     const socket = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn() });
-    server.emit('upgrade', { url } as IncomingMessage, socket as unknown as Duplex, Buffer.alloc(0));
+    server.emit('upgrade', { url }, socket, Buffer.alloc(0));
     return socket;
   };
   return { shutdown, rejections, handle, upgrade };

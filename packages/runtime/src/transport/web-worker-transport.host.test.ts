@@ -64,15 +64,16 @@ describe('webWorkerHost — real port acquisition (R3)', () => {
     postedMessages.length = 0;
 
     const postMessageSpy = vi.spyOn(globalThis as unknown as Window, 'postMessage');
-    postMessageSpy.mockImplementation(((
+    const postMessage: Window['postMessage'] = (
       data: unknown,
-      options?: { transfer?: Transferable[] } | readonly Transferable[],
+      options?: string | { transfer?: Transferable[] } | readonly Transferable[],
     ) => {
       const transfer = Array.isArray(options)
         ? options
         : (options as { transfer?: Transferable[] } | undefined)?.transfer;
       postedMessages.push({ data, transfer });
-    }) as unknown as Window['postMessage']);
+    };
+    postMessageSpy.mockImplementation(postMessage);
 
     const addSpy = vi.spyOn(globalThis, 'addEventListener');
     addSpy.mockImplementation(((type: string, listener: EventListener) => {

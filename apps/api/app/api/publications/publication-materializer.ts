@@ -577,7 +577,7 @@ export const materializePublication = async (
     uploads.map(async ({ bytes, sha, contentType }) => {
       const key = blobKeyFromSha256Hex(sha);
       const existing = await storage.headBlob({ namespace: 'blobs', key, tier });
-      if (existing !== undefined && existing.contentType === contentType) {
+      if (existing?.contentType === contentType) {
         return;
       }
       await storage.putBlob({

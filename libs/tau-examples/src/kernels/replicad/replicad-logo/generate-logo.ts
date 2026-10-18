@@ -388,7 +388,11 @@ const surfaceNormal = (u: number, slope = 0, facing: 1 | -1 = 1): Vector3 => {
  */
 const azimuthal = (
   id: string,
-  { slope = 0, facing = 1 as 1 | -1, bounce = 1 } = {},
+  {
+    slope = 0,
+    facing = 1,
+    bounce = 1,
+  }: { slope?: number; facing?: 1 | -1; bounce?: number } = {},
 ): string => {
   const stops = 17;
   const entries = Array.from({ length: stops }, (_, index) => {

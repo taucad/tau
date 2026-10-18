@@ -135,7 +135,7 @@ describe('RecordIssuesAction', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Save not confirmed · 1 record' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry save' }));
-    expect(screen.getByRole('listitem', { name: 'Pane layout' })).toHaveTextContent('not yet confirmed saved');
+    expect(screen.getByRole('listitem', { name: 'Pane layout' })).toMatchTextContent('not yet confirmed saved');
     expect(retrySave).not.toHaveBeenCalled();
     expect(screen.getByText('Still waiting for the original write. No replacement write started.')).toBeDefined();
   });
@@ -225,9 +225,9 @@ it.each([false, true])(
       expect(store.snapshot().record).toEqual(hasBaseline ? valid : undefined);
       await userEvent.click(screen.getByRole('button', { name: 'Settings not applied · 1 record' }));
       const row = await screen.findByRole('listitem', { name: 'Model display settings' });
-      expect(row).not.toHaveTextContent('Default settings are in use');
-      expect(row).not.toHaveTextContent('values loaded before are still in use');
-      expect(row).toHaveTextContent('The file could not be applied');
+      expect(row).not.toMatchTextContent('Default settings are in use');
+      expect(row).not.toMatchTextContent('values loaded before are still in use');
+      expect(row).toMatchTextContent('The file could not be applied');
     } finally {
       store.dispose();
     }

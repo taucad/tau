@@ -63,9 +63,9 @@ describe('useAttachmentSource', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('first')).toHaveTextContent('ready blob:object-1');
+      expect(screen.getByTestId('first')).toMatchTextContent('ready blob:object-1');
     });
-    expect(screen.getByTestId('second')).toHaveTextContent('ready blob:object-1');
+    expect(screen.getByTestId('second')).toMatchTextContent('ready blob:object-1');
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(readFile).toHaveBeenCalledTimes(1);
     expect(readFile).toHaveBeenCalledWith(`${directory}/${imageHash}.png`);
@@ -75,7 +75,7 @@ describe('useAttachmentSource', () => {
     const first = render(<Probe id='first' part={imagePart} />);
     const second = render(<Probe id='second' part={imagePart} />);
     await waitFor(() => {
-      expect(screen.getByTestId('second')).toHaveTextContent('ready blob:object-1');
+      expect(screen.getByTestId('second')).toMatchTextContent('ready blob:object-1');
     });
 
     first.unmount();
@@ -118,7 +118,7 @@ describe('useAttachmentSource', () => {
       resolveBytes?.(new Uint8Array([1]));
     });
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-2');
-    expect(screen.getByTestId('second')).toHaveTextContent('ready blob:object-1');
+    expect(screen.getByTestId('second')).toMatchTextContent('ready blob:object-1');
     second.unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-1');
   });
@@ -127,7 +127,7 @@ describe('useAttachmentSource', () => {
     const url = 'data:image/png;base64,iVBORw0KGgo=';
     render(<Probe id='legacy' part={{ url, mediaType: 'image/png' }} />);
 
-    expect(screen.getByTestId('legacy')).toHaveTextContent(`ready ${url}`);
+    expect(screen.getByTestId('legacy')).toMatchTextContent(`ready ${url}`);
     expect(readFile).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
@@ -142,7 +142,7 @@ describe('useAttachmentSource', () => {
     render(<OrderedProbe />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('ordered')).toHaveTextContent('ready');
+      expect(screen.getByTestId('ordered')).toMatchTextContent('ready');
     });
     expect(readFile.mock.calls.map(([path]) => path)).toEqual([
       `${composer}/${imageHash}.png`,
@@ -160,7 +160,7 @@ describe('useAttachmentSource', () => {
     render(<OrderedProbe />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('ordered')).toHaveTextContent('absent');
+      expect(screen.getByTestId('ordered')).toMatchTextContent('absent');
     });
   });
 
@@ -169,7 +169,7 @@ describe('useAttachmentSource', () => {
     render(<Probe id='missing' part={imagePart} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('missing')).toHaveTextContent('absent');
+      expect(screen.getByTestId('missing')).toMatchTextContent('absent');
     });
     expect(createObjectURL).not.toHaveBeenCalled();
   });

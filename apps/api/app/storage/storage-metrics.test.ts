@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs and outputs use PascalCase fields */
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { ServiceOutputTypes } from '@aws-sdk/client-s3';
-import type { MetricsService } from '#telemetry/metrics.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
 
 const storageClient = (respond: () => { output: ServiceOutputTypes; response: unknown }) => {
@@ -10,9 +9,7 @@ const storageClient = (respond: () => { output: ServiceOutputTypes; response: un
   // Stands in for the network: everything after `build` never runs.
   client.middlewareStack.add(() => async () => respond(), { step: 'build', name: 'testTransport' });
   const metrics = { storageOperationDuration: { record: vi.fn() }, storageTransferBytes: { add: vi.fn() } };
-  instrumentStorageClient(client, metrics as unknown as MetricsService, (bucket) =>
-    bucket === 'private-bucket' ? 'private' : 'public',
-  );
+  instrumentStorageClient(client, metrics, (bucket) => (bucket === 'private-bucket' ? 'private' : 'public'));
   return { client, metrics };
 };
 

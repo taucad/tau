@@ -33,8 +33,8 @@ type GeoSpecVitestTestTask = {
 };
 
 declare module 'vitest' {
-  // oxlint-disable-next-line typescript/consistent-type-definitions, typescript/no-empty-object-type, typescript/no-explicit-any -- Vitest's merge target is an interface with this exact generic default.
-  interface Matchers<T = any> extends GeoSpecVitestMatcherMethods {}
+  // oxlint-disable-next-line typescript/consistent-type-definitions, typescript/no-empty-object-type -- Augment Vitest's interface without redeclaring its version-specific generic parameters.
+  interface Matchers extends GeoSpecVitestMatcherMethods {}
 }
 
 /** Installed Vitest matcher map and lifecycle settlement hook. @public */

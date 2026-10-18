@@ -65,7 +65,7 @@ export function createWebGpuSilhouetteMaterial(maskTexture: Texture): Silhouette
     );
   })();
 
-  return Object.assign(material, { silhouetteTexelSize: texelSize }) as SilhouetteNodeMaterial;
+  return Object.assign(material, { silhouetteTexelSize: texelSize });
 }
 
 /** Point the composite at a mask of `width × height` device pixels. */

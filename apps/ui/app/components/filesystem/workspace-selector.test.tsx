@@ -90,8 +90,8 @@ describe('WorkspaceSelector', () => {
     /* Glyph first at the bar's 16 px, its label the first to leave when the bar needs room (D6). */
     expect(trigger.querySelector('svg')).toHaveClass('size-4');
     expect(trigger.querySelector('span')).toHaveClass('group-data-[hide-kernel]/bar:hidden');
-    expect(trigger).toHaveTextContent('Home');
-    expect(trigger).not.toHaveTextContent('in this browser');
+    expect(trigger).toMatchTextContent('Home');
+    expect(trigger).not.toMatchTextContent('in this browser');
     expect(trigger.querySelector('[title]')).toBeNull();
 
     await user.hover(trigger);
@@ -131,7 +131,7 @@ describe('WorkspaceSelector', () => {
     const trigger = screen.getByRole('button', {
       name: 'Create in A very long workshop folder name',
     });
-    expect(trigger).not.toHaveTextContent('on your disk');
+    expect(trigger).not.toMatchTextContent('on your disk');
     await user.hover(trigger);
     const tooltipCopy = await screen.findAllByText(
       'Projects are saved directly to this folder on your disk. Select to change location.',
@@ -145,7 +145,7 @@ describe('WorkspaceSelector', () => {
     const trigger = screen.getByRole('button', { name: 'Create in Home' });
     expect(trigger).toHaveClass('justify-start', 'border', 'bg-background', 'shadow-xs');
     expect(screen.getByText('Home')).toHaveClass('min-w-0', 'flex-1', 'text-left');
-    expect(trigger).not.toHaveTextContent('in this browser');
+    expect(trigger).not.toMatchTextContent('in this browser');
     expect(trigger.lastElementChild).toHaveClass('ml-auto');
   });
 
@@ -159,12 +159,12 @@ describe('WorkspaceSelector', () => {
     expect(screen.getByText('Create in')).toBeVisible();
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
-    expect(options[0]).toHaveTextContent('Home');
-    expect(options[0]).toHaveTextContent('in this browser');
-    expect(options[1]).toHaveTextContent('A very long workshop folder name');
-    expect(options[1]).toHaveTextContent('on your disk');
-    expect(options[0]).not.toHaveTextContent('·');
-    expect(options[1]).not.toHaveTextContent('·');
+    expect(options[0]).toMatchTextContent('Home');
+    expect(options[0]).toMatchTextContent('in this browser');
+    expect(options[1]).toMatchTextContent('A very long workshop folder name');
+    expect(options[1]).toMatchTextContent('on your disk');
+    expect(options[0]).not.toMatchTextContent('·');
+    expect(options[1]).not.toMatchTextContent('·');
     expect(screen.getByText('in this browser')).toHaveClass('text-xs');
     expect(screen.getByText('on your disk')).toHaveClass('text-xs');
     expect(options[0]!.querySelector('[title]')).toBeNull();

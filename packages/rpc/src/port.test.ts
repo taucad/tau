@@ -59,14 +59,14 @@ describe('wrapMessagePort', () => {
 
     const copyOnly = wrapMessagePort(port1, { label: 'electron-utility:renderer', copyOnly: true });
     const bytes = new Uint8Array([1, 2, 3]);
-    copyOnly.postMessage({ bytes }, [bytes.buffer as unknown as Transferable]);
+    copyOnly.postMessage({ bytes }, [bytes.buffer]);
     /* The whole point: the caller keeps its buffer, so the far end gets bytes. */
     expect(bytes.buffer.byteLength).toBe(3);
 
     /* Default wires still transfer: the browser worker pool depends on it. */
     const transferring = wrapMessagePort(port1, { label: 'worker' });
     const owned = new Uint8Array([4, 5, 6]);
-    transferring.postMessage({ owned }, [owned.buffer as unknown as Transferable]);
+    transferring.postMessage({ owned }, [owned.buffer]);
     expect(owned.buffer.byteLength).toBe(0);
 
     await new Promise<void>((resolve) => {
@@ -517,9 +517,9 @@ describe('wrapMessagePortMain', () => {
 
     const bytes = new Uint8Array([1, 2, 3]);
     expect(() => {
-      wrapped.postMessage({ bytes }, [bytes.buffer as unknown as Transferable]);
+      wrapped.postMessage({ bytes }, [bytes.buffer]);
     }).not.toThrow();
-    wrapped.postMessage({ handoff }, [handoff as unknown as Transferable]);
+    wrapped.postMessage({ handoff }, [handoff]);
 
     expect(received).toEqual([{ bytes }, { handoff }]);
     /* Copied, not transferred: the sender still owns its bytes. */

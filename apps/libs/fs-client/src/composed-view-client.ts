@@ -211,7 +211,7 @@ const touchedPaths = (property: string, args: readonly unknown[]): readonly stri
     return [source, `${source.slice(0, source.lastIndexOf('/') + 1)}${newName}`];
   }
   if (property === 'writeFiles') {
-    return Object.keys((args[0] ?? {}) as Record<string, unknown>);
+    return Object.keys(args[0] ?? {});
   }
   if (property === 'bulkMove') {
     return ((args[0] ?? []) as ReadonlyArray<{ source: string; target: string }>).flatMap(({ source, target }) => [
@@ -529,7 +529,7 @@ export const createComposedViewClient = (input: {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.readdir(path);
     },
-    stat: (async (absolutePath: string, options?: FileStatOptions) => {
+    stat: async (absolutePath: string, options?: FileStatOptions) => {
       const { proxy, path } = servedBy(absolutePath);
       const result = options ? await proxy.stat(path, options) : await proxy.stat(path);
       if (isDependency(proxy)) {
@@ -539,7 +539,7 @@ export const createComposedViewClient = (input: {
       }
       remember(path, result.provenance);
       return result;
-    }) as FileSystemClient['stat'],
+    },
     lstat: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.lstat(path);

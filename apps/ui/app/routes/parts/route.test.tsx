@@ -65,7 +65,7 @@ describe('Parts route', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search parts' }), { target: { value: 'motor' } });
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'Open Part 24' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Current query')).toHaveTextContent('?q=motor');
+    expect(screen.getByLabelText('Current query')).toMatchTextContent('?q=motor');
   });
 
   it('should restore category filters from the URL and update the selected category', async () => {
@@ -76,7 +76,7 @@ describe('Parts route', () => {
     expect(screen.getByRole('menuitemradio', { name: 'Brackets' })).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Fasteners' }));
     expect(screen.getAllByRole('listitem')).toHaveLength(20);
-    expect(screen.getByLabelText('Current query')).toHaveTextContent('?category=fasteners');
+    expect(screen.getByLabelText('Current query')).toMatchTextContent('?category=fasteners');
   });
 
   it('should clear the category and search after no parts match', async () => {
@@ -97,6 +97,6 @@ describe('Parts route', () => {
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Open settings' }));
-    expect(screen.getByLabelText('Current query')).toHaveTextContent('?settings=experimental');
+    expect(screen.getByLabelText('Current query')).toMatchTextContent('?settings=experimental');
   });
 });

@@ -571,8 +571,7 @@ export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFa
       return;
     }
 
-    const edgeMaterial =
-      fatLineBaseMaterials.get(object) ?? ((object as LineSegments2).material as GltfFatLineMaterial);
+    const edgeMaterial = fatLineBaseMaterials.get(object) ?? (object as LineSegments2).material;
     if (!updatedMaterials.has(edgeMaterial) && edgeMaterial.color.getHex() !== edgeColor) {
       setGltfFatLineMaterialColor(edgeMaterial, edgeColor);
     }

@@ -31,7 +31,7 @@ export class ChatExceptionFilter implements ExceptionFilter {
 
     // Extract request ID: prefer header if present, otherwise use Fastify's generated ID
     const headerRequestId = request.headers[httpHeader.requestId] as string | undefined;
-    const requestId = headerRequestId ?? (request.id as string | undefined);
+    const requestId = headerRequestId ?? request.id;
 
     let statusCode: number;
     let chatError: ChatError;

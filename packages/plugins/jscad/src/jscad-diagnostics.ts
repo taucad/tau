@@ -226,7 +226,7 @@ const validateJscadGeom3 = (
     } catch (error) {
       return { validation: { valid: false, message: issueMessage(error) }, polygonCount: polygons.length };
     }
-    ledger.addFace(polygon.vertices as ReadonlyArray<readonly number[]>);
+    ledger.addFace(polygon.vertices);
   }
 
   const { mismatchedDirectedEdges } = ledger.summarize();

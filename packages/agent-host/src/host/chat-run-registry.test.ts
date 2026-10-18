@@ -336,7 +336,7 @@ describe('the chat-run registry (RA-S3)', () => {
       systemPrompt: 'You are Tau.',
       toolRegistry: idle,
       auth: () => 'daemon-bearer',
-      fetch: vi.fn(async () => new Response(null, { status: 500 })) as unknown as typeof globalThis.fetch,
+      fetch: vi.fn(async () => new Response(null, { status: 500 })),
     });
 
     const attach = { type: 'attach', payload: { chatId: 'chat-orphan' } } as const;

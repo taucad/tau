@@ -327,7 +327,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account',
       );
     }
-    this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
+    this.signingClient = this.client;
   }
 
   /**
@@ -403,7 +403,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
 
     return {
-      body: response.Body as Readable,
+      body: response.Body,
       contentType: response.ContentType ?? 'application/octet-stream',
       etag: response.ETag?.replaceAll('"', '') ?? '',
       ...(response.ContentLength === undefined ? {} : { contentLength: Number(response.ContentLength) }),

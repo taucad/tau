@@ -162,9 +162,15 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
               .length,
           };
         };
-        const { gpu } = navigator as Navigator & {
-          readonly gpu: { requestAdapter: () => Promise<unknown> };
-        };
+        const readGpu = (
+          runtimeNavigator: Pick<Navigator, 'userAgent'> & {
+            readonly gpu?: { requestAdapter: () => Promise<unknown> };
+          },
+        ): { requestAdapter: () => Promise<unknown> } | undefined => runtimeNavigator.gpu;
+        const gpu = readGpu(navigator);
+        if (gpu === undefined) {
+          throw new Error('Expected browser GPU adapter surface');
+        }
         const adapter = await gpu.requestAdapter();
         let adapterDescription: unknown = adapter;
         if (adapter) {

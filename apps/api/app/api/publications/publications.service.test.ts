@@ -118,7 +118,7 @@ function createStoreStub(repositoryPath: string): PublicationsServiceDeps[8] {
     },
     deleteObjects: async (_locator, keys) => store.deleteObjects(only, keys),
   };
-  return seeded as unknown as PublicationsServiceDeps[8];
+  return seeded;
 }
 
 /**
@@ -274,7 +274,7 @@ function createBillingStub(args?: {
          reaches `ensureRepository` (N5's second route, review C11). */
       canSyncFiles: args?.canSyncFiles ?? true,
     }),
-  } as unknown as PublicationsServiceDeps[7];
+  };
 }
 
 function createMetricsStub(): PublicationsServiceDeps[5] {

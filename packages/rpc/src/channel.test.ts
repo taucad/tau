@@ -483,9 +483,9 @@ describe('createChannelClient / createChannelServer', () => {
         },
       },
     });
-    c.port2.postMessage({ not: 'wire' as unknown } as { not: string });
+    c.port2.postMessage({ not: 'wire' });
     c.port2.postMessage(null);
-    c.port2.postMessage({ v: 1 } as unknown);
+    c.port2.postMessage({ v: 1 });
   });
 
   it('rejects listen with AbortError when signal is already aborted', async () => {
@@ -643,15 +643,9 @@ describe('createChannelClient / createChannelServer', () => {
       },
     });
     const client = createChannelClient({ port: portClient, sessionKey: 's1' });
-    channel.port1.postMessage({ v: 0, k: 'rs', i: 'x', o: 1, d: 0 } as {
-      v: number;
-      k: string;
-      i: string;
-      o: number;
-      d: number;
-    });
+    channel.port1.postMessage({ v: 0, k: 'rs', i: 'x', o: 1, d: 0 });
     channel.port1.postMessage(null);
-    channel.port1.postMessage({ v: 1 } as unknown);
+    channel.port1.postMessage({ v: 1 });
     void client;
   });
 

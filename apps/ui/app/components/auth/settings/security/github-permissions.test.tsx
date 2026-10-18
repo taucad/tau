@@ -73,7 +73,7 @@ describe('independent GitHub Security connections', () => {
   it('should show verification failures without claiming a grant from the stored account', async () => {
     fixture.capability.mockRejectedValue(new Error('unavailable'));
     renderSettings();
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not be checked');
+    expect(await screen.findByRole('alert')).toMatchTextContent('could not be checked');
     expect(screen.queryByText(/Gist access granted/u)).not.toBeInTheDocument();
   });
 });

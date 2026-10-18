@@ -674,7 +674,7 @@ export const ChatEditorFileTree = memo(function ({
   const preflightCreate = useCallback(
     async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationErrorLike> => {
       const result = await canCreate(path, kind);
-      return result === true ? true : (result as WorkspaceMutationErrorLike);
+      return result === true ? true : result;
     },
     [canCreate],
   );
@@ -883,7 +883,7 @@ export const ChatEditorFileTree = memo(function ({
       // view. Every collision remains non-destructive and aborts the rename.
       const preflight = await canRename(oldPath, newName);
       if (preflight !== true) {
-        surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+        surfacePreflightError(preflight);
         return;
       }
 
@@ -958,7 +958,7 @@ export const ChatEditorFileTree = memo(function ({
         if (result === true) {
           continue;
         }
-        surfacePreflightError(result as WorkspaceMutationErrorLike);
+        surfacePreflightError(result);
         return;
       }
 
@@ -1314,7 +1314,7 @@ export const ChatEditorFileTree = memo(function ({
         // oxlint-disable-next-line no-await-in-loop -- Multi-select can include parent/child paths; ordered preflight keeps outcomes deterministic.
         const preflight = await canDelete(path);
         if (preflight !== true) {
-          surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+          surfacePreflightError(preflight);
           continue;
         }
         const deletion = isFolder ? deleteDirectory(path, { recursive: true }) : deleteFile(path, { source: 'user' });
@@ -1563,7 +1563,7 @@ export const ChatEditorFileTree = memo(function ({
           // oxlint-disable-next-line no-await-in-loop -- Directory creation is ordered by depth so parents exist before children.
           const preflight = await canCreate(directoryPath, 'directory');
           if (preflight !== true) {
-            failures.push(mutationErrorMessage(preflight as WorkspaceMutationErrorLike));
+            failures.push(mutationErrorMessage(preflight));
             continue;
           }
 
@@ -1594,7 +1594,7 @@ export const ChatEditorFileTree = memo(function ({
           collisions.push(candidate.filePath);
           continue;
         }
-        failures.push(mutationErrorMessage(preflight as WorkspaceMutationErrorLike));
+        failures.push(mutationErrorMessage(preflight));
       }
 
       if (collisions.length > 0) {

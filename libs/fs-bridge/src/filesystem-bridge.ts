@@ -502,7 +502,7 @@ const serializeWorkspaceMutationError = (error: WorkspaceMutationError): Workspa
     message: error.message,
     ...(error.target === undefined ? {} : { target: error.target }),
   };
-  return serialized as WorkspaceMutationError;
+  return serialized;
 };
 
 const serializeMutationResult = (result: true | WorkspaceMutationError): true | WorkspaceMutationError =>

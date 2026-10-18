@@ -738,13 +738,12 @@ describe('createThreeCameraRig', () => {
           const tangentA = Math.cos(elevation) * Math.cos(azimuth);
           const tangentB = Math.cos(elevation) * Math.sin(azimuth);
           const normal = Math.sin(elevation);
-          const direction = (
+          const direction: [number, number, number] =
             axis === 'x'
               ? [normal, tangentA, tangentB]
               : axis === 'y'
                 ? [tangentA, normal, tangentB]
-                : [tangentA, tangentB, normal]
-          ) as [number, number, number];
+                : [tangentA, tangentB, normal];
 
           for (const { fov, viewport, zoom } of viewports) {
             const view = createCameraView({

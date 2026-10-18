@@ -111,7 +111,7 @@ class FakeFileManagerWorker {
 }
 
 const createOpenFileSystemBridge = (worker: FakeFileManagerWorker) => (): ReturnType<typeof openFileSystemBridge> =>
-  openFileSystemBridge(worker as unknown as Worker);
+  openFileSystemBridge(worker);
 
 const runtimeConfig = {
   tauApiUrl: 'https://api.tau.test',
@@ -855,7 +855,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
       const bridges: Array<ReturnType<typeof openFileSystemBridge>> = [];
       const client = createGeoSpecWorkerRpcClient({
         openFileSystemBridge: () => {
-          const bridge = openFileSystemBridge(fileManagerWorker as unknown as Worker);
+          const bridge = openFileSystemBridge(fileManagerWorker);
           vi.spyOn(bridge, 'dispose');
           bridges.push(bridge);
           return bridge;

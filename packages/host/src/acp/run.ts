@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url';
 
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
-import type { ContentBlock, McpServer, StopReason, Usage as AcpUsage } from '@agentclientprotocol/sdk';
+import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
 import { isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type {
@@ -822,7 +822,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         if (!result.ok) {
           throw failureError(result.failure);
         }
-        return { stopReason: result.stopReason as StopReason };
+        return { stopReason: result.stopReason };
       } finally {
         turn.signal.removeEventListener('abort', onAbort);
         turns.delete(requestId);

@@ -14,7 +14,7 @@ const launcher = createRuntimeChildWorkerLauncher();
 
 /** Whether the child may spawn: the existing child's grants refuse it. */
 const ownSpawn = () => {
-  const childProcess = /** @type {typeof import('node:child_process')} */ (process.getBuiltinModule('child_process'));
+  const childProcess = process.getBuiltinModule('child_process');
   try {
     childProcess.execFileSync('/bin/sh', ['-c', 'true']);
     return 'spawned';

@@ -494,7 +494,7 @@ export const draftMachine = setup({
       draftText: loaded.text,
       draftAttachments: loaded.attachments,
       draftToolChoice: 'auto',
-      draftMode: 'agent' as ChatMode,
+      draftMode: 'agent',
       messageEdits: {},
       activeEditMessageId: undefined,
       editDraftText: '',

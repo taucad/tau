@@ -101,7 +101,7 @@ describe('desktop module graph', () => {
       ],
       build: {
         assetsInlineLimit: 0,
-        rollupOptions: {
+        rolldownOptions: {
           output: {
             assetFileNames: 'assets/[name]-[hash][extname]',
             manualChunks(id) {

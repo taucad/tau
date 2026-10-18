@@ -156,9 +156,9 @@ describe('createAgentChannelClient', () => {
     const overSocket = await socketClient.execute(cancel);
 
     const whatwg = new MessageChannel();
-    serveAgentChannel(whatwg.port1 as unknown as MessagePortLike, launcher, { build });
+    serveAgentChannel(whatwg.port1, launcher, { build });
     const whatwgClient = createAgentChannelClient({
-      connect: () => whatwgOnly(whatwg.port2 as unknown as MessagePortLike),
+      connect: () => whatwgOnly(whatwg.port2),
     });
     disposers.push(() => {
       whatwgClient.close();
@@ -167,7 +167,7 @@ describe('createAgentChannelClient', () => {
     const overWhatwg = await whatwgClient.execute(cancel);
 
     const emitter = new MessageChannel();
-    serveAgentChannel(emitter.port1 as unknown as MessagePortLike, launcher, { build });
+    serveAgentChannel(emitter.port1, launcher, { build });
     // Driven through `on/off/start/close` — the Electron `MessagePortMain` shape.
     const emitterClient = createAgentChannelClient({ connect: () => emitter.port2 });
     disposers.push(() => {
@@ -289,7 +289,7 @@ describe('createAgentChannelClient', () => {
           }),
       },
     });
-    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as MessagePortLike });
+    const client = createAgentChannelClient({ connect: () => channel.port2 });
     disposers.push(() => {
       client.close();
       channel.port1.close();
@@ -380,7 +380,7 @@ describe('createAgentChannelClient', () => {
         };
       };
     }>({
-      port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
+      port: wrapMessagePort<unknown>(channel.port1),
       sessionKey: 'tau-agent',
       impl: {
         call: async () => {
@@ -407,7 +407,7 @@ describe('createAgentChannelClient', () => {
         },
       },
     });
-    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as MessagePortLike });
+    const client = createAgentChannelClient({ connect: () => channel.port2 });
     disposers.push(() => {
       client.close();
       channel.port1.close();
@@ -444,7 +444,7 @@ describe('createAgentChannelClient', () => {
     const client = createAgentChannelClient({
       connect: () => {
         dials += 1;
-        return channel.port2 as unknown as MessagePortLike;
+        return channel.port2;
       },
     });
     disposers.push(() => {

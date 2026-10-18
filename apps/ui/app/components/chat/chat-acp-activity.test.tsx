@@ -28,7 +28,7 @@ describe('ACP activity presentation', () => {
       />,
     );
     expect(screen.getByRole('status', { name: 'Agent activity' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('status', { name: 'Agent activity' })).toHaveTextContent('Retrying in 2 seconds');
+    expect(screen.getByRole('status', { name: 'Agent activity' })).toMatchTextContent('Retrying in 2 seconds');
     rerender(
       <ChatAcpActivity
         data={{ ...session, activity: { kind: 'compaction', status: 'completed', label: 'Context compacted' } }}
@@ -41,7 +41,7 @@ describe('ACP activity presentation', () => {
         data={{ ...session, activity: { kind: 'compaction', status: 'failed', label: 'Context compaction failed' } }}
       />,
     );
-    expect(screen.getByRole('alert', { name: 'Agent activity' })).toHaveTextContent('Context compaction failed');
+    expect(screen.getByRole('alert', { name: 'Agent activity' })).toMatchTextContent('Context compaction failed');
   });
 
   it('should preserve keyboard disclosure and focus when delegated work completes', async () => {
@@ -92,7 +92,7 @@ describe('ACP activity presentation', () => {
         }}
       />,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('The delegated task failed');
+    expect(screen.getByRole('alert')).toMatchTextContent('The delegated task failed');
     expect(screen.getByRole('button', { name: 'Review dimensions No longer observed' })).toBeInTheDocument();
     expect(screen.getByText('This turn ended before the task reported a result.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check the mesh Stopped' })).toBeInTheDocument();

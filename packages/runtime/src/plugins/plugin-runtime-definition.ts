@@ -79,7 +79,7 @@ export function attachRuntimePluginDefinition<Plugin extends PlainPluginObject, 
     configurable: false,
     writable: false,
   });
-  return plugin as Plugin & RuntimePluginDefinitionCarrier<Definition>;
+  return plugin;
 }
 
 /** @public */

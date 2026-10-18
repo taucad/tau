@@ -64,23 +64,23 @@ export const frontCover = {
 export const buildFrontCover = (place: Placement): BuiltPart => {
   const o = frontCover.outline;
   // Cover body: outline slab from backX to wallX (cavity shelled after).
-  const body = draw([-o.yHalf, o.zMin])
+  const body: Shape3D = draw([-o.yHalf, o.zMin])
     .lineTo([o.yHalf, o.zMin])
     .lineTo([o.yHalf, o.zMax])
     .lineTo([-o.yHalf, o.zMax])
     .close()
     .sketchOnPlane('YZ')
     .extrude(frontCover.wallX - frontCover.backX)
-    .translate([frontCover.backX, 0, 0]) as Shape3D;
+    .translate([frontCover.backX, 0, 0]);
   // Timing cavity: inner void open to the block face.
-  const cavity = draw([-o.yHalf + 12, o.zMin + 12])
+  const cavity: Shape3D = draw([-o.yHalf + 12, o.zMin + 12])
     .lineTo([o.yHalf - 12, o.zMin + 12])
     .lineTo([o.yHalf - 12, o.zMax - 12])
     .lineTo([-o.yHalf + 12, o.zMax - 12])
     .close()
     .sketchOnPlane('YZ')
     .extrude(frontCover.wallX - frontCover.backX - frontCover.plateT)
-    .translate([frontCover.backX, 0, 0]) as Shape3D;
+    .translate([frontCover.backX, 0, 0]);
   let cover = body.cut(cavity);
   // Gerotor pump boss: front wall to x = -4; pocket opens rearward.
   cover = cover.fuse(
@@ -135,7 +135,7 @@ export const buildFrontCover = (place: Placement): BuiltPart => {
       .close()
       .sketchOnPlane('YZ')
       .extrude(-26)
-      .translate([frontCover.backX, 0, 0]) as Shape3D,
+      .translate([frontCover.backX, 0, 0]),
   );
   cover = cover.cut(
     makeCylinder(
@@ -207,7 +207,7 @@ export const buildFrontCover = (place: Placement): BuiltPart => {
       .close()
       .sketchOnPlane('YZ')
       .extrude(16)
-      .translate([-20, 0, 0]) as Shape3D,
+      .translate([-20, 0, 0]),
   );
   const pickupTapPts: Vec3[] = [
     [-10, -16, -50],
@@ -401,7 +401,7 @@ export const buildValveCover = (
       .close()
       .sketchOnPlane('XY')
       .extrude(54)
-      .translate([0, 0, -0.01]) as Shape3D,
+      .translate([0, 0, -0.01]),
   );
   const boltTools: Shape3D[] = [];
   for (const [x, y] of railTapXY) {
@@ -494,7 +494,7 @@ export const buildRailGasket = (
         .close()
         .sketchOnPlane('XY')
         .extrude(options.t + 2)
-        .translate([0, 0, -1]) as Shape3D,
+        .translate([0, 0, -1]),
     );
   }
   const tools: Shape3D[] = [];
@@ -557,7 +557,7 @@ export const buildOilPan = (place: Placement): BuiltPart => {
         .close()
         .sketchOnPlane('XY')
         .extrude(-37)
-        .translate([0, 0, 0.01]) as Shape3D,
+        .translate([0, 0, 0.01]),
     )
     .cut(
       draw([233, -97])
@@ -567,7 +567,7 @@ export const buildOilPan = (place: Placement): BuiltPart => {
         .close()
         .sketchOnPlane('XY')
         .extrude(-137)
-        .translate([0, 0, 0.01]) as Shape3D,
+        .translate([0, 0, 0.01]),
     );
   void rim;
   // Rim flange plate (window matches the block skirt opening) so the rail
@@ -587,7 +587,7 @@ export const buildOilPan = (place: Placement): BuiltPart => {
         .close()
         .sketchOnPlane('XY')
         .extrude(-6)
-        .translate([0, 0, 1]) as Shape3D,
+        .translate([0, 0, 1]),
     );
   pan = pan.fuse(rimPlate);
   // Rim flange with 16 bolt holes matching the block rail taps.
@@ -629,7 +629,7 @@ export const buildOilPickup = (place: Placement): BuiltPart => {
     ),
   );
   void flange;
-  let pickup = makeCylinder(20, 4, [0, 0, -4], [0, 0, 1]) as Shape3D;
+  let pickup: Shape3D = makeCylinder(20, 4, [0, 0, -4], [0, 0, 1]);
   const spine = (): ReturnType<Sketcher['done']> =>
     new Sketcher('XZ')
       .movePointerTo([0, 0])
@@ -691,7 +691,7 @@ export const buildPumpRotor = (
   const width = fit.rotorWidth;
   if (kind === 'outer') {
     const outerR = fit.outerRotorDia / 2;
-    let rotor = makeCylinder(outerR, width, [0, 0, 0], [1, 0, 0]) as Shape3D;
+    let rotor: Shape3D = makeCylinder(outerR, width, [0, 0, 0], [1, 0, 0]);
     // Bore Ø52 scalloped by 11 lobe pockets on the bore circle.
     const pockets: Shape3D[] = [];
     for (let index = 0; index < 11; index++) {
@@ -730,7 +730,7 @@ export const buildPumpRotor = (
   }
   // Inner rotor: r21 body with 10 tip bumps (tips r25.5), riding the snout
   // flats through a Ø38.1 bore flattened at 34.1 A/F.
-  let rotor = makeCylinder(21, width, [0, 0, 0], [1, 0, 0]) as Shape3D;
+  let rotor: Shape3D = makeCylinder(21, width, [0, 0, 0], [1, 0, 0]);
   for (let index = 0; index < 10; index++) {
     const a = (index * 2 * Math.PI) / 10;
     rotor = rotor.fuse(
@@ -761,7 +761,7 @@ export const buildPumpRotor = (
     boreProfile
       .sketchOnPlane('YZ')
       .extrude(width + 2)
-      .translate([-1, 0, 0]) as Shape3D,
+      .translate([-1, 0, 0]),
   );
   const shape = place.shape(rotor);
   const interfaces: InterfaceDeclarations = {
@@ -773,7 +773,7 @@ export const buildPumpRotor = (
 
 /** Oil pump cover: ground plate closing the pocket, 4x M6. */
 export const buildPumpCover = (place: Placement): BuiltPart => {
-  let plate = makeCylinder(44, 6, [0, 0, 0], [-1, 0, 0]) as Shape3D;
+  let plate: Shape3D = makeCylinder(44, 6, [0, 0, 0], [-1, 0, 0]);
   const boltPts: Vec3[] = [];
   const tools: Shape3D[] = [];
   for (const deg of [45, 135, 225, 315]) {
@@ -821,14 +821,14 @@ export const buildReliefSpring = (place: Placement): BuiltPart => {
 export const buildWaterPumpHousing = (place: Placement): BuiltPart => {
   const legY = 145.7;
   const bodyX: [number, number] = [-70, -46];
-  let housing = draw([-176, 40])
+  let housing: Shape3D = draw([-176, 40])
     .lineTo([176, 40])
     .lineTo([176, 93])
     .lineTo([-176, 93])
     .close()
     .sketchOnPlane('YZ')
     .extrude(bodyX[1] - bodyX[0])
-    .translate([bodyX[0], 0, 0]) as Shape3D;
+    .translate([bodyX[0], 0, 0]);
   // Volute cavity around the impeller (on the crank-parallel pump axis).
   housing = housing.cut(
     makeCylinder(36.5, 18, [bodyX[0] + 3, 0, 66.5], [1, 0, 0]),
@@ -847,7 +847,7 @@ export const buildWaterPumpHousing = (place: Placement): BuiltPart => {
         .close()
         .sketchOnPlane('YZ')
         .extrude(-bodyX[1] - 0 + 0)
-        .translate([bodyX[1], 0, 0]) as Shape3D,
+        .translate([bodyX[1], 0, 0]),
     );
   }
   // Discharge drillings from the volute into the block inlets.
@@ -924,7 +924,7 @@ export const buildWaterPumpShaft = (place: Placement): BuiltPart => {
 };
 
 export const buildImpeller = (place: Placement): BuiltPart => {
-  let impeller = makeCylinder(12, 8, [8, 0, 0], [1, 0, 0]) as Shape3D;
+  let impeller: Shape3D = makeCylinder(12, 8, [8, 0, 0], [1, 0, 0]);
   for (let index = 0; index < 6; index++) {
     const a = (index * Math.PI) / 3;
     impeller = impeller.fuse(
@@ -947,7 +947,7 @@ export const buildImpeller = (place: Placement): BuiltPart => {
 };
 
 export const buildPumpPulley = (place: Placement): BuiltPart => {
-  let pulley = makeCylinder(45, 10, [-46, 0, 0], [1, 0, 0]) as Shape3D;
+  let pulley: Shape3D = makeCylinder(45, 10, [-46, 0, 0], [1, 0, 0]);
   pulley = pulley.cut(
     makeCylinder(42, 4, [-43, 0, 0], [1, 0, 0]).cut(
       makeCylinder(36, 6, [-44, 0, 0], [1, 0, 0]),

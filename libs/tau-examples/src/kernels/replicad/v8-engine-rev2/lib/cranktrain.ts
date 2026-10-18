@@ -52,7 +52,7 @@ export const buildCrankKey = (place: Placement): BuiltPart => {
 export const buildDamperHub = (place: Placement): BuiltPart => {
   const boreR = ckp.snoutDia / 2 - press.damperHub;
   // Local: x = 0 at the hub rear face (seats the snout shoulder at -36).
-  const profile = draw([boreR, 0])
+  const profile: Shape3D = draw([boreR, 0])
     .lineTo([40, 0])
     .lineTo([40, -22])
     .lineTo([24, -22])
@@ -61,7 +61,7 @@ export const buildDamperHub = (place: Placement): BuiltPart => {
     .close()
     .sketchOnPlane('XZ')
     .revolve([0, 0, 1])
-    .rotate(90, [0, 0, 0], [0, 1, 0]) as Shape3D;
+    .rotate(90, [0, 0, 0], [0, 1, 0]);
   // Rotate so the revolve axis (+z) lands on +x: local x = axial.
   const sealBand = makeCylinder(24, 8, [-22, 0, 0], [-1, 0, 0]);
   let hub = profile.fuse(sealBand);
@@ -140,7 +140,7 @@ export const buildDamperWasher = (place: Placement): BuiltPart => {
 /** Flywheel: rim-biased disc with spigot recess, bolt holes, gear seat. */
 export const buildFlywheel = (place: Placement): BuiltPart => {
   // Local: x = 0 at the crank-flange contact face; body extends +x.
-  const profile = draw([35.01, 0])
+  const profile: Shape3D = draw([35.01, 0])
     .lineTo([120, 0])
     .lineTo([120, 12])
     .lineTo([148, 12])
@@ -151,7 +151,7 @@ export const buildFlywheel = (place: Placement): BuiltPart => {
     .close()
     .sketchOnPlane('XZ')
     .revolve([0, 0, 1])
-    .rotate(90, [0, 0, 0], [0, 1, 0]) as Shape3D;
+    .rotate(90, [0, 0, 0], [0, 1, 0]);
   let flywheel = profile;
   // Spigot recess Ø70.04 x 9 at the front face.
   flywheel = flywheel.fuse(makeCylinder(60, 42, [0, 0, 0], [1, 0, 0]));

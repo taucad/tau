@@ -71,7 +71,7 @@ export const stalledGateway = (): typeof globalThis.fetch =>
           reject(new DOMException('The operation was aborted.', 'AbortError'));
         });
       }),
-  ) as unknown as typeof globalThis.fetch;
+  );
 
 const launchers: AgentLauncher[] = [];
 

@@ -40,7 +40,15 @@ import type { KernelIssue } from '@taucad/runtime';
 export type RpcInvocationContext = Readonly<{
   /** Cancels only the active wait and its cooperative operation. */
   signal?: AbortSignal;
+  /**
+   * Receives the operation's progress while it runs, when the caller listens; never its answer. `progress` increases
+   * with every report, and `total` is present only when the end is known.
+   */
+  onProgress?: ((report: RpcProgressReport) => void) | undefined;
 }>;
+
+/** One progress report of a running operation, as {@link RpcInvocationContext.onProgress} receives it. @public */
+export type RpcProgressReport = Readonly<{ progress: number; total?: number; message?: string }>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
  * `name` is a basename, never a path.

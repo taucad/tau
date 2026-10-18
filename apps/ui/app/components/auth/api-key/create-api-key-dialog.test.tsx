@@ -96,7 +96,7 @@ describe('CreateApiKeyDialog', () => {
 
     expect(authMocks.createApiKey).not.toHaveBeenCalled();
     expect(getNameInput()).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByRole('alert')).toHaveTextContent('API key name is required.');
+    expect(screen.getByRole('alert')).toMatchTextContent('API key name is required.');
   });
 
   it('trims a valid name before creating an API key', async () => {

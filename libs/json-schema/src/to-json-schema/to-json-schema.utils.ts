@@ -133,5 +133,5 @@ export function xor<T>(array1: readonly T[], array2: readonly T[]): T[] {
  * @returns Array of keys
  */
 export function keys<T extends Record<string, unknown>>(object: T): Array<keyof T> {
-  return Object.keys(object) as Array<keyof T>;
+  return Object.keys(object);
 }

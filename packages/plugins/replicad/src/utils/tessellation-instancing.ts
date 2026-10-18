@@ -149,11 +149,11 @@ type MatrixTransform = (matrix: readonly number[], point: Point3) => [number, nu
 const angularToleranceToRad = (tessellation: Tessellation): number => tessellation.angularTolerance * (Math.PI / 180);
 
 function asInstancingOc(openCascade: OpenCascadeInstance): ReplicadInstancingOc {
-  return openCascade as ReplicadInstancingOc;
+  return openCascade;
 }
 
 function asInstancingBindings(openCascade: OpenCascadeInstance): ReplicadInstancingBindings {
-  return openCascade as unknown as ReplicadInstancingBindings;
+  return openCascade;
 }
 
 function shapeHandle(shape: Meshable): unknown {

@@ -575,5 +575,5 @@ const assertReferences = (manifest: z.infer<typeof machineManifestSchema>): void
 export const parseMachineManifest = (candidate: unknown): MachineManifest => {
   const manifest = machineManifestSchema.parse(candidate);
   assertReferences(manifest);
-  return Object.freeze(manifest) as MachineManifest;
+  return Object.freeze(manifest);
 };

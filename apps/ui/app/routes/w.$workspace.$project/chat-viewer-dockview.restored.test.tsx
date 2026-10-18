@@ -185,7 +185,7 @@ vi.mock('#components/panes/dockview.js', () => ({
       } as unknown as DockviewApi;
     });
     useEffect(() => {
-      onReady({ api } as DockviewReadyEvent);
+      onReady({ api });
       // oxlint-disable-next-line react-hooks/exhaustive-deps -- Dockview emits ready once per mounted API.
     }, [api]);
     return createElement(

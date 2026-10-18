@@ -4,7 +4,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { createBvhCache } from '#graphics/three/utils/bvh-cache.js';
 import { bvhBuildOptions, createBvhWorkerClient } from '#graphics/three/utils/bvh-worker-client.js';
-import type { BvhWorkerPort } from '#graphics/three/utils/bvh-worker-client.js';
 import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 
 /**
@@ -138,7 +137,7 @@ describe('BVH worker', () => {
         createBvhWorkerClient(() => {
           const worker = new Worker(script);
           created.push(worker);
-          return worker as unknown as BvhWorkerPort;
+          return worker;
         }),
     });
     const { geometry } = mesh;

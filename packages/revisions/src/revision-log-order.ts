@@ -229,8 +229,7 @@ const ancestorsOf = (start: RevisionId, parents: ReadonlyMap<string, readonly Re
  * @returns Both heads, in the one order every merge-base question uses.
  * @internal
  */
-export const mergeBaseHeads = (left: RevisionId, right: RevisionId): readonly RevisionId[] =>
-  [left, right].toSorted() as readonly RevisionId[];
+export const mergeBaseHeads = (left: RevisionId, right: RevisionId): readonly RevisionId[] => [left, right].toSorted();
 
 export const mergeBaseOf = (
   entries: readonly RevisionAncestryNode[],

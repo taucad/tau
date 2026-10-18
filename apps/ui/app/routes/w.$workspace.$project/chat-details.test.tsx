@@ -114,7 +114,7 @@ describe('DetailsPanelBody', () => {
     expect(screen.getByRole('region', { name: 'Chat usage' })).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('Desk lamp');
     expect(screen.getByLabelText('Description')).toHaveValue('A compact task light');
-    expect(screen.getByRole('button', { name: 'Select Main File' })).toHaveTextContent('main.ts');
+    expect(screen.getByRole('button', { name: 'Select Main File' })).toMatchTextContent('main.ts');
   });
 
   it('preserves immediate updates, tag deduplication, and main-file selection', () => {

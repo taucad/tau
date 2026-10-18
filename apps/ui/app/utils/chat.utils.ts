@@ -285,6 +285,14 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           lines.push(`Resolution: ${resolution.join(', ')}`);
         }
       }
+      if (output.mechanism?.declared) {
+        const { admitted, links, joints, couplings, animations } = output.mechanism;
+        lines.push(
+          admitted
+            ? `Mechanism: ${links} links, ${joints} joints, ${couplings} couplings${animations.length > 0 ? `, animations ${animations.join(', ')}` : ''}`
+            : 'Mechanism: declared, not admitted',
+        );
+      }
       if (output.kernelIssues && output.kernelIssues.length > 0) {
         const issues = output.kernelIssues.map((issue) => `  - ${issue.message}`).join('\n');
         lines.push('Issues:', issues);

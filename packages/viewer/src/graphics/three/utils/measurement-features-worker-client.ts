@@ -295,7 +295,7 @@ export function createMeasurementFeatureWorkerClient(
       const signature = getMeshMeasurementSignature(mesh);
       const association = mesh.userData['measurementFeatures'] as TopologyAssociation | undefined;
       const existing = pending.get(mesh);
-      if (existing && existing.signature === signature && existing.association === association) {
+      if (existing?.signature === signature && existing.association === association) {
         return new Promise((resolve, reject) => {
           existing.waiters.push({ resolve, reject });
         });

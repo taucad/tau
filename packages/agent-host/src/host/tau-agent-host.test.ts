@@ -53,8 +53,7 @@ const appendSettlement = async (
       ledger: foldChatLedger(emptyChatLedger, await log.read()),
       leaderEpoch: 'epoch-settle',
       recordedAt: new Date(Date.UTC(2026, 8, 2)).toISOString(),
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stated attempt rides the body (N4), as M1 writes it.
-      rows: [{ runId, body: body as LogRowBody }],
+      rows: [{ runId, body }],
     });
   } finally {
     await log.close();
@@ -2903,15 +2902,13 @@ describe('the host run ledger', () => {
   } as const;
 
   /** One seeded body under the envelope the fold reads it through. */
-  const recorded = (event: SeededLogEvent, sequence: number): AgentLogEvent =>
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one envelope over a closed union of seeded bodies.
-    ({
-      ...event,
-      version: 1,
-      leaderEpoch: 'epoch-fold',
-      sequence,
-      recordedAt: '2026-09-26T00:00:00.000Z',
-    }) as AgentLogEvent;
+  const recorded = (event: SeededLogEvent, sequence: number): AgentLogEvent => ({
+    ...event,
+    version: 1,
+    leaderEpoch: 'epoch-fold',
+    sequence,
+    recordedAt: '2026-09-26T00:00:00.000Z',
+  });
 
   it('should fold one log into the chat run and every run append state', () => {
     const seeded: readonly SeededLogEvent[] = [

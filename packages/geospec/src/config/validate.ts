@@ -16,7 +16,7 @@ const object = (value: unknown, label: string): Record<string, unknown> => {
 const jsonObject = (value: unknown, label: string): Record<string, JSONValue> => {
   const result = object(value, label);
   assertGeoSpecJsonValue(result);
-  return result as Record<string, JSONValue>;
+  return result;
 };
 
 const descriptor = (value: unknown): GeoSpecTauProjectDescriptor => {

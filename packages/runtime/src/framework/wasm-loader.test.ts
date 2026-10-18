@@ -163,13 +163,12 @@ describe('compileWasmStreaming', () => {
     vi.spyOn(WebAssembly, 'compileStreaming').mockResolvedValue(mockModule);
 
     const endSpy = vi.fn();
-    const tracer = {
+    const tracer: RuntimeSpanTracer = {
       startSpan: vi.fn().mockReturnValue({ end: endSpy }),
     };
 
     try {
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tracer mock only implements startSpan
-      await compileWasmStreaming('https://example.com/traced.wasm', tracer as unknown as RuntimeSpanTracer);
+      await compileWasmStreaming('https://example.com/traced.wasm', tracer);
       expect(tracer.startSpan).toHaveBeenCalledWith('wasm.compile', { url: 'https://example.com/traced.wasm' });
       expect(endSpy).toHaveBeenCalled();
     } finally {

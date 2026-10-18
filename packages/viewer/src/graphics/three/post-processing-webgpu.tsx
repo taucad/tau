@@ -186,7 +186,7 @@ const createPipelineResources = ({
     const aoDepth = sample((uv) =>
       gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
     );
-    aoNode = ao(aoDepth, scenePassNormal, aoCamera.camera as Camera);
+    aoNode = ao(aoDepth, scenePassNormal, aoCamera.camera);
     aoNode.resolutionScale = 0.5;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.

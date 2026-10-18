@@ -44,7 +44,7 @@ describe('GeoSpecModelLoadError', () => {
 
   it('should keep string details verbatim', () => {
     const error = new GeoSpecModelLoadError([
-      { code: 'A', severity: 'error', message: 'unclonable', details: 'reason' as unknown as { fn: () => void } },
+      { code: 'A', severity: 'error', message: 'unclonable', details: 'reason' },
     ]);
     const cloned = new GeoSpecModelLoadError([
       { code: 'A', severity: 'error', message: 'unclonable', details: { fn: () => undefined, self: undefined } },

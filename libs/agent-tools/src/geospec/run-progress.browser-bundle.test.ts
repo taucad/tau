@@ -28,7 +28,7 @@ describe('GeoSpec browser progress contract', () => {
         write: false,
         minify: false,
         assetsInlineLimit: 0,
-        rollupOptions: { input: entry, preserveEntrySignatures: 'strict' },
+        rolldownOptions: { input: entry, preserveEntrySignatures: 'strict' },
       },
     });
     if (!('output' in result)) {

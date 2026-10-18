@@ -100,7 +100,7 @@ describe('local host admission', () => {
       authority.issueTrustedSession({
         actor: actors[0],
         ...scope,
-        grants: [{ route: 'jobs', operation: 'machines.snapshot' as HostAdmissionOperation }],
+        grants: [{ route: 'jobs', operation: 'machines.snapshot' }],
       }),
     ).toThrow('INVALID_HOST_GRANT');
   });

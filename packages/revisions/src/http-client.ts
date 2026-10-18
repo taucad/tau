@@ -248,7 +248,7 @@ export const createRevisionHttpClient = (options: RevisionHttpClientOptions = {}
         options.authorization?.(request.url),
         options.proxyAuthorization?.(request.url),
       ]);
-      const headers = new Headers(request.headers as Record<string, string> | undefined);
+      const headers = new Headers(request.headers);
       if (authorization !== undefined) {
         /* A header, never `?token=`: a URL is logged by every proxy and every
          * server between here and the remote (I8). */

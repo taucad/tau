@@ -287,7 +287,7 @@ describe('KinematicsPanelBody', () => {
 
     expect(screen.getByTestId('kinematics-pane')).toBeInTheDocument();
     expect(field('Sun')).toBeInTheDocument();
-    expect(statusRegion()).toHaveTextContent('Ready');
+    expect(statusRegion()).toMatchTextContent('Ready');
   });
 
   it('should open the groups around a follower the part menu reveals', async () => {
@@ -306,7 +306,7 @@ describe('KinematicsPanelBody', () => {
       renderPane({ withMechanism: false, isBuilding: true });
 
       expect(statusRegion()).toHaveAttribute('aria-busy', 'true');
-      expect(statusRegion()).toHaveTextContent('Building the model');
+      expect(statusRegion()).toMatchTextContent('Building the model');
       expect(screen.queryByText('This model declares no mechanism')).not.toBeInTheDocument();
     });
 
@@ -330,9 +330,9 @@ describe('KinematicsPanelBody', () => {
         ],
       });
 
-      expect(alertRegion()).toHaveTextContent('The mechanism could not be loaded');
-      expect(alertRegion()).toHaveTextContent(message);
-      expect(alertRegion()).not.toHaveTextContent('An unrelated warning.');
+      expect(alertRegion()).toMatchTextContent('The mechanism could not be loaded');
+      expect(alertRegion()).toMatchTextContent(message);
+      expect(alertRegion()).not.toMatchTextContent('An unrelated warning.');
       expect(screen.queryByText('This model declares no mechanism')).not.toBeInTheDocument();
     });
   });

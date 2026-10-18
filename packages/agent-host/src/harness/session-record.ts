@@ -682,7 +682,7 @@ export function providerMessageToPi(
       metadata.provider === 'anthropic' && metadata.api === 'openai-completions' && model.provider === 'anthropic'
         ? model.api
         : typeof metadata.api === 'string'
-          ? (metadata.api as Api)
+          ? metadata.api
           : model.api;
     const hydrated: AssistantMessage = {
       role: 'assistant',

@@ -13,7 +13,6 @@ import { promisify } from 'node:util';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
 import { Engine } from 'geospec-engine/node';
 import { createExampleRuntimeClient } from '@taucad/tau-examples/runtime';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, it, expect } from 'vitest';
 
@@ -124,7 +123,7 @@ describe('geospec example suites (regression backbone)', () => {
         nativeAssertions: { engine },
         model: {
           projectPath,
-          runtime: async () => createExampleRuntimeClient(projectPath) as unknown as GeoSpecRuntimeClient,
+          runtime: async () => createExampleRuntimeClient(projectPath),
         },
       });
       try {

@@ -451,7 +451,7 @@ function ObjectFieldTemplate(
         }
 
         // Check if this direct child property matches
-        return isSchemaMatchingSearch(childSchema as RJSFSchema, formContext.searchTerm, propertyName);
+        return isSchemaMatchingSearch(childSchema, formContext.searchTerm, propertyName);
       }).length
     : totalPropertiesCount;
 

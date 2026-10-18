@@ -68,7 +68,7 @@ export const createAdapterConnection = (
     const ask = async <M extends AcpVendorMethod>(method: M, params: unknown): Promise<AcpVendorResponses[M]> => {
       const id = `vendor-${String(requests++)}`;
       const { promise, resolve, reject } = Promise.withResolvers<AcpVendorResponses[M]>();
-      waiting.set(id, { resolve: resolve as (result: unknown) => void, reject });
+      waiting.set(id, { resolve, reject });
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the SDK validated `params` against `method`'s schema.
       send({ type: 'vendorRequest', id, request: { method, params } as unknown as AcpVendorRequest });
       return promise;

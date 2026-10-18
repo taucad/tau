@@ -25,7 +25,7 @@ describe('ChatEditorMarkdownViewer', () => {
   it('should render preview by default without inline tabs', () => {
     render(<ChatEditorMarkdownViewer paneId='pane-doc' filePath='README.md' {...baseProps} />);
 
-    expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# hello');
+    expect(screen.getByTestId('markdown-preview')).toMatchTextContent('# hello');
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
   });
@@ -48,7 +48,7 @@ describe('ChatEditorMarkdownViewer', () => {
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading README.md');
+    expect(screen.getByRole('status')).toMatchTextContent('Loading README.md');
     expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
   });
 });

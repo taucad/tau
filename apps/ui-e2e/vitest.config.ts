@@ -82,11 +82,11 @@ export default defineConfig({
         a4: missingLiveGithubVariables(['second']),
       },
     },
+    // Artifact requirement: browser-side evidence writes and child-context trace attachments need Vitest write access.
+    api: { allowWrite: true },
     browser: {
       enabled: true,
       headless: true,
-      // Artifact requirement: browser-side evidence writes and child-context trace attachments need Vitest write access.
-      api: { allowWrite: true },
       provider: playwright({ actionTimeout: 10_000 }),
       commands: uiBrowserCommands,
       screenshotFailures: false,

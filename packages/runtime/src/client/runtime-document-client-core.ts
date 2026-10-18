@@ -573,7 +573,8 @@ export function createRuntimeClient(options: {
           : undefined;
       try {
         // The public route projection validates concrete options; wire admission validates the object again.
-        const call = channel.call('transcode', request as RuntimeTranscodeArgs, controller.signal);
+        const wireRequest: RuntimeTranscodeArgs = request;
+        const call = channel.call('transcode', wireRequest, controller.signal);
         void clearRecoveryWhenSettled(call, operationId);
         const wire = await waitWithAbort(Promise.race([call, timed.promise, terminated.promise]), signal);
         workerReplied = true;

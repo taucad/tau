@@ -112,7 +112,7 @@ export function normalizeJscadShapeForRenderMesh(
 function getRenderablePolygons(shape: unknown, shapeIndex: number, modeling: JscadModeling): JscadPolygon[] {
   const normalizedShape = normalizeJscadShapeForRenderMesh(shape, shapeIndex, modeling);
   try {
-    return modeling.geometries.geom3.toPolygons(normalizedShape) as JscadPolygon[];
+    return modeling.geometries.geom3.toPolygons(normalizedShape);
   } catch (error) {
     throw createShapeConversionError(shape, shapeIndex, error);
   }

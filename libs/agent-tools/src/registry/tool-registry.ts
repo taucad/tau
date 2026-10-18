@@ -23,6 +23,7 @@ import type {
   RpcImageClient,
   RpcRevisionsClient,
   RpcParameterClient,
+  RpcProgressReport,
   RpcRuntimeClient,
   RpcWorkbenchClient,
   RpcSkillResolver,
@@ -423,7 +424,13 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         ...(options.acquisition === undefined ? {} : { acquisition: options.acquisition }),
         workbench,
       });
+      /* Progress keeps rising across the one stale-evaluation retry: the retry's reports start above the last one. */
+      let progressFloor = 0;
+      let lastProgress: number | undefined;
       const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {
+        if (lastProgress !== undefined) {
+          progressFloor = lastProgress + 1;
+        }
         const aborted = Promise.withResolvers<never>();
         /* Tracked so a rejection that lands after the race is already won is
          * handled rather than surfacing as an unhandled rejection. */
@@ -451,9 +458,20 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
                   toolCallId: invocation.toolCallId,
                 }
               : parsed.data;
+          const { onUpdate } = invocation;
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
           const dispatch = dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, {
             signal: invocation.signal,
+            /* A progress report is a partial result shaped `{ progress, total, message }`, as the MCP projection reads it;
+             * a retried dispatch reports above the last report of the one before it. */
+            ...(onUpdate === undefined
+              ? {}
+              : {
+                  onProgress: (report: RpcProgressReport) => {
+                    lastProgress = progressFloor + report.progress;
+                    onUpdate({ content: { ...report, progress: lastProgress }, isError: false });
+                  },
+                }),
           });
           return preserveMutatingOutcome ? await dispatch : await Promise.race([dispatch, aborted.promise]);
         } finally {

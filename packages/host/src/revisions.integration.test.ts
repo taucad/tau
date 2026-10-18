@@ -1782,8 +1782,8 @@ describe('a branch refusal over the host channel', () => {
             subject: 'branch',
             operation: 'create',
             branch: 'main',
-            code: expect.any(String) as unknown as string,
-            message: expect.any(String) as unknown as string,
+            code: expect.any(String) as unknown,
+            message: expect.any(String) as unknown,
           },
         });
     } finally {
@@ -1870,8 +1870,8 @@ describe('a restore refusal over the host channel', () => {
           value: {
             type: 'error',
             subject: 'restore',
-            code: expect.any(String) as unknown as string,
-            message: expect.any(String) as unknown as string,
+            code: expect.any(String) as unknown,
+            message: expect.any(String) as unknown,
           },
         });
     } finally {

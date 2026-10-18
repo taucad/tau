@@ -48,7 +48,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should annotate OTEL span with error status for 500 errors', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
 
     const host = createMockArgumentsHost();
     const exception = new Error('internal failure');
@@ -63,7 +63,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should annotate OTEL span for HttpException with 5xx status', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
 
     const host = createMockArgumentsHost();
     const exception = new HttpException('Service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
@@ -74,7 +74,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should NOT annotate OTEL span for 4xx errors', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
 
     const host = createMockArgumentsHost();
     const exception = new HttpException('Not Found', HttpStatus.NOT_FOUND);
@@ -86,7 +86,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should NOT annotate OTEL span for 400 Bad Request', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
 
     const host = createMockArgumentsHost();
     const exception = new HttpException('Bad request', HttpStatus.BAD_REQUEST);
@@ -106,7 +106,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should not reply again once the response has already been sent', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
     const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {
       // Test-local logger sink.
     });
@@ -207,7 +207,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
   });
 
   it('should not call recordException for non-Error 5xx exceptions', () => {
-    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    getSpanSpy.mockReturnValue(mockSpan);
 
     const host = createMockArgumentsHost();
     const exception = 'string error';

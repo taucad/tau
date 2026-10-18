@@ -369,7 +369,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
     createdAt: new Date(0).toISOString(),
   };
   const data: PublicationRouteLoaderData = {
-    publication: publication as unknown as Record<string, unknown>,
+    publication,
     viewerRole: 'public',
     urls: { view: '', share: '', og: '', thumbnail: '' },
     manifest: {

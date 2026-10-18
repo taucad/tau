@@ -126,7 +126,7 @@ export const createGeoSpecNativeNodePoolRunner = (options: GeoSpecNativeNodePool
           {
             workerData: { projectPath: options.projectPath, grant: grants[index++] },
           },
-        ) as NodeWorkerLike,
+        ),
       ),
     initializeWorker: (worker) => {
       worker.postMessage({ type: 'initialize' });

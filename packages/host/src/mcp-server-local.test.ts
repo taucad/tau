@@ -53,6 +53,7 @@ const serve = async (
     readonly workspaceRoot?: string;
     readonly pinned?: boolean;
     readonly listed?: readonly HostToolDefinition[];
+    readonly runtime?: TauMcpServerOptions['runtime'];
   },
 ) => {
   const invocations: HostToolInvocation[] = [];
@@ -69,6 +70,7 @@ const serve = async (
     pinned: options?.pinned ?? false,
     registry,
     checkouts,
+    runtime: options?.runtime,
   });
   const dispatch = served.options?.dispatch;
   if (dispatch === undefined) {
@@ -114,6 +116,19 @@ describe('serveLocalHostMcp', () => {
     const { local } = await serve(ready, { listed: [] });
     try {
       expect(served.options?.cadTools).toEqual([toolName.evaluateModel, toolName.screenshot, toolName.exportModel]);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it('should hand the server the CLI and launch it names in initialize', async () => {
+    const runtime: TauMcpServerOptions['runtime'] = {
+      version: '0.1.0-beta.7',
+      launch: { source: 'npx', plugin: '0.1.0-beta.7', node: '24.20.0', skipped: [] },
+    };
+    const { local } = await serve(ready, { runtime });
+    try {
+      expect(served.options?.runtime).toEqual(runtime);
     } finally {
       await local.close();
     }
@@ -237,6 +252,48 @@ describe('serveLocalHostMcp', () => {
       expect(JSON.parse(await readFile(absolutePath, 'utf8'))).toEqual(verdict);
     } finally {
       await local.close();
+    }
+  });
+
+  it('should name the engine and the runtime on every GeoSpec report, shortened or not (VER-3)', async () => {
+    const engine = {
+      name: 'geospec-engine',
+      version: '0.2.0',
+      protocol: 3,
+      numericProfile: 'geospec-demand-v6',
+      qualification: 'experimental',
+    };
+    const runtime: TauMcpServerOptions['runtime'] = {
+      version: '0.1.0-beta.7',
+      launch: {
+        source: 'installed',
+        path: '/opt/homebrew/bin/tau',
+        plugin: '0.1.0-beta.7',
+        node: '24.20.0',
+        skipped: [],
+      },
+    };
+    for (const reason of ['Too small', 'x'.repeat(140_000)]) {
+      const verdict = {
+        failures: [
+          { id: 'main.geospec.ts:size', requirement: 'Size', reason, suggestion: 'Fix', targetFile: 'main.ts' },
+        ],
+        passes: [],
+        passed: 0,
+        total: 1,
+        engine,
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one server per report size.
+      const { dispatch, local } = await serve({ content: { success: true, ...verdict }, isError: false }, { runtime });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        const result = await dispatch({ rpcName: rpcName.runGeoSpecTests, args: {} }, { toolCallId: 'tests' });
+
+        expect(result).toMatchObject({ success: true, engine, runtime });
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await local.close();
+      }
     }
   });
 

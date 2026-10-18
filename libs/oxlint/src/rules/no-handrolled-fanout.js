@@ -1,7 +1,7 @@
 /**
  * @typedef {import('eslint').Rule.RuleModule} RuleModule
  * @typedef {import('eslint').Rule.RuleContext} RuleContext
- * @typedef {import('estree').PropertyDefinition} PropertyDefinition
+ * @typedef {import('@typescript-eslint/types').TSESTree.PropertyDefinition} PropertyDefinition
  * @typedef {import('@typescript-eslint/types').TSESTree.VariableDeclarator} VariableDeclarator
  */
 

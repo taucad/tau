@@ -82,7 +82,7 @@ const sseResponse = (chunks: readonly string[]): Response => {
 
 /** One gateway turn that answers with plain assistant text and stops. */
 const scriptedGateway = (): typeof globalThis.fetch =>
-  vi.fn(async () => sseResponse(authoritativeGatewayWireFixtures.browserTurn)) as unknown as typeof globalThis.fetch;
+  vi.fn(async () => sseResponse(authoritativeGatewayWireFixtures.browserTurn));
 
 /** A gateway that never answers, so the run stays live for the whole case. */
 const stalledGateway = (signalHolder: { abort?: () => void }): typeof globalThis.fetch =>
@@ -99,7 +99,7 @@ const stalledGateway = (signalHolder: { abort?: () => void }): typeof globalThis
         }
         init?.signal?.addEventListener('abort', aborted);
       }),
-  ) as unknown as typeof globalThis.fetch;
+  );
 
 const roots: string[] = [];
 let launcher: AgentLauncher | undefined;
@@ -1611,7 +1611,7 @@ describe('createAgentLauncher', () => {
       fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
         bodies.push(typeof init?.body === 'string' ? init.body : '');
         return sseResponse(authoritativeGatewayWireFixtures.browserTurn);
-      }) as unknown as typeof globalThis.fetch,
+      }),
     });
     launcher = host;
 

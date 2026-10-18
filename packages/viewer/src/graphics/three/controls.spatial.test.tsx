@@ -10,12 +10,16 @@ const mocks = vi.hoisted(() => {
     originMeters: [10, 20, 30],
     metersPerRenderUnit: 0.001,
   };
+  const mutableState: { handlesPicker: unknown; cubePicker: unknown } = {
+    handlesPicker: undefined,
+    cubePicker: undefined,
+  };
   return {
     context: { isSectionViewActive: true, isMeasureActive: false, measurements: [] },
     renderFrame,
     cameraControlProperties: undefined as Record<string, unknown> | undefined,
-    handlesPicker: undefined as unknown,
-    cubePicker: undefined as unknown,
+    handlesPicker: mutableState.handlesPicker,
+    cubePicker: mutableState.cubePicker,
   };
 });
 

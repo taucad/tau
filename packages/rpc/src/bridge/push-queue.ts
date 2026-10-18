@@ -31,7 +31,7 @@ export const createPushQueue = <T>(): PushQueue<T> => {
     }
     closed = true;
     for (const waiter of waiters.splice(0)) {
-      waiter({ value: undefined as unknown as T, done: true });
+      waiter({ value: undefined, done: true });
     }
   };
 
@@ -44,7 +44,7 @@ export const createPushQueue = <T>(): PushQueue<T> => {
             return { value, done: false };
           }
           if (closed) {
-            return { value: undefined as unknown as T, done: true };
+            return { value: undefined, done: true };
           }
           return new Promise<IteratorResult<T>>((resolve) => {
             waiters.push(resolve);
@@ -52,7 +52,7 @@ export const createPushQueue = <T>(): PushQueue<T> => {
         },
         return: async (): Promise<IteratorResult<T>> => {
           close();
-          return { value: undefined as unknown as T, done: true };
+          return { value: undefined, done: true };
         },
       };
     },

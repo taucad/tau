@@ -1358,9 +1358,7 @@ it('should drop a queued reconcile request when the page is hidden and queue it 
   };
   try {
     /* The silent holder is past its heartbeat bound, so the chat queues for its lock. */
-    void client.execute({ type: 'attach', commandId: 'req_hidden', payload: { chatId } } as Parameters<
-      AgentChannelClient['execute']
-    >[0]);
+    void client.execute({ type: 'attach', commandId: 'req_hidden', payload: { chatId } });
     await vi.waitFor(
       async () => {
         const { pending } = await chatLocks(providerBasePath);

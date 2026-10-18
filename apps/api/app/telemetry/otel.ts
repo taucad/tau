@@ -72,10 +72,12 @@ const sdk = new NodeSDK({
 
   // Every series carries `service_name` and, on Fly, `tau_process`: Fly's managed Prometheus adds neither,
   // and dashboards and alerts select and group by both (OBS-13).
-  metricReader: new PrometheusExporter({
-    port: metricsPort,
-    withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
-  }),
+  metricReaders: [
+    new PrometheusExporter({
+      port: metricsPort,
+      withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
+    }),
+  ],
 
   logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 

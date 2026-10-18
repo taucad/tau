@@ -6,7 +6,6 @@ import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionMetadataSchema, revisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
 import { refPatternIsHostLocal } from '#remotes.js';
-import type { FileMode } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import { runGitCommand } from '#git-command.js';
@@ -599,7 +598,7 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
         }
         const objectId = await asObjectId(header[2]);
         const path = decodePath(new Uint8Array(record.subarray(tab + 1)));
-        return [path, new Uint8Array(await readObject(objectId, 'blob')), header[0] as FileMode];
+        return [path, new Uint8Array(await readObject(objectId, 'blob')), header[0]];
       }),
     );
     return new ImmutableRevisionTree(entries);

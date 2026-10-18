@@ -43,7 +43,7 @@ describe('repository write approval and first push', () => {
   it('should require approval and then a separate push gesture', async () => {
     const push = show();
     await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Nothing is pushed now');
+    expect(screen.getByRole('alertdialog')).toMatchTextContent('Nothing is pushed now');
     expect(push).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Enable repository writes' }));
     await waitFor(() => {
@@ -52,7 +52,7 @@ describe('repository write approval and first push', () => {
     expect(fixture.setWrite).toHaveBeenCalledWith('connection', { repositoryId: 9, enabled: true });
     expect(push).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Push to GitHub' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Push completed');
+    expect(await screen.findByRole('status')).toMatchTextContent('Push completed');
     expect(push).toHaveBeenCalledOnce();
   });
   it('should cancel enablement without changing permissions or pushing', async () => {
@@ -85,7 +85,7 @@ describe('repository write approval and first push', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
     await userEvent.click(screen.getByRole('button', { name: 'Enable repository writes' }));
     const dialog = screen.getByRole('alertdialog');
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Repository access changed');
+    expect(await within(dialog).findByRole('alert')).toMatchTextContent('Repository access changed');
     expect(push).not.toHaveBeenCalled();
   });
   it('should not offer a push while the revision scheduler is fetching', async () => {

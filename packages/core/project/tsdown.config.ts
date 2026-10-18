@@ -17,7 +17,9 @@ const baseConfig: UserConfig = {
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-  external: ['zod', 'jose', 'jszip'],
+  deps: {
+    neverBundle: ['zod', 'jose', 'jszip'],
+  },
 };
 
 const packageConfig: UserConfig = {

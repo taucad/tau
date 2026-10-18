@@ -317,7 +317,7 @@ const rows: readonly AdapterRow[] = [
   {
     name: 'MemoryProvider (reference)',
     covers: [],
-    create: async () => new MemoryProvider() as unknown as RuntimeFileSystemBase,
+    create: async (): Promise<RuntimeFileSystemBase> => new MemoryProvider(),
     diverges: {
       containment:
         'The `packages/filesystem` oracle is not a runtime adapter: it has no rooted-path validation of its own. Runtime adapters add that through `assertRootedPath`.',

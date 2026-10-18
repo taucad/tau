@@ -197,7 +197,7 @@ export const readPluginSbom = async (plugin: PreparationPlugin): Promise<Sbom | 
   }
   try {
     const document = await readJson(join(plugin.directory, pluginSbomName));
-    return isRecord(document) ? (document as Sbom) : undefined;
+    return isRecord(document) ? document : undefined;
   } catch {
     return undefined;
   }

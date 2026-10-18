@@ -1,6 +1,7 @@
 import type { LinksFunction, MetaFunction } from 'react-router';
 import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from 'react-router';
 import { RootProvider } from 'fumadocs-ui/provider/react-router';
+import { lazy } from 'react';
 import type { ReactNode } from 'react';
 import { getStaticSearchIndexUrl } from '#lib/fumadocs/static-search.server.js';
 // oxlint-disable-next-line import-x/no-unassigned-import -- Vite extracts the global stylesheet into the static client build.
@@ -59,12 +60,14 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
   );
 }
 
+const StaticSearchDialog = lazy(async () => import('#components/static-search-dialog.js'));
+
 export default function App(): React.JSX.Element {
   const { searchIndexUrl } = useLoaderData<typeof loader>();
 
   return (
     <RootProvider
-      search={{ options: { type: 'static', api: searchIndexUrl } }}
+      search={{ SearchDialog: StaticSearchDialog, options: { api: searchIndexUrl } }}
       theme={{
         attribute: 'class',
         defaultTheme: 'system',

@@ -64,7 +64,7 @@ describe('queued message adornment', () => {
     });
     const { rerender } = render(<ChatMessageQueueView {...props} />);
     await user.click(screen.getByRole('button', { name: 'Delete queued message 1' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Storage unavailable');
     rerender(<ChatMessageQueueView {...props} items={[]} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
@@ -78,7 +78,7 @@ describe('queued message adornment', () => {
       steer: { type: 'cancel', commandId: 'same_cancel', payload: { chatId: 'chat', runId: 'original' } },
     }));
     render(<ChatMessageQueueView {...props} items={items} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Send failed');
+    expect(screen.getByRole('status')).toMatchTextContent('Send failed');
     expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(props.onRetry).toHaveBeenCalledOnce();
@@ -91,10 +91,10 @@ describe('queued message adornment', () => {
     render(<ChatMessageQueueView {...props} />);
     await user.click(screen.getByRole('button', { name: 'Send now' }));
     expect(screen.getByText('Keep the scope large')).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('Sending');
+    expect(screen.getByRole('status')).toMatchTextContent('Sending');
     expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
     operation.reject(new Error('Disk full. Message is still saved.'));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Disk full');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Disk full');
     expect(screen.getByText('Keep the scope large')).toBeVisible();
   });
   it('should edit inline without replacing the composer or dropping the queued item', async () => {
@@ -141,7 +141,7 @@ describe('queued message adornment', () => {
       } else {
         await user.click(screen.getByRole('button', { name: 'Delete queued message 1' }));
       }
-      expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable');
+      expect(await screen.findByRole('alert')).toMatchTextContent('Storage unavailable');
       try {
         await user.click(screen.getByRole('button', { name: 'Retry' }));
         expect(onEdit.mock.calls).toEqual([
@@ -149,7 +149,7 @@ describe('queued message adornment', () => {
           ['one', action === 'edit' ? 'Keep this exact edit' : undefined],
         ]);
         expect(props.onRetry).not.toHaveBeenCalled();
-        expect(screen.getByRole('status')).toHaveTextContent(action === 'edit' ? 'Saving' : 'Removing');
+        expect(screen.getByRole('status')).toMatchTextContent(action === 'edit' ? 'Saving' : 'Removing');
         expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
       } finally {
         retried.resolve();

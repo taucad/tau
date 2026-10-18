@@ -523,7 +523,7 @@ export const createChatRunActor = (
     const { actor } = reference;
     /* No stopped check on a plain handle: a report after the incarnation closed is dropped here (RV4). */
     if (actor?.getSnapshot().status === 'active') {
-      actor.send(event as ChatRunEvent);
+      actor.send(event);
     }
   };
   const machine = chatRunMachine.provide({

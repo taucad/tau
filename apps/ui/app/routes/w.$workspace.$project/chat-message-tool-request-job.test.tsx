@@ -195,7 +195,7 @@ describe('ChatMessageToolRequestJob', () => {
       />,
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toMatchTextContent(
       'job request: No machine is bound to this workspace; the person binds one in the Print pane.',
     );
   });

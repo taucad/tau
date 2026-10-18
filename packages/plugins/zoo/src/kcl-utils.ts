@@ -87,9 +87,10 @@ function normalizeKclExecutionResult(raw: unknown): KclExecutionResult {
   const errorsRaw = Array.isArray(fromIssues) ? fromIssues : fromLegacyErrors;
   const allIssues = Array.isArray(errorsRaw) ? (errorsRaw as CompilationError[]) : [];
   const partitioned = partitionExecutionIssues(allIssues);
+  const variables: KclExecutionResult['variables'] = record['variables'] ?? {};
 
   return {
-    variables: (record['variables'] ?? {}) as KclExecutionResult['variables'],
+    variables,
     operations: (record['operations'] ?? { map: {} }) as OperationsByModule,
     artifactGraph: (record['artifactGraph'] ?? { map: {}, itemCount: 0 }) as ArtifactGraph,
     errors: partitioned.errors,

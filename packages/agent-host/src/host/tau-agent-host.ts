@@ -56,7 +56,6 @@ import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentLogEvent,
   JsonObject,
-  JsonValue,
   ProviderMessage,
   RunTrigger,
   TurnContextSnapshot,
@@ -1095,9 +1094,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     events: readonly AgentLogEvent[],
     runId: string,
   ): (AgentLogEvent & { readonly admission?: AdmissionRecord }) | undefined =>
-    events.find((event) => event.runId === runId && event.type === 'run.lifecycle' && event.state === 'admitted') as
-      | (AgentLogEvent & { readonly admission?: AdmissionRecord })
-      | undefined;
+    events.find((event) => event.runId === runId && event.type === 'run.lifecycle' && event.state === 'admitted');
 
   /**
    * Resolve every unresolved model attempt in the chat before a Resume prepares anything (RA-S11, EQ1): each terminal
@@ -1138,7 +1135,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           { details: { attemptId } },
         );
       }
-      rows.push(settledRowOf(attemptId, resolution) as LogRowBody);
+      rows.push(settledRowOf(attemptId, resolution));
     }
     return rows;
   };
@@ -1188,7 +1185,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             if (resolution?.status === 'terminal' || resolution?.status === 'voided') {
               repair.push({
                 runId: ledger.invocations[attemptId]!.runId,
-                body: settledRowOf(attemptId, resolution) as LogRowBody,
+                body: settledRowOf(attemptId, resolution),
               });
             }
           }
@@ -1317,7 +1314,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             agent,
             config,
             ...(state === undefined ? {} : { state }),
-          } as AdmissionRecord),
+          }),
           start: [{ type: 'message.appended', message: marked }],
           ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
         };
@@ -1556,8 +1553,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           const events = await log.read();
           const admission = admittedRowOf(events, runId)?.admission;
           const resumed = events.findLast(
-            (event) => event.runId === runId && event.type === 'run.lifecycle' && event.state === 'running',
-          ) as (AgentLogEvent & { readonly selection?: TurnModelConfig }) | undefined;
+            (event): event is Extract<AgentLogEvent, { type: 'run.lifecycle' }> =>
+              event.runId === runId && event.type === 'run.lifecycle' && event.state === 'running',
+          );
           const selection = mode === 'start' ? undefined : resumed?.selection;
           const committed = events.findLast(
             (event) => event.runId === runId && event.type === 'turn.history-projection-committed',
@@ -1586,7 +1584,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               toolRegistry: approvingTools(key, grant?.tools ?? options.toolRegistry),
               eventLog: log,
               /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
-              appendEvent: async (event) => append([event as LogRowBody]),
+              appendEvent: async (event) => append([event]),
               ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
               ...(selection === undefined ? {} : { selection }),
               clientContext,
@@ -1789,7 +1787,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         status: 'applied',
         effect: 'not-applied',
         details: {
-          ...(run === undefined ? {} : { snapshot: run as unknown as JsonValue }),
+          ...(run === undefined ? {} : { snapshot: run }),
           takeover: claim.takeover,
           endCursor: ledger.position.cursor,
         },

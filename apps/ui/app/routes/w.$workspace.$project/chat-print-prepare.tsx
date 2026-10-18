@@ -508,7 +508,7 @@ export const usePrintPrepare = ({
     }
     const projection = submissionOf(provider).parameters.input;
     return {
-      schema: submissionOf(provider).legacyProjection.inputSchema as JSONSchema7,
+      schema: submissionOf(provider).legacyProjection.inputSchema,
       defaults: projection.status === 'usable' ? { ...projection.declaration.defaults } : {},
     };
   }, [provider]);
@@ -1689,8 +1689,7 @@ function StartOptionsStage({ prepare }: { readonly prepare: PrintPrepare }): Rea
 
 type BambuSettings = NonNullable<BambuStudioMode['settings']>;
 
-const asSchema = (value: unknown): JSONSchema7 | undefined =>
-  isRecordObject(value) ? (value as JSONSchema7) : undefined;
+const asSchema = (value: unknown): JSONSchema7 | undefined => (isRecordObject(value) ? value : undefined);
 
 /**
  * Bambu Studio's settings as one level of groups, process then filament, for the shared Parameters
@@ -2100,7 +2099,7 @@ export function PrepareStages({
       if (!isBambuStudio) {
         setOptions(applyPreset(options, preset, optionsSchema?.schema));
       } else if (qualityPresets.has(preset.id)) {
-        choosePreset(preset.id as BambuQualityPreset);
+        choosePreset(preset.id);
       }
     },
     [choosePreset, isBambuStudio, options, optionsSchema, setOptions],

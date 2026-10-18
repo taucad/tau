@@ -168,7 +168,7 @@ const [redTray, blueTray] = ['#FF0000FF', '#0000FFFF'] as const;
  */
 const findMachine = async (status: string, name = 'Workshop X1C'): Promise<HTMLElement> => {
   await waitFor(() => {
-    expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent(`${name}${status}`);
+    expect(screen.getByRole('combobox', { name: 'Machine' })).toMatchTextContent(`${name}${status}`);
   });
   return screen.getByRole('combobox', { name: 'Machine' });
 };
@@ -484,7 +484,7 @@ describe('Print pane orientation', () => {
     await findMachine('Ready');
     expect(screen.queryByText('FAILED')).not.toBeInTheDocument();
     openDisclosure(/^Inspect/u);
-    expect(screen.getByText('Controller state').nextElementSibling).toHaveTextContent('FAILED');
+    expect(screen.getByText('Controller state').nextElementSibling).toMatchTextContent('FAILED');
     inspected.unmount();
 
     renderPane(createFixture({ entries: [entry({ freshness: 'stale' })] }).client);
@@ -799,7 +799,7 @@ describe('Print pane prepare and send', () => {
 
     await findMachine('Ready');
     expect(container.querySelector('[data-slot="print-panel-body"]')).toHaveClass('min-w-0', 'flex-col');
-    expect(screen.getByRole('button', { name: /^History/u })).toHaveTextContent('Nothing yet');
+    expect(screen.getByRole('button', { name: /^History/u })).toMatchTextContent('Nothing yet');
 
     const quality = screen.getByRole('combobox', { name: 'Quality' });
     await user.click(quality);
@@ -811,7 +811,7 @@ describe('Print pane prepare and send', () => {
     await user.keyboard('{Escape}');
     await chooseOption(user, quality, 'Fine');
     await waitFor(() => {
-      expect(quality).toHaveTextContent('Fine0.12 mm');
+      expect(quality).toMatchTextContent('Fine0.12 mm');
     });
     // The choice is the project's: saved as the only changed key beside the printer model. The combobox shows the
     // store's draft at once and the file write lands after it, so wait for the file too.
@@ -820,7 +820,7 @@ describe('Print pane prepare and send', () => {
     });
 
     const material = screen.getByRole('group', { name: 'Material' });
-    expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
+    expect(within(material).getByRole('combobox', { name: 'Material' })).toMatchTextContent('A1');
     await user.click(within(material).getByRole('combobox', { name: 'Material' }));
     expect(screen.getByRole('option', { name: /A2/u })).toHaveAttribute('data-disabled');
     await user.keyboard('{Escape}');
@@ -843,14 +843,14 @@ describe('Print pane prepare and send', () => {
     // The numbers people read stay in view; the rest folds into Details, summarised by the part's size.
     const result = await screen.findByRole('group', { name: 'Slice result' });
     expect(within(result).getByText('125 layers · about 42 min · 3.2 m')).toBeInTheDocument();
-    expect(within(result).getByRole('button', { name: /^Details/u })).toHaveTextContent('50 × 50 × 25 mm');
+    expect(within(result).getByRole('button', { name: /^Details/u })).toMatchTextContent('50 × 50 × 25 mm');
     await sliceDetails();
     // The part alone decides the plate fit; every move, start routine included, is shown beside it.
-    expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('50 × 50 × 25 mm');
-    expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
+    expect(within(result).getByText('Part').nextElementSibling).toMatchTextContent('50 × 50 × 25 mm');
+    expect(within(result).getByText('Toolpath').nextElementSibling).toMatchTextContent(
       "236 × 153 × 35 mm · every nozzle move, including the printer's start routine",
     );
-    expect(within(result).getByText('Plate').nextElementSibling).toHaveTextContent('The part fits the plate');
+    expect(within(result).getByText('Plate').nextElementSibling).toMatchTextContent('The part fits the plate');
 
     await user.click(prepareActions().getByRole('button', { name: 'Preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({ type: 'openFile', path: slicePath, source: 'user' });
@@ -950,10 +950,10 @@ describe('Print pane prepare and send', () => {
     // Playwright reads a wrapping label's whole text, options included, so only an explicit name keeps
     // `getByLabel('Plate', { exact: true })` finding it; jsdom and Chromium already name it "Plate" either way.
     expect(plate).toHaveAttribute('aria-label', 'Plate');
-    expect(plate).toHaveTextContent('Textured PEI plate');
+    expect(plate).toMatchTextContent('Textured PEI plate');
     await chooseOption(user, plate, 'Cool plate');
     await waitFor(() => {
-      expect(plate).toHaveTextContent('Cool plate');
+      expect(plate).toMatchTextContent('Cool plate');
     });
     await expectPreferences({ plate: 'cool' });
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
@@ -979,7 +979,7 @@ describe('Print pane prepare and send', () => {
     const options = await screen.findByLabelText('Slicer options');
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
     await waitFor(() => {
-      expect(within(options).getByTestId('parameters')).toHaveTextContent('{"layerHeight":0.16}');
+      expect(within(options).getByTestId('parameters')).toMatchTextContent('{"layerHeight":0.16}');
     });
     await expectPreferences({ options: { layerHeight: 0.16 } });
     expect(screen.getByText(/Options changed since this slice/u)).toBeInTheDocument();
@@ -991,7 +991,7 @@ describe('Print pane prepare and send', () => {
       fixture.observe(entry({ snapshot: { ...entry().snapshot, observedAt: later } }));
     });
     await screen.findByText(/Observed/u);
-    expect(within(screen.getByLabelText('Slicer options')).getByTestId('parameters')).toHaveTextContent(
+    expect(within(screen.getByLabelText('Slicer options')).getByTestId('parameters')).toMatchTextContent(
       '{"layerHeight":0.16}',
     );
     expect(screen.getByText(/Options changed since this slice/u)).toBeInTheDocument();
@@ -1081,7 +1081,7 @@ describe('Print pane prepare and send', () => {
     await findMachine('Ready');
     // Start options fold, summarised by what is on.
     const startOptions = screen.getByRole('button', { name: /^Start options/u });
-    expect(startOptions).toHaveTextContent(/^Start options\s*Levelling, flow$/u);
+    expect(startOptions).toMatchTextContent(/^Start options\s*Levelling, flow$/u);
     openDisclosure(/^Start options/u);
     await openAdvancedSettings(user);
     const mapping = await screen.findByLabelText('Machine mapping');
@@ -1116,7 +1116,7 @@ describe('Print pane prepare and send', () => {
     await user.click(timelapse);
 
     expect(timelapse).toBeChecked();
-    expect(screen.getByRole('button', { name: /^Start options/u })).toHaveTextContent(/timelapse/u);
+    expect(screen.getByRole('button', { name: /^Start options/u })).toMatchTextContent(/timelapse/u);
   });
 
   it('leaves a start option the provider does not declare as on/off in Advanced, with its own control', async () => {
@@ -1173,7 +1173,7 @@ describe('Print pane prepare and send', () => {
     const bed = screen.getByRole('switch', { name: 'Toggle for Bed levelling' });
     await user.click(bed);
     expect(bed).not.toBeChecked();
-    expect(screen.getByRole('button', { name: /^Start options/u })).toHaveTextContent(/^Start options\s*Flow$/u);
+    expect(screen.getByRole('button', { name: /^Start options/u })).toMatchTextContent(/^Start options\s*Flow$/u);
     // A stale slice is never offered for sending: Slice again takes Send's place.
     expect(prepareActions().queryByRole('button', { name: 'Review print' })).not.toBeInTheDocument();
     await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
@@ -1193,7 +1193,7 @@ describe('Print pane prepare and send', () => {
     const user = userEvent.setup();
     renderPane(fixture.client);
     await findMachine('Ready');
-    expect(screen.getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
+    expect(screen.getByRole('combobox', { name: 'Material' })).toMatchTextContent('A1');
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await reviewPrint();
     const checks = fixture.checkJob.mock.calls.length;
@@ -1280,7 +1280,7 @@ describe('Print pane external spool', () => {
     renderPane(createFixture().client);
 
     const material = await screen.findByRole('group', { name: 'Material' });
-    expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
+    expect(within(material).getByRole('combobox', { name: 'Material' })).toMatchTextContent('A1');
     expect(within(material).queryByRole('button', { name: 'Reset Material' })).not.toBeInTheDocument();
   });
 
@@ -1292,9 +1292,9 @@ describe('Print pane external spool', () => {
     const material = await screen.findByRole('group', { name: 'Material' });
     const selector = within(material).getByRole('combobox', { name: 'Material' });
     // The AMS stays the default; the external spool is chosen on purpose.
-    expect(selector).toHaveTextContent('A1');
+    expect(selector).toMatchTextContent('A1');
     await chooseOption(user, selector, 'Ext');
-    expect(selector).toHaveTextContent('Ext');
+    expect(selector).toMatchTextContent('Ext');
 
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await user.click(await reviewPrint());
@@ -1312,7 +1312,7 @@ describe('Print pane external spool', () => {
     const material = await screen.findByRole('group', { name: 'Material' });
     fireEvent.click(within(material).getByRole('combobox', { name: 'Material' }));
     const externalSpool = screen.getByRole('option', { name: /^Ext/u });
-    expect(externalSpool).toHaveTextContent('Ext · Empty');
+    expect(externalSpool).toMatchTextContent('Ext · Empty');
     expect(externalSpool).toHaveAttribute('data-disabled');
   });
 
@@ -1344,7 +1344,7 @@ describe('Print pane external spool', () => {
     });
     expect(send).toBeDisabled();
     const checks = prepareActions().getByRole('list', { name: 'Checks' });
-    expect(checks).toHaveTextContent('At the machine: Load PETG on the external spool.');
+    expect(checks).toMatchTextContent('At the machine: Load PETG on the external spool.');
     // The machine was asked with the person's choices only: what the slice was made for it reads from the program.
     const asked = fixture.checkJob.mock.lastCall?.[0];
     expect(asked?.machineId).toBe('machine-1');
@@ -1361,7 +1361,7 @@ describe('Print pane external spool', () => {
     renderPane(createFixture({ entries: [machine] }).client);
     const slots = await screen.findByRole('list', { name: 'Material slots' });
     const external = within(slots).getByText('Ext').closest('li');
-    expect(external).toHaveTextContent(/^ExtPETG.*In use/u);
+    expect(external).toMatchTextContent(/^ExtPETG.*In use/u);
   });
 });
 
@@ -1594,8 +1594,8 @@ describe('Print pane jobs', () => {
 
     const region = await screen.findByRole('region', { name: jobRegionName });
     const checks = within(region).getByRole('list', { name: 'Checks' });
-    expect(checks).toHaveTextContent('PETG is loaded in A1 (blocked)');
-    expect(checks).toHaveTextContent('At the machine: Load PETG in A1.');
+    expect(checks).toMatchTextContent('PETG is loaded in A1 (blocked)');
+    expect(checks).toMatchTextContent('At the machine: Load PETG in A1.');
     fireEvent.click(within(region).getByRole('checkbox', { name: 'The build plate is clear' }));
     expect(within(region).getByRole('button', { name: 'Start print' })).toBeDisabled();
     expect(fixture.resolveJob).not.toHaveBeenCalled();
@@ -1624,7 +1624,7 @@ describe('Print pane jobs', () => {
     );
 
     const progress = await screen.findByRole('status', { name: 'Waiting for Workshop X1C to confirm the start…' });
-    expect(progress).toHaveTextContent("Tau confirms it from the machine's own report");
+    expect(progress).toMatchTextContent("Tau confirms it from the machine's own report");
     expect(screen.queryByText(/reply-lost/u)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry|check again|reconcile/iu })).not.toBeInTheDocument();
   });
@@ -1644,10 +1644,10 @@ describe('Print pane jobs', () => {
 
     const alert = await screen.findByRole('region', { name: 'Start not confirmed' });
     // One live region announces the headline; the card around it is not a second one.
-    expect(within(alert).getByRole('alert')).toHaveTextContent(
+    expect(within(alert).getByRole('alert')).toMatchTextContent(
       "The machine hasn't confirmed the start of pyramid.gcode.3mf.",
     );
-    expect(alert).toHaveTextContent('Nothing is resent.');
+    expect(alert).toMatchTextContent('Nothing is resent.');
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
     await user.click(within(alert).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
@@ -1668,7 +1668,9 @@ describe('Print pane jobs', () => {
     renderPane(fixture.client);
 
     const job = await screen.findByRole('region', { name: 'Job' });
-    expect(within(job).getByRole('status')).toHaveTextContent('Press start on Workshop X1C to begin pyramid.gcode.3mf');
+    expect(within(job).getByRole('status')).toMatchTextContent(
+      'Press start on Workshop X1C to begin pyramid.gcode.3mf',
+    );
     await user.click(within(job).getByRole('button', { name: 'Withdraw' }));
     await waitFor(() => {
       expect(fixture.withdrawJob).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ jobId: 'job-agent-1' }));
@@ -1705,14 +1707,14 @@ describe('Print pane monitor and controls', () => {
 
     await findMachine('Printing');
     const run = screen.getByRole('region', { name: 'Run' });
-    expect(run).toHaveTextContent(/^pyramid\.gcode\.3mf · /u);
+    expect(run).toMatchTextContent(/^pyramid\.gcode\.3mf · /u);
     expect(within(run).getByRole('progressbar', { name: 'Workshop X1C run progress' })).toHaveAttribute(
       'aria-valuenow',
       '42',
     );
-    expect(run).toHaveTextContent('Layer 42 of 125');
+    expect(run).toMatchTextContent('Layer 42 of 125');
     // Pause and Cancel say what they leave the printer doing before they are pressed.
-    expect(run).toHaveTextContent('The nozzle parks and stays hot.');
+    expect(run).toMatchTextContent('The nozzle parks and stays hot.');
 
     await user.click(within(run).getByRole('button', { name: 'Pause' }));
     await waitFor(() => {
@@ -1974,7 +1976,7 @@ describe('Print pane monitor and controls', () => {
     renderPane(createFixture({ entries: [busy] }).client);
     await findMachine('Busy');
     const alert = screen.getByRole('alert', { name: 'Machine alert' });
-    expect(alert).toHaveTextContent(`Go to Stop${consequence}`);
+    expect(alert).toMatchTextContent(`Go to Stop${consequence}`);
     // One Stop: the remedy leads to it rather than offering its own.
     expect(screen.getAllByRole('button', { name: 'Stop' })).toHaveLength(1);
 
@@ -2013,7 +2015,7 @@ describe('Print pane monitor and controls', () => {
       );
       await findMachine('Ready');
       const ended = await screen.findByRole('region', { name: 'Run' });
-      expect(ended).toHaveTextContent(new RegExp(`^${line}$`, 'u'));
+      expect(ended).toMatchTextContent(new RegExp(`^${line}$`, 'u'));
       expect(within(ended).queryByRole('progressbar')).not.toBeInTheDocument();
       expect(within(ended).queryByRole('button')).not.toBeInTheDocument();
     },
@@ -2028,8 +2030,8 @@ describe('Print pane monitor and controls', () => {
     );
     await findMachine('Printing');
     const live = screen.getByRole('region', { name: 'Run' });
-    expect(live).toHaveTextContent('not started from Tau');
-    expect(live).not.toHaveTextContent('started at the machine');
+    expect(live).toMatchTextContent('not started from Tau');
+    expect(live).not.toMatchTextContent('started at the machine');
   });
 
   it("names the run by the program the person approved, not the printer's upload name", async () => {
@@ -2048,9 +2050,9 @@ describe('Print pane monitor and controls', () => {
     );
     await findMachine('Printing');
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Run' })).toHaveTextContent(/^pyramid\.gcode\.3mf · /u);
+      expect(screen.getByRole('region', { name: 'Run' })).toMatchTextContent(/^pyramid\.gcode\.3mf · /u);
     });
-    expect(screen.getByRole('region', { name: 'Run' })).not.toHaveTextContent('tau-3f2a9c');
+    expect(screen.getByRole('region', { name: 'Run' })).not.toMatchTextContent('tau-3f2a9c');
   });
 
   it('holds an open job while a run is in progress and disables every control while stale', async () => {
@@ -2117,9 +2119,9 @@ describe('Print pane monitor and controls', () => {
     openDisclosure(/^History/u);
     const operations = screen.getByRole('list', { name: 'Operations' });
     const [setMaterial, fan] = within(operations).getAllByRole('listitem');
-    expect(setMaterial).toHaveTextContent('Set materialDone · seen');
+    expect(setMaterial).toMatchTextContent('Set materialDone · seen');
     expect(within(setMaterial!).getByLabelText('by Tau agent')).toBeInTheDocument();
-    expect(fan).toHaveTextContent('Part fanWaiting for the report');
+    expect(fan).toMatchTextContent('Part fanWaiting for the report');
   });
 
   it('holds an agent’s request for a control not yet qualified, even while a person tests it', async () => {
@@ -2148,9 +2150,9 @@ describe('Print pane monitor and controls', () => {
     ]);
     renderPane(createFixture({ entries: [entry({ testing: true })] }).client, bridge);
     const card = await screen.findByRole('region', { name: 'Agent request' });
-    expect(card).toHaveTextContent('The agent asks to: LoadUnqualified');
-    expect(card).toHaveTextContent('The printer heats the nozzle and feeds filament.');
-    expect(card).toHaveTextContent('Load is not yet qualified on this machine; only a person testing it may try it.');
+    expect(card).toMatchTextContent('The agent asks to: LoadUnqualified');
+    expect(card).toMatchTextContent('The printer heats the nozzle and feeds filament.');
+    expect(card).toMatchTextContent('Load is not yet qualified on this machine; only a person testing it may try it.');
     expect(within(card).getByRole('button', { name: 'Approve' })).toBeDisabled();
   });
 
@@ -2284,7 +2286,7 @@ describe('Print pane monitor and controls', () => {
     renderPane(createFixture({ entries: [qualifiedLight()] }).client, bridge);
     const card = await screen.findByRole('region', { name: 'Agent request' });
     const values = within(card).getByRole('definition');
-    expect(values).toHaveTextContent('false');
+    expect(values).toMatchTextContent('false');
     expect(within(card).getByText('On')).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
@@ -2322,7 +2324,7 @@ describe('Print pane Bambu Studio mode', () => {
     renderPane(fixture.client);
     // Bambu Studio working as expected needs no line of its own: its process preset is the sign.
     await waitFor(() => {
-      expect(combobox('Process')).toHaveTextContent(selectedLabel(standard));
+      expect(combobox('Process')).toMatchTextContent(selectedLabel(standard));
     });
     return { fixture, studio };
   };
@@ -2358,14 +2360,14 @@ describe('Print pane Bambu Studio mode', () => {
     expect(studio.settings).toHaveBeenLastCalledWith({ printer: x1c, process: standard, filaments: [plaMatte] });
     // The slicer and its version are inspection detail.
     openDisclosure(/^Inspect/u);
-    expect(screen.getByText('Slicer').nextElementSibling).toHaveTextContent(`Bambu Studio ${bambuStudioVersion}`);
+    expect(screen.getByText('Slicer').nextElementSibling).toMatchTextContent(`Bambu Studio ${bambuStudioVersion}`);
     expect(screen.queryByText(/^Slicing with/u)).not.toBeInTheDocument();
-    expect(combobox('Printer preset')).toHaveTextContent(selectedLabel(x1c));
+    expect(combobox('Printer preset')).toMatchTextContent(selectedLabel(x1c));
     // The tray's Bambu filament id picks the preset; the tray's own type and colour sit beside it.
-    expect(combobox('Filament A1')).toHaveTextContent(selectedLabel(plaMatte));
+    expect(combobox('Filament A1')).toMatchTextContent(selectedLabel(plaMatte));
     // Compatible processes only, with the person's presets apart from the system ones.
     await user.click(combobox('Process'));
-    expect(screen.getByRole('group', { name: 'Your presets' })).toHaveTextContent('0.20mm Standard Gyroid PETG');
+    expect(screen.getByRole('group', { name: 'Your presets' })).toMatchTextContent('0.20mm Standard Gyroid PETG');
     expect(screen.queryByRole('option', { name: '0.20mm Standard @BBL P1P' })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
 
@@ -2381,10 +2383,10 @@ describe('Print pane Bambu Studio mode', () => {
       });
     });
     const result = await sliceDetails();
-    expect(within(result).getByText('Sliced by').nextElementSibling).toHaveTextContent(
+    expect(within(result).getByText('Sliced by').nextElementSibling).toMatchTextContent(
       `Bambu Studio ${bambuStudioVersion}`,
     );
-    expect(within(result).getByText('Time').nextElementSibling).toHaveTextContent(
+    expect(within(result).getByText('Time').nextElementSibling).toMatchTextContent(
       'about 28 min (Bambu Studio estimate)',
     );
 
@@ -2424,7 +2426,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
     expect(within(settings).queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
     expect(within(settings).getByRole('button', { name: 'Group: Strength' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Advanced settings/u })).toHaveTextContent(/^Advanced settings$/u);
+    expect(screen.getByRole('button', { name: /^Advanced settings/u })).toMatchTextContent(/^Advanced settings$/u);
     await user.click(screen.getByRole('button', { name: 'Reset Wall loops' }));
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Reset Wall loops' })).not.toBeInTheDocument();
@@ -2564,8 +2566,8 @@ describe('Print pane Bambu Studio mode', () => {
 
       await screen.findByRole('group', { name: 'Filaments' });
       expect(screen.queryByRole('group', { name: 'Material' })).not.toBeInTheDocument();
-      expect(slot(1)).toHaveTextContent(selectedLabel('0'));
-      expect(slot(2)).toHaveTextContent(selectedLabel('1'));
+      expect(slot(1)).toMatchTextContent(selectedLabel('0'));
+      expect(slot(2)).toMatchTextContent(selectedLabel('1'));
       expect(mockExport).not.toHaveBeenCalled();
     });
 
@@ -2583,8 +2585,8 @@ describe('Print pane Bambu Studio mode', () => {
         ]),
       );
       // Blue PLA on the external spool, listed first, still loses to the AMS tray that can change filament.
-      expect(slot(1)).toHaveTextContent(selectedLabel('1'));
-      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
+      expect(slot(1)).toMatchTextContent(selectedLabel('1'));
+      expect(slot(2)).toMatchTextContent(selectedLabel('0'));
       await user.click(slot(1));
       expect(screen.getAllByRole('option').map(({ textContent }) => textContent.trim())).toEqual([
         'A1 · PLA',
@@ -2602,8 +2604,8 @@ describe('Print pane Bambu Studio mode', () => {
       const fixture = await sliceTwoColours(user, colourful());
       // One row per filament replaces the material chips.
       expect(screen.queryByRole('group', { name: 'Material' })).not.toBeInTheDocument();
-      expect(slot(1)).toHaveTextContent(selectedLabel('1'));
-      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
+      expect(slot(1)).toMatchTextContent(selectedLabel('1'));
+      expect(slot(2)).toMatchTextContent(selectedLabel('0'));
       await user.click(slot(1));
       expect(screen.getAllByRole('option').map(({ textContent }) => textContent.trim())).toEqual([
         'A1 · PLA',
@@ -2649,7 +2651,7 @@ describe('Print pane Bambu Studio mode', () => {
       expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeEnabled();
       // Presets per tray, as Bambu Studio resolves them.
       await waitFor(() => {
-        expect(combobox('Filament A3')).toHaveTextContent(selectedLabel(petg));
+        expect(combobox('Filament A3')).toMatchTextContent(selectedLabel(petg));
       });
       summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
       await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
@@ -2666,8 +2668,8 @@ describe('Print pane Bambu Studio mode', () => {
 
       // A1 is filament 2's, so filament 2 takes A3 in exchange.
       await chooseOption(user, slot(1), '0');
-      expect(slot(1)).toHaveTextContent(selectedLabel('0'));
-      expect(slot(2)).toHaveTextContent(selectedLabel('2'));
+      expect(slot(1)).toMatchTextContent(selectedLabel('0'));
+      expect(slot(2)).toMatchTextContent(selectedLabel('2'));
     });
 
     it('holds Send until a filament no free tray could take has a slot', async () => {
@@ -2676,8 +2678,8 @@ describe('Print pane Bambu Studio mode', () => {
         user,
         colourful([loadedSlot('ams-a/a1', 'PLA', { color: redTray }), emptySlot('ams-a/a2')]),
       );
-      expect(slot(1)).toHaveTextContent(selectedLabel(''));
-      expect(slot(2)).toHaveTextContent(selectedLabel('0'));
+      expect(slot(1)).toMatchTextContent(selectedLabel(''));
+      expect(slot(2)).toMatchTextContent(selectedLabel('0'));
       expect(
         await prepareActions().findByText('Filament 1 has no slot. Choose a loaded slot for it before sending.'),
       ).toBeInTheDocument();
@@ -2699,7 +2701,7 @@ describe('Print pane Bambu Studio mode', () => {
     });
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     const result = await sliceDetails();
-    expect(within(result).getByRole('status')).toHaveTextContent(refusal);
+    expect(within(result).getByRole('status')).toMatchTextContent(refusal);
     expect(within(result).queryByText('Toolpath')).not.toBeInTheDocument();
     expect(within(result).queryByText(/fits the plate/u)).not.toBeInTheDocument();
     await reviewPrint();
@@ -2741,11 +2743,11 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
 
     const result = await sliceDetails();
-    expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('19.6 × 19.6 × 20 mm');
-    expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
+    expect(within(result).getByText('Part').nextElementSibling).toMatchTextContent('19.6 × 19.6 × 20 mm');
+    expect(within(result).getByText('Toolpath').nextElementSibling).toMatchTextContent(
       "240 × 268 × 121.5 mm · every nozzle move, including the printer's start routine",
     );
-    expect(within(result).getByText('Plate').nextElementSibling).toHaveTextContent('The part fits the plate');
+    expect(within(result).getByText('Plate').nextElementSibling).toMatchTextContent('The part fits the plate');
     expect(within(result).queryByRole('alert')).not.toBeInTheDocument();
     const send = await reviewPrint();
     expect(send).not.toHaveAccessibleDescription();
@@ -2764,7 +2766,7 @@ describe('Print pane Bambu Studio mode', () => {
     const send = await prepareActions().findByRole('button', { name: 'Review print' });
     expect(send).toBeDisabled();
     expect(send).toHaveAccessibleDescription(reason);
-    expect(within(screen.getByLabelText('Slice result')).getByRole('alert')).toHaveTextContent(reason);
+    expect(within(screen.getByLabelText('Slice result')).getByRole('alert')).toMatchTextContent(reason);
   });
 
   it('reloads the settings for another process or filament and drops overrides the new presets lack', async () => {
@@ -2781,7 +2783,7 @@ describe('Print pane Bambu Studio mode', () => {
     // Fine is one Process choice; it has no ironing, so that override goes.
     await chooseOption(user, combobox('Process'), '0.12mm Fine @BBL X1C');
     await waitFor(() => {
-      expect(combobox('Process')).toHaveTextContent(selectedLabel('0.12mm Fine @BBL X1C'));
+      expect(combobox('Process')).toMatchTextContent(selectedLabel('0.12mm Fine @BBL X1C'));
     });
     expect(studio.settings).toHaveBeenLastCalledWith({
       printer: x1c,
@@ -2801,7 +2803,7 @@ describe('Print pane Bambu Studio mode', () => {
       process: '0.12mm Fine @BBL X1C',
       settings: { ironing_speed: 40, layer_height: 0.16 },
     });
-    expect(combobox('Process')).toHaveTextContent('0.12mm Fine');
+    expect(combobox('Process')).toMatchTextContent('0.12mm Fine');
 
     // Picking a process by name keeps the person's choice through the next resolution.
     await chooseOption(user, combobox('Process'), '0.20mm Standard Gyroid PETG @BBL X1C');
@@ -2924,9 +2926,9 @@ describe('Print pane Bambu Studio mode', () => {
     renderPane(refused.client);
 
     const jobs = await screen.findByRole('region', { name: 'Jobs' });
-    expect(jobs).toHaveTextContent('The machine rejected the start (MACHINE_ACTION_PROVIDER_REJECTED)');
-    expect(jobs).toHaveTextContent(reason);
-    expect(jobs).not.toHaveTextContent('Developer Mode');
+    expect(jobs).toMatchTextContent('The machine rejected the start (MACHINE_ACTION_PROVIDER_REJECTED)');
+    expect(jobs).toMatchTextContent(reason);
+    expect(jobs).not.toMatchTextContent('Developer Mode');
   });
 });
 
@@ -2954,7 +2956,7 @@ describe('Print pane print settings file', () => {
     desktopHost.bambuStudio = studio;
     renderPane(createFixture({ entries: [entry({ providerId: 'bambu' })] }).client);
     await waitFor(() => {
-      expect(combobox('Process')).toHaveTextContent(selectedLabel(process));
+      expect(combobox('Process')).toMatchTextContent(selectedLabel(process));
     });
     return studio;
   };
@@ -2984,9 +2986,9 @@ describe('Print pane print settings file', () => {
       },
       partial: { filaments: [petg], plate: 'cool' },
     });
-    expect(combobox('Filament A1')).toHaveTextContent(selectedLabel(petg));
-    expect(combobox('Plate')).toHaveTextContent(selectedLabel('cool'));
-    expect(combobox('Process')).toHaveTextContent('0.12mm Fine');
+    expect(combobox('Filament A1')).toMatchTextContent(selectedLabel(petg));
+    expect(combobox('Plate')).toMatchTextContent(selectedLabel('cool'));
+    expect(combobox('Process')).toMatchTextContent('0.12mm Fine');
     // Marks follow the keys in the file: the picks it names, and nothing Bambu Studio resolved on its own.
     for (const name of ['Process', 'Plate', 'Filament A1', 'print settings']) {
       expect(reset(name)).toBeInTheDocument();
@@ -3031,7 +3033,7 @@ describe('Print pane print settings file', () => {
 
     await chooseOption(user, combobox('Process'), fine);
     await waitFor(() => {
-      expect(combobox('Process')).toHaveTextContent(selectedLabel(fine));
+      expect(combobox('Process')).toMatchTextContent(selectedLabel(fine));
     });
     await chooseOption(user, combobox('Process'), gyroid);
     await chooseOption(user, combobox('Filament A1'), petg);
@@ -3063,7 +3065,7 @@ describe('Print pane print settings file', () => {
     await expectPreferences({ plate: 'cool' });
     await user.click(reset('Plate'));
     await expectPreferences({});
-    expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
+    expect(combobox('Plate')).toMatchTextContent(selectedLabel('textured-pei'));
     expect(queryReset('print settings')).not.toBeInTheDocument();
   });
 
@@ -3108,7 +3110,7 @@ describe('Print pane print settings file', () => {
     await expectPreferences({ options: { layerHeight: 0.16 } });
     await user.click(within(options).getByRole('button', { name: 'Set nozzle diameter' }));
     await waitFor(() => {
-      expect(within(options).getByTestId('parameters')).toHaveTextContent('{"nozzleDiameter":0.6,"layerHeight":0.16}');
+      expect(within(options).getByTestId('parameters')).toMatchTextContent('{"nozzleDiameter":0.6,"layerHeight":0.16}');
     });
     // The nozzle belongs to the machine, never to the project's file, so no save was even tried.
     expect(JSON.parse(preferencesText() ?? 'null')).toEqual({
@@ -3127,7 +3129,7 @@ describe('Print pane print settings file', () => {
 
     await user.click(within(options).getByRole('button', { name: 'Reset layer height' }));
     await expectPreferences({});
-    expect(within(options).getByTestId('parameters')).toHaveTextContent('{"nozzleDiameter":0.6}');
+    expect(within(options).getByTestId('parameters')).toMatchTextContent('{"nozzleDiameter":0.6}');
   });
 
   it('should preserve malformed and future records, blocking preparation and management', async () => {
@@ -3137,7 +3139,7 @@ describe('Print pane print settings file', () => {
     renderPane(createFixture().client);
     await findMachine('Ready');
 
-    expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/newer|unsupported/iu);
+    expect(await within(prepareRegion()).findByRole('alert')).toMatchTextContent(/newer|unsupported/iu);
     expect(within(prepareRegion()).getByRole('combobox', { name: 'Profile' })).toBeDisabled();
     const slice = prepareActions().getByRole('button', { name: 'Slice and preview' });
     expect(slice).toBeDisabled();
@@ -3175,7 +3177,7 @@ describe('Print pane print settings file', () => {
     await expectPreferences({ plate: 'cool', preset: 'fine' });
     projectFiles.race(preferencesBytes({ plate: 'cool', preset: 'standard' }));
     await chooseOption(user, quality(), 'Fast');
-    expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/changed|conflict/iu);
+    expect(await within(prepareRegion()).findByRole('alert')).toMatchTextContent(/changed|conflict/iu);
     await user.click(
       within(prepareRegion()).getByRole('button', {
         name: 'Use latest saved settings',
@@ -3213,13 +3215,13 @@ describe('Saved machine profiles', () => {
     await user.type(copyName, 'Production');
     await user.click(screen.getByRole('button', { name: 'Duplicate profile' }));
     await waitFor(() => {
-      expect(profile()).toHaveTextContent('Production');
+      expect(profile()).toMatchTextContent('Production');
     });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fast');
     await expectPreferences({ preset: 'fast' });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Second X1C');
     await waitFor(() => {
-      expect(profile()).toHaveTextContent('Production');
+      expect(profile()).toMatchTextContent('Production');
     });
     await expectPreferences({ preset: 'fast' });
     await chooseOption(user, profile(), 'Default');
@@ -3232,7 +3234,7 @@ describe('Saved machine profiles', () => {
     await user.type(newName, 'Batch');
     await user.click(screen.getByRole('button', { name: 'Rename profile' }));
     await waitFor(() => {
-      expect(profile()).toHaveTextContent('Batch');
+      expect(profile()).toMatchTextContent('Batch');
     });
     await waitFor(() => {
       expect(projectFiles.read(settingsPath)).toContain('Batch');
@@ -3249,16 +3251,16 @@ describe('Saved machine profiles', () => {
     await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete profile…' }));
     const remove = await screen.findByRole('alertdialog', { name: 'Delete “Batch”?' });
-    expect(remove).toHaveTextContent('“Default” becomes the profile for printers of this type.');
+    expect(remove).toMatchTextContent('“Default” becomes the profile for printers of this type.');
     await user.click(within(remove).getByRole('button', { name: 'Delete profile' }));
     await waitFor(() => {
-      expect(profile()).toHaveTextContent('Default');
+      expect(profile()).toMatchTextContent('Default');
     });
     await expectPreferences({ preset: 'fine' });
     pane.unmount();
     renderPane(fixture.client);
     await waitFor(() => {
-      expect(profile()).toHaveTextContent('Default');
+      expect(profile()).toMatchTextContent('Default');
     });
     await expectPreferences({ preset: 'fine' });
     const savedFile = readMachineSettings({
@@ -3323,7 +3325,7 @@ describe('Saved machine profiles', () => {
     });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Workshop X1C');
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: 'Quality' })).toHaveTextContent('Fine');
+      expect(screen.getByRole('combobox', { name: 'Quality' })).toMatchTextContent('Fine');
     });
     await expectPreferences({ preset: 'fine' });
     expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
@@ -3418,7 +3420,7 @@ describe('Print pane with the Bambu provider’s own manifests', () => {
       await findMachine('Ready');
       const monitor = screen.getByRole('region', { name: 'Monitor' });
       // The plate is a fact beside the heaters, by the name the manifest gives it.
-      expect(monitor).toHaveTextContent('PlateTextured PEI plate');
+      expect(monitor).toMatchTextContent('PlateTextured PEI plate');
       const slots = within(monitor).getByRole('list', { name: 'Material slots' });
       expect(within(slots).getAllByRole('listitem')).toHaveLength(slotCount);
       expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
@@ -3626,8 +3628,8 @@ describe('Print pane presence, Stop and jobs across machines', () => {
       }).client,
     );
     const ended = await screen.findByRole('region', { name: 'Run' });
-    expect(ended).toHaveTextContent('Last run: Not reported · pyramid.gcode.3mf');
-    expect(ended).toHaveTextContent('Workshop X1C did not report how this run ended, and Tau did not stop it.');
+    expect(ended).toMatchTextContent('Last run: Not reported · pyramid.gcode.3mf');
+    expect(ended).toMatchTextContent('Workshop X1C did not report how this run ended, and Tau did not stop it.');
   });
 });
 
@@ -3659,7 +3661,7 @@ describe('Print pane without printers', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up a machine' }));
 
-    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent('?settings=machines');
+    expect(screen.getByRole('status', { name: 'location' })).toMatchTextContent('?settings=machines');
   });
 });
 
@@ -3751,7 +3753,7 @@ describe('Print pane program files', () => {
 
     const region = programRegion();
     expect(await within(region).findByText('The machine is homed: Home before running a program.')).toBeInTheDocument();
-    expect(within(region).getByRole('list', { name: 'Checks' })).toHaveTextContent('The machine is homed');
+    expect(within(region).getByRole('list', { name: 'Checks' })).toMatchTextContent('The machine is homed');
     expect(within(region).getByRole('button', { name: /^Home/u })).toBeInTheDocument();
     expect(within(region).getByRole('button', { name: 'Review job' })).toBeDisabled();
     const [checked] = fixture.checkJob.mock.lastCall ?? [];

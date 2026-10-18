@@ -2,7 +2,7 @@ import type { PartialDeep } from 'type-fest';
 import type { PanelState } from '#types/editor.types.js';
 
 export const mergePanelState = (current: PanelState, update?: PartialDeep<PanelState>): PanelState => {
-  const desktopLayout = update?.desktopLayout as Partial<PanelState['desktopLayout']> | undefined;
+  const desktopLayout: Partial<PanelState['desktopLayout']> | undefined = update?.desktopLayout;
   return {
     desktopLayout: {
       chatOpen: desktopLayout?.chatOpen ?? current.desktopLayout.chatOpen,

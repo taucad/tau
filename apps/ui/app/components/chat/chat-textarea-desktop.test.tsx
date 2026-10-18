@@ -210,7 +210,7 @@ describe('ChatTextareaBar', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add' }));
     const attach = screen.getByRole('menuitem', { name: /Attach image or PDF/u });
     expect(attach).toHaveAttribute('aria-disabled', 'true');
-    expect(attach).toHaveTextContent("This model can't read images or PDFs");
+    expect(attach).toMatchTextContent("This model can't read images or PDFs");
     expect(screen.queryByRole('menuitem', { name: /Add context/u })).toBeNull();
   });
 
@@ -486,14 +486,14 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
     expect(catalogHealth.retry).toHaveBeenCalledOnce();
-    expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+    expect(screen.getByRole('textbox')).toMatchTextContent('Keep this draft');
   });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {
     renderComposer('', codexSession, { canResume: true });
 
     const resume = screen.getByRole('button', { name: 'Resume' });
-    expect(resume).toHaveTextContent('Resume');
+    expect(resume).toMatchTextContent('Resume');
     expect(resume).toHaveAttribute('aria-disabled', 'false');
   });
 
@@ -514,7 +514,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = renderComposer('Make a render of this using $imagegen', codexSession);
 
     await vi.waitFor(() => {
-      expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
+      expect(view.container.querySelector('.ProseMirror')).toMatchTextContent('Make a render of this using $imagegen');
     });
     /* A chip is the only thing in the editor that draws an icon. */
     expect(view.container.querySelector('.ProseMirror svg')).toBeNull();
@@ -524,7 +524,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     await vi.waitFor(() => {
       expect(view.container.querySelector('.ProseMirror svg')).not.toBeNull();
     });
-    expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
+    expect(view.container.querySelector('.ProseMirror')).toMatchTextContent('Make a render of this using $imagegen');
   });
   it.each(['submitted', 'streaming'] as const)(
     'should dictate into the draft while a chat is %s without sending or stopping it',
@@ -555,7 +555,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       await userEvent.click(dictate);
       await userEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }));
       await waitFor(() => {
-        expect(screen.getByRole('textbox')).toHaveTextContent('Existing draft. Make the corners round.');
+        expect(screen.getByRole('textbox')).toMatchTextContent('Existing draft. Make the corners round.');
       });
       expect(submit).not.toHaveBeenCalled();
       expect(cancelChat).not.toHaveBeenCalled();
@@ -609,7 +609,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     act(() => {
       preview?.('Build a');
     });
-    expect(view.container.querySelector('[data-slot=dictation-transcript]')).toHaveTextContent('Build a');
+    expect(view.container.querySelector('[data-slot=dictation-transcript]')).toMatchTextContent('Build a');
     expect(submit).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute('aria-disabled', 'true');
     await act(async () => {

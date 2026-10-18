@@ -332,9 +332,7 @@ const delay = async (milliseconds: number, signal: AbortSignal): Promise<void> =
  */
 const parameterProblems = (descriptor: MachineActionDescriptor, parameters: JsonObject): string | undefined => {
   try {
-    const schema = z.fromJSONSchema(
-      descriptor.configuration.legacyProjection.inputSchema as Parameters<typeof z.fromJSONSchema>[0],
-    );
+    const schema = z.fromJSONSchema(descriptor.configuration.legacyProjection.inputSchema);
     const result = schema.safeParse(parameters);
     return result.success ? undefined : z.prettifyError(result.error);
   } catch {

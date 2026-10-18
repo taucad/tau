@@ -45,7 +45,7 @@ describe('UI asset integrity', () => {
         assetsInlineLimit: 0,
         sourcemap: 'hidden',
         minify: false,
-        rollupOptions: { input: path.join(root, 'main.js'), preserveEntrySignatures: 'strict' },
+        rolldownOptions: { input: path.join(root, 'main.js'), preserveEntrySignatures: 'strict' },
       },
     });
   });

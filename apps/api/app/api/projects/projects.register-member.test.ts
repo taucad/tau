@@ -8,7 +8,6 @@ import { project, projectCollaborator, user } from '#database/schema.js';
 import type { DatabaseService } from '#database/database.service.js';
 import { databaseReachable } from '#testing/database-reachable.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
@@ -87,7 +86,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('PUT /v1/projects/:id b
           canCreatePrivateShares: entitled.has(userId),
           canUseProKernels: entitled.has(userId),
         }),
-      } as unknown as CommercialEntitlementsService,
+      },
       new ProjectAccessService(databaseService),
     );
   }, 60_000);

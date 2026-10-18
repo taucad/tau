@@ -1647,7 +1647,7 @@ const solveChainPose = (
 /** Main bearing cap: extruded section with registers, notch, bolt stack. */
 const buildMainCap = (place: Placement): BuiltPart => {
   const { halfW } = capGeo;
-  const profile = draw([-halfW, 0])
+  const profile: Shape3D = draw([-halfW, 0])
     .lineTo([halfW, 0])
     .lineTo([halfW, -capGeo.registerDepth])
     .lineTo([halfW - 20, -capGeo.height])
@@ -1656,7 +1656,7 @@ const buildMainCap = (place: Placement): BuiltPart => {
     .close()
     .sketchOnPlane('YZ')
     .extrude(capGeo.thickness)
-    .translate([-capGeo.thickness / 2, 0, 0]) as Shape3D;
+    .translate([-capGeo.thickness / 2, 0, 0]);
   let cap = profile.cut(
     makeCylinder(
       capGeo.saddleR,
@@ -1833,7 +1833,7 @@ const buildWaterPumpGasket = (): BuiltPart => {
 };
 
 const buildOilFilter = (place: Placement): BuiltPart => {
-  let filter = makeCylinder(38, 80, [0, 0, 0], [-1, 0, 0]) as Shape3D;
+  let filter: Shape3D = makeCylinder(38, 80, [0, 0, 0], [-1, 0, 0]);
   filter = filter.cut(makeCylinder(9.55, 14, [1, 0, 0], [-1, 0, 0]));
   const shape = place.shape(filter);
   const interfaces: InterfaceDeclarations = {

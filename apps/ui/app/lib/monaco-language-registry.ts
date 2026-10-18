@@ -99,7 +99,7 @@ type MeasureFunction = (measureName: string, startMark: string, endMark: string)
  */
 function getPerformance(): { mark?: MarkFunction; measure?: MeasureFunction } | undefined {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive: SSR / non-browser hosts may lack performance
-  return globalThis.performance as { mark?: MarkFunction; measure?: MeasureFunction } | undefined;
+  return globalThis.performance;
 }
 
 export class LanguageContributionRegistry {

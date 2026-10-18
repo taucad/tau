@@ -116,7 +116,7 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
     return false;
   }
-  const { type } = value as { type: unknown };
+  const { type } = value;
   return (
     type === 'fileWritten' ||
     type === 'fileDeleted' ||

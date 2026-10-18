@@ -96,7 +96,7 @@ describe('ActiveSessions', () => {
 
     renderSessions();
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toMatchTextContent(
       'For your security, sign in again to view and manage active sessions.',
     );
     expect(screen.getByRole('link', { name: 'Sign in again' })).toHaveAttribute(
@@ -117,7 +117,7 @@ describe('ActiveSessions', () => {
     });
 
     renderSessions();
-    expect(screen.getByRole('alert')).toHaveTextContent("We couldn't load your active sessions.");
+    expect(screen.getByRole('alert')).toMatchTextContent("We couldn't load your active sessions.");
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
 

@@ -164,7 +164,7 @@ export const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape
     return { path: relativePath, diagnostics };
   }
 
-  if (Object.keys(parsed.data as Record<string, unknown>).length === 0) {
+  if (Object.keys(parsed.data).length === 0) {
     diagnostics.push({ level: 'ERROR', message: 'Missing frontmatter entirely' });
     return { path: relativePath, diagnostics };
   }

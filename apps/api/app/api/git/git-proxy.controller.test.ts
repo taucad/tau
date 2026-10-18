@@ -483,7 +483,7 @@ describe('GitProxyController', () => {
     await proxyController().proxyPost(
       'user-1',
       { url: 'https://github.com/tau/x.git/info/lfs/objects/batch' },
-      { ...request({ accept: lfsMediaType, 'content-type': lfsMediaType }, 'POST'), body: batch } as FastifyRequest,
+      { ...request({ accept: lfsMediaType, 'content-type': lfsMediaType }, 'POST'), body: batch },
       reply(),
     );
 

@@ -122,7 +122,7 @@ describe('useGeometryUnitKernelPrefetch', () => {
   beforeEach(() => {
     prefetchSpy = vi.fn<(ids: readonly string[]) => void>();
     originalPrefetch = registry.prefetch.bind(registry);
-    registry.prefetch = prefetchSpy as unknown as typeof registry.prefetch;
+    registry.prefetch = prefetchSpy;
   });
 
   afterEach(() => {

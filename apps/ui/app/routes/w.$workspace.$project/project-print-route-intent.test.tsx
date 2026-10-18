@@ -27,7 +27,7 @@ it('opens a closed Print pane and retains the exact machine/job intent', async (
   await waitFor(() => {
     expect(openPanel).toHaveBeenCalledExactlyOnceWith('print');
   });
-  expect(screen.getByRole('status')).toHaveTextContent('?machineHost=host&machine=mill&job=request&chat=chat-1');
+  expect(screen.getByRole('status')).toMatchTextContent('?machineHost=host&machine=mill&job=request&chat=chat-1');
 });
 
 it('does not reopen Print from a saved URL when machines are disabled', () => {

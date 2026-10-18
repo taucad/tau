@@ -63,14 +63,13 @@ const readPositionVersion = (attribute: THREE.BufferAttribute | THREE.Interleave
 /** The geometry's positions; `getAttribute` is typed as always present, but a geometry may have none. */
 const positionOf = (
   geometry: THREE.BufferGeometry,
-): THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined =>
-  geometry.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+): THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined => geometry.getAttribute('position');
 
 const triangleCount = (geometry: THREE.BufferGeometry): number =>
   Math.floor(((geometry.index ?? positionOf(geometry))?.count ?? 0) / 3);
 
 const isEntryCurrent = (entry: Entry, geometry: THREE.BufferGeometry): boolean => {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  const position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute = geometry.getAttribute('position');
   const index = geometry.index ?? undefined;
   return (
     entry.position === position &&
@@ -139,7 +138,7 @@ export const createBvhCache = ({
     if (existing && isEntryCurrent(existing, geometry)) {
       return existing;
     }
-    const position = geometry.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+    const position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute = geometry.getAttribute('position');
     const index = geometry.index ?? undefined;
     const entry: Entry = {
       position,

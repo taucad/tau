@@ -49,7 +49,7 @@ export type MachineSettingsHandle = SettingsProjection & {
 /** The JSON schema a provider's settings form validates against. */
 const schemaOf = (settings: ConfigurationManifestV1): RJSFSchema =>
   // SAFETY: a configuration manifest's legacy projection is draft-07 JSON Schema, which RJSF's schema type describes.
-  settings.legacyProjection.inputSchema as RJSFSchema;
+  settings.legacyProjection.inputSchema;
 
 /** Whether a provider's settings form keeps the plate, which Prepare shows beside the slicing preferences. */
 const keepsPlate = (settings: ConfigurationManifestV1 | undefined): boolean =>

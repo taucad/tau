@@ -122,7 +122,7 @@ describe('viewport submission FPS output', () => {
     mocks.gl.domElement = canvas;
     const view = render(<RenderFpsOverlay />);
     const output = screen.getByLabelText('Render-loop submission FPS');
-    expect(output).toHaveTextContent('FPS · idle');
+    expect(output).toMatchTextContent('FPS · idle');
     expect(output).toHaveAttribute('aria-live', 'off');
     expect(output).toHaveAttribute('aria-description', expect.stringContaining('does not measure GPU completion'));
     act(() => {
@@ -144,7 +144,7 @@ describe('viewport submission FPS output', () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(screen.getByLabelText('Render-loop submission FPS')).toHaveTextContent('FPS · idle');
+    expect(screen.getByLabelText('Render-loop submission FPS')).toMatchTextContent('FPS · idle');
     expect(mocks.invalidate).not.toHaveBeenCalled();
     expect(renderLoopObservers.has(canvas)).toBe(true);
     view.unmount();

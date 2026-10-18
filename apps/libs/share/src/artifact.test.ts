@@ -78,7 +78,6 @@ describe('portable share artifacts', () => {
 
   it('rejects unexpected JWE headers', async () => {
     const archive = await createShareArchive(snapshot());
-    const p2s = new Uint8Array(16).fill(4);
     const compactJwe = await new CompactEncrypt(archive)
       .setProtectedHeader({
         alg: 'PBES2-HS512+A256KW',
@@ -86,7 +85,7 @@ describe('portable share artifacts', () => {
         cty: 'application/zip',
         typ: 'unexpected',
       })
-      .setKeyManagementParameters({ p2c: 210_000, p2s })
+      .setKeyManagementParameters({ p2c: 210_000 })
       .encrypt(bytes(password));
     await expect(shareArtifactCodec.openWithPassword({ compactJwe, password })).rejects.toMatchObject({
       code: 'SHARE_ARTIFACT_INVALID',

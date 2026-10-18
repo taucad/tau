@@ -19,14 +19,14 @@ const makeItemList = (items: readonly DataTransferItem[]): DataTransferItemList 
     clear: () => undefined,
     item: (index: number) => list[index] ?? null,
     remove: () => undefined,
-  }) as DataTransferItemList;
+  });
 };
 
 const makeFileList = (files: readonly File[]): FileList => {
   const list = [...files] as File[];
   return Object.assign(list, {
     item: (index: number) => list[index] ?? null,
-  }) as FileList;
+  });
 };
 
 const makeClipboardData = ({

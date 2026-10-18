@@ -140,14 +140,14 @@ describe('NativeImageViewer', () => {
       });
     render(viewer({ readAll }));
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading image…');
+    expect(screen.getByRole('status')).toMatchTextContent('Loading image…');
     expect(screen.getByRole('group', { name: 'File actions for preview.png' })).toBeEmptyDOMElement();
   });
 
   it('shows a stable error when full bytes no longer match the routed format', async () => {
     render(viewer({ readAll: async () => new Uint8Array([0, 1, 2]) }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/changed before it could be displayed/i);
+    expect(await screen.findByRole('alert')).toMatchTextContent(/changed before it could be displayed/i);
     expect(screen.getByRole('group', { name: 'File actions for preview.png' })).toBeEmptyDOMElement();
     await waitFor(() => {
       expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ describe('NativeImageViewer', () => {
 
     fireEvent.error(image);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be decoded/i);
+    expect(await screen.findByRole('alert')).toMatchTextContent(/could not be decoded/i);
     expect(screen.queryByRole('img', { name: 'broken.png' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'File actions for broken.png' })).toBeEmptyDOMElement();
     expect(URL.createObjectURL).toHaveBeenCalledOnce();

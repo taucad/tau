@@ -1,7 +1,7 @@
 import { NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import type { CSSProperties, ReactNode, UIEvent } from 'react';
+import type { ReactNode, UIEvent } from 'react';
 import { LayoutPriority } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
 import type { AllotmentHandle } from 'allotment';
@@ -162,20 +162,18 @@ const ApplicationShell = ({
       data-slot='application-shell'
       data-sidebar-open={!isMobile && open}
       className='group/app-shell relative size-full min-h-0 overflow-hidden'
-      style={
-        {
-          '--sidebar-panel-width': `${sidebarPreferredWidth}px`,
-          '--titlebar-controls-width':
-            open && !isMobile
-              ? 'calc(var(--sidebar-panel-width) - 1px)'
-              : isDesktopTarget
-                ? isFullscreen
-                  ? closedTitlebarControlsWidth
-                  : windowedClosedTitlebarControlsWidth
-                : browserClosedTitlebarControlsWidth,
-          ...(isFullscreen ? { '--desktop-titlebar-inset': 'calc(var(--spacing) * 2)' } : {}),
-        } as CSSProperties
-      }
+      style={{
+        '--sidebar-panel-width': `${sidebarPreferredWidth}px`,
+        '--titlebar-controls-width':
+          open && !isMobile
+            ? 'calc(var(--sidebar-panel-width) - 1px)'
+            : isDesktopTarget
+              ? isFullscreen
+                ? closedTitlebarControlsWidth
+                : windowedClosedTitlebarControlsWidth
+              : browserClosedTitlebarControlsWidth,
+        ...(isFullscreen ? { '--desktop-titlebar-inset': 'calc(var(--spacing) * 2)' } : {}),
+      }}
     >
       {isDesktopTarget ? (
         <span

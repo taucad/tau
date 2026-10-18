@@ -22,7 +22,7 @@ describe('PaneAction', () => {
     const { onClick, action } = renderAction();
 
     expect(action).toHaveAttribute('data-slot', 'pane-button');
-    expect(action).toHaveTextContent('Export');
+    expect(action).toMatchTextContent('Export');
     await user.click(action);
 
     expect(onClick).toHaveBeenCalledOnce();
@@ -34,7 +34,7 @@ describe('PaneAction', () => {
 
     await user.hover(action);
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Open exporter');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Open exporter');
   });
 
   it('should fold to its icon with the host classes, keeping its name', () => {

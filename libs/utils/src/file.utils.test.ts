@@ -33,7 +33,7 @@ describe('downloadBlob', () => {
   beforeEach(() => {
     mockAnchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
     vi.spyOn(document, 'createElement').mockReturnValue(mockAnchor as unknown as HTMLElement);
-    vi.spyOn(document.body, 'append').mockImplementation(() => undefined as unknown as HTMLElement);
+    vi.spyOn(document.body, 'append').mockImplementation(() => undefined);
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
   });

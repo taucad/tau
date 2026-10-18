@@ -91,7 +91,7 @@ export function collectWireTransferables(value: unknown): Transferable[] {
     visited.add(object);
 
     if (isMessagePortLike(object)) {
-      transferables.push(object as unknown as Transferable);
+      transferables.push(object);
       return;
     }
     if (object instanceof ArrayBuffer) {

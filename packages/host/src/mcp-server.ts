@@ -39,6 +39,7 @@ import type {
   TauMcpRpcFailure,
   TauMcpRpcName,
   TauMcpRpcSuccess,
+  TauMcpRuntime,
   TauMcpStdioStreams,
   TauMcpToolName,
 } from '@taucad/mcp';
@@ -840,6 +841,8 @@ export type LocalHostMcpOptions = {
    * link packs every project file git does not ignore.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
+  /** The serving CLI and how it was started: the `initialize` instructions name it, and every `test_model` answer carries it as `runtime`. */
+  readonly runtime?: TauMcpRuntime | undefined;
 };
 
 /** A local MCP server serving one agent. @public */
@@ -848,6 +851,15 @@ export type LocalHostMcp = {
   /** Close the server and remove the screenshots and reports it filed. */
   close(): Promise<void>;
 };
+
+/**
+ * The engine a `test_model` answer names, so a shortened report keeps it as the full one does (VER-3).
+ *
+ * @param content - The registry's answer.
+ * @returns `{ engine }`, or nothing when the answer names none.
+ */
+const identityOf = (content: JsonValue): { readonly engine?: JsonValue } =>
+  isJsonObject(content) && content['engine'] !== undefined ? { engine: content['engine'] } : {};
 
 /**
  * The project folder one call names, if any.
@@ -962,9 +974,16 @@ export const serveLocalHostMcp = async (
       return route;
     }
     const result = await invokeIn({ workspaceRoot, tool: route.tool, args: route.args, call: dispatchOptions });
-    return present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch((error: unknown) =>
-      hostFault(route.tool, error),
+    const presented = await present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch(
+      (error: unknown) => hostFault(route.tool, error),
     );
+    return route.tool === toolName.testModel && presented.success === true
+      ? {
+          ...presented,
+          ...identityOf(result.content),
+          ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+        }
+      : presented;
   };
   const viewer =
     options.viewerPage === undefined
@@ -1018,6 +1037,7 @@ export const serveLocalHostMcp = async (
   const server = await serveTauMcpStdio(
     {
       ...(viewer === undefined ? {} : { viewer }),
+      runtime: options.runtime,
       cadTools,
       hostTools: options.registry
         .list()

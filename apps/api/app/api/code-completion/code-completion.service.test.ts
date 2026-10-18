@@ -5,7 +5,7 @@ import type { ModelInvocationService } from '#api/llm/model-invocation.types.js'
 describe('CodeCompletionService', () => {
   it('maps malformed runtime input to a bounded bad request before invoking the owner', async () => {
     const invocations = { invoke: vi.fn() };
-    const service = new CodeCompletionService(invocations as unknown as ModelInvocationService);
+    const service = new CodeCompletionService(invocations);
 
     await expect(service.complete({}, 'user', new AbortController().signal)).rejects.toMatchObject({ status: 400 });
     expect(invocations.invoke).not.toHaveBeenCalled();

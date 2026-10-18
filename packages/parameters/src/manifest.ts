@@ -1473,7 +1473,7 @@ const projectDraft07 = (schema: JsonStructureSchema): ParameterSchemaProjection<
       ? {
           status: 'usable',
           dialect: 'draft-07',
-          schema: projectedSchema as JSONSchema7,
+          schema: projectedSchema,
           diagnostics,
         }
       : { status: 'unsupported', dialect: 'draft-07', diagnostics },
@@ -1953,7 +1953,7 @@ const admitResolution = (value: unknown): ParameterResolutionOptions => {
   if (resolution['sourceUnitDigest'] !== undefined) {
     requireDigest(resolution['sourceUnitDigest'], 'identity.resolution.sourceUnitDigest');
   }
-  return resolution as ParameterResolutionOptions;
+  return resolution;
 };
 
 const admitSource = (value: unknown): ParameterSource => {
@@ -2399,11 +2399,7 @@ const inspectParameterManifest = (value: unknown): ParameterManifest => {
     ) {
       fail(diagnostic('INVALID_ANNOTATION', 'invalid effective quantity semantics', bindingResource, bindingPointer));
     }
-    validateSemanticBinding(
-      bindingRecord as NonNullable<ParameterDeclaration['bindings']>[string],
-      bindingResource,
-      bindingPointer,
-    );
+    validateSemanticBinding(bindingRecord, bindingResource, bindingPointer);
     const expected = expectedTables.bindings[pointer];
     if (
       expected !== undefined &&

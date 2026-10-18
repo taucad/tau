@@ -10,7 +10,7 @@ describe('image transcoder browser build', () => {
       build: {
         write: false,
         lib: { entry: fileURLToPath(new URL('image.transcoder.ts', import.meta.url)), formats: ['es'] },
-        rollupOptions: {
+        rolldownOptions: {
           external: ['@taucad/camera', '@taucad/runtime/transcoder', 'nanoraster'],
         },
       },

@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // Keep mock matchers on this runner's Vitest instance instead of a second external peer.
+    server: { deps: { inline: ['vitest-mock-extended'] } },
     maxWorkers: 4,
     typecheck: {
       enabled: true,

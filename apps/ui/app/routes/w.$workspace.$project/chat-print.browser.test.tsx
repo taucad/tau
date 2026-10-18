@@ -131,7 +131,7 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
   } else if (scenario === 'prepare') {
     // The Machine select names the printer and its status; slicing is the pane's action bar.
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Workshop X1CReady');
+      expect(screen.getByRole('combobox', { name: 'Machine' })).toMatchTextContent('Workshop X1CReady');
     });
     await page.getByRole('button', { name: 'Slice and preview' }).click();
     await screen.findByRole('group', { name: 'Slice result' });

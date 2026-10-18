@@ -394,7 +394,7 @@ export const readManifest = (root?: string, selection: CatalogSelection = 'all')
     return buildState(resolvedRoot, { public: publicCatalog });
   }
 
-  const privateCatalog = readCatalog(resolvedRoot, 'private') as PrivateCatalog;
+  const privateCatalog = readCatalog(resolvedRoot, 'private');
   return buildState(resolvedRoot, { public: publicCatalog, private: privateCatalog });
 };
 

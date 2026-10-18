@@ -1439,11 +1439,7 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
 
   it('merges a parameter record per key through its codec, never as text (N1)', async () => {
     const record = (values: Record<string, number>): string =>
-      new TextDecoder().decode(
-        serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } } as Parameters<
-          typeof serializeParameterRecord
-        >[0]),
-      );
+      new TextDecoder().decode(serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } }));
     const path = '.tau/parameters/main.json';
     const race = createRace(path, record({ height: 10, width: 10 }));
     try {
@@ -1467,11 +1463,7 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
 
   it('records rather than marking a parameter both sides changed (N1, D14)', async () => {
     const record = (values: Record<string, number>): string =>
-      new TextDecoder().decode(
-        serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } } as Parameters<
-          typeof serializeParameterRecord
-        >[0]),
-      );
+      new TextDecoder().decode(serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } }));
     const path = '.tau/parameters/main.json';
     const race = createRace(path, record({ height: 10 }));
     try {

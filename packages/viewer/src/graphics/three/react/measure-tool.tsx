@@ -1149,8 +1149,7 @@ export function MeasureTool(): React.JSX.Element {
       return;
     }
     if (
-      previous &&
-      previous.cameraRevision === cameraRevision &&
+      previous?.cameraRevision === cameraRevision &&
       previous.geometryKey === geometryKey &&
       previous.graphicsActor === graphicsActor &&
       previous.isMeasureActive === isMeasureActive &&

@@ -31,8 +31,9 @@ beforeEach(() => {
 });
 
 const begin = async (onTranscript = vi.fn()) => {
+  const initialProps: { draftOwner: unknown } = { draftOwner: {} };
   const hook = renderHook(({ draftOwner }) => useDictation(onTranscript, draftOwner), {
-    initialProps: { draftOwner: {} as unknown },
+    initialProps,
   });
   await waitFor(() => {
     expect(hook.result.current.available).toBe(true);

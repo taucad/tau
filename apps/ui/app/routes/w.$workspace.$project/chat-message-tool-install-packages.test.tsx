@@ -42,7 +42,7 @@ describe('ChatMessageToolInstallPackages', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('simplex-noise').parentElement).toHaveTextContent('simplex-noise 4.0.3');
+    expect(screen.getByText('simplex-noise').parentElement).toMatchTextContent('simplex-noise 4.0.3');
   });
 
   it('should open on a refusal and show its recovery message', () => {
@@ -67,7 +67,7 @@ describe('ChatMessageToolInstallPackages', () => {
       'aria-expanded',
       'true',
     );
-    expect(screen.getByText(message, { exact: false }).parentElement).toHaveTextContent(
+    expect(screen.getByText(message, { exact: false }).parentElement).toMatchTextContent(
       `no-matching-version: ${message}`,
     );
   });
@@ -84,6 +84,6 @@ describe('ChatMessageToolInstallPackages', () => {
         part={{ toolCallId: 'install-1', state: 'output-error', input: {}, errorText: 'EROFS' }}
       />,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('package install: EROFS');
+    expect(screen.getByRole('alert')).toMatchTextContent('package install: EROFS');
   });
 });

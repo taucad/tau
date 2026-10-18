@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { CreditLedgerService, recordSettledGenAiUsage } from '#api/billing/credit-ledger.service.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import type { DatabaseService } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
 
 const attributes = {
   'gen_ai.request.model': 'model-a',
@@ -26,7 +25,7 @@ describe('recordSettledGenAiUsage', () => {
     const metrics = meters();
 
     recordSettledGenAiUsage(
-      metrics as unknown as MetricsService,
+      metrics,
       attributes,
       {
         kind: 'final_usage',
@@ -53,7 +52,7 @@ describe('recordSettledGenAiUsage', () => {
     const metrics = meters();
 
     recordSettledGenAiUsage(
-      metrics as unknown as MetricsService,
+      metrics,
       attributes,
       { kind: 'absorbed_unknown', meterItems: [{ dimension: 'output', tier: null, quantity: 9n }] },
       { chargedAtoms: 7n, supplierCostPicoUsd: null },
@@ -69,7 +68,7 @@ describe('recordSettledGenAiUsage', () => {
     const metrics = meters();
 
     recordSettledGenAiUsage(
-      metrics as unknown as MetricsService,
+      metrics,
       attributes,
       { kind: 'provider_rejected' },
       { chargedAtoms: 0n, supplierCostPicoUsd: 0n },

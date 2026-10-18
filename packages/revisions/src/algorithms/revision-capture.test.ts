@@ -856,7 +856,7 @@ const caseInsensitiveFileSystem = () => {
     readdir: async (path) => [...directory(path).children.values()].map((child) => child.name),
     readdirEntries: async (path) =>
       [...directory(path).children.values()].map((child) => ({ name: child.name, kind: child.kind })),
-    stat: (async (path: string) => {
+    stat: async (path: string) => {
       const node = lookup(path);
       if (node === undefined) {
         throw enoent(path);
@@ -864,7 +864,7 @@ const caseInsensitiveFileSystem = () => {
       return node.kind === 'dir'
         ? { type: 'dir', size: 0, mtimeMs: 0 }
         : { type: 'file', size: node.content.byteLength, mtimeMs: 0, contentKind: 'text', lineCount: 1 };
-    }) as RevisionCaptureFileSystem['stat'],
+    },
     readFile: (async (path: string) => {
       const node = lookup(path);
       if (node?.kind !== 'file') {

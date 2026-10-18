@@ -1215,7 +1215,7 @@ describe('the external agent run kind', () => {
          * before it still decides: a report Tau cannot parse is not a reset. */
         details: {
           failure: { category: 'limit' },
-          resetsAt: expect.closeTo(resetsAt, -1) as unknown as number,
+          resetsAt: expect.closeTo(resetsAt, -1) as unknown,
           window: 'five_hour',
         },
       },
@@ -1292,7 +1292,7 @@ describe('the external agent run kind', () => {
       state: 'failed',
       detail: {
         code: 'EXTERNAL_AGENT_LIMIT_REACHED',
-        details: { resetsAt: expect.closeTo(resetsAt, -1) as unknown as number, window: 'five_hour' },
+        details: { resetsAt: expect.closeTo(resetsAt, -1) as unknown, window: 'five_hour' },
       },
     });
   }, 90_000);
@@ -1455,7 +1455,7 @@ describe('the external agent run kind', () => {
         details: {
           agentId: 'codex',
           failure: { category: 'internal', title: 'Internal error', actions: ['retry'] },
-          diagnostics: expect.stringContaining('[SYSTEM_ERROR] Prompt for session') as unknown as string,
+          diagnostics: expect.stringContaining('[SYSTEM_ERROR] Prompt for session') as unknown,
         },
       },
     });
@@ -1569,7 +1569,7 @@ describe('the external agent run kind', () => {
       }),
     ).resolves.toMatchObject({
       status: 'refused',
-      message: expect.stringMatching(/cannot start the gemini agent/u) as unknown as string,
+      message: expect.stringMatching(/cannot start the gemini agent/u) as unknown,
     });
   }, 30_000);
 });

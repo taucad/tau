@@ -139,7 +139,7 @@ describe('MachinesSettings', () => {
     fireEvent.click(add);
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Simulated X1C is bound as bambu:sim.');
+      expect(screen.getByRole('status')).toMatchTextContent('Simulated X1C is bound as bambu:sim.');
     });
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ providerId: 'bambu-simulator', configuration: {} }),
@@ -180,10 +180,10 @@ describe('MachinesSettings', () => {
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: 'Simulated X1C' }));
     const simulator = screen.getByRole('region', { name: 'Simulated X1C' });
-    expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not machine settings.');
+    expect(simulator).toMatchTextContent('Its settings only change the simulation; they are not machine settings.');
     const speed = await within(simulator).findByRole('spinbutton', { name: 'Input for Demo speed' });
     expect(speed).toHaveValue('1');
-    expect(within(simulator).getByLabelText('Parameter: Demo speed')).toHaveTextContent('Demo speed');
+    expect(within(simulator).getByLabelText('Parameter: Demo speed')).toMatchTextContent('Demo speed');
     expect(
       within(simulator).getByText('Simulated seconds per real second, so a long print can be watched in minutes'),
     ).toBeInTheDocument();
@@ -202,7 +202,7 @@ describe('MachinesSettings', () => {
     await user.click(add);
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Simulated X1C is bound as bambu:sim.');
+      expect(screen.getByRole('status')).toMatchTextContent('Simulated X1C is bound as bambu:sim.');
     });
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
@@ -239,7 +239,7 @@ describe('MachinesSettings', () => {
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('shop-x1c is bound as bambu:sim.');
+      expect(screen.getByRole('status')).toMatchTextContent('shop-x1c is bound as bambu:sim.');
     });
     /* Where it is travels as the contract's endpoint, by the provider's transport; the configuration holds only its own fields. */
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
@@ -326,7 +326,7 @@ describe('MachinesSettings', () => {
       expect(addressField()).toHaveValue('192.168.0.112');
     });
     expect(nameField()).toHaveValue('Workshop X1C');
-    expect(screen.getByRole('status')).toHaveTextContent('Listening for more machines…');
+    expect(screen.getByRole('status')).toMatchTextContent('Listening for more machines…');
     expect(find).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Bind' })).toBeEnabled();
 
@@ -334,7 +334,7 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(find).toBeEnabled();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('');
+    expect(screen.getByRole('status')).toMatchTextContent('');
   });
 
   it('should bind Mini through its provider without a later scan replacing its identity or typed code', async () => {
@@ -402,7 +402,7 @@ describe('MachinesSettings', () => {
 
     expect(
       within(screen.getByRole('list', { name: 'Machines that cannot be added here' })).getByRole('listitem'),
-    ).toHaveTextContent(`${grblProvider.manifest.identity.displayName} can't be added here. ${reason}`);
+    ).toMatchTextContent(`${grblProvider.manifest.identity.displayName} can't be added here. ${reason}`);
     fireEvent.click(find);
 
     await waitFor(() => {
@@ -436,8 +436,8 @@ describe('MachinesSettings', () => {
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^The printer refused the code\.$/u);
-    expect(screen.getByRole('status')).toHaveTextContent('');
+    expect(await screen.findByRole('alert')).toMatchTextContent(/^The printer refused the code\.$/u);
+    expect(screen.getByRole('status')).toMatchTextContent('');
   });
 
   it('should ask for where the machine is before discovering anything', async () => {
@@ -453,7 +453,7 @@ describe('MachinesSettings', () => {
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter an address.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Enter an address.');
     expect(facet.discover).not.toHaveBeenCalled();
   });
 
@@ -598,7 +598,7 @@ describe('MachinesSettings', () => {
 
     fireEvent.click(testing);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'Testing could not be changed: The machine is printing.',
     );
     expect(testing).toBeChecked();
@@ -634,7 +634,7 @@ describe('MachinesSettings', () => {
 
     renderSettings();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(printersInUseElsewhere);
+    expect(await screen.findByRole('alert')).toMatchTextContent(printersInUseElsewhere);
     // The list is unknown, not empty.
     expect(screen.queryByText('No machines yet.')).not.toBeInTheDocument();
   });
@@ -673,7 +673,7 @@ describe('MachinesSettings', () => {
       const facet = await findSaved();
 
       const code = screen.getByRole('group', { name: 'Access code' });
-      expect(code).toHaveTextContent('Saved in your Keychain');
+      expect(code).toMatchTextContent('Saved in your Keychain');
       /* The only thing named "Access code" is that line: no field asks for the code. */
       expect(screen.getByLabelText('Access code')).toBe(code);
       fireEvent.click(screen.getByRole('button', { name: 'Printer details' }));
@@ -683,7 +683,7 @@ describe('MachinesSettings', () => {
       submit();
 
       await waitFor(() => {
-        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is bound as bambu:sim.');
+        expect(screen.getByRole('status')).toMatchTextContent('Workshop X1C is bound as bambu:sim.');
       });
       expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate: savedCandidate, name: 'Workshop X1C' });
       /* No code leaves the page: the host reuses the one it saved. */
@@ -709,8 +709,8 @@ describe('MachinesSettings', () => {
 
       submit();
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Enter the access code shown on the machine.');
-      expect(screen.getByRole('status')).toHaveTextContent('');
+      expect(await screen.findByRole('alert')).toMatchTextContent('Enter the access code shown on the machine.');
+      expect(screen.getByRole('status')).toMatchTextContent('');
       expect(facet.discover).toHaveBeenCalledOnce();
       expect(facet.beginBinding).not.toHaveBeenCalled();
       expect(state.completeBinding).not.toHaveBeenCalled();
@@ -732,7 +732,7 @@ describe('MachinesSettings', () => {
       submit();
 
       await waitFor(() => {
-        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is bound as bambu:sim.');
+        expect(screen.getByRole('status')).toMatchTextContent('Workshop X1C is bound as bambu:sim.');
       });
       expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({
         ceremonyId: 'ceremony-1',
@@ -750,7 +750,7 @@ describe('MachinesSettings', () => {
 
       submit();
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toMatchTextContent(
         "The machine's certificate changed since the code was saved. Enter the access code to bind it again.",
       );
       expect(screen.getByLabelText('Access code')).toHaveAttribute('type', 'password');
@@ -787,7 +787,7 @@ describe('MachinesSettings', () => {
       fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove' }));
 
       await waitFor(() => {
-        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is removed.');
+        expect(screen.getByRole('status')).toMatchTextContent('Workshop X1C is removed.');
       });
       expect(facet.removeBinding).toHaveBeenCalledExactlyOnceWith({ machineId: 'workshop-x1c' });
       /* The list follows the host's directory. */
@@ -806,7 +806,7 @@ describe('MachinesSettings', () => {
 
       fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove' }));
 
-      expect(await within(confirmation).findByRole('alert')).toHaveTextContent(
+      expect(await within(confirmation).findByRole('alert')).toMatchTextContent(
         "Resolve this machine's open jobs first.",
       );
       expect(within(confirmation).getByRole('button', { name: 'Remove' })).toBeEnabled();
@@ -850,7 +850,7 @@ describe('MachinesSettings', () => {
 
       expect(await screen.findByText('No machines yet.')).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent('');
+      expect(screen.getByRole('status')).toMatchTextContent('');
     });
   });
 });

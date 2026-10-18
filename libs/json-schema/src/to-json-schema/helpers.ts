@@ -148,5 +148,5 @@ export function mergeSchemaObjs(schema1: JSONSchema7, schema2: JSONSchema7): JSO
     }
   }
 
-  return returnValueObject as JSONSchema7;
+  return returnValueObject;
 }

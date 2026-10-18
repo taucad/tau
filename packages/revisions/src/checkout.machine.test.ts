@@ -365,7 +365,7 @@ describe('checkoutMachine', () => {
       checkoutId: 'checkout-1',
       trigger: 'close',
       requestId: 'close-1',
-      reason: expect.stringContaining('out of space') as unknown as string,
+      reason: expect.stringContaining('out of space') as string,
     });
     expect(parent.events.find((event) => event.type === 'cutFailed')).toEqual(refusal);
 

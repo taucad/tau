@@ -295,7 +295,7 @@ const harness = async (): Promise<Harness> => {
         type: 'start',
         commandId: 'req_seam-leader',
         payload: { chatId, runId: 'run-0', trigger: 'submit', message: { id: 'user-0', role: 'user', content: 'hi' } },
-      } as Parameters<AgentChannelClient['execute']>[0]);
+      });
       /* The start answers once the run is admitted; it is running only once that row follows (W6.r1 round 4). */
       await vi.waitFor(
         async () => {
@@ -609,7 +609,7 @@ describe('the seam on the browser leg', () => {
         limit: agentWireLimits.batchRows,
         maxBytes: agentWireLimits.batchBytes,
         ...input,
-      } as Parameters<AgentChannelClient['read']>[0]);
+      });
     await expect(read({ cursor: rows.length + 5 })).resolves.toEqual({
       status: 'refused',
       chatId,
@@ -647,7 +647,7 @@ describe('the seam on the browser leg', () => {
         type: 'start',
         commandId: 'req_seam-second',
         payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-2', role: 'user', content: 'hi' } },
-      } as Parameters<AgentChannelClient['execute']>[0]);
+      });
       expect(again).toMatchObject({ status: 'refused', code: 'RUN_ID_TAKEN' });
     });
 

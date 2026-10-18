@@ -35,7 +35,7 @@ describe('machine profile observation recovery', () => {
         <MachineProfiles settings={settings} studio={studio} />
       </TooltipProvider>,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('settings watch refused');
+    expect(screen.getByRole('alert')).toMatchTextContent('settings watch refused');
     await userEvent.click(screen.getByRole('button', { name: 'Retry settings updates' }));
     expect(retry).toHaveBeenCalledOnce();
     expect(settings.useLatest).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import type { MotionStyle, Transition } from 'motion/react';
+import type { Transition } from 'motion/react';
 import { motion } from 'motion/react';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -67,11 +67,9 @@ export function BorderBeam({
   return (
     <div
       className='pointer-events-none absolute inset-0 rounded-[inherit] border-(length:--border-beam-width) border-transparent [mask-image:linear-gradient(transparent,transparent),linear-gradient(#000,#000)] [mask-composite:intersect] [mask-clip:padding-box,border-box]'
-      style={
-        {
-          '--border-beam-width': `${borderWidth}px`,
-        } as React.CSSProperties
-      }
+      style={{
+        '--border-beam-width': `${borderWidth}px`,
+      }}
     >
       <motion.div
         className={cn(
@@ -79,15 +77,13 @@ export function BorderBeam({
           'bg-gradient-to-l from-[var(--color-from)] via-[var(--color-to)] to-transparent',
           className,
         )}
-        style={
-          {
-            width: size,
-            offsetPath: `rect(0 auto auto 0 round ${size}px)`,
-            '--color-from': colorFrom,
-            '--color-to': colorTo,
-            ...style,
-          } as MotionStyle
-        }
+        style={{
+          width: size,
+          offsetPath: `rect(0 auto auto 0 round ${size}px)`,
+          '--color-from': colorFrom,
+          '--color-to': colorTo,
+          ...style,
+        }}
         initial={{ offsetDistance: `${initialOffset}%` }}
         animate={{
           offsetDistance: isReverse

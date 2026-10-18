@@ -303,7 +303,7 @@ export const createGeoSpecRunProgress = (): GeoSpecRunProgress => {
           passes.push(projected.pass);
         }
       }
-      if (inFlightTest !== undefined && inFlightTest.targetFile === file) {
+      if (inFlightTest?.targetFile === file) {
         tests.push(inFlightTest);
         countStatus(counts, 'not-run');
       }

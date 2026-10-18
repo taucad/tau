@@ -149,7 +149,7 @@ describe('Minification-resilient function naming', () => {
       expect(mr.name).toBe('mr');
       const { mangledToOriginal, exportNames } = preserveExportNames({
         basicFaceExtrusion: mr,
-      } as Record<string, unknown>);
+      });
       expect(mr.name).toBe('basicFaceExtrusion');
       expect(mangledToOriginal.get('mr')).toBe('basicFaceExtrusion');
       expect(exportNames.has('basicFaceExtrusion')).toBe(true);
@@ -160,7 +160,7 @@ describe('Minification-resilient function naming', () => {
         throw new Error('test');
       };
 
-      preserveExportNames({ basicFaceExtrusion: mr } as Record<string, unknown>);
+      preserveExportNames({ basicFaceExtrusion: mr });
 
       try {
         mr();
@@ -174,7 +174,7 @@ describe('Minification-resilient function naming', () => {
 
     it('should include unchanged names in exportNames but not in mangledToOriginal', () => {
       const myFunction = named('myFunction', () => 0);
-      const { mangledToOriginal, exportNames } = preserveExportNames({ myFunction } as Record<string, unknown>);
+      const { mangledToOriginal, exportNames } = preserveExportNames({ myFunction });
       expect(myFunction.name).toBe('myFunction');
       expect(mangledToOriginal.size).toBe(0);
       expect(exportNames.has('myFunction')).toBe(true);
@@ -202,7 +202,7 @@ describe('Minification-resilient function naming', () => {
         Sketch: a,
         Blueprint: b,
         makeSolid: c,
-      } as Record<string, unknown>);
+      });
       /* eslint-enable @typescript-eslint/naming-convention -- end minified export simulation */
       expect(a.name).toBe('Sketch');
       expect(b.name).toBe('Blueprint');
@@ -225,7 +225,7 @@ describe('Minification-resilient function naming', () => {
       }
       /* eslint-enable @typescript-eslint/explicit-member-accessibility -- end minified class simulation */
 
-      const { mangledToOriginal } = preserveExportNames({ Sketch: e } as Record<string, unknown>);
+      const { mangledToOriginal } = preserveExportNames({ Sketch: e });
       /* eslint-enable @typescript-eslint/naming-convention -- end minified class simulation */
       expect(mangledToOriginal.get('e')).toBe('Sketch');
 

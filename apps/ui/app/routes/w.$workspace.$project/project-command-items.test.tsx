@@ -1,7 +1,6 @@
 import { render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { UIMatch } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
@@ -187,7 +186,7 @@ const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'
   ...over,
 });
 
-const match: UIMatch = {
+const match = {
   data: undefined,
   handle: undefined,
   id: 'project-route',

@@ -82,7 +82,7 @@ const requestedMeshIntent = (
   format: RuntimeBackedModelFormat,
   tessellation: TessellationIntent | undefined,
 ): GeometryExportIntent['requested'] => ({
-  format: format as GeometryExportIntent['requested']['format'],
+  format: format,
   coordinateSystem: 'z-up',
   unit: { length: 'millimeter' },
   ...(tessellation === undefined ? {} : { tessellation }),
@@ -266,7 +266,7 @@ export const resolveRuntimeExportIntent = (options: {
 
     const exportOptions: Record<string, unknown> = {};
     const honored: NonNullable<GeometryExportIntent['honored']> = {
-      format: format as GeometryExportIntent['requested']['format'],
+      format: format,
       sourceUnit: 'mm',
     };
     if (hasSchemaProperty(route, 'coordinateSystem')) {
@@ -278,7 +278,7 @@ export const resolveRuntimeExportIntent = (options: {
       options: exportOptions,
       sourceUnit: 'mm',
       provenance: {
-        requested: { format: format as GeometryExportIntent['requested']['format'] },
+        requested: { format: format },
         honored,
         route: routeToProvenance(route),
       },

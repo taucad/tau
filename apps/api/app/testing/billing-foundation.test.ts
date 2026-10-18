@@ -390,8 +390,7 @@ describe('billing database protections and real command', () => {
           ]),
         };
         return spawnSync(process.execPath, args, {
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- sanitized child intentionally excludes ambient API configuration
-          env: childEnvironment as NodeJS.ProcessEnv,
+          env: childEnvironment,
           encoding: 'utf8',
         });
       };
@@ -414,8 +413,7 @@ describe('billing database protections and real command', () => {
         ]),
       };
       const duplicate = spawnSync(process.execPath, [...args, '--environment', 'prod-us'], {
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- sanitized child intentionally excludes ambient API configuration
-        env: duplicateEnvironment as NodeJS.ProcessEnv,
+        env: duplicateEnvironment,
         encoding: 'utf8',
       });
       expect(duplicate.status).toBe(1);

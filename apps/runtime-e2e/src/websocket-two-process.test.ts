@@ -364,7 +364,7 @@ const recordSockets = (): SocketRecorder => {
       /* `ws` narrows `binaryType` to its own union while the structural
        * `WebSocketLike` declares `binaryType: string`; the members themselves
        * match, which is why `webSocketHost` wraps these very sockets. */
-      return socket as unknown as ReturnType<NonNullable<WebSocketTransportOptions['createSocket']>>;
+      return socket;
     },
     routed: (route) => dialled.find((entry) => new URL(entry.url).pathname === `/${route}`)?.socket,
   };

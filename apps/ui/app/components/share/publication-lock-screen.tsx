@@ -210,7 +210,7 @@ export function parsePublicationLockPayload(data: unknown): PublicationLockReaso
     return undefined;
   }
 
-  const { reason } = parsed as { reason: unknown };
+  const { reason } = parsed;
   if (typeof reason !== 'string' || !isPublicationLockReason(reason)) {
     return undefined;
   }

@@ -311,7 +311,7 @@ describe('RevisionStatusAction', () => {
     const trigger = await screen.findByRole('button', {
       name: 'Open Revisions. You are on main, Rev 12. Saved on this device.',
     });
-    expect(trigger).toHaveTextContent(/^main$/u);
+    expect(trigger).toMatchTextContent(/^main$/u);
   });
 
   /*
@@ -333,15 +333,15 @@ describe('RevisionStatusAction', () => {
     const trigger = await screen.findByRole('button', {
       name: 'Open Revisions. You are on main, Rev 13. Saved on this device.',
     });
-    expect(trigger).toHaveTextContent(/^main$/u);
+    expect(trigger).toMatchTextContent(/^main$/u);
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
-    expect(trigger).not.toHaveTextContent(/Viewing|Rev 3/u);
+    expect(trigger).not.toMatchTextContent(/Viewing|Rev 3/u);
 
     await user.tab();
     await screen.findByRole('list', { name: 'Recent revisions' });
     const card = document.querySelector('[data-slot="revision-card"]');
-    expect(card?.firstElementChild).toHaveTextContent(/^main\s*Rev 13$/u);
-    expect(card).toHaveTextContent('Restored Rev 3');
+    expect(card?.firstElementChild).toMatchTextContent(/^main\s*Rev 13$/u);
+    expect(card).toMatchTextContent('Restored Rev 3');
   });
 
   it('names a restore by its target when that target is older than the loaded page (B4)', async () => {
@@ -359,7 +359,7 @@ describe('RevisionStatusAction', () => {
 
     const card = document.querySelector('[data-slot="revision-card"]');
     await waitFor(() => {
-      expect(card).toHaveTextContent('Restored Rev 3');
+      expect(card).toMatchTextContent('Restored Rev 3');
     });
     expect(revisionStatusHarness.rowRequests).toEqual(['rev-3']);
   });
@@ -422,8 +422,8 @@ describe('RevisionStatusAction', () => {
     await user.tab();
 
     const recent = await screen.findByRole('list', { name: 'Recent revisions' });
-    expect(recent).toHaveTextContent('Motor mount holes');
-    expect(recent).toHaveTextContent('Thinner arms');
+    expect(recent).toMatchTextContent('Motor mount holes');
+    expect(recent).toMatchTextContent('Thinner arms');
     expect(screen.getByText('Modified since Rev 12')).toBeInTheDocument();
     expect(screen.getByText('Click to open Revisions')).toBeInTheDocument();
   });
@@ -483,8 +483,8 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = screen.getByRole('button', { name: 'Open Revisions. Setting up. Loading history…' });
-    expect(trigger).toHaveTextContent('Setting up');
-    expect(trigger).not.toHaveTextContent(/main|Nothing saved/u);
+    expect(trigger).toMatchTextContent('Setting up');
+    expect(trigger).not.toMatchTextContent(/main|Nothing saved/u);
   });
 
   it('says the conflicted line in its name, and draws the amber GitMerge (HQ1, HQ2)', async () => {

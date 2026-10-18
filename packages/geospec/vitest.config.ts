@@ -29,6 +29,8 @@ export const substrateCoverageSourcePolicy = {
 export default defineConfig({
   test: {
     environment: 'node',
+    // Keep mock matchers on this runner's Vitest instance instead of a second external peer.
+    server: { deps: { inline: ['vitest-mock-extended'] } },
     env: installedConsumerRoot
       ? {
           // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

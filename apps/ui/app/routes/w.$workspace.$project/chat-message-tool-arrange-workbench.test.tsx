@@ -89,15 +89,15 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
     expect(header).toHaveAttribute('aria-expanded', 'true');
     expect(header).toHaveFocus();
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
     act(() => {
       current = { layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' };
       listener?.();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
     appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Shown');
+    expect(screen.getByRole('status')).toMatchTextContent('Shown');
     expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeEnabled();
     act(() => {
       current = {
@@ -107,10 +107,10 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       };
       listener?.();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Shown partly');
+    expect(screen.getByRole('status')).toMatchTextContent('Shown partly');
     await userEvent.keyboard(' ');
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByRole('alert')).toHaveTextContent('Telemetry could not be shown');
+    expect(screen.getByRole('alert')).toMatchTextContent('Telemetry could not be shown');
   });
 
   it('should keep a restore receipt visible when collapsed and disable an immediate toggle', async () => {
@@ -157,14 +157,14 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       },
     };
     const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('button')).toHaveTextContent('Unchanged workbench');
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('button')).toMatchTextContent('Unchanged workbench');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
     rendered.rerender(
       <ChatMessageToolArrangeWorkbench
         part={{ ...part, output: { ...part.output, revisions: output.output.revisions } }}
       />,
     );
-    expect(screen.getByRole('button')).toHaveTextContent('Arranged workbench');
+    expect(screen.getByRole('button')).toMatchTextContent('Arranged workbench');
   });
 
   it.each(['approval-requested', 'approval-responded', 'output-denied'] as const)(
@@ -182,7 +182,7 @@ describe('ChatMessageToolArrangeWorkbench', () => {
         />,
       );
       expect(screen.queryByRole('button', { name: /Approve/u })).not.toBeInTheDocument();
-      expect(screen.getByRole('button')).toHaveTextContent(
+      expect(screen.getByRole('button')).toMatchTextContent(
         state === 'output-denied' ? 'Denied' : state === 'approval-requested' ? 'Awaiting approval' : 'Awaiting result',
       );
     },
@@ -211,46 +211,46 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     };
     appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedEntryRevisions = new Map([['model/main.ts', entriesDigest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedEntryRevisions = new Map([
       ['model/main.ts', entriesDigest],
       ['model/other.ts', entriesDigest],
     ]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedWorkbenchRevisions = new Map([
       [workbenchPaths.layout, digest],
       [workbenchPaths.view('iso'), entriesDigest],
     ]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedWorkbenchRevisions = new Map([
       [workbenchPaths.layout, digest],
       [workbenchPaths.view('iso'), viewDigest],
     ]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Shown');
+    expect(screen.getByRole('status')).toMatchTextContent('Shown');
 
     appliedEntryRevisions = new Map([
       ['model/main.ts', viewDigest],
       ['model/other.ts', entriesDigest],
     ]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedEntryRevisions = new Map([
       ['model/main.ts', entriesDigest],
       ['model/other.ts', entriesDigest],
     ]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Shown');
+    expect(screen.getByRole('status')).toMatchTextContent('Shown');
   });
 
   it('waits for the matching acknowledged layout and a removed view to leave that layout', () => {
@@ -271,15 +271,15 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     controller.snapshot.mockReturnValue({ layout, layoutDigest: closedDigest, refused: [] });
     appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, closedDigest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Written');
+    expect(screen.getByRole('status')).toMatchTextContent('Written');
 
     controller.snapshot.mockReturnValue({ layout: closedLayout, layoutDigest: closedDigest, refused: [] });
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Shown');
+    expect(screen.getByRole('status')).toMatchTextContent('Shown');
   });
 
   it.each([
@@ -322,7 +322,7 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     await userEvent.click(screen.getByRole('button', { name: /Arranged/u }));
     const restore = screen.getByRole('button', { name: 'Restore previous layout' });
     await userEvent.click(restore);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Previous layout could not be restored.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Previous layout could not be restored.');
     expect(restore).toBeEnabled();
   });
 });

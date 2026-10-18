@@ -61,8 +61,9 @@ const manifest = {
 
 type Answer = { readonly status?: number; readonly body?: string; readonly headers?: Record<string, string> };
 
-const transportOf = (answers: Readonly<Record<string, Answer>>, calls: string[]): typeof fetch =>
-  (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+const transportOf =
+  (answers: Readonly<Record<string, Answer>>, calls: string[]): typeof fetch =>
+  async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const { url } = new Request(input);
     calls.push(`${init?.method ?? 'GET'} ${url}`);
     const answer = answers[`${init?.method ?? 'GET'} ${url}`];
@@ -70,7 +71,7 @@ const transportOf = (answers: Readonly<Record<string, Answer>>, calls: string[])
       throw new Error(`unrouted ${url}`);
     }
     return new Response(answer.body ?? null, { status: answer.status ?? 200, headers: answer.headers ?? {} });
-  }) as typeof fetch;
+  };
 
 const fresh: Record<string, Answer> = {
   [`HEAD ${pbsUrl}`]: { headers: { 'content-length': '6' } },

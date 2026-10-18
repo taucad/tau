@@ -1342,7 +1342,7 @@ describe('2020-12 parameter schema view', () => {
     };
     delete producer.schema.properties['precise'];
     delete producer.defaults['precise'];
-    return compile(producer as unknown as ParameterDeclaration);
+    return compile(producer);
   };
 
   it('should emit the OGC profile with binding semantics and no $id (Requirements 1, 7, 8; Recommendation 1 G–L)', async () => {

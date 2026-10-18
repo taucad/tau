@@ -62,7 +62,7 @@ describe('Workbench first-checkout readiness', () => {
         <Component />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('region')).toHaveTextContent('Downloading project files');
+    expect(screen.getByRole('region')).toMatchTextContent('Downloading project files');
     expect(screen.getByRole('region')).toHaveAttribute('aria-busy', 'true');
     expect(mocks.machines).not.toHaveBeenCalled();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();

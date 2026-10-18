@@ -113,7 +113,7 @@ export const observeGeometryHost = async (
       }
       const originalFork = utilityProcess.fork;
       state.tauE2eGeometryEvents = [];
-      utilityProcess.fork = ((...args: Parameters<typeof originalFork>) => {
+      utilityProcess.fork = (...args: Parameters<typeof originalFork>) => {
         const options = args[2];
         const geometry = options?.serviceName === 'tau-geometry-host';
         if (geometry && entryPreload) {
@@ -203,7 +203,7 @@ export const observeGeometryHost = async (
           });
         }
         return child;
-      }) as typeof utilityProcess.fork;
+      };
       state.tauE2eRestoreGeometryFork = () => {
         utilityProcess.fork = originalFork;
         delete state.tauE2eRestoreGeometryFork;

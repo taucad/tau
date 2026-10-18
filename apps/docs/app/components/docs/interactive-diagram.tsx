@@ -144,7 +144,7 @@ function InteractiveDiagramRenderer({
 
   const [selectedNode, setSelectedNode] = useState<string>();
 
-  const selectedNodeData = useMemo(() => {
+  const selectedNodeData = useMemo<DiagramNodeData | undefined>(() => {
     if (!selectedNode) {
       return undefined;
     }
@@ -152,7 +152,7 @@ function InteractiveDiagramRenderer({
     if (!node || node.type === 'group') {
       return undefined;
     }
-    return node.data as DiagramNodeData;
+    return node.data;
   }, [selectedNode, initialNodes]);
 
   const highlightedEdges = useMemo(() => {

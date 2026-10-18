@@ -38,7 +38,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 const chat = (id: string): Chat =>
-  ({ id, resourceId: 'p', name: id, messages: [], createdAt: 0, updatedAt: 0 }) satisfies Partial<Chat> as Chat;
+  ({ id, resourceId: 'p', name: id, messages: [], createdAt: 0, updatedAt: 0 }) satisfies Partial<Chat>;
 
 /**
  * Two turns on one branch, one per chat: `u1` is the branch's first revision

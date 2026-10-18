@@ -1009,11 +1009,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     try {
       // The exact export union is erased at this dynamic boundary after declaration,
       // offer and option admission; preserve the selected provider content.
-      const exportSelected = kernel.definition.export as (
+      const exportSelected: (
         input: { handle: unknown; exportId: string; options: Record<string, unknown>; content?: RuntimeContentInput },
         services: KernelRuntime,
         context: unknown,
-      ) => Promise<ExportOutput>;
+      ) => Promise<ExportOutput> = kernel.definition.export;
       const output = await exportSelected(
         {
           handle: input.nativeHandle,

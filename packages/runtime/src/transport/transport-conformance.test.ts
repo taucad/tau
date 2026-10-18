@@ -33,7 +33,7 @@ import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
-import type { WebWorkerTransportOptions } from '#transport/web-worker-client.js';
+import type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 import { webSocketClient } from '#transport/web-socket-client.js';
 import { webSocketTransport } from '#transport/web-socket-transport.js';
@@ -690,8 +690,8 @@ describe('transport conformance — web-worker (C2)', () => {
       const client = webWorkerTransport({
         url: 'about:blank',
         workerCtor: fake.workerCtor,
-        createWorker: () =>
-          Reflect.construct(fake.workerCtor, ['app-owned-worker.js', { type: 'module' }]) as unknown as FakeWorker,
+        createWorker: (): WebWorkerLike =>
+          Reflect.construct(fake.workerCtor, ['app-owned-worker.js', { type: 'module' }]),
       }).materialize();
       await client.open();
       expect(fake.urls).toEqual(['app-owned-worker.js']);
@@ -1236,7 +1236,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
       async (port: MessagePort): Promise<RuntimeTransportClient> => {
         const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
         const wrapped = portBacked(port);
-        const worker = {
+        const worker: WebWorkerLike = {
           postMessage: (data: unknown, transfer?: readonly Transferable[]) => {
             wrapped.postMessage(data, transfer);
           },
@@ -1254,8 +1254,8 @@ describe('transport conformance — shared transport internals (T37)', () => {
         };
         return webWorkerTransport({
           url: 'about:blank',
-          createWorker: () => worker as unknown as Worker,
-        }).materialize() as unknown as RuntimeTransportClient;
+          createWorker: () => worker,
+        }).materialize();
       },
     ],
     [
@@ -1282,14 +1282,14 @@ describe('transport conformance — shared transport internals (T37)', () => {
         return nodeWorkerTransport({
           url: new URL('about:blank'),
           workerCtor: PortBackedNodeWorker,
-        }).materialize() as unknown as RuntimeTransportClient;
+        }).materialize();
       },
     ],
     [
       'electron-utility',
       async (port: MessagePort): Promise<RuntimeTransportClient> => {
         const { electronUtilityClient } = await import('#electron/electron-utility-client.js');
-        return electronUtilityClient({ port }) as unknown as RuntimeTransportClient;
+        return electronUtilityClient({ port });
       },
     ],
     [
@@ -1307,7 +1307,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
         return webSocketClient({
           url: 'ws://127.0.0.1:8080',
           createSocket: () => messagePortAsWebSocket(port),
-        }) as unknown as RuntimeTransportClient;
+        });
       },
     ],
   ] as const;

@@ -262,8 +262,10 @@ const openProject = async (page: Page): Promise<void> => {
     }
   }
   // Every project made through Build from code has an "Initial design" chat, so the URL proves which one opened.
-  await chatLink.first().click({ noWaitAfter: true });
-  await page.waitForURL(new RegExp(`/w/[^/]+/${projectSlug}(?:[/?]|$)`, 'u'), { timeout: 60_000 });
+  await Promise.all([
+    page.waitForURL(new RegExp(`/w/[^/]+/${projectSlug}(?:[/?]|$)`, 'u'), { timeout: 60_000 }),
+    chatLink.first().click(),
+  ]);
   await sleep(page, 25_000);
   await page.keyboard.press('Escape');
   if (/[?&]settings=/u.test(page.url())) {

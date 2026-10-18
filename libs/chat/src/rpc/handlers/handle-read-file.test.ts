@@ -173,12 +173,9 @@ describe('handleReadFile', () => {
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
       fileSystem.stat.mockResolvedValue(textStat(200, 5000));
 
-      // Bypass the Zod schema (which would already reject this at the wire layer)
-      // by casting through `unknown` — we still want a defensive handler-level clamp.
-      const result = await handleReadFile(
-        { targetFile: 'big.ts', limit: 5000 } as unknown as Parameters<typeof handleReadFile>[0],
-        fileSystem,
-      );
+      // Call the handler directly, bypassing the Zod schema that would reject this at the wire layer.
+      // The defensive handler-level clamp must still enforce the limit.
+      const result = await handleReadFile({ targetFile: 'big.ts', limit: 5000 }, fileSystem);
 
       const content = result.success ? result.content : '';
       expect(content).toContain('truncated; continue with offset=2001');

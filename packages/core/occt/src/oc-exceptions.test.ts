@@ -138,7 +138,7 @@ describe('decodeOcException', () => {
       },
     };
 
-    const result = decodeOcException(42, mockOcInstance as unknown as OcExceptionInstance);
+    const result = decodeOcException(42, mockOcInstance);
     expect(result.message).toContain('KernelError:');
     expect(result.message).toContain('Standard_NullObject');
     expect(result.cppStack).toBe('at BRepAlgoAPI_Fuse');
@@ -153,7 +153,7 @@ describe('decodeOcException', () => {
       },
     };
 
-    const result = decodeOcException(42, mockOcInstance as unknown as OcExceptionInstance);
+    const result = decodeOcException(42, mockOcInstance);
     expect(result.message).toContain('Unknown kernel error (code 42)');
     expect(result.cppStack).toBeUndefined();
   });
@@ -192,7 +192,7 @@ describe('formatRuntimeErrorWithOc', () => {
 
     const result = formatRuntimeErrorWithOc({
       error: 42,
-      ocInstance: mockOcInstance as unknown as OcExceptionInstance,
+      ocInstance: mockOcInstance,
       ...helpers,
     });
 
@@ -215,7 +215,7 @@ describe('formatRuntimeErrorWithOc', () => {
 
     const result = formatRuntimeErrorWithOc({
       error: sourceError,
-      ocInstance: mockOcInstance as unknown as OcExceptionInstance,
+      ocInstance: mockOcInstance,
       ...helpers,
     });
 

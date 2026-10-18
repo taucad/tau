@@ -218,7 +218,7 @@ describe('ProjectLibraryCard live preview', () => {
     await userEvent.keyboard('Renamed project{Enter}');
     expect(mockActions.handleRename).toHaveBeenCalledExactlyOnceWith(mockProject.id, 'Renamed project');
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
 
     await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
@@ -247,7 +247,7 @@ describe('ProjectLibraryCard live preview', () => {
     renderCard();
 
     const location = screen.getByLabelText('Location: Home in this browser');
-    expect(location).toHaveTextContent('home/library');
+    expect(location).toMatchTextContent('home/library');
     expect(location).toHaveClass('w-fit', 'max-w-full');
     expect(location.querySelector('span')).not.toHaveClass('font-mono');
     expect(location.querySelector('svg')).toHaveClass('size-3');
@@ -269,7 +269,7 @@ describe('ProjectLibraryCard live preview', () => {
     });
 
     const location = screen.getByLabelText('Location: Workshop on your disk');
-    expect(location).toHaveTextContent('workshop/library');
+    expect(location).toMatchTextContent('workshop/library');
     expect(location.querySelector('span')).not.toHaveClass('font-mono');
     expect(location.querySelector('svg')).toHaveClass('size-3');
   });
@@ -335,16 +335,16 @@ describe('ProjectLibraryCard live preview', () => {
     renderCard({ onSelect });
 
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
 
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select Library Preview Demo' }));
     expect(onSelect).toHaveBeenCalledOnce();
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
 
     await userEvent.click(screen.getByRole('button', { name: 'Library Preview Demo' }));
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
 
     await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
   });
 });

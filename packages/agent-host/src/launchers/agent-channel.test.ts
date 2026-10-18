@@ -16,7 +16,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
-import type { Channel, MessagePortLike, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
+import type { Channel, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
 import { parseLeadershipFrame } from '#launchers/leadership/frames.js';
@@ -76,7 +76,7 @@ const client = (port: Parameters<typeof createChannelClient>[0]['port']): Channe
   createChannelClient<AgentWireProtocol>({
     port,
     sessionKey: 'tau-agent',
-    protocolSchemas: agentWireProtocolSchemas as WireProtocolSchemas<AgentWireProtocol>,
+    protocolSchemas: agentWireProtocolSchemas,
   });
 
 const cancel = { commandId: 'cmd-1', payload: { chatId: 'chat-1', runId: 'run-1' } } as const;
@@ -210,8 +210,8 @@ describe('serveAgentChannel', () => {
 
     // Leg 2: a MessagePort, exactly as the Electron services utility is handed one.
     const channel = new MessageChannel();
-    serveAgentChannel(channel.port1 as unknown as MessagePortLike, launcher, { build });
-    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    serveAgentChannel(channel.port1, launcher, { build });
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2));
     disposers.push(() => {
       portChannel.close();
       channel.port1.close();
@@ -246,7 +246,7 @@ describe('serveAgentChannel', () => {
       },
     };
     serveAgentChannel(emitterOnly, launcher, { build });
-    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2));
     disposers.push(() => {
       portChannel.close();
       channel.port1.close();
@@ -271,7 +271,7 @@ describe('serveAgentChannel', () => {
     const channel = new MessageChannel();
     const seen: unknown[] = [];
     const status = { projectId: 'project-1', branch: 'main', headRevisionId: 'revision-1' };
-    serveAgentChannel(channel.port1 as unknown as MessagePortLike, launcher, {
+    serveAgentChannel(channel.port1, launcher, {
       build,
       revisions: {
         async request(request) {
@@ -283,7 +283,7 @@ describe('serveAgentChannel', () => {
         },
       },
     });
-    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2));
     disposers.push(() => {
       portChannel.close();
       channel.port1.close();
@@ -304,8 +304,8 @@ describe('serveAgentChannel', () => {
 
   it('refuses revision requests when this host exposes no revision root', async () => {
     const channel = new MessageChannel();
-    serveAgentChannel(channel.port1 as unknown as MessagePortLike, recordingLauncher(), { build });
-    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    serveAgentChannel(channel.port1, recordingLauncher(), { build });
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2));
     disposers.push(() => {
       portChannel.close();
       channel.port1.close();

@@ -145,7 +145,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
               items: properties.items,
               command: properties.command as (item: SlashCommandItem) => void,
               clientRect: properties.clientRect ?? undefined,
-            } as SuggestionPopupState<SlashCommandItem>);
+            });
           },
           onUpdate(properties) {
             renderCallbacks.onStateChange({
@@ -153,7 +153,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
               items: properties.items,
               command: properties.command as (item: SlashCommandItem) => void,
               clientRect: properties.clientRect ?? undefined,
-            } as SuggestionPopupState<SlashCommandItem>);
+            });
           },
           onExit() {
             renderCallbacks.onStateChange(undefined);

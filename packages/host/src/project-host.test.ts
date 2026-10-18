@@ -310,7 +310,7 @@ describe('createProjectHost', () => {
       type: 'resume',
       commandId: 'command-1',
       payload: { chatId: 'chat-1', runId: 'run-new' },
-    } as Parameters<AgentLauncher['execute']>[0]);
+    });
 
     const stop = new AbortController();
     const outcome = await Promise.race([
@@ -382,7 +382,7 @@ describe('createProjectHost', () => {
         type: 'start',
         commandId: `start-${runId}`,
         payload: { trigger: 'submit', chatId, runId, message: { id: `user-${runId}`, role: 'user', content: 'Go.' } },
-      } as Parameters<AgentLauncher['execute']>[0]);
+      });
     await start('chat-1', 'run-1');
     seams.execute = undefined;
 
@@ -501,7 +501,7 @@ describe('createProjectHost', () => {
         runId: 'run-late',
         message: { id: 'u', role: 'user', content: 'Go.' },
       },
-    } as Parameters<AgentLauncher['execute']>[0]);
+    });
 
     actor.send({ type: 'release', gen: 1, requestId: 'release-1' });
     await new Promise((resolve) => {

@@ -364,7 +364,7 @@ const memberEntries = (
     const signatures = kind === 'property' ? [] : signaturesOf(node, checker);
 
     const existing = byName.get(name);
-    if (existing !== undefined && existing.kind === kind) {
+    if (existing?.kind === kind) {
       existing.signatures.push(...signatures);
       continue;
     }

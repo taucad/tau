@@ -2,7 +2,8 @@ import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
 import { afterEach, expect } from 'vitest';
 
-expect.extend(matchers);
+// Preserve jest-dom substring and RegExp semantics under the browser-compatible name.
+expect.extend({ ...matchers, toMatchTextContent: matchers.toHaveTextContent });
 afterEach(cleanup);
 
 class ResizeObserverMock implements ResizeObserver {

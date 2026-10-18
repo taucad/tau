@@ -123,7 +123,7 @@ describe('a decision whose file count is not a choice (R13)', () => {
   it('should say Checking files while the conflict is being read, never a count', () => {
     decision({ ...foreign, labels: undefined, paths: [], busy: true });
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking files…');
+    expect(screen.getByRole('status')).toMatchTextContent('Checking files…');
     expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
   });
@@ -193,9 +193,9 @@ describe('a conflict line in Branches (D14)', () => {
     expect(screen.queryByRole('menuitem', { name: /Rename/u })).not.toBeInTheDocument();
     await user.click(screen.getByRole('menuitem', { name: 'Remove this decision…' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Remove another device’s decision on main?' });
-    expect(dialog).toHaveTextContent('part.scad, .tau/parameters/part.json');
+    expect(dialog).toMatchTextContent('part.scad, .tau/parameters/part.json');
     /* The raw line is for engineers, behind Details. */
-    expect(dialog).toHaveTextContent(`refs/heads/${line}`);
+    expect(dialog).toMatchTextContent(`refs/heads/${line}`);
     await user.click(screen.getByRole('button', { name: 'Remove' }));
 
     expect(requestRefRemoval).toHaveBeenCalledWith('p', `refs/heads/${line}`);
@@ -212,7 +212,7 @@ describe('a conflict line in Branches (D14)', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Remove this decision…' }));
     await user.click(screen.getByRole('button', { name: 'Remove' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'Only the project’s owner can remove another device’s decision.',
     );
     expect(revisionStatusHarness.commands.syncNow).not.toHaveBeenCalled();
@@ -318,7 +318,7 @@ describe('Rename on a branch that keeps its name elsewhere (D91)', () => {
     await user.click(screen.getByRole('button', { name: `Actions for ${name}` }));
     const item = screen.getByRole('menuitem', { name: new RegExp(`^Rename ${name}…`, 'u') });
     expect(item).toHaveAttribute('aria-disabled', 'true');
-    expect(item).toHaveTextContent(reason);
+    expect(item).toMatchTextContent(reason);
     await user.click(item);
 
     expect(screen.queryByRole('textbox', { name: `New name for ${name}` })).not.toBeInTheDocument();

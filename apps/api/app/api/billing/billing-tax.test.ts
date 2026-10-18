@@ -181,8 +181,7 @@ describe('paid tax source projection', () => {
       automatic_tax: { status: 'complete' },
       total_taxes: [{ amount: 150 }, { amount: 50 }],
     } as unknown as Stripe.Invoice;
-    const incomplete = (invoice: Record<string, unknown>): Stripe.Invoice =>
-      ({ ...complete, ...invoice }) as unknown as Stripe.Invoice;
+    const incomplete = (invoice: Record<string, unknown>): Stripe.Invoice => ({ ...complete, ...invoice });
     expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: complete })).toBeUndefined();
     expect(paidTaxSourceIncompleteness({ paidEvidence })).toBe('missing_immutable_paid_snapshot');
     expect(paidTaxSourceIncompleteness({ paidEvidence, invoice: incomplete({ automatic_tax: undefined }) })).toBe(
@@ -224,7 +223,7 @@ describe('paid tax source projection', () => {
     expect(
       paidTaxSourceIncompleteness({
         paidEvidence: zeroTaxPaid,
-        checkout: { ...session, status: 'open' } as unknown as Stripe.Checkout.Session,
+        checkout: { ...session, status: 'open' },
       }),
     ).toBe('checkout_status:open');
     const projected = await projectPaidTaxEvidence({ paidEvidence: zeroTaxPaid, checkout: session });

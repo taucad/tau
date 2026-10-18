@@ -59,7 +59,7 @@ describe('electronUtilityHost filesystem boot', () => {
 
     receive?.({
       data: { runtimePortIndex: 0, fileSystemPortIndex: 1 },
-      ports: [runtimePorts.port1, fileSystemPorts.port2] as unknown as MessagePortMainLike[],
+      ports: [runtimePorts.port1, fileSystemPorts.port2],
     });
 
     await opening;
@@ -98,7 +98,7 @@ describe('electronUtilityHost filesystem boot', () => {
 
     await host.close('fixture shutdown');
     await expect(opening).rejects.toThrow(/closed before parent boot frame/u);
-    receive?.({ ports: [runtimePorts.port1] as unknown as MessagePortMainLike[] });
+    receive?.({ ports: [runtimePorts.port1] });
 
     expect(closeRuntimePort).toHaveBeenCalledOnce();
     runtimePorts.port2.close();
@@ -125,7 +125,7 @@ describe('electronUtilityHost filesystem boot', () => {
 
     receive?.({
       data: { runtimePortIndex: 0, fileSystemPortIndex: 1, computeStorePortIndex: 2 },
-      ports: [runtimePorts.port1, fileSystemPorts.port1, computePorts.port1] as unknown as MessagePortMainLike[],
+      ports: [runtimePorts.port1, fileSystemPorts.port1, computePorts.port1],
     });
     await Promise.resolve();
     await host.close('close during filesystem hello');

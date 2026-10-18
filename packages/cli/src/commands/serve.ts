@@ -4,7 +4,6 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
-import { Worker } from 'node:worker_threads';
 
 import {
   defaultConfigDirectory,
@@ -14,7 +13,6 @@ import {
   startHostDaemon,
 } from '@taucad/host';
 import { startNativeWorker } from '@taucad/native-process-core';
-import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type {
   HostDaemonAgentOptions,
@@ -34,7 +32,8 @@ import { stageUiEnvironment } from '#ui-environment.js';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
+import { createComputeStoreHost } from '#compute-store.js';
+import type { ComputeStoreConnection } from '#compute-store.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { NativeComposition, NativePreparation } from '#native-kernels.js';
 
@@ -60,14 +59,6 @@ const tauCloudEnabled = (): boolean => {
   }
   throw new TypeError('TAU_CLOUD_ENABLED must be exactly true or false');
 };
-
-const computeStoreWorkerModulePath = (): string =>
-  fileURLToPath(
-    new URL(
-      import.meta.url.endsWith('.ts') ? '../compute-store.worker.ts' : './compute-store-worker.mjs',
-      import.meta.url,
-    ),
-  );
 
 /**
  * The arguments of one runtime child. The daemon starts it with a minimal environment, so the acquisition profile
@@ -998,37 +989,18 @@ export const serveCommand = defineCommand({
                 : acquisitionOf(acquisitionValue),
           });
     const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
-    let computeWorker: Worker | undefined;
-    let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
-    const invalidateComputeWorker = (worker: Worker): void => {
-      if (computeWorker !== worker) {
-        return;
-      }
-      computeConnection?.dispose();
-      computeConnection = undefined;
-      computeWorker = undefined;
-    };
-    const ensureCompute = (): ReturnType<typeof connectSqliteComputeStoreWorker> => {
-      if (computeConnection) {
-        return computeConnection;
-      }
+    const computeStore = createComputeStoreHost({
+      directory: join(defaultConfigDirectory(), 'compute'),
+      onError: (error) => {
+        consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
+      },
+    });
+    const ensureCompute = (): ComputeStoreConnection => {
       if (!computeWorkspaceRoot) {
         throw new Error('Durable compute requires an admitted workspace.');
       }
-      const worker = new Worker(computeStoreWorkerModulePath(), {
-        workerData: { directory: join(defaultConfigDirectory(), 'compute') } satisfies ComputeStoreWorkerData,
-      });
-      worker.once('exit', () => {
-        invalidateComputeWorker(worker);
-      });
-      worker.on('error', (error) => {
-        invalidateComputeWorker(worker);
-        consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
-      });
-      computeWorker = worker;
-      computeConnection = connectSqliteComputeStoreWorker({ worker, workspace: computeWorkspaceRoot });
-      return computeConnection;
+      return computeStore.connect(computeWorkspaceRoot);
     };
     const compute: ComputeBinding | (() => ComputeBinding) | undefined = agent
       ? args.computeMode === 'durable'
@@ -1185,8 +1157,7 @@ export const serveCommand = defineCommand({
         );
         process.exitCode = exitCodes.error;
       } finally {
-        computeConnection?.dispose();
-        await computeWorker?.terminate();
+        await computeStore.close();
         await kernels.dispose().catch(() => undefined);
         await stagedUi?.dispose();
       }

@@ -369,9 +369,7 @@ const toolCallUpdate = async (
 
 const promptText = (blocks: readonly unknown[]): string =>
   blocks
-    .map((block) =>
-      typeof block === 'object' && block !== null && 'text' in block ? String((block as { text: unknown }).text) : '',
-    )
+    .map((block) => (typeof block === 'object' && block !== null && 'text' in block ? String(block.text) : ''))
     .filter((text) => text !== '')
     .join(' ');
 

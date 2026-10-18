@@ -81,8 +81,7 @@ const current = (harness: AttachGenerationHarness): Incarnation | undefined => {
 
 /* The machine's context, read only inside the state that declares each key (MC-R26). */
 type Snapshot = ReturnType<Actor<typeof projectHostMachine>['getSnapshot']>;
-const contextOf = (snapshot: Snapshot): Readonly<Record<string, unknown>> =>
-  snapshot.context as unknown as Readonly<Record<string, unknown>>;
+const contextOf = (snapshot: Snapshot): Readonly<Record<string, unknown>> => snapshot.context;
 
 /* The spec launcher the live actor's current incarnation stands for, while it serves or closes. */
 const launcherOf = (live: Incarnation | undefined): number => {

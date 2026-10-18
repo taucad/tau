@@ -169,6 +169,9 @@ export {
   hostMcpCapabilityPrefix,
   serveLocalHostMcp,
 } from '#mcp-server.js';
+/* `tau mcp` reads the agent plugin's launcher descriptor with the parser of the server that names it. */
+export { parseTauMcpLaunch } from '@taucad/mcp';
+export type { TauMcpRuntime } from '@taucad/mcp';
 export type {
   HostMcpCapabilityClaims,
   HostMcpEndpoint,

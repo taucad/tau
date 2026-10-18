@@ -132,8 +132,8 @@ const connect = async (program = '', options: VirtualGrblOptions = {}, setup: Se
 
 const motionOf = (report: MachineReport) => componentValue(report.components, 'motion', 'motion')!;
 type Xyz = Readonly<Record<'x' | 'y' | 'z', number>>;
-const machineAt = (report: MachineReport): Xyz => motionOf(report).position.machine as Xyz;
-const originOf = (report: MachineReport): Xyz => motionOf(report).workOffset.origin as Xyz;
+const machineAt = (report: MachineReport): Xyz => motionOf(report).position.machine;
+const originOf = (report: MachineReport): Xyz => motionOf(report).workOffset.origin;
 
 /** Apply an action and require the controller to take it. */
 const accept = async (connected: Connected, target: string, parameters?: unknown): Promise<MachineCommandReceipt> => {

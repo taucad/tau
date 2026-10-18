@@ -81,14 +81,14 @@ describe('ChatErrorRateLimit', () => {
       render(<ChatErrorRateLimit resumable retryAfterSeconds={3} autoResume={{ runId: 'run-1', attempt: 1 }} />);
 
       const timer = screen.getByRole('timer');
-      expect(timer).toHaveTextContent('Resuming in 3 seconds');
+      expect(timer).toMatchTextContent('Resuming in 3 seconds');
       expect(timer.nextElementSibling).toBe(screen.getByRole('button', { name: 'Resume' }));
       expect(screen.queryByText('Resume in 3 seconds.')).not.toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(2000);
       });
-      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 1 second');
+      expect(screen.getByRole('timer')).toMatchTextContent('Resuming in 1 second');
       expect(continueChat).not.toHaveBeenCalled();
 
       act(() => {
@@ -111,7 +111,7 @@ describe('ChatErrorRateLimit', () => {
         />,
       );
 
-      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 7 seconds');
+      expect(screen.getByRole('timer')).toMatchTextContent('Resuming in 7 seconds');
     } finally {
       vi.useRealTimers();
     }

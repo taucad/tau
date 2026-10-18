@@ -4796,7 +4796,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           type: 'export',
           format,
           options: validatedOptions,
-          content: contentResult.content as Record<string, boolean>,
+          content: contentResult.content,
           route: {
             kind: 'direct',
             kernelId: ownerKernelId,
@@ -4974,7 +4974,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         type: 'export',
         format,
         options: rawOptions,
-        content: contentResult.content as Record<string, boolean>,
+        content: contentResult.content,
         route: {
           kind: 'transcoded',
           kernelId: transcoderRoute.kernelId,
@@ -5225,7 +5225,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           ({ type }) => type !== 'content' && type !== 'export' && type !== 'middleware',
         ),
         ...exportDependencies.dependencies,
-        { type: 'content', content: options.plan.route.content as Record<string, boolean> },
+        { type: 'content', content: options.plan.route.content },
         options.plan.dependency,
       ];
     } else {
@@ -6200,7 +6200,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           ]),
         ),
       },
-      defaults: Object.fromEntries(keys.map((key) => [key, contentDefault(operation, key)])) as RuntimeContentInput,
+      defaults: Object.fromEntries(keys.map((key) => [key, contentDefault(operation, key)])),
     };
   }
 
@@ -6715,7 +6715,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (input.content !== undefined) {
       const contentDep: ContentDependency = {
         type: 'content',
-        content: input.content as Record<string, boolean>,
+        content: input.content,
       };
       runtimeDeps.push(contentDep);
     }
@@ -7433,7 +7433,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     content: RuntimeContentInput | undefined,
     keys: readonly RuntimeContentKey[],
   ): RuntimeContentInput {
-    return Object.fromEntries(keys.map((key) => [key, content?.[key] ?? false])) as RuntimeContentInput;
+    return Object.fromEntries(keys.map((key) => [key, content?.[key] ?? false]));
   }
 
   private withoutRuntimeContent<Input extends Record<PropertyKey, unknown>>(input: Input): Omit<Input, 'content'> {

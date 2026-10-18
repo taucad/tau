@@ -143,12 +143,12 @@ describe('ProviderRegistry', () => {
 
     it('should reject an unkeyed or malformed memory root', async () => {
       await expect(registry.getProvider(invalidMemoryScope)).rejects.toThrow('memory:<scope>');
-      await expect(
-        registry.getProvider({ backend: 'memory', storageRootKey: 'scratch' } as WorkspaceScope),
-      ).rejects.toThrow('memory:<scope>');
-      await expect(
-        registry.getProvider({ backend: 'memory', storageRootKey: 'memory:' } as WorkspaceScope),
-      ).rejects.toThrow('memory:<scope>');
+      await expect(registry.getProvider({ backend: 'memory', storageRootKey: 'scratch' })).rejects.toThrow(
+        'memory:<scope>',
+      );
+      await expect(registry.getProvider({ backend: 'memory', storageRootKey: 'memory:' })).rejects.toThrow(
+        'memory:<scope>',
+      );
     });
 
     it('should cache webaccess providers per physical root key', async () => {

@@ -19,7 +19,7 @@ const denied = async (probe) => {
  * @returns Whether it was contained.
  */
 const refusesWorker = async (options) => {
-  const { Worker } = /** @type {typeof import('node:worker_threads')} */ (process.getBuiltinModule('worker_threads'));
+  const { Worker } = process.getBuiltinModule('worker_threads');
   const workerOptions = /** @type {import('node:worker_threads').WorkerOptions} */ (options);
   try {
     const worker = new Worker(
@@ -53,16 +53,14 @@ const handleStart = async (message) => {
   if (!outputPath || !networkUrl) {
     throw new TypeError('Permission fixture requires an output path and network URL.');
   }
-  const filesystem = /** @type {typeof import('node:fs')} */ (process.getBuiltinModule('fs'));
-  const childProcess = /** @type {typeof import('node:child_process')} */ (process.getBuiltinModule('child_process'));
-  const workerThreads = /** @type {typeof import('node:worker_threads')} */ (
-    process.getBuiltinModule('worker_threads')
-  );
-  const wasi = /** @type {typeof import('node:wasi')} */ (process.getBuiltinModule('wasi'));
-  const inspector = /** @type {typeof import('node:inspector')} */ (process.getBuiltinModule('inspector'));
-  const os = /** @type {typeof import('node:os')} */ (process.getBuiltinModule('os'));
+  const filesystem = process.getBuiltinModule('fs');
+  const childProcess = process.getBuiltinModule('child_process');
+  const workerThreads = process.getBuiltinModule('worker_threads');
+  const wasi = process.getBuiltinModule('wasi');
+  const inspector = process.getBuiltinModule('inspector');
+  const os = process.getBuiltinModule('os');
   const path = process.getBuiltinModule('path');
-  const url = /** @type {typeof import('node:url')} */ (process.getBuiltinModule('url'));
+  const url = process.getBuiltinModule('url');
   const networkResponse = await fetch(networkUrl);
   const proof = {
     filesystem: await denied(

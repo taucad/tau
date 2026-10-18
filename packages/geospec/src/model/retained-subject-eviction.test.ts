@@ -1,7 +1,6 @@
 import { Engine } from 'geospec-engine/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
-import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 
 /**
  * A one-tetrahedron GLB whose apex height makes each subject's bytes, and so its identity, distinct.
@@ -64,7 +63,7 @@ describe('retained subject eviction against the real engine', () => {
   it('should evict and re-admit when a scope admits more subjects than the engine retains', async () => {
     const engine = new Engine();
     engines.push(engine);
-    const loader = createGeoSpecNativeModelLoader({ engine: engine as unknown as GeoSpecNativeModelEngine });
+    const loader = createGeoSpecNativeModelLoader({ engine });
     const retainedLimit = 32;
     const subjects = [];
     try {

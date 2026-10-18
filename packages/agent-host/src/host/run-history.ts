@@ -170,8 +170,7 @@ export const externalSessionOf = (
       continue;
     }
     const { kind: _kind, runKind: _runKind, ...state } = marker;
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `agentId` is checked above and every other field is optional.
-    return state as JsonObject & ExternalSessionState;
+    return state;
   }
   return undefined;
 };

@@ -128,7 +128,7 @@ describe('Node leadership', () => {
         runId: 'run-1',
         type: 'run.lifecycle',
         state: 'completed',
-      } as AgentLogEvent),
+      }),
     ).rejects.toMatchObject({ code: 'LOG_FENCED' });
     expect(await readFile(logPath, 'utf8')).toBe(before);
   });

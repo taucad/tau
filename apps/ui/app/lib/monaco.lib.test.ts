@@ -1,8 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-const mockMark = vi.fn();
-const mockMeasure = vi.fn();
-vi.stubGlobal('performance', { mark: mockMark, measure: mockMeasure });
+const mockMark = vi.spyOn(performance, 'mark');
+const mockMeasure = vi.spyOn(performance, 'measure');
 
 vi.mock('@monaco-editor/react', () => ({ loader: { config: vi.fn() } }));
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: vi.fn() }));

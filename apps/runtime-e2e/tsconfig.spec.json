@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "allowJs": true,
     "outDir": "./out-tsc/spec",
     "noEmit": true,
     "types": ["node", "vite/client", "vitest/importMeta", "vitest"],
@@ -9,5 +10,5 @@
     "target": "ESNext",
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.mts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.mts", "vitest.config.ts", "scripts/cjs-compat.cjs"]
 }

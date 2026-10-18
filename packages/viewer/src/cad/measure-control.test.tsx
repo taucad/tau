@@ -65,7 +65,7 @@ describe('MeasureControl', () => {
 
     await user.hover(screen.getByRole('button', { name: 'Measure' }));
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('MeasureM');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('MeasureM');
   });
 
   it('should read Stop measure while running', async () => {
@@ -75,7 +75,7 @@ describe('MeasureControl', () => {
 
     await user.hover(screen.getByRole('button', { name: 'Measure' }));
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Stop measure');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Stop measure');
   });
   it('should explain that a model is required before starting the tool', async () => {
     mocks.geometryRadius = 0;
@@ -87,6 +87,6 @@ describe('MeasureControl', () => {
     expect(mocks.graphicsSend).not.toHaveBeenCalled();
     await user.unhover(button);
     await user.hover(button);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Available when a model is displayed');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Available when a model is displayed');
   });
 });

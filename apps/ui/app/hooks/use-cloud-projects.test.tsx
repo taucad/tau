@@ -9,13 +9,14 @@ import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 /* The account behind the session hook, scripted per row. */
-const { account } = vi.hoisted(() => ({
-  account: {
-    auth: 'authed' as 'authed' | 'anonymous' | 'indeterminate',
+const { account } = vi.hoisted(() => {
+  const account: { auth: 'authed' | 'anonymous' | 'indeterminate'; isResolved: boolean; canSyncFiles: boolean } = {
+    auth: 'authed',
     isResolved: true,
     canSyncFiles: true,
-  },
-}));
+  };
+  return { account };
+});
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => account.auth }));
 vi.mock('#cloud/commercial-features.js', () => ({
   useCommercialFeatures: () => ({ isResolved: account.isResolved, canSyncFiles: account.canSyncFiles }),

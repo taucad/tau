@@ -37,7 +37,7 @@ describe('SVG transcoder Vite asset integration', () => {
       build: {
         outDir: distributionDirectory,
         emptyOutDir: true,
-        rollupOptions: {
+        rolldownOptions: {
           external: ['@resvg/resvg-wasm', '@taucad/runtime/transcoder', 'nanoraster', 'zod'],
         },
       },

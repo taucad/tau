@@ -176,8 +176,7 @@ export type ClientEnvironment = Pick<
 >;
 
 const selectClientEnvironment = (environment: Environment): Partial<ClientEnvironment> => {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- fromEntries cannot retain tuple-key completeness.
-  return Object.fromEntries(clientEnvironmentKeys.map((key) => [key, environment[key]])) as Partial<ClientEnvironment>;
+  return Object.fromEntries(clientEnvironmentKeys.map((key) => [key, environment[key]]));
 };
 
 /**

@@ -383,7 +383,7 @@ describe('Desktop renderer ownership', () => {
         },
         createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
       ],
-      build: { outDir: paths.renderer, emptyOutDir: true, rollupOptions: { input: join(source, 'entry.js') } },
+      build: { outDir: paths.renderer, emptyOutDir: true, rolldownOptions: { input: join(source, 'entry.js') } },
     });
     const report = await inspectDesktopPayload(paths);
     expect(report.violations).toContainEqual(expect.stringContaining('Forbidden web surface'));

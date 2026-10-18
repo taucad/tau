@@ -65,7 +65,7 @@ export const initSentry = (): void => {
   Sentry.init({
     dsn,
     environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
-    sendDefaultPii: false,
+    // Sentry 10 defaults to PII off; partial dataCollection options change those defaults.
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
     beforeSend: scrubSentryEvent,
     beforeBreadcrumb: scrubSentryBreadcrumb,

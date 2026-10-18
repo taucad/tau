@@ -795,7 +795,7 @@ export const parseMachineProvider = (value: unknown): MachineProvider => {
   const candidate = machineProviderSchema.parse(cloneBoundedJson(providerWireValue(value), providerLimits));
   assertDefinition(candidate);
   parseMachineManifest(candidate.manifest);
-  return freezeJson(candidate) as MachineProvider;
+  return freezeJson(candidate);
 };
 
 /**

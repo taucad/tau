@@ -13,7 +13,11 @@ function createTestChannel(listen: Mock<WorkerChangeChannelTransport['listen']>)
   wire: (data: unknown) => void;
 } {
   const channel = new WorkerChangeChannel({ transport: { listen } });
-  const wire = listen.mock.calls[0]![1] as (data: unknown) => void;
+  const firstCall: Parameters<WorkerChangeChannelTransport['listen']> | undefined = listen.mock.calls[0];
+  if (firstCall === undefined) {
+    throw new TypeError('WorkerChangeChannel did not register its fileChanged listener.');
+  }
+  const wire = firstCall[1];
   return { channel, wire };
 }
 

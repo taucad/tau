@@ -460,7 +460,7 @@ export const buildIntakeManifold = (place: Placement): BuiltPart => {
 /** Throttle body: ring housing with the Ø75 bore and shaft bosses. */
 export const buildThrottleBody = (place: Placement): BuiltPart => {
   const length = 42;
-  let bodyShape = makeCylinder(52, length, [0, 0, 0], [-1, 0, 0]) as Shape3D;
+  let bodyShape: Shape3D = makeCylinder(52, length, [0, 0, 0], [-1, 0, 0]);
   bodyShape = bodyShape.cut(
     makeCylinder(fit.throttleBore / 2, length + 2, [1, 0, 0], [-1, 0, 0]),
   );
@@ -513,12 +513,12 @@ export const buildThrottleBody = (place: Placement): BuiltPart => {
 };
 
 export const buildThrottleShaft = (place: Placement): BuiltPart => {
-  let shaft = makeCylinder(
+  let shaft: Shape3D = makeCylinder(
     fit.throttleShaft / 2,
     116,
     [0, -58, 0],
     [0, 1, 0],
-  ) as Shape3D;
+  );
   const tools = [-10, 10].map((dy) =>
     makeCylinder(tapHoleDia(3) / 2, 9, [4.1, dy, 0], [-1, 0, 0]),
   );
@@ -540,12 +540,12 @@ export const buildThrottleShaft = (place: Placement): BuiltPart => {
 };
 
 export const buildThrottleBlade = (place: Placement): BuiltPart => {
-  let blade = makeCylinder(
+  let blade: Shape3D = makeCylinder(
     fit.bladeDia / 2,
     1.5,
     [4.75, 0, 0],
     [-1, 0, 0],
-  ) as Shape3D;
+  );
   const tools = [-10, 10].map((dy) =>
     makeCylinder(1.6, 4, [5, dy, 0], [-1, 0, 0]),
   );
@@ -645,7 +645,7 @@ export const buildInjectorORing = (place: Placement): BuiltPart => {
 
 /** Thermostat: poppet cartridge Ø52 with a seat rim. */
 export const buildThermostat = (place: Placement): BuiltPart => {
-  let stat = makeCylinder(27.4, 3, [0, 0, 0], [-1, 0, 0]) as Shape3D;
+  let stat: Shape3D = makeCylinder(27.4, 3, [0, 0, 0], [-1, 0, 0]);
   stat = stat.fuse(makeCylinder(22, 12, [0, 0, 0], [1, 0, 0]));
   stat = stat.fuse(makeCylinder(8, 8, [-8, 0, 0], [1, 0, 0]));
   const shape = place.shape(stat);
@@ -657,7 +657,7 @@ export const buildThermostat = (place: Placement): BuiltPart => {
 
 /** Thermostat housing: die-cast elbow with an outlet barb. */
 export const buildThermostatHousing = (place: Placement): BuiltPart => {
-  let housing = makeCylinder(34, 8, [0, 0, 0], [-1, 0, 0]) as Shape3D;
+  let housing: Shape3D = makeCylinder(34, 8, [0, 0, 0], [-1, 0, 0]);
   housing = housing.fuse(makeCylinder(17.5, 40, [-6, 0, 0], [-1, 0, 0]));
   housing = housing.cut(makeCylinder(13, 48, [1, 0, 0], [-1, 0, 0]));
   const tools = [

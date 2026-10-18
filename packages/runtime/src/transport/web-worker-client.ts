@@ -248,7 +248,7 @@ export const webWorkerClient = (
           throw new TypeError('webWorkerTransport: requires `createWorker` or an explicit worker `url`');
         }
         const url = typeof options.url === 'string' ? options.url : options.url.href;
-        worker = Reflect.construct(workerCtor, [url, { type: 'module' }]) as WebWorkerLike;
+        worker = Reflect.construct(workerCtor, [url, { type: 'module' }]);
       }
       const eventWorker = worker as WebWorkerLike & {
         addEventListener(

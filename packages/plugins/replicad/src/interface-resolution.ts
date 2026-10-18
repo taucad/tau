@@ -62,7 +62,7 @@ type EntryFaceQueries = {
 
 const memoizeInstanceGetter = (face: ReplicadFace, key: 'geomType' | 'center'): void => {
   const facePrototype: unknown = Object.getPrototypeOf(face);
-  const prototypeGetter = Object.getOwnPropertyDescriptor(facePrototype as Record<string, unknown>, key)?.get;
+  const prototypeGetter = Object.getOwnPropertyDescriptor(facePrototype, key)?.get;
   if (!prototypeGetter) {
     return;
   }

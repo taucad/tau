@@ -258,7 +258,7 @@ function planSurfaceUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (
 
   return () => {
     for (const [attribute, values] of writes) {
-      (attribute.array as Float32Array).set(values as Float32Array);
+      (attribute.array as Float32Array).set(values);
       attribute.needsUpdate = true;
     }
     if (writes.some(([attribute]) => attribute === target.geometry.getAttribute('position'))) {

@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   /** Widened, so a test can answer any status. */
   const pickResult = (result: ModelPickResult): ModelPickResult => result;
-  return {
+  const initialMocks = {
     noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
     cameraRig: {
@@ -101,12 +101,16 @@ const mocks = vi.hoisted(() => {
     sectionView: { isActive: false },
     raycastClipState: undefined as RaycastClipState | undefined,
     sceneBounds,
-    backend: 'webgl' as 'webgl' | 'webgpu',
     sectionClip: undefined as SectionClip | undefined,
     /** What the GPU pick answers; `unavailable` routes every ray through the trees, as a renderer without it does. */
     modelPickResult: pickResult({ status: 'unavailable' }),
     modelPickReplay: vi.fn(),
   };
+  const mutableMocks: typeof initialMocks & { backend: 'webgl' | 'webgpu' } = {
+    ...initialMocks,
+    backend: 'webgl',
+  };
+  return mutableMocks;
 });
 
 vi.mock('#graphics/three/react/use-model-gpu-pick.js', () => ({

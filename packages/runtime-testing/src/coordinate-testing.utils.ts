@@ -82,9 +82,9 @@ export const readCoordinateEvidence = async ({
       const positions: Point3[] = [];
       const normals: Point3[] = [];
       for (let index = 0; index < positionAccessor.getCount(); index++) {
-        positions.push(transformPoint(positionAccessor.getElement(index, [0, 0, 0]) as Point3, matrix));
+        positions.push(transformPoint(positionAccessor.getElement<Point3>(index, [0, 0, 0]), matrix));
         if (normalAccessor) {
-          normals.push(transformNormal(normalAccessor.getElement(index, [0, 0, 0]) as Point3, matrix));
+          normals.push(transformNormal(normalAccessor.getElement<Point3>(index, [0, 0, 0]), matrix));
         }
       }
 
@@ -116,7 +116,7 @@ export const readCoordinateEvidence = async ({
         centroid[2] += point[2];
       }
       evidence.push({
-        baseColorFactor: primitive.getMaterial()?.getBaseColorFactor() as [number, number, number, number] | undefined,
+        baseColorFactor: primitive.getMaterial()?.getBaseColorFactor(),
         materialName: primitive.getMaterial()?.getName() ?? '',
         meshName: mesh.getName(),
         nodeName: node.getName(),

@@ -297,7 +297,7 @@ const buildTopologyPayload = ({
           solidIndex,
           meshIndex,
         },
-      } as unknown as JSONObject,
+      },
     });
 
     sectionSources.push({
@@ -336,7 +336,7 @@ const buildTopologyPayload = ({
             edgeIndices,
             adjacentFaces: adjacencyByFace.get(faceIndex) ?? [],
           },
-        } as unknown as JSONObject,
+        },
       });
     }
   }

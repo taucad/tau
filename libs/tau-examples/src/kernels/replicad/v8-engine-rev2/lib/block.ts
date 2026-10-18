@@ -104,22 +104,22 @@ export const buildBlock = (place: Placement): BuiltPart => {
   let block = pen.close().sketchOnPlane('YZ').extrude(blockLength);
 
   // Bellhousing flange plate + crank sensor boss (fused before cuts).
-  const flange = draw([-bellFlange.halfW, bellFlange.zMin])
+  const flange: Shape3D = draw([-bellFlange.halfW, bellFlange.zMin])
     .lineTo([bellFlange.halfW, bellFlange.zMin])
     .lineTo([bellFlange.halfW, bellFlange.zMax])
     .lineTo([-bellFlange.halfW, bellFlange.zMax])
     .close()
     .sketchOnPlane('YZ')
     .extrude(rearFaceX - bellFlange.x0)
-    .translate([bellFlange.x0, 0, 0]) as Shape3D;
-  const boss = draw([-sensorBoss.yHalf, sensorBoss.zBottom])
+    .translate([bellFlange.x0, 0, 0]);
+  const boss: Shape3D = draw([-sensorBoss.yHalf, sensorBoss.zBottom])
     .lineTo([sensorBoss.yHalf, sensorBoss.zBottom])
     .lineTo([sensorBoss.yHalf, sensorBoss.zTop])
     .lineTo([-sensorBoss.yHalf, sensorBoss.zTop])
     .close()
     .sketchOnPlane('YZ')
     .extrude(sensorBoss.x1 - sensorBoss.x0)
-    .translate([sensorBoss.x0, 0, 0]) as Shape3D;
+    .translate([sensorBoss.x0, 0, 0]);
   void 0;
   // Motor mount pads on the skirt walls.
   const mountPad = (side: 1 | -1): Shape3D =>
@@ -130,7 +130,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
       .close()
       .sketchOnPlane('YZ')
       .extrude(90)
-      .translate([212.4, 0, 0]) as Shape3D;
+      .translate([212.4, 0, 0]);
   block = block.fuse(flange).fuse(mountPad(1)).fuse(mountPad(-1));
 
   // Crankcase bays between the bulkheads (front wall 0..22.4, rear 492.4..).
@@ -146,28 +146,28 @@ export const buildBlock = (place: Placement): BuiltPart => {
         .close()
         .sketchOnPlane('YZ')
         .extrude(x1 - x0)
-        .translate([x0, 0, 0]) as Shape3D,
+        .translate([x0, 0, 0]),
     );
   }
   // Below the register ledges the bulkheads are cleared to the skirt walls.
-  const underLedge = draw([-90, -181])
+  const underLedge: Shape3D = draw([-90, -181])
     .lineTo([90, -181])
     .lineTo([90, -capGeo.registerDepth])
     .lineTo([-90, -capGeo.registerDepth])
     .close()
     .sketchOnPlane('YZ')
     .extrude(494)
-    .translate([-1, 0, 0]) as Shape3D;
+    .translate([-1, 0, 0]);
   // Cap cavity: the bulkhead bottoms are machined up to the z = 0 parting
   // plane between the register ledges.
-  const capCavity = draw([-(capGeo.halfW - press.capRegister), -181])
+  const capCavity: Shape3D = draw([-(capGeo.halfW - press.capRegister), -181])
     .lineTo([capGeo.halfW - press.capRegister, -181])
     .lineTo([capGeo.halfW - press.capRegister, 0.001])
     .lineTo([-(capGeo.halfW - press.capRegister), 0.001])
     .close()
     .sketchOnPlane('YZ')
     .extrude(494)
-    .translate([-1, 0, 0]) as Shape3D;
+    .translate([-1, 0, 0]);
   block = block
     .cut(bays[0]!)
     .cut(bays[1]!)
@@ -241,7 +241,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
       .close()
       .sketchOnPlane('XZ')
       .revolve([1, 0, 0])
-      .translate([0, 0, camAxisZ]) as Shape3D,
+      .translate([0, 0, camAxisZ]),
   );
   // Rear crank exit bore.
   cuts.push(makeCylinder(rearBoreR, 32, [488, 0, 0], [1, 0, 0]));
@@ -556,7 +556,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
         .cut(inner)
         .sketchOnPlane('YZ')
         .extrude(1.5)
-        .translate([-0.01, 0, 0]) as Shape3D,
+        .translate([-0.01, 0, 0]),
     );
   }
   // Cam thrust plate seat groove + 2x M6 taps beside the cam nose.
@@ -575,7 +575,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
       .cut(inner)
       .sketchOnPlane('YZ')
       .extrude(1.5)
-      .translate([-0.01, 0, 0]) as Shape3D;
+      .translate([-0.01, 0, 0]);
   })();
   cuts.push(camPlateGroove);
   for (const side of [-1, 1] as const) {
@@ -607,7 +607,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
     ['R', 135.5],
     ['L', 268.3],
   ] as const) {
-    const p = bankPoint(bank, x as number, -valleyWallA - 1, 195);
+    const p = bankPoint(bank, x, -valleyWallA - 1, 195);
     const v: Vec3 = bank === 'R' ? [0, -c, -c] : [0, c, -c];
     void v;
     const inward: Vec3 = bank === 'R' ? [0, c, -c] : [0, -c, -c];
@@ -767,7 +767,7 @@ export const buildBlock = (place: Placement): BuiltPart => {
           ['L', 268.3],
         ] as const
       ).map(([bank, x]) => {
-        const p = bankPoint(bank, x as number, -valleyWallA + 8, 195);
+        const p = bankPoint(bank, x, -valleyWallA + 8, 195);
         return [p[0] + tapHoleDia(8) / 2, p[1], p[2]] as Vec3;
       }),
       'CYLINDRE',

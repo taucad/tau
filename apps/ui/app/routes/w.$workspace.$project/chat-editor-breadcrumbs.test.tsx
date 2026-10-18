@@ -177,10 +177,10 @@ describe('ChatEditorBreadcrumbs', () => {
     expect(badges[1]).toHaveAccessibleDescription(description);
     expect(badges[0]?.getAttribute('aria-describedby')).not.toBe(badges[1]?.getAttribute('aria-describedby'));
     expect(screen.getAllByRole('navigation', { name: 'File breadcrumbs' })[0]).toContainElement(badges[0]!);
-    expect(screen.getAllByRole('button', { current: 'page' })[0]).toHaveTextContent('events.jsonl');
+    expect(screen.getAllByRole('button', { current: 'page' })[0]).toMatchTextContent('events.jsonl');
 
     fireEvent.click(badges[0]!);
-    expect(await screen.findByRole('dialog', { name: 'Artifact' })).toHaveTextContent(description);
+    expect(await screen.findByRole('dialog', { name: 'Artifact' })).toMatchTextContent(description);
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

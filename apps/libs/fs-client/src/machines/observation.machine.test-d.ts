@@ -1,6 +1,8 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
 import { observationMachine } from '#machines/observation.machine.js';
 
-expectTypeOf(observationMachine).toExtend<AnyStateMachine>();
+it('preserves the complete observation.machine type contracts', () => {
+  expectTypeOf(observationMachine).toExtend<AnyStateMachine>();
+});

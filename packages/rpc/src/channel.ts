@@ -1230,7 +1230,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     port,
     hello,
 
-    call: (async (name: CallNames<P>, args?: unknown, signal?: AbortSignal): Promise<unknown> => {
+    call: async (name: CallNames<P>, args?: unknown, signal?: AbortSignal): Promise<unknown> => {
       ensureOpen();
       if (signal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
@@ -1280,7 +1280,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
         const { value, transfer } = unwrapTransferables(args);
         post({ v: 1, k: 'rq', i: id, n: name, a: value ?? null }, transfer);
       });
-    }) as Channel<P>['call'],
+    },
 
     notify<N extends NotifyNames<P>>(name: N, args?: NotifyArgs<P, N> | WithTransferables<NotifyArgs<P, N>>): void {
       ensureOpen();
@@ -1293,7 +1293,8 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       const topic =
         notifyTopics.get(name) ?? new Topic<unknown>({ name: `rpc-notify:${name}`, onError: () => undefined });
       notifyTopics.set(name, topic);
-      const unsubscribe = topic.subscribe(handler as (args: unknown) => void);
+      const notificationHandler: (args: unknown) => void = handler;
+      const unsubscribe = topic.subscribe(notificationHandler);
       return () => {
         unsubscribe();
         if (topic.size === 0) {
@@ -1519,7 +1520,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       }
       const ac = new AbortController();
       inFlightCalls.set(id, ac);
-      const callImpl = impl.call as WidenedCallImpl;
+      const callImpl: WidenedCallImpl = impl.call;
       // async-iife: bootstrap — wire handlers are sync per Port contract; per-frame
       // dispatch is tracked via inFlightCalls AbortController registry below.
       void (async () => {
@@ -1567,9 +1568,10 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
          * fire-and-forget messages have no caller to reject. */
         return;
       }
-      if (impl.notify) {
+      const notificationServer: { notify?: WidenedNotifyImpl } = impl;
+      if (notificationServer.notify) {
         try {
-          (impl.notify as WidenedNotifyImpl)(context, raw.n, validatedArgs);
+          notificationServer.notify(context, raw.n, validatedArgs);
         } catch {
           // Drop notify handler errors so the channel survives.
         }

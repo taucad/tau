@@ -114,7 +114,7 @@ export async function getMaterialBaseColor(
   if (!material) {
     throw new Error(`Material index ${materialIndex} out of range (found ${materials.length})`);
   }
-  return material.getBaseColorFactor() as [number, number, number, number];
+  return material.getBaseColorFactor();
 }
 
 /**
@@ -138,7 +138,7 @@ export async function getAllMaterialBaseColors(
   const baseColors: Array<[number, number, number, number]> = [];
   for (const document of documents) {
     for (const material of document.getRoot().listMaterials()) {
-      baseColors.push(material.getBaseColorFactor() as [number, number, number, number]);
+      baseColors.push(material.getBaseColorFactor());
     }
   }
   return baseColors;
@@ -174,7 +174,7 @@ export async function getTrianglePrimitiveBaseColors(
         if (!material) {
           continue;
         }
-        baseColors.push(material.getBaseColorFactor() as [number, number, number, number]);
+        baseColors.push(material.getBaseColorFactor());
       }
     }
   }

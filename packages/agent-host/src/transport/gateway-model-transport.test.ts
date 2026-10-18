@@ -744,7 +744,7 @@ describe('createGatewayModelTransport', () => {
   it('takes the pi model context window from the request, not a configured default', async () => {
     const modelless = createGatewayModelTransportWithModel({
       baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async () => fixtureResponse()) as unknown as typeof globalThis.fetch,
+      fetch: vi.fn(async () => fixtureResponse()),
     });
 
     await expect(collect(modelless.stream(request({ contextWindow: 200_000 })))).resolves.toContainEqual({
@@ -1088,7 +1088,7 @@ describe('createGatewayModelTransport', () => {
         request({
           providerKind: fixture.providerKind,
           reasoning: fixture.reasoning,
-        } as Partial<ModelStreamRequest>),
+        }),
       ),
     );
 

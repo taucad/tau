@@ -169,7 +169,7 @@ describe('FileSystemSettings storage usage', () => {
     await waitFor(() => {
       expect(warn).toHaveBeenCalled();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Saved in this browser');
+    expect(screen.getByRole('status')).toMatchTextContent('Saved in this browser');
   });
 });
 

@@ -296,7 +296,7 @@ describe('ProjectNavigation', () => {
 
     expect(screen.getAllByRole('link')).toHaveLength(5);
     const showMore = screen.getByRole('button', { name: 'Show more projects' });
-    expect(showMore).toHaveTextContent('Show more projects');
+    expect(showMore).toMatchTextContent('Show more projects');
     expect(showMore).not.toHaveClass('font-medium');
     fireEvent.click(showMore);
     expect(screen.getAllByRole('link')).toHaveLength(10);
@@ -474,7 +474,7 @@ describe('ProjectNavigation', () => {
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], error: new Error('offline') });
     const { unmount } = render(<ProjectNavigation />);
     const failure = document.querySelector('[data-slot=failure-row]');
-    expect(failure).toHaveTextContent("Couldn't load projects");
+    expect(failure).toMatchTextContent("Couldn't load projects");
     expect(failure?.querySelector('button, a')).toBeNull();
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
     unmount();
@@ -512,14 +512,14 @@ describe('ProjectNavigation', () => {
     const mark = collapsedToggle.querySelector<HTMLElement>('[data-glyph]');
     expect(mark?.dataset['glyph']).toBe('attention');
     expect(mark).toHaveClass('justify-center');
-    expect(mark?.querySelector('.absolute')).toHaveTextContent('2');
+    expect(mark?.querySelector('.absolute')).toMatchTextContent('2');
     const collapsedLink = screen.getByRole('link', { name: 'Two' });
-    expect(descriptionOf(collapsedLink)).toHaveTextContent('Live, busy · 2 need you');
+    expect(descriptionOf(collapsedLink)).toMatchTextContent('Live, busy · 2 need you');
 
     const expandedToggle = screen.getByRole('button', { name: 'Collapse One' });
     expect(expandedToggle.querySelector('[data-glyph]')).toBeNull();
     const expandedLink = screen.getByRole('link', { name: 'One' });
-    expect(descriptionOf(expandedLink)).toHaveTextContent(/^Live, busy$/u);
+    expect(descriptionOf(expandedLink)).toMatchTextContent(/^Live, busy$/u);
   });
 
   /* D15: the name dissolves at the row's edge rather than clipping. */
@@ -528,7 +528,7 @@ describe('ProjectNavigation', () => {
     const link = screen.getByRole('link', { name: 'Two' });
     const row = link.closest<HTMLElement>('[data-slot=project-trigger]');
     expect(row).toHaveClass('fade-row', 'h-7');
-    expect(link.querySelector('.fade-label')).toHaveTextContent('Two');
+    expect(link.querySelector('.fade-label')).toMatchTextContent('Two');
     expect(row?.querySelector('.truncate')).toBeNull();
     const more = screen.getByRole('button', { name: 'More actions for Two' });
     const newChat = screen.getByRole('button', { name: 'New chat in Two' });
@@ -650,8 +650,8 @@ describe('ProjectNavigation', () => {
     }));
     render(<ProjectNavigation />);
     const link = screen.getByRole('link', { name: 'One' });
-    expect(descriptionOf(link)).toHaveTextContent('Closed to save memory · 30 min idle');
-    expect(descriptionOf(screen.getByRole('link', { name: 'Two' }))).toHaveTextContent(/^Closed$/u);
+    expect(descriptionOf(link)).toMatchTextContent('Closed to save memory · 30 min idle');
+    expect(descriptionOf(screen.getByRole('link', { name: 'Two' }))).toMatchTextContent(/^Closed$/u);
   });
 
   it('folds what is no longer live under Earlier', () => {

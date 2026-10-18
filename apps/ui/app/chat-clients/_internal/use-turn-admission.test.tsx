@@ -49,24 +49,27 @@ beforeEach(() => {
 describe('useTurnAdmission', () => {
   it('should refuse a Tau turn with a readable reason when the model catalog cannot be reached', async () => {
     harness.catalog = { status: 'unavailable' };
+    const expectedMessage: unknown = expect.stringContaining("can't reach its model list");
     await expect(admit(opus)).rejects.toMatchObject({
       code: 'CHAT_PLACEMENT_UNAVAILABLE',
-      message: expect.stringContaining("can't reach its model list") as unknown as string,
+      message: expectedMessage,
     });
     expect(harness.creditPreflight).not.toHaveBeenCalled();
   });
 
   it('should refuse a Tau turn on a model the catalog no longer offers', async () => {
     harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.9')] };
+    const expectedMessage: unknown = expect.stringContaining('anthropic-claude-opus-4.8 is no longer offered');
     await expect(admit(opus)).rejects.toMatchObject({
       code: 'CHAT_PLACEMENT_UNAVAILABLE',
-      message: expect.stringContaining('anthropic-claude-opus-4.8 is no longer offered') as unknown as string,
+      message: expectedMessage,
     });
   });
 
   it('should admit a Tau turn once the awaited catalog offers its model', async () => {
     harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
-    await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    const expectedHostId: unknown = expect.any(String);
+    await expect(admit(opus)).resolves.toEqual({ hostId: expectedHostId });
     expect(harness.creditPreflight).toHaveBeenCalledWith('anthropic-claude-opus-4.8', 'anthropic-claude-opus-4.8');
   });
 

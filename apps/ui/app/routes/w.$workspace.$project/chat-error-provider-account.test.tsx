@@ -45,8 +45,8 @@ describe('ChatErrorProviderAccount (self-host)', () => {
     render(<ChatErrorProviderAccountSelfHost description={openAiMessage} details={openAiDetails} />);
 
     const notice = screen.getByRole('status', { name: 'OpenAI has no credit left' });
-    expect(notice).toHaveTextContent("This server's OpenAI key is out of credit");
-    expect(notice).toHaveTextContent('Add credit on platform.openai.com');
+    expect(notice).toMatchTextContent("This server's OpenAI key is out of credit");
+    expect(notice).toMatchTextContent('Add credit on platform.openai.com');
     expect(actionLabels(notice)).toEqual(['Open OpenAI billing', 'Switch model', 'Try again']);
     expect(modelSelectorMock).toHaveBeenCalled();
     expect(notice).not.toHaveClass('bg-destructive/10');
@@ -104,7 +104,7 @@ describe('ChatErrorProviderAccount (self-host)', () => {
 
     const notice = screen.getByRole('status', { name: 'Together has no credit left' });
     expect(within(notice).queryByRole('link')).not.toBeInTheDocument();
-    expect(notice).toHaveTextContent('Add credit with Together');
+    expect(notice).toMatchTextContent('Add credit with Together');
     expect(actionLabels(notice)).toEqual(['Switch model', 'Try again']);
   });
 
@@ -126,12 +126,12 @@ describe('ChatErrorProviderAccount (Tau Cloud)', () => {
     render(<ChatErrorProviderAccountCloud description={openAiMessage} details={openAiDetails} />);
 
     const notice = screen.getByRole('status', { name: 'OpenAI models are unavailable right now' });
-    expect(notice).toHaveTextContent('Tau could not run this turn on OpenAI. You were not charged for it.');
+    expect(notice).toMatchTextContent('Tau could not run this turn on OpenAI. You were not charged for it.');
     expect(actionLabels(notice)).toEqual(['Switch model', 'Try again']);
     expect(within(notice).queryByRole('link')).not.toBeInTheDocument();
     expect(within(notice).queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
-    expect(notice).not.toHaveTextContent('credit_balance_exhausted');
-    expect(notice).not.toHaveTextContent('You have no credits remaining');
+    expect(notice).not.toMatchTextContent('credit_balance_exhausted');
+    expect(notice).not.toMatchTextContent('You have no credits remaining');
     expect(notice).not.toHaveClass('bg-destructive/10');
   });
 

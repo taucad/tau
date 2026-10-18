@@ -30,7 +30,7 @@ vi.mock('node:fs', async (importOriginal) => {
   const recorded = (...arguments_: Parameters<typeof nodeFs.watch>): ReturnType<typeof nodeFs.watch> => {
     const listener = arguments_.at(-1);
     if (typeof listener === 'function') {
-      watched.push(listener as WatchListener);
+      watched.push(listener);
     }
     return actual.watch(...arguments_);
   };

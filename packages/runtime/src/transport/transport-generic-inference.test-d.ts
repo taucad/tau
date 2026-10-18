@@ -3,7 +3,7 @@
  * `transport-projections.ts` helpers.
  */
 
-import { describe, it, assertType } from 'vitest';
+import { describe, it, assertType, expectTypeOf } from 'vitest';
 import { z } from 'zod';
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
@@ -65,7 +65,8 @@ describe('transport callable generic inference end-to-end (C12)', () => {
 
   it('TransportBindingsExtra resolves to `{}` when no phantom extras declared', () => {
     type X = TransportBindingsExtra<typeof bundledTransport>;
-    assertType<X>({} as Readonly<Record<string, unknown>>);
+    const extras: Readonly<Record<string, unknown>> = {};
+    assertType<X>(extras);
   });
 
   it('TransportClientOptions narrows wired client wiring args', () => {
@@ -78,7 +79,7 @@ describe('transport callable generic inference end-to-end (C12)', () => {
 
   it('RuntimeFromTransport is undefined for worker-backed transports', () => {
     type R = RuntimeFromTransport<ReturnType<typeof bundledTransport>>;
-    assertType<undefined>(undefined as unknown as R);
+    expectTypeOf<R>().toEqualTypeOf<undefined>();
   });
 
   it('RuntimeFromTransport projects in-process runtime definitions', () => {

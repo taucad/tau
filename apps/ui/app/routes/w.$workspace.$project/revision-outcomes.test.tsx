@@ -114,7 +114,7 @@ describe('RevisionOutcomes', () => {
         description: revisionFailureCopy.turn.fallback,
       },
     ]);
-    expect(getByTestId('latest')).toHaveTextContent('failed:turn-1');
+    expect(getByTestId('latest')).toMatchTextContent('failed:turn-1');
   });
 
   /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name
@@ -158,7 +158,7 @@ describe('RevisionOutcomes', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]?.title).toBe('That change needs your attention');
     expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/merge conflict|branch|HEAD/iu);
-    expect(getByTestId('latest')).toHaveTextContent('conflicted:turn-2');
+    expect(getByTestId('latest')).toMatchTextContent('conflicted:turn-2');
   });
 
   it('stays quiet for the outcome that did record a revision', () => {
@@ -178,7 +178,7 @@ describe('RevisionOutcomes', () => {
     });
 
     expect(errors).toEqual([]);
-    expect(getByTestId('latest')).toHaveTextContent('none');
+    expect(getByTestId('latest')).toMatchTextContent('none');
   });
 
   it('should refresh a cached empty chat inventory after remote chats are projected', async () => {
@@ -200,13 +200,13 @@ describe('RevisionOutcomes', () => {
         <CachedChatInventory />
       </QueryClientProvider>,
     );
-    expect(getByTestId('chats')).toHaveTextContent('none');
+    expect(getByTestId('chats')).toMatchTextContent('none');
 
     projectedChats = [{ id: 'remote-chat', name: 'Remote design' }];
     publish({ type: 'chats.projected', projectId: 'p', chatIds: ['remote-chat'] });
 
     await waitFor(() => {
-      expect(getByTestId('chats')).toHaveTextContent('Remote design');
+      expect(getByTestId('chats')).toMatchTextContent('Remote design');
     });
     expect(queryClient.getQueryState(['all-chats'])?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(['chat', 'remote-chat'])?.isInvalidated).toBe(true);

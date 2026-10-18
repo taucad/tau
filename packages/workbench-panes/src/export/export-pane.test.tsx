@@ -99,8 +99,8 @@ describe('ExportPane', () => {
     const { source } = createSource();
     renderPane(source);
 
-    expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('model.ts');
-    expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('Main');
+    expect(screen.getByRole('region', { name: 'Source' })).toMatchTextContent('model.ts');
+    expect(screen.getByRole('region', { name: 'Source' })).toMatchTextContent('Main');
     const groups = within(screen.getByRole('region', { name: 'Formats' })).getAllByText(/^(BREP|Mesh)$/u);
     expect(groups.map((group) => group.textContent)).toEqual(['BREP', 'Mesh']);
   });
@@ -128,7 +128,7 @@ describe('ExportPane', () => {
         zipMultiple: false,
       });
     });
-    expect(await screen.findByRole('status')).toHaveTextContent('Exported STEP');
+    expect(await screen.findByRole('status')).toMatchTextContent('Exported STEP');
   });
 
   it('should offer zip only to a host that can zip several downloads', () => {
@@ -182,7 +182,7 @@ describe('ExportPane', () => {
     fireEvent.click(screen.getByRole('button', { name: /glb/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Export GLB' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('radius must be positive');
+    expect(await screen.findByRole('alert')).toMatchTextContent('radius must be positive');
   });
 
   it('should show why there is nothing to export yet', () => {
@@ -211,7 +211,7 @@ describe('ExportPane', () => {
     });
     const view = renderPane(failed.source);
     const alert = screen.getByRole('alert', { name: 'Export formats could not be loaded' });
-    expect(alert).toHaveTextContent('No kernel exports model.ts.');
+    expect(alert).toMatchTextContent('No kernel exports model.ts.');
     expect(screen.queryByRole('status', { name: 'Export formats are still loading' })).toBeNull();
     expect(screen.queryByText('No geometry to export for this file')).toBeNull();
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
@@ -229,7 +229,7 @@ describe('ExportPane', () => {
     });
     renderPane(mismatched.source);
     const mismatch = screen.getByRole('alert', { name: 'Export formats could not be loaded' });
-    expect(mismatch).toHaveTextContent(message);
+    expect(mismatch).toMatchTextContent(message);
     expect(within(mismatch).queryByRole('button')).toBeNull();
   });
 

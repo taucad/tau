@@ -464,7 +464,7 @@ describe('ParametersPane', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('change-params'));
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('The record changed.');
+    expect(screen.getByRole('alert')).toMatchTextContent('The record changed.');
   });
 
   it('commits a field of the active group and refuses setValue that does not commit', async () => {

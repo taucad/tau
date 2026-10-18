@@ -655,7 +655,7 @@ export const trackAgentTurn = (
     const durable = projection.views[runId]?.chunks ?? [];
     for (const chunk of chunksSince(durable, durable.length < durableSeen ? 0 : durableSeen)) {
       markFirstUpdate(chunk.type);
-      foldChunk(facts, chunk as unknown as Readonly<Record<string, unknown>>);
+      foldChunk(facts, chunk);
     }
     durableSeen = durable.length;
   };

@@ -40,12 +40,15 @@ const cloud: readonly CloudProject[] = [
 /* Shared with this account later: the listing's ids change. */
 const newcomer: CloudProject = { id: 'proj_ddddddddddddddddddddd', name: 'Delta Duct', role: 'write', updatedAt: 3 };
 
-const { mockCreateProject, mockGetProjectFileSystemConfig, auth } = vi.hoisted(() => ({
-  mockCreateProject: vi.fn(),
-  /* The route config: what this device holds, the record `createProject` itself refuses a held id by. */
-  mockGetProjectFileSystemConfig: vi.fn(),
-  auth: { current: 'authed' as 'authed' | 'anonymous' | 'indeterminate' },
-}));
+const { mockCreateProject, mockGetProjectFileSystemConfig, auth } = vi.hoisted(() => {
+  const auth: { current: 'authed' | 'anonymous' | 'indeterminate' } = { current: 'authed' };
+  return {
+    mockCreateProject: vi.fn(),
+    /* The route config: what this device holds, the record `createProject` itself refuses a held id by. */
+    mockGetProjectFileSystemConfig: vi.fn(),
+    auth,
+  };
+});
 
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: mockCreateProject }) }));
 vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetProjectFileSystemConfig }));

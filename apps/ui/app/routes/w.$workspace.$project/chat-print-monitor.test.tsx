@@ -252,7 +252,7 @@ describe('Control on a milling machine', () => {
     });
     renderControl(router(), { attended: true, fixture });
     await user.click(within(openStage('Control')).getByRole('button', { name: 'Jog X+' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Grbl answered error:15 (travel exceeded).');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Grbl answered error:15 (travel exceeded).');
     expect(fixture.applyAction).toHaveBeenCalledOnce();
   });
 
@@ -260,7 +260,7 @@ describe('Control on a milling machine', () => {
     const user = userEvent.setup();
     const { fixture } = renderControl(router(), { attended: true });
     const control = openStage('Control');
-    expect(control).toHaveTextContent('It stops by itself after 10 s.');
+    expect(control).toMatchTextContent('It stops by itself after 10 s.');
     await user.click(within(control).getByRole('switch', { name: 'Router' }));
     await waitFor(() => {
       expect(fixture.applyAction).toHaveBeenCalledWith(
@@ -277,12 +277,12 @@ describe('Control on a milling machine', () => {
     renderControl(router());
     const monitor = screen.getByRole('region', { name: 'Monitor' });
     const table = within(monitor).getByRole('table');
-    expect(within(table).getByRole('row', { name: /^Work G54/u })).toHaveTextContent('100.000120.0005.000');
-    expect(within(table).getByRole('row', { name: /^Machine/u })).toHaveTextContent('400.000420.000-10.000');
+    expect(within(table).getByRole('row', { name: /^Work G54/u })).toMatchTextContent('100.000120.0005.000');
+    expect(within(table).getByRole('row', { name: /^Machine/u })).toMatchTextContent('400.000420.000-10.000');
     expect(within(monitor).getByText('Homed')).toBeInTheDocument();
     // The offset's revision guards writes; a person reads only the offset.
-    expect(monitor).toHaveTextContent('Work offsetG54');
-    expect(monitor).not.toHaveTextContent('revision');
+    expect(monitor).toMatchTextContent('Work offsetG54');
+    expect(monitor).not.toMatchTextContent('revision');
   });
 
   it('hides a position it cannot trust', () => {
@@ -294,7 +294,7 @@ describe('Control on a milling machine', () => {
     );
     renderControl(router({ snapshot: machineSnapshot(lost) }));
     const table = within(screen.getByRole('region', { name: 'Monitor' })).getByRole('table');
-    expect(within(table).getByRole('row', { name: /^Machine/u })).toHaveTextContent('Machine———');
+    expect(within(table).getByRole('row', { name: /^Machine/u })).toMatchTextContent('Machine———');
     expect(screen.getByText('Lost')).toBeInTheDocument();
   });
 
@@ -339,9 +339,9 @@ describe('Control on a milling machine', () => {
     expect(within(monitor).getByRole('heading', { name: 'Axes position' })).toBeInTheDocument();
     expect(within(monitor).getByRole('heading', { name: 'Second head position' })).toBeInTheDocument();
     expect(within(monitor).getAllByRole('table')).toHaveLength(2);
-    expect(monitor).toHaveTextContent('Second head work offsetG54');
-    expect(monitor).not.toHaveTextContent('wo-2');
-    expect(screen.getByRole('button', { name: /^Monitor/u })).toHaveTextContent('Lost · Router off');
+    expect(monitor).toMatchTextContent('Second head work offsetG54');
+    expect(monitor).not.toMatchTextContent('wo-2');
+    expect(screen.getByRole('button', { name: /^Monitor/u })).toMatchTextContent('Lost · Router off');
 
     const control = openStage('Control');
     expect(within(control).getByRole('group', { name: 'Axes' })).toBeInTheDocument();
@@ -351,7 +351,7 @@ describe('Control on a milling machine', () => {
     expect(within(second).queryByRole('button', { name: /^Unlock/u })).not.toBeInTheDocument();
     // The lost head blocks the first group's jog: the refusal names it, and its remedy homes it, not the Axes.
     const axes = within(control).getByRole('group', { name: 'Axes' });
-    expect(axes).toHaveTextContent('Second head: The position was lost. Home first.');
+    expect(axes).toMatchTextContent('Second head: The position was lost. Home first.');
     await user.click(within(axes).getByRole('button', { name: /^Second head: Home/u }));
     await waitFor(() => {
       expect(fixture.applyAction).toHaveBeenCalledWith(
@@ -380,7 +380,7 @@ describe('Control on a milling machine', () => {
     // The rotary unit declares no homing and reports no trust: it neither gates motion nor reads as not homed.
     const rotary = withRotary(['motion.move']);
     renderControl(router({ manifest: rotary, snapshot: machineSnapshot(millingComponents(rotary)) }));
-    expect(screen.getByRole('button', { name: /^Monitor/u })).toHaveTextContent('Homed · Router off');
+    expect(screen.getByRole('button', { name: /^Monitor/u })).toMatchTextContent('Homed · Router off');
   });
 
   it('offers a rotary-only group no work-zero move and no empty jog pad', () => {
@@ -417,7 +417,7 @@ describe('Control on a milling machine', () => {
     // An alert reads in the feature tone; red is only for Stop and cancel (#321).
     expect(alert).toHaveClass('border-feature/30');
     expect(alert.className).not.toMatch(/destructive/u);
-    expect(alert).toHaveTextContent('At the machine: Move the gantry off the switch.');
+    expect(alert).toMatchTextContent('At the machine: Move the gantry off the switch.');
     await user.click(within(alert).getByRole('button', { name: /^Unlock/u }));
     await waitFor(() => {
       expect(fixture.applyAction).toHaveBeenCalledWith(
@@ -441,7 +441,7 @@ describe('press and hold', () => {
     const { observe } = renderControl(machine, { attended: true, fixture });
     const control = openStage('Control');
     fireEvent.click(within(control).getByRole('radio', { name: 'Hold to jog' }));
-    expect(control).toHaveTextContent('the machine stops by itself within 150 ms');
+    expect(control).toMatchTextContent('the machine stops by itself within 150 ms');
     return { jog: within(control).getByRole('button', { name }), observe };
   };
 
@@ -533,7 +533,7 @@ describe('press and hold', () => {
     await waitFor(() => {
       expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
     });
-    expect(screen.getByRole('alert')).toHaveTextContent(/^Garage LongMill stopped the jog: /u);
+    expect(screen.getByRole('alert')).toMatchTextContent(/^Garage LongMill stopped the jog: /u);
     const renewals = fixture.renewHold.mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
@@ -569,7 +569,7 @@ describe('press and hold', () => {
     fixture.renewHold.mockResolvedValue({ status: 'ended' });
     const { jog } = holdJog(fixture);
     await press(fixture, jog);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Garage LongMill ended the jog.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Garage LongMill ended the jog.');
     expect(jog).toHaveAttribute('aria-pressed', 'false');
     // The machine already ended it: nothing to release.
     expect(fixture.endHold).not.toHaveBeenCalled();
@@ -593,7 +593,7 @@ describe('press and hold', () => {
     fixture.beginHold.mockClear();
     await press(fixture, jog);
     fireEvent.pointerUp(jog);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'Garage LongMill did not confirm the end of the jog (MACHINE_CHANNEL_CLOSED)',
     );
   });
@@ -720,10 +720,10 @@ describe('Monitor and materials on a printer', () => {
   it('reads heaters with their targets and the material slots', () => {
     renderControl(printing());
     const monitor = screen.getByRole('region', { name: 'Monitor' });
-    expect(monitor).toHaveTextContent('Nozzle220 °Cto 220 °C');
+    expect(monitor).toMatchTextContent('Nozzle220 °Cto 220 °C');
     const slots = within(monitor).getByRole('list', { name: 'Material slots' });
     expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(slots).getAllByRole('listitem')[0]).toHaveTextContent(/^A1.*PLA.*In use/u);
+    expect(within(slots).getAllByRole('listitem')[0]).toMatchTextContent(/^A1.*PLA.*In use/u);
   });
 
   it('marks a group stale once its observation is past its validity', () => {
@@ -790,7 +790,7 @@ describe('Monitor and materials on a printer', () => {
     );
     await user.click(within(screen.getByRole('list', { name: 'Material slots' })).getByText('A1'));
     const slot = screen.getByRole('group', { name: 'Slot A1' });
-    expect(slot).toHaveTextContent('The AMS read this spool’s tag, which sets its material.');
+    expect(slot).toMatchTextContent('The AMS read this spool’s tag, which sets its material.');
     expect(within(slot).queryByRole('button', { name: 'Set material' })).not.toBeInTheDocument();
     // A1 feeds the toolhead already: the offer is to unload, and it asks first.
     await user.click(within(slot).getByRole('button', { name: 'Unload' }));
@@ -823,7 +823,7 @@ describe('Monitor and materials on a printer', () => {
     const control = openStage('Control');
     const speed = within(control).getByRole('combobox', { name: 'Part fan' });
     // A speed between the list's steps is still the speed it runs at.
-    expect(speed).toHaveTextContent('47 %');
+    expect(speed).toMatchTextContent('47 %');
 
     await user.click(speed);
     await user.click(screen.getByRole('option', { name: '50 %' }));
@@ -833,21 +833,21 @@ describe('Monitor and materials on a printer', () => {
       );
     });
     // Accepted is not applied: the list keeps the reported speed until the machine reports another.
-    expect(speed).toHaveTextContent('47 %');
+    expect(speed).toMatchTextContent('47 %');
 
     // The printer rounds to its own steps.
     observe(fanAt(0.53));
-    expect(speed).toHaveTextContent('53 %');
+    expect(speed).toMatchTextContent('53 %');
     // The program turns it off.
     observe(fanAt(0));
-    expect(speed).toHaveTextContent('0 %');
+    expect(speed).toMatchTextContent('0 %');
   });
 
   it('lists the pressure-advance table, deletes a row, and saves a value by hand', async () => {
     const user = userEvent.setup();
     const { fixture } = renderControl(entry({ testing: true }));
     const stage = openStage('Pressure advance');
-    expect(stage).toHaveTextContent('PLA Basic 0.4');
+    expect(stage).toMatchTextContent('PLA Basic 0.4');
     await user.click(within(stage).getByRole('button', { name: 'Delete PLA Basic 0.4' }));
     await waitFor(() => {
       expect(fixture.applyAction).toHaveBeenCalledWith(
@@ -919,7 +919,7 @@ describe('Activities', () => {
       }),
     );
     const card = screen.getByRole('region', { name: 'Loading A2' });
-    expect(within(card).getByRole('status')).toHaveTextContent(
+    expect(within(card).getByRole('status')).toMatchTextContent(
       'Workshop X1C waits for you: Is the new colour coming out?',
     );
     await user.click(within(card).getByRole('button', { name: /^Yes, it is clean/u }));
@@ -946,7 +946,7 @@ describe('Activities', () => {
     });
     const { fixture, unmount } = renderControl(measured);
     const card = screen.getByRole('region', { name: 'Pressure-advance calibration' });
-    expect(card).toHaveTextContent('K 0.024');
+    expect(card).toMatchTextContent('K 0.024');
     const name = within(card).getByRole('textbox', { name: 'Profile name' });
     await user.clear(name);
     await user.type(name, 'PLA measured');
@@ -990,8 +990,8 @@ describe('Activities', () => {
       }),
     );
     const card = screen.getByRole('region', { name: 'Flow-ratio calibration' });
-    expect(card).toHaveTextContent('Flow ratio 0.980');
-    expect(card).toHaveTextContent('Tau can’t keep this result yet. Enter it in your slicer’s filament settings.');
+    expect(card).toMatchTextContent('Flow ratio 0.980');
+    expect(card).toMatchTextContent('Tau can’t keep this result yet. Enter it in your slicer’s filament settings.');
     expect(within(card).queryByRole('button', { name: /^Save as a profile/u })).not.toBeInTheDocument();
     expect(within(card).queryByRole('textbox', { name: 'Profile name' })).not.toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Discard' }));
@@ -1218,11 +1218,11 @@ describe("the machine's own actions", () => {
     expect(await within(printer).findByRole('button', { name: 'Group: Routines' })).toBeInTheDocument();
     // Nothing incomplete is sent: the form names what it still needs.
     expect(within(printer).getByRole('button', { name: /^Run printer calibration/u })).toBeDisabled();
-    expect(printer).toHaveTextContent('Complete Routines first.');
+    expect(printer).toMatchTextContent('Complete Routines first.');
     // An entry added and not yet chosen is no value either.
     await userEvent.setup().click(within(printer).getByRole('button', { name: 'Add item (Routines)' }));
     expect(within(printer).getByRole('button', { name: /^Run printer calibration/u })).toBeDisabled();
-    expect(printer).toHaveTextContent('Complete Routines first.');
+    expect(printer).toMatchTextContent('Complete Routines first.');
     expect(fixture.applyAction).not.toHaveBeenCalled();
   });
 
@@ -1241,7 +1241,7 @@ describe("the machine's own actions", () => {
     });
 
     const printer = within(control).getByRole('group', { name: 'Printer' });
-    expect(printer).toHaveTextContent(
+    expect(printer).toMatchTextContent(
       'The printer homes, probes the bed and sweeps its motors; the plate must be empty.',
     );
     // Its parameters come from its own form.
@@ -1353,14 +1353,14 @@ describe("the machine's own actions", () => {
     );
     const { fixture } = renderControl(waiting, { attended: true });
     // A screen reader hears what the counter counts.
-    expect(within(screen.getByRole('region', { name: 'Run' })).getByText(/^Lines 3 of 12/u)).toHaveTextContent(
+    expect(within(screen.getByRole('region', { name: 'Run' })).getByText(/^Lines 3 of 12/u)).toMatchTextContent(
       'Lines 3 of 12, counted from work sent to the machine; it runs a few lines behind',
     );
     const control = openStage('Control');
     // The run owns motion; the simulator's lid stays, as the provider allows it now.
     expect(within(control).queryByRole('group', { name: 'Motion' })).not.toBeInTheDocument();
     const board = within(control).getByRole('group', { name: 'LongBoard' });
-    expect(board).toHaveTextContent('What a person standing at the machine would press.');
+    expect(board).toMatchTextContent('What a person standing at the machine would press.');
     expect(within(control).queryByRole('button', { name: /^Reset settings/u })).not.toBeInTheDocument();
 
     await user.click(await within(board).findByRole('combobox', { name: 'Select for Button' }));
@@ -1398,10 +1398,10 @@ describe('Monitor readings', () => {
     renderControl(entry({ snapshot: machineSnapshot(components) }));
     const monitor = screen.getByRole('region', { name: 'Monitor' });
     expect(within(monitor).getByRole('heading', { name: /^chamber$/iu, level: 3 })).toBeInTheDocument();
-    expect(monitor).toHaveTextContent('Humidity40');
+    expect(monitor).toMatchTextContent('Humidity40');
     // One component unknown, its siblings still read.
-    expect(monitor).toHaveTextContent('Bed24 °C');
-    expect(monitor).not.toHaveTextContent('Nozzle');
+    expect(monitor).toMatchTextContent('Bed24 °C');
+    expect(monitor).not.toMatchTextContent('Nozzle');
   });
 
   it('should read a yes-or-no reading in words', () => {
@@ -1417,9 +1417,9 @@ describe('Monitor readings', () => {
     ] satisfies readonly ComponentObservation[];
     renderControl(entry({ snapshot: machineSnapshot(components) }));
     const monitor = screen.getByRole('region', { name: 'Monitor' });
-    expect(monitor).toHaveTextContent('Storage cardYes');
-    expect(monitor).toHaveTextContent('Levelling mapNo');
-    expect(monitor).not.toHaveTextContent(/true|false/u);
+    expect(monitor).toMatchTextContent('Storage cardYes');
+    expect(monitor).toMatchTextContent('Levelling mapNo');
+    expect(monitor).not.toMatchTextContent(/true|false/u);
   });
 
   it.each([
@@ -1436,7 +1436,7 @@ describe('Monitor readings', () => {
     );
     renderControl(router({ snapshot: machineSnapshot(components) }));
     const monitor = screen.getByRole('region', { name: 'Monitor' });
-    expect(monitor).toHaveTextContent(label);
+    expect(monitor).toMatchTextContent(label);
   });
 
   it('marks the position stale once it is past the time it stays valid', () => {

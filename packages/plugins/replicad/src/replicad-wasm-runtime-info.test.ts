@@ -20,10 +20,9 @@ const singleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')
 const multiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
 
 const initSingle = async (): Promise<ReplicadRuntimeInfoProbe> =>
-  initOcct(singleWasmUrl, await loadReplicadSingleWasm()) as Promise<ReplicadRuntimeInfoProbe>;
+  initOcct(singleWasmUrl, await loadReplicadSingleWasm());
 
-const initMulti = async (): Promise<ReplicadRuntimeInfoProbe> =>
-  initOcct(multiWasmUrl, await loadReplicadMultiWasm()) as Promise<ReplicadRuntimeInfoProbe>;
+const initMulti = async (): Promise<ReplicadRuntimeInfoProbe> => initOcct(multiWasmUrl, await loadReplicadMultiWasm());
 
 describe('ReplicadRuntimeInfo bindings', { timeout: 60_000 }, () => {
   it('report serial execution for the single-threaded Replicad build', async () => {

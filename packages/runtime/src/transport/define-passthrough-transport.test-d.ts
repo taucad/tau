@@ -21,28 +21,27 @@ const stubDescriptor = <Id extends string>(id: Id): TransportDescriptor<Id> => (
 
 const stubClient = <Id extends string>(
   id: Id,
-): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, Id> =>
-  ({
-    id,
-    describe(): TransportDescriptor<Id> {
-      return stubDescriptor(id);
-    },
-    async open(): Promise<TransportClientReady> {
-      throw new Error('stub');
-    },
-    async initialize() {
-      throw new Error('stub');
-    },
-    signalDocumentAbort() {
-      return false;
-    },
-    operationTimeoutRecovery: { kind: 'unsupported' },
-    async resolveBinary() {
-      throw new Error('stub');
-    },
-    async close() {},
-    closed: Promise.resolve({ cause: 'requested' }),
-  }) as RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, Id>;
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, Id> => ({
+  id,
+  describe(): TransportDescriptor<Id> {
+    return stubDescriptor(id);
+  },
+  async open(): Promise<TransportClientReady> {
+    throw new Error('stub');
+  },
+  async initialize() {
+    throw new Error('stub');
+  },
+  signalDocumentAbort() {
+    return false;
+  },
+  operationTimeoutRecovery: { kind: 'unsupported' },
+  async resolveBinary() {
+    throw new Error('stub');
+  },
+  async close() {},
+  closed: Promise.resolve({ cause: 'requested' }),
+});
 
 describe('definePassthroughTransport — TypeScript surface', () => {
   const clientFoo = (): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<string, unknown>>, 'foo'> =>

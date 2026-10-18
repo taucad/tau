@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
 import { commandOf, turnIntentOf } from '#chat-clients/turn-intent.js';
 
-const message = (id: string, role: 'user' | 'assistant'): MyUIMessage =>
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a transcript row is `id` and `role` as far as the rewind point is concerned.
-  ({ id, role, parts: [{ type: 'text', text: id }] }) as MyUIMessage;
+const message = (id: string, role: 'user' | 'assistant'): MyUIMessage => ({
+  id,
+  role,
+  parts: [{ type: 'text', text: id }],
+});
 
 /** One completed turn, then a second whose user message the provider refused. */
 const refusedSecondTurn = [message('u1', 'user'), message('a1', 'assistant'), message('u2', 'user')];

@@ -18,8 +18,7 @@ const parameterCodec: CacheCodec<DescribeResult<ParameterManifest>> = {
     }
     return utf8.encode(JSON.stringify(value));
   },
-  decode: ({ bytes }) =>
-    describeResultSchema.parse(JSON.parse(strictUtf8.decode(bytes))) as DescribeResult<ParameterManifest>,
+  decode: ({ bytes }) => describeResultSchema.parse(JSON.parse(strictUtf8.decode(bytes))),
 };
 
 const parameterAction = (semanticHash: string): ComputeAction => ({
@@ -39,15 +38,8 @@ const parameterAction = (semanticHash: string): ComputeAction => ({
   codec: { id: parameterCodec.id, version: parameterCodec.version },
 });
 
-/**
- * Parameter extraction reuse backed by the runtime compute CAS.
- *
- * @deprecated The kernel worker re-runs extraction after every cache hit to trust the producer
- * declaration, so a hit saves nothing; its own parameter result cache already reuses extraction.
- * Remove it from your middleware list.
- * @public
- */
-export const parameterCache = defineMiddleware({
+/** Canonical implementation used by the plugin registry and deprecated public alias. @internal */
+export const parameterCacheDefinition = defineMiddleware({
   id: 'parameterCache',
   name: 'ParameterCache',
   version: '4.0.0',
@@ -68,3 +60,13 @@ export const parameterCache = defineMiddleware({
     return result.value;
   },
 });
+
+/**
+ * Parameter extraction reuse backed by the runtime compute CAS.
+ *
+ * @deprecated The kernel worker re-runs extraction after every cache hit to trust the producer
+ * declaration, so a hit saves nothing; its own parameter result cache already reuses extraction.
+ * Remove it from your middleware list.
+ * @public
+ */
+export const parameterCache = parameterCacheDefinition;

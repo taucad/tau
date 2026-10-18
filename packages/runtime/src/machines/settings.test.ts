@@ -39,7 +39,7 @@ const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)
 describe('versioned machine preferences', () => {
   it('should admit immutable records, reject unsafe identities and preserve unsupported bytes', () => {
     expect(machineSettingsPath({ typeId: 'bambu.x1c' })).toBe('.tau/machines/settings/bambu.x1c.json');
-    expect(() => machineSettingsPath({ typeId: '../x' as 'bambu.x1c' })).toThrow();
+    expect(() => machineSettingsPath({ typeId: '../x' })).toThrow();
     const read = readMachineSettings({
       bytes: bytes(settings),
       typeId: 'bambu.x1c',

@@ -76,7 +76,7 @@ const subCommands: Record<string, CommandDef> = {
   }),
   agent: lazyCommand('agent', 'Drive agent runs on a Tau Host', async () => {
     const { agentCommand } = await import('./commands/agent.js');
-    return agentCommand as CommandDef;
+    return agentCommand;
   }),
   tui: lazyCommand('tui', 'Watch and drive a chat in an interactive terminal UI', async () => {
     const { tuiCommand } = await import('./commands/tui.js');
@@ -84,7 +84,7 @@ const subCommands: Record<string, CommandDef> = {
   }),
   revisions: lazyCommand('revisions', 'Read and move between a project’s revisions', async () => {
     const { revisionsCommand } = await import('./commands/revisions.js');
-    return revisionsCommand as CommandDef;
+    return revisionsCommand;
   }),
   open: lazyCommand('open', 'Open a project folder, file or Tau link in the browser', async () => {
     const { openCommand } = await import('./commands/open.js');
@@ -104,11 +104,11 @@ const subCommands: Record<string, CommandDef> = {
   }),
   host: lazyCommand('host', 'Inspect a Tau Host', async () => {
     const { hostCommand } = await import('./commands/host.js');
-    return hostCommand as CommandDef;
+    return hostCommand;
   }),
   ui: lazyCommand('ui', 'Check a deployed Tau UI against its build', async () => {
     const { uiCommand } = await import('./commands/ui.js');
-    return uiCommand as CommandDef;
+    return uiCommand;
   }),
 };
 

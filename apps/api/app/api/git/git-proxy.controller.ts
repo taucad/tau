@@ -521,7 +521,7 @@ export class GitProxyController {
         : {}),
       redirect: 'manual',
       signal: abort.signal,
-    } as RequestInit);
+    });
 
     for (let hop = 0; redirectStatuses.has(response.status); hop += 1) {
       const location = response.headers.get('location');
@@ -758,7 +758,7 @@ export class GitProxyController {
       headers,
       ...(method === 'GET' ? {} : { body: Readable.toWeb(body) as ReadableStream, duplex: 'half' }),
       redirect: 'error',
-    } as RequestInit);
+    });
     void reply.status(response.status);
     for (const header of ['content-type', 'content-length', 'etag']) {
       const value = response.headers.get(header);
@@ -833,7 +833,7 @@ export class GitProxyController {
     }
     let addresses: LookupAddress[];
     try {
-      addresses = await lookup(hostname, { all: true, verbatim: true });
+      addresses = await lookup(hostname, { all: true, order: 'verbatim' });
     } catch {
       throw new BadGatewayException({ code: 'GIT_PROXY_DNS_FAILED' });
     }

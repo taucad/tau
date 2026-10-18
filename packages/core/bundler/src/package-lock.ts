@@ -110,8 +110,7 @@ const readEntry = (path: string, value: unknown): PackageLockEntry => {
   if (path !== '' && typeof entry['version'] !== 'string') {
     throw new TypeError(`Lock entry '${path}' has no version.`);
   }
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- every field above was type-checked against PackageLockEntry
-  return entry as PackageLockEntry;
+  return entry;
 };
 
 /**

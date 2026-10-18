@@ -45,12 +45,15 @@ const buildState = ({
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
-const { mockEditorRefSend, mockState, syncNow, chatSync } = vi.hoisted(() => ({
-  mockEditorRefSend: vi.fn(),
-  syncNow: vi.fn(),
-  chatSync: { state: 'loading' },
-  mockState: { current: undefined as unknown },
-}));
+const { mockEditorRefSend, mockState, syncNow, chatSync } = vi.hoisted(() => {
+  const mockState: { current: unknown } = { current: undefined };
+  return {
+    mockEditorRefSend: vi.fn(),
+    syncNow: vi.fn(),
+    chatSync: { state: 'loading' },
+    mockState,
+  };
+});
 
 vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 vi.mock('#hooks/use-revision-status.js', () => ({

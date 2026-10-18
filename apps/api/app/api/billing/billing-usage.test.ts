@@ -15,7 +15,7 @@ type Tx = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 
 const queryRows = <T extends ReadonlyArray<Record<string, unknown>>>(items: T): postgres.RowList<T> =>
   Object.assign(items, {
-    count: items.length as T['length'],
+    count: items.length,
     command: 'SELECT',
     columns: [],
     statement: { name: '', string: '', types: [], columns: [] },

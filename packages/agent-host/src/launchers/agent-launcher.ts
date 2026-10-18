@@ -21,7 +21,7 @@ import { createPortableId, transportFailureOfRun } from '#harness/session-record
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
-import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
+import type { AgentLogEvent } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
   SourceLiveEvent,
@@ -823,7 +823,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       status: 'applied',
       effect: 'not-applied',
       details: {
-        ...(run === undefined ? {} : { snapshot: run as unknown as JsonValue }),
+        ...(run === undefined ? {} : { snapshot: run }),
         takeover: driverless,
         endCursor: chat.ledger.position.cursor,
         role: port.role(chatId).role,

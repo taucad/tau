@@ -30,7 +30,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true });
-  globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+  globalThis.fetch = fetchMock;
   cadPreviewMocks.parameters = {};
 });
 

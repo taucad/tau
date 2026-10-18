@@ -242,5 +242,5 @@ export function parseNodeFsFrame<Schema extends z.ZodType>(schema: Schema, raw: 
   if (version !== nodeFsProtocolVersion) {
     throw new NodeFsProtocolVersionError(version);
   }
-  return schema.parse(raw) as z.infer<Schema>;
+  return schema.parse(raw);
 }

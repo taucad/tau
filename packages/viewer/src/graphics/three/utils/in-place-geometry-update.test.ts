@@ -115,7 +115,7 @@ describe('in-place geometry update', () => {
     const gltf = await present(buildGlb());
     const targets = captureInPlaceGeometryTargets({
       scene: gltf.scene,
-      associations: gltf.parser.associations as ReadonlyMap<Object3D, { meshes?: number; primitives?: number }>,
+      associations: gltf.parser.associations,
       bytes: buildGlb(),
     });
     expect(targets).toBeDefined();
@@ -190,7 +190,7 @@ describe('in-place geometry update', () => {
     const gltf = await present(buildGlb());
     const targets = captureInPlaceGeometryTargets({
       scene: gltf.scene,
-      associations: gltf.parser.associations as ReadonlyMap<Object3D, { meshes?: number; primitives?: number }>,
+      associations: gltf.parser.associations,
       bytes: buildGlb(),
     });
     const position = findSurface(gltf.scene).geometry.getAttribute('position') as BufferAttribute;
@@ -203,7 +203,7 @@ describe('in-place geometry update', () => {
     const gltf = await present(buildGlb());
     const targets = captureInPlaceGeometryTargets({
       scene: gltf.scene,
-      associations: gltf.parser.associations as ReadonlyMap<Object3D, { meshes?: number; primitives?: number }>,
+      associations: gltf.parser.associations,
       bytes: buildGlb(),
     });
     const position = findSurface(gltf.scene).geometry.getAttribute('position') as BufferAttribute;
@@ -228,7 +228,7 @@ describe('in-place geometry update', () => {
     const gltf = await present(bytes);
     const targets = captureInPlaceGeometryTargets({
       scene: gltf.scene,
-      associations: gltf.parser.associations as ReadonlyMap<Object3D, { meshes?: number; primitives?: number }>,
+      associations: gltf.parser.associations,
       bytes,
     });
     const position = findSurface(gltf.scene).geometry.getAttribute('position') as BufferAttribute;

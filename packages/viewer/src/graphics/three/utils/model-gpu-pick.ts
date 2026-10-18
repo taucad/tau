@@ -305,7 +305,7 @@ export const createModelGpuPicker = ({
   };
 
   const ensureTarget = (width: number, height: number): PickRenderTarget => {
-    if (target && target.width === width && target.height === height) {
+    if (target?.width === width && target.height === height) {
       return target;
     }
     target?.dispose();

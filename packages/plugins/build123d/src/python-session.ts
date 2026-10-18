@@ -6,7 +6,7 @@ import { NativeProcessSession, NativeWorkerReportedError } from '@taucad/native-
 import type { NativeProtocolResponse } from '@taucad/native-process-core';
 import type { ResidentCacheBinding, ResidentExportEntry, RuntimeLogger } from '@taucad/runtime/kernel';
 import { actionDigest } from '@taucad/cache-core';
-import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
+import type { ActionDigest } from '@taucad/cache-core';
 import type { z } from 'zod';
 
 import {
@@ -261,7 +261,7 @@ export class PythonSession {
             continue;
           }
           entries.push({
-            action: descriptor.action as unknown as ComputeAction,
+            action: descriptor.action,
             bytes: new Uint8Array(bytes),
             mediaType: brepMediaType,
             determinism: 'byte-exact',

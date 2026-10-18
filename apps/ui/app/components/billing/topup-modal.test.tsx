@@ -388,7 +388,7 @@ describe('TopupModal', () => {
       expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
     });
     await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Automatic reload is handling this purchase.');
+    expect(await screen.findByRole('status')).toMatchTextContent('Automatic reload is handling this purchase.');
     expect(screen.queryByRole('button', { name: 'Confirm quote' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard quote' })).not.toBeInTheDocument();
     // The dialog's own bootstrap reads only manual top-ups; a reload surfaces through the refusal it causes.

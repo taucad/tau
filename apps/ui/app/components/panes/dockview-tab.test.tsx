@@ -96,7 +96,7 @@ describe('DockviewTab', () => {
 
     await user.hover(title);
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(expectedTitle);
+    expect(await screen.findByRole('tooltip')).toMatchTextContent(expectedTitle);
   });
 
   it('closes from a pointer-only glyph without nesting an interactive control in the tab', () => {

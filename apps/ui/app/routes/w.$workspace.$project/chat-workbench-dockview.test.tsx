@@ -308,7 +308,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
                 filePath={request.path}
                 content={content}
                 isEditorReady={request.textEditor?.isReady}
-                onChange={request.textEditor?.onChange as (value: string) => void}
+                onChange={request.textEditor?.onChange}
               />
             ),
           });
@@ -525,7 +525,7 @@ describe('FileEditor routing', () => {
 
     const placeholder = screen.getByRole('status');
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
-    expect(placeholder).toHaveTextContent('Loading mystery.dat');
+    expect(placeholder).toMatchTextContent('Loading mystery.dat');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
   });
 
@@ -743,7 +743,7 @@ describe('FileEditor routing', () => {
       <FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
     );
     expect(screen.getByTestId('viewer')).toBe(editor);
-    expect(screen.getByRole('status')).toHaveTextContent('File updates unavailable');
+    expect(screen.getByRole('status')).toMatchTextContent('File updates unavailable');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry file updates' }));
     expect(retry).toHaveBeenCalledOnce();
   });

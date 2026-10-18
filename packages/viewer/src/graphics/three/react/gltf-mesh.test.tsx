@@ -504,7 +504,7 @@ describe('applyGltfEdgeThemeColor', () => {
     const scene = new Group();
     scene.add(buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]));
     const gltf: Pick<GLTF, 'scene'> = { scene };
-    applyFatLineSegments(gltf as GLTF, {
+    applyFatLineSegments(gltf, {
       backend: 'webgl',
       resolution: new Vector2(1024, 768),
       edgeColor: gltfEdgeColorLightMode,
@@ -753,11 +753,14 @@ describe('applyModelComponentVisualStateToScene', () => {
   it('should carry the section clip to the emphasis material an edge swaps to, and keep it on the way back', () => {
     const scene = new Group();
     scene.add(buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]));
-    applyFatLineSegments({ scene } as GLTF, {
-      backend: 'webgpu',
-      resolution: new Vector2(1024, 768),
-      edgeColor: gltfEdgeColorLightMode,
-    });
+    applyFatLineSegments(
+      { scene },
+      {
+        backend: 'webgpu',
+        resolution: new Vector2(1024, 768),
+        edgeColor: gltfEdgeColorLightMode,
+      },
+    );
     scene.traverse((object) => {
       if (object.type === 'LineSegments2') {
         assignComponentOwner(object as unknown as LineSegments, firstComponentId);

@@ -70,9 +70,21 @@ export type TauViewerModel = Readonly<{
   sha256: string;
 }>;
 
+/** What a shown GLB carries of its source's mechanism, for the page's Kinematics pane. @public */
+export type TauViewerMechanism = Readonly<{
+  /** The GLB carries a mechanism payload for the page's Kinematics pane. */
+  preserved: boolean;
+  /** Joints in that payload; 0 when there is none. */
+  joints: number;
+  /** Animation ids, in authored order. */
+  animations: readonly string[];
+}>;
+
 /** Structured result of `show_model` and `open_model_file`. @public */
 export type TauViewerShowResult = Readonly<{
   model: TauViewerModel;
+  /** What the shown GLB carries of a mechanism; absent for an SVG. */
+  mechanism?: TauViewerMechanism | undefined;
   /** The loopback page showing this model, when the server runs one. */
   viewerUrl?: string | undefined;
   /** Component ids the agent asked the page to select, as the model tree names them. */
@@ -218,8 +230,8 @@ export type TauViewerClient = Readonly<{
   clientInfo?: Readonly<{ name: string }> | undefined;
 }>;
 
-/** The client name Codex's MCP client sends, from the desktop app and the CLI alike. */
-const codexClientName = 'codex-mcp-client';
+/** The client name Codex's MCP client sends, from the desktop app and the CLI alike. @public */
+export const codexClientName = 'codex-mcp-client';
 
 /**
  * Choose the presentation for one client (blueprint D5).

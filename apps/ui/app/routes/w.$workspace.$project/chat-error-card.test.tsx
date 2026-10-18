@@ -52,6 +52,6 @@ describe('ChatErrorCard', () => {
 
     const card = screen.getByRole('status', { name: 'Codex is rate limited' });
     expect(card.querySelector('[data-slot="chat-error-card-actions"]')).toBeNull();
-    expect(card).toHaveTextContent('Details');
+    expect(card).toMatchTextContent('Details');
   });
 });

@@ -2,6 +2,11 @@
 import { readFile } from 'node:fs/promises';
 // oxlint-disable-next-line import-x/no-unassigned-import -- this is a side effect
 import '@testing-library/jest-dom';
+import { toHaveTextContent as toMatchTextContent } from '@testing-library/jest-dom/matchers';
+import { expect } from 'vitest';
+
+// Keep substring and RegExp matching aligned with Vitest Browser's matching-name API.
+expect.extend({ toMatchTextContent });
 
 // Vite rewrites package-owned WASM/font assets to /@fs/ URLs. Jsdom has no Vite
 // HTTP server, so load those same real bytes directly while preserving normal fetches.
@@ -237,8 +242,8 @@ const stubEntry = {
   detail: undefined,
   toJSON: () => ({}),
 };
-globalThis.performance.mark = (() => stubEntry) as typeof globalThis.performance.mark;
-globalThis.performance.measure = (() => stubEntry) as typeof globalThis.performance.measure;
+globalThis.performance.mark = () => stubEntry;
+globalThis.performance.measure = () => stubEntry;
 
 // Jsdom returns null from HTMLCanvasElement.getContext('2d'), which crashes
 // `three/addons` modules that call `ctx.fillStyle = …` at module load time

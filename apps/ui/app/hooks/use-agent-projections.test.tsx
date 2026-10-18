@@ -371,7 +371,7 @@ describe('useAgentProjections', () => {
       isLoading: false,
       error: undefined,
       retry: vi.fn(),
-    } as unknown as ReturnType<typeof useChatRecords>);
+    });
     vi.mocked(useChatSessionStore).mockReturnValue(store);
 
     const { result } = renderHook(() => useAgentProjections({ workspaceLabel: 'tau' }));
@@ -408,7 +408,7 @@ describe('useAgentProjections', () => {
       isLoading: false,
       error: undefined,
       retry: vi.fn(),
-    } as unknown as ReturnType<typeof useChatRecords>);
+    });
     vi.mocked(useChatSessionStore).mockReturnValue(store);
     const { result } = renderHook(() => useAgentProjections());
     const beforeText = result.current.agents;

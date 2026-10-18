@@ -170,7 +170,7 @@ describe('AgentsPanelBody', () => {
         <AgentsPanelBody />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('alert', { name: 'Agents unavailable' })).toHaveTextContent(
+    expect(screen.getByRole('alert', { name: 'Agents unavailable' })).toMatchTextContent(
       'Agents unavailableCould not read project chatsRetry',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

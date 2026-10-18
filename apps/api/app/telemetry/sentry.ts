@@ -41,7 +41,7 @@ if (dsn) {
     release: process.env['FLY_IMAGE_REF'],
     serverName: process.env['FLY_MACHINE_ID'],
     skipOpenTelemetrySetup: true,
-    sendDefaultPii: false,
+    // Sentry 10 defaults to PII off; partial dataCollection options change those defaults.
     defaultIntegrations: false,
     integrations: [
       Sentry.eventFiltersIntegration(),

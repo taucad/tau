@@ -22,7 +22,7 @@ describe('typed question controls', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Same' })[0]!);
     fireEvent.click(screen.getByRole('button', { name: 'Confirm selection' }));
     expect(answer).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent('matches the requested limits');
+    expect(screen.getByRole('alert')).toMatchTextContent('matches the requested limits');
     fireEvent.click(screen.getAllByRole('button', { name: 'Same' })[1]!);
     fireEvent.click(screen.getByRole('button', { name: 'Confirm selection' }));
     expect(answer).toHaveBeenCalledWith({ value: ['red', 'blue'] });

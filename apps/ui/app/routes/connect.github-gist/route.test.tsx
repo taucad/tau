@@ -66,7 +66,7 @@ describe('ConnectGithubGistRoute', () => {
   it('should confirm a verified return and send the person back to Tau', async () => {
     renderAt('/connect/github-gist?shareAuth=github-gist');
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking Gist access');
+    expect(screen.getByRole('status')).toMatchTextContent('Checking Gist access');
     expect(await screen.findByText('Gist access granted')).toBeVisible();
     expect(screen.getByText('You can return to Tau. Nothing has been published.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Allow Gist access' })).not.toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('ConnectGithubGistRoute', () => {
   it('should report a cancelled return and offer the grant again', async () => {
     renderAt('/connect/github-gist?shareAuth=github-gist&error=access_denied&error_description=provider+copy');
 
-    expect(screen.getByRole('status')).toHaveTextContent('Gist access was not granted');
+    expect(screen.getByRole('status')).toMatchTextContent('Gist access was not granted');
     expect(screen.queryByText(/provider copy/i)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Allow Gist access' }));
@@ -108,7 +108,7 @@ describe('ConnectGithubGistRoute', () => {
   it('should report a failed return as an alert and offer the grant again', () => {
     renderAt('/connect/github-gist?shareAuth=github-gist&error=state_mismatch');
 
-    expect(screen.getByRole('alert')).toHaveTextContent('GitHub authorization could not be completed');
+    expect(screen.getByRole('alert')).toMatchTextContent('GitHub authorization could not be completed');
     expect(screen.getByRole('button', { name: 'Allow Gist access' })).toBeEnabled();
   });
 
@@ -118,7 +118,7 @@ describe('ConnectGithubGistRoute', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Allow Gist access' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('GitHub authorization could not be started.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('GitHub authorization could not be started.');
     expect(screen.getByRole('button', { name: 'Allow Gist access' })).toBeEnabled();
   });
 

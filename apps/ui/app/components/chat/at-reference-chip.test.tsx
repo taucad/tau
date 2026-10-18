@@ -35,7 +35,7 @@ function createEntry(path: string, partial: Partial<FileEntry> = {}): FileEntry 
   const mtimeMs = partial.mtimeMs ?? 0;
 
   if (partial.type === 'dir') {
-    const directoryPartial = partial as Partial<DirectoryFileEntry>;
+    const directoryPartial: Partial<DirectoryFileEntry> = partial;
     return {
       path,
       name,
@@ -183,7 +183,7 @@ describe('AtReferenceChip', () => {
     );
 
     expect(container.querySelector('svg')).not.toBeInTheDocument();
-    expect(container).toHaveTextContent('$5');
+    expect(container).toMatchTextContent('$5');
   });
 
   it('should render fallback mark when neither data attribute is present', () => {

@@ -88,7 +88,7 @@ describe('AccountClosureSettings', () => {
     const review = vi.fn();
     renderClosure(binding, review);
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Finish or cancel your pending payment first.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Finish or cancel your pending payment first.');
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
     // The sentence names an action and the control reaches it; the notice has done its job once the dialog is open.
     await userEvent.click(screen.getByRole('button', { name: 'Open Add credits' }));
@@ -100,7 +100,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'prepared', purpose: 'manual_topup' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Discard or finish your pending top-up quote first.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Discard or finish your pending top-up quote first.');
     expect(screen.getByRole('button', { name: 'Open Add credits' })).toBeEnabled();
   });
 
@@ -108,7 +108,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'attention_required', attention: { action: 'continue_hosted' } });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Finish your pending payment in Checkout first.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Finish your pending payment in Checkout first.');
     expect(screen.getByRole('button', { name: 'Open Add credits' })).toBeEnabled();
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
@@ -117,7 +117,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'prepared', purpose: 'automatic_topup' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('An automatic reload is in progress.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('An automatic reload is in progress.');
     expect(screen.queryByRole('button', { name: 'Open Add credits' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
@@ -126,7 +126,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'attention_required' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'A payment needs attention before this account can close.',
     );
     expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
@@ -137,7 +137,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'processing' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('A payment is still being processed.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('A payment is still being processed.');
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
 
@@ -145,7 +145,7 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'funds_received' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'Your payment was received and its credits are still being added.',
     );
     expect(screen.getByRole('link', { name: 'Contact support' })).toBeInTheDocument();
@@ -157,14 +157,14 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'fulfilled' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('That payment is no longer pending. Try again.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('That payment is no longer pending. Try again.');
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
 
   it('should say when the closure status could not be checked and still offer to prepare', async () => {
     current.mockRejectedValue(new Error('offline'));
     renderClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not check account closure status.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Could not check account closure status.');
     expect(screen.getByRole('button', { name: 'Close account' })).toBeInTheDocument();
   });
 

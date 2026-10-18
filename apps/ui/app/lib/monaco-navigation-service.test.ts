@@ -46,7 +46,7 @@ describe('registerMonacoNavigation', () => {
       openCodeEditor(s: unknown, resource: monaco.Uri, selection?: unknown): boolean;
     };
 
-    const handled = opener.openCodeEditor({} as unknown, monaco.Uri.file('/src/a.ts'), new monaco.Position(2, 3));
+    const handled = opener.openCodeEditor({}, monaco.Uri.file('/src/a.ts'), new monaco.Position(2, 3));
     expect(handled).toBe(true);
 
     expect(sent[0]).toEqual(
@@ -81,7 +81,7 @@ describe('registerMonacoNavigation', () => {
       openCodeEditor(s: unknown, resource: monaco.Uri): boolean;
     };
 
-    opener.openCodeEditor({} as unknown, monaco.Uri.file('/node_modules/pkg/x.js'));
+    opener.openCodeEditor({}, monaco.Uri.file('/node_modules/pkg/x.js'));
     expect(sent[0]).toEqual(
       expect.objectContaining({
         type: 'openFile',
@@ -103,7 +103,7 @@ describe('registerMonacoNavigation', () => {
     const opener = registerSpy.mock.calls[0]![0] as {
       openCodeEditor(s: unknown, resource: monaco.Uri): boolean;
     };
-    expect(opener.openCodeEditor({} as unknown, monaco.Uri.parse('https://example.com/x'))).toBe(false);
+    expect(opener.openCodeEditor({}, monaco.Uri.parse('https://example.com/x'))).toBe(false);
     registerSpy.mockRestore();
     disposable.dispose();
     workspaceFs.dispose();
@@ -118,9 +118,7 @@ describe('registerMonacoNavigation', () => {
       openCodeEditor(s: unknown, resource: monaco.Uri): boolean;
     };
 
-    expect(opener.openCodeEditor({} as unknown, monaco.Uri.from({ scheme: 'file', path: '/../outside.ts' }))).toBe(
-      false,
-    );
+    expect(opener.openCodeEditor({}, monaco.Uri.from({ scheme: 'file', path: '/../outside.ts' }))).toBe(false);
     expect(sent).toEqual([]);
 
     registerSpy.mockRestore();

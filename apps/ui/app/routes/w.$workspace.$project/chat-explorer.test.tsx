@@ -696,7 +696,7 @@ describe('ChatExplorerTree', () => {
       expect(exportImage).toHaveBeenCalledTimes(2);
     });
     const properties = screen.getByTestId('model-pane-properties');
-    expect(properties).toHaveTextContent('helper_part');
+    expect(properties).toMatchTextContent('helper_part');
     await act(async () => {
       second.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([2]) }]);
     });

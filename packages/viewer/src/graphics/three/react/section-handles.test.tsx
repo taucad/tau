@@ -16,12 +16,17 @@ type CompileAsync = (scene: THREE.Object3D, camera: THREE.Camera) => Promise<THR
 
 const mocks = vi.hoisted(() => {
   const bounds: SpatialBounds = { min: [-0.05, -0.05, -0.05], max: [0.05, 0.05, 0.05] };
+  const mutableState: { actor: unknown; state: unknown; cameraRig: unknown } = {
+    actor: undefined,
+    state: undefined,
+    cameraRig: undefined,
+  };
   return {
-    actor: undefined as unknown,
-    state: undefined as unknown,
+    actor: mutableState.actor,
+    state: mutableState.state,
     frame: undefined as FrameCallback | undefined,
     bounds,
-    cameraRig: undefined as unknown,
+    cameraRig: mutableState.cameraRig,
   };
 });
 

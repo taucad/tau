@@ -5,7 +5,12 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
-import { classifyLogRow, fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
+import {
+  agentLogEventSchema,
+  classifyLogRow,
+  fileRefBlockSchema,
+  userProviderMessageSchema,
+} from '#log/event-schema.js';
 
 const hash = 'a'.repeat(64);
 
@@ -102,6 +107,47 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
     const file = memoryEventLogStorage(new TextEncoder().encode(lines.join('')));
     return createEventLogAppender(file.storage);
   };
+
+  it('should preserve the model selection already persisted with a resumed running attempt', () => {
+    const row = {
+      ...envelope(1),
+      type: 'run.lifecycle',
+      state: 'running',
+      selection: {
+        id: 'resumed-model',
+        contextWindow: 8192,
+        maxTokens: 1024,
+        providerKind: 'tau',
+        cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
+        reasoning: { effort: 'high', budgetTokens: 512 },
+      },
+    };
+
+    expect(agentLogEventSchema.parse(row)).toEqual(row);
+    expect(classifyLogRow(row)).toEqual({ class: 'known', event: row });
+  });
+
+  it('should keep legacy lifecycle rows without a model selection valid', () => {
+    const row = { ...envelope(1), type: 'run.lifecycle', state: 'running' };
+
+    expect(agentLogEventSchema.parse(row)).toEqual(row);
+    expect(classifyLogRow(row)).toEqual({ class: 'known', event: row });
+  });
+
+  it.each([
+    null,
+    'resumed-model',
+    { contextWindow: 8192 },
+    { id: '', contextWindow: 8192 },
+    { id: 'resumed-model', contextWindow: 0 },
+    { id: 'resumed-model', contextWindow: 8192, maxTokens: -1 },
+    { id: 'resumed-model', contextWindow: 8192, providerKind: 'unrecognized' },
+  ])('should refuse execution of a malformed persisted selection while preserving its row: %j', (selection) => {
+    const row = { ...envelope(1), type: 'run.lifecycle', state: 'running', selection };
+
+    expect(agentLogEventSchema.safeParse(row).success).toBe(false);
+    expect(classifyLogRow(row)).toEqual({ class: 'opaque', event: row });
+  });
 
   it('should open a log whose middle line is unreadable and quarantine it', async () => {
     const log = await logOf([

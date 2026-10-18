@@ -3,7 +3,6 @@ import type { ParameterSnapshot } from '#snapshot.js';
 import { snapshotFor } from '#snapshot.js';
 import { groupOperationRejection, validRequestShape } from '#request.js';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
-import type { CacheValue } from '@taucad/cache-core';
 import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry, JSONValue, ParameterGroup } from '@taucad/types';
 import { parseInput } from '@taucad/units/input';
@@ -506,7 +505,7 @@ const convertedConstraints = (
       const converted = convertValue(value);
       return converted === undefined ? [] : [[key, converted]];
     }),
-  ) as ParameterBinding['constraints'];
+  );
 };
 
 const sourceUnitRebindRequired = (): Error =>
@@ -627,7 +626,7 @@ const withoutEmptyClaims = (group: ParameterGroup): ParameterGroup => ({
 });
 
 const sameValues = (left: Readonly<Record<string, JSONValue>>, right: Readonly<Record<string, JSONValue>>): boolean =>
-  canonicalizeCacheValue({ value: left as CacheValue }) === canonicalizeCacheValue({ value: right as CacheValue });
+  canonicalizeCacheValue({ value: left }) === canonicalizeCacheValue({ value: right });
 
 /** Compute a record transition from one admitted semantic snapshot. @internal */
 export const planParameterRecord = (

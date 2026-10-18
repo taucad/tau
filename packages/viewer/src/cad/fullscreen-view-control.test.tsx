@@ -79,7 +79,7 @@ describe('FullscreenViewControl', () => {
 
     await user.click(screen.getByRole('button', { name: 'Enter fullscreen' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Unable to change fullscreen. Try again.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Unable to change fullscreen. Try again.');
     expect(screen.getByRole('button', { name: 'Enter fullscreen', pressed: false })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Enter fullscreen' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('FullscreenViewControl', () => {
 
     await user.click(screen.getByRole('button', { name: 'Enter fullscreen' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Fullscreen is unavailable here.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Fullscreen is unavailable here.');
     expect(requestFullscreen).not.toHaveBeenCalled();
   });
 

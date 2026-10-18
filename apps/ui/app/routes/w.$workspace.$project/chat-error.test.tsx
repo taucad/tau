@@ -348,7 +348,7 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
 
     // A provider's transient pacing resumes on its own, counting down beside Resume.
-    expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 30 seconds');
+    expect(screen.getByRole('timer')).toMatchTextContent('Resuming in 30 seconds');
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
@@ -394,7 +394,7 @@ describe('ChatError', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent('server_error: The server had an error');
+    expect(screen.getByTestId('code-viewer')).toMatchTextContent('server_error: The server had an error');
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
@@ -435,13 +435,13 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
 
     const card = screen.getByRole('alert');
-    expect(card).toHaveTextContent('This model is paused');
+    expect(card).toMatchTextContent('This model is paused');
     expect(
       screen.getByText("Tau's operators have paused this model. Switch to another model to continue."),
     ).toBeInTheDocument();
-    expect(card).not.toHaveTextContent(gatewaySentence);
-    expect(card).not.toHaveTextContent('Service Temporarily Unavailable');
-    expect(card).not.toHaveTextContent('Everything up to here is saved.');
+    expect(card).not.toMatchTextContent(gatewaySentence);
+    expect(card).not.toMatchTextContent('Service Temporarily Unavailable');
+    expect(card).not.toMatchTextContent('Everything up to here is saved.');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Switch model',
       'Try again',
@@ -478,14 +478,14 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
 
     const card = screen.getByRole('alert');
-    expect(card).toHaveTextContent('This account needs attention');
+    expect(card).toMatchTextContent('This account needs attention');
     expect(
       screen.getByText(
         'Tau has paused spending on this account while we look at a billing issue. Contact support to continue.',
       ),
     ).toBeInTheDocument();
-    expect(card).not.toHaveTextContent(gatewaySentence);
-    expect(card).not.toHaveTextContent('Everything up to here is saved.');
+    expect(card).not.toMatchTextContent(gatewaySentence);
+    expect(card).not.toMatchTextContent('Everything up to here is saved.');
     expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Debug details']);
 
@@ -613,7 +613,7 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
+    expect(screen.getByTestId('code-viewer')).toMatchTextContent(hostSentence);
   });
 
   /* Ruling Q6: taking leadership back is a protocol, not an error action. */
@@ -830,7 +830,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByRole('region', { name: 'External agent stop' })).toHaveTextContent(
+    expect(screen.getByRole('region', { name: 'External agent stop' })).toMatchTextContent(
       "You've hit your usage limit.",
     );
     expect(screen.queryByText('Rate limit exceeded')).not.toBeInTheDocument();
@@ -884,7 +884,7 @@ describe('ChatError', () => {
 
     const { container } = render(<ChatErrorBanner />);
 
-    expect(container.querySelector('[data-slot="chat-error-card"]')).toHaveTextContent(
+    expect(container.querySelector('[data-slot="chat-error-card"]')).toMatchTextContent(
       'The model could not finish this turn.',
     );
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
@@ -905,7 +905,7 @@ describe('ChatError', () => {
 
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Debug details' }));
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent('generic-trace');
+    expect(screen.getByTestId('code-viewer')).toMatchTextContent('generic-trace');
   });
 
   it('renders the network banner for a dropped request', () => {

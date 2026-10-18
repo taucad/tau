@@ -121,7 +121,7 @@ it("should keep a new project host's bridges when the previous host's project-cl
         type: 'attach',
         commandId: 'req_late-release',
         payload: { chatId: 'chat-late' },
-      } as Parameters<AgentChannelClient['execute']>[0]),
+      }),
     ).resolves.toMatchObject({ status: 'applied' });
     stream.client.close();
   } finally {
@@ -168,7 +168,7 @@ it('should answer needs to a rebridge that names a host that is no longer open',
         type: 'attach',
         commandId: 'req_stale-host',
         payload: { chatId: 'chat-stale' },
-      } as Parameters<AgentChannelClient['execute']>[0]),
+      }),
     ).resolves.toMatchObject({ status: 'applied' });
     stream.client.close();
   } finally {
@@ -393,7 +393,7 @@ it('should use registered durable compute before and after a project-host rebrid
             type: 'attach',
             commandId: `attach-${runId}-${crypto.randomUUID()}`,
             payload: { chatId: 'chat-durable-compute' },
-          } as Parameters<AgentChannelClient['execute']>[0]);
+          });
           expect(answer).toMatchObject({
             status: 'applied',
             details: { snapshot: { runId, state: 'completed' } },

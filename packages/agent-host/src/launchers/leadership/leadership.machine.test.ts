@@ -32,7 +32,6 @@ import {
 } from '#browser/leadership.fixture.js';
 import { chatRunMachine } from '#host/chat-run.machine.js';
 import { chatLeadershipNames } from '#launchers/leadership/names.js';
-import type { AgentLogEvent } from '#log/event-types.js';
 import type { LeadershipMessage } from '#launchers/leadership/frames.js';
 import { firedLate, leadershipIgnoredEvents, leadershipMachine } from '#launchers/leadership/leadership.machine.js';
 import type { LeadershipEffectArgs, LeadershipInput } from '#launchers/leadership/leadership.machine.js';
@@ -406,7 +405,7 @@ describe('leadership (M2)', () => {
         runId: 'run-1',
         state: 'completed',
         sequence: lastOfA.sequence + 1,
-      } as AgentLogEvent),
+      }),
     ).rejects.toMatchObject({ code: 'LOG_FENCED' });
     expect(fileSystem.files.get(logPath('chat-4'))).toEqual(before);
     await thawed.close();

@@ -113,7 +113,10 @@ const expectCaptureTurn = async (): Promise<void> => {
   // Not `'gpu' in navigator`: Playwright's Firefox exposes `navigator.gpu` and
   // hands back no adapter, which is the same question the capture itself asks.
   const canCapture = await target.evaluate(async () => {
-    const { gpu } = navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } };
+    const readGpu = (
+      runtimeNavigator: Pick<Navigator, 'userAgent'> & { gpu?: { requestAdapter(): Promise<unknown> } },
+    ): { requestAdapter(): Promise<unknown> } | undefined => runtimeNavigator.gpu;
+    const gpu = readGpu(navigator);
     return gpu ? (await gpu.requestAdapter()) !== null : false;
   });
   if (canCapture) {

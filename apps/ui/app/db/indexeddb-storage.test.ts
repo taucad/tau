@@ -41,7 +41,7 @@ const trackConnections = (): TrackedConnection[] => {
   const factory = globalThis.indexedDB;
   const openDatabase = factory.open.bind(factory);
   const connections: TrackedConnection[] = [];
-  factory.open = ((name: string, version?: number) => {
+  factory.open = (name: string, version?: number) => {
     const request = openDatabase(name, version);
     request.addEventListener('success', () => {
       const { result: db } = request;
@@ -54,7 +54,7 @@ const trackConnections = (): TrackedConnection[] => {
       connections.push(entry);
     });
     return request;
-  }) as typeof factory.open;
+  };
   return connections;
 };
 

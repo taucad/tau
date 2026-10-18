@@ -9,7 +9,7 @@ const requestWebGpuAdapter = async (): Promise<boolean> => {
 
   try {
     // `GPU` / `navigator.gpu` arrived after some `lib.dom` baselines TypeScript snapshots use.
-    const navigatorGpu = (navigator as Navigator & { readonly gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+    const navigatorGpu = (navigator as { readonly gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
     if (navigatorGpu === undefined) {
       return false;
     }

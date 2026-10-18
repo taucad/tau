@@ -218,13 +218,13 @@ describe('CommunityProjectGrid', () => {
     expect(provider).toHaveAttribute('data-project-id', 'community-project');
     expect(provider).toHaveAttribute('data-main-file', 'main.ts');
     expect(provider).toHaveAttribute('data-file-count', '2');
-    expect(screen.getByTestId('location')).toHaveTextContent('/community');
+    expect(screen.getByTestId('location')).toMatchTextContent('/community');
 
     await userEvent.click(previewToggle);
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
     expect(previewToggle).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('presentation')).toHaveAttribute('alt', '');
-    expect(screen.getByTestId('location')).toHaveTextContent('/community');
+    expect(screen.getByTestId('location')).toMatchTextContent('/community');
 
     await userEvent.click(previewToggle);
     expect(await screen.findByTestId('cad-preview-provider')).toBeInTheDocument();
@@ -298,7 +298,7 @@ describe('CommunityProjectGrid', () => {
       location: { kind: 'home' },
     });
     await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/remixed-project');
+      expect(screen.getByTestId('location')).toMatchTextContent('/w/tau-workspace/remixed-project');
     });
     expect(toastMock.success).toHaveBeenCalledWith('Remixed to your projects', { description: 'Community Demo' });
   });
@@ -317,7 +317,7 @@ describe('CommunityProjectGrid', () => {
     });
     expect(screen.getByRole('button', { name: 'Create remix' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Remix Community Demo', hidden: true })).toBeEnabled();
-    expect(screen.getByTestId('location')).toHaveTextContent('/community');
+    expect(screen.getByTestId('location')).toMatchTextContent('/community');
   });
 
   it('should name the example when a remix fails for another reason', async () => {

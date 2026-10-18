@@ -40,14 +40,14 @@ const notchTool = (x: number): Shape3D =>
 
 export const buildConnectingRod = (place: Placement): BuiltPart => {
   // Big-end upper half: extruded profile along X (width 21.8).
-  const bigProfile = draw([-bigOdR, 0])
+  const bigProfile: Shape3D = draw([-bigOdR, 0])
     .lineTo([-bigOdR, 18])
     .threePointsArcTo([bigOdR, 18], [0, 46])
     .lineTo([bigOdR, 0])
     .close()
     .sketchOnPlane('YZ')
     .extrude(rp.bigEndWidth)
-    .translate([-halfW, 0, 0]) as Shape3D;
+    .translate([-halfW, 0, 0]);
   // I-beam between the eyes: profile in XY, filleted corners R3, extruded +z.
   const pocketW = (rp.beamFlangeW - rp.beamWebT) / 2;
   const pocketH = rp.beamDepth - 2 * rp.beamFlangeT;
@@ -119,7 +119,7 @@ export const buildConnectingRod = (place: Placement): BuiltPart => {
 };
 
 export const buildRodCap = (place: Placement): BuiltPart => {
-  const profile = draw([-bigOdR, 0])
+  const profile: Shape3D = draw([-bigOdR, 0])
     .lineTo([bigOdR, 0])
     .lineTo([bigOdR, capBottom + 6])
     .lineTo([bigOdR - 6, capBottom])
@@ -128,7 +128,7 @@ export const buildRodCap = (place: Placement): BuiltPart => {
     .close()
     .sketchOnPlane('YZ')
     .extrude(rp.bigEndWidth)
-    .translate([-halfW, 0, 0]) as Shape3D;
+    .translate([-halfW, 0, 0]);
   // Pilot bore Ø9.0 (parting side) + Ø9.5 clearance + spot face Ø15.
   const boltHole = (y: number): Shape3D =>
     draw([0, capBottom - 1])
@@ -140,7 +140,7 @@ export const buildRodCap = (place: Placement): BuiltPart => {
       .close()
       .sketchOnPlane('XZ')
       .revolve([0, 0, 1])
-      .translate([0, y, 0]) as Shape3D;
+      .translate([0, y, 0]);
 
   const shape = place.shape(
     profile

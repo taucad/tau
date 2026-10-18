@@ -142,9 +142,9 @@ describe('GeometryUnitTiming', () => {
   it('defaults every projection to the latest completed trace and keeps live status independent', () => {
     renderTiming({ cadRef: actor('bundling'), query: '' });
 
-    expect(screen.getByRole('status')).toHaveTextContent('Bundling…');
+    expect(screen.getByRole('status')).toMatchTextContent('Bundling…');
     expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
-    expect(getTotalMetric()).toHaveTextContent('40ms');
+    expect(getTotalMetric()).toMatchTextContent('40ms');
     expect(screen.getByRole('treeitem', { name: /new\.operation/u })).toBeInTheDocument();
     expect(screen.queryByText('old.operation')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Render pipeline' })).toBeInTheDocument();
@@ -154,7 +154,7 @@ describe('GeometryUnitTiming', () => {
     renderTiming({ cadRef: actor(), query: '' });
     fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
 
-    expect(getTotalMetric()).toHaveTextContent('100ms');
+    expect(getTotalMetric()).toMatchTextContent('100ms');
     expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();
     expect(screen.queryByText('new.operation')).not.toBeInTheDocument();
   });
@@ -162,7 +162,7 @@ describe('GeometryUnitTiming', () => {
   it('shows no matches for the global query while retaining overview metrics', () => {
     renderTiming({ cadRef: actor(), query: 'not-present' });
     expect(screen.getByText('No matching telemetry')).toBeInTheDocument();
-    expect(getTotalMetric()).toHaveTextContent('40ms');
+    expect(getTotalMetric()).toMatchTextContent('40ms');
   });
 
   it('provides Trace and Timeline modes plus complete selected-span details', () => {
@@ -206,7 +206,7 @@ describe('GeometryUnitTiming', () => {
   it('keeps the trace the user pinned after the machine has evicted its spans', () => {
     const view = renderTiming({ cadRef: actor(), query: '' });
     fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
-    expect(getTotalMetric()).toHaveTextContent('100ms');
+    expect(getTotalMetric()).toMatchTextContent('100ms');
 
     // D9: the bounded ring drops the oldest trace. A pane that only held its id would silently
     // snap back to the newest one and lose what the user was reading.
@@ -216,7 +216,7 @@ describe('GeometryUnitTiming', () => {
       </TooltipProvider>,
     );
 
-    expect(getTotalMetric()).toHaveTextContent('100ms');
+    expect(getTotalMetric()).toMatchTextContent('100ms');
     expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();
   });
 

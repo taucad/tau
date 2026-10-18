@@ -196,7 +196,7 @@ function CalibrationProbe({
     () => ({ benchmark, cameraSettings, capture, metadata, pixelRatio, presented }),
     [benchmark, cameraSettings, capture, metadata, pixelRatio, presented],
   );
-  const state = useRef({
+  const initialState = {
     measurement,
     measured: undefined as typeof measurement | undefined,
     frame: 0,
@@ -210,10 +210,11 @@ function CalibrationProbe({
     samples: [] as FrameSample[],
     gpuSamples: [] as number[],
     benchmarkResult: undefined as Record<string, unknown> | undefined,
-    saved: undefined as unknown,
+    saved: undefined,
     gpuPendingPeak: 0,
     drainStarted: 0,
-  });
+  };
+  const state = useRef<Omit<typeof initialState, 'saved'> & { saved: unknown }>(initialState);
   const report = useCallback((): Record<string, unknown> => {
     const context = gl instanceof WebGLRenderer ? gl.getContext() : undefined;
     const debug = context?.getExtension('WEBGL_debug_renderer_info');

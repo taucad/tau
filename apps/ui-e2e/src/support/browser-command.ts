@@ -1358,9 +1358,7 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
       readonly isFallbackAdapter?: boolean;
       requestDevice(): Promise<GpuDevice>;
     };
-    type GpuNavigator = Navigator & {
-      readonly gpu?: { requestAdapter(): Promise<GpuAdapter | null> };
-    };
+    type OptionalGpu = { requestAdapter(): Promise<GpuAdapter | null> } | undefined;
     type GpuConstants = typeof globalThis & {
       readonly GPUBufferUsage?: {
         readonly COPY_DST: number;
@@ -1381,7 +1379,9 @@ export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], Tar
       qualificationErrors.push(`WebGPU qualification requires a secure context; received ${targetUrl}.`);
     }
 
-    const { gpu } = navigator as GpuNavigator;
+    const readGpu = (runtimeNavigator: Pick<Navigator, 'userAgent'> & { readonly gpu?: OptionalGpu }): OptionalGpu =>
+      runtimeNavigator.gpu;
+    const gpu = readGpu(navigator);
     const adapter = await gpu?.requestAdapter();
     const adapterInfo = adapter?.info;
     const explicitAdapter = adapter

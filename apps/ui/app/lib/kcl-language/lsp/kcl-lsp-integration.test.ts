@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
+import type { JSONRPCResponse } from 'json-rpc-2.0';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { encodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
@@ -41,7 +41,7 @@ async function lspRequest<T>(method: string, parameters: unknown): Promise<T> {
       id,
       method,
       params: parameters,
-    } as JSONRPCRequest),
+    }),
   );
 
   const response = (await responsePromise) as JSONRPCResponse;
@@ -62,7 +62,7 @@ function lspNotify(method: string, parameters: unknown): void {
       jsonrpc: '2.0',
       method,
       params: parameters,
-    } as JSONRPCRequest),
+    }),
   );
 }
 

@@ -125,6 +125,6 @@ describe('ExportSchemaForm', () => {
     };
     renderForm({ optionStore: store });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('STL options could not be prepared: disk unavailable');
+    expect(await screen.findByRole('alert')).toMatchTextContent('STL options could not be prepared: disk unavailable');
   });
 });

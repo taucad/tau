@@ -517,10 +517,7 @@ describe('convertParameterDefinitionsToJsonSchema', () => {
     });
 
     it('should handle null values correctly', () => {
-      const definitions: JscadParameterDefinition[] = [
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentionally invalid for edge-case testing
-        { name: 'nullable', type: 'text', initial: null as unknown as string },
-      ];
+      const definitions: JscadParameterDefinition[] = [{ name: 'nullable', type: 'text', initial: null }];
 
       const result = convertParameterDefinitionsToJsonSchema(definitions);
 

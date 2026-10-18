@@ -291,8 +291,7 @@ const readTombstone = (value: unknown): ManifestTombstone | null => {
 };
 
 /** The bytes committed to the store. One line of JSON; nothing derives from its layout. */
-export const encodeManifest = (manifest: Manifest): ManifestBytes =>
-  new TextEncoder().encode(JSON.stringify(manifest)) as ManifestBytes;
+export const encodeManifest = (manifest: Manifest): ManifestBytes => new TextEncoder().encode(JSON.stringify(manifest));
 
 /**
  * Parses and validates stored bytes. Every field is checked, because these

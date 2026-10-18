@@ -714,30 +714,26 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const store = new ChatSessionStore({ chatSession });
     store.setDependencies(createStubDeps(client));
     const hostCommand = vi.fn();
-    const unpublish = store.publishProjectHostConnector(
-      projectId,
-      async () =>
-        ({
-          hostCommand,
-          catchUp: writerOwnedCatchUp,
-          read: vi.fn(),
-          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
-            queueMicrotask(() =>
-              parameters[3]?.({
-                status: 'batch',
-                sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
-                chatId,
-                cursor: 0,
-                nextCursor: 0,
-                endCursor: 0,
-                events: [],
-              }),
-            );
-            return vi.fn();
-          },
-          close: vi.fn(async () => undefined),
-        }) as unknown as AgentHostClient,
-    );
+    const unpublish = store.publishProjectHostConnector(projectId, async () => ({
+      hostCommand,
+      catchUp: writerOwnedCatchUp,
+      read: vi.fn(),
+      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+        queueMicrotask(() =>
+          parameters[3]?.({
+            status: 'batch',
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+            chatId,
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+          }),
+        );
+        return vi.fn();
+      },
+      close: vi.fn(async () => undefined),
+    }));
     const unobserve = store.observe(chatId, projectId);
     const session = store.acquire(chatId, projectId);
 
@@ -1904,36 +1900,32 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
     const unobserve = store.observe(chatId, projectId);
     const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
-    const unpublish = store.publishProjectHostConnector(
-      projectId,
-      async () =>
-        ({
-          hostCommand,
-          catchUp: writerOwnedCatchUp,
-          read: vi.fn<AgentHostClient['read']>(async () => ({
-            status: 'batch',
-            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
-            chatId,
-            cursor: 0,
-            nextCursor: 0,
-            endCursor: 0,
-            events: [],
-          })),
-          subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
-            args[3]?.({
-              status: 'batch',
-              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
-              chatId,
-              cursor: 0,
-              nextCursor: 0,
-              endCursor: 0,
-              events: [],
-            });
-            return () => undefined;
-          },
-          close: vi.fn(async () => undefined),
-        }) as unknown as AgentHostClient,
-    );
+    const unpublish = store.publishProjectHostConnector(projectId, async () => ({
+      hostCommand,
+      catchUp: writerOwnedCatchUp,
+      read: vi.fn<AgentHostClient['read']>(async () => ({
+        status: 'batch',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+        chatId,
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+      })),
+      subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
+        args[3]?.({
+          status: 'batch',
+          sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+          chatId,
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        });
+        return () => undefined;
+      },
+      close: vi.fn(async () => undefined),
+    }));
     await vi.waitFor(() => {
       expect(store.getAttachmentStatus(chatId)).toBe('attached');
     });

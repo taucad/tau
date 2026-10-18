@@ -241,6 +241,7 @@ const lifecycleEventSchema = z.looseObject({
   ...eventBase,
   type: z.literal('run.lifecycle'),
   state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
+  selection: turnContextSchema.shape.model,
   placement: turnPlacementSchema.optional(),
   storageDurability: z.enum(storageDurabilityClasses).optional(),
   detail: runFailureDetailSchema.optional(),
@@ -544,5 +545,5 @@ export const parseLogEvent = (value: unknown): AgentLogEvent => {
       cause: result.error,
     });
   }
-  return result.data as AgentLogEvent;
+  return result.data;
 };

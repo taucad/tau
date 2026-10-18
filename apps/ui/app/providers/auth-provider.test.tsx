@@ -20,7 +20,7 @@ import { FinancialSessionProvider } from '#providers/financial-session-provider.
 
 const mocks = vi.hoisted(() => ({
   routerLink: vi.fn(),
-  resolvedAuth: vi.fn(() => 'indeterminate' as 'authed' | 'anonymous' | 'indeterminate'),
+  resolvedAuth: vi.fn((): 'authed' | 'anonymous' | 'indeterminate' => 'indeterminate'),
   purgeSavedUsage: vi.fn(async () => undefined),
 }));
 const { routerLink } = mocks;

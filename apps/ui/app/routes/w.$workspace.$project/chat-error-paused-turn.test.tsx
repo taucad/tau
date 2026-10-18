@@ -116,6 +116,6 @@ describe('ChatErrorPausedTurn', () => {
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent('MALFORMED_RESPONSE');
+    expect(screen.getByTestId('code-viewer')).toMatchTextContent('MALFORMED_RESPONSE');
   });
 });

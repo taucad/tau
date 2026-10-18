@@ -102,14 +102,14 @@ const valveAxisAt = (
 };
 
 export const buildCylinderHead = (place: Placement): BuiltPart => {
-  const envelope = draw([hp.aIn, 0])
+  const envelope: Shape3D = draw([hp.aIn, 0])
     .lineTo([hp.aOut, 0])
     .lineTo([hp.aOut, hp.height])
     .lineTo([hp.aIn, hp.height])
     .close()
     .sketchOnPlane('YZ')
     .extrude(hp.length)
-    .translate([hp.frontX, 0, 0]) as Shape3D;
+    .translate([hp.frontX, 0, 0]);
 
   const cuts: Shape3D[] = [];
   const seatProbes: Vec3[] = [];

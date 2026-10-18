@@ -37,7 +37,7 @@ describe('LlmGatewayService', () => {
         throw new Error('provider rejected');
       }),
     };
-    const service = new LlmGatewayService(invocations as unknown as ModelInvocationService);
+    const service = new LlmGatewayService(invocations);
     const reply = { header: vi.fn(), status: vi.fn(), send: vi.fn() };
     reply.header.mockReturnValue(reply);
 

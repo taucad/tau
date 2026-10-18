@@ -115,7 +115,7 @@ const createSectionClipMask = ({ settings, first, second }: SectionClipStorage):
       });
     });
     return isKept;
-  })() as Node<'bool'>;
+  })();
 };
 
 /** A new clip with no pieces, for one viewer. Never share it between viewers or renderers. */

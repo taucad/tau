@@ -75,7 +75,7 @@ export const seedLog = async (file: MemoryLogFile, events: readonly SeededLogEve
       leaderEpoch: 'epoch-seed',
       sequence,
       recordedAt: new Date(Date.UTC(2026, 8, 1)).toISOString(),
-    } as AgentLogEvent);
+    });
     sequence++;
   }
   await appender.close();

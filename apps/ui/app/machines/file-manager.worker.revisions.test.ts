@@ -1201,7 +1201,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       /* The registration answers; whatever the advertisement then does is the
        * remote's business, not this pin's. */
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     try {
       /* The origin reaches the worker the way the page sends it (I8). */
@@ -1272,7 +1272,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const [, older] = await root.log();
     const original = globalThis.fetch;
     /* No cloud here: the push is refused, after the name is already on the revision. */
-    globalThis.fetch = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 503 }));
 
     try {
       alpha.send({
@@ -1569,7 +1569,7 @@ describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
           reject(new DOMException('The operation was aborted.', 'AbortError'));
         });
       });
-    }) as unknown as typeof globalThis.fetch;
+    });
 
     try {
       const alpha = await fixture.open('alpha');

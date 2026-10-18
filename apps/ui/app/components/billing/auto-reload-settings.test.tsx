@@ -74,7 +74,7 @@ describe('AutoReloadSettings', () => {
   it('shows one load failure with a working retry and no contradictory off state', async () => {
     getReloadConsent.mockRejectedValueOnce(new Error('offline'));
     renderSettings();
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded');
+    expect(await screen.findByRole('alert')).toMatchTextContent('could not be loaded');
     expect(screen.queryByText('Automatic reload is off.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));

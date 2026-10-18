@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
+import type { JSONRPCRequest } from 'json-rpc-2.0';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { encodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
 
 function makeResponse(id: number, result: unknown): Uint8Array<ArrayBuffer> {
-  return encodeMessage({ jsonrpc: '2.0', id, result } as JSONRPCResponse);
+  return encodeMessage({ jsonrpc: '2.0', id, result });
 }
 
 function makeNotification(method: string, parameters?: unknown): Uint8Array<ArrayBuffer> {
@@ -12,7 +12,7 @@ function makeNotification(method: string, parameters?: unknown): Uint8Array<Arra
     jsonrpc: '2.0',
     method,
     params: parameters,
-  } as JSONRPCRequest);
+  });
 }
 
 function makeRequest(id: number, method: string, parameters?: unknown): Uint8Array<ArrayBuffer> {
@@ -21,7 +21,7 @@ function makeRequest(id: number, method: string, parameters?: unknown): Uint8Arr
     id,
     method,
     params: parameters,
-  } as JSONRPCRequest);
+  });
 }
 
 describe('StreamDemuxer', () => {
@@ -101,7 +101,7 @@ describe('StreamDemuxer', () => {
         jsonrpc: '2.0',
         id: 5,
         error: { code: -32_601, message: 'Method not found' },
-      } as JSONRPCResponse),
+      }),
     );
 
     const response = await responsePromise;

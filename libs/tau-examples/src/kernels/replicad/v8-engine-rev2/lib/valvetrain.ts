@@ -198,10 +198,10 @@ export const buildCamshaft = (place: Placement): BuiltPart => {
   );
   const chains = allValveChains();
   const lobes: Shape3D[] = chains.map((chain) => {
-    const lobe = lobeProfile()
+    const lobe: Shape3D = lobeProfile()
       .sketchOnPlane('YZ')
       .extrude(cp.lobeWidth)
-      .translate([chain.x - cp.lobeWidth / 2, 0, 0]) as Shape3D;
+      .translate([chain.x - cp.lobeWidth / 2, 0, 0]);
     return lobe.rotate(-noseAngle(chain), [chain.x, 0, 0], [1, 0, 0]);
   });
   let cam = revolved;
@@ -326,7 +326,7 @@ export const rockerLayout = {
 } as const;
 
 export const buildRockerArm = (place: Placement): BuiltPart => {
-  const body = draw([-vp.rockerCupArm - 8, -8])
+  const body: Shape3D = draw([-vp.rockerCupArm - 8, -8])
     .lineTo([vp.rockerPalletArm + 8, -8])
     .lineTo([vp.rockerPalletArm + 8, 4])
     .lineTo([-vp.rockerCupArm - 8, 4])
@@ -334,15 +334,13 @@ export const buildRockerArm = (place: Placement): BuiltPart => {
     .sketchOnPlane('XZ')
     .extrude(16)
     // The XZ sketch extrudes toward -y; +8 centers the bar on y = 0.
-    .translate([0, 8, 0]) as Shape3D;
+    .translate([0, 8, 0]);
   const pallet = makeSphere(20).translate([vp.rockerPalletArm, 0, 12]);
-  let rocker = body.fuse(pallet as Shape3D);
+  let rocker = body.fuse(pallet);
   // Pushrod cup pocket: sphere R5 centred 1 above the underside.
-  rocker = rocker.cut(
-    makeSphere(5).translate(rockerLayout.cupCenter) as Shape3D,
-  );
+  rocker = rocker.cut(makeSphere(5).translate(rockerLayout.cupCenter));
   // Pivot socket: sphere R8 centred at the origin, open to the top.
-  rocker = rocker.cut(makeSphere(8) as Shape3D);
+  rocker = rocker.cut(makeSphere(8));
   // Stud slot through the body.
   rocker = rocker.cut(makeCylinder(5.6, 30, [0, 0, -12], [0, 0, 1]));
   const shape = place.shape(rocker);
@@ -374,7 +372,7 @@ export const buildRockerArm = (place: Placement): BuiltPart => {
 
 /** Rocker pivot ball: sphere R8 with a stud bore and a flat top. */
 export const buildPivotBall = (place: Placement): BuiltPart => {
-  const ball = (makeSphere(8) as Shape3D)
+  const ball = makeSphere(8)
     .cut(makeCylinder(5.1, 20, [0, 0, -10], [0, 0, 1]))
     .cut(makeCylinder(9, 4, [0, 0, 5], [0, 0, 1]));
   const shape = place.shape(ball);

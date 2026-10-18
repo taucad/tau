@@ -22,6 +22,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "ai": "catalog:",
+    "google-auth-library": "catalog:",
     "react": "catalog:",
     "react-email": "catalog:",
     "resend": "catalog:",

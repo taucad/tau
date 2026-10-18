@@ -85,7 +85,7 @@ const cheekSolid = (pin: number, side: 'f' | 'r'): Shape3D => {
   return profile
     .sketchOnPlane('YZ')
     .extrude(band[1] - band[0])
-    .translate([band[0], 0, 0]) as Shape3D;
+    .translate([band[0], 0, 0]);
 };
 
 export const buildCrankshaft = (place: Placement): BuiltPart => {
@@ -153,14 +153,14 @@ export const buildCrankshaft = (place: Placement): BuiltPart => {
 
   // Snout flats (oil pump drive, 34 A/F) on the Ø38 band [-14, -2].
   const flatBox = (side: 1 | -1): Shape3D => {
-    const box = draw([-17, cp.flatsAf / 2])
+    const box: Shape3D = draw([-17, cp.flatsAf / 2])
       .lineTo([-4, cp.flatsAf / 2])
       .lineTo([-4, 40])
       .lineTo([-17, 40])
       .close()
       .sketchOnPlane('XY')
       .extrude(60)
-      .translate([0, 0, -30]) as Shape3D;
+      .translate([0, 0, -30]);
     return side === 1 ? box : box.mirror('XZ');
   };
   crank = crank.cut(flatBox(1)).cut(flatBox(-1));

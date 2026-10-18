@@ -66,10 +66,11 @@ for (const { part } of definitions) {
         ao: {},
       },
     });
-    if (!result.success || result.files.length !== 1 || !result.files[0]) {
+    const file = result.success ? result.files.at(0) : undefined;
+    if (!result.success || result.files.length !== 1 || !file) {
       throw new Error(`Thumbnail failed: ${part.id}: ${JSON.stringify(result.issues)}`);
     }
-    await writeFile(join(root, 'thumbnail.webp'), result.files[0].bytes);
+    await writeFile(join(root, 'thumbnail.webp'), file.bytes);
     sourceDigests[part.id] = digest;
     await writeFile(sourceDigestsPath, JSON.stringify(sourceDigests, undefined, 2) + '\n');
     console.log(`Rendered ${part.id}`);

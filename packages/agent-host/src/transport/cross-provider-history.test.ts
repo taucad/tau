@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Every provider wire asserted here uses snake_case keys. */
 import { describe, expect, it, vi } from 'vitest';
 import type { StopReason } from '@earendil-works/pi-ai';
-import type { JsonObject, ModelProviderKind, ProviderMessage } from '#log/event-types.js';
+import type { JsonObject, ProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -278,13 +278,13 @@ const outboundBody = async (options: {
     fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       bodies.push(JSON.parse(init?.body as string) as WireRecord);
       return wireResponse(options.target);
-    }) as unknown as typeof globalThis.fetch,
+    }),
   });
   const request: ModelStreamRequest = {
     attemptId: 'attempt-cross-provider-1',
     invocationPurpose: 'generation',
     modelId: options.targetModelId ?? flavours[options.target].modelId,
-    providerKind: options.target as ModelProviderKind,
+    providerKind: options.target,
     maxTokens: 8192,
     contextWindow: 200_000,
     systemPrompt: 'CAD',

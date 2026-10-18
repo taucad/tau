@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryScheduler } from '#api/billing/billing-recovery.scheduler.js';
-import type { BillingRecoveryMetrics } from '#api/billing/billing-recovery.scheduler.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { LlmRecoveryResult } from '#api/billing/credit-ledger.types.js';
 
@@ -29,7 +28,7 @@ const scheduler = (
   recoverDueLlmOperations: CreditLedgerService['recoverDueLlmOperations'],
   metrics = fakeMetrics(),
 ): BillingRecoveryScheduler =>
-  new BillingRecoveryScheduler({ recoverDueLlmOperations }, metrics as unknown as BillingRecoveryMetrics, {
+  new BillingRecoveryScheduler({ recoverDueLlmOperations }, metrics, {
     environment: 'prod-eu',
     intervalMilliseconds: 1,
     limit: 100,

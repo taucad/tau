@@ -285,7 +285,7 @@ describe('ChatViewerControls', () => {
         });
       });
 
-      expect(status).toHaveTextContent('Section unavailable for this model; showing the last section');
+      expect(status).toMatchTextContent('Section unavailable for this model; showing the last section');
     });
 
     it('should claim no last section when the caps refuse before they ever drew one', () => {
@@ -300,7 +300,7 @@ describe('ChatViewerControls', () => {
         });
       });
 
-      expect(within(sectionRow()).getByRole('status')).toHaveTextContent(/^Section unavailable for this model$/);
+      expect(within(sectionRow()).getByRole('status')).toMatchTextContent(/^Section unavailable for this model$/);
     });
   });
 

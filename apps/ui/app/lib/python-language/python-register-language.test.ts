@@ -31,7 +31,7 @@ describe('Python language contribution', () => {
       getWordUntilPosition: () => ({ word: 'Bo', startColumn: 24, endColumn: 26 }),
     } as unknown as Monaco.editor.ITextModel;
     const completionContext: Monaco.languages.CompletionContext = {
-      triggerKind: 0 as Monaco.languages.CompletionTriggerKind,
+      triggerKind: 0,
     };
     const cancellationToken: Monaco.CancellationToken = {
       isCancellationRequested: false,

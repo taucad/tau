@@ -51,7 +51,7 @@ describe('NavChat', () => {
     await userEvent.click(screen.getByRole('link', { name: /New Project/ }));
 
     expect(await screen.findByText('Home Composer')).toBeInTheDocument();
-    expect(screen.getByTestId('focus-request')).toHaveTextContent('true');
+    expect(screen.getByTestId('focus-request')).toMatchTextContent('true');
   });
 
   it('should open the home composer from its shortcut', async () => {
@@ -60,7 +60,7 @@ describe('NavChat', () => {
     await userEvent.keyboard('{Control>}n{/Control}');
 
     expect(await screen.findByText('Home Composer')).toBeInTheDocument();
-    expect(screen.getByTestId('focus-request')).toHaveTextContent('true');
+    expect(screen.getByTestId('focus-request')).toMatchTextContent('true');
   });
 
   it('should replace the history entry when the shortcut is pressed on the home composer', async () => {
@@ -70,6 +70,6 @@ describe('NavChat', () => {
     await userEvent.keyboard('{Control>}n{/Control}');
 
     expect(await screen.findByText('Home Composer')).toBeInTheDocument();
-    expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE');
+    expect(screen.getByTestId('navigation-type')).toMatchTextContent('REPLACE');
   });
 });

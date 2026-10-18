@@ -65,7 +65,7 @@ const readRuleTokens = (selectorStart: number, styles = globalStyles): TokenMap 
     Array.from({ length: style.length }, (_, index) => style.item(index))
       .filter((name) => name.startsWith('--'))
       .map((name) => [name, style.getPropertyValue(name).trim()]),
-  ) as TokenMap;
+  );
 };
 
 const firstRoot = globalStyles.indexOf(':root');

@@ -40,7 +40,7 @@ export default function main(p = defaultParams): Shape3D {
     .containsPoint([0, myNeckRadius, p.height])
     .ofSurfaceType('CYLINDRE')
     // oxlint-disable-next-line unicorn/no-array-method-this-argument -- FaceFinder.find(shape, options) is not Array#find
-    .find(shape.clone() as Shape3D, {
+    .find(shape.clone(), {
       unique: true,
     });
 

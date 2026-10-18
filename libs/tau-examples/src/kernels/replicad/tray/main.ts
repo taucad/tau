@@ -36,14 +36,14 @@ function profileBox(inputProfile: Drawing, base: Drawing) {
   const baseSketch = base.sketchOnPlane() as Sketch;
 
   // We create the side of the box
-  const side = baseSketch.clone().sweepSketch(
+  const side: Shell = baseSketch.clone().sweepSketch(
     (plane: Plane): Sketch => {
       return profile.sketchOnPlane(plane) as Sketch;
     },
     {
       withContact: true,
     },
-  ) as Shell;
+  );
 
   // We put all the pieces together
   return makeSolid([

@@ -760,7 +760,7 @@ describe('the Tau Cloud publish and register legs', () => {
       urls.push(input instanceof Request ? input.url : input.toString());
       calls.push(init ?? {});
       return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-    }) as unknown as typeof globalThis.fetch;
+    });
     return {
       calls,
       urls,

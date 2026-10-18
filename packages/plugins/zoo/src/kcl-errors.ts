@@ -258,7 +258,7 @@ const isKclErrorWithOutputs = (error: unknown): error is KclErrorWithOutputs => 
     return false;
   }
 
-  if (!isWasmKclError((error as { error: unknown }).error)) {
+  if (!isWasmKclError(error.error)) {
     return false;
   }
 
@@ -278,7 +278,7 @@ function mapKclErrorWithOutputsToPartialExecutionResult(outputs: KclErrorWithOut
     artifactGraph: outputs.artifactGraph,
     errors,
     warnings,
-    filenames: outputs.filenames as KclExecutionResult['filenames'],
+    filenames: outputs.filenames,
     defaultPlanes: outputs.defaultPlanes ?? undefined,
   };
 }
@@ -393,12 +393,7 @@ export const isWasmExecutionResultWithError = (
   error: WasmKclError;
   filenames?: Record<string | number, WasmFileInfo>;
 } => {
-  return (
-    error !== null &&
-    typeof error === 'object' &&
-    'error' in error &&
-    isWasmKclError((error as { error: unknown }).error)
-  );
+  return error !== null && typeof error === 'object' && 'error' in error && isWasmKclError(error.error);
 };
 
 /**
@@ -411,7 +406,7 @@ export const extractWasmKclErrorDetails = (error: unknown): WasmKclErrorExtracti
   if (isKclErrorWithOutputs(error)) {
     const extended = error.error as ExtendedWasmKclError;
     extended.filenames = error.filenames as unknown as ExtendedWasmKclError['filenames'];
-    extended.sourceFiles = error.sourceFiles as unknown as ExtendedWasmKclError['sourceFiles'];
+    extended.sourceFiles = error.sourceFiles;
     return {
       wasmError: extended,
       partialOutcome: mapKclErrorWithOutputsToPartialExecutionResult(error),

@@ -177,14 +177,12 @@ function ConnectedPrintPanel({
     <div
       data-slot='print-panel-body'
       className='flex size-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar'
-      style={
-        {
-          '--param-field-h': '1.5rem',
-          '--param-field-radius': 'var(--radius-md)',
-          '--param-field-color': 'var(--color-muted-foreground)',
-          '--param-field-color-focus': 'var(--color-foreground)',
-        } as React.CSSProperties
-      }
+      style={{
+        '--param-field-h': '1.5rem',
+        '--param-field-radius': 'var(--radius-md)',
+        '--param-field-color': 'var(--color-muted-foreground)',
+        '--param-field-color-focus': 'var(--color-foreground)',
+      }}
     >
       {selected ? (
         <ProjectMachinePanel

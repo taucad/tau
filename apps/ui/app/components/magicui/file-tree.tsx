@@ -37,8 +37,6 @@ const useTree = () => {
 
 type TreeViewComponentProps = {} & React.HTMLAttributes<HTMLDivElement>;
 
-type Direction = 'rtl' | 'ltr' | undefined;
-
 type TreeViewProps = {
   readonly initialSelectedId?: string;
   readonly indicator?: boolean;
@@ -160,7 +158,7 @@ function Tree({
           defaultValue={expandedItems}
           value={expandedItems}
           className='flex w-full flex-col'
-          dir={dir as Direction}
+          dir={dir}
           onValueChange={(value) => {
             setExpandedItems((previous) => [...(previous ?? []), value[0]!]);
           }}

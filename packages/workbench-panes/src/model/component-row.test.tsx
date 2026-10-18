@@ -229,7 +229,7 @@ describe('Model component rows', () => {
     expect(icon).toHaveStyle({ fill: iconColor });
     expect(screen.queryByTestId('component-color-swatch')).not.toBeInTheDocument();
     expect(rowButton.children[0]).toBe(icon);
-    expect(rowButton.children[1]).toHaveTextContent('sun_gear');
+    expect(rowButton.children[1]).toMatchTextContent('sun_gear');
   });
 
   it('should keep isolate controls out of the Tab order for isolated and hovered rows', () => {

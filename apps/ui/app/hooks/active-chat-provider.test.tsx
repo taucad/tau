@@ -1326,13 +1326,13 @@ describe('ActiveChatProvider', () => {
       const viewer = getByRole('img', { name: 'Project viewer' });
       rerender(<Surface chatId='chat_new' />);
       await waitFor(() => {
-        expect(getByRole('img', { name: 'Project viewer' })).toHaveTextContent('chat_new');
+        expect(getByRole('img', { name: 'Project viewer' })).toMatchTextContent('chat_new');
       });
       expect(getByRole('img', { name: 'Project viewer' })).toBe(viewer);
       expect(stores[0]?.get('chat_initial')).toBeUndefined();
       rerender(<Surface chatId='chat_initial' />);
       await waitFor(() => {
-        expect(getByRole('img', { name: 'Project viewer' })).toHaveTextContent('chat_initial');
+        expect(getByRole('img', { name: 'Project viewer' })).toMatchTextContent('chat_initial');
       });
       expect(getByRole('img', { name: 'Project viewer' })).toBe(viewer);
       expect(mounted).toHaveBeenCalledOnce();
@@ -1379,13 +1379,13 @@ describe('ActiveChatProvider', () => {
       ]);
     });
     view.rerender(<Surface chatId='chat_history' />);
-    expect(view.getByRole('button')).toHaveTextContent('chat_current:');
+    expect(view.getByRole('button')).toMatchTextContent('chat_current:');
     expect(view.getByRole('button').closest('[inert]')).not.toBeNull();
     await act(async () => {
       metadata.resolve(makeChat({ id: 'chat_history' }));
     });
     await waitFor(() => {
-      expect(view.getByRole('button')).toHaveTextContent('chat_history:saved-message');
+      expect(view.getByRole('button')).toMatchTextContent('chat_history:saved-message');
     });
     expect(seen).not.toContain('chat_history:');
     expect(view.getByRole('button').closest('[inert]')).toBeNull();

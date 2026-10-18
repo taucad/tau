@@ -332,7 +332,7 @@ describe('ViewerIssues — disclosure', () => {
       />,
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Saved view “drawing” is unavailable');
+    expect(screen.getByRole('alert')).toMatchTextContent('Saved view “drawing” is unavailable');
     fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
     expect(onAct).toHaveBeenCalledOnce();
   });

@@ -97,7 +97,7 @@ export const ContextMention = Extension.create<ContextMentionOptions>({
               items: properties.items,
               command: properties.command as (item: ContextSuggestionItem) => void,
               clientRect: properties.clientRect ?? undefined,
-            } as SuggestionPopupState<ContextSuggestionItem>);
+            });
           },
           onUpdate(properties) {
             renderCallbacks.onStateChange({
@@ -105,7 +105,7 @@ export const ContextMention = Extension.create<ContextMentionOptions>({
               items: properties.items,
               command: properties.command as (item: ContextSuggestionItem) => void,
               clientRect: properties.clientRect ?? undefined,
-            } as SuggestionPopupState<ContextSuggestionItem>);
+            });
           },
           onExit() {
             renderCallbacks.onStateChange(undefined);

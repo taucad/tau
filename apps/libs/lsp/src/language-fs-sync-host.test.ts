@@ -13,7 +13,7 @@ const readyRef = (postMessage: () => void, filePoolBuffer?: SharedArrayBuffer): 
     matches: (state: string) => state === 'ready',
     context: { worker: { postMessage } as unknown as Worker, rootDirectory: '/projects/abc', filePoolBuffer },
   };
-  return { getSnapshot: () => snap } as unknown as TauLanguageFileManagerRef;
+  return { getSnapshot: () => snap };
 };
 
 describe('lsp-fs-sync-host', () => {

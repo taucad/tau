@@ -42,10 +42,10 @@ describe('Electron utility runtime helper', () => {
 const utilityClientHarness = () => {
   const { port1, port2 } = new MessageChannel();
   let notify: ((detail: ElectronRuntimeHostExitDetail) => void) | undefined;
-  registerElectronRuntimeHostExit(port1 as unknown as MessagePort, (listener) => {
+  registerElectronRuntimeHostExit(port1, (listener) => {
     notify = listener;
   });
-  const client = electronUtilityClient({ port: port1 as unknown as MessagePort });
+  const client = electronUtilityClient({ port: port1 });
   return {
     client,
     killPort: (): void => {

@@ -467,7 +467,7 @@ export function classifyLibraryFrames(frames: KernelStackFrame[], libraryExportN
     return frames;
   }
 
-  return frames.map((frame) => {
+  return frames.map((frame): KernelStackFrame => {
     if (frame.context !== 'framework' || !frame.functionName) {
       return frame;
     }
@@ -476,7 +476,7 @@ export function classifyLibraryFrames(frames: KernelStackFrame[], libraryExportN
     const baseName = dotIndex > 0 ? frame.functionName.slice(0, dotIndex) : frame.functionName;
 
     if (libraryExportNames.has(baseName)) {
-      return { ...frame, context: 'library' as FrameContext };
+      return { ...frame, context: 'library' };
     }
 
     return frame;

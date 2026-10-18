@@ -27,14 +27,14 @@ describe('WorkbenchToggleButton', () => {
 
     const toggle = screen.getByRole('button', { name: 'Toggle Workbench lane' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    expect(toggle).toHaveTextContent('3');
+    expect(toggle).toMatchTextContent('3');
 
     rerender(
       <TooltipProvider delayDuration={0}>
         <WorkbenchToggleButton isOpen={false} count={12} />
       </TooltipProvider>,
     );
-    expect(toggle).toHaveTextContent('9+');
+    expect(toggle).toMatchTextContent('9+');
   });
 
   it('should name its action in its tooltip whether the lane is open or closed', async () => {
@@ -42,7 +42,7 @@ describe('WorkbenchToggleButton', () => {
     const { rerender } = renderToggle({ isOpen: false });
 
     await user.hover(screen.getByRole('button', { name: 'Toggle Workbench lane' }));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Toggle Workbench$/u);
+    expect(await screen.findByRole('tooltip')).toMatchTextContent(/^Toggle Workbench$/u);
 
     rerender(
       <TooltipProvider delayDuration={0}>
@@ -50,7 +50,7 @@ describe('WorkbenchToggleButton', () => {
       </TooltipProvider>,
     );
     expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveAttribute('aria-pressed', 'true');
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Toggle Workbench$/u);
+    expect(await screen.findByRole('tooltip')).toMatchTextContent(/^Toggle Workbench$/u);
   });
 
   it('should pass its handlers and ref to the button', async () => {

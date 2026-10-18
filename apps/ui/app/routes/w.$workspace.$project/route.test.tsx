@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { UIMatch } from 'react-router';
 
 const providerInputs = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
@@ -24,7 +23,7 @@ const testMatch = {
   data: undefined,
   loaderData: {},
   handle: undefined,
-} satisfies UIMatch;
+};
 
 describe('/w/{workspace}/{project}', () => {
   it('delegates URL resolution to the app-level project session host', () => {

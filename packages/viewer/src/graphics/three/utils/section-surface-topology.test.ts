@@ -819,8 +819,8 @@ describe('section surface topology', () => {
     const base = cubeGeometry();
     const basePosition = base.getAttribute('position');
     const positions = new Float32Array(basePosition.count * 2 * 3);
-    positions.set(basePosition.array as Float32Array);
-    positions.set(basePosition.array as Float32Array, basePosition.count * 3);
+    positions.set(basePosition.array);
+    positions.set(basePosition.array, basePosition.count * 3);
     const sharedPosition = new THREE.BufferAttribute(positions, 3);
     const sourceIndices = [...base.getIndex()!.array];
     const firstIndices = sourceIndices.filter((_, offset) => Math.floor(offset / 3) % 2 === 0);

@@ -459,7 +459,7 @@ describe('PluginsRoute', () => {
   it('should lead with the page title inside the shell main', () => {
     renderRoute();
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Plugins');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('Plugins');
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Search plugins' })).toBeInTheDocument();
   });

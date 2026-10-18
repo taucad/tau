@@ -29,11 +29,11 @@ export default defineConfig({
     hookTimeout: 300_000,
     retry: process.env['CI'] ? 2 : 0,
     fileParallelism: false,
+    // Artifact requirement: child-context and Electron trace attachments must survive target teardown.
+    api: { allowWrite: true },
     browser: {
       enabled: true,
       headless: true,
-      // Artifact requirement: child-context and Electron trace attachments must survive target teardown.
-      api: { allowWrite: true },
       provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       commands: {
         reactCaptureTargetDiagnostics,

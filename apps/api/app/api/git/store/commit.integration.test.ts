@@ -431,7 +431,7 @@ describe('repository store commit protocol', () => {
       expect(looseCount(lease.directory)).toBeGreaterThan(0);
       expect(packsOf(lease.directory)).toHaveLength(0);
       await expect(commitLease({ store, lease, committedBy })).rejects.toThrow(
-        expect.objectContaining({ code: 'loose-objects' }) as unknown as Error,
+        expect.objectContaining({ code: 'loose-objects' }),
       );
       expect(await readManifest(locator)).toBeUndefined();
       await lease.dispose();
@@ -512,7 +512,7 @@ describe('repository store commit protocol', () => {
       push(client.directory, lease.directory, ['main']);
 
       await expect(commitLease({ store, lease, committedBy, byteCeiling: 16 })).rejects.toThrow(
-        expect.objectContaining({ code: 'ceiling-exceeded' }) as unknown as Error,
+        expect.objectContaining({ code: 'ceiling-exceeded' }),
       );
       expect(await readManifest(locator)).toBeUndefined();
       await lease.dispose();
@@ -600,7 +600,7 @@ describe('repository store commit protocol', () => {
       expect(looseCount(lease.directory)).toBeGreaterThan(0);
 
       await expect(commitLease({ store, lease, committedBy, packBound: 0 })).rejects.toThrow(
-        expect.objectContaining({ code: 'loose-objects' }) as unknown as Error,
+        expect.objectContaining({ code: 'loose-objects' }),
       );
       const manifest = await readManifest(locator);
       expect(manifest?.generation).toBe(1);
@@ -806,7 +806,7 @@ describe('repository store commit protocol', () => {
       await commitTombstone({ store, locator, committedBy });
 
       await expect(hydrateLease({ store, locator, parentDirectory: scratch('lease') })).rejects.toThrow(
-        expect.objectContaining({ code: 'tombstoned' }) as unknown as Error,
+        expect.objectContaining({ code: 'tombstoned' }),
       );
     }, 60_000);
   });
@@ -894,7 +894,7 @@ describe('repository store commit protocol', () => {
       push(client.directory, lease.directory, ['main']);
 
       await expect(commitLease({ store: limited, lease, committedBy })).rejects.toThrow(
-        expect.objectContaining({ code: 'lost' }) as unknown as Error,
+        expect.objectContaining({ code: 'lost' }),
       );
       expect(calls.count).toBe(3);
       expect(await readManifest(locator)).toBeUndefined();
@@ -969,7 +969,7 @@ describe('repository store commit protocol', () => {
       await store.commitManifest(locator, encodeManifest(reborn), lease.token === 'absent' ? 'absent' : lease.token);
 
       await expect(commitLease({ store, lease, committedBy })).rejects.toThrow(
-        expect.objectContaining({ code: 'incarnation-changed' }) as unknown as Error,
+        expect.objectContaining({ code: 'incarnation-changed' }),
       );
       await lease.dispose();
     }, 60_000);
@@ -1514,7 +1514,7 @@ describe('repository store commit protocol', () => {
       const lease = await hydrateLease({ store, locator, parentDirectory: scratch('lease') });
       push(client.directory, lease.directory, ['main']);
       await expect(commitLease({ store, lease, committedBy, deadlineAt: Date.now() - 1 })).rejects.toThrow(
-        expect.objectContaining({ code: 'deadline' }) as unknown as Error,
+        expect.objectContaining({ code: 'deadline' }),
       );
 
       const unchanged = await store.readManifest(locator);
@@ -1539,13 +1539,13 @@ describe('repository store commit protocol', () => {
       expect(tombstoned.manifest.tombstone?.purgeAfter).toBeDefined();
       // The in-flight writer's token is stale: it loses rather than resurrecting the repository.
       await expect(commitLease({ store, lease: inFlight, committedBy })).rejects.toThrow(
-        expect.objectContaining({ code: 'lost' }) as unknown as Error,
+        expect.objectContaining({ code: 'lost' }),
       );
       await inFlight.dispose();
 
       // Delete then re-register with the same project id, before purge.
       await expect(hydrateLease({ store, locator, parentDirectory: scratch('lease') })).rejects.toThrow(
-        expect.objectContaining({ code: 'tombstoned' }) as unknown as Error,
+        expect.objectContaining({ code: 'tombstoned' }),
       );
       const created = await store.commitManifest(
         locator,

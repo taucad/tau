@@ -1534,7 +1534,7 @@ export function collectModelPickableSurfaceMeshes(root: Object3D): Mesh[] {
 }
 
 function getPrimitiveReferences(node: GeometryComponentNode): readonly GeometryComponentPrimitiveRef[] {
-  return Array.isArray(node.primitiveRefs) ? (node.primitiveRefs as readonly GeometryComponentPrimitiveRef[]) : [];
+  return Array.isArray(node.primitiveRefs) ? node.primitiveRefs : [];
 }
 
 type GltfLoaderAssociation = {

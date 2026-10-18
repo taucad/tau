@@ -74,7 +74,7 @@ it('shows the pane placeholder until Monaco is configured, then mounts the edito
   const placeholder = screen.getByRole('status');
   expect(placeholder).toHaveAttribute('aria-busy', 'true');
   expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
-  expect(placeholder).toHaveTextContent('Loading editor');
+  expect(placeholder).toMatchTextContent('Loading editor');
   expect(editorMounts).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -105,9 +105,9 @@ it('offers a retry in the pane when configuration fails', async () => {
   configuration.publish({ status: 'failed', error: new Error('chunk failed') });
   render(<CodeEditor onChange={() => undefined} />);
 
-  expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load the code editor");
+  expect(screen.getByRole('alert')).toMatchTextContent("Couldn't load the code editor");
   expect(editorMounts).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(configuration.configure).toHaveBeenCalledTimes(1);
-  expect(await screen.findByRole('status')).toHaveTextContent('Loading editor');
+  expect(await screen.findByRole('status')).toMatchTextContent('Loading editor');
 });

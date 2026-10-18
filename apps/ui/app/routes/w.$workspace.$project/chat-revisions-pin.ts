@@ -61,7 +61,7 @@ export function useRevisionPinMemory(): void {
   const { pinTo } = useRevisionCommands();
   /* The project whose remembered pin was already offered, so it is offered once per load. */
   const restoredFor = useRef<string | undefined>(undefined);
-  const isCurrent = status !== undefined && status.projectId === projectId && status.registrySettled;
+  const isCurrent = status?.projectId === projectId && status.registrySettled;
   const pinned = isCurrent ? pinnedLinkedCheckout(status) : undefined;
   const selected = isCurrent ? status.checkoutId : undefined;
   const listedIds = isCurrent

@@ -315,7 +315,7 @@ export function validateGlbResources(value: unknown): asserts value is GlbResour
     if (rawWebp !== undefined && (rawWebp === null || typeof rawWebp !== 'object' || Array.isArray(rawWebp))) {
       fail(`textures[${index}].extensions.EXT_texture_webp`, 'must be an object');
     }
-    const webp = rawWebp as { source?: number } | undefined;
+    const webp: { source?: number } | undefined = rawWebp;
     if (texture.source === undefined && webp?.source === undefined) {
       fail(`textures[${index}]`, 'must reference an image source');
     }
@@ -356,7 +356,7 @@ export function collectGltfExtensions(value: unknown, extensions: Set<string>): 
         continue;
       }
       if (key === 'extensions' && child !== null && typeof child === 'object') {
-        for (const name of Object.keys(child as Record<string, unknown>)) {
+        for (const name of Object.keys(child)) {
           extensions.add(name);
         }
       }

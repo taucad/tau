@@ -159,11 +159,11 @@ function collectBatchCommandIds(message: Record<string, unknown>): string[] {
   }
 
   if (commands && typeof commands === 'object' && !Array.isArray(commands)) {
-    return Object.keys(commands as Record<string, unknown>);
+    return Object.keys(commands);
   }
 
   if (cmds && typeof cmds === 'object' && !Array.isArray(cmds)) {
-    return Object.keys(cmds as Record<string, unknown>);
+    return Object.keys(cmds);
   }
 
   return [];

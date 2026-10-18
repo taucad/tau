@@ -241,8 +241,7 @@ describe('fixture renderer output', () => {
     const captureAssertion = expect(capture).rejects.toThrow('GPU copy failed');
     const drainAssertion = expect(drained).rejects.toBeInstanceOf(TypeError);
     completed.reject(new TypeError('GPU copy failed'));
-    await captureAssertion;
-    await drainAssertion;
+    await Promise.all([captureAssertion, drainAssertion]);
     expect(renderer.getOutputRenderTarget()).toBeNull();
     expect(renderer.getRenderTarget()).toBeNull();
   });

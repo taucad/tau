@@ -95,7 +95,7 @@ describe('/projects/new creation location', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderRoute();
 
-    expect(screen.getByTestId('location-picker')).toHaveTextContent('workspace');
+    expect(screen.getByTestId('location-picker')).toMatchTextContent('workspace');
     await userEvent.type(screen.getByLabelText('Project Name *'), 'Bracket');
     await userEvent.click(screen.getByRole('button', { name: /Create Project/ }));
 

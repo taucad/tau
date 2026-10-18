@@ -202,24 +202,24 @@ describe('Parameters - Core Search Functionality', () => {
     // Should show reason with proper aria labels
     const hoopReason = screen.getByLabelText('Invalid Field Reason: hoop');
     expect(hoopReason).toBeTruthy();
-    expect(hoopReason).toHaveTextContent('Reason: Missing items definition');
+    expect(hoopReason).toMatchTextContent('Reason: Missing items definition');
 
     const tagReason = screen.getByLabelText('Invalid Field Reason: tag');
     expect(tagReason).toBeTruthy();
-    expect(tagReason).toHaveTextContent('Reason: Missing items definition');
+    expect(tagReason).toMatchTextContent('Reason: Missing items definition');
 
     // Should show array requirements with proper aria labels
     const hoopArrayRequirements = screen.getByLabelText('Array Requirements: hoop');
     expect(hoopArrayRequirements).toBeTruthy();
-    expect(hoopArrayRequirements).toHaveTextContent('Array Requirements');
-    expect(hoopArrayRequirements).toHaveTextContent(
+    expect(hoopArrayRequirements).toMatchTextContent('Array Requirements');
+    expect(hoopArrayRequirements).toMatchTextContent(
       'All items must be the same type. Use a single type instead of using mixed types or tuples.',
     );
 
     const tagArrayRequirements = screen.getByLabelText('Array Requirements: tag');
     expect(tagArrayRequirements).toBeTruthy();
-    expect(tagArrayRequirements).toHaveTextContent('Array Requirements');
-    expect(tagArrayRequirements).toHaveTextContent(
+    expect(tagArrayRequirements).toMatchTextContent('Array Requirements');
+    expect(tagArrayRequirements).toMatchTextContent(
       'All items must be the same type. Use a single type instead of using mixed types or tuples.',
     );
   });
@@ -1093,7 +1093,7 @@ describe('Parameters - Array and Object Count Display', () => {
     // Should show array group with count (3)
     const arrayGroup = screen.getByLabelText('Group: Strings');
     expect(arrayGroup).toBeTruthy();
-    expect(arrayGroup).toHaveTextContent('(3)');
+    expect(arrayGroup).toMatchTextContent('(3)');
   });
 
   it('should show correct count for array with single item', () => {
@@ -1129,7 +1129,7 @@ describe('Parameters - Array and Object Count Display', () => {
     // Should show array group with count (1)
     const arrayGroup = screen.getByLabelText('Group: Tags');
     expect(arrayGroup).toBeTruthy();
-    expect(arrayGroup).toHaveTextContent('(1)');
+    expect(arrayGroup).toMatchTextContent('(1)');
   });
 
   it('should show correct count for object with multiple properties', () => {
@@ -1170,7 +1170,7 @@ describe('Parameters - Array and Object Count Display', () => {
     // Should show object group with count (3)
     const objectGroup = screen.getByLabelText('Group: Config');
     expect(objectGroup).toBeTruthy();
-    expect(objectGroup).toHaveTextContent('(3)');
+    expect(objectGroup).toMatchTextContent('(3)');
   });
 
   it('should not show collapsible group for top-level object', () => {
@@ -1278,7 +1278,7 @@ describe('Parameters - Search Highlighting', () => {
     // Should have highlighted text - use within() to scope queries and aria-label
     const highlight = within(networkField).getByLabelText('Highlighted: Network');
     expect(highlight).toBeTruthy();
-    expect(highlight).toHaveTextContent('Network');
+    expect(highlight).toMatchTextContent('Network');
   });
 
   it('should highlight search term in parameter descriptions', async () => {
@@ -1328,7 +1328,7 @@ describe('Parameters - Search Highlighting', () => {
     // Should have highlighted text in description - use within() to scope queries and aria-label
     const highlight = within(description).getByLabelText('Highlighted: server');
     expect(highlight).toBeTruthy();
-    expect(highlight).toHaveTextContent('server');
+    expect(highlight).toMatchTextContent('server');
   });
 
   it('should highlight search term in group titles', async () => {
@@ -1582,7 +1582,7 @@ describe('Parameters - Filtered Count Display', () => {
     expect(groupTrigger).toBeTruthy();
 
     // Should show (1/4) format when filtered
-    expect(groupTrigger).toHaveTextContent('(1/4)');
+    expect(groupTrigger).toMatchTextContent('(1/4)');
   });
 
   it('should show regular count format when not searching', () => {
@@ -1624,9 +1624,9 @@ describe('Parameters - Filtered Count Display', () => {
     // Group should show regular count format (3) when not searching
     const groupTrigger = screen.getByLabelText('Group: Configuration');
     expect(groupTrigger).toBeTruthy();
-    expect(groupTrigger).toHaveTextContent('(3)');
+    expect(groupTrigger).toMatchTextContent('(3)');
     // Should NOT show filtered format
-    expect(groupTrigger).not.toHaveTextContent('/');
+    expect(groupTrigger).not.toMatchTextContent('/');
   });
 
   it('should show filtered count when group title matches but properties do not', async () => {
@@ -1671,7 +1671,7 @@ describe('Parameters - Filtered Count Display', () => {
     // Group should show filtered count (0/2) since properties don't match "config"
     const groupTrigger = screen.getByLabelText('Group: Configuration');
     expect(groupTrigger).toBeTruthy();
-    expect(groupTrigger).toHaveTextContent('(0/2)');
+    expect(groupTrigger).toMatchTextContent('(0/2)');
   });
 
   it('should show regular count format when all properties match search', async () => {
@@ -1716,9 +1716,9 @@ describe('Parameters - Filtered Count Display', () => {
     // Group should show regular count format (2) since all properties match
     const groupTrigger = screen.getByLabelText('Group: Configuration');
     expect(groupTrigger).toBeTruthy();
-    expect(groupTrigger).toHaveTextContent('(2)');
+    expect(groupTrigger).toMatchTextContent('(2)');
     // Should NOT show filtered format when all match
-    expect(groupTrigger).not.toHaveTextContent('/');
+    expect(groupTrigger).not.toMatchTextContent('/');
   });
 });
 
@@ -2443,12 +2443,12 @@ describe('Parameters - Required Field Indicator', () => {
     // Required field should have asterisk
     const nameField = screen.getByLabelText('Parameter: Name');
     expect(nameField).toBeTruthy();
-    expect(nameField).toHaveTextContent('*');
+    expect(nameField).toMatchTextContent('*');
 
     // Optional field should not have asterisk
     const optionalField = screen.getByLabelText('Parameter: Optional');
     expect(optionalField).toBeTruthy();
-    expect(optionalField).not.toHaveTextContent('*');
+    expect(optionalField).not.toMatchTextContent('*');
   });
 
   it('should show asterisk for required nested fields', () => {
@@ -2488,12 +2488,12 @@ describe('Parameters - Required Field Indicator', () => {
     // Required nested field should have asterisk
     const hostField = screen.getByLabelText('Parameter: Host');
     expect(hostField).toBeTruthy();
-    expect(hostField).toHaveTextContent('*');
+    expect(hostField).toMatchTextContent('*');
 
     // Optional nested field should not have asterisk
     const portField = screen.getByLabelText('Parameter: Port');
     expect(portField).toBeTruthy();
-    expect(portField).not.toHaveTextContent('*');
+    expect(portField).not.toMatchTextContent('*');
   });
 });
 
@@ -3518,7 +3518,7 @@ describe('Parameters - admitted unit projection', () => {
     expect(label.nextElementSibling).toBe(hint);
     expect(input).not.toHaveAttribute('aria-describedby');
     await user.hover(hint);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Inferred unit');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Inferred unit');
 
     await user.clear(input);
     await user.type(input, '12');

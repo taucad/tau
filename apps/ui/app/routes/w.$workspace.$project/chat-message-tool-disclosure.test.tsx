@@ -89,7 +89,7 @@ describe('tool disclosure content parity', () => {
         }}
       />,
     );
-    expect(screen.getByText('Captured').parentElement).toHaveTextContent('1 screenshot');
+    expect(screen.getByText('Captured').parentElement).toMatchTextContent('1 screenshot');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 

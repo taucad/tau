@@ -173,8 +173,14 @@ const confinedFsLike = (root: string): FsLike => ({
     unlink: async (path) => unlink(join(root, path)),
     rmdir: async (path) => rm(join(root, path), { recursive: true }),
     rename: async (oldPath, newPath) => rename(join(root, oldPath), join(root, newPath)),
-    stat: async (path) => (await stat(join(root, path))) as unknown as NativeStats,
-    lstat: async (path) => (await stat(join(root, path))) as unknown as NativeStats,
+    stat: async (path): Promise<NativeStats> => {
+      const result: NativeStats = await stat(join(root, path));
+      return result;
+    },
+    lstat: async (path): Promise<NativeStats> => {
+      const result: NativeStats = await stat(join(root, path));
+      return result;
+    },
   },
 });
 

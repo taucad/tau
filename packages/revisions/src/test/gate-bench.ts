@@ -197,8 +197,7 @@ const measureSave = async (variant: string): Promise<Record<string, number>> => 
   const { actor } = createProjectRevisionsActor({
     port,
     projectId: 'gate-bench',
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- the in-memory provider is the checkout the worker's rooted view wraps.
-    filesystem: async () => filesystem as unknown as RevisionFileSystem,
+    filesystem: async (): Promise<RevisionFileSystem> => filesystem,
     completeChanges: variant === 'save',
   });
   let answered: PromiseWithResolvers<void> | undefined;
@@ -277,8 +276,7 @@ const measureNativeParts = async (): Promise<Record<string, number>> => {
   const actors = createRevisionActors({
     port,
     projectId: 'gate-bench',
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.
-    filesystem: async () => filesystem as unknown as RevisionFileSystem,
+    filesystem: async (): Promise<RevisionFileSystem> => filesystem,
   });
   const parts: { cut: number[]; write: number[]; ref: number[] } = { cut: [], write: [], ref: [] };
   let head: string | undefined;
@@ -330,8 +328,7 @@ const measurePlan = async (): Promise<Record<string, number>> => {
   const actors = createRevisionActors({
     port,
     projectId: 'gate-bench',
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.
-    filesystem: async () => filesystem as unknown as RevisionFileSystem,
+    filesystem: async (): Promise<RevisionFileSystem> => filesystem,
     completeChanges: true,
   });
   const revisions: string[] = [];

@@ -16,7 +16,7 @@ const sampledPoints = (offset: number): SampledPoints => ({
 const mount = async (
   content: React.ReactNode,
   backend: 'webgl' | 'webgpu',
-): Promise<{ meshes: THREE.Mesh[]; unmount: () => void }> => {
+): Promise<{ meshes: THREE.Object3D[]; unmount: () => void }> => {
   const canvas = document.createElement('canvas');
   const root = createRoot(canvas);
   let state: RootState | undefined;
@@ -42,10 +42,10 @@ const mount = async (
     );
   });
 
-  const meshes: THREE.Mesh[] = [];
+  const meshes: THREE.Object3D[] = [];
   state?.scene.traverse((object) => {
     if (object instanceof THREE.Mesh) {
-      meshes.push(object as unknown as THREE.Mesh);
+      meshes.push(object);
     }
   });
   return {

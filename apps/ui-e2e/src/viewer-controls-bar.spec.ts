@@ -69,7 +69,7 @@ async function callBridge<Name extends keyof ViewerBridge>(
       // The command transport turns an undefined argument into null.
       return bridge[method]!(...values.map((value) => value ?? undefined));
     },
-    { method: name, values: parameters as unknown[] },
+    { method: name, values: parameters },
   ) as Promise<ReturnType<ViewerBridge[Name]>>;
 }
 

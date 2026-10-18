@@ -69,9 +69,7 @@ describe('repository manifest codec', () => {
     it('should refuse an unknown format', () => {
       const bytes = new TextEncoder().encode(JSON.stringify({ ...sample(), format: 2 }));
 
-      expect(() => decodeManifest(bytes)).toThrow(
-        expect.objectContaining({ code: 'unsupported-format' }) as unknown as Error,
-      );
+      expect(() => decodeManifest(bytes)).toThrow(expect.objectContaining({ code: 'unsupported-format' }));
     });
 
     it('should refuse bytes that are not JSON', () => {
@@ -165,10 +163,10 @@ describe('repository manifest codec', () => {
 
       expect(() => {
         assertGenerationSucceeds(base, { ...base, generation: base.generation });
-      }).toThrow(expect.objectContaining({ code: 'generation-not-monotonic' }) as unknown as Error);
+      }).toThrow(expect.objectContaining({ code: 'generation-not-monotonic' }));
       expect(() => {
         assertGenerationSucceeds(base, { ...base, generation: base.generation - 1 });
-      }).toThrow(expect.objectContaining({ code: 'generation-not-monotonic' }) as unknown as Error);
+      }).toThrow(expect.objectContaining({ code: 'generation-not-monotonic' }));
     });
   });
 
@@ -333,7 +331,7 @@ describe('repository manifest codec', () => {
 
       expect(() => {
         assertSameIncarnation(hydrated, current);
-      }).toThrow(expect.objectContaining({ code: 'incarnation-changed' }) as unknown as Error);
+      }).toThrow(expect.objectContaining({ code: 'incarnation-changed' }));
       expect(() => {
         assertSameIncarnation(hydrated, hydrated);
       }).not.toThrow();

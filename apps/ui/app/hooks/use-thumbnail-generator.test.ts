@@ -229,7 +229,7 @@ describe('useThumbnailGenerator', () => {
       width: 640,
       height: 480,
       close: vi.fn(),
-    } as unknown as ImageBitmap);
+    });
     exportImage.mockResolvedValueOnce(webpFile(2));
     await expect(
       thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),

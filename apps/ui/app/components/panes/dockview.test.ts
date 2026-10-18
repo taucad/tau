@@ -46,7 +46,7 @@ vi.mock('dockview-react', async () => {
               element,
               onDidActivePanelChange: () => ({ dispose: () => undefined }),
             } as unknown as DockviewApi,
-          } as DockviewReadyEvent);
+          });
         },
       },
       createElement(

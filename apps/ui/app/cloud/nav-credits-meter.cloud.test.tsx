@@ -158,8 +158,8 @@ describe('NavCreditsMeter', () => {
     expect(screen.getByText('0')).toBeInTheDocument();
     expect(screen.getByText('20 credits reserved for active work')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('menuitem', { name: 'About monthly credits' }));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('24 credits available this month');
-    expect(screen.getByRole('tooltip')).toHaveTextContent('2,000 credits per month');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('24 credits available this month');
+    expect(screen.getByRole('tooltip')).toMatchTextContent('2,000 credits per month');
   });
 
   it('should not invent a percentage for Enterprise', () => {

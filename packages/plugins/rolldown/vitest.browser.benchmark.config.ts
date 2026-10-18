@@ -39,11 +39,11 @@ export default defineConfig({
     include: ['src/bundler-engine.benchmark.test.ts'],
     testTimeout: 900_000,
     fileParallelism: false,
+    // Artifact requirement: the benchmark writes its structured report through Vitest Browser Mode.
+    api: { allowWrite: true },
     browser: {
       enabled: true,
       headless: true,
-      // Artifact requirement: the benchmark writes its structured report through Vitest Browser Mode.
-      api: { allowWrite: true },
       provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium', name: 'rolldown-benchmark-isolated' }],
     },

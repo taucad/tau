@@ -75,7 +75,7 @@ export function createMonacoTestStub(): MonacoTestStub {
           return;
         }
         currentLanguage = next;
-        languageChanges.emit({ model: model as unknown as Monaco.editor.ITextModel, oldLanguage: previous });
+        languageChanges.emit({ model: model, oldLanguage: previous });
         fireOnLanguage(next);
       },
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal shape; unused fields throw if read
@@ -160,7 +160,7 @@ export function createMonacoTestStub(): MonacoTestStub {
     },
     editor: {
       getModels(): readonly Monaco.editor.ITextModel[] {
-        return [...models.values()] as unknown as Monaco.editor.ITextModel[];
+        return [...models.values()];
       },
       getModel(uri: { toString(): string }): Monaco.editor.ITextModel | undefined {
         const key = uri.toString();
@@ -168,17 +168,17 @@ export function createMonacoTestStub(): MonacoTestStub {
         if (!model) {
           return undefined;
         }
-        return model as unknown as Monaco.editor.ITextModel;
+        return model;
       },
       createModel(_value: string, languageId?: string, uri?: { toString(): string }): Monaco.editor.ITextModel {
         const resolvedUri = uri?.toString() ?? `inmemory://stub/${models.size}`;
         const model = createStubModel(resolvedUri, languageId ?? 'plaintext');
         models.set(resolvedUri, model);
-        createdModels.emit(model as unknown as Monaco.editor.ITextModel);
+        createdModels.emit(model);
         if (languageId) {
           fireOnLanguage(languageId);
         }
-        return model as unknown as Monaco.editor.ITextModel;
+        return model;
       },
       onDidCreateModel(callback: (model: Monaco.editor.ITextModel) => void): Monaco.IDisposable {
         return { dispose: createdModels.subscribe(callback) };
@@ -199,12 +199,12 @@ export function createMonacoTestStub(): MonacoTestStub {
       fireOnLanguage(id);
     },
     __getModels() {
-      return [...models.values()] as unknown as readonly Monaco.editor.ITextModel[];
+      return [...models.values()];
     },
     __createModel(uri, languageId) {
       const model = createStubModel(uri, languageId);
       models.set(uri, model);
-      createdModels.emit(model as unknown as Monaco.editor.ITextModel);
+      createdModels.emit(model);
       fireOnLanguage(languageId);
       return model;
     },

@@ -441,6 +441,8 @@ const mount = async (
   document.documentElement.classList.toggle('dark', theme === 'dark');
   globalThis.history.replaceState(undefined, '', `?graphicsBackend=${mocks.backend}`);
   await page.viewport(1320, 780);
+  // Parsed data and window RAFs can precede this canvas's first natural render.
+  const mountStarted = performance.now();
   const { container: root, unmount } = render(
     <TooltipProvider>
       <PrinterViewer name={file.name} kind={file.kind} revision={1} readAll={file.readAll} renderPane={renderPane} />
@@ -450,6 +452,18 @@ const mount = async (
   const frame = within(root).getByTestId('frame');
   resize(frame, size);
   await nextFrames(6);
+  await waitFor(
+    () => {
+      const canvas = root.querySelector('canvas');
+      expect(canvas?.isConnected).toBe(true);
+      const renderer = canvas && mocks.renderers.get(canvas);
+      expect(renderer?.info.render.calls ?? 0).toBeGreaterThan(0);
+      expect(
+        performance.getEntriesByName('tau.printer.scene-first-frame').some((entry) => entry.startTime >= mountStarted),
+      ).toBe(true);
+    },
+    { timeout: 10_000 },
+  );
   return {
     frame,
     unmount: async (): Promise<void> => {
@@ -775,7 +789,7 @@ describe('Printer viewer framing', () => {
         await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
         await chooseFromMore(frame, 'menuitemradio', plate);
         await waitFor(() => {
-          expect(screen.getByRole('status', { name: 'Build plate preview' })).toHaveTextContent('schematic plate');
+          expect(screen.getByRole('status', { name: 'Build plate preview' })).toMatchTextContent('schematic plate');
         });
         await capture(frame, `failed-${mini ? 'mini' : 'x1c'}-${plate.toLowerCase().replaceAll(' ', '-')}.png`);
       } finally {

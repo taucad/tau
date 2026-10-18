@@ -200,7 +200,7 @@ describe('ChatAgentSheet', () => {
 
     const trigger = screen.getByRole('button', { name: 'Agent and model: Fable 5.1, effort High' });
     expect(within(trigger).getByTestId('svg-icon')).toHaveAttribute('data-icon', 'claude');
-    expect(trigger).toHaveTextContent('High');
+    expect(trigger).toMatchTextContent('High');
   });
 
   it('opens with focus on the Model row and shows the level in an Effort row', async () => {
@@ -208,7 +208,7 @@ describe('ChatAgentSheet', () => {
     await openSheet();
 
     expect(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' })).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Effort for Fable 5.1: High. Change' })).toHaveTextContent(
+    expect(screen.getByRole('button', { name: 'Effort for Fable 5.1: High. Change' })).toMatchTextContent(
       /^EffortHigh$/u,
     );
   });
@@ -228,7 +228,7 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('option', { name: 'High, recommended' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getAllByText('Recommended')).toHaveLength(1);
     const lede = screen.getByText(/^Higher effort means more thorough responses/u);
-    expect(lede).toHaveTextContent('uses your credits faster.');
+    expect(lede).toMatchTextContent('uses your credits faster.');
     expect(levels.at(-1)?.compareDocumentPosition(lede)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     await userEvent.click(screen.getByRole('option', { name: 'Medium' }));
@@ -295,10 +295,10 @@ describe('ChatAgentSheet', () => {
       'Codex · studio, unavailable',
     ]);
     /* The host is the heading, so each row keeps the agent's own name. */
-    expect(within(screen.getByRole('group', { name: 'On this computer' })).getByRole('option')).toHaveTextContent(
+    expect(within(screen.getByRole('group', { name: 'On this computer' })).getByRole('option')).toMatchTextContent(
       /^Codex$/u,
     );
-    expect(within(screen.getByRole('group', { name: 'On studio' })).getByRole('option')).toHaveTextContent(
+    expect(within(screen.getByRole('group', { name: 'On studio' })).getByRole('option')).toMatchTextContent(
       "CodexCan't start",
     );
     expect(within(screen.getByRole('option', { name: 'Tau, in use' })).getByText('Fable 5.1')).toBeInTheDocument();
@@ -612,11 +612,11 @@ describe('ChatAgentSheet', () => {
     await openSheet();
 
     const settings = screen.getByRole('button', { name: 'Settings: Plan · Fast mode. Change' });
-    expect(settings).toHaveTextContent('Plan · Fast mode');
+    expect(settings).toMatchTextContent('Plan · Fast mode');
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
-    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent('Settings');
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toMatchTextContent('Settings');
     /* Focus lands on the first control: the chosen Collaboration mode. */
     expect(
       within(screen.getByRole('tablist', { name: 'Collaboration mode' })).getByRole('tab', { name: 'Plan' }),
@@ -702,7 +702,7 @@ describe('ChatAgentSheet', () => {
     await openSheet();
 
     const row = screen.getByRole('button', { name: 'Model: Fable 5.1. Change' });
-    expect(row).toHaveTextContent(/^ModelFable 5\.1$/u);
+    expect(row).toMatchTextContent(/^ModelFable 5\.1$/u);
   });
 
   it('sizes the model list to its rows and opens it on the model in use', async () => {
@@ -734,10 +734,10 @@ describe('ChatAgentSheet', () => {
       await openSheet();
       await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
 
-      expect(within(screen.getByRole('group', { name: 'Pinned' })).getByRole('option')).toHaveTextContent(
+      expect(within(screen.getByRole('group', { name: 'Pinned' })).getByRole('option')).toMatchTextContent(
         /^Fable 5\.1/u,
       );
-      expect(within(screen.getByRole('group', { name: 'Anthropic' })).getByRole('option')).toHaveTextContent(
+      expect(within(screen.getByRole('group', { name: 'Anthropic' })).getByRole('option')).toMatchTextContent(
         /^Haiku 5\.5/u,
       );
       expect(screen.getByRole('button', { name: 'Pin Fable 5.1' })).toHaveAttribute('aria-pressed', 'true');

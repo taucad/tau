@@ -2022,19 +2022,15 @@ describe('chat activity indicator closeout: projection seams', () => {
     type: 'run.lifecycle',
     state,
   });
-  const interrupt = (phase: 'requested' | 'resolved'): AgentLogEvent =>
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact interrupt fixture
-    ({
-      ...base,
-      type: 'interrupt.recorded',
-      interruptId: 'int-1',
-      phase,
-      reason: phase === 'requested' ? 'Run npm test?' : 'approved',
-      payload:
-        phase === 'requested'
-          ? { kind: 'approval', prompt: 'Run npm test?', agentId: 'codex' }
-          : { outcome: 'approved' },
-    }) as AgentLogEvent;
+  const interrupt = (phase: 'requested' | 'resolved'): AgentLogEvent => ({
+    ...base,
+    type: 'interrupt.recorded',
+    interruptId: 'int-1',
+    phase,
+    reason: phase === 'requested' ? 'Run npm test?' : 'approved',
+    payload:
+      phase === 'requested' ? { kind: 'approval', prompt: 'Run npm test?', agentId: 'codex' } : { outcome: 'approved' },
+  });
   const acpThought = (thinking: string, streamState: 'checkpoint' | 'final'): AgentLogEvent => ({
     ...base,
     type: 'message.appended',

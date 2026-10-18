@@ -703,7 +703,7 @@ const startTree = async (
   });
   const facts: TreeFact[] = [];
   actor.on('*', (event) => {
-    facts.push(event as TreeFact);
+    facts.push(event);
   });
   actor.start();
   await expect.poll(() => actor.getSnapshot().context.registrySettled, { timeout: 10_000 }).toBe(true);
@@ -2885,7 +2885,7 @@ for (const actorSet of actorSets) {
         run(actors.checkouts.addCheckout, { projectId: 'project-1', branch: 'conflicts', from: '' }),
       ).rejects.toMatchObject({
         code: 'BRANCH_NAME_RESERVED',
-        message: expect.stringContaining('conflicts') as unknown as string,
+        message: expect.stringContaining('conflicts') as string,
       });
       await expect(
         run(actors.branch.rename, { projectId: 'project-1', branch: 'feature', name: 'conflicts/mine' }),
@@ -3187,7 +3187,7 @@ for (const actorSet of actorSets) {
         await context.filesystem.writeFile('b.txt', 'typed, not saved\n');
         await expect(
           run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
-        ).rejects.toMatchObject({ message: expect.stringContaining('not in a revision yet') as unknown as string });
+        ).rejects.toMatchObject({ message: expect.stringContaining('not in a revision yet') as string });
         expect(await context.port.readRef('main')).toBe(later);
         await context.filesystem.writeFile('b.txt', 'later\n');
 

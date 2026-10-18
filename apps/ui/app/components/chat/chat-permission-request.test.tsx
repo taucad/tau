@@ -142,7 +142,7 @@ describe('compact permission requests', () => {
       await pending.promise;
     });
     expect(screen.getByRole('button', { name: option.name, busy: true })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Sending response…');
+    expect(screen.getByRole('status')).toMatchTextContent('Sending response…');
     rerender(
       <ChatPermissionRequest
         approval={approval}
@@ -175,7 +175,7 @@ describe('compact permission requests', () => {
     render(<ChatPermissionRequest approval={approval} name='Codex' onRespond={respond} />);
     await user.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't send your response. Try again.");
+      expect(screen.getByRole('alert')).toMatchTextContent("Couldn't send your response. Try again.");
     });
     expect(screen.queryByText(/raw host detail/u)).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow', busy: false })).toBeEnabled();
@@ -485,7 +485,7 @@ describe('request inspection disclosure', () => {
     expect(screen.getByRole('button', { name: 'View request' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Allow' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'View request' }));
-    expect(screen.getByRole('region', { name: 'Request content' })).toHaveTextContent('print("inspection")');
+    expect(screen.getByRole('region', { name: 'Request content' })).toMatchTextContent('print("inspection")');
     expect(screen.getByRole('region', { name: 'Request content' }).textContent).toContain(command);
     rerender(<ChatPermissionRequest approval={request} name='Grok' outcome='approved' />);
     expect(screen.getByRole('button', { name: 'Hide request' })).toHaveAttribute('aria-expanded', 'true');

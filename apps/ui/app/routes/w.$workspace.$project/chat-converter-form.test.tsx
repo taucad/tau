@@ -33,7 +33,7 @@ type Resolved = Parameters<typeof ExportSchemaForm>[0]['resolved'];
 /** A route schema exactly as the runtime publishes it: Draft-7 input JSON, no dialect, plain own keys. */
 const published = (schema: z.ZodType, defaults: Record<string, unknown>): Resolved => {
   const { $schema: _dialect, ...plain } = toJSONSchema(schema, { target: 'draft-7', io: 'input' }) as JSONSchema7;
-  return { schema: plain as JSONSchema7, defaults };
+  return { schema: plain, defaults };
 };
 
 const fieldUnit = (label: string): string | undefined =>

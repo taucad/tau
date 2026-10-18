@@ -56,7 +56,7 @@ const formatToolForXaiResponses = (tool: BindToolsInput): XAIResponsesTool => {
 
   const openAiTool = convertToOpenAITool(tool);
   if (!isRecord(openAiTool) || !isRecord(openAiTool.function)) {
-    return openAiTool as unknown as XAIResponsesTool;
+    return openAiTool;
   }
 
   const { function: functionDefinition, ...toolOptions } = openAiTool;
@@ -76,7 +76,7 @@ const retagProvider = <T extends Record<string, unknown> | undefined>(metadata: 
   }
 
   const nextMetadata = { ...metadata, [modelProviderKey]: 'xai' };
-  return nextMetadata as T;
+  return nextMetadata;
 };
 
 const extractText = (message: AIMessage | AIMessageChunk): string => {

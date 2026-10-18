@@ -115,13 +115,13 @@ describe('MachineDetails', () => {
       'What Stop does: Motion halts at once, heaters turn off, the position is kept.',
       'Recovery: None needed',
     ]);
-    expect(stop).toHaveTextContent('not a safety-rated emergency stop');
+    expect(stop).toMatchTextContent('not a safety-rated emergency stop');
   });
 
   it('should show a streamed, at-machine milling machine with its work area and its own job form', () => {
     renderDetails(providerFor('grbl', routerManifest), '1.1h');
 
-    expect(screen.getByRole('button', { name: /^Processes / })).toHaveTextContent('Milling, 3-axis');
+    expect(screen.getByRole('button', { name: /^Processes / })).toMatchTextContent('Milling, 3-axis');
     expect(factsOf(openPart('Processes'))).toEqual([
       'Simultaneous axes: 3',
       'Features: Arcs',
@@ -135,14 +135,14 @@ describe('MachineDetails', () => {
     expect(factsOf(openPart('Stop'))[0]).toBe(
       'What Stop does: Motion slows to a stop, the spindle stops, the position is kept.',
     );
-    expect(screen.getByRole('button', { name: /^Job options / })).toHaveTextContent('1 field');
+    expect(screen.getByRole('button', { name: /^Job options / })).toMatchTextContent('1 field');
   });
 
   it('should mark every control with its qualification, its reason or evidence, and who may use it', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const controls = openPart('Controls');
-    expect(controls).toHaveTextContent('Designed controls can be tried by a person while Testing is on');
+    expect(controls).toMatchTextContent('Designed controls can be tried by a person while Testing is on');
     const rows = within(within(controls).getByRole('list', { name: 'Controls' }))
       .getAllByRole('listitem')
       .map((row) => row.textContent);
@@ -206,8 +206,8 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.1.0');
-    expect(binding).not.toHaveTextContent('Only the simulator reads these');
+    expect(binding).toMatchTextContent('Declared by bambu.machine.binding 2.1.0');
+    expect(binding).not.toMatchTextContent('Only the simulator reads these');
     const serial = await within(binding).findByRole('textbox', { name: 'Input for Serial' });
     expect(
       within(binding)
@@ -227,11 +227,11 @@ describe('MachineDetails', () => {
 
     const binding = openPart('Binding settings');
     expect(binding).toHaveAccessibleName('Binding settings 1 field · Read-only');
-    expect(binding).toHaveTextContent('Only the simulator reads these; they are not machine settings.');
-    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 2.1.0');
+    expect(binding).toMatchTextContent('Only the simulator reads these; they are not machine settings.');
+    expect(binding).toMatchTextContent('Declared by bambu.simulator.binding 2.1.0');
     /* The declaration titles the field and starts it at real time. */
     const speed = await within(binding).findByRole('spinbutton', { name: 'Input for Demo speed' });
-    expect(within(binding).getByLabelText('Parameter: Demo speed')).toHaveTextContent('Demo speed');
+    expect(within(binding).getByLabelText('Parameter: Demo speed')).toMatchTextContent('Demo speed');
     expect(speed).toHaveAttribute('readonly');
     expect(speed).toHaveValue('1');
     expect(
@@ -243,7 +243,7 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const options = openPart('Job options');
-    expect(options).toHaveTextContent('Declared by fixture.submission 1.3.0');
+    expect(options).toMatchTextContent('Declared by fixture.submission 1.3.0');
     const bedLeveling = await within(options).findByRole('switch', { name: 'Toggle for Bed Leveling' });
     expect(bedLeveling).toBeChecked();
     expect(bedLeveling).toBeDisabled();
@@ -253,10 +253,10 @@ describe('MachineDetails', () => {
     for (const label of ['Expected Filament Diameter', 'Expected Nozzle Diameter']) {
       const diameter = within(options).getByRole('spinbutton', { name: `Input for ${label}` });
       expect(diameter).toHaveAttribute('readonly');
-      expect(within(options).getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+      expect(within(options).getByLabelText(`Parameter: ${label}`)).toMatchTextContent(label);
     }
-    expect(options).not.toHaveTextContent('Kind');
-    expect(options).not.toHaveTextContent('Space');
+    expect(options).not.toMatchTextContent('Kind');
+    expect(options).not.toMatchTextContent('Space');
     expect(within(options).queryByRole('button', { name: /^Add/u })).not.toBeInTheDocument();
     expect(within(options).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
     fireEvent.click(within(options).getByRole('switch', { name: 'Toggle for Timelapse' }));

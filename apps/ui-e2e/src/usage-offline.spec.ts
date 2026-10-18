@@ -71,7 +71,7 @@ const signInAndSave = async (account: StubbedAccount, snapshot = snapshotA): Pro
   await installBillingApiStub({ environment: 'development', account, snapshot });
   await target.navigate('/usage');
   await target.expectVisible(freshness, 60_000);
-  await expect.poll(freshnessText, { timeout: 60_000 }).toMatch(/^Updated /u);
+  await expect.poll(async () => freshnessText(), { timeout: 60_000 }).toMatch(/^Updated /u);
   await expect
     .poll(
       async () => {
@@ -138,7 +138,7 @@ describe('Offline usage contract', () => {
     // The same canonical query, reloaded with no API at all, is still served.
     await cutTheApi(accountA);
     await target.reload();
-    await expect.poll(freshnessText, { timeout: 60_000 }).toBe(savedLine(accountA, asOf));
+    await expect.poll(async () => freshnessText(), { timeout: 60_000 }).toBe(savedLine(accountA, asOf));
     expect(await readText(creditsUsed)).toBe('1.23 credits');
 
     // A view this device never saved — the record key carries the canonical query,
@@ -237,7 +237,7 @@ describe('Offline usage contract', () => {
 
     await installBillingApiStub({ environment: 'development', account: accountB, snapshot: snapshotB });
     await target.reload();
-    await expect.poll(freshnessText, { timeout: 60_000 }).toMatch(/^Updated /u);
+    await expect.poll(async () => freshnessText(), { timeout: 60_000 }).toMatch(/^Updated /u);
 
     await expect
       .poll(async () => readPurgeMessages('secondary'), { timeout: 30_000 })
@@ -265,7 +265,7 @@ describe('Offline usage contract', () => {
 
     await target.navigate('/usage');
 
-    await expect.poll(freshnessText, { timeout: 60_000 }).toMatch(/^Updated /u);
+    await expect.poll(async () => freshnessText(), { timeout: 60_000 }).toMatch(/^Updated /u);
     expect(await readText(creditsUsed)).toBe('1.23 credits');
     await target.expectVisible(offlineSaving, 30_000);
     expect(await readText(offlineSaving)).toBe('Not enough storage to keep this usage for offline viewing.');
@@ -290,7 +290,7 @@ describe('Offline usage contract', () => {
 
     await target.navigate('/usage');
 
-    await expect.poll(freshnessText, { timeout: 60_000 }).toMatch(/^Updated /u);
+    await expect.poll(async () => freshnessText(), { timeout: 60_000 }).toMatch(/^Updated /u);
     expect(await readText(creditsUsed)).toBe('1.23 credits');
     await target.expectVisible(offlineSaving, 30_000);
     expect(await readText(offlineSaving)).toBe('Saving usage for offline viewing is unavailable on this device.');

@@ -278,7 +278,7 @@ const admittedRequest = async (index = 0): Promise<AdmittedRequest> => {
   await waitFor(() => {
     expect(admittedTurns.length).toBeGreaterThan(index);
   });
-  return admittedTurns[index]!.request as unknown as AdmittedRequest;
+  return admittedTurns[index]!.request;
 };
 
 /** The gesture reaches the chat's admission; a refusal is the row's to assert. */

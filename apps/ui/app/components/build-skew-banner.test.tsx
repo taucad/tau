@@ -35,7 +35,7 @@ describe('build-id skew guard (DF20)', () => {
 
     announce(buildId + 1);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is running');
+    expect(await screen.findByRole('alert')).toMatchTextContent('A newer version of Tau is running');
     expect(isBuildSuperseded()).toBe(true);
   });
 

@@ -14,11 +14,11 @@
  * readable exactly as before (D14).
  */
 
-import { createHash, randomUUID } from 'node:crypto';
-import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 
 import type { ExternalAgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
+import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { isRecord } from '@taucad/utils/schema';
 
 /** The media a `file-ref` path can name, by the extension its path carries. */
@@ -33,6 +33,9 @@ const attachmentExtensions: Readonly<Record<string, string>> = {
 
 /**
  * Persist one attachment for a chat and return both the transcript and local paths.
+ *
+ * The bytes are published through the Node chat store's attachment writer, which the
+ * agent host's own screenshot captures use too.
  * @param input - Workspace, chat, MIME type and canonical base64 bytes.
  * @returns Content-addressed chat and local file references.
  */
@@ -61,24 +64,8 @@ export const saveChatAttachment = async (input: {
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const path = `attachments/${sha256}.${extension}`;
   const absolutePath = join(input.workspaceRoot, '.tau', 'chats', input.chatId, path);
-  await mkdir(join(input.workspaceRoot, '.tau', 'chats', input.chatId, 'attachments'), { recursive: true });
-  const temporaryPath = `${absolutePath}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, bytes, { flag: 'wx' });
-  try {
-    try {
-      await link(temporaryPath, absolutePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
-      }
-      const existing = await readFile(absolutePath);
-      if (!existing.equals(bytes)) {
-        throw error;
-      }
-    }
-  } finally {
-    await unlink(temporaryPath);
-  }
+  // The chat store's own writer: one atomic, content-addressed Node writer for every chat attachment (D-UI-04).
+  await createNodeAttachmentReader(input.workspaceRoot).write!(input.chatId, path, new Uint8Array(bytes));
   return { path, absolutePath, byteLength: bytes.length, sha256 };
 };
 

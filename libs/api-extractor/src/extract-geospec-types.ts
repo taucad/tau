@@ -19,6 +19,7 @@ const publicEntries = {
   './engine': './engine/index.d.ts',
   './mesh': './mesh/index.d.ts',
   './model': './model/index.d.ts',
+  './model/node': './model/node/index.d.ts',
   './runner': './runner/index.d.ts',
   './runner/native': './runner/native/index.d.ts',
   './runner/node': './runner/node/index.d.ts',

@@ -1,6 +1,55 @@
 # geospec — Types (2)
 
-63 top-level symbols. Signatures are verbatim typescript.
+60 top-level symbols. Signatures are verbatim typescript.
+
+// Runtime client surface consumed by `geospec/model`
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
+    open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
+    on?(event: 'telemetry', handler: (batch: {
+        readonly entries: ReadonlyArray<{
+            name: string;
+            duration: number;
+            startTime: number;
+            workerTimeOrigin: number;
+        }>;
+    }) => void): () => void;
+}
+
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
+
+  // GeoSpecRuntimeClient.on (method)
+  on?(event: 'telemetry', handler: (batch: {
+          readonly entries: ReadonlyArray<{
+              name: string;
+              duration: number;
+              startTime: number;
+              workerTimeOrigin: number;
+          }>;
+      }) => void): () => void;
+
+// Lazy runtime factory consumed by `geospec/model`
+GeoSpecRuntimeClientFactory: () => Promise<GeoSpecRuntimeClient>
+
+// Explicit source adapter for formats whose runtime setup is not part of the generic Tau runtime preset
+GeoSpecRuntimeSourceAdapter: {
+    id: string;
+    extensions: readonly string[];
+    createRuntime(options: {
+        projectPath?: string;
+        file?: string;
+    }): Promise<GeoSpecRuntimeClient>;
+}
+
+  id: string
+
+  extensions: readonly string[]
+
+  // GeoSpecRuntimeSourceAdapter.createRuntime (method)
+  createRuntime(options: {
+          projectPath?: string;
+          file?: string;
+      }): Promise<GeoSpecRuntimeClient>;
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -282,6 +331,38 @@ LoadModelSourceOptions: {
 
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
+
+// Options for {@link commandExporter}
+CommandExporterOptions: {
+    readonly id: string;
+    /** File extensions without the dot, or `'*'`. */
+    readonly extensions: readonly string[];
+    /** Executable and leading arguments, such as `['python', 'export.py']`. */
+    readonly command: readonly string[];
+    /** What the command can do. Protocol 1 carries no inline sources, so `inlineSources` must not be set. */
+    readonly capabilities: GeoSpecExporterCapabilities;
+    /** Working directory of the command; defaults to the request's project root. */
+    readonly cwd?: string;
+    /** Extra environment variables, merged over this process's. */
+    readonly env?: Readonly<Record<string, string>>;
+}
+
+  readonly id: string
+
+  // File extensions without the dot, or `'*'`
+  readonly extensions: readonly string[]
+
+  // Executable and leading arguments, such as `['python', 'export.py']`
+  readonly command: readonly string[]
+
+  // What the command can do
+  readonly capabilities: GeoSpecExporterCapabilities
+
+  // Working directory of the command
+  readonly cwd?: string
+
+  // Extra environment variables, merged over this process's
+  readonly env?: Readonly<Record<string, string>>
 
 // Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
 GeoSpecCollector: {
@@ -658,6 +739,11 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
     readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
     /**
+     * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
+     * `extensions` claim the file exports it.
+     */
+    readonly exporters?: readonly GeoSpecModelExporter[];
+    /**
      * Subject handles carried between the release scopes of loaders that share one engine, keyed by
      * subjectHash. With a carrier, `releaseAll` keeps this scope's subjects for the next scope and
      * releases only the previous scope's subjects this scope did not load again, so reloading
@@ -683,6 +769,9 @@ CreateGeoSpecNativeModelLoaderOptions: {
   readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
+
+  // Model exporters for source-kind files, consulted when no runtime is configured
+  readonly exporters?: readonly GeoSpecModelExporter[]
 
   // Subject handles carried between the release scopes of loaders that share one engine, keyed by subjectHash
   readonly carried?: Map<string, unknown>
@@ -1398,130 +1487,3 @@ GeoSpecPmiNumber: {
   readonly millimetres: string
 
   readonly name: string
-
-// A uniquely forward-transferred face
-GeoSpecPmiFaceAssociation: {
-    readonly sourceFaceId: number;
-    readonly occurrenceRoute: readonly number[];
-    readonly occurrence: number | null;
-    readonly publicFaceOrdinal: number;
-}
-
-  readonly sourceFaceId: number
-
-  readonly occurrenceRoute: readonly number[]
-
-  readonly occurrence: number | null
-
-  readonly publicFaceOrdinal: number
-
-// One ordered role reference, including incomplete source/transfer evidence
-GeoSpecPmiShapeReference: {
-    readonly sourceAspectId: number | null;
-    readonly sourceUsageIds: readonly number[];
-    readonly sourceItemIds: readonly number[];
-    readonly requestedRoute: GeoSpecPmiField<readonly number[]>;
-    readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
-}
-
-  readonly sourceAspectId: number | null
-
-  readonly sourceUsageIds: readonly number[]
-
-  readonly sourceItemIds: readonly number[]
-
-  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
-
-  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
-
-// Normalized authored limits
-GeoSpecPmiLimits: {
-    readonly lowerMillimetres: string;
-    readonly upperMillimetres: string;
-    readonly basis: 'authored-limits' | 'nominal-plus-minus';
-}
-
-  readonly lowerMillimetres: string
-
-  readonly upperMillimetres: string
-
-  readonly basis: 'authored-limits' | 'nominal-plus-minus'
-
-// Source record preserving semantic/presentation separation and ordered roles
-GeoSpecPmiRecord: {
-    readonly sourceId: number;
-    readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation';
-    readonly channel: 'semantic' | 'presentation';
-    readonly kind: string;
-    readonly name: GeoSpecPmiField<string>;
-    readonly first: readonly GeoSpecPmiShapeReference[];
-    readonly second: readonly GeoSpecPmiShapeReference[];
-    readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>;
-    readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>;
-    readonly interpretation: GeoSpecPmiField<string>;
-    readonly raw: readonly GeoSpecPmiRawEntity[];
-}
-
-  readonly sourceId: number
-
-  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
-
-  readonly channel: 'semantic' | 'presentation'
-
-  readonly kind: string
-
-  readonly name: GeoSpecPmiField<string>
-
-  readonly first: readonly GeoSpecPmiShapeReference[]
-
-  readonly second: readonly GeoSpecPmiShapeReference[]
-
-  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
-
-  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
-
-  readonly interpretation: GeoSpecPmiField<string>
-
-  readonly raw: readonly GeoSpecPmiRawEntity[]
-
-// Positive-only inventory value inside the ordinary canonical query report
-GeoSpecPmiInventory: {
-    readonly contract: 'geospec.pmi.inventory/v1';
-    readonly status: 'semantic' | 'graphical-only' | 'empty';
-    readonly fileSchema: string;
-    readonly editionValidation: 'not-validated';
-    readonly records: readonly GeoSpecPmiRecord[];
-}
-
-  readonly contract: 'geospec.pmi.inventory/v1'
-
-  readonly status: 'semantic' | 'graphical-only' | 'empty'
-
-  readonly fileSchema: string
-
-  readonly editionValidation: 'not-validated'
-
-  readonly records: readonly GeoSpecPmiRecord[]
-
-// Strict inventory output limits
-GeoSpecPmiQueryPayload: {
-    readonly maxRecords?: number;
-    readonly maxOutputBytes?: number;
-}
-
-  readonly maxRecords?: number
-
-  readonly maxOutputBytes?: number
-
-// Complete inventory value
-GeoSpecPmiQueryValue: {
-    readonly inventory: GeoSpecPmiInventory;
-    readonly subjectHash: string;
-    readonly provenance: Readonly<Record<string, unknown>>;
-}
-
-  readonly inventory: GeoSpecPmiInventory
-
-  readonly subjectHash: string
-
-  readonly provenance: Readonly<Record<string, unknown>>

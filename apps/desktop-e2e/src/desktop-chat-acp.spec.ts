@@ -243,26 +243,27 @@ const codexAvailable = ((): boolean => {
 /**
  * One captured view's pixels as a data URL.
  *
- * An in-app capture carries them inline; one an external agent took through
- * Tau's MCP endpoint was saved as a chat attachment and names its file instead.
+ * Tau's own agent stores each capture as a chat attachment and keeps only its
+ * `path` in the log (D-UI-04); one an external agent took through Tau's MCP
+ * endpoint was saved the same way and also names its local file. A log
+ * written before captures were stored carries them inline.
  *
- * @param image - A captured view, inline or saved.
+ * @param image - A captured view, inline, stored or saved.
+ * @param eventsPath - The chat's `events.jsonl`, whose directory owns `attachments/`.
  * @returns The image as a `data:` URL.
  */
 const captureDataUrl = (
   image:
     | { readonly dataUrl: string }
     | { readonly mimeType: string; readonly absolutePath: string }
-    | { readonly path: string },
+    | { readonly mimeType: string; readonly path: string },
+  eventsPath: string,
 ): string => {
   if ('dataUrl' in image) {
     return image.dataUrl;
   }
-  if (!('absolutePath' in image)) {
-    // Only the browser host stores captures as chat attachments; a desktop capture is inline or saved.
-    throw new Error(`Desktop capture unexpectedly stored as ${image.path}.`);
-  }
-  return `data:${image.mimeType};base64,${readFileSync(image.absolutePath).toString('base64')}`;
+  const file = 'absolutePath' in image ? image.absolutePath : join(dirname(eventsPath), image.path);
+  return `data:${image.mimeType};base64,${readFileSync(file).toString('base64')}`;
 };
 
 let session: DesktopSession | undefined;
@@ -612,7 +613,9 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     const capture = screenshotOutputSchema.parse(
       toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.scad' }),
     );
-    expect(capture.images.every((image) => captureDataUrl(image).startsWith('data:image/'))).toBe(true);
+    expect(capture.images.every((image) => captureDataUrl(image, eventsPathNow()).startsWith('data:image/'))).toBe(
+      true,
+    );
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);
@@ -706,6 +709,7 @@ it('conformance other volume and envelope', async () => {
         return captureDataUrl(
           screenshotOutputSchema.parse(toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }))
             .images[0]!,
+          eventsPathNow(),
         );
       });
       expect(captures[0]).not.toBe(captures[1]);
@@ -833,40 +837,49 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       if (image === undefined) {
         throw new Error('The repaired Turbojet capture returned no image.');
       }
-      const pixels = await page.evaluate(async (dataUrl) => {
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const bitmap = await createImageBitmap(blob);
-        const { height, width } = bitmap;
-        const canvas = new OffscreenCanvas(64, 64);
-        const context = canvas.getContext('2d');
-        if (context === null) {
-          throw new Error('2D canvas context unavailable while validating the ACP capture.');
-        }
-        context.drawImage(bitmap, 0, 0, 64, 64);
-        bitmap.close();
-        const rgba = context.getImageData(0, 0, 64, 64).data;
-        const colors = new Set<string>();
-        let minimum = 255;
-        let maximum = 0;
-        let opaque = 0;
-        for (let index = 0; index < rgba.length; index += 4) {
-          if (rgba[index + 3]! === 0) {
-            continue;
+      if (nativeTurbojet) {
+        // Tau's own agent stores its capture beside the chat and the log names it (D-UI-04).
+        expect(image).not.toHaveProperty('dataUrl');
+        expect(image).toHaveProperty('path');
+        expect(JSON.stringify(captureResult)).not.toContain('data:image/');
+      }
+      const pixels = await page.evaluate(
+        async (dataUrl) => {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          const bitmap = await createImageBitmap(blob);
+          const { height, width } = bitmap;
+          const canvas = new OffscreenCanvas(64, 64);
+          const context = canvas.getContext('2d');
+          if (context === null) {
+            throw new Error('2D canvas context unavailable while validating the ACP capture.');
           }
-          opaque += 1;
-          const red = rgba[index]!;
-          const green = rgba[index + 1]!;
-          const blue = rgba[index + 2]!;
-          const luminance = (red + green + blue) / 3;
-          minimum = Math.min(minimum, luminance);
-          maximum = Math.max(maximum, luminance);
-          colors.add(
-            `${String(Math.floor(red / 16))}:${String(Math.floor(green / 16))}:${String(Math.floor(blue / 16))}`,
-          );
-        }
-        return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
-      }, captureDataUrl(image));
+          context.drawImage(bitmap, 0, 0, 64, 64);
+          bitmap.close();
+          const rgba = context.getImageData(0, 0, 64, 64).data;
+          const colors = new Set<string>();
+          let minimum = 255;
+          let maximum = 0;
+          let opaque = 0;
+          for (let index = 0; index < rgba.length; index += 4) {
+            if (rgba[index + 3]! === 0) {
+              continue;
+            }
+            opaque += 1;
+            const red = rgba[index]!;
+            const green = rgba[index + 1]!;
+            const blue = rgba[index + 2]!;
+            const luminance = (red + green + blue) / 3;
+            minimum = Math.min(minimum, luminance);
+            maximum = Math.max(maximum, luminance);
+            colors.add(
+              `${String(Math.floor(red / 16))}:${String(Math.floor(green / 16))}:${String(Math.floor(blue / 16))}`,
+            );
+          }
+          return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
+        },
+        captureDataUrl(image, eventsPath),
+      );
       expect(pixels.width).toBeGreaterThan(100);
       expect(pixels.height).toBeGreaterThan(100);
       expect(pixels.opaque).toBeGreaterThan(1000);

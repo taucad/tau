@@ -485,11 +485,12 @@ RuntimeBackedModelFormat: Exclude<GeoSpecModelFormat, 'mesh-buffer'>
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 364 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 392 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 - `api-types.md` — Types
+- `api-types-2.md` — Types (2)
 - `api-classes.md` — Classes
 
 Read ranges, not whole files. Never copy a reference into a source file.

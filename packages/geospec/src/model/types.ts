@@ -83,6 +83,88 @@ export type GeoSpecRuntimeSourceAdapter = {
 };
 
 /**
+ * Formats a {@link GeoSpecModelExporter} may produce from a source-kind file.
+ *
+ * @public
+ */
+export type GeoSpecExportFormat = Extract<GeoSpecModelFormat, 'glb' | 'step'>;
+
+/**
+ * What a {@link GeoSpecModelExporter} declares it can do. The loader refuses a load the exporter
+ * cannot serve with `GEOSPEC_EXPORTER_UNSUPPORTED` before it calls `export`.
+ *
+ * @public
+ */
+export type GeoSpecExporterCapabilities = {
+  /** The formats `export` produces; at least one. A GLB-only exporter refuses STEP loads up front. */
+  readonly formats: readonly GeoSpecExportFormat[];
+  /** Accepts `parameters`. Without it, a load that passes parameters refuses. */
+  readonly parameters?: boolean;
+  /** Crops to `region` (an axis-aligned millimetre box) before export. Without it, a region load refuses. */
+  readonly region?: boolean;
+  /** Accepts `inline` sources, which back `loadModel({ code })`. Without it, an inline load refuses. */
+  readonly inlineSources?: boolean;
+};
+
+/**
+ * One export request. Every field but `inline` and `signal` maps onto subprocess protocol 1, so the
+ * same request crosses a process boundary unchanged.
+ *
+ * @public
+ */
+export type GeoSpecModelExportRequest = {
+  /** Entry file, as a path from the project root. */
+  readonly file: string;
+  /** Absolute project root the exporter resolves `file` and its imports against, when the host has one. */
+  readonly projectPath?: string;
+  readonly format: GeoSpecExportFormat;
+  /** JSON-serialisable parameter values; present only when the exporter declares `parameters`. */
+  readonly parameters?: Readonly<Record<string, unknown>>;
+  /** Tessellation tolerances for a mesh export. */
+  readonly mesh?: { readonly linearTolerance?: number; readonly angularToleranceDegrees?: number };
+  /** Millimetre crop box; present only when the exporter declares `region`. */
+  readonly region?: GeoSpecLoadRegion;
+  /** Source text keyed by project-relative path; present only when the exporter declares `inlineSources`. */
+  readonly inline?: Readonly<Record<string, string>>;
+  readonly signal?: AbortSignal;
+};
+
+/**
+ * The bytes an exporter returns, in the canonical Z-up millimetre frame.
+ *
+ * @public
+ */
+export type GeoSpecModelArtifact = {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly format: GeoSpecExportFormat;
+  /** Unit of raw GLB coordinates; defaults to `'mm'`. STEP carries its own unit. */
+  readonly sourceUnit?: GeoSpecUnit;
+  /** External resources the primary bytes reference, by name. */
+  readonly resources?: ReadonlyArray<{ readonly name: string; readonly bytes: Uint8Array<ArrayBuffer> }>;
+  /**
+   * Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits,
+   * optionally prefixed `sha256:`). The load records it as the subject's source revision.
+   */
+  readonly consumedSources?: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
+};
+
+/**
+ * Turns a source-kind model file into GLB or STEP bytes for GeoSpec. Hosts pass exporters to the
+ * model loader; the first whose `extensions` claim a file exports it. `extensions` have no leading dot,
+ * and `'*'` claims every file. `export` may be called concurrently; the exporter owns its caching.
+ *
+ * @public
+ */
+export type GeoSpecModelExporter = {
+  readonly id: string;
+  readonly extensions: readonly string[];
+  readonly capabilities: GeoSpecExporterCapabilities;
+  export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
+  /** Releases what the exporter holds; called by whoever constructed it, never by the loader. */
+  close?(): Promise<void>;
+};
+
+/**
  * Axis-aligned crop box in canonical Z-up millimetres; every `min` axis is below its `max` axis.
  *
  * @public
@@ -273,6 +355,11 @@ export type CreateModelLoaderOptions = {
   runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
   /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+  /**
+   * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
+   * `extensions` claim the file exports it.
+   */
+  exporters?: readonly GeoSpecModelExporter[];
   /** Project root used by runtime integrations. */
   projectPath?: string;
   /** STEP reader strategy used for STEP sources or exports. */

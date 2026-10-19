@@ -1,6 +1,6 @@
 # geospec API index
 
-geospec 0.1.0-beta.7 · 364 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.7 · 392 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -295,33 +295,61 @@ RuntimeExportIntent (type) [lines 1387-1398] [3 members] — Resolved runtime ex
 RuntimeExportIntentFailure (type) [lines 1400-1408] [2 members] — Structured failure returned when a runtime cannot provide the requested…
   RuntimeExportIntentFailure.success (property)
   RuntimeExportIntentFailure.diagnostics (property)
-CreateModelLoaderOptions (type) [lines 1410-1462] [10 members] — Defaults accepted by {@link import ('./load-model.js').createModelLoader}
+CreateModelLoaderOptions (type) [lines 1410-1470] [11 members] — Defaults accepted by {@link import ('./load-model.js').createModelLoader}
   CreateModelLoaderOptions.engine (property) — Initialized compiled engine supplied by the host, never selected by…
   CreateModelLoaderOptions.readSource (property) — Rooted host reader for direct filesystem or URL sources
   CreateModelLoaderOptions.format (property) — Geometry format to export when an individual call does not…
   CreateModelLoaderOptions.runtime (property) — Runtime client or lazy runtime factory
   CreateModelLoaderOptions.sourceAdapters (property) — Source-specific runtime adapters, e.g
+  CreateModelLoaderOptions.exporters (property) — Model exporters for source-kind files, consulted when no runtime is…
   CreateModelLoaderOptions.projectPath (property) — Project root used by runtime integrations
   CreateModelLoaderOptions.stepStreaming (property) — STEP reader strategy used for STEP sources or exports
   CreateModelLoaderOptions.mesh (property) — Whether STEP loading should also produce mesh evidence
   CreateModelLoaderOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   CreateModelLoaderOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
-GeoSpecLoadRegion (type) [lines 1464-1472] [2 members] — Axis-aligned crop box in canonical Z-up millimetres
+GeoSpecExporterCapabilities (type) [lines 1472-1494] [4 members] — What a {@link GeoSpecModelExporter} declares it can do
+  GeoSpecExporterCapabilities.formats (property) — The formats `export` produces
+  GeoSpecExporterCapabilities.parameters (property) — Accepts `parameters`
+  GeoSpecExporterCapabilities.region (property) — Crops to `region` (an axis-aligned millimetre box) before export
+  GeoSpecExporterCapabilities.inlineSources (property) — Accepts `inline` sources, which back `loadModel({ code })`
+GeoSpecExportFormat (type) [lines 1496-1497] — Formats a {@link GeoSpecModelExporter} may produce from a source-kind file
+GeoSpecLoadRegion (type) [lines 1499-1507] [2 members] — Axis-aligned crop box in canonical Z-up millimetres
   GeoSpecLoadRegion.min (property)
   GeoSpecLoadRegion.max (property)
-GeoSpecModelFormat (type) [lines 1474-1475] — Geometry formats accepted by {@link import ('./load-model.js').loadModel}
-GeoSpecModelLoader (type) [lines 1477-1478] — Function shape used by GeoSpec runners to provide model loading…
-ManagedGeoSpecModelLoader (type) [lines 1480-1486] [1 members] — A configured loader whose shared runtime can be released with…
+GeoSpecModelArtifact (type) [lines 1509-1547] [5 members] — The bytes an exporter returns, in the canonical Z-up millimetre…
+  GeoSpecModelArtifact.bytes (property)
+  GeoSpecModelArtifact.format (property)
+  GeoSpecModelArtifact.sourceUnit (property) — Unit of raw GLB coordinates
+  GeoSpecModelArtifact.resources (property) — External resources the primary bytes reference, by name
+  GeoSpecModelArtifact.consumedSources (property) — Every source file the export read, as a path from…
+GeoSpecModelExporter (type) [lines 1549-1570] [5 members] — Turns a source-kind model file into GLB or STEP bytes…
+  GeoSpecModelExporter.id (property)
+  GeoSpecModelExporter.extensions (property)
+  GeoSpecModelExporter.capabilities (property)
+  GeoSpecModelExporter.export (method)
+  GeoSpecModelExporter.close (method) — Releases what the exporter holds
+GeoSpecModelExportRequest (type) [lines 1572-1616] [8 members] — One export request
+  GeoSpecModelExportRequest.file (property) — Entry file, as a path from the project root
+  GeoSpecModelExportRequest.projectPath (property) — Absolute project root the exporter resolves `file` and its imports…
+  GeoSpecModelExportRequest.format (property)
+  GeoSpecModelExportRequest.parameters (property) — JSON-serialisable parameter values
+  GeoSpecModelExportRequest.mesh (property) — Tessellation tolerances for a mesh export
+  GeoSpecModelExportRequest.region (property) — Millimetre crop box
+  GeoSpecModelExportRequest.inline (property) — Source text keyed by project-relative path
+  GeoSpecModelExportRequest.signal (property)
+GeoSpecModelFormat (type) [lines 1618-1619] — Geometry formats accepted by {@link import ('./load-model.js').loadModel}
+GeoSpecModelLoader (type) [lines 1621-1622] — Function shape used by GeoSpec runners to provide model loading…
+ManagedGeoSpecModelLoader (type) [lines 1624-1630] [1 members] — A configured loader whose shared runtime can be released with…
   ManagedGeoSpecModelLoader.dispose (method)
-GeoSpecRuntimeClient (type) [lines 1488-1512] [2 members] — Runtime client surface consumed by `geospec/model`
+GeoSpecRuntimeClient (type) [lines 1632-1656] [2 members] — Runtime client surface consumed by `geospec/model`
   GeoSpecRuntimeClient.open (property)
   GeoSpecRuntimeClient.on (method)
-GeoSpecRuntimeClientFactory (type) [lines 1514-1515] — Lazy runtime factory consumed by `geospec/model`
-GeoSpecRuntimeSourceAdapter (type) [lines 1517-1535] [3 members] — Explicit source adapter for formats whose runtime setup is not…
+GeoSpecRuntimeClientFactory (type) [lines 1658-1659] — Lazy runtime factory consumed by `geospec/model`
+GeoSpecRuntimeSourceAdapter (type) [lines 1661-1679] [3 members] — Explicit source adapter for formats whose runtime setup is not…
   GeoSpecRuntimeSourceAdapter.id (property)
   GeoSpecRuntimeSourceAdapter.extensions (property)
   GeoSpecRuntimeSourceAdapter.createRuntime (method)
-LoadModelCodeOptions (type) [lines 1537-1620] [14 members] — Inline code-CAD model load options
+LoadModelCodeOptions (type) [lines 1681-1764] [14 members] — Inline code-CAD model load options
   LoadModelCodeOptions.code (property) — Source files keyed by project-relative path
   LoadModelCodeOptions.file (property) — Entry path to render from {@link code }
   LoadModelCodeOptions.rootDir (property) — Not accepted
@@ -336,7 +364,7 @@ LoadModelCodeOptions (type) [lines 1537-1620] [14 members] — Inline code-CAD m
   LoadModelCodeOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelCodeOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
   LoadModelCodeOptions.region (property) — Axis-aligned millimetre box the kernel crops the model to before…
-LoadModelFileOptions (type) [lines 1622-1707] [13 members] — Filesystem-backed model load options
+LoadModelFileOptions (type) [lines 1766-1851] [13 members] — Filesystem-backed model load options
   LoadModelFileOptions.file (property) — Model file to render, as a path from the project…
   LoadModelFileOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   LoadModelFileOptions.projectPath (property) — Project root used by runtime integrations
@@ -350,7 +378,10 @@ LoadModelFileOptions (type) [lines 1622-1707] [13 members] — Filesystem-backed
   LoadModelFileOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelFileOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
   LoadModelFileOptions.region (property) — Axis-aligned millimetre box the kernel crops the model to before…
-LoadModelOptions (type) [lines 1709-1734] [8 members] — Options accepted by {@link import ('./load-model.js').loadModel}
+
+## Types (2) — `api-types-2.md`
+
+LoadModelOptions (type) [lines 5-30] [8 members] — Options accepted by {@link import ('./load-model.js').loadModel}
   LoadModelOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   LoadModelOptions.format (property) — Geometry format to export
   LoadModelOptions.parameters (property) — Explicit parameters passed to the runtime
@@ -359,7 +390,7 @@ LoadModelOptions (type) [lines 1709-1734] [8 members] — Options accepted by {@
   LoadModelOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   LoadModelOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
-LoadModelSourceOptions (type) [lines 1736-1816] [13 members] — Direct geometry-source model load options
+LoadModelSourceOptions (type) [lines 32-112] [13 members] — Direct geometry-source model load options
   LoadModelSourceOptions.source (property) — Geometry bytes, path, browser file/blob, or in-memory mesh buffer
   LoadModelSourceOptions.resources (property) — Named external resources consumed alongside the direct geometry bytes
   LoadModelSourceOptions.rootDir (property) — Project-relative folder a path `source` and each resource path resolve…

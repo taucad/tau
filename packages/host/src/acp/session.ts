@@ -366,17 +366,9 @@ export const writeSessionTextFile = async (
   const provider = new NodeFsProvider(cwd);
   const target = await confine(cwd, params.path, 'write');
   /* The one content rule on this path, shared with Tau's own file tools: the
-   * manifest stays valid and keeps its identity (manifest recovery blueprint R8). */
+   * manifest stays a valid authored declaration (manifest recovery blueprint R8). */
   if (target === 'tau.json') {
-    let current: Uint8Array<ArrayBuffer> | undefined;
-    try {
-      current = await provider.readFile(target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-    }
-    const refusal = checkProjectManifestReplacement(new TextEncoder().encode(params.content), current);
+    const refusal = checkProjectManifestReplacement(new TextEncoder().encode(params.content));
     if (refusal !== undefined) {
       throw Object.assign(new Error(refusal), { code: 'VALIDATION_ERROR' });
     }

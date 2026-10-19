@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_tjNeJoVjz6GRTDtTa1j86",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Thrust ball bearing",
   "description": "Two separate races and eight separately named rolling balls, with a through shaft opening and explicit outer envelope.",
   "tags": [

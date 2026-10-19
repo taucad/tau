@@ -58,7 +58,7 @@ describe.runIf(gitToolchainOnPath)('close revision of an adopted repository', ()
     await writeFile(join(project, 'dist', 'bundle.js'), 'built\n');
     await writeFile(join(project, '.env'), 'SECRET=1\n');
 
-    const revisions = createProjectRevisions({ workspaceRoot: project });
+    const revisions = createProjectRevisions({ workspaceRoot: project, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
     try {
       await vi.waitFor(() => {
         expect(revisions.status().registrySettled).toBe(true);

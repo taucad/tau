@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_YXEB6larAuGXUnCuIcGoq",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "JSCAD Cylinder",
   "description": "Create precise cylindrical shapes with full control over dimensions and smoothness. Perfect for rods, pins, spacers, or any round component. Adjust height and radius for your exact needs, and fine-tune the segment count to balance between smooth curves and performance. Essential for mechanical parts, architectural elements, or decorative objects.",
   "tags": ["3d-printing", "parametric", "jscad"],

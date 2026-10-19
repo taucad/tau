@@ -3,7 +3,7 @@ title: 'Project Manifest Policy'
 description: 'Authority contract for the strict first-release tau.json manifest, host-local project library state, lifecycle overlays, and filesystem-first discovery.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-27'
+updated: '2026-10-19'
 related:
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
@@ -23,7 +23,7 @@ related:
 
 Internal reference for the `tau.json` project manifest and its boundary with host-local project library state. It defines which facts are portable project content, which facts are local application state, and how filesystem discovery and the local overlay compose without creating two project authorities.
 
-> **Status: active** — this is the first-release v1 contract. The unreleased draft implementation cuts directly to it as specified by `docs/research/tau-json-project-library-state-boundary.md`; no manifest-version migration or compatibility layer ships.
+> **Status: active** — this is the first-release v1 contract. The unreleased draft implementation cuts directly to it as specified by `docs/research/tau-json-project-library-state-boundary.md`; a narrow conversion of the immediately preceding prerelease manifest preserves existing cloud IDs without a general migration framework.
 
 ## Rationale
 
@@ -35,20 +35,21 @@ The governing invariant is:
 
 ## Authority Table
 
-| Concern                             | Authoritative home                                      | Examples                                                            |
-| ----------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
-| Portable project declaration        | `/tau.json`                                             | schema URL, logical ID, name, description, tags, and the main asset |
-| Authored or generated project files | Project filesystem                                      | entry paths, `.tau/parameters/<entryPath>.json`, asset thumbnails   |
-| Host-local library lifecycle        | `projectLibraryStates` object store                     | `lastActivityAt`, `deletedAt`                                       |
-| Host-local revision pointer         | `projectLibraryStates` object store                     | `revisionState` while chats remain browser-local                    |
-| Physical storage binding            | `ProjectFileSystemConfig` in `tau-fs-handles`           | backend, workspace ID, storage root                                 |
-| Rebuildable presentation cache      | Memory only unless separately justified by measurements | React Query project results, thumbnail object URLs                  |
+| Concern                             | Authoritative home                                      | Examples                                                          |
+| ----------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------- |
+| Portable project declaration        | `/tau.json`                                             | schema URL, name, description, tags, and the main asset           |
+| Authored or generated project files | Project filesystem                                      | entry paths, `.tau/parameters/<entryPath>.json`, asset thumbnails |
+| Generated project identity          | `.tau/project.json`                                     | versioned, validated `projectId`; protected host-owned metadata   |
+| Host-local library lifecycle        | `projectLibraryStates` object store                     | `lastActivityAt`, `deletedAt`                                     |
+| Host-local revision pointer         | `projectLibraryStates` object store                     | `revisionState` while chats remain browser-local                  |
+| Physical storage binding            | `ProjectFileSystemConfig` in `tau-fs-handles`           | backend, workspace ID, storage root                               |
+| Rebuildable presentation cache      | Memory only unless separately justified by measurements | React Query project results, thumbnail object URLs                |
 
 ## Rules
 
-### 1. An identifiable manifest establishes project existence
+### 1. A declaration and resolved identity establish project existence
 
-A directory containing a `tau.json` whose identity reads (Rule 15) on a configured storage root **is** a project. A defective declaration degrades that project and never removes it. Discovery scans `/projects/*/tau.json`; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
+A directory containing a recognized `tau.json` whose generated identity resolves (Rule 15) on a configured storage root **is** a project. A defective declaration degrades that project and never removes it. Discovery scans `/projects/*/tau.json`; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
 
 A pending linked-remote bootstrap is a quarantined provisional directory, not a project. Its protected operation marker proves only recovery ownership and never substitutes for `tau.json`. Discovery admits it only after the reviewed Git tree and setup revision verify and manifest-last publication completes. A local import remains a valid project when its later remote push is pending or refused.
 
@@ -80,7 +81,6 @@ CORRECT:
 ```typescript
 const manifest: ProjectManifest = {
   $schema: projectManifestSchemaUrl,
-  id: project.id,
   name: project.name,
   description: project.description,
   tags: project.tags,
@@ -96,9 +96,9 @@ const manifest = { ...project, $schema: projectManifestSchemaUrl };
 
 ### 4. `$schema` is the manifest's sole on-disk version discriminator
 
-The current and only supported URL is `https://tau.new/schemas/tau-schema-v1.json`. `tau.json` carries that URL in `$schema` and does not duplicate the same fact in `schemaVersion`.
+The current and only supported URL is `https://tau.new/schemas/tau-v1.json`. `tau.json` carries that URL in `$schema` and does not duplicate the same fact in `schemaVersion`.
 
-Because no manifest contract has shipped, Tau replaces the draft implementation at that URL before release. Readers accept the exact v1 URL and strict v1 shape; an unknown or malformed URL returns a structured unsupported-schema issue without mutating bytes. No old-manifest parser, forward-migration branch, or second schema URL exists in the first release.
+Because no manifest contract has shipped, Tau replaces the draft implementation at that URL before release. Readers accept the exact v1 URL and strict v1 shape; an unknown or malformed URL returns a structured unsupported-schema issue without mutating bytes. Only the explicitly named conversion API accepts the exact previous prerelease URL and strict ID-bearing shape; ordinary readers do not.
 
 The published JSON Schema is generated from the strict Zod schema. Once v1 is released, its URL and bytes are immutable. A future incompatible contract receives a new URL only when that contract is actually designed.
 
@@ -177,9 +177,9 @@ In-app manifest writes are serialized by the project manager/project machine bou
 
 External writers edit the manifest itself. The app converges by watching, re-parsing, and replacing only the manifest slice of the composed project view; local library state remains untouched. A defective external edit is surfaced on the open project (Rule 15) and is never silently ignored. Machine-origin write guards and coalescing prevent write/watch loops.
 
-Agent file tools are external writers with a gate. A `tau.json` write through an agent tool or the ACP filesystem must parse strictly and keep the project's current `id`; otherwise it is refused with the exact issues. Deleting `tau.json` through an agent tool is refused.
+Agent file tools are external writers with a gate. A `tau.json` write through an agent tool or the ACP filesystem must parse strictly without identity fields; otherwise it is refused with the exact issues. Generated `.tau/project.json` is inaccessible through authored agent views. Deleting `tau.json` through an agent tool is refused.
 
-When importing a Git history, validate an existing manifest at the pinned source commit before reserving identity. Adopt its id only when no local project owns it. If the same id is already local, open the existing project only after its stable remote repository identity matches; otherwise require an explicit new-id manifest change on a new branch. Missing or invalid manifests remain unchanged in the imported parent and may be created or replaced only in the user's reviewed setup revision.
+When importing a Git history, validate the pinned declaration before reserving local identity. Use stable remote repository binding for duplicate recognition. An unassociated new clone receives a new local ID, including when its source declaration has a validated previous prerelease ID. Existing authenticated cloud and established local bindings preserve their IDs. Conflicts require explicit resolution and never re-identify another local project. Any declaration conversion belongs to the reviewed setup revision, preserving the imported parent.
 
 The thumbnail owner writes bytes to the path declared by the target asset. Parameter owners write only canonical sidecars. Neither generated write counts as project activity.
 
@@ -189,15 +189,13 @@ The current Projects query uses React Query for in-memory caching/deduplication 
 
 A persistent manifest projection is not part of the current design. If measured cold-start scale later justifies one, it must be explicitly rebuildable, fingerprinted against the manifest, and unable to establish existence or overwrite filesystem content. It remains distinct from authoritative `ProjectLibraryState`.
 
-### 12. The pre-release draft cuts over once; no manifest migration subsystem ships
+### 12. Preserve prerelease IDs through one narrow conversion
 
-No manifest contract has been released, so the repository replaces the draft shape directly with strict v1. Repository fixtures, generated schemas, constructors, and consumers switch together. Runtime code does not retain a draft parser, compatibility aliases, migration journal, recovery UI, content-addressed manifest backup format, or a second schema URL.
+The strict parser and all writers use the id-free manifest and new schema URL. The separately named legacy converter recognizes only the exact previous `https://tau.new/schemas/tau-schema-v1.json` contract with a validated ID. It returns an identity candidate and new declaration; it is not an alternate normal parser or a general version-migration registry.
 
-The known user workspace is handled as an explicit one-off implementation task against its exact browser origin/profile. Quiesce normal discovery and writes; take an exact-byte backup outside the projects tree; snapshot every available draft `updatedAt`, `deletedAt`, and `revisionState`; and reject duplicate logical IDs, unsafe paths, and destination collisions. Before mutation, preflight every source manifest and proposed strict-v1 output. Missing files referenced by an already-broken draft are reported and preserved as declarations; the cutover neither guesses replacements nor adds cross-field validation.
+Shared XState actors establish the same generated identity before conditionally replacing the exact original manifest bytes. Existing durable identity, trusted cloud identity and legacy identity must agree. On replacement conflict retain the sidecar, reread and refuse contradictory evidence; never roll back identity or mint another ID. A restart converges on the same record.
 
-After a successful preflight, seed exact local rows before discovery can create fallback timestamps, preserve valid parameter sidecars, and replace every manifest through temporary-file writes. Verify every manifest and per-project local value—not only aggregate counts—before deleting temporary artifacts and resuming discovery. On failure, restore original manifest bytes and prior local rows and remove only sidecars created by the task. None of this becomes a production import or migration API. The degraded reader and Repair (Rule 15) interpret no draft field: they are the general defect path for any identifiable manifest, not a draft parser.
-
-The existing object-store-to-filesystem conversion is a separate legacy-storage concern. While legacy rows remain, it emits the final strict v1 shape through the ordinary serializer and maps legacy `updatedAt`, `deletedAt`, and `revisionState` to `ProjectLibraryState`. It verifies both destinations before clearing the old row. It must not introduce a manifest-to-manifest migration path.
+Cloud open seeds the authenticated cloud ID before pull. Convert only the current working tree after verified materialization, including historical restore; historical objects and remote repository/database keys remain unchanged. Conversion is an ordinary local revision change. The separate legacy object-store conversion emits the new strict manifest and explicit durable identity, and verifies both before clearing the old row.
 
 ### 13. Non-project spaces carry no manifest
 
@@ -205,26 +203,21 @@ Ephemeral preview/converter mounts and server-rendered publication surfaces are 
 
 ### 14. Manifests are untrusted input and paths come from discovery
 
-Readers bound bytes before `JSON.parse`, validate through the selected strict schema, and classify each entry by Rule 15: a declaration defect degrades the entry, while an identity failure quarantines only that entry with a structured reason that names the problem. Physical provider paths come exclusively from the discovery `ProjectLocator`. A validated manifest `id` is logical identity and may name a virtual route only after duplicate-ID detection; it is never joined into a provider path.
+Readers bound bytes before `JSON.parse`, validate through the selected strict schema, and classify each entry by Rule 15: a declaration defect degrades the entry, while an identity failure quarantines only that entry with a structured reason that names the problem. Physical provider paths come exclusively from the discovery `ProjectLocator`. A validated generated `projectId` is logical identity and may name a virtual route only after duplicate-ID detection; it is never joined into a provider path.
 
-### 15. Identity decides routing; the declaration only degrades
+### 15. Identity and declarations have separate failure states
 
-`readProjectManifestBytes` in `@taucad/types` is the one manifest reader. It separates identity (`$schema`, which must be v1 or absent, and `id`) from the declaration (every other field):
+`readProjectManifestBytes` in `@taucad/types` reads the declaration only. Strict valid bytes are usable; a recognized defective declaration yields a normalized, write-protected view with exact issues. Unreadable, oversized or foreign-schema bytes remain quarantined. No parser generates identity.
 
-| Bytes                                                   | Outcome                                                                                               |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Strictly valid                                          | Valid                                                                                                 |
-| Identity reads; declaration defective                   | Valid with an `issue`: a normalized strict view, the exact issues, write-protected                    |
-| No readable identity                                    | `adoption-required` with the salvaged declaration; also a directory holding `.tau/` but no `tau.json` |
-| Unreadable, over 256 KiB, or a present non-v1 `$schema` | Quarantined with the named reason                                                                     |
+The shared `@taucad/project-core/identity` XState lifecycle resolves `.tau/project.json`, a strict `{version: 1, projectId}` record, using injected read, random-ID generation and atomic create-if-absent actors. Concurrent initializers reread the winning record. Trusted evidence conflicts are explicit refusals; path hashes, directory basenames and fresh-per-read random fallbacks are forbidden. Read-only storage may reuse a record or an explicit host-local stable binding; otherwise report persistence unavailable.
 
-For a mounted project, the route's own id is the identity of last resort; a present `id` that differs from it is a mismatch, never a fallback.
+Discovery carries `projectId` beside `manifest` and physical `locator`. Initialize only after recognizing a declaration or validated legacy conversion. Explicit native host admission may bootstrap identity before a declaration exists, preserving empty-directory `tau serve`; the sidecar alone never establishes project existence. A named runtime `Project` may compose `id` with declaration fields, but it is never serialized wholesale.
 
-A degraded view is lossy by construction. Tau therefore never writes a degraded manifest implicitly: the project writer and every manager update re-read the bytes and refuse while they are degraded, and editable details become read-only with the reason. **Repair** is the one explicit canonicalizing write. It is not offered for a JSON syntax error, because defaults would erase text a person can still fix in the editor.
+Keep generated identity hidden from agent views and exclude it from normal revisions and portable shares. Watch identity changes and invalidate resolved bindings through the owning machine. A raw copy retaining the sidecar retains identity and follows duplicate quarantine; explicit Duplicate creates a fresh identity. A move preserving the record retains identity.
 
-Every degraded or quarantined state is visible with its exact issues: on the open project, on the library card, and in the editor, which validates `tau.json` against the published schema. Adopt writes a strictly valid manifest and restores the id the route binding remembers when no discovered project holds it. When several directories claim one id, the directory the persisted route binding names stays routable, and choosing another copy is an explicit, config-only transaction that writes no project files.
+Degraded views are lossy. Refuse implicit writes while degraded; explicit Repair alone canonicalizes them and is unavailable for JSON syntax errors. Adopt restores a remembered route identity only after fresh uniqueness verification. Duplicate resolution changes bindings without rewriting project content. Preserve both manifest and generated identity through partial deletion failure.
 
-**Why**: One unknown `assets` key once made an identifiable project, its chat and an in-flight agent run unreachable from every surface, with no action but hand-editing (`docs/research/tau-json-manifest-failure-recovery-blueprint.md`). Write protection keeps the protection strict parsing gave: an older build cannot destroy a newer build's fields.
+**Why**: Authoring a declaration must not require minting an ID, while a broken declaration must not erase an established route, chats or recovery ownership.
 
 ## Anti-Patterns
 
@@ -238,7 +231,7 @@ Every degraded or quarantined state is visible with its exact issues: on the ope
 - Using a classification such as `mechanical` as an asset ID, or adding a classification field before a non-mechanical consumer exists.
 - Keeping revision turn IDs portable while their authoritative chats remain local.
 - Treating a missing workspace as deletion or clearing local state after an incomplete discovery scan.
-- Shipping a parser, migration framework, or recovery UI for the unreleased draft manifest.
+- Expanding the narrow prerelease conversion into a general compatibility framework.
 - Clearing a legacy object-store row before its final strict v1 filesystem project and mapped local state both verify successfully.
 - Quarantining a project whose identity reads because its declaration is defective.
 - Writing a degraded manifest other than through an explicit Repair, or offering Repair for a JSON syntax error.
@@ -249,7 +242,7 @@ Every degraded or quarantined state is visible with its exact issues: on the ope
 
 - [ ] An identifiable `tau.json` remains the only project-existence authority; a declaration defect degrades and never removes a project.
 - [ ] Degraded manifests are surfaced with their exact issues, write-protected, and canonicalized only by an explicit Repair.
-- [ ] Agent `tau.json` writes parse strictly and keep the current `id`; agent deletion of `tau.json` is refused.
+- [ ] Agent `tau.json` writes parse strictly without identity fields; agent deletion of `tau.json` is refused.
 - [ ] Manifest, library-state, and composed UI types are separate; serialization is explicit.
 - [ ] `$schema` is the sole manifest version field; strict v1 is generated and becomes immutable when released.
 - [ ] The v1 schema and every nested object reject unknown properties.
@@ -260,8 +253,8 @@ Every degraded or quarantined state is visible with its exact issues: on the ope
 - [ ] Local state contains only `lastActivityAt`, `deletedAt`, and revision state.
 - [ ] Activity is decided by project-domain events, never raw filesystem timestamps.
 - [ ] Soft delete leaves files recoverable; permanent delete is journaled and explicit.
-- [ ] The one-off workspace cutover quiesces the target origin, rejects duplicate IDs, globally preflights without mutation, and verifies strict v1 files plus exact seeded state before cleanup.
-- [ ] No draft parser, manifest migration/recovery subsystem, or second schema URL ships.
+- [ ] Prerelease conversion persists matching identity before exact-byte conditional replacement and preserves cloud repository IDs.
+- [ ] Normal parsing accepts only the new URL; the narrow named converter alone accepts the previous strict prerelease contract.
 - [ ] Legacy object-store conversion emits strict v1 plus mapped local state and clears a row only after both verify.
 - [ ] No new listing cache or persistent projection is added without measurements and a separate authority contract.
 

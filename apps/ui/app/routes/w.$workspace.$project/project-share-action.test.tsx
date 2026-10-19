@@ -1,7 +1,7 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import type * as XStateModule from 'xstate';
 import { useWorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
 import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
@@ -21,7 +21,7 @@ let capturedPanelProperties: ProjectSharePanelProps | undefined;
 let projectActivity = 10;
 let sourceContent = new TextEncoder().encode('initial source');
 
-const project = projectToManifest({
+const project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   name: 'Share fixture',
   description: 'Current project',

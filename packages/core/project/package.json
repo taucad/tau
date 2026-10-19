@@ -40,7 +40,8 @@
     "./share-error": "./src/share-error.ts",
     "./share-locator": "./src/share-locator.ts",
     "./share-snapshot": "./src/share-snapshot.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./identity": "./src/identity.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -80,7 +81,12 @@
         "import": "./dist/share-snapshot.mjs",
         "default": "./dist/share-snapshot.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./identity": {
+        "types": "./dist/identity.d.mts",
+        "import": "./dist/identity.mjs",
+        "default": "./dist/identity.mjs"
+      }
     },
     "imports": {}
   },
@@ -93,9 +99,11 @@
   },
   "dependencies": {
     "jose": "^6.2.3",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "xstate": "catalog:"
   },
   "devDependencies": {
+    "@taucad/xstate-testing": "workspace:*",
     "zod": "catalog:"
   },
   "peerDependencies": {

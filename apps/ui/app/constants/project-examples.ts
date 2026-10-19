@@ -49,7 +49,7 @@ export const sampleProjects: readonly BuiltinProjectCardModel[] = builtinCatalog
         {
           locator: example.locator,
           kernel,
-          id: example.manifest.id,
+          id: `builtin:${example.locator}`,
           name: example.manifest.name,
           description: example.manifest.description,
           tags: example.manifest.tags,

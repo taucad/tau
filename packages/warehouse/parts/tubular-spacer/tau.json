@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_38kwwo_BrObPz53W1ulwr",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Tubular spacer",
   "description": "Tubular spacer with a modeled opening and editable section dimensions.",
   "tags": [

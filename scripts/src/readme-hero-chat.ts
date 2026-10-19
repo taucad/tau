@@ -80,7 +80,7 @@ const modelId = 'anthropic-claude-fable-5.1';
 const mainTs = await readFile(join(exampleDirectory, 'main.ts'), 'utf8');
 const geospecTs = await readFile(join(exampleDirectory, 'main.geospec.ts'), 'utf8');
 const designMd = await readFile(join(exampleDirectory, 'DESIGN.md'), 'utf8');
-const manifest = JSON.parse(await readFile(join(projectDirectory, 'tau.json'), 'utf8')) as { id: string; name: string };
+const manifest = JSON.parse(await readFile(join(projectDirectory, 'tau.json'), 'utf8')) as { name: string };
 const thumbnail = await readFile(join(exampleDirectory, 'thumbnail.webp'));
 const skillMd = await readFile(join(skillDirectory, 'SKILL.md'), 'utf8');
 const skillEntries = await readdir(skillDirectory);
@@ -93,7 +93,19 @@ const skillDescription =
     .filter(Boolean)
     .join(' ') ?? '';
 
-const projectId = manifest.id;
+const identity: unknown = JSON.parse(await readFile(join(projectDirectory, '.tau/project.json'), 'utf8'));
+if (
+  !identity ||
+  typeof identity !== 'object' ||
+  !('version' in identity) ||
+  identity.version !== 1 ||
+  !('projectId' in identity) ||
+  typeof identity.projectId !== 'string' ||
+  !/^proj_[A-Za-z0-9_-]{21}$/u.test(identity.projectId)
+) {
+  throw new Error('Open this project in Tau first to establish a valid project identity.');
+}
+const { projectId } = identity;
 
 /* The first draft of main.ts meshes the ring at phase 0; GeoSpec catches the clash and the fix phases it by 2.5°. */
 const phasedRing =

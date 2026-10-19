@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "M4 Tau runtime box",
   "description": "Live C2 runtime export fixture",
   "tags": ["geospec", "replicad"],

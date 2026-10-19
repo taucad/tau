@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_wagZCtLVdKlC0tCpYBGRf",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted spring pin",
   "description": "Hollow cylindrical spring pin with a full-length open slot.",
   "tags": [

@@ -32,7 +32,7 @@ import {
   readProjectManifestBytes,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
 import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -225,7 +225,7 @@ export function isKnownChatId({
 
 /** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */
 type ObservedManifestState = {
-  readonly project: ProjectManifest | undefined;
+  readonly project: Project | undefined;
   readonly issue: ProjectManifestParseIssue | undefined;
 };
 
@@ -235,20 +235,14 @@ const manifestStateKey = ({ project, issue }: ObservedManifestState): string =>
     ...(issue === undefined ? [] : describeProjectManifestIssue(issue)),
   ].join('\n');
 
-/** A present id that names another project: this route's bytes no longer describe it. */
-const idMismatchIssue = (expected: string, found: string): ProjectManifestParseIssue => ({
-  code: 'manifest-invalid',
-  issues: [{ code: 'custom', path: ['id'], message: `Expected ${expected}, the project open here; found ${found}` }],
-});
-
 /**
  * Follow `tau.json` while its project is open, never silently (blueprint R5).
  *
- * Valid JSON that still identifies this project (strict or degraded) reloads
+ * Valid JSON declarations (strict or degraded) reload
  * when it differs from what the workspace holds, so a degraded declaration
  * shows its issue at once. Syntax-invalid JSON retains the mounted manifest
  * and reports its issue. Bytes that no longer identify it — missing, unreadable, oversize, a
- * foreign `$schema` or another project's id — are reported instead: the
+ * foreign `$schema` — are reported instead: the
  * workspace keeps its last good manifest open so the person can fix the file.
  */
 export const createProjectManifestChangeObserver = ({
@@ -301,13 +295,9 @@ export const createProjectManifestChangeObserver = ({
       if (disposed || attempt !== generation) {
         return;
       }
-      const read = readProjectManifestBytes(bytes, { id: projectId });
+      const read = readProjectManifestBytes(bytes);
       if (!read.success) {
         reportIssue(read.issue);
-        return;
-      }
-      if (read.data.id !== projectId) {
-        reportIssue(idMismatchIssue(projectId, read.data.id));
         return;
       }
       const current = getCurrent();
@@ -315,7 +305,7 @@ export const createProjectManifestChangeObserver = ({
         reportIssue(read.issue);
         return;
       }
-      const observed = manifestStateKey({ project: read.data, issue: read.issue });
+      const observed = manifestStateKey({ project: { ...read.data, id: projectId }, issue: read.issue });
       if (current.project !== undefined && manifestStateKey(current) === observed) {
         onSettled?.();
         return;
@@ -336,7 +326,7 @@ export const createProjectManifestChangeObserver = ({
 
 /**
  * Read the open route's manifest: strict, or degraded with its issue. The
- * route's id stands in only when the bytes lost theirs (blueprint R3).
+ * established route binding supplies identity independently of the declaration.
  */
 export async function resolveScopedProjectManifest({
   contentService,
@@ -344,20 +334,17 @@ export async function resolveScopedProjectManifest({
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<{ readonly project: ProjectManifest; readonly issue?: ProjectManifestParseIssue }> {
+}): Promise<{ readonly project: Project; readonly issue?: ProjectManifestParseIssue }> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
   }
 
-  const read = readProjectManifestBytes(outcome.content, { id: projectId });
+  const read = readProjectManifestBytes(outcome.content);
   if (!read.success) {
     throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  if (read.data.id !== projectId) {
-    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${read.data.id}`);
-  }
-  return read.issue === undefined ? { project: read.data } : { project: read.data, issue: read.issue };
+  return { project: { ...read.data, id: projectId }, ...(read.issue === undefined ? {} : { issue: read.issue }) };
 }
 
 export function ProjectProvider({
@@ -492,8 +479,8 @@ export function ProjectProvider({
         // and an implicit write must never replace a degraded manifest (R4).
         const current = await contentService.resolve('tau.json', { forceText: true });
         if (current.kind === 'text') {
-          const read = readProjectManifestBytes(current.content, { id: projectId });
-          if (!read.success || read.issue !== undefined || read.data.id !== projectId) {
+          const read = readProjectManifestBytes(current.content);
+          if (!read.success || read.issue !== undefined) {
             throw new Error('tau.json needs repair before Tau can change it. Repair it, or fix it in the editor.');
           }
         }

@@ -152,8 +152,7 @@ describe('createOpenInTauLink', () => {
 describe('createDirectShare', () => {
   let project: string;
   const manifest = {
-    $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-    id: 'proj_abcdefghijklmnopqrstu',
+    $schema: 'https://tau.new/schemas/tau-v1.json',
     name: 'Bracket',
     description: '',
     tags: [],

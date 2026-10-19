@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs",
+    "name": "Revisions ES module outputs — 106.09 kB brotli with checked legacy manifest conversion (2026-10-19)",
     "path": "dist/**/*.mjs",
-    "limit": "106 kB"
+    "limit": "106.2 kB"
   }
 ]

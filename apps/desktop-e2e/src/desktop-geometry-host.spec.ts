@@ -70,9 +70,9 @@ const returnPrompt = 'Run the native quick check on the first project again.';
 const expectProjectRun = async (run: GeometryHostEvent | undefined, projectRoot: string): Promise<void> => {
   expect(run?.kind).toBe('run');
   expect(run?.root).toBeTypeOf('string');
-  const manifest = JSON.parse(await readFile(join(projectRoot, 'tau.json'), 'utf8')) as { id: string };
+  const identity = JSON.parse(await readFile(join(projectRoot, '.tau/project.json'), 'utf8')) as { projectId: string };
   const canonicalProjectRoot = await realpath(projectRoot);
-  const checkoutRoot = join(dirname(canonicalProjectRoot), '.tau', 'checkouts', manifest.id);
+  const checkoutRoot = join(dirname(canonicalProjectRoot), '.tau', 'checkouts', identity.projectId);
   const within = (parent: string): boolean => {
     const child = relative(parent, resolve(run!.root!));
     return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));

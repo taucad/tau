@@ -29,6 +29,8 @@ export { WorkspaceFileService } from '#workspace-file-service.js';
 export { pendingProjectCommitInputSchema } from '#project-directories.js';
 export type {
   ProjectDiscoveryEntry,
+  ProjectDiscoveryIssue,
+  ResolvedProjectManifest,
   ProjectDiscoveryResult,
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,

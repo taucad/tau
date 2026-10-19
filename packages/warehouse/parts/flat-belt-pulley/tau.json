@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_RJ5lXBba8y3wbzZlHG68b",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Crowned flat-belt pulley",
   "description": "Crowned belt-running surface with a through-bored hub.",
   "tags": [

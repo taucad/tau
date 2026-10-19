@@ -71,6 +71,7 @@ export function pickDuplicatedFocusedChatId(args: {
 
 const createInitialEditorState = (args: {
   readonly project: ProjectManifest;
+  readonly projectId: string;
   /** Absent when the project was created without a chat (review R5). */
   readonly chatId: string | undefined;
   readonly overrides?: InitialEditorState;
@@ -96,7 +97,7 @@ const createInitialEditorState = (args: {
   const panelState = mergePanelState(defaultPanelState, args.overrides?.panelState);
 
   return {
-    projectId: args.project.id,
+    projectId: args.projectId,
     openFiles,
     activePaneId: args.overrides?.activePaneId ?? seedPaneId,
     focusedChatId: args.chatId,
@@ -130,6 +131,7 @@ const objectStoreWorker = {
   /** Prepare stable replay data before any cross-store project creation writes. */
   async prepareProjectCreation(options: {
     manifest: ProjectManifest;
+    projectId: string;
     /** Omitted to create the project and no chat at all (review R5). */
     chat?: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>;
     /** Where the chat's attachment references are copied from; see `PendingCreateProjectOperation`. */
@@ -147,7 +149,7 @@ const objectStoreWorker = {
         : {
             ...options.chat,
             id: generatePrefixedId(idPrefix.chat),
-            resourceId: project.id,
+            resourceId: options.projectId,
             createdAt: timestamp,
             updatedAt: timestamp,
             recencyAt: timestamp,
@@ -156,9 +158,10 @@ const objectStoreWorker = {
     const operation: PendingCreateProjectOperation = {
       operationId,
       kind: 'create',
+      projectId: options.projectId,
       ...options.storage,
       manifest: project,
-      library: { projectId: project.id, lastActivityAt: timestamp },
+      library: { projectId: options.projectId, lastActivityAt: timestamp },
       files: seedInitialWorkbenchFiles(
         options.files,
         options.deferInitialView ? undefined : project.assets.main.entryPath,
@@ -167,6 +170,7 @@ const objectStoreWorker = {
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({
         project,
+        projectId: options.projectId,
         chatId: chat?.id,
         overrides: options.editorState,
         timestamp,
@@ -179,7 +183,8 @@ const objectStoreWorker = {
 
   /** Prepare stable replay data before any cross-store duplicate writes. */
   async prepareProjectDuplicate(options: {
-    sourceManifest: ProjectManifest;
+    sourceProjectId: string;
+    targetProjectId: string;
     targetManifest: ProjectManifest;
     files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
     storage: PendingProjectStorage;
@@ -196,14 +201,14 @@ const objectStoreWorker = {
       return {
         ...chat,
         id,
-        resourceId: newProject.id,
+        resourceId: options.targetProjectId,
         createdAt: timestamp,
         updatedAt: timestamp,
         recencyAt: timestamp,
         deletedAt: undefined,
       };
     });
-    const sourceEditorState = await storage.getEditorState(options.sourceManifest.id);
+    const sourceEditorState = await storage.getEditorState(options.sourceProjectId);
     const mappedFocusedChatId = pickDuplicatedFocusedChatId({
       sourceFocusedChatId: sourceEditorState?.focusedChatId,
       chatIdMapping,
@@ -211,7 +216,7 @@ const objectStoreWorker = {
     });
     const editorState = mappedFocusedChatId
       ? {
-          projectId: newProject.id,
+          projectId: options.targetProjectId,
           openFiles: sourceEditorState?.openFiles ?? [],
           activePaneId: sourceEditorState?.activePaneId,
           focusedChatId: mappedFocusedChatId,
@@ -226,10 +231,11 @@ const objectStoreWorker = {
     const operation: PendingDuplicateProjectOperation = {
       operationId,
       kind: 'duplicate',
+      projectId: options.targetProjectId,
       ...options.storage,
-      sourceProjectId: options.sourceManifest.id,
+      sourceProjectId: options.sourceProjectId,
       manifest: newProject,
-      library: { projectId: newProject.id, lastActivityAt: timestamp },
+      library: { projectId: options.targetProjectId, lastActivityAt: timestamp },
       files: seedInitialWorkbenchFiles(options.files, newProject.assets.main.entryPath),
       chats: clonedChats,
       editorState,

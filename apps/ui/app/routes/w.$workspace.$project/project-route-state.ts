@@ -11,7 +11,7 @@
  * `project-route-notices.tsx`. Nothing else has to learn about it.
  */
 import { createContext, useContext } from 'react';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -30,20 +30,20 @@ export type ProjectRouteSlugs = Readonly<{
  */
 export type ProjectRouteState =
   | Readonly<{ kind: 'resolving' }>
-  | Readonly<{ kind: 'editor'; projectId: string; project: ProjectManifest }>
+  | Readonly<{ kind: 'editor'; projectId: string; project: Project }>
   | Readonly<{
       kind: 'closed';
       projectId: string;
-      project: ProjectManifest;
+      project: Project;
       reason: ProjectSessionCloseReason | undefined;
     }>
-  | Readonly<{ kind: 'trashed'; projectId: string; project: ProjectManifest }>
+  | Readonly<{ kind: 'trashed'; projectId: string; project: Project }>
   | Readonly<{ kind: 'missing'; slugs: ProjectRouteSlugs | undefined }>
   | Readonly<{ kind: 'conflict'; projectId: string }>
   | Readonly<{ kind: 'unavailable'; projectId: string }>
   | Readonly<{ kind: 'recovering'; projectId: string }>
   | Readonly<{ kind: 'recovery-failed'; projectId: string; reason: PendingProjectRecoveryReason }>
-  | Readonly<{ kind: 'native-kernel'; projectId: string; project: ProjectManifest; kernelName: string }>
+  | Readonly<{ kind: 'native-kernel'; projectId: string; project: Project; kernelName: string }>
   | Readonly<{ kind: 'access-error'; projectId: string; error: Error }>
   | Readonly<{ kind: 'flush-error'; error: Error }>;
 

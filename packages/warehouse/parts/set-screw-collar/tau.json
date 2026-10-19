@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JTIj77YkK1QsrqgniLmUs",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Set-screw shaft collar",
   "description": "Axial stop collar with a radial screw opening.",
   "tags": [

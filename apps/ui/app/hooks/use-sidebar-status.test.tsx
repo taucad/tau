@@ -128,7 +128,7 @@ const registrySend = vi.fn();
 const sessionSend = vi.fn();
 
 const sidebarProject: ProjectListItem = {
-  $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+  $schema: 'https://tau.new/schemas/tau-v1.json',
   id: 'enclosure',
   name: 'Enclosure',
   description: 'Enclosure',

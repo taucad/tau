@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_picovoxel000000000032",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "PicoVoxel Sphere Minus Beams",
   "description": "PicoVoxel Sphere Minus Beams community example, adapted to Tau's injected-session runtime.",
   "tags": ["picovoxel", "typescript", "community-example"],

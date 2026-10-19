@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_vP-axHi4y3zckFHrceVue",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Shoulder screw",
   "description": "Shoulder screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

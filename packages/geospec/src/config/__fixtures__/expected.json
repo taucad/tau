@@ -14,8 +14,7 @@
         "kind": "tau-project",
         "manifestPath": "tau.json",
         "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "$schema": "https://tau.new/schemas/tau-v1.json",
           "name": "C1 ordinary fixture",
           "description": "Config data import control",
           "tags": [],
@@ -45,8 +44,7 @@
         "kind": "tau-project",
         "manifestPath": "tau.json",
         "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "$schema": "https://tau.new/schemas/tau-v1.json",
           "name": "C1 ordinary fixture",
           "description": "Config data import control",
           "tags": [],
@@ -75,8 +73,7 @@
         "kind": "tau-project",
         "manifestPath": "tau.json",
         "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+          "$schema": "https://tau.new/schemas/tau-v1.json",
           "name": "C1 ordinary fixture",
           "description": "Config data import control",
           "tags": [],

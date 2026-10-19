@@ -153,26 +153,12 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     const conflicts = compared.filter((conflict) => conflict !== undefined);
     return conflicts.length > 0 ? { status: 'conflict', conflicts } : undefined;
   };
-  /** Refuse bytes that would leave `tau.json` invalid or re-identify the project. */
-  const assertManifestReplacement = async (
-    path: string,
-    next: Uint8Array<ArrayBuffer>,
-    current?: Uint8Array<ArrayBuffer>,
-  ): Promise<void> => {
+  /** Refuse bytes that would leave the authored declaration invalid. */
+  const assertManifestReplacement = (path: string, next: Uint8Array<ArrayBuffer>): void => {
     if (assertRootedPath(path) !== manifestPath) {
       return;
     }
-    let existing = current;
-    if (existing === undefined) {
-      try {
-        existing = await bytes(path);
-      } catch (error) {
-        if (getErrno(error) !== 'ENOENT') {
-          throw error;
-        }
-      }
-    }
-    const refusal = checkProjectManifestReplacement(next, existing);
+    const refusal = checkProjectManifestReplacement(next);
     if (refusal !== undefined) {
       throw manifestRefusal(refusal);
     }
@@ -241,7 +227,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       if (!unchanged) {
         return { status: 'conflict', currentBytes } as const;
       }
-      await assertManifestReplacement(path, replacement, currentBytes);
+      assertManifestReplacement(path, replacement);
       assertNotAborted(signal);
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
@@ -304,7 +290,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     async writeFile(path, content) {
       await mutations.queueFor(path, async () => {
         const next = textEncoder.encode(content);
-        await assertManifestReplacement(path, next);
+        assertManifestReplacement(path, next);
         assertNotAborted(signal);
         await provider.writeFile(assertRootedPath(path), next);
       });
@@ -318,7 +304,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         throw new TypeError('Checked writes require a destination precondition.');
       }
       return mutations.queueFor(path, async () => {
-        await assertManifestReplacement(path, data);
+        assertManifestReplacement(path, data);
         assertNotAborted(signal);
         if (provider.writeFileChecked !== undefined) {
           try {
@@ -379,7 +365,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     async writeBinaryFile(path, data) {
       await mutations.queueFor(path, async () => {
         const next = new Uint8Array(data);
-        await assertManifestReplacement(path, next);
+        assertManifestReplacement(path, next);
         assertNotAborted(signal);
         await provider.writeFile(assertRootedPath(path), next);
       });
@@ -417,7 +403,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
           }
         }
         const next = textEncoder.encode(existing + content);
-        await assertManifestReplacement(path, next);
+        assertManifestReplacement(path, next);
         assertNotAborted(signal);
         await provider.writeFile(assertRootedPath(path), next);
       });
@@ -433,7 +419,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
             expectedDigest === undefined
               ? writeIfUnchanged
               : async (target, expected, replacement) => {
-                  await assertManifestReplacement(target, replacement, expected);
+                  assertManifestReplacement(target, replacement);
                   assertNotAborted(signal);
                   if (provider.writeFileChecked === undefined) {
                     throw Object.assign(new Error('Reviewed edits require atomic checked-write authority.'), {

@@ -1,9 +1,9 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
@@ -345,7 +345,7 @@ const routeModule = await import('./project-route.js');
 const sessionsModule = await import('./project-live-sessions.js');
 
 const project = (id: string) =>
-  projectToManifest({
+  createProjectFixture({
     id,
     name: id,
     description: '',

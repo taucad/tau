@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_BqTWMgfFD1fX6OuCX9m9e",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex flange nut",
   "description": "Hex flange nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

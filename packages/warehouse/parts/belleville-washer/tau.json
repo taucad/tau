@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sBKjloqCV_KLzpE4OHdrZ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Belleville washer",
   "description": "Belleville washer with a modeled opening and editable section dimensions.",
   "tags": [

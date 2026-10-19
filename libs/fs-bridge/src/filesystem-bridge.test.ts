@@ -736,6 +736,7 @@ describe('createFileSystemBridgeProxy', () => {
     try {
       await proxy.ready;
       const pending = proxy.commitPendingProjectDirectory({
+        projectId: 'proj_ppppppppppppppppppppp',
         providerBasePath: 'pending',
         scope: { backend: 'indexeddb' },
         files: { 'main.ts': { content } },
@@ -762,6 +763,7 @@ describe('createFileSystemBridgeProxy', () => {
       // `ready` first, or the channel's 30 s hello deadline closes it instead.
       await proxy.ready;
       const pending = proxy.commitPendingProjectDirectory({
+        projectId: 'proj_ppppppppppppppppppppp',
         providerBasePath: 'pending',
         scope: { backend: 'indexeddb' },
         files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },

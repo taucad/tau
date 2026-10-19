@@ -1,10 +1,10 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { act, render, screen } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
 import { createContext, useContext, useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -29,7 +29,7 @@ function TestRouter({
 }
 
 const mockProject: ProjectListItem = {
-  ...projectToManifest({
+  ...createProjectFixture({
     id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
     name: 'Library Preview Demo',
     description: 'Test project',

@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_S8_wKJlsvchAB1-bUQYSJ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "U mounting bracket",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [

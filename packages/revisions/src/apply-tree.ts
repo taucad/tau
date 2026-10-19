@@ -47,6 +47,12 @@ export const createApplyTreeEffects = (
     useFileSystem: UseCheckoutFileSystem;
     capture: (place: Checkout, modeBasis?: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
     onApplyingTree: RevisionActorsOptions['onApplyingTree'];
+    /** A verified current-tree conversion, owned by this transaction, before graph publication. */
+    afterApply?: (
+      place: Checkout,
+      target: ImmutableRevisionTree,
+      signal: AbortSignal | undefined,
+    ) => Promise<ImmutableRevisionTree>;
     policy: PathPolicy;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     /** The tree id a capture of this checkout records as, through its warm memo (E3). */
@@ -378,17 +384,20 @@ export const createApplyTreeEffects = (
       before: ImmutableRevisionTree,
     ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
       await materialization.validate?.(before);
+      let recoveryTarget = target;
       try {
         /* `applyTree` verifies the paths it wrote by re-reading them (C3); that
          * re-read is the settlement's second and last walk, so nothing here
          * captures the tree again to compare it a second time. */
         const paths = await applyTree(place, target, { from: before, signal: materialization.signal });
         materialization.signal?.throwIfAborted();
+        recoveryTarget = (await dependencies.afterApply?.(place, target, materialization.signal)) ?? target;
+        materialization.signal?.throwIfAborted();
         return { paths, result: await materialization.publish?.() };
       } catch (error) {
         try {
           const current = await capture(place, before);
-          const recovery = recoveryTree(before, target, current);
+          const recovery = recoveryTree(before, recoveryTarget, current);
           if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
             await applyTree(place, recovery, { from: current });
           }

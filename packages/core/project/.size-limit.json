@@ -1,7 +1,24 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "complete package output (file-only)",
     "path": "dist/**/*.mjs",
     "limit": "100 kB"
+  },
+  {
+    "name": "manifest root closure (file-only; dependencies excluded)",
+    "path": ["dist/index.mjs", "dist/project-manifest.mjs"],
+    "limit": "1.5 kB"
+  },
+  {
+    "name": "identity closure (file-only; dependencies excluded)",
+    "path": [
+      "dist/identity.mjs",
+      "dist/identity-record.mjs",
+      "dist/identity.machine.mjs",
+      "dist/identity-resolver.machine.mjs",
+      "dist/identity-conversion.machine.mjs",
+      "dist/project-manifest.mjs"
+    ],
+    "limit": "5.5 kB"
   }
 ]

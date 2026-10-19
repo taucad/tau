@@ -3,7 +3,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import { Loader } from '@taucad/ui/components/loader';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import {
@@ -36,7 +36,7 @@ export function DynamicPreviewProvider({
   const projectManager = useProjectManager();
   const [loadedProject, setLoadedProject] = useState<{
     readonly projectId: string;
-    readonly project: ProjectManifest | undefined;
+    readonly project: Project | undefined;
   }>();
 
   useEffect(() => {

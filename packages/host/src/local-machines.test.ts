@@ -53,8 +53,26 @@ describe('openLocalMachines', () => {
     return machines;
   };
 
+  const writeProject = async (): Promise<void> => {
+    await mkdir(join(project, '.tau'), { recursive: true });
+    await writeFile(
+      join(project, '.tau/project.json'),
+      JSON.stringify({ version: 1, projectId: 'proj_abcdefghijklmnopqrstu' }),
+    );
+    await writeFile(
+      join(project, 'tau.json'),
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Test',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
+  };
+
   it("should serve the store's providers and name each folder's project", async () => {
-    await writeFile(join(project, 'tau.json'), JSON.stringify({ id: 'proj_abcdefghijklmnopqrstu' }));
+    await writeProject();
     const machines = await opened();
     try {
       expect(await machines.projectOf(project)).toBe('proj_abcdefghijklmnopqrstu');
@@ -76,7 +94,7 @@ describe('openLocalMachines', () => {
     const machines = await opened();
     try {
       expect(await machines.projectOf(project)).toBeUndefined();
-      await writeFile(join(project, 'tau.json'), JSON.stringify({ id: 'proj_abcdefghijklmnopqrstu' }));
+      await writeProject();
       expect(await machines.projectOf(project)).toBe('proj_abcdefghijklmnopqrstu');
       expect(await machines.projectOf(join(scratch, 'missing'))).toBeUndefined();
     } finally {
@@ -89,7 +107,7 @@ describe('openLocalMachines', () => {
     /* Nothing holds the store: another host opens it. */
     const other = await opened();
     await other.close();
-    await writeFile(join(project, 'tau.json'), JSON.stringify({ id: 'proj_abcdefghijklmnopqrstu' }));
+    await writeProject();
     const named = await opened(true);
     await named.close();
   });

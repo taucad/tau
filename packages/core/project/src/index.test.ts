@@ -12,6 +12,35 @@ describe('@taucad/project-core', () => {
     expect(entry).not.toHaveProperty('plugin');
   });
 
+  it('keeps identity machines and XState outside the manifest root import graph', () => {
+    const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+    const visited = new Set<string>();
+    const externalDependencies = new Set<string>();
+    const visit = (name: string): void => {
+      if (visited.has(name)) {
+        return;
+      }
+      visited.add(name);
+      const source = readFileSync(join(sourceDirectory, name), 'utf8')
+        .replaceAll(/\/\*[\S\s]*?\*\//g, '')
+        .replaceAll(/^\s*\/\/.*$/gm, '')
+        .replaceAll(/^\s*(?:import|export)\s+type\s[^;]*;/gm, '');
+      for (const match of source.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["']([^"']+)["']/g)) {
+        const specifier = match[1]!;
+        if (specifier.startsWith('#')) {
+          visit(specifier.slice(1).replace(/\.js$/, '.ts'));
+        } else if (specifier.startsWith('.')) {
+          visit(join(dirname(name), specifier).replace(/\.js$/, '.ts'));
+        } else {
+          externalDependencies.add(specifier);
+        }
+      }
+    };
+    visit('index.ts');
+    expect([...externalDependencies]).toEqual(['zod']);
+    expect([...visited].some((name) => name.includes('identity'))).toBe(false);
+  });
+
   it('keeps native, Python, and Node-only payloads out of browser source', () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
     const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);

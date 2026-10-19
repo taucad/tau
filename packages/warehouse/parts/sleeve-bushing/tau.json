@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_a_lbNRvW5id5qKQjj6yvx",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Plain sleeve bushing",
   "description": "Chamfered annular sleeve with a continuous shaft bore.",
   "tags": [

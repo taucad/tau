@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_IoThw7tZ0iqFVthfzFX5u",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Planetary Gear System \u2014 build123d",
   "description": "A native Build123D 34-part planetary stage with a nested carrier, three reusable planet subassemblies, native joints and coupled live playback. The fixed ring, sun input, carrier and planet spin follow the 24/24/72 gear ratio; GLB carries the mechanism and STEP carries the assembly.",
   "tags": ["assembly", "gears", "parametric", "build123d", "reference"],

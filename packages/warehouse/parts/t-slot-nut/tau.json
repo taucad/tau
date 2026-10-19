@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_RBZ5KMRCzzPRNQAJbecBS",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "T-slot nut",
   "description": "T-slot nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sK51FLB1FWdibdlmjSUng",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Stepped shaft",
   "description": "Turned shaft with two reduced journals and a full-diameter central shoulder.",
   "tags": [

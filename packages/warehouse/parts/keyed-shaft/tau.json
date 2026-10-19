@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_0sHu6Z7hJiST3qLRIEnqC",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Keyed shaft",
   "description": "Chamfered shaft with a finite-length milled key seat.",
   "tags": [

@@ -72,7 +72,6 @@ describe('generated example artifacts', () => {
   });
 
   it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {
-    const ids = new Set<string>();
     const locators = new Set<string>();
     let count = 0;
     for (const entry of manifest) {
@@ -85,7 +84,7 @@ describe('generated example artifacts', () => {
       }
       const parsed = projectManifestSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
       const locator = `${entry.kernel}.${entry.name}`;
-      expect(ids.has(parsed.id)).toBe(false);
+      expect(parsed).not.toHaveProperty('id');
       expect(locators.has(locator)).toBe(false);
       expect(existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.entryPath))).toBe(
         true,
@@ -95,7 +94,6 @@ describe('generated example artifacts', () => {
           existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.thumbnail)),
         ).toBe(true);
       }
-      ids.add(parsed.id);
       locators.add(locator);
       count++;
     }

@@ -762,7 +762,7 @@ export function FileManagerProvider({
       const matches = discovery.entries.filter(
         (entry) =>
           entry.status === 'valid' &&
-          entry.manifest.id === projectId &&
+          entry.projectId === projectId &&
           entry.locator.backend === 'webaccess' &&
           entry.locator.workspaceId === workspaceId,
       );

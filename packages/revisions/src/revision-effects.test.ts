@@ -1193,6 +1193,15 @@ describe('the checkout registry', () => {
 
 for (const actorSet of actorSets) {
   describe.runIf(actorSet.enabled)(`revision ingress safety — ${actorSet.name}`, () => {
+    const scaffold = {
+      $schema: 'https://tau.new/schemas/tau-v1.json',
+      name: 'Remote',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    };
+    const remoteManifest = `${JSON.stringify(scaffold)}\n`;
+    const editedManifest = `${JSON.stringify({ ...scaffold, description: 'mine' })}\n`;
     const synchronized = async () => {
       const context = await fixture({ 'main.ts': 'base\n' }, (filesystem) => filesystem, {
         actorSet: actorSet.name,
@@ -1235,7 +1244,7 @@ for (const actorSet of actorSets) {
         const remoteReceipt = await context.port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([
-            ['tau.json', '{"id":"project-1"}\n'],
+            ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
           provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
@@ -1247,7 +1256,7 @@ for (const actorSet of actorSets) {
       };
 
       /* The opener's `tau.json` is the remote's own: nothing here is work, so the pull lands as is. */
-      const opened = await unborn('{"id":"project-1"}\n');
+      const opened = await unborn(remoteManifest);
       await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual({
         checkoutId: 'live',
         revisionId: opened.remote,
@@ -1257,24 +1266,22 @@ for (const actorSet of actorSets) {
       expect(await opened.filesystem.readFile('main.scad', 'utf8')).toBe('cube(1);\n');
 
       /* A file the remote holds differently is still work: minted first (rule 6), never overwritten. */
-      const edited = await unborn('{"id":"project-1","name":"mine"}\n');
+      const edited = await unborn(editedManifest);
       await expect(run(edited.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
         status: 'held',
         hold: 'dirty',
         revisionId: edited.remote,
       });
       expect(await edited.port.readRef('main')).toBeUndefined();
-      expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
+      expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe(editedManifest);
 
       /* The placeholder a cloud open writes is setup, not work: the remote's manifest replaces it (e921b3d96). */
-      const placeholder = await unborn(
-        `${JSON.stringify({ id: 'project-1', name: 'Remote', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } })}\n`,
-      );
+      const placeholder = await unborn(`${JSON.stringify(scaffold)}\n`);
       await expect(run(placeholder.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
         checkoutId: 'live',
         revisionId: placeholder.remote,
       });
-      expect(await placeholder.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1"}\n');
+      expect(await placeholder.filesystem.readFile('tau.json', 'utf8')).toBe(remoteManifest);
     }, 30_000);
 
     /* W13c + W13d: the same rule for a cut taken before that pull lands (a close, a hidden tab), or before any fetch. */
@@ -1289,7 +1296,7 @@ for (const actorSet of actorSets) {
         const remoteReceipt = await context.port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([
-            ['tau.json', '{"id":"project-1"}\n'],
+            ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
           provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
@@ -1308,27 +1315,25 @@ for (const actorSet of actorSets) {
         });
       };
 
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' })).resolves.toMatchObject({ nothingToSave: true });
+      await expect(unbornCut({ 'tau.json': remoteManifest })).resolves.toMatchObject({ nothingToSave: true });
       /* Work the remote does not hold is still work: the cut is an ordinary one. */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' })).resolves.not.toHaveProperty(
-        'nothingToSave',
-      );
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
+      await expect(unbornCut({ 'tau.json': editedManifest })).resolves.not.toHaveProperty('nothingToSave');
+      await expect(unbornCut({ 'tau.json': remoteManifest, 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
         'nothingToSave',
       );
       /* W13d: never fetched — a fresh device opened offline — the opener's own manifest is setup too… */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' }, false)).resolves.toMatchObject({
+      await expect(unbornCut({ 'tau.json': editedManifest }, false)).resolves.toMatchObject({
         nothingToSave: true,
       });
-      /* …but not another project's manifest, nor any other file. */
+      /* …but not an invalid declaration, nor any other file. */
       await expect(unbornCut({ 'tau.json': '{"id":"project-2"}\n' }, false)).resolves.not.toHaveProperty(
         'nothingToSave',
       );
-      await expect(
-        unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' }, false),
-      ).resolves.not.toHaveProperty('nothingToSave');
+      await expect(unbornCut({ 'tau.json': remoteManifest, 'notes.md': 'mine\n' }, false)).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
       /* No remote, no pull to merge a root into: an unborn line's first cut is an ordinary one. */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' }, false, false)).resolves.not.toHaveProperty(
+      await expect(unbornCut({ 'tau.json': remoteManifest }, false, false)).resolves.not.toHaveProperty(
         'nothingToSave',
       );
     }, 30_000);

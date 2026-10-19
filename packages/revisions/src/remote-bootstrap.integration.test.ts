@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { projectToManifest, serializeProjectManifest } from '@taucad/project-core';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createRevisionHttpClient } from '#http-client.js';
@@ -28,7 +29,7 @@ describe('bootstrapRemoteRevisionStore', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('pins one source head and records exactly one reviewed setup child', async () => {
+  it('preserves legacy source history and records an id-free reviewed setup child', async () => {
     const fixture = await startGitHttpBackend({ root, name: 'source' });
     try {
       const source = createIsomorphicGitRevisionPort({
@@ -36,9 +37,30 @@ describe('bootstrapRemoteRevisionStore', () => {
         http: createRevisionHttpClient(),
       });
       await source.init({ author, createSetupFiles: false });
+      const legacy = new TextEncoder().encode(
+        JSON.stringify({
+          $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+          id: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+          name: 'Source',
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'model.scad' } },
+        }),
+      );
+      const canonical = serializeProjectManifest(
+        projectToManifest({
+          name: 'Imported',
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'model.scad' } },
+        }),
+      );
       const receipt = await source.writeRevision({
         parents: [],
-        tree: new ImmutableRevisionTree([['model.scad', 'cube(1);\n', '100755']]),
+        tree: new ImmutableRevisionTree([
+          ['model.scad', 'cube(1);\n', '100755'],
+          ['tau.json', legacy],
+        ]),
         provenance,
         summary: { generated: 'Source' },
       });
@@ -59,13 +81,20 @@ describe('bootstrapRemoteRevisionStore', () => {
         targetBranch: 'main',
         author,
         setup: {
-          files: [{ path: 'tau.json', content: new TextEncoder().encode('{"name":"Imported"}\n') }],
+          files: [{ path: 'tau.json', content: canonical }],
           provenance,
           summary: { generated: 'Set up Tau project' },
         },
       });
 
       expect(result.head).not.toBe(sourceHead);
+      expect(result.tree.get('tau.json')).toEqual(canonical);
+      expect(JSON.parse(new TextDecoder().decode(result.tree.get('tau.json')))).not.toHaveProperty('id');
+      expect(result.tree.get('.tau/project.json')).toBeUndefined();
+      const importedOriginal = await destination.readTree(sourceHead);
+      const remoteOriginal = await source.readTree(sourceHead);
+      expect(importedOriginal?.get('tau.json')).toEqual(legacy);
+      expect(remoteOriginal?.get('tau.json')).toEqual(legacy);
       expect(result.tree.mode('model.scad')).toBe('100755');
       expect(new TextDecoder().decode(result.tree.get('tau.json'))).toContain('Imported');
       /* The generated config is part of the reviewed setup, not a later unsaved change (D34). */

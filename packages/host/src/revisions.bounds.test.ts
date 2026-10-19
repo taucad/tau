@@ -55,7 +55,7 @@ const unreadableRegistry = async (): Promise<Readonly<{ workspaceRoot: string; p
   await filesystem.writeFile('main.ts', 'export const size = 1;\n');
   const port = createIsomorphicGitRevisionPort({
     filesystem,
-    checkouts: { projectId: 'project-1', root: () => filesystem },
+    checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => filesystem },
   });
   return {
     workspaceRoot,
@@ -71,7 +71,7 @@ const unreadableRegistry = async (): Promise<Readonly<{ workspaceRoot: string; p
 describe('revision waits answered with the clock frozen (TS-S8)', () => {
   it('should answer a verb once the registry answers with no checkout (B4)', async () => {
     const { workspaceRoot, port } = await unreadableRegistry();
-    const revisions = openProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const revisions = await openProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
 
     const outcome = await answerOf(revisions.switchTo('feature'));
     await revisions.close();
@@ -81,7 +81,7 @@ describe('revision waits answered with the clock frozen (TS-S8)', () => {
 
   it('should answer the close flush once the registry answers with no live checkout (B3)', async () => {
     const { workspaceRoot, port } = await unreadableRegistry();
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
 
     const outcome = await answerOf(outcomeOf(revisions.release()));
 
@@ -95,7 +95,7 @@ describe('revision waits answered with the clock frozen (TS-S8)', () => {
     const filesystem = new NodeFsProvider(workspaceRoot);
     await filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const port = createIsomorphicGitRevisionPort({ filesystem });
-    const revisions = openProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const revisions = await openProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
 
     const outcome = await answerOf(
       revisions.publish({

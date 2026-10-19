@@ -20,7 +20,7 @@ export type CreateInitialProjectOptions = {
 };
 
 export type CreateInitialProjectResult = {
-  projectData: Omit<ProjectManifest, '$schema' | 'id'>;
+  projectData: Omit<ProjectManifest, '$schema'>;
   files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
 };
 
@@ -161,7 +161,7 @@ function ecosystemFiles(options: CreateInitialProjectOptions): Record<string, st
 export function createInitialProject(options: CreateInitialProjectOptions): CreateInitialProjectResult {
   const { projectName, mainFileName, emptyCodeContent } = options;
 
-  const projectData: Omit<ProjectManifest, '$schema' | 'id'> = {
+  const projectData: Omit<ProjectManifest, '$schema'> = {
     name: projectName,
     description: '',
     tags: [],

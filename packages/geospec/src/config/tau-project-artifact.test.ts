@@ -8,8 +8,7 @@ import type { GeoSpecTauProjectRuntime } from '#config/tau-project-artifact.js';
 import type { GeoSpecExportRoute } from '#model/export-intent.js';
 
 const manifest: ProjectManifest = {
-  $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-  id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+  $schema: 'https://tau.new/schemas/tau-v1.json',
   name: 'Nested fixture',
   description: 'Tau artifact adapter fixture',
   tags: [],

@@ -15,8 +15,7 @@ A Tau project is a folder whose model entry file, normally `main.<ext>` at its r
 
 ```json
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_V1StGXR8Z5jdHi6BmyT3a",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Wall bracket",
   "description": "",
   "tags": [],
@@ -24,7 +23,7 @@ A Tau project is a folder whose model entry file, normally `main.<ext>` at its r
 }
 ```
 
-`id` is `proj_` and 21 letters or digits. Generate a new one for each project you create, and keep an existing project's `id` unchanged.
+Do not add `id` or `projectId`. Tau creates and preserves project identity automatically when the folder is opened.
 
 ## Kernels
 

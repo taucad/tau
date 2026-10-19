@@ -1,3 +1,4 @@
+import { convertLegacyProjectManifestBytes } from '@taucad/types';
 import type { AppUiPreferences, StorageProvider } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
 import type {
@@ -8,6 +9,18 @@ import type { ProjectLibraryState } from '#types/project-library.types.js';
 import { announceCandidateConsent, withCandidateConsentLock } from '#lib/geospec-candidate-consent.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
+
+/** Normalize only pre-release manifest-owned identity rows before replaying their existing resources. */
+const normalizePendingProjectOperation = (operation: PendingProjectOperation): PendingProjectOperation => {
+  if (operation.kind === 'permanent-delete' || typeof operation.projectId === 'string') {
+    return operation;
+  }
+  const converted = convertLegacyProjectManifestBytes(new TextEncoder().encode(JSON.stringify(operation.manifest)));
+  if (!converted.success || converted.data.projectId !== operation.library.projectId) {
+    throw new Error('Pending project operation has conflicting or invalid legacy identity');
+  }
+  return { ...operation, projectId: converted.data.projectId, manifest: converted.data.manifest };
+};
 
 /** Pre-cutover store, dropped by the v9 bootstrap. Nothing reads it. */
 const legacyProjectsStoreName = 'projects';
@@ -264,7 +277,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
       const transaction = db.transaction(this.pendingProjectOperationsStoreName, 'readonly');
       const request = transaction.objectStore(this.pendingProjectOperationsStoreName).get(operationId);
       request.addEventListener('success', () => {
-        resolve(request.result as PendingProjectOperation | undefined);
+        try {
+          const operation = request.result as PendingProjectOperation | undefined;
+          resolve(operation === undefined ? undefined : normalizePendingProjectOperation(operation));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
       request.addEventListener('error', () => {
         reject(request.error ?? new Error(`Failed to read pending project operation ${operationId}`));
@@ -283,7 +301,15 @@ export class IndexedDbStorageProvider implements StorageProvider {
       const transaction = db.transaction(this.pendingProjectOperationsStoreName, 'readonly');
       const request = transaction.objectStore(this.pendingProjectOperationsStoreName).getAll();
       request.addEventListener('success', () => {
-        resolve(request.result as PendingProjectOperation[]);
+        try {
+          resolve(
+            (request.result as PendingProjectOperation[]).map((operation) =>
+              normalizePendingProjectOperation(operation),
+            ),
+          );
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
       request.addEventListener('error', () => {
         reject(request.error ?? new Error('Failed to read pending project operations'));

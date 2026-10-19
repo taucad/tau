@@ -2108,8 +2108,10 @@ describe('close and continue', () => {
       await source.page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
       const slug = projectSlug(source.page);
       const sourceRoot = join(source.homeRoot, slug);
-      const manifest = JSON.parse(await readFile(join(sourceRoot, 'tau.json'), 'utf8')) as { readonly id?: string };
-      const projectId = manifest.id ?? '';
+      const identity = JSON.parse(await readFile(join(sourceRoot, '.tau/project.json'), 'utf8')) as {
+        readonly projectId?: string;
+      };
+      const projectId = identity.projectId ?? '';
       if (!projectId) {
         throw new Error(`${continuationOwner} ${direction}: source project id is absent`);
       }

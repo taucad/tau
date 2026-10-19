@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
-import { parseProjectManifestBytes } from '@taucad/types';
+import { parseProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
+import { convertLegacyProjectManifestBytes } from '@taucad/project-core';
 import {
   assertDistinctPaths,
   createShareArchive,
@@ -224,13 +225,16 @@ export const normalizeRepositoryArchive = async (
 ): Promise<ShareOpenedArtifact> => {
   const files = await selectRepositoryFiles(archive, { root, limits: repositoryShareLimits });
   const manifestFile = files.find(({ path }) => path === 'tau.json');
-  const manifest = manifestFile
-    ? parseProjectManifestBytes(manifestFile.content)
-    : failInvalid('The repository project does not contain a root tau.json.');
-  if (!manifest.success) {
+  if (!manifestFile) {
+    return failInvalid('The repository project does not contain a root tau.json.');
+  }
+  const parsed = parseProjectManifestBytes(manifestFile.content);
+  const legacy = parsed.success ? undefined : convertLegacyProjectManifestBytes(manifestFile.content);
+  const manifest = parsed.success ? parsed.data : legacy?.success ? legacy.data.manifest : undefined;
+  if (!manifest) {
     return failInvalid('The repository project manifest is invalid.');
   }
-  const { entryPath } = manifest.data.assets.main;
+  const { entryPath } = manifest.assets.main;
   if (!files.some(({ path }) => path === entryPath)) {
     failInvalid('The repository project entry file does not exist.');
   }
@@ -238,6 +242,7 @@ export const normalizeRepositoryArchive = async (
     entryPath,
     files: files.map((file) => ({
       ...file,
+      content: file.path === 'tau.json' ? serializeProjectManifest(manifest) : file.content,
       sha256: '',
       role: file.path === entryPath ? 'entry' : 'project-metadata',
     })),

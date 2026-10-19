@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_7d8YbjeuieNs_gG_ZR3nc",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-spoke handwheel",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [

@@ -25,7 +25,6 @@ const { loader, meta, resolvePortableArtifact } = await import('#routes/s.$slug/
 
 const encoder = new TextEncoder();
 const manifest = projectToManifest({
-  id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   name: 'Portable fixture',
   description: 'Record classification fixture',
   tags: [],
@@ -53,6 +52,21 @@ const loaderArgs = (slug: string): LoaderFunctionArgs => {
 };
 
 describe('/s provider dispatch', () => {
+  it('opens an existing legacy share with an id-free remix declaration', () => {
+    const artifact = portableArtifact({ activeGroup: 'default', groups: { default: { values: {} } } });
+    const legacy = {
+      ...manifest,
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+    };
+    const files = artifact.files.map((file) =>
+      file.path === 'tau.json' ? { ...file, content: encoder.encode(JSON.stringify(legacy)) } : file,
+    );
+    const resolved = resolvePortableArtifact({ ...artifact, files });
+    expect(resolved?.manifest).toEqual(manifest);
+    expect(JSON.parse(new TextDecoder().decode(resolved?.files['tau.json']?.content))).toEqual(manifest);
+  });
+
   beforeEach(() => {
     loadPublication.mockClear();
   });

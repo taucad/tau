@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_nj9xJGPI05ZNmr1DBjJC6",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Fan guard",
   "description": "Perforated frame with four mounting holes, three protective bars and a central hub.",
   "tags": [

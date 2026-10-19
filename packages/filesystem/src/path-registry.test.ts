@@ -84,6 +84,16 @@ describe('path registry', () => {
     });
   });
 
+  it('should hide generated identity from authored views while observing its changes', () => {
+    expect(classify('.tau/project.json')).toStrictEqual({
+      class: 'records',
+      versioned: false,
+      agentAccess: 'hidden',
+      watch: 'ui',
+    });
+    expect(classify('.TAU/PROJECT.json')).toStrictEqual(classify('.tau/project.json'));
+  });
+
   it('names each family once, so no two rows can disagree', () => {
     expect(new Set(pathRegistry.map((row) => row.prefix)).size).toBe(pathRegistry.length);
   });

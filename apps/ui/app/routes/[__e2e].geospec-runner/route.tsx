@@ -46,7 +46,7 @@ const seedFiles = Object.fromEntries([
   ['main.geospec.ts', { content: encode(geoSpecModel) }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
+const createSeedProject = (): Omit<ProjectManifest, '$schema'> => ({
   name: 'geospec runner e2e',
   description: 'Deterministic local seed for the browser GeoSpec runner surface.',
   tags: ['e2e', 'openscad', 'geospec'],

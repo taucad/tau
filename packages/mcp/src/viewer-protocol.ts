@@ -85,6 +85,8 @@ export type TauViewerShowResult = Readonly<{
   model: TauViewerModel;
   /** What the shown GLB carries of a mechanism; absent for an SVG. */
   mechanism?: TauViewerMechanism | undefined;
+  /** What the agent should know about the shown file, such as the source an export was made from. */
+  hint?: string | undefined;
   /** The loopback page showing this model, when the server runs one. */
   viewerUrl?: string | undefined;
   /** Component ids the agent asked the page to select, as the model tree names them. */

@@ -78,18 +78,57 @@ describe('createLocalMcpViewer', () => {
   });
 
   it('should show a GLB exported from a source with that source, so its panes have parameters', async () => {
-    await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
-    await writeFile(join(root, '.tau', 'artifacts', 'tc-7__bracket.glb'), glb);
+    const folder = join(root, '.tau', 'artifacts', 'tc-7__src_bracket.ts-glb');
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'model.glb'), glb);
     await writeFile(join(root, 'src', 'bracket.glb'), glb);
 
-    const exported = shownModel(await viewer.show({ targetFile: '.tau/artifacts/tc-7__bracket.glb' }, inline));
+    const exported = shownModel(
+      await viewer.show({ targetFile: '.tau/artifacts/tc-7__src_bracket.ts-glb/model.glb' }, inline),
+    );
     const beside = shownModel(await viewer.show({ targetFile: 'src/bracket.glb' }, inline));
     const unmatched = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
 
-    expect(exported.model).toMatchObject({ path: '.tau/artifacts/tc-7__bracket.glb', sourceFile: 'src/bracket.ts' });
+    expect(exported.model).toMatchObject({
+      path: '.tau/artifacts/tc-7__src_bracket.ts-glb/model.glb',
+      sourceFile: 'src/bracket.ts',
+    });
+    expect(exported.hint).toBe(
+      '.tau/artifacts/tc-7__src_bracket.ts-glb/model.glb is an export of src/bracket.ts, drawn as exported. Call show_model with targetFile src/bracket.ts to show the source with its parameters and mechanism.',
+    );
     expect(beside.model).toMatchObject({ path: 'src/bracket.glb', sourceFile: 'src/bracket.ts' });
     expect(unmatched.model.sourceFile).toBeUndefined();
+    expect(unmatched.hint).toBeUndefined();
     expect(renderGlb).not.toHaveBeenCalled();
+  });
+
+  it('should name the source of an exported STEP it converts, and none for a source or an unmatched export', async () => {
+    const folder = join(root, '.tau', 'artifacts', 'tc-8__src_bracket.ts-step');
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'assembly.step'), 'ISO-10303-21;');
+    await mkdir(join(root, '.tau', 'artifacts', 'tc-9__gone.ts-step'), { recursive: true });
+    await writeFile(join(root, '.tau', 'artifacts', 'tc-9__gone.ts-step', 'assembly.step'), 'ISO-10303-21;');
+    renderGlb.mockImplementation(async () => {
+      await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+      await writeFile(join(root, '.tau', 'artifacts', 'step.glb'), glb);
+      return '.tau/artifacts/step.glb';
+    });
+
+    const step = shownModel(
+      await viewer.show({ targetFile: '.tau/artifacts/tc-8__src_bracket.ts-step/assembly.step' }, inline),
+    );
+    const orphan = shownModel(
+      await viewer.show({ targetFile: '.tau/artifacts/tc-9__gone.ts-step/assembly.step' }, inline),
+    );
+    const source = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+
+    expect(step.model).toMatchObject({
+      title: 'assembly',
+      sourceFile: '.tau/artifacts/tc-8__src_bracket.ts-step/assembly.step',
+    });
+    expect(step.hint).toContain('is an export of src/bracket.ts, drawn as exported.');
+    expect(orphan.hint).toBeUndefined();
+    expect(source.hint).toBeUndefined();
   });
 
   it('should show a GLB this server rendered with the source it rendered', async () => {

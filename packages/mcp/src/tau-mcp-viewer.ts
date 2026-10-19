@@ -330,7 +330,7 @@ const describeMechanism = (mechanism: NonNullable<TauViewerShowResult['mechanism
     : 'This GLB carries no mechanism.';
 
 const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation): CallToolResult => {
-  const { model, viewerUrl, mechanism } = result;
+  const { model, viewerUrl, mechanism, hint } = result;
   const name = model.sourceFile ?? model.path;
   const text =
     presentation === 'text'
@@ -339,7 +339,16 @@ const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation)
         : `Open ${name} in the Tau viewer: ${viewerUrl}`
       : `Showing ${name} in the Tau viewer.`;
   return {
-    content: [{ type: 'text', text: mechanism === undefined ? text : `${text}\n${describeMechanism(mechanism)}` }],
+    content: [
+      {
+        type: 'text',
+        text: [
+          text,
+          ...(mechanism === undefined ? [] : [describeMechanism(mechanism)]),
+          ...(hint === undefined ? [] : [hint]),
+        ].join('\n'),
+      },
+    ],
     structuredContent: result,
   };
 };

@@ -83,9 +83,14 @@ const instructionsFor = (tested: boolean): string =>
 /** Model-facing guidance returned by MCP initialization. @public */
 export const tauMcpInstructions = instructionsFor(true);
 
-/** The sentence a server with the viewer adds to {@link tauMcpInstructions}. */
-const viewerInstruction =
-  'When the person should look at a model, call show_model after evaluate_model succeeds; it shows the model in the Tau viewer, or returns a viewer link to share with them.';
+/**
+ * The sentences a server with the viewer adds to {@link tauMcpInstructions}: what `show_model` shows, and what a
+ * part reference names.
+ */
+const viewerInstruction = [
+  'When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism, or returns a link to share; showing an exported file shows that file only.',
+  'A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take.',
+].join(' ');
 
 /** {@link serverVersion}, read once. */
 let installedVersion: string | undefined;

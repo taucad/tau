@@ -100,7 +100,7 @@ describe('ChatErrorRateLimit', () => {
     }
   });
 
-  it('should take the wait from the provider sentence without a Retry-After', () => {
+  it('should back off from 200 ms when the gateway sent no Retry-After, ignoring the sentence', () => {
     vi.useFakeTimers();
     try {
       render(
@@ -111,7 +111,12 @@ describe('ChatErrorRateLimit', () => {
         />,
       );
 
-      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 7 seconds');
+      // The gateway owns the provider's advice; the card reads only its estimate.
+      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 1 second');
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

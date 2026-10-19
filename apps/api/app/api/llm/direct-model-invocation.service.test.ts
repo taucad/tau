@@ -248,6 +248,32 @@ describe('DirectModelInvocationService', () => {
     }
   });
 
+  it('should carry the retry estimate a Vertex 429 states only in its RetryInfo body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            error: {
+              code: 429,
+              message: 'Resource exhausted. Please try again later.',
+              status: 'RESOURCE_EXHAUSTED',
+              details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37.2s' }],
+            },
+          },
+        ]),
+        { status: 429, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    try {
+      await service.invoke(gatewayIntent());
+      expect.fail('The rate-limited relay should throw');
+    } catch (error) {
+      expect(errorDetails(error)).toMatchObject({ type: 'RATE_LIMITED', details: { retryAfterSeconds: 38 } });
+    }
+  });
+
   it('should answer the Vertex 499 CANCELLED as a provider outage', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: { code: 499, message: 'The operation was cancelled.' } }), {

@@ -12,6 +12,8 @@ export type ProviderAccountRefusalDetails = {
   readonly providerId: GatewayProviderId;
   readonly providerCode?: string;
   readonly accountOwner: ProviderAccountOwner;
+  /** Whole seconds the provider asked a rate-limited request to wait; what `Retry-After` carries pre-stream. */
+  readonly retryAfterSeconds?: number;
 };
 
 /** One recognised provider-account refusal: the provider's own code and sentence. */

@@ -69,20 +69,63 @@ export const readUpstreamRefusal = async (response: Response): Promise<UpstreamR
     : { body, loggedBody: redactCredentials(JSON.stringify(body)).slice(0, maximumLoggedBodyBytes) };
 };
 
+/* A Google `Duration` as JSON (`"37s"`, `"37.226s"`), and a provider's own sentence
+ * ("Please try again in 11.054s", "Please retry in 37.2s"; Codex reads the same). */
+const durationSeconds = /^(\d+(?:\.\d+)?)s$/u;
+const retrySentence = /(?:try again|retry) in\s*(\d+(?:\.\d+)?)\s*(ms|s|seconds?)\b/iu;
+
+/** Whole seconds, rounded up, so the client never resumes before the provider allows. */
+const wholeSeconds = (seconds: number): number | undefined =>
+  Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : undefined;
+
 /**
- * Reads an upstream retry estimate.
+ * The retry estimate a provider states in its error body: Google's `RetryInfo`
+ * detail (Vertex and Gemini answer 429 with it and no header), else the wait its
+ * sentence names. Vertex wraps a refusal in a one-element array.
  *
- * @param headers - The refused response's headers.
- * @returns The delta-seconds estimate, or undefined when there is none.
+ * @param body - The parsed provider body or SSE error frame.
+ * @returns Whole seconds, or undefined when the body states no wait.
  */
-export const upstreamRetryAfterSeconds = (headers: Headers): number | undefined => {
-  const header = headers.get('retry-after')?.trim();
-  if (header === undefined || header === '') {
+export const providerRetryAfterSeconds = (body: unknown): number | undefined => {
+  const unwrapped = Array.isArray(body) && body.length === 1 ? (body[0] as unknown) : body;
+  if (unwrapped === null || typeof unwrapped !== 'object') {
     return undefined;
   }
+  const { error } = unwrapped as { error?: unknown };
+  if (error === null || typeof error !== 'object') {
+    return undefined;
+  }
+  const { details, message } = error as { details?: unknown; message?: unknown };
+  for (const detail of Array.isArray(details) ? details : []) {
+    const retryDelay =
+      detail !== null && typeof detail === 'object' ? (detail as { retryDelay?: unknown }).retryDelay : undefined;
+    const match = typeof retryDelay === 'string' ? durationSeconds.exec(retryDelay) : null;
+    if (match?.[1] !== undefined) {
+      return wholeSeconds(Number(match[1]));
+    }
+  }
+  const sentence = typeof message === 'string' ? retrySentence.exec(message) : null;
+  if (sentence?.[1] === undefined || sentence[2] === undefined) {
+    return undefined;
+  }
+  const value = Number(sentence[1]);
+  return wholeSeconds(sentence[2].toLowerCase() === 'ms' ? value / 1000 : value);
+};
+
+/**
+ * Reads an upstream retry estimate: the standard `Retry-After` header, else the
+ * wait the provider's body states ({@link providerRetryAfterSeconds}). The gateway
+ * answers either as its own `Retry-After`, so clients read one header.
+ *
+ * @param headers - The refused response's headers.
+ * @param body - The refused response's parsed body, when it was read.
+ * @returns The delta-seconds estimate, or undefined when there is none.
+ */
+export const upstreamRetryAfterSeconds = (headers: Headers, body?: unknown): number | undefined => {
+  const header = headers.get('retry-after')?.trim();
   // Ponytail: delta-seconds only; an HTTP-date Retry-After simply carries no estimate.
-  const seconds = Number(header);
-  return Number.isInteger(seconds) && seconds >= 0 ? seconds : undefined;
+  const seconds = header === undefined || header === '' ? Number.NaN : Number(header);
+  return Number.isInteger(seconds) && seconds >= 0 ? seconds : providerRetryAfterSeconds(body);
 };
 
 /** How the gateway answers one upstream status. Messages stay with each caller. */

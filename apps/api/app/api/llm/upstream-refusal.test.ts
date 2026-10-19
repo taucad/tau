@@ -4,6 +4,7 @@ import {
   cloudUpstreamRefusalMessage,
   contextWindowRefusalMessage,
   isContextWindowRefusal,
+  providerRetryAfterSeconds,
   readUpstreamRefusal,
   redactCredentials,
   upstreamRetryAfterSeconds,
@@ -87,6 +88,46 @@ describe('upstreamRetryAfterSeconds', () => {
 
   it('should report no estimate when the header is absent', () => {
     expect(upstreamRetryAfterSeconds(new Headers())).toBeUndefined();
+  });
+});
+
+const googleRetryInfo = (retryDelay: string): unknown => ({
+  error: {
+    code: 429,
+    message: 'Resource exhausted. Please try again later.',
+    status: 'RESOURCE_EXHAUSTED',
+    details: [
+      { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'RATE_LIMIT_EXCEEDED' },
+      { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay },
+    ],
+  },
+});
+
+describe('providerRetryAfterSeconds', () => {
+  it.each([
+    ['a Google RetryInfo detail', googleRetryInfo('37s'), 37],
+    ['a fractional RetryInfo, rounded up', googleRetryInfo('37.226s'), 38],
+    ['a RetryInfo inside the Vertex one-element array', [googleRetryInfo('12s')], 12],
+    ['an OpenAI sentence', { error: { message: 'Rate limit reached. Please try again in 11.054s.' } }, 12],
+    ['a Gemini sentence', { error: { message: 'Quota exceeded. Please retry in 4.2s.' } }, 5],
+    ['a millisecond sentence, rounded up', { error: { message: 'Please try again in 250ms.' } }, 1],
+    ['a sentence in seconds', { error: { message: 'Try again in 30 seconds.' } }, 30],
+  ])('should read %s', (_label, body, seconds) => {
+    expect(providerRetryAfterSeconds(body)).toBe(seconds);
+  });
+
+  it.each([
+    ['no wait in the sentence', { error: { message: 'Resource exhausted. Please try again later.' } }],
+    ['no error member', { message: 'try again in 5s' }],
+    ['no body', undefined],
+  ])('should report no estimate for %s', (_label, body) => {
+    expect(providerRetryAfterSeconds(body)).toBeUndefined();
+  });
+
+  it('should prefer the upstream header over the body, and fall back to the body without one', () => {
+    expect(upstreamRetryAfterSeconds(new Headers({ 'retry-after': '7' }), googleRetryInfo('37s'))).toBe(7);
+    expect(upstreamRetryAfterSeconds(new Headers(), googleRetryInfo('37s'))).toBe(37);
+    expect(upstreamRetryAfterSeconds(new Headers({ 'retry-after': 'soon' }), googleRetryInfo('37s'))).toBe(37);
   });
 });
 

@@ -116,7 +116,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
       if (refusal) {
         throw this.providerAccountExhausted(route.providerId, refusal);
       }
-      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
+      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers, body);
       const classification = classifyUpstreamRefusal({
         status: response.status,
         accountOwner: 'operator',

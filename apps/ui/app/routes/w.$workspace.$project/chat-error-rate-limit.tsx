@@ -111,9 +111,8 @@ export const ChatErrorRateLimit = memo(function ({
         : rateLimitRetryDelayMilliseconds({
             retry,
             ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-            ...(description === undefined ? {} : { message: description }),
           }),
-    [retry, retryAfterSeconds, description],
+    [retry, retryAfterSeconds],
   );
   // The countdown re-arms when `continueChat` changes, so the budget is checked again here:
   // a failed attempt already resumed is never resumed twice.

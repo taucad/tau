@@ -317,6 +317,38 @@ describe('a provider that cuts a live stream by its status (Finding 3)', () => {
     );
   });
 
+  it('should carry a Vertex RetryInfo wait on the coded RATE_LIMITED frame, where no header can go', async () => {
+    const inBand = `data: ${JSON.stringify({
+      error: {
+        code: 429,
+        message: vertexMessage,
+        status: 'RESOURCE_EXHAUSTED',
+        details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' }],
+      },
+    })}\n\n`;
+
+    const output = await filtered({
+      providerId: 'vertexai',
+      accountOwner: 'tau',
+      text: vertexChunk + inBand,
+      chunkBytes: 37,
+    });
+
+    expect(output).toBe(
+      vertexChunk +
+        gatewayErrorFrame({
+          code: 'RATE_LIMITED',
+          message: cloudRateLimitMessage,
+          details: {
+            providerId: 'vertexai',
+            providerCode: 'RESOURCE_EXHAUSTED',
+            accountOwner: 'tau',
+            retryAfterSeconds: 37,
+          },
+        }),
+    );
+  });
+
   it.each(['tail', 'in-band'] as const)(
     'should give a Cloud customer the shared sentence for a %s refusal, never the supplier text',
     async (shape) => {

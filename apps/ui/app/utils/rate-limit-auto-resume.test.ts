@@ -6,7 +6,6 @@ import {
   rateLimitRetryDelayMilliseconds,
   recordRateLimitAutoResume,
   resetRateLimitAutoResumes,
-  retryDelayFromMessage,
 } from '#utils/rate-limit-auto-resume.js';
 
 describe('rateLimitBackoffMilliseconds', () => {
@@ -24,34 +23,9 @@ describe('rateLimitBackoffMilliseconds', () => {
   });
 });
 
-describe('retryDelayFromMessage', () => {
-  it.each([
-    ['Rate limit reached. Please try again in 11.054s.', 11_054],
-    ['try again in 35 seconds', 35_000],
-    ['Try Again In 1 second', 1000],
-    ['Please try again in 250ms', 250],
-  ])('should read %j', (message, expected) => {
-    expect(retryDelayFromMessage(message)).toBe(expected);
-  });
-
-  it('should read nothing from a sentence without a wait', () => {
-    expect(retryDelayFromMessage('The model provider is rate limiting this request.')).toBeUndefined();
-    expect(retryDelayFromMessage(undefined)).toBeUndefined();
-  });
-});
-
 describe('rateLimitRetryDelayMilliseconds', () => {
-  it('should prefer Retry-After over the sentence and the sentence over backoff', () => {
-    const message = 'Please try again in 2s';
-
-    expect(
-      rateLimitRetryDelayMilliseconds({
-        retryAfterSeconds: 30,
-        message,
-        retry: 1,
-      }),
-    ).toBe(30_000);
-    expect(rateLimitRetryDelayMilliseconds({ message, retry: 1 })).toBe(2000);
+  it('should take the gateway Retry-After and otherwise back off', () => {
+    expect(rateLimitRetryDelayMilliseconds({ retryAfterSeconds: 30, retry: 1 })).toBe(30_000);
     expect(rateLimitRetryDelayMilliseconds({ retry: 4 })).toBeGreaterThanOrEqual(1440);
     expect(rateLimitRetryDelayMilliseconds({ retry: 4 })).toBeLessThan(1760);
   });

@@ -473,7 +473,7 @@ export class BillableModelInvocationService {
           );
         }
       }
-      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
+      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers, body);
       const classification = classifyUpstreamRefusal({
         status: response.status,
         accountOwner: 'tau',

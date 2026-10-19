@@ -3,6 +3,7 @@ import { createSseDecoder } from '#api/llm/llm-gateway.stream.js';
 import type { SseEvent } from '#api/llm/llm-gateway.stream.js';
 import {
   classifyUpstreamRefusal,
+  providerRetryAfterSeconds,
   cloudUpstreamRefusalMessage,
   isContextWindowRefusal,
   maximumRefusalMessageCharacters,
@@ -320,6 +321,9 @@ export const createProviderAccountFrameFilter = (input: {
     }
     const { type } = classifyUpstreamRefusal({ status, accountOwner: input.accountOwner });
     const { status: providerCode, message } = error;
+    /* A frame cannot set a header once the stream has started, so the estimate rides
+     * the frame's details, the field the client derives from `Retry-After` pre-stream. */
+    const retryAfterSeconds = type === 'RATE_LIMITED' ? providerRetryAfterSeconds(body) : undefined;
     /* The operator owns the key, so the supplier's own reason stays in the message,
      * clamped the way the pre-stream leg clamps it because the chat persists it. On
      * Cloud the key is Tau's and the customer reads the shared sentence instead.
@@ -338,6 +342,7 @@ export const createProviderAccountFrameFilter = (input: {
           providerId: input.providerId,
           ...(typeof providerCode === 'string' ? { providerCode } : {}),
           accountOwner: input.accountOwner,
+          ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
         },
       }),
     );

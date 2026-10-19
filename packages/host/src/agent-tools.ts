@@ -24,6 +24,7 @@
  */
 
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -238,26 +239,35 @@ const runtimeFailure = (
   };
 };
 
+let geoSpecEngineLoads: boolean | undefined;
+
 /**
  * The GeoSpec engine is an optional peer: a daemon shipped without it is still
  * a complete file-and-geometry host, it just cannot verify. `list()` is
  * synchronous and a tool must never be advertised before its engine is known to
- * exist, so resolution is probed here rather than discovered on first call.
+ * exist, so availability is probed here rather than discovered on first call.
+ * Resolving `geospec-engine/node` is not enough: its loader resolves on a
+ * platform without a prebuilt addon and only fails when the binding loads, so
+ * the entry is loaded once, synchronously, and that answer is kept (F-B3).
  *
  * @returns True when this installation can run GeoSpec.
  */
 const geoSpecEngineResolves = (): boolean => {
+  if (geoSpecEngineLoads !== undefined) {
+    return geoSpecEngineLoads;
+  }
   try {
     /* The modules the runner imports, all this host's own declared
      * dependencies, so its own module is the correct base — unlike the kernel
      * plugins next door. */
-    import.meta.resolve('geospec-engine/node');
     import.meta.resolve('geospec/runner/native');
     import.meta.resolve('@taucad/geospec-engine/node-filesystem');
-    return true;
+    createRequire(import.meta.url)('geospec-engine/node');
+    geoSpecEngineLoads = true;
   } catch {
-    return false;
+    geoSpecEngineLoads = false;
   }
+  return geoSpecEngineLoads;
 };
 
 /** One serialized native engine retains subjects only within its canonical root. */

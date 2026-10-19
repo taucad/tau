@@ -19,7 +19,7 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-10-16*
+*Generated on 2026-10-19*
 
 ## Summary
 
@@ -31,10 +31,10 @@ By using Tau, you agree to comply with the license terms of all included depende
 | (MIT AND Zlib) | 1 |
 | (MIT OR CC0-1.0) | 1 |
 | BSD-3-Clause | 4 |
-| ISC | 6 |
+| ISC | 7 |
 | SEE LICENSE IN LICENSE.md | 1 |
 | WTFPL OR ISC | 1 |
-| MIT | 76 |
+| MIT | 78 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -77,6 +77,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **inherits** v2.0.4 — [Repository](https://github.com/isaacs/inherits)
 - **once** v1.4.0 — [Repository](https://github.com/isaacs/once)
 - **sax** v1.1.6 — [Repository](https://github.com/isaacs/sax-js)
+- **saxes** v6.0.0 — [Repository](https://github.com/lddubeau/saxes)
 - **wrappy** v1.0.2 — [Repository](https://github.com/npm/wrappy)
 
 ## SEE LICENSE IN LICENSE.md
@@ -164,7 +165,9 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **util-deprecate** v1.0.2 — [Repository](https://github.com/TooTallNate/util-deprecate)
 - **which-typed-array** v1.1.24 — [Repository](https://github.com/inspect-js/which-typed-array)
 - **ws** v8.22.0 — [Repository](https://github.com/websockets/ws)
+- **xmlchars** v2.2.0 — [Repository](https://github.com/lddubeau/xmlchars)
 - **xmldoc** v0.4.0 — [Repository](https://github.com/nfarina/xmldoc)
+- **xstate** v6.0.0-alpha.59 — [Repository](https://github.com/statelyai/xstate)
 
 ---
 

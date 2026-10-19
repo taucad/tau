@@ -19,10 +19,13 @@ const isComposerOwned = (element: Element, container: HTMLElement): boolean => {
 
 /**
  * Whether a composer's menu, popover or drawer is open: a press outside it dismisses that, not the
- * composer. Those are portalled out of every composer; the marked triggers inside one are not.
+ * composer. Those are portalled out of every composer; the marked triggers inside one are not. One
+ * still animating closed is already dismissed.
  */
 const hasOpenSurface = (): boolean =>
-  [...document.querySelectorAll(`[${focusTrapAttribute}]`)].some((element) => !element.closest('[data-chat-composer]'));
+  [...document.querySelectorAll(`[${focusTrapAttribute}]:not([data-state="closed"])`)].some(
+    (element) => !element.closest('[data-chat-composer]'),
+  );
 
 /**
  * Reports when the user has left a composer, so an edit box can close. Leaving means focus moved to

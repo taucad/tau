@@ -7,9 +7,11 @@ import { focusTrapAttribute, useComposerExit } from '#components/chat/use-compos
 function Composer({
   onExit,
   isSurfaceOpen,
+  isSurfaceClosing = false,
 }: {
   readonly onExit: () => void;
   readonly isSurfaceOpen: boolean;
+  readonly isSurfaceClosing?: boolean;
 }): React.JSX.Element {
   const containerReference = useRef<HTMLDivElement>(null);
   const { handleBlur } = useComposerExit({ containerReference, onExit });
@@ -24,6 +26,8 @@ function Composer({
           <input aria-label='Search kernels' />
         </div>
       ) : null}
+      {/* A surface stays mounted, marked closed, while its close animation runs. */}
+      {isSurfaceClosing ? <div data-state='closed' {...{ [focusTrapAttribute]: '' }} /> : null}
       {/* The chat's main composer marks its own triggers, which are not open surfaces. */}
       <div data-chat-composer='main'>
         <button type='button' {...{ [focusTrapAttribute]: '' }}>
@@ -131,6 +135,18 @@ describe('useComposerExit', () => {
 
     rerender(false);
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('should report leaving on a press outside while a dismissed surface animates closed', async () => {
+    const onExit = vi.fn();
+    const { rerender } = render(<Composer onExit={onExit} isSurfaceOpen={false} />);
+    screen.getByRole('textbox', { name: 'Edit your message' }).focus();
+    pressAsWebKit(screen.getByRole('button', { name: 'Select kernel' }));
+    rerender(<Composer isSurfaceClosing onExit={onExit} isSurfaceOpen={false} />);
+    await nextFrame();
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 

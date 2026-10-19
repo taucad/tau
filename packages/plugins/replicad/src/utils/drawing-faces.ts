@@ -11,11 +11,15 @@ type PlaneSketchable = {
   sketchOnPlane(plane?: 'XY'): SketchLike;
 };
 
-/** A sketch on a plane: `Sketch`, `CompoundSketch` or `Sketches`, which has no `delete` of its own. */
+/**
+ * A sketch on a plane: `Sketch` and `Sketches` give `faces()`, `CompoundSketch` only `face()`, and `Sketches` has no
+ * `delete` of its own.
+ */
 type SketchLike = {
   delete?: () => void;
   sketches?: ReadonlyArray<{ delete?: () => void }>;
-  faces(): AnyShape;
+  faces?: () => AnyShape;
+  face?: () => AnyShape;
 };
 
 const deleteSketch = (sketch: SketchLike): void => {
@@ -89,7 +93,13 @@ export const drawingFaces = (shape: unknown): AnyShape => {
   }
   const sketch = shape.sketchOnPlane('XY');
   try {
-    return sketch.faces();
+    if (typeof sketch.faces === 'function') {
+      return sketch.faces();
+    }
+    if (typeof sketch.face === 'function') {
+      return sketch.face();
+    }
+    throw new TypeError('The drawing sketch has no face form.');
   } finally {
     deleteSketch(sketch);
   }

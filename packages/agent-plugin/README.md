@@ -33,7 +33,7 @@ claude plugin marketplace add taucad/marketplace
 claude plugin install tau@taucad
 ```
 
-Claude Code 2.1.275 or later does both in one step: `claude plugin install tau --marketplace taucad/marketplace`, or `/plugin install tau --marketplace taucad/marketplace` inside a session. Add `--scope project` to record the plugin in the current project's settings rather than yours. The install is a copy under `~/.claude/plugins/cache/taucad/tau/<version>/`; `claude plugin update tau@taucad` refreshes it, and the next session runs it.
+Claude Code does both in one step: `claude plugin install tau --marketplace taucad/marketplace` from the shell on 2.1.292 or later, or `/plugin install tau --marketplace taucad/marketplace` inside a session on 2.1.275 or later. Add `--scope project` to record the plugin in the current project's settings rather than yours. The install is a copy under `~/.claude/plugins/cache/taucad/tau/<version>/`; `claude plugin update tau@taucad` refreshes it, and the next session runs it.
 
 ### Codex
 

@@ -11,7 +11,7 @@ Needs Node.js 24 or later with its npm 11 (`node -v`, `npm -v`; npm 10 cannot re
     npm install -g @taucad/cli@beta
     tau --version
 
-Claude Code 2.1.275 or later, one step:
+Claude Code 2.1.292 or later, one step:
 
     claude plugin install tau --marketplace taucad/marketplace
 

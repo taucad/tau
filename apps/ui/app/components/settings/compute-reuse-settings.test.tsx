@@ -62,7 +62,8 @@ beforeEach(() => {
 
 it('offers labelled keyboard-native modes and applies the chosen mode', () => {
   render(<ComputeReuseSettings />);
-  expect(screen.getByRole('radio', { name: /Durable/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /Saved on this device/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /This session only/ })).not.toBeChecked();
   fireEvent.click(screen.getByRole('radio', { name: /Off/ }));
   expect(state.set).toHaveBeenCalledWith('off');
 });

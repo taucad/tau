@@ -626,7 +626,7 @@
     "immer": "^10.2.0",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-virtuoso": "^4.18.7",
+    "react-virtuoso": "^4.18.19",
     "three": "^0.184.0",
     "type-fest": "catalog:",
     "vitest-mock-extended": "catalog:",

@@ -102,6 +102,14 @@
         "cwd": "{projectRoot}"
       }
     },
+    "test-geospec": {
+      "command": "tsx scripts/test-geospec.mts",
+      "dependsOn": [{ "projects": ["scripts"], "target": "prepare-geospec-test-consumer" }],
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "test": {
       "command": "vitest --run",
       "options": {

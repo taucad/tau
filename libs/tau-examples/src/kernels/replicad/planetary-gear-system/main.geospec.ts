@@ -3,6 +3,7 @@ import { loadModel } from 'geospec/model';
 
 describe('Planetary Gear System', () => {
   it('has the specified 174 mm rim and 68 mm axial envelope', async () => {
+    // Bounds answer on the default mesh; no exact BRep is needed.
     const m = await loadModel({ file: 'main.ts' });
     expectGeo(m).toHaveBoundingBox({
       min: { x: -87, y: -87, z: -28 },
@@ -12,11 +13,13 @@ describe('Planetary Gear System', () => {
   });
 
   it('contains closed manufactured solids', async () => {
+    // Watertightness is a mesh claim, so the default mesh load answers it.
     expectGeo(await loadModel({ file: 'main.ts' })).toBeWatertight();
   });
 
   it('contains the gears, two carriers and all support hardware', async () => {
-    const m = await loadModel({ file: 'main.ts' });
+    // Assembly occurrences are read from the STEP product structure.
+    const m = await loadModel({ file: 'main.ts', format: 'step' });
     expectGeo(m).toHaveAssemblyOccurrences({
       uniqueNames: true,
       occurrences: [
@@ -57,7 +60,8 @@ describe('Planetary Gear System', () => {
   });
 
   it('places the three planet axes on a 96 mm pitch circle', async () => {
-    const m = await loadModel({ file: 'main.ts' });
+    // Assembly occurrences are read from the STEP product structure.
+    const m = await loadModel({ file: 'main.ts', format: 'step' });
     expectGeo(m).toHaveAssemblyOccurrences({
       occurrences: [
         {
@@ -77,14 +81,17 @@ describe('Planetary Gear System', () => {
   });
 
   it('has no gear or hardware interference', async () => {
+    // Interference is decided on exact BRep; a mesh load exhausts the matcher budget.
     expectGeo(
-      await loadModel({ file: 'main.ts' }),
+      await loadModel({ file: 'main.ts', format: 'step' }),
     ).toHaveNoComponentInterference({ tolerance: 0.015 });
   });
 
   it('preserves clearance with a wider face and advanced input angle', async () => {
+    // Interference and occurrences need exact BRep; the bounds read from it too.
     const m = await loadModel({
       file: 'main.ts',
+      format: 'step',
       parameters: { module: 2, faceWidth: 18, inputAngle: 30 },
     });
     expectGeo(m).toHaveBoundingBox({
@@ -108,7 +115,9 @@ describe('Planetary Gear System', () => {
   });
 
   it('dimensions the removable bearing and thrust hardware', async () => {
-    const m = await loadModel({ file: 'main.ts' });
+    // Occurrence bounds and clearance are answered from exact STEP BRep evidence;
+    // cloned parts share STEP products, so select each occurrence by its path.
+    const m = await loadModel({ file: 'main.ts', format: 'step' });
     expectGeo(m).toHaveAssemblyOccurrences({
       occurrences: [
         {
@@ -145,10 +154,7 @@ describe('Planetary Gear System', () => {
         },
       ],
     });
-    // Clearance is a relationship claim, answered from exact STEP BRep evidence;
-    // cloned parts share STEP products, so select each occurrence by its path.
-    const brep = await loadModel({ file: 'main.ts', format: 'step' });
-    expectGeo(brep).toHaveSpatialRelationships({
+    expectGeo(m).toHaveSpatialRelationships({
       relationships: [
         {
           kind: 'clearance',
@@ -170,9 +176,11 @@ describe('Planetary Gear System', () => {
 
   it('clears intermediate tooth contact phases', async () => {
     for (const inputAngle of [5, 10, 15]) {
+      // Interference is decided on exact BRep; a mesh load exhausts the matcher budget.
       // oxlint-disable-next-line eslint/no-await-in-loop -- Phases load serially through one model runtime.
       const m = await loadModel({
         file: 'main.ts',
+        format: 'step',
         parameters: { module: 2, faceWidth: 14, inputAngle },
       });
       expectGeo(m).toHaveNoComponentInterference({ tolerance: 0.015 });
@@ -182,6 +190,7 @@ describe('Planetary Gear System', () => {
   // Retain these exact-feature checks even if the local STEP inspection backend
   // is unavailable; mesh bounds and clearance are proxies, not BRep certification.
   it('provides valid millimetre BRep solids', async () => {
+    // Validity, units and topology are BRep claims.
     const m = await loadModel({ file: 'main.ts', format: 'step' });
     expectGeo(m).toBeValidBrep();
     expectGeo(m).toHaveStepUnits({ unit: 'mm' });
@@ -189,6 +198,7 @@ describe('Planetary Gear System', () => {
   });
 
   it('has the mounting pattern and cylindrical shaft and bearing interfaces', async () => {
+    // Hole patterns and cylindrical faces are exact-feature BRep claims.
     const m = await loadModel({ file: 'main.ts', format: 'step' });
     // The capsule-slot ends of both carrier spiders are also 5.5 mm cylinders, so the
     // pattern matcher groups them with the ring's clearance holes. Assert the six

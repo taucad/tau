@@ -44,6 +44,7 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
+      geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
     steps:
@@ -85,11 +86,13 @@ jobs:
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
+          geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
           browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
+          echo "Affected with a test-geospec target: $geospec_examples"
           # Each staging app is diffed against the commit staging serves, not against
           # the last green run that NX_BASE names: while `main` is red that base stays
           # put and every push would redeploy everything changed since. An app with no
@@ -113,7 +116,7 @@ jobs:
             echo "$deploy_apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser"; do
+          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -414,10 +417,10 @@ jobs:
           grep -q '"parity":"npm-ci"' "$RUNNER_TEMP/parity.log"
 
   # The required check. It passes only when the plan and every affected lane passed, and the
-  # browser lane too when this run needed it.
+  # browser and GeoSpec example-contract lanes too when this run needed them.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane, browser]
+    needs: [plan, affected-lane, browser, geospec-examples]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -427,10 +430,13 @@ jobs:
           LANES_RESULT: ${{ needs.affected-lane.result }}
           BROWSER_REQUIRED: ${{ needs.plan.outputs.browser }}
           BROWSER_RESULT: ${{ needs.browser.result }}
+          GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
+          GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
         run: |
           test "$PLAN_RESULT" = success
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
+          if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -477,6 +483,35 @@ jobs:
           path: out/reports/formal
           if-no-files-found: ignore
           retention-days: 14
+
+  # Example suites as executable contracts (VER-5): each contract example runs through
+  # the `geospec` CLI installed from the workspace build, and every row passes or stays
+  # undecided for its pinned reason (`libs/tau-examples/scripts/geospec-contracts.ts`).
+  geospec-examples:
+    name: GeoSpec example contracts
+    runs-on: ubuntu-latest
+    needs: [plan]
+    if: needs.plan.outputs.geospec-examples == 'true'
+    timeout-minutes: 30
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Run affected example contracts
+        run: pnpm nx affected -t test-geospec --parallel=1
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
 
   size-report:
     name: Bundle size report

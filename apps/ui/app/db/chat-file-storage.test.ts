@@ -150,7 +150,8 @@ const createStoreWithFiles = (
     },
     list: async (path) => {
       const provided = await provider();
-      return (await provided.readdir(rooted(path))).toSorted();
+      const names = await provided.readdir(rooted(path));
+      return names.toSorted();
     },
   };
 };
@@ -210,10 +211,9 @@ describe.each([
 
     const directory = `/projects/${projectId}/.tau/chats/${chat.id}`;
     await expect(files.list(directory)).resolves.toEqual(['chat.json']);
-    expect(JSON.parse(await files.read(chatFile(chat.id, 'chat.json')))).toMatchObject({
-      deletedAt: expect.any(Number),
-      purgedAt: expect.any(Number),
-    });
+    const tombstone: unknown = JSON.parse(await files.read(chatFile(chat.id, 'chat.json')));
+    expect(tombstone).toHaveProperty('deletedAt', expect.any(Number));
+    expect(tombstone).toHaveProperty('purgedAt', expect.any(Number));
     await expect(files.list(`/projects/${projectId}/.tau/chats/${kept.id}`)).resolves.toEqual([
       'attachments',
       'chat.json',

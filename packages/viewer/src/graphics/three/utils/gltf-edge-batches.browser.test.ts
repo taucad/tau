@@ -19,7 +19,6 @@ import {
   InstancedMesh,
   InstancedBufferGeometry,
   InterleavedBufferAttribute,
-  BufferAttribute,
 } from 'three';
 import type { Object3D, Material } from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -37,7 +36,13 @@ import {
   collectGltfFatLineMaterials,
   updateLineMaterialResolution,
 } from '#graphics/three/materials/gltf-edges.js';
-import { createEdgeBatch, writeEdgePlacement } from '#graphics/three/utils/gltf-edge-batches.js';
+import {
+  createEdgeBatch,
+  getEdgeOccurrenceCapacity,
+  getEdgeOccurrenceCount,
+  setEdgeOccurrenceCount,
+  writeEdgePlacement,
+} from '#graphics/three/utils/gltf-edge-batches.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
 import {
   installRendererOutput,
@@ -335,7 +340,7 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
       expect(edgeGroup.children[0]).toBe(first);
       sources[0]!.parent!.visible = false;
       owner.sync();
-      expect(first.geometry.instanceCount).toBe(99);
+      expect(getEdgeOccurrenceCount(first.geometry)).toBe(99);
       sources[0]!.parent!.visible = true;
       setGltfFatLineEmphasis(sources[0]!, 'hover');
       setGltfFatLineEmphasis(sources[1]!, 'hover');
@@ -416,247 +421,256 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
     }
   });
 
-  it('should preserve pixels and release actual occurrence buffers through material changes', async () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const renderer = await createRenderer('viewport', backend, canvas);
-    renderers.push(renderer);
-    const validation: unknown[] = [];
-    const errors = vi.spyOn(console, 'error').mockImplementation((...args) => validation.push(args));
-    const camera = new OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
-    camera.position.z = 20;
-    camera.updateMatrixWorld();
-    const scene = new Scene();
-    scene.background = new Color(0xff_ff_ff);
-    const webGlTarget = renderer instanceof WebGLRenderer ? new WebGLRenderTarget(128, 128) : undefined;
-    const target = webGlTarget ?? new RenderTarget(128, 128);
-    const positions = new Float32Array([-0.3, -0.3, 0, 0.3, 0.3, 0, -0.3, 0.3, 0, 0.3, -0.3, 0]);
-    const resolution = new Vector2(128, 128);
-    const material = createGltfFatLineMaterial({
-      backend,
-      resolution,
-      edgeColor: 0,
-    });
-    const canonical = Array.from({ length: 100 }, (_, i) => {
-      const mesh = createGltfFatLineSegmentsFromPositions({
+  describe.each(['occurrences', 'segments'] as const)('%s layout', (layout) => {
+    it('should preserve pixels and release actual occurrence buffers through material changes', async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const renderer = await createRenderer('viewport', backend, canvas);
+      renderers.push(renderer);
+      const validation: unknown[] = [];
+      const errors = vi.spyOn(console, 'error').mockImplementation((...args) => validation.push(args));
+      const camera = new OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
+      camera.position.z = 20;
+      camera.updateMatrixWorld();
+      const scene = new Scene();
+      scene.background = new Color(0xff_ff_ff);
+      const webGlTarget = renderer instanceof WebGLRenderer ? new WebGLRenderTarget(128, 128) : undefined;
+      const target = webGlTarget ?? new RenderTarget(128, 128);
+      const positions = new Float32Array([-0.3, -0.3, 0, 0.3, 0.3, 0, -0.3, 0.3, 0, 0.3, -0.3, 0]);
+      const resolution = new Vector2(128, 128);
+      const material = createGltfFatLineMaterial({
         backend,
-        positions,
-        material,
-      })!;
-      mesh.position.set(((i % 10) - 4.5) * 0.9, (Math.floor(i / 10) - 4.5) * 0.9, 0);
-      scene.add(mesh);
-      return mesh;
-    });
-    const batch = createEdgeBatch(positions, 100, {
-      backend,
-      resolution,
-      color: 0,
-    });
-    const clip = createSectionClip(backend);
-    installSectionClip(batch.material, clip);
-    installSectionClip(material, clip);
-    const { geometry } = batch;
-    for (let i = 0; i < 100; i++) {
-      writeEdgePlacement(
-        geometry,
-        i,
-        new Matrix4().makeTranslation(canonical[i]!.position.x, canonical[i]!.position.y, 0),
-      );
-    }
-    geometry.instanceCount = 100;
-    const render = async () => {
-      if (renderer instanceof WebGLRenderer) {
-        if (!webGlTarget) {
-          throw new TypeError('Expected WebGL render target');
-        }
-        renderer.setRenderTarget(webGlTarget);
-      } else {
-        renderer.setRenderTarget(target);
-      }
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(null);
-      if (renderer instanceof WebGLRenderer) {
-        const p = new Uint8Array(128 * 128 * 4);
-        if (!webGlTarget) {
-          throw new TypeError('Expected WebGL render target');
-        }
-        renderer.readRenderTargetPixels(webGlTarget, 0, 0, 128, 128, p);
-        return p;
-      }
-      return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, 128, 128));
-    };
-    let allocated = (): GPUBuffer[] => [];
-    let destroyed = (): GPUBuffer[] => [];
-    const restores: Array<() => void> = [];
-    let draws = () => 0;
-    try {
-      if (renderer instanceof WebGLRenderer) {
-        const gl = renderer.getContext();
-        if (!(gl instanceof WebGL2RenderingContext)) {
-          throw new TypeError('Expected WebGL2 context');
-        }
-        const draw = vi.spyOn(gl, 'drawElementsInstanced');
-        draws = () => draw.mock.calls.length;
-        restores.push(() => {
-          draw.mockRestore();
-        });
-        const invalid = gl.createShader(gl.VERTEX_SHADER)!;
-        gl.shaderSource(invalid, 'bad shader');
-        gl.compileShader(invalid);
-        expect(gl.getShaderParameter(invalid, gl.COMPILE_STATUS)).toBe(false);
-        gl.deleteShader(invalid);
-      } else {
-        expect(nativeDevice(renderer).createBuffer).toBeTypeOf('function');
-        const device = nativeDevice(renderer);
-        const gpuErrors = (event: GPUUncapturedErrorEvent) => {
-          validation.push(event.error.message);
-        };
-        device.addEventListener('uncapturederror', gpuErrors);
-        restores.push(() => {
-          device.removeEventListener('uncapturederror', gpuErrors);
-        });
-        const draw = vi.spyOn(GPURenderPassEncoder.prototype, 'drawIndexed');
-        draws = () => draw.mock.calls.length;
-        restores.push(() => {
-          draw.mockRestore();
-        });
-        device.pushErrorScope('validation');
-        const invalid = device.createShaderModule({ code: 'bad shader' });
-        const invalidCompilation = await invalid.getCompilationInfo();
-        expect(invalidCompilation.messages.some((message) => message.type === 'error')).toBe(true);
-        expect(await device.popErrorScope()).not.toBeNull();
-        const allocations = vi.spyOn(device, 'createBuffer');
-        const deletions = vi.spyOn(GPUBuffer.prototype, 'destroy');
-        restores.push(() => {
-          allocations.mockRestore();
-          deletions.mockRestore();
-        });
-        allocated = () =>
-          allocations.mock.calls.flatMap(([descriptor], index) => {
-            const result = allocations.mock.results[index];
-            return /^tau-edge-[0-3]$/.test(descriptor.label ?? '') && result?.type === 'return' ? [result.value] : [];
-          });
-        destroyed = () => deletions.mock.contexts.filter((buffer): buffer is GPUBuffer => buffer instanceof GPUBuffer);
-        for (let c = 0; c < 4; c++) {
-          geometry.getAttribute(`tauOccurrence${c}`).name = `tau-edge-${c}`;
-        }
-      }
-      let prior = draws();
-      const before = await render();
-      expect(draws() - prior).toBe(100);
-      for (const mesh of canonical) {
-        scene.remove(mesh);
-      }
-      scene.add(batch);
-      prior = draws();
-      const after = await render();
-      expect(draws() - prior).toBe(1);
-      expect([...after]).toEqual([...before]);
-      if (!(renderer instanceof WebGLRenderer)) {
-        const shader = await renderer.debug.getShaderAsync(scene, camera, batch);
-        if (shader.vertexShader === null) {
-          throw new TypeError('Expected generated vertex shader');
-        }
-        expect(shader.vertexShader).toContain('tauOccurrence0');
-        const result = await nativeDevice(renderer)
-          .createShaderModule({ code: shader.vertexShader })
-          .getCompilationInfo();
-        expect(result.messages.filter((m) => m.type === 'error')).toEqual([]);
-      }
-
-      const parity = async () => {
-        batch.visible = true;
-        for (const m of canonical) {
-          scene.remove(m);
-        }
-        const a = await render();
-        batch.visible = false;
-        for (const m of canonical) {
-          scene.add(m);
-        }
-        const b = await render();
-        expect(a).toEqual(b);
-        for (const m of canonical) {
-          scene.remove(m);
-        }
-        batch.visible = true;
-      };
-      writeSectionClip(
-        clip,
-        [
-          {
-            cutId: 'half',
-            faces: [],
-            halfSpaces: [{ normal: [1, 0, 0], constant: 0 }],
-          },
-        ],
-        0,
-      );
-      await parity();
-      writeSectionClip(clip, [], 0);
-      canonical[0]!.position.set(0, 0, 0.25);
-      writeEdgePlacement(geometry, 0, new Matrix4().makeTranslation(0, 0, 0.25));
-      await parity();
-      canonical[99]!.visible = false;
-      geometry.instanceCount = 99;
-      await parity();
-      canonical[99]!.visible = true;
-      geometry.instanceCount = 100;
-      material.color.setHex(0xff_cc_00);
-      batch.material.color.setHex(0xff_cc_00);
-      await parity();
-      const endpointAttribute = geometry.getAttribute('instanceStart');
-      if (!(endpointAttribute instanceof BufferAttribute)) {
-        throw new TypeError('Expected expanded endpoint attribute');
-      }
-      const endpoint = endpointAttribute.array;
-      const { version } = endpointAttribute;
-      writeEdgePlacement(geometry, 0, new Matrix4().makeTranslation(0, 0, 0.25));
-      expect(geometry.getAttribute('instanceStart').array).toBe(endpoint);
-      expect(endpointAttribute.version).toBe(version);
-
-      for (const count of [1, 2, 100, 1000]) {
-        const b = createEdgeBatch(positions, count, {
+        resolution,
+        edgeColor: 0,
+      });
+      const canonical = Array.from({ length: 100 }, (_, i) => {
+        const mesh = createGltfFatLineSegmentsFromPositions({
           backend,
-          resolution,
-          color: 0,
-        });
-        expect(b.geometry.getAttribute('instanceStart').count).toBe(16);
-        expect(b.geometry.getAttribute('tauOccurrence0').array.byteLength * 4).toBe(count * 64);
-        b.geometry.dispose();
-        b.material.dispose();
+          positions,
+          material,
+        })!;
+        mesh.position.set(((i % 10) - 4.5) * 0.9, (Math.floor(i / 10) - 4.5) * 0.9, 0);
+        scene.add(mesh);
+        return mesh;
+      });
+      const batch = createEdgeBatch(positions, 100, {
+        backend,
+        resolution,
+        color: 0,
+        layout,
+      });
+      const clip = createSectionClip(backend);
+      installSectionClip(batch.material, clip);
+      installSectionClip(material, clip);
+      const { geometry } = batch;
+      for (let i = 0; i < 100; i++) {
+        writeEdgePlacement(
+          geometry,
+          i,
+          new Matrix4().makeTranslation(canonical[i]!.position.x, canonical[i]!.position.y, 0),
+        );
       }
-      batch.material.color.setHex(0xff_cc_00);
-      await render();
-      batch.material.transparent = true;
-      batch.material.opacity = 0.6;
-      batch.material.needsUpdate = true;
-      await render();
-      batch.material.transparent = false;
-      batch.material.opacity = 1;
-      batch.material.needsUpdate = true;
-      await render();
-      geometry.dispose();
-      batch.material.dispose();
-      if (!(renderer instanceof WebGLRenderer)) {
-        const owned = allocated();
-        expect(owned.length).toBe(4);
-        expect(owned.every((b) => destroyed().includes(b))).toBe(true);
+      setEdgeOccurrenceCount(geometry, 100);
+      const render = async () => {
+        if (renderer instanceof WebGLRenderer) {
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          renderer.setRenderTarget(webGlTarget);
+        } else {
+          renderer.setRenderTarget(target);
+        }
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        if (renderer instanceof WebGLRenderer) {
+          const p = new Uint8Array(128 * 128 * 4);
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          renderer.readRenderTargetPixels(webGlTarget, 0, 0, 128, 128, p);
+          return p;
+        }
+        return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, 128, 128));
+      };
+      let allocated = (): GPUBuffer[] => [];
+      let destroyed = (): GPUBuffer[] => [];
+      const restores: Array<() => void> = [];
+      let draws = () => 0;
+      try {
+        if (renderer instanceof WebGLRenderer) {
+          const gl = renderer.getContext();
+          if (!(gl instanceof WebGL2RenderingContext)) {
+            throw new TypeError('Expected WebGL2 context');
+          }
+          const draw = vi.spyOn(gl, 'drawElementsInstanced');
+          draws = () => draw.mock.calls.length;
+          restores.push(() => {
+            draw.mockRestore();
+          });
+          const invalid = gl.createShader(gl.VERTEX_SHADER)!;
+          gl.shaderSource(invalid, 'bad shader');
+          gl.compileShader(invalid);
+          expect(gl.getShaderParameter(invalid, gl.COMPILE_STATUS)).toBe(false);
+          gl.deleteShader(invalid);
+        } else {
+          expect(nativeDevice(renderer).createBuffer).toBeTypeOf('function');
+          const device = nativeDevice(renderer);
+          const gpuErrors = (event: GPUUncapturedErrorEvent) => {
+            validation.push(event.error.message);
+          };
+          device.addEventListener('uncapturederror', gpuErrors);
+          restores.push(() => {
+            device.removeEventListener('uncapturederror', gpuErrors);
+          });
+          const draw = vi.spyOn(GPURenderPassEncoder.prototype, 'drawIndexed');
+          draws = () => draw.mock.calls.length;
+          restores.push(() => {
+            draw.mockRestore();
+          });
+          device.pushErrorScope('validation');
+          const invalid = device.createShaderModule({ code: 'bad shader' });
+          const invalidCompilation = await invalid.getCompilationInfo();
+          expect(invalidCompilation.messages.some((message) => message.type === 'error')).toBe(true);
+          expect(await device.popErrorScope()).not.toBeNull();
+          const allocations = vi.spyOn(device, 'createBuffer');
+          const deletions = vi.spyOn(GPUBuffer.prototype, 'destroy');
+          restores.push(() => {
+            allocations.mockRestore();
+            deletions.mockRestore();
+          });
+          allocated = () =>
+            allocations.mock.calls.flatMap(([descriptor], index) => {
+              const result = allocations.mock.results[index];
+              return /^tau-edge-[0-3]$/.test(descriptor.label ?? '') && result?.type === 'return' ? [result.value] : [];
+            });
+          destroyed = () =>
+            deletions.mock.contexts.filter((buffer): buffer is GPUBuffer => buffer instanceof GPUBuffer);
+          for (let c = 0; c < 4; c++) {
+            geometry.getAttribute(`tauOccurrence${c}`).name = `tau-edge-${c}`;
+          }
+        }
+        let prior = draws();
+        const before = await render();
+        expect(draws() - prior).toBe(100);
+        for (const mesh of canonical) {
+          scene.remove(mesh);
+        }
+        scene.add(batch);
+        prior = draws();
+        const after = await render();
+        expect(draws() - prior).toBe(1);
+        expect([...after]).toEqual([...before]);
+        if (!(renderer instanceof WebGLRenderer)) {
+          const shader = await renderer.debug.getShaderAsync(scene, camera, batch);
+          if (shader.vertexShader === null) {
+            throw new TypeError('Expected generated vertex shader');
+          }
+          expect(shader.vertexShader).toContain('tauOccurrence0');
+          const result = await nativeDevice(renderer)
+            .createShaderModule({ code: shader.vertexShader })
+            .getCompilationInfo();
+          expect(result.messages.filter((m) => m.type === 'error')).toEqual([]);
+        }
+
+        const parity = async () => {
+          batch.visible = true;
+          for (const m of canonical) {
+            scene.remove(m);
+          }
+          const a = await render();
+          batch.visible = false;
+          for (const m of canonical) {
+            scene.add(m);
+          }
+          const b = await render();
+          expect(a).toEqual(b);
+          for (const m of canonical) {
+            scene.remove(m);
+          }
+          batch.visible = true;
+        };
+        writeSectionClip(
+          clip,
+          [
+            {
+              cutId: 'half',
+              faces: [],
+              halfSpaces: [{ normal: [1, 0, 0], constant: 0 }],
+            },
+          ],
+          0,
+        );
+        await parity();
+        writeSectionClip(clip, [], 0);
+        canonical[0]!.position.set(0, 0, 0.25);
+        writeEdgePlacement(geometry, 0, new Matrix4().makeTranslation(0, 0, 0.25));
+        await parity();
+        canonical[99]!.visible = false;
+        setEdgeOccurrenceCount(geometry, 99);
+        await parity();
+        canonical[99]!.visible = true;
+        setEdgeOccurrenceCount(geometry, 100);
+        material.color.setHex(0xff_cc_00);
+        batch.material.color.setHex(0xff_cc_00);
+        await parity();
+        const endpointAttribute = geometry.getAttribute('instanceStart');
+        const endpointBuffer =
+          endpointAttribute instanceof InterleavedBufferAttribute ? endpointAttribute.data : endpointAttribute;
+        expect(endpointAttribute instanceof InterleavedBufferAttribute).toBe(layout === 'segments');
+        const endpoint = endpointAttribute.array;
+        const { version } = endpointBuffer;
+        writeEdgePlacement(geometry, 0, new Matrix4().makeTranslation(0, 0, 0.25));
+        expect(geometry.getAttribute('instanceStart').array).toBe(endpoint);
+        expect(endpointBuffer.version).toBe(version);
+
+        for (const count of [1, 2, 100, 1000]) {
+          const b = createEdgeBatch(positions, count, {
+            backend,
+            resolution,
+            color: 0,
+            layout,
+          });
+          // Unrolled segments carry 8 endpoint copies each; the segment layout reads each segment once.
+          expect(b.geometry.getAttribute('instanceStart').count).toBe(layout === 'segments' ? 2 : 16);
+          expect(getEdgeOccurrenceCapacity(b.geometry)).toBe(count);
+          expect(b.geometry.getAttribute('tauOccurrence0').array.byteLength * 4).toBe(
+            count * 64 * (layout === 'segments' ? 8 : 1),
+          );
+          b.geometry.dispose();
+          b.material.dispose();
+        }
+        batch.material.color.setHex(0xff_cc_00);
+        await render();
+        batch.material.transparent = true;
+        batch.material.opacity = 0.6;
+        batch.material.needsUpdate = true;
+        await render();
+        batch.material.transparent = false;
+        batch.material.opacity = 1;
+        batch.material.needsUpdate = true;
+        await render();
+        geometry.dispose();
+        batch.material.dispose();
+        if (!(renderer instanceof WebGLRenderer)) {
+          const owned = allocated();
+          expect(owned.length).toBe(4);
+          expect(owned.every((b) => destroyed().includes(b))).toBe(true);
+        }
+        expect(validation).toEqual([]);
+      } finally {
+        for (const mesh of canonical) {
+          mesh.geometry.dispose();
+        }
+        material.dispose();
+        geometry.dispose();
+        batch.material.dispose();
+        target.dispose();
+        for (const f of restores) {
+          f();
+        }
+        errors.mockRestore();
       }
-      expect(validation).toEqual([]);
-    } finally {
-      for (const mesh of canonical) {
-        mesh.geometry.dispose();
-      }
-      material.dispose();
-      geometry.dispose();
-      batch.material.dispose();
-      target.dispose();
-      for (const f of restores) {
-        f();
-      }
-      errors.mockRestore();
-    }
+    });
   });
 });

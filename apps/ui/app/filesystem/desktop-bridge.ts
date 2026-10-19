@@ -299,6 +299,11 @@ export type DesktopBridge = {
     readonly openIcon: 'finder' | 'file-explorer' | 'folder';
     /** Label for selecting a file or folder in its parent, e.g. `Reveal in Finder`. */
     readonly revealLabel: string;
+    /** Exact saved folder grants, excluding the app-owned Home. */
+    list(): Promise<readonly string[]>;
+    /** Forget a folder without deleting files; refuses active projects. */
+    disconnect(path: string): Promise<void>;
+    onChange(listener: () => void): () => void;
     open(path: string): Promise<void>;
     /** Select a file or folder inside a granted root in the file manager. */
     reveal(path: string): Promise<void>;

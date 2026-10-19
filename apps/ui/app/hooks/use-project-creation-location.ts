@@ -5,8 +5,10 @@ import {
   getProjectCreationLocation,
   getWorkspace,
   isNodeWorkspace,
+  isNodeWorkspaceConnected,
   listWorkspaces,
   requestHandlePermission,
+  subscribeProjectRootConfigurationChanges,
 } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -101,12 +103,11 @@ const isAbortError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 
 const probeWorkspaceOption = async (workspace: Workspace): Promise<WorkspaceLocationOption> => {
-  // A node workspace is a folder on disk the shell already opened: there is no
-  // handle to retain and no permission to revoke, so its probe is its row.
+  // Native connection state follows the shell grant, not retained metadata.
   if (isNodeWorkspace(workspace)) {
     return {
       location: { kind: 'workspace', workspaceId: workspace.workspaceId },
-      status: 'connected',
+      status: (await isNodeWorkspaceConnected(workspace)) ? 'connected' : 'disconnected',
       ...projectLocationDescriptor({ kind: 'workspace', workspaceName: workspace.name }),
     };
   }
@@ -155,6 +156,17 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   const reconnectWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
+      const workspaces = await listWorkspaces();
+      const workspace = workspaces.find((entry) => entry.workspaceId === workspaceId);
+      if (workspace && isNodeWorkspace(workspace)) {
+        try {
+          await projectManager.connectWorkspace();
+          await loadRef.current(false);
+        } catch {
+          toast.error('Failed to reconnect the folder.');
+        }
+        return;
+      }
       const picker = webAccessDirectoryPicker();
       if (!picker) {
         // Reconnecting rebinds a retained handle, which this host cannot
@@ -312,7 +324,11 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
     } else {
       void getProjectCreationLocation({ webAccessSupported: false });
     }
+    const stop = subscribeProjectRootConfigurationChanges(() => {
+      void loadRef.current(false);
+    });
     return () => {
+      stop();
       mountedRef.current = false;
       generationRef.current += 1;
     };

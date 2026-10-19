@@ -155,6 +155,8 @@ export type ServicesBroker = {
   peekStreamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
+  /** Whether a directory contains a retained, running or closing project host. */
+  hasActiveDirectory(directory: string): boolean;
   /** Original project identity retained for an admitted execution root. */
   computeProjectRoot(executionRoot: string): string | undefined;
   /**
@@ -657,6 +659,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
+    },
+    hasActiveDirectory(directory) {
+      const parent = canonicalRoot(directory);
+      return [...runtimeContexts.keys(), ...projectAttachments.keys(), ...releasingRoots.keys()].some(
+        (root) => root === parent || root.startsWith(parent + sep),
+      );
     },
     retainAgentHost(input) {
       const root = canonicalRoot(input.workspaceRoot);

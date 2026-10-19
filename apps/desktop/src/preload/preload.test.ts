@@ -6,6 +6,7 @@ import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
+  directoryGrantChannels,
   hostHandOffChannel,
   openDirectoryChannel,
   revealPathChannel,
@@ -292,5 +293,32 @@ describe('desktop update preload bridge', () => {
     }
     unsubscribe();
     expect(state.listeners.get(desktopUpdateChannels.changed)).toEqual([]);
+  });
+});
+
+describe('desktop folder grants', () => {
+  it('should relay listing and disconnect, and unsubscribe from cross-window changes', async () => {
+    const { directories } = state.exposed.get('tau') as {
+      directories: {
+        list(): Promise<readonly string[]>;
+        disconnect(path: string): Promise<void>;
+        onChange(handler: () => void): () => void;
+      };
+    };
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(['/Downloads']);
+    expect(await directories.list()).toEqual(['/Downloads']);
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.list);
+    await directories.disconnect('/Downloads');
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.disconnect, '/Downloads');
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce('Close projects in this folder.');
+    await expect(directories.disconnect('/Downloads')).rejects.toThrow('Close projects in this folder.');
+    const changed = vi.fn();
+    const unsubscribe = directories.onChange(changed);
+    for (const listener of state.listeners.get(directoryGrantChannels.changed) ?? []) {
+      listener({});
+    }
+    expect(changed).toHaveBeenCalledOnce();
+    unsubscribe();
+    expect(state.listeners.get(directoryGrantChannels.changed)).toEqual([]);
   });
 });

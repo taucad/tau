@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +9,44 @@ import { createKernelForkResolver, createProjectRootRegistry, sanitizeServicesCo
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 
 describe('createProjectRootRegistry', () => {
+  it('should revoke a saved grant across restart without deleting any files or other grants', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-disconnect-'));
+    try {
+      const downloads = join(directory, 'Downloads');
+      const documents = join(directory, 'Documents');
+      mkdirSync(downloads);
+      mkdirSync(documents);
+      writeFileSync(join(downloads, 'part.step'), 'keep this model');
+      const storePath = join(directory, 'grants.json');
+      const registry = createProjectRootRegistry({ storePath });
+      registry.admit(downloads);
+      registry.admit(documents);
+      expect(registry.revoke(downloads)).toBe(true);
+      expect(registry.revoke(downloads)).toBe(false);
+      const reopened = createProjectRootRegistry({ storePath });
+      expect(reopened.isTrusted(join(downloads, 'part.step'))).toBe(false);
+      expect(reopened.isTrusted(documents)).toBe(true);
+      expect(readFileSync(join(downloads, 'part.step'), 'utf8')).toBe('keep this model');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('should retain live authority when persisting revocation fails', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-disconnect-'));
+    try {
+      const storePath = join(directory, 'grants.json');
+      const registry = createProjectRootRegistry({ storePath });
+      registry.admit(homeRoot);
+      mkdirSync(`${storePath}.tmp`);
+      expect(() => registry.revoke(homeRoot)).toThrow();
+      expect(registry.isTrusted(homeRoot)).toBe(true);
+      expect(createProjectRootRegistry({ storePath }).isTrusted(homeRoot)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('admits an admitted root and its descendants', () => {
     const registry = createProjectRootRegistry();
     registry.admit(homeRoot);

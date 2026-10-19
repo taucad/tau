@@ -1,9 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import type * as ReactRouter from 'react-router';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
+
+const nativeNavigation = vi.hoisted(() => ({ navigate: vi.fn() }));
+vi.mock('react-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof ReactRouter>()),
+  useNavigate: () => nativeNavigation.navigate,
+}));
 
 const homeOnly: ProjectCreationLocationState = {
   phase: 'ready',
@@ -302,4 +309,17 @@ describe('WorkspaceSelector', () => {
     await user.keyboard('{Escape}');
     expect(onRequestFocus).toHaveBeenCalledOnce();
   });
+});
+
+it('opens Manage locations inside the desktop window', async () => {
+  vi.stubEnv('TAU_TARGET', 'desktop');
+  const user = userEvent.setup();
+  try {
+    renderPicker(readyState());
+    await user.click(screen.getByRole('button', { name: 'Create in Home' }));
+    await user.click(screen.getByRole('button', { name: 'Manage locations…' }));
+    expect(nativeNavigation.navigate).toHaveBeenCalledWith('/files');
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

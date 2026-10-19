@@ -26,6 +26,13 @@ export const openDirectoryChannel = 'tau:open-directory';
 /** Select a granted file or directory in the operating system's file manager. */
 export const revealPathChannel = 'tau:reveal-path';
 
+/** Native workspace grants; changes invalidate every renderer's filesystem topology. */
+export const directoryGrantChannels = {
+  list: 'tau:directories:list',
+  disconnect: 'tau:directories:disconnect',
+  changed: 'tau:directories:changed',
+} as const;
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 

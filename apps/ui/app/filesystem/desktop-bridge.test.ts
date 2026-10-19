@@ -109,7 +109,16 @@ describe('desktopBridge', () => {
     const open = vi.fn(async (_path: string) => undefined);
     const reveal = vi.fn(async (_path: string) => undefined);
     installShellGlobal({
-      directories: { openLabel: 'Open in Finder', openIcon: 'finder', revealLabel: 'Reveal in Finder', open, reveal },
+      directories: {
+        list: vi.fn(async () => []),
+        disconnect: vi.fn(async () => undefined),
+        onChange: vi.fn(() => () => undefined),
+        openLabel: 'Open in Finder',
+        openIcon: 'finder',
+        revealLabel: 'Reveal in Finder',
+        open,
+        reveal,
+      },
     });
     const current = await loadBridge();
     const directories = current.desktopBridge()?.directories;

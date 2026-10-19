@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   agentHostSessionChannels,
   computeControlChannels,
+  directoryGrantChannels,
   openDirectoryChannel,
   revealPathChannel,
   machinesChannels,
@@ -58,6 +59,7 @@ const state = vi.hoisted(() => ({
   kernelUtilityEntry: undefined as string | undefined,
   servicesUtilityEntry: undefined as string | undefined,
   userData: '',
+  servicesHasActiveDirectory: vi.fn(() => false),
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
@@ -381,6 +383,7 @@ vi.mock('#main/services-broker.js', () => ({
       recover: state.servicesRecover,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
+      hasActiveDirectory: state.servicesHasActiveDirectory,
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
       computeProjectRoot: (root: string) =>
@@ -489,6 +492,7 @@ afterEach(async () => {
   } else {
     Reflect.deleteProperty(process, 'resourcesPath');
   }
+  state.servicesHasActiveDirectory.mockReturnValue(false);
   vi.clearAllMocks();
   fakeWindow.isFullScreen.mockReturnValue(false);
 });
@@ -580,6 +584,48 @@ describe('desktop main compute owner', () => {
     },
     bootMilliseconds,
   );
+  it(
+    'revokes an unused saved grant, notifies windows, and preserves its files',
+    async () => {
+      await bootstrap();
+      const directory = join(state.userData, 'Downloads');
+      await mkdir(directory);
+      await writeFile(join(directory, 'model.step'), 'preserve me');
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [directory] });
+      await state.handlers.get('tau:select-directory')!({ senderFrame: {} });
+      const list = state.handlers.get(directoryGrantChannels.list)!;
+      const disconnect = state.handlers.get(directoryGrantChannels.disconnect)!;
+      expect(list({ senderFrame: {} })).toEqual([directory]);
+      state.servicesHasActiveDirectory.mockReturnValueOnce(true);
+      expect(disconnect({ senderFrame: {} }, directory)).toContain('Close projects');
+      expect(list({ senderFrame: {} })).toEqual([directory]);
+      disconnect({ senderFrame: {} }, directory);
+      expect(list({ senderFrame: {} })).toEqual([]);
+      expect(JSON.parse(await readFile(join(state.userData, 'granted-roots.json'), 'utf8'))).not.toContain(directory);
+      expect(await readFile(join(directory, 'model.step'), 'utf8')).toBe('preserve me');
+      expect(fakeWindow.webContents.send).toHaveBeenCalledWith(directoryGrantChannels.changed);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses Home, relative paths, and untrusted grant requests',
+    async () => {
+      await bootstrap();
+      const disconnect = state.handlers.get(directoryGrantChannels.disconnect)!;
+      expect(() => disconnect({ senderFrame: {} }, join(state.userData, 'home'))).toThrow('Home cannot');
+      expect(() => disconnect({ senderFrame: {} }, 'Downloads')).toThrow('invalid directory');
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      expect(() => disconnect({ senderFrame: {} }, '/Downloads')).toThrow('invalid directory');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      expect(() => state.handlers.get(directoryGrantChannels.list)!({ senderFrame: {} })).toThrow(
+        'untrusted directory',
+      );
+    },
+    bootMilliseconds,
+  );
+
   it('should open only granted directories and propagate file manager failures', async () => {
     const directory = await bootstrap();
     await mkdir(directory, { recursive: true });

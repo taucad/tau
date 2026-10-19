@@ -18,7 +18,7 @@ import { installBrowserHost } from '#main/browser-host.js';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { totalmem } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -115,6 +115,7 @@ import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
+  directoryGrantChannels,
   revealPathChannel,
   agentHostSessionChannels,
   machinesChannels,
@@ -1310,6 +1311,33 @@ const bootstrapElectronApp = async (): Promise<void> => {
     shell.showItemInFolder(target);
   });
 
+  ipcMain.handle(directoryGrantChannels.list, (event) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Desktop shell refused an untrusted directory request.');
+    }
+    return roots.roots().filter((root) => root !== homeRoot);
+  });
+  ipcMain.handle(directoryGrantChannels.disconnect, (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('Desktop shell refused an invalid directory disconnect.');
+    }
+    if (resolve(path) === resolve(homeRoot)) {
+      throw new Error('Home cannot be disconnected.');
+    }
+    if (!roots.roots().includes(resolve(path))) {
+      return;
+    }
+    if (services.hasActiveDirectory(path)) {
+      return 'Close projects in this folder and wait for their work to finish before disconnecting.';
+    }
+    roots.revoke(path);
+    publishRoots();
+    geometry.revokeUnauthorized();
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send(directoryGrantChannels.changed);
+    }
+  });
+
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
     if (!trusted(event.senderFrame)) {
       return undefined;
@@ -1340,6 +1368,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
      * so the folder is still reachable on the next launch. */
     roots.admit(directory);
     publishRoots();
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send(directoryGrantChannels.changed);
+    }
     log.log('info', 'dialog.directory-admitted', { directory, seeded: seededPick !== undefined });
     return directory;
   });

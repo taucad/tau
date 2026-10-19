@@ -16,6 +16,8 @@ import { fileManagerWorkerName, homeBackendFromWorkerName } from '#machines/file
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 
+const grantedPaths = new Set<string>();
+
 const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
 
 const installDesktopBridge = (): void => {
@@ -23,6 +25,10 @@ const installDesktopBridge = (): void => {
   vi.stubGlobal('tau', {
     nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
     dialog: { selectDirectory },
+    directories: {
+      list: async () => [...grantedPaths],
+      onChange: () => () => undefined,
+    },
   });
 };
 
@@ -41,6 +47,8 @@ const loadModules = async (): Promise<{
 
 beforeEach(() => {
   selectDirectory.mockClear();
+  grantedPaths.clear();
+  grantedPaths.add('/Users/tester/Projects/Workshop');
 });
 
 afterEach(() => {
@@ -129,6 +137,36 @@ describe('desktop node Home', () => {
 
 describe('picked node workspaces', () => {
   const picked = '/Users/tester/Projects/Workshop';
+
+  it('should stop discovery and project routing after revocation while retaining identity for reconnect', async () => {
+    installDesktopBridge();
+    const { handleStore } = await loadModules();
+    const entry = await handleStore.createNodeWorkspace(picked);
+    const config = {
+      projectId: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+      backend: 'node',
+      path: picked,
+      providerBasePath: 'widget',
+    } as const;
+    await handleStore.setProjectFileSystemConfig(config);
+    const connected = await handleStore.getProjectRootConfigs();
+    expect(connected.projects).toContainEqual(config);
+    grantedPaths.delete(picked);
+    expect(await handleStore.isNodeWorkspaceConnected(entry)).toBe(false);
+    expect(await handleStore.getProjectRootConfigs()).toEqual({
+      projects: [],
+      roots: [{ backend: 'node', path: homeRoot }],
+    });
+    expect(await handleStore.getProjectFileSystemConfig(config.projectId)).toEqual(config);
+    expect(await handleStore.getWorkspaceMetadata(entry.workspaceId)).toMatchObject({ path: picked });
+    grantedPaths.add(picked);
+    expect(await handleStore.createNodeWorkspace(picked)).toMatchObject({
+      workspaceId: entry.workspaceId,
+      minted: false,
+    });
+    const reconnected = await handleStore.getProjectRootConfigs();
+    expect(reconnected.projects).toContainEqual(config);
+  });
 
   it('records a picked folder by its absolute path and re-adopts it on a second pick', async () => {
     installDesktopBridge();

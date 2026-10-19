@@ -1,3 +1,4 @@
+import { DesktopWorkspaceLocations } from '#components/filesystem/desktop-workspace-locations.js';
 import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
 import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
@@ -286,6 +287,7 @@ export function FileSystemSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-6 pb-6'>
+      {isDesktopTarget() ? <DesktopWorkspaceLocations /> : undefined}
       {webAccessDirectoryPicker() ? (
         <SettingsItem settingId='workspaces'>
           <SettingsSectionCard>

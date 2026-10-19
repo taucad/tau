@@ -113,6 +113,22 @@ const brokerHarness = () => {
 };
 
 describe('createServicesBroker', () => {
+  it('should prevent disconnect while a project is retained and allow it after release', async () => {
+    const { broker } = brokerHarness();
+    const input = { workspaceRoot: '/picked/part', projectId: 'project', attachmentId: 'window' };
+    try {
+      expect(broker.hasActiveDirectory('/picked')).toBe(false);
+      broker.retainAgentHost(input);
+      expect(broker.hasActiveDirectory('/picked')).toBe(true);
+      expect(broker.hasActiveDirectory('/pick')).toBe(false);
+      expect(broker.hasActiveDirectory('/other')).toBe(false);
+      await broker.releaseAgentHost(input, 1000);
+      expect(broker.hasActiveDirectory('/picked')).toBe(false);
+    } finally {
+      await broker.dispose();
+    }
+  });
+
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
     expect(servicesConcerns).not.toContain('exactMeasurement');

@@ -5,7 +5,9 @@
   "type": "module",
   "sideEffects": [
     "./src/launch.ts",
-    "./dist/launch.mjs"
+    "./dist/launch.mjs",
+    "./src/doctor.ts",
+    "./dist/doctor.mjs"
   ],
   "private": false,
   "repository": {

@@ -128,7 +128,7 @@ describe('attribution', () => {
 });
 
 describe('published package', () => {
-  it('should pack the manifests, MCP configs, launcher and skills, and nothing from the workspace', async () => {
+  it('should pack the manifests, MCP configs, launcher, doctor and skills, and nothing from the workspace', async () => {
     const { stdout } = await promisify(execFile)('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
       cwd: root,
     });
@@ -144,8 +144,12 @@ describe('published package', () => {
         'LICENSE',
         'NOTICE',
         'README.md',
+        'dist/doctor-probe.mjs',
+        'dist/doctor.mjs',
         'dist/index.mjs',
         'dist/launch.mjs',
+        'dist/preflight.mjs',
+        'dist/resolve-tau-cli.mjs',
         'mcp/claude.json',
         'mcp/codex.json',
         'package.json',

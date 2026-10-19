@@ -27,6 +27,11 @@
       "import": "./src/geospec/index.ts",
       "default": "./src/geospec/index.ts"
     },
+    "./geospec/exporter": {
+      "types": "./src/geospec/tau-client-exporter.ts",
+      "import": "./src/geospec/tau-client-exporter.ts",
+      "default": "./src/geospec/tau-client-exporter.ts"
+    },
     "./capture": {
       "types": "./src/capture/index.ts",
       "import": "./src/capture/index.ts",
@@ -58,6 +63,8 @@
     "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "xstate": "catalog:",
     "zod": "catalog:"

@@ -57,8 +57,8 @@ import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
-import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
+import { runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import type { TauExporterClient } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -127,12 +127,6 @@ export const runStatusFromCounts = (
   counts: HostTestModelCounts,
   run: { readonly completed: boolean; readonly cancelled?: boolean },
 ): HostTestModelRunStatus => chatRunStatusFromCounts(counts, run);
-
-/**
- * Runtime surface the host's GeoSpec runner borrows. It never terminates it, so termination is not required.
- * @public
- */
-export type HostGeoSpecRuntimeClient = Omit<GeoSpecRuntimeClient, 'terminate'>;
 
 /**
  * The canonical host runner. Per-load source identity belongs to its finalized lineage.
@@ -429,7 +423,8 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  * Every call in this process shares one engine and runs after the previous call's runner
  * closes. A call keeps its subjects admitted until the next call settles, which releases
  * those it did not load again, so repeating `test_model` on unchanged models is digest-only.
- * The runtime is borrowed; closing this runner hands the engine to the next call.
+ * The runtime is borrowed: `tauClientExporter` exports through it and never shuts it down; closing
+ * this runner hands the engine to the next call.
  *
  * @param workspaceRoot - Absolute project root the runner executes against.
  * @param runtime - Existing project runtime used to export authored models.
@@ -438,7 +433,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  */
 export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
-  runtime: HostGeoSpecRuntimeClient,
+  runtime: TauExporterClient,
 ): Promise<HostGeoSpecRunner> => {
   const previous = nativeTail;
   let endTurn = (): void => undefined;
@@ -447,10 +442,11 @@ export const createHostGeoSpecRunner = async (
   });
   await previous;
   try {
-    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
+    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }, exporter] = await Promise.all([
       openNativeGeoSpecSession(workspaceRoot),
       import('geospec/runner/native'),
       import('geospec/runner/node'),
+      tauClientExporter({ client: runtime }),
     ]);
 
     const filesystem = createNodeVmFileSystem(workspaceRoot);
@@ -461,8 +457,7 @@ export const createHostGeoSpecRunner = async (
       nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
       model: {
         projectPath: workspaceRoot,
-        /* The loader terminates only runtimes it creates; a borrowed client is never terminated. */
-        runtime: runtime as GeoSpecRuntimeClient,
+        exporters: [exporter],
         readSource: async (source) => {
           if (typeof source !== 'string') {
             throw new TypeError('Native GeoSpec file sources must be project paths.');

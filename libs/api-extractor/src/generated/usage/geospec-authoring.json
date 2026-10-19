@@ -671,14 +671,6 @@
       "lookups": 3
     },
     {
-      "id": "typescript:GeoSpecTauProjectArtifact.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:GeoSpecTauProjectDescriptor.format",
       "name": "format",
       "score": 3,
@@ -1287,22 +1279,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeoSpecTauProjectArtifact.export",
-      "name": "export",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpecTauProjectArtifact.frame",
-      "name": "frame",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
       "id": "typescript:GeoSpecTestCase.diagnostics",
       "name": "diagnostics",
       "score": 1,
@@ -1457,22 +1433,6 @@
     {
       "id": "typescript:PrimitiveRecord.aabb",
       "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:RuntimeBackedModelFormat",
-      "name": "RuntimeBackedModelFormat",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:RuntimeExportIntentFailure.diagnostics",
-      "name": "diagnostics",
       "score": 1,
       "workspace": 0,
       "examples": 0,

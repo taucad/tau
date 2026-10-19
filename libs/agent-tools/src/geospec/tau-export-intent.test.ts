@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { geoSpecMeshEvidenceMatchers, resolveRuntimeExportIntent } from '#model/export-intent.js';
-import type { GeoSpecRuntimeClient } from '#model/types.js';
+import { geoSpecMeshEvidenceMatchers } from 'geospec/model';
 
-function createRuntime(): GeoSpecRuntimeClient;
-function createRuntime<Runtime extends Record<string, unknown>>(runtime: Runtime): GeoSpecRuntimeClient & Runtime;
+import type { TauExporterClient } from '#geospec/tau-client-exporter.js';
+import { resolveRuntimeExportIntent } from '#geospec/tau-export-intent.js';
+
+function createRuntime(): TauExporterClient;
+function createRuntime<Runtime extends Record<string, unknown>>(runtime: Runtime): TauExporterClient & Runtime;
 function createRuntime(runtime?: Record<string, unknown>) {
-  const client: GeoSpecRuntimeClient = {
+  const client: TauExporterClient = {
     connect: vi.fn(async () => undefined),
-    open: vi.fn<GeoSpecRuntimeClient['open']>(),
+    open: vi.fn<TauExporterClient['open']>(),
     terminate: vi.fn(),
   };
   return Object.assign(client, runtime);
@@ -334,6 +336,137 @@ describe('resolveRuntimeExportIntent', () => {
           direct: true,
         },
       },
+    });
+  });
+});
+
+describe('runtime export intent from bare runtime shapes', () => {
+  const routelessRuntime = {} as unknown as TauExporterClient;
+
+  it('should request canonical mesh evidence from a route-unaware runtime', () => {
+    const intent = resolveRuntimeExportIntent({ runtime: routelessRuntime, format: 'glb' });
+
+    expect(intent).toStrictEqual({
+      options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      sourceUnit: 'mm',
+      provenance: {
+        requested: { format: 'glb', coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        honored: {
+          format: 'glb',
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+          sourceUnit: 'mm',
+        },
+      },
+    });
+  });
+
+  it('should accept a direct BRep STEP route and record its provenance', () => {
+    const runtime = {
+      bestRouteFor: () => ({
+        kernelId: 'replicad',
+        sourceFormat: 'brep',
+        targetFormat: 'step',
+        fidelity: 'brep',
+        exportOptions: { schema: { properties: { coordinateSystem: {} } } },
+      }),
+    } as unknown as TauExporterClient;
+
+    const intent = resolveRuntimeExportIntent({ runtime, format: 'step' });
+
+    expect(intent).toStrictEqual({
+      options: { coordinateSystem: 'z-up' },
+      sourceUnit: 'mm',
+      provenance: {
+        requested: { format: 'step' },
+        honored: { format: 'step', sourceUnit: 'mm', coordinateSystem: 'z-up' },
+        route: {
+          kernelId: 'replicad',
+          sourceFormat: 'brep',
+          targetFormat: 'step',
+          fidelity: 'brep',
+          direct: true,
+        },
+      },
+    });
+  });
+
+  it('should reject a transcoded STEP route', () => {
+    const runtime = {
+      bestRouteFor: () => ({ transcoderId: 'mesh-to-step', fidelity: 'mesh' }),
+    } as unknown as TauExporterClient;
+
+    const result = resolveRuntimeExportIntent({ runtime, format: 'step' });
+
+    expect(result).toStrictEqual({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED' })],
+    });
+  });
+
+  it('should accept a route-aware runtime that has no STEP route at all', () => {
+    const runtime = { bestRouteFor: () => undefined } as unknown as TauExporterClient;
+
+    expect(resolveRuntimeExportIntent({ runtime, format: 'stp' })).toStrictEqual({
+      options: {},
+      sourceUnit: 'mm',
+      provenance: {
+        requested: { format: 'stp' },
+        honored: { format: 'stp', sourceUnit: 'mm' },
+        route: undefined,
+      },
+    });
+  });
+
+  it('should fail a mesh route that cannot express the canonical request', () => {
+    const runtime = {
+      bestRouteFor: () => ({ exportOptions: { schema: { properties: {} } } }),
+    } as unknown as TauExporterClient;
+
+    expect(resolveRuntimeExportIntent({ runtime, format: 'glb' })).toStrictEqual({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_CANONICAL_EXPORT_UNSUPPORTED' })],
+    });
+  });
+
+  it('should fall back to a canonical request when a route-aware runtime advertises no routes', () => {
+    const runtime = { bestRouteFor: () => undefined, capabilities: { routes: [] } } as unknown as TauExporterClient;
+
+    expect(resolveRuntimeExportIntent({ runtime, format: 'glb' })).toMatchObject({ sourceUnit: 'mm' });
+  });
+
+  it('should report a missing route when the runtime advertises routes it cannot pick from', () => {
+    const runtime = {
+      bestRouteFor: () => undefined,
+      capabilities: { routes: [{}] },
+    } as unknown as TauExporterClient;
+    const viaRoutesFor = {
+      bestRouteFor: () => undefined,
+      routesFor: () => [{}],
+    } as unknown as TauExporterClient;
+
+    expect(resolveRuntimeExportIntent({ runtime, format: 'glb' })).toStrictEqual({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_CANONICAL_EXPORT_UNSUPPORTED' })],
+    });
+    expect(resolveRuntimeExportIntent({ runtime: viaRoutesFor, format: 'glb' })).toStrictEqual({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_CANONICAL_EXPORT_UNSUPPORTED' })],
+    });
+  });
+
+  it('should honour a fully expressive mesh route', () => {
+    const runtime = {
+      bestRouteFor: () => ({
+        kernelId: 'replicad',
+        transcoderId: 'gltf',
+        exportOptions: { schema: { properties: { coordinateSystem: {}, unit: {} } } },
+      }),
+    } as unknown as TauExporterClient;
+
+    expect(resolveRuntimeExportIntent({ runtime, format: 'glb' })).toMatchObject({
+      options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      provenance: { route: { direct: false } },
     });
   });
 });

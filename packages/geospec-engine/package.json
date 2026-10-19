@@ -85,6 +85,7 @@
     "geospec-engine": "catalog:"
   },
   "devDependencies": {
+    "@taucad/agent-tools": "workspace:*",
     "@taucad/build123d": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/picogk": "workspace:*",

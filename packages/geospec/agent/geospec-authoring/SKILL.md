@@ -106,7 +106,7 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   rootDir?: string
   // Geometry format to export
   format?: GeoSpecModelFormat
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
   // STEP reader strategy used for STEP exports
   stepStreaming?: StepStreamingMode
@@ -128,6 +128,10 @@ export declare function it(name: string, function_: GeoSpecTestCallback): void;
 
 // GeoSpec suite helper used inside VM-executed test modules
 export declare function describe(name: string, function_: GeoSpecTestCallback): void;
+  skip(name: string, function_?: GeoSpecTestCallback): void;
+
+// Alias for {@link it}
+export declare function test(name: string, function_: GeoSpecTestCallback): void;
   skip(name: string, function_?: GeoSpecTestCallback): void;
 ```
 
@@ -467,30 +471,25 @@ GeoSpecVoidWaypoint: Vec3 | {
     occurrence: string;
 }
 
-// Inline code-CAD model load options
-LoadModelCodeOptions: {
-  // Source files keyed by project-relative path
-  code: Code
-  // Geometry format to export
+// Direct geometry-source model load options
+LoadModelSourceOptions: {
+  // Source geometry format
   format?: GeoSpecModelFormat
-  // Explicit parameters passed to the runtime
+  // Explicit parameters recorded in provenance
   parameters?: Record<string, unknown>
   // Whether STEP loading should also produce mesh evidence
   mesh?: boolean
-  // … 10 more members in the API reference: file, rootDir, runtime, sourceAdapters, projectPath, stepStreaming, meshLinearTolerance, meshAngularToleranceDegrees, workUnitLimit, region
+  // … 10 more members in the API reference: source, resources, rootDir, path, name, sourceUnit, stepStreaming, meshLinearTolerance, meshAngularToleranceDegrees, workUnitLimit
 }
-
-RuntimeBackedModelFormat: Exclude<GeoSpecModelFormat, 'mesh-buffer'>
 ```
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 392 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 368 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 - `api-types.md` — Types
-- `api-types-2.md` — Types (2)
 - `api-classes.md` — Classes
 
 Read ranges, not whole files. Never copy a reference into a source file.

@@ -4,6 +4,7 @@ import { memoryUsage } from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Engine } from 'geospec-engine/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
+import type { GeoSpecModelExporter } from 'geospec/model';
 import type { RuntimeDefinition } from '@taucad/runtime';
 import type * as NativeStore from '@taucad/native-process-core/store';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
@@ -44,26 +45,45 @@ const bindNativeKernelsToStore = async (runtime: RuntimeDefinition): Promise<voi
 };
 
 /**
+ * The worker's exporter over the default runtime. It claims the extensions the default runtime's kernels declare and
+ * creates its Node client on the first export of a run, binding the native kernels first; the run's release shuts the
+ * client down.
+ * @param projectPath - The project the client is rooted at.
+ * @returns The exporter.
+ */
+const createDefaultExporter = async (projectPath: string): Promise<GeoSpecModelExporter> => {
+  const [{ tauClientExporter }, { defaultRuntime }, { resolveRuntimeDefinition }] = await Promise.all([
+    import('@taucad/agent-tools/geospec/exporter'),
+    import('#model/default-runtime.js'),
+    import('@taucad/runtime/worker'),
+  ]);
+  const { kernels } = await resolveRuntimeDefinition(defaultRuntime, undefined);
+  return tauClientExporter({
+    async client() {
+      const { createNodeClient } = await import('@taucad/runtime/node');
+      await bindNativeKernelsToStore(defaultRuntime);
+      return createNodeClient({ runtime: defaultRuntime, projectPath });
+    },
+    extensions: [
+      ...new Set(kernels.flatMap(({ extensions = [] }) => extensions).filter((extension) => extension !== '*')),
+    ],
+  });
+};
+
+/**
  * Construct, serve, and clean up a native engine entirely inside this worker.
  * @param port - Parent message port.
  * @param options - Project and assigned caller-inclusive grant.
  * @public
  */
-export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolWorkerOptions): void => {
+export const startNativePoolWorker = async (port: NativePoolPort, options: NativePoolWorkerOptions): Promise<void> => {
   const engine = new Engine(undefined, options.grant);
   try {
     const filesystem = createNodeVmFileSystem(options.projectPath);
     const nativeModelLoader = createGeoSpecNativeModelLoader({
       engine,
       projectPath: options.projectPath,
-      runtime: async () => {
-        const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
-          import('@taucad/runtime/node'),
-          import('#model/default-runtime.js'),
-        ]);
-        await bindNativeKernelsToStore(defaultRuntime);
-        return createNodeClient({ runtime: defaultRuntime, projectPath: options.projectPath });
-      },
+      exporters: [await createDefaultExporter(options.projectPath)],
       readSource: async (source) => {
         if (typeof source !== 'string') {
           throw new TypeError('Native Node pool direct sources must be project-rooted paths or bytes.');
@@ -97,7 +117,7 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
 
 if (parentPort !== null) {
   try {
-    startNativePoolWorker(parentPort, workerData as NativePoolWorkerOptions);
+    await startNativePoolWorker(parentPort, workerData as NativePoolWorkerOptions);
   } catch (error) {
     parentPort.postMessage({
       type: 'initialization-error',

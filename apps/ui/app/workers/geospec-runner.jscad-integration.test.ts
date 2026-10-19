@@ -448,6 +448,8 @@ describe('geospec-runner.worker JSCAD integration', () => {
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue({
       connect: vi.fn().mockResolvedValue(undefined),
+      // A connected client reports its kernels; JSCAD claims the TypeScript model.
+      capabilities: { registrations: [{ kind: 'kernel', id: 'jscad', extensions: ['ts', 'js'] }], routes: [] },
       open(input: unknown) {
         return {
           async export(format: string, request: unknown) {

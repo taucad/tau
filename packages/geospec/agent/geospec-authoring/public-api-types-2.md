@@ -1,55 +1,6 @@
 # geospec — Types (2)
 
-56 top-level symbols. Signatures are verbatim typescript.
-
-// Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
-    open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
-    on?(event: 'telemetry', handler: (batch: {
-        readonly entries: ReadonlyArray<{
-            name: string;
-            duration: number;
-            startTime: number;
-            workerTimeOrigin: number;
-        }>;
-    }) => void): () => void;
-}
-
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
-
-  // GeoSpecRuntimeClient.on (method)
-  on?(event: 'telemetry', handler: (batch: {
-          readonly entries: ReadonlyArray<{
-              name: string;
-              duration: number;
-              startTime: number;
-              workerTimeOrigin: number;
-          }>;
-      }) => void): () => void;
-
-// Lazy runtime factory consumed by `geospec/model`
-GeoSpecRuntimeClientFactory: () => Promise<GeoSpecRuntimeClient>
-
-// Explicit source adapter for formats whose runtime setup is not part of the generic Tau runtime preset
-GeoSpecRuntimeSourceAdapter: {
-    id: string;
-    extensions: readonly string[];
-    createRuntime(options: {
-        projectPath?: string;
-        file?: string;
-    }): Promise<GeoSpecRuntimeClient>;
-}
-
-  id: string
-
-  extensions: readonly string[]
-
-  // GeoSpecRuntimeSourceAdapter.createRuntime (method)
-  createRuntime(options: {
-          projectPath?: string;
-          file?: string;
-      }): Promise<GeoSpecRuntimeClient>;
+61 top-level symbols. Signatures are verbatim typescript.
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -61,13 +12,9 @@ LoadModelCodeOptions: {
     rootDir?: never;
     /** Geometry format to export. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the runtime. */
+    /** Explicit parameters passed to the exporter. */
     parameters?: Record<string, unknown>;
-    /** Runtime client or lazy runtime factory. */
-    runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
-    sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
-    /** Project root used by runtime integrations. */
+    /** Absolute project root passed to the exporter. */
     projectPath?: string;
     /** STEP reader strategy used for STEP exports. */
     stepStreaming?: StepStreamingMode;
@@ -84,12 +31,11 @@ LoadModelCodeOptions: {
      */
     workUnitLimit?: number;
     /**
-     * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
-     * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
-     * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
-     * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
-     * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
-     * it never stands for the whole model.
+     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
+     * can be checked region by region. Only an exporter that declares `region` honours it; any other
+     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
+     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
+     * so a claim on it never stands for the whole model.
      */
     region?: GeoSpecLoadRegion;
 }
@@ -106,16 +52,10 @@ LoadModelCodeOptions: {
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
-  // Runtime client or lazy runtime factory
-  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  // Source-specific runtime adapters, e.g
-  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
-
-  // Project root used by runtime integrations
+  // Absolute project root passed to the exporter
   projectPath?: string
 
   // STEP reader strategy used for STEP exports
@@ -133,7 +73,7 @@ LoadModelCodeOptions: {
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
 
-  // Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model can be checked region by region
+  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
   region?: GeoSpecLoadRegion
 
 // Filesystem-backed model load options
@@ -149,16 +89,12 @@ LoadModelFileOptions: {
      * evidence.
      */
     rootDir?: string;
-    /** Project root used by runtime integrations. */
+    /** Absolute project root passed to the exporter. */
     projectPath?: string;
     /** Geometry format to export. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the runtime. */
+    /** Explicit parameters passed to the exporter. */
     parameters?: Record<string, unknown>;
-    /** Runtime client or lazy runtime factory. */
-    runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
-    sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
     /** STEP reader strategy used for STEP exports. */
     stepStreaming?: StepStreamingMode;
     /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -174,12 +110,11 @@ LoadModelFileOptions: {
      */
     workUnitLimit?: number;
     /**
-     * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
-     * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
-     * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
-     * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
-     * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
-     * it never stands for the whole model.
+     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
+     * can be checked region by region. Only an exporter that declares `region` honours it; any other
+     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
+     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
+     * so a claim on it never stands for the whole model.
      */
     region?: GeoSpecLoadRegion;
 }
@@ -190,20 +125,14 @@ LoadModelFileOptions: {
   // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
   rootDir?: string
 
-  // Project root used by runtime integrations
+  // Absolute project root passed to the exporter
   projectPath?: string
 
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
-
-  // Runtime client or lazy runtime factory
-  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  // Source-specific runtime adapters, e.g
-  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // STEP reader strategy used for STEP exports
   stepStreaming?: StepStreamingMode
@@ -220,7 +149,7 @@ LoadModelFileOptions: {
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
 
-  // Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model can be checked region by region
+  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
   region?: GeoSpecLoadRegion
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
@@ -232,7 +161,7 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
@@ -720,12 +649,7 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly format?: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
     readonly projectPath?: string;
     readonly readSource?: GeoSpecNativeSourceReader;
-    readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
-    /**
-     * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
-     * `extensions` claim the file exports it.
-     */
+    /** Model exporters for source-kind files; the first whose `extensions` claim the file exports it. */
     readonly exporters?: readonly GeoSpecModelExporter[];
     /**
      * Subject handles carried between the release scopes of loaders that share one engine, keyed by
@@ -750,11 +674,7 @@ CreateGeoSpecNativeModelLoaderOptions: {
 
   readonly readSource?: GeoSpecNativeSourceReader
 
-  readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
-
-  // Model exporters for source-kind files, consulted when no runtime is configured
+  // Model exporters for source-kind files
   readonly exporters?: readonly GeoSpecModelExporter[]
 
   // Subject handles carried between the release scopes of loaders that share one engine, keyed by subjectHash
@@ -777,7 +697,7 @@ GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
@@ -824,7 +744,7 @@ GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
   releaseSubject(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 
 // Model loader injected into native VM runs
-// Remarks: Direct `source` loads read their source again on every call and the engine digests those exact bytes; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Runtime loads are coalesced per release scope (one run): a load whose file, inline code, project path, parameters, format, tolerances, region and ingest options equal an earlier successful load's reuses that admission without exporting or ingesting again. A file load is reused only while a Runtime source snapshot still matches the earlier load's complete source revision; otherwise, or when every owner of the earlier admission has released it, the load exports afresh. Failures are never reused.
+// Remarks: Direct `source` loads read their source again on every call and the engine digests those exact bytes; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Exported loads are coalesced per release scope (one run): a load whose file, inline code, project path, parameters, format, tolerances, region and ingest options equal an earlier successful load's reuses that admission without exporting or ingesting again. A file load is reused only while the exporter's `revision` still matches the earlier load's complete source revision; otherwise, or when every owner of the earlier admission has released it, the load exports afresh. Failures are never reused.
 GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: GeoSpecNativeLoadModelOptions<Code>) => Promise<GeoSpecNativeModelSubject>
 
 // Subject identity returned by native STEP/GLB admission
@@ -860,7 +780,7 @@ ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
     /**
      * Drain registered admissions, including additions while drainage awaits,
      * then release this scope's subjects (with a carrier: the previous scope's
-     * subjects this scope did not load again) and owned Runtime clients.
+     * subjects this scope did not load again), then close every exporter it exported through.
      *
      * Await the intended complete load chain before final release, and await
      * this method before closing the caller-owned engine. Calls after it returns
@@ -1440,3 +1360,136 @@ MinimumDistanceFact: {
   readonly distance: number
 
   readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
+
+// Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery: {
+    readonly capability: 'minimumDistance';
+    readonly subject: GeoSpecNativeSubject;
+    readonly payload: {
+        readonly pair: readonly [{
+            readonly occurrencePath: string;
+        }, {
+            readonly occurrencePath: string;
+        }];
+    };
+}
+
+  readonly capability: 'minimumDistance'
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly payload: {
+          readonly pair: readonly [{
+              readonly occurrencePath: string;
+          }, {
+              readonly occurrencePath: string;
+          }];
+      }
+
+// Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult: {
+    readonly status: 'complete';
+    readonly fact: MinimumDistanceFact;
+} | {
+    readonly status: 'refused';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
+    readonly message: string;
+} | {
+    readonly status: 'interrupted';
+    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+    readonly message: string;
+}
+
+  readonly status: 'complete'
+
+// Flat native query transport options
+GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
+    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
+    readonly payload?: unknown;
+}
+
+  readonly engine: GeoSpecNativeEngine
+
+  readonly claimId: string
+
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot: string
+
+  readonly workUnitLimit: number
+
+  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
+  readonly maximumWorkUnitLimit?: number
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
+
+  readonly payload?: unknown
+
+// Existing positive-only ancillary operations owned by the native core
+GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
+
+// Explicit support state for one source-attributed inventory field
+GeoSpecPmiField: {
+    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
+    readonly value: Value | null;
+    readonly reason: string | null;
+}
+
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+
+  readonly value: Value | null
+
+  readonly reason: string | null
+
+// Original Part21 entity ID and exact source argument tokens
+GeoSpecPmiRawEntity: {
+    readonly sourceId: number;
+    readonly kind: string;
+    readonly arguments: readonly string[];
+}
+
+  readonly sourceId: number
+
+  readonly kind: string
+
+  readonly arguments: readonly string[]
+
+// Source-authored scalar and Rust-normalized reduced rational millimetres
+GeoSpecPmiNumber: {
+    readonly sourceId: number;
+    readonly authoredText: string;
+    readonly unitId: number;
+    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
+    readonly millimetres: string;
+    readonly name: string;
+}
+
+  readonly sourceId: number
+
+  readonly authoredText: string
+
+  readonly unitId: number
+
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
+
+  readonly millimetres: string
+
+  readonly name: string
+
+// A uniquely forward-transferred face
+GeoSpecPmiFaceAssociation: {
+    readonly sourceFaceId: number;
+    readonly occurrenceRoute: readonly number[];
+    readonly occurrence: number | null;
+    readonly publicFaceOrdinal: number;
+}
+
+  readonly sourceFaceId: number
+
+  readonly occurrenceRoute: readonly number[]
+
+  readonly occurrence: number | null
+
+  readonly publicFaceOrdinal: number

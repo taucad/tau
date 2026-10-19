@@ -1,6 +1,6 @@
 # geospec — Functions
 
-41 top-level symbols. Signatures are verbatim typescript.
+39 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -66,21 +66,6 @@ export declare function createModelLoader(defaults: CreateModelLoaderOptions): M
 // loadModel (function)
 export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   _options: Source, code, or file model load options
-
-// resolveRuntimeExportIntent (function)
-export declare function resolveRuntimeExportIntent(options: {
-    runtime: GeoSpecRuntimeClient;
-    format: RuntimeBackedModelFormat;
-    meshLinearTolerance?: number;
-    meshAngularToleranceDegrees?: number;
-    /**
-     * The kernel that evaluates this source, when the host knows it. Routes are
-     * then chosen among that kernel's own, so a mesh-only kernel is told its
-     * BRep matchers are unsupported instead of being sent to another kernel's
-     * STEP route.
-     */
-    kernelId?: string;
-}): RuntimeExportIntent | RuntimeExportIntentFailure;
 
 // Create a model exporter that runs a command speaking GeoSpec subprocess protocol 1
 // Throws: TypeError when the options are incomplete or declare `inlineSources`.
@@ -161,7 +146,7 @@ export declare function allocateNativePoolGrants(options: {
 // Create a native model loader that admits actual STEP/GLB bytes and retains generation-checked handles until the owning runner finishes
 // createGeoSpecNativeModelLoader (function)
 export declare function createGeoSpecNativeModelLoader(defaults: CreateGeoSpecNativeModelLoaderOptions): ManagedGeoSpecNativeModelLoader;
-//   defaults: Native engine, Runtime defaults, and optional source reader
+//   defaults: Native engine, exporters, and optional source reader
 
 // Create a Node `VmFileSystem` rooted at `root`
 // createNodeVmFileSystem (function)
@@ -229,12 +214,6 @@ export declare function installGeoSpecVitest(client: GeoSpecAssertionClient): Ge
 // setupGeoSpecVitest (function)
 export declare function setupGeoSpecVitest(options: GeoSpecAssertionClientOptions): GeoSpecVitestAdapter;
 //   options: Flat native assertion-client options
-
-// Export one Tau project from Runtime's coherent source snapshot
-// Remarks: This helper preserves finalized bytes and provenance metadata. It does not certify mathematical geometry or grant the runtime trusted-evaluator authority.
-// exportTauProjectArtifact (function)
-export declare function exportTauProjectArtifact(options: ExportTauProjectArtifactOptions): Promise<KernelResult<GeoSpecTauProjectArtifact>>;
-//   options: Descriptor, fresh-runtime factory, and optional cancellation signal
 
 // Load one trusted project config using Node's native module loader
 // Remarks: Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed. TypeScript must use erasable syntax; JSON imports use standard attributes. Executable config/imports are trusted developer code, not sandboxed code. Node's same-process module cache is unchanged: load once per run and use a fresh process when fresh executable imports are required. No reload guarantee or transitive-source identity is supplied here.

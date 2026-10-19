@@ -6,7 +6,7 @@ import type { AnyPluginInstance, MiddlewarePlugin } from '@taucad/runtime';
 import { nodeWorkerHost } from '@taucad/runtime/transport/node';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 
-const requireReplicad = createRequire(new URL('../../../plugins/replicad/package.json', import.meta.url));
+const requireReplicad = createRequire(new URL('../../../../packages/plugins/replicad/package.json', import.meta.url));
 const replicadModule: unknown = await import(requireReplicad.resolve('@taucad/replicad'));
 if (
   typeof replicadModule !== 'object' ||
@@ -18,7 +18,9 @@ if (
 }
 const replicad = replicadModule.replicad as () => AnyPluginInstance;
 
-const requireMiddleware = createRequire(new URL('../../../plugins/middleware/package.json', import.meta.url));
+const requireMiddleware = createRequire(
+  new URL('../../../../packages/plugins/middleware/package.json', import.meta.url),
+);
 const middlewareModule: unknown = await import(requireMiddleware.resolve('@taucad/middleware'));
 const middleware = [
   'parameterFileResolver',

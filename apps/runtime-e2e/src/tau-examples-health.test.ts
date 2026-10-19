@@ -3,7 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
-import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
+import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
+import { createExampleGeoSpecRuntimeClient, exampleKernelExtensions } from '@taucad/tau-examples/runtime';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -32,13 +33,16 @@ describe('Tau example model health', () => {
       .spyOn(console, 'error')
       .mockImplementation((...values) => consoleDiagnostics.push(`error: ${values.map(String).join(' ')}`));
     const engine = new Engine();
-    /* One caller-owned runtime for every run. A factory gives each run its own in-process runtime, and a terminated
+    /* One caller-owned runtime for every run, borrowed by the exporter. A factory gives each run its own in-process runtime, and a terminated
      * in-process runtime keeps its kernel threads and memory, so the corpus would exhaust the host part-way through. */
     const runtime = await createExampleGeoSpecRuntimeClient(examplesRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem: createNodeVmFileSystem(examplesRoot),
       nativeAssertions: { engine },
-      model: { projectPath: examplesSource, runtime },
+      model: {
+        projectPath: examplesSource,
+        exporters: [await tauClientExporter({ client: runtime, extensions: exampleKernelExtensions })],
+      },
     });
     try {
       expect(selectedModels.length, `TAU_EXAMPLE_PATTERN ${examplePattern ?? ''} selects no model`).toBeGreaterThan(0);

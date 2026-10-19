@@ -1,8 +1,8 @@
 import type { RootState } from '@react-three/fiber';
-import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
+import { Canvas, flushSync as flushThreeSync, useThree } from '@react-three/fiber';
 import { flushSync } from 'react-dom';
 import type { RefCallback } from 'react';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WebGPURenderer } from 'three/webgpu';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
@@ -36,7 +36,31 @@ import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Parent bumps canvas key — remount this instance fresh after real device/context loss retry. */
   readonly onRetry: () => void;
+  /** Receives the canvas's CSS pixel area and drawing-buffer pixel ratio when they change. */
+  readonly onSurfaceResize?: (cssPixels: number, pixelRatio: number) => void;
 };
+
+/** Reports the canvas's surface size from inside the R3F root, on mount and whenever it changes. */
+function SurfaceSizeReporter({
+  onSurfaceResize,
+}: Readonly<{ onSurfaceResize: (cssPixels: number, pixelRatio: number) => void }>): undefined {
+  const cssPixels = useThree((state) => state.size.width * state.size.height);
+  const pixelRatio = useThree((state) => state.viewport.dpr);
+  useEffect(() => {
+    onSurfaceResize(cssPixels, pixelRatio);
+  }, [onSurfaceResize, cssPixels, pixelRatio]);
+  return undefined;
+}
+
+/**
+ * The surface reporter for a canvas whose owner wants its size, mounted only then.
+ * @param onSurfaceResize - The owner's callback, if any.
+ * @returns The reporter, or nothing.
+ */
+const renderSurfaceSizeReporter = (
+  onSurfaceResize: ((cssPixels: number, pixelRatio: number) => void) | undefined,
+): React.JSX.Element | undefined =>
+  onSurfaceResize ? <SurfaceSizeReporter onSurfaceResize={onSurfaceResize} /> : undefined;
 
 /**
  * Sets R3F's pointer rays with {@link setRaycasterFromCamera} after whichever compute the root settled on: its own, or
@@ -62,6 +86,7 @@ export function ThreeCanvasInstance({
   children,
   graphicsBackend,
   onRetry,
+  onSurfaceResize,
   enableGizmo = false,
   enableGrid = false,
   enableAxes = false,
@@ -242,6 +267,7 @@ export function ThreeCanvasInstance({
           </SceneOverlay>
         </OverlayDepthProvider>
         {isCanvasReady ? <ActorBridge /> : null}
+        {renderSurfaceSizeReporter(onSurfaceResize)}
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />
         ) : null}

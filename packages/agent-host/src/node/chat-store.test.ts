@@ -143,6 +143,23 @@ describe('Node chat store and a permanent delete', () => {
     }
   });
 
+  it('refuses a direct attachment write (ACP media) into a purged chat and creates nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-chat-purged-media-'));
+    try {
+      const directory = join(root, '.tau', 'chats', 'chat');
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, 'chat.json'), record(true));
+
+      await expect(
+        createNodeAttachmentReader(root).write!('chat', `attachments/${'b'.repeat(64)}.png`, new Uint8Array([1])),
+      ).rejects.toMatchObject({ code: 'LOG_FENCED' });
+
+      expect(await readdir(directory)).toEqual(['chat.json']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('fences an open writer at its next append once the chat is purged, and never recreates the log', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-chat-purged-append-'));
     try {
@@ -165,6 +182,10 @@ describe('Node chat store and a permanent delete', () => {
       await expect(writer.append(event(1))).rejects.toMatchObject({
         code: 'LOG_FENCED',
       });
+      /* A capture the run stores before its next row is fenced the same way. */
+      await expect(
+        binding.attachments.write!('chat', `attachments/${'a'.repeat(64)}.webp`, new Uint8Array([1])),
+      ).rejects.toMatchObject({ code: 'LOG_FENCED' });
       await writer.close();
 
       expect(await readdir(directory)).toEqual(['chat.json']);

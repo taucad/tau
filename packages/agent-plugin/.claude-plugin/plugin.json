@@ -2,7 +2,7 @@
   "name": "tau",
   "displayName": "Tau",
   "version": "0.1.0-beta.6",
-  "description": "Evaluate, test, screenshot and export code-CAD models with Tau.",
+  "description": "Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.",
   "author": {
     "name": "Tau",
     "url": "https://tau.new"
@@ -10,6 +10,24 @@
   "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-plugin#readme",
   "repository": "https://github.com/taucad/tau",
   "license": "Apache-2.0",
-  "keywords": ["cad", "3d", "replicad", "openscad", "geospec", "3d-printing"],
+  "keywords": [
+    "cad",
+    "3d",
+    "mcp",
+    "replicad",
+    "openscad",
+    "jscad",
+    "manifold",
+    "picovoxel",
+    "smlib",
+    "tscircuit",
+    "build123d",
+    "picogk",
+    "geospec",
+    "step",
+    "stl",
+    "3mf",
+    "3d-printing"
+  ],
   "mcpServers": "./mcp/claude.json"
 }

@@ -1,7 +1,7 @@
 {
   "name": "tau",
   "version": "0.1.0-beta.6",
-  "description": "Evaluate, test, screenshot and export code-CAD models with Tau.",
+  "description": "Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.",
   "author": {
     "name": "Tau",
     "url": "https://tau.new"
@@ -9,13 +9,31 @@
   "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-plugin#readme",
   "repository": "https://github.com/taucad/tau",
   "license": "Apache-2.0",
-  "keywords": ["cad", "3d", "replicad", "openscad", "geospec", "3d-printing"],
+  "keywords": [
+    "cad",
+    "3d",
+    "mcp",
+    "replicad",
+    "openscad",
+    "jscad",
+    "manifold",
+    "picovoxel",
+    "smlib",
+    "tscircuit",
+    "build123d",
+    "picogk",
+    "geospec",
+    "step",
+    "stl",
+    "3mf",
+    "3d-printing"
+  ],
   "skills": "./skills/",
   "mcpServers": "./mcp/codex.json",
   "interface": {
     "displayName": "Tau",
     "shortDescription": "Code-CAD you can see and test",
-    "longDescription": "Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel or tscircuit, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder.",
+    "longDescription": "Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d or PicoGK, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.",
     "developerName": "Tau",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
@@ -25,7 +43,8 @@
     "termsOfServiceURL": "https://tau.new/legal/terms",
     "defaultPrompt": [
       "Model a parametric wall bracket in replicad and show me a screenshot.",
-      "Run the GeoSpec tests for this Tau project and fix what fails."
+      "Run the GeoSpec tests for this Tau project and fix what fails.",
+      "Export main.ts as STEP and tell me where the file is."
     ],
     "composerIcon": "./assets/icon.svg",
     "logo": "./assets/icon.svg"

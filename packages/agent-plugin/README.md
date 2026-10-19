@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/npm/l/@taucad/agent-plugin.svg)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue.svg)](https://docs.npmjs.com/generating-provenance-statements)
 
-Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher
+Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK).
 
 ## Why this package?
 

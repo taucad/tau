@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
+import {
+  codexDefaultPrompts,
+  codexLongDescription,
+  codexShortDescription,
+  packageDescription,
+  pluginDescription,
+  pluginKeywords,
+} from '#descriptions.js';
+
 /** The package folder, which is the plugin root both hosts load. The test target builds it first. */
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -54,6 +63,25 @@ describe('plugin manifests', () => {
       extensions: { 'com.openai': { onboardingSkill: 'tau' } },
     });
     expect(readJson('.claude-plugin/plugin.json')).toMatchObject({ mcpServers: './mcp/claude.json' });
+  });
+
+  it('should carry the description texts from their one source in every manifest and package.json', () => {
+    const listing = { description: pluginDescription, keywords: pluginKeywords };
+
+    expect(readJson('.claude-plugin/plugin.json')).toMatchObject(listing);
+    expect(readJson('.codex-plugin/plugin.json')).toMatchObject({
+      ...listing,
+      interface: {
+        shortDescription: codexShortDescription,
+        longDescription: codexLongDescription,
+        defaultPrompt: codexDefaultPrompts,
+      },
+    });
+    expect(readJson('.claude-plugin/marketplace.json')).toMatchObject({
+      plugins: [{ name: 'tau', description: pluginDescription }],
+    });
+    expect(readJson('package.json')).toMatchObject({ description: packageDescription });
+    expect(codexShortDescription.length).toBeLessThanOrEqual(30);
   });
 
   it('should list this folder as the tau plugin of the tau-dev marketplace', () => {

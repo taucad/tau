@@ -30,9 +30,18 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { MessageChannel } from 'node:worker_threads';
+import {
+  NodeFsProvider,
+  NodeFsAuthorityHost,
+  serveNodeFsProvider,
+  toNodeFsPort,
+} from '@taucad/filesystem/backend/node';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { classify } from '@taucad/filesystem/path-registry';
+import type { ProjectManifest } from '@taucad/project-core';
+import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
+import { classify, tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
@@ -64,6 +73,7 @@ const fetchRecords = async (actors: RevisionActors) => {
   };
 };
 
+const projectId = 'proj_123456789012345678901';
 const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
 const chatRef = `refs/tau/chats/${chatId}`;
@@ -71,8 +81,10 @@ const mainRef = 'refs/heads/main';
 const syncQueuePath = '.git/sync-pending';
 
 const temporaryRoots: string[] = [];
+const authorityCleanups: Array<() => Promise<void>> = [];
 
 afterAll(async () => {
+  await Promise.all(authorityCleanups.map(async (close) => close()));
   await Promise.all(temporaryRoots.map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -95,7 +107,7 @@ const legs: readonly Leg[] = [
         filesystem,
         /* The browser leg reaches a remote only through a client (W11b §1.2). */
         http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
-        checkouts: { projectId: 'project-1', root: () => filesystem },
+        checkouts: { projectId, root: () => filesystem },
       }),
   },
   {
@@ -153,6 +165,7 @@ const device = async (
     remoteUrl?: string;
     files?: Readonly<Record<string, string>>;
     onChatsProjected?: (chatIds: readonly string[]) => void;
+    checkedWrites?: boolean;
     wrapFilesystem?: (filesystem: RevisionFileSystem) => RevisionFileSystem;
     remoteMoves?: (input: Readonly<{ projectId: string }>, handlers: RevisionStreamHandlers) => () => void;
   }>,
@@ -160,7 +173,28 @@ const device = async (
   const { leg, label, remoteUrl } = input;
   const files = input.files ?? {};
   const root = await temporaryRoot(label);
-  const filesystem = new NodeFsProvider(root);
+  let filesystem: RevisionFileSystem = new NodeFsProvider(root);
+  if (input.checkedWrites) {
+    const authorityRoot = await temporaryRoot(`${label}-authority`);
+    const authority = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      authorityIdentity: () => root,
+    });
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(toNodeFsPort(port2), {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+      authority,
+    });
+    const channel = new NodeFsChannel(toNodeFsPort(port1));
+    filesystem = new NodeFsProviderClient(channel, root);
+    authorityCleanups.push(async () => {
+      channel.close();
+      await stop();
+      port1.close();
+      port2.close();
+    });
+  }
   for (const [path, content] of Object.entries(files)) {
     // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files, in order.
     await filesystem.writeFile(path, content);
@@ -172,7 +206,7 @@ const device = async (
   }
   const actors = createRevisionActors({
     port,
-    projectId: 'project-1',
+    projectId,
     filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
     deviceId: () => `device-${label}`,
     ...(input.onChatsProjected === undefined ? {} : { onChatsProjected: input.onChatsProjected }),
@@ -186,7 +220,7 @@ const device = async (
     scheduler: (options = {}) =>
       createActor(syncMachine.provide({ actors: actors.sync }), {
         input: {
-          projectId: 'project-1',
+          projectId,
           debounceMilliseconds: 5,
           /* Long enough that a settled state stays settled while a row asserts it:
            * the backoff is a delay, not something this suite is measuring. */
@@ -482,61 +516,92 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    * before the open pull. An unborn branch has recorded nothing, so the
    * manifest is not work to lose: the pull must replace it, not refuse it.
    */
-  it('materializes a remote project over the placeholder manifest a cloud open writes', async () => {
-    const remoteRoot = await temporaryRoot('cloud-open-manifest');
-    const remote = await startGitHttpBackend({ root: remoteRoot });
-    try {
-      const one = await device({ leg, label: 'a-cloud-open', remoteUrl: remote.url });
-      const files = { 'tau.json': '{"name":"Bracket","main":"bracket.scad"}\n', 'bracket.scad': 'cube(7);\n' };
-      const head = await record({ device: one, files, summary: 'Device A' });
-      const first = one.scheduler();
-      first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
-      await vi.waitFor(
-        () => {
-          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
-        },
-        { timeout: 30_000 },
-      );
-      first.stop();
+  it.each([false, true])(
+    'should materialize a cloud project over its placeholder (legacy=%s)',
+    async (legacy) => {
+      const remoteRoot = await temporaryRoot('cloud-open-manifest');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const schedulers: Array<ReturnType<Device['scheduler']>> = [];
+      try {
+        const one = await device({ leg, label: 'a-cloud-open', remoteUrl: remote.url });
+        const manifest: ProjectManifest = {
+          $schema: projectManifestSchemaUrl,
+          name: 'Bracket',
+          description: 'Cloud project',
+          tags: [],
+          assets: { main: { entryPath: 'bracket.scad' } },
+        };
+        const manifestBytes = serializeProjectManifest(manifest);
+        const files = {
+          'tau.json': legacy
+            ? JSON.stringify({ ...manifest, $schema: 'https://tau.new/schemas/tau-schema-v1.json', id: projectId })
+            : new TextDecoder().decode(manifestBytes),
+          'bracket.scad': 'cube(7);\n',
+        };
+        const head = await record({ device: one, files, summary: 'Device A' });
+        const first = one.scheduler();
+        schedulers.push(first);
+        first.start();
+        first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
+        await vi.waitFor(
+          () => {
+            expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+          },
+          { timeout: 30_000 },
+        );
+        first.stop();
 
-      const two = await device({
-        leg,
-        label: 'b-cloud-open',
-        remoteUrl: remote.url,
-        /* `cloudProjectStub`'s manifest, as `serializeProjectManifest` writes it. */
-        files: {
-          'tau.json': `${JSON.stringify(
-            {
-              $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-              id: 'project-1',
-              name: 'Bracket',
-              description: '',
-              tags: [],
-              assets: { main: { entryPath: 'main.scad' } },
-            },
-            null,
-            2,
-          )}\n`,
-        },
-      });
-      const second = two.scheduler();
-      second.start();
-      await vi.waitFor(
-        () => {
-          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
-        },
-        { timeout: 30_000 },
-      );
+        const two = await device({
+          leg,
+          label: 'b-cloud-open',
+          checkedWrites: true,
+          remoteUrl: remote.url,
+          /* `cloudProjectStub`'s manifest, as `serializeProjectManifest` writes it. */
+          files: {
+            '.tau/project.json': JSON.stringify({ version: 1, projectId }),
+            'tau.json': `${JSON.stringify(
+              {
+                $schema: projectManifestSchemaUrl,
+                name: 'Bracket',
+                description: '',
+                tags: [],
+                assets: { main: { entryPath: 'main.scad' } },
+              },
+              null,
+              2,
+            )}\n`,
+          },
+        });
+        const second = two.scheduler();
+        schedulers.push(second);
+        second.start();
+        await vi.waitFor(
+          () => {
+            expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+          },
+          { timeout: 30_000 },
+        );
 
-      expect(await two.port.readRef(mainRef)).toBe(head);
-      expect(await two.filesystem.readFile('tau.json', 'utf8')).toBe(files['tau.json']);
-      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe(files['bracket.scad']);
-      second.stop();
-    } finally {
-      await remote.close();
-    }
-  }, 180_000);
+        expect(await two.port.readRef(mainRef)).toBe(head);
+        expect(await two.filesystem.readFile('tau.json')).toEqual(manifestBytes);
+        expect(JSON.parse(await two.filesystem.readFile('.tau/project.json', 'utf8'))).toEqual({
+          version: 1,
+          projectId,
+        });
+        // Conversion changes only the checkout; the fetched revision retains its original bytes.
+        const historicalTree = await two.port.readTree(revisionId(head));
+        expect(new TextDecoder().decode(historicalTree?.get('tau.json'))).toBe(files['tau.json']);
+        expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe(files['bracket.scad']);
+        second.stop();
+      } finally {
+        for (const scheduler of schedulers) {
+          scheduler.stop();
+        }
+        await remote.close();
+      }
+    },
+    180_000,
+  );
 
   /*
    * W18 DEF-2 red pin (c): the second device holds a project it has never seen.
@@ -801,7 +866,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         ]),
       );
       await run(two.actors.branch.applySwitch, {
-        projectId: 'project-1',
+        projectId,
         branch: 'feature',
         checkoutId: undefined,
       });
@@ -1053,7 +1118,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     const conflictsOf = async (device_: Device): Promise<readonly ConflictRecord[]> => {
       const { conflicts } = await run<{ conflicts: readonly ConflictRecord[] }>(
         device_.actors.checkouts.listCheckouts,
-        { projectId: 'project-1' },
+        { projectId },
       );
       return conflicts;
     };
@@ -1139,18 +1204,18 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
       /* A decides, keeping its own version: a merge on `main` with the conflict among its parents. */
       const loaded = await run<{ paths: ReadonlyArray<{ path: string }> }>(one.actors.resolution.loadConflict, {
-        projectId: 'project-1',
+        projectId,
         revisionId: recorded,
       });
       expect(loaded.paths.map((entry) => entry.path)).toStrictEqual(['a.scad']);
       await run(one.actors.resolution.applyResolution, {
-        projectId: 'project-1',
+        projectId,
         revisionId: recorded,
         path: 'a.scad',
         side: 'mine',
       });
       const decided = await run<{ revisionId: string; branch?: string }>(one.actors.resolution.finishMerge, {
-        projectId: 'project-1',
+        projectId,
         revisionId: recorded,
       });
       expect(decided.branch).toBe(line);
@@ -1218,7 +1283,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
                 return fetch(input, init);
               },
             }),
-            checkouts: { projectId: 'project-1', root: () => filesystem },
+            checkouts: { projectId, root: () => filesystem },
           }),
       };
       try {
@@ -1737,7 +1802,7 @@ describe.runIf(gitToolchainOnPath)('the open pull’s deadline over isomorphic-g
        * recorded, and the project gets on with itself. */
       const scheduler = createActor(syncMachine.provide({ actors: one.actors.sync }), {
         input: {
-          projectId: 'project-1',
+          projectId,
           debounceMilliseconds: 5,
           retryMilliseconds: 30_000,
           pullRenderMilliseconds: 20,

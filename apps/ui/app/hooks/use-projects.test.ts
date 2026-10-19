@@ -238,7 +238,8 @@ describe('useProjects listing query', () => {
 
   it('filters the deleted rows out of the shared listing', () => {
     const entry = (id: string, deletedAt?: number) => ({
-      manifest: { id, name: id },
+      projectId: id,
+      manifest: { name: id },
       library: { lastActivityAt: 1, ...(deletedAt === undefined ? {} : { deletedAt }) },
       locator: { backend: 'indexeddb' },
     });

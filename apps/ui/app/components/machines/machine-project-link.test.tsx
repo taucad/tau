@@ -15,7 +15,8 @@ describe('machine source provenance', () => {
     const job = agentJob();
     const projects = [
       {
-        manifest: { id: job.artifact.projectId, name: 'Walnut tray' },
+        projectId: job.artifact.projectId,
+        manifest: { name: 'Walnut tray' },
         library: {},
         slugs: { workspaceSlug: 'new-home', projectSlug: 'renamed-tray' },
       },
@@ -45,7 +46,9 @@ describe('machine source provenance', () => {
   it.each([false, true])('provides an action for a missing or trashed source (trashed=%s)', async (trashed) => {
     const job = agentJob();
     getProjectListing.mockResolvedValue({
-      projects: trashed ? [{ manifest: { id: job.artifact.projectId }, library: { deletedAt: '2026-10-15' } }] : [],
+      projects: trashed
+        ? [{ projectId: job.artifact.projectId, manifest: {}, library: { deletedAt: '2026-10-15' } }]
+        : [],
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(

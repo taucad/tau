@@ -13,7 +13,7 @@ import { desktopE2EApiUrl, desktopE2EFreeTierSyncEnabled } from '#support/config
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
-  backupByDefaultLine,
+  forgetBackupByDefault,
   connectTauCloud,
   openBackupChooser,
   revisionStatus,
@@ -268,7 +268,6 @@ describe.skipIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner', () => {
     await expect
       .poll(async () => client.page.evaluate((id) => localStorage.getItem(`tau:tau-cloud-intent:${id}`), projectId))
       .toBeNull();
-    expect(await backupByDefaultLine(client.page).count(), 'D19: no line for an account the gate refuses').toBe(0);
     expect(registrations, 'D19/D23: a free owner must never register a project').toEqual([]);
     expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(0);
   }, 900_000);
@@ -590,16 +589,14 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
   }, 120_000);
 
   /* Row 1 (D16, D18). D19 now connects a new project by itself once the plan
-   * allows it, so the chooser is reached the way a person keeps a project
-   * local first: *Turn off backup* on the line D19 shows, then *Back up*. */
+   * allows it, so the project is kept local first (its intent forgotten),
+   * then *Back up* reaches the chooser. */
   it('should include 1 GB of Tau Cloud, connect, and read the figure on both clients after a reopen', async () => {
     const { client } = required(free);
     const b = required(desktop);
     allowanceProjectId = await createProject(client, allowanceName);
+    await forgetBackupByDefault(client.page, allowanceProjectId);
     await openRevisions(client);
-    const line = backupByDefaultLine(client.page);
-    await line.getByRole('button', { name: 'Turn off backup', exact: true }).click({ timeout: 120_000 });
-    await line.waitFor({ state: 'hidden', timeout: 60_000 });
 
     await openBackupChooser(client.page);
     const region = client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();

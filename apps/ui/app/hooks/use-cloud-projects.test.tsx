@@ -60,8 +60,6 @@ const {
   materializedCloudProjects,
   nextTauCloudStep,
   tauCloudIntent,
-  turnOffBackupConsequence,
-  turnOffBackupByDefault,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');
@@ -363,16 +361,6 @@ describe('useTauCloudIntentConnection', () => {
     expect(connectRemote).not.toHaveBeenCalled();
   });
 
-  it('should name the copy on Tau Cloud only once there is one', () => {
-    expect(turnOffBackupConsequence(remote('none'))).toBe('Turning it off keeps this project on this device.');
-    expect(turnOffBackupConsequence(remote('tau', 'connecting'))).toBe(
-      'Turning it off keeps this project on this device.',
-    );
-    expect(turnOffBackupConsequence(remote('tau', 'connected'))).toBe(
-      'Stops backing up. The copy already on Tau Cloud stays.',
-    );
-  });
-
   it('should never connect while the intent is default and unannounced', () => {
     tauCloudIntent.set(projectId, 'default');
 
@@ -384,11 +372,11 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBe('noticed');
   });
 
-  it('should connect nothing after the inline Turn off backup action', () => {
+  it('should connect nothing once the intent is cleared before the first revision', () => {
     tauCloudIntent.set(projectId, 'default');
     const { rerender } = renderConnection(undefined);
     act(() => {
-      turnOffBackupByDefault(projectId, remote('none'), commands);
+      tauCloudIntent.set(projectId, undefined);
     });
     rerender({ head: 'rev-1' });
 

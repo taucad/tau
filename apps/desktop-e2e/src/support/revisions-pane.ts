@@ -19,12 +19,23 @@ export const revisionStatus = (page: Page): Locator =>
   revisionStrip(page).getByRole('status', { name: 'Revision status' });
 
 /**
- * The backup-by-default line (D19): `Backs up to Tau Cloud automatically.`
- * with *Turn off backup*, shown before the first revision so the opt-out comes
- * before anything leaves the device.
+ * Opt a new project out of backup by default (D19) before its first revision.
+ *
+ * The pane offers no opt-out of its own, so this forgets the project's stored
+ * intent (`tau:tau-cloud-intent:<id>`, `use-cloud-projects.ts`) once creation
+ * has written it, then reloads so no in-memory copy survives.
  */
-export const backupByDefaultLine = (page: Page): Locator =>
-  page.locator('[data-slot="backup-by-default"]').filter({ visible: true }).first();
+export const forgetBackupByDefault = async (page: Page, projectId: string): Promise<void> => {
+  const key = `tau:tau-cloud-intent:${projectId}`;
+  await expect
+    .poll(async () => page.evaluate((intentKey) => localStorage.getItem(intentKey), key), { timeout: 60_000 })
+    .not.toBeNull();
+  await page.evaluate((intentKey) => {
+    localStorage.removeItem(`${intentKey}:account`);
+    localStorage.removeItem(intentKey);
+  }, key);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+};
 
 /** History's revision rows, newest first: one button per revision, named `Rev N · <title>`. */
 export const historyRows = (page: Page): Locator =>

@@ -363,45 +363,6 @@ export const nextTauCloudStep = (
 };
 
 /**
- * The opt-out's consequence, said wherever the opt-out is offered (RV-W11 8).
- * The copy on Tau Cloud is named only once there is one to keep.
- *
- * @param remote - The project's remote facet, when the root has answered.
- * @returns The sentence.
- * @public
- */
-export const turnOffBackupConsequence = (remote: Pick<RemoteFacet, 'kind' | 'phase'> | undefined): string =>
-  remote?.kind === 'tau' && remote.phase === 'connected'
-    ? 'Stops backing up. The copy already on Tau Cloud stays.'
-    : 'Turning it off keeps this project on this device.';
-
-/**
- * *Turn off backup* in the Revisions pane reads
- * the remote as it is now rather than as it was when the offer was drawn.
- *
- * @param projectId - The project.
- * @param remote - The live remote facet, when the root has answered.
- * @param commands - The session's disconnect and cancel verbs.
- * @public
- */
-export const turnOffBackupByDefault = (
-  projectId: string,
-  remote: Pick<RemoteFacet, 'kind' | 'phase'> | undefined,
-  commands: Readonly<{ disconnectRemote: () => void; cancelRemote: () => void }>,
-): void => {
-  tauCloudIntent.set(projectId, undefined);
-  if (remote?.kind !== 'tau') {
-    return;
-  }
-  /* A connection still being made is cancelled; one that stands is disconnected. */
-  if (remote.phase === 'connecting') {
-    commands.cancelRemote();
-  } else if (remote.phase !== 'disconnecting') {
-    commands.disconnectRemote();
-  }
-};
-
-/**
  * The account, as far as backup by default cares (D19).
  *
  * @returns The session's answer and W8's entitlement.

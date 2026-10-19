@@ -19,7 +19,7 @@ import {
 } from '#support/gateway-fixture.js';
 import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
 import {
-  backupByDefaultLine,
+  forgetBackupByDefault,
   connectTauCloud,
   historyRows,
   openBackupChooser,
@@ -235,11 +235,10 @@ const openSyncRegion = async (client: PageClient): Promise<void> => {
  * Opt a new project out of backup by default (D19) before its first revision,
  * for a row whose subject is another remote or a project kept on this device.
  */
-const turnOffDefaultBackup = async (client: PageClient): Promise<void> => {
+const turnOffDefaultBackup = async (client: BrowserClient, slug: string): Promise<void> => {
+  const projectId = required(await browserProjectId(client, slug), 'D19: the project id is absent.');
+  await forgetBackupByDefault(client.page, projectId);
   await openRevisionsPane(client);
-  const line = backupByDefaultLine(client.page);
-  await line.getByRole('button', { name: 'Turn off backup', exact: true }).click({ timeout: 120_000 });
-  await line.waitFor({ state: 'hidden', timeout: 60_000 });
 };
 
 /** Connect Tau Cloud, or let D19's default connection do it (`connectTauCloud`). */
@@ -2384,8 +2383,7 @@ describe('a git remote', () => {
     if (!browser || !gitRemote) {
       throw new Error('The browser client or the git fixture did not start.');
     }
-    await createProjectInBrowser(browser, 'W18 Git Remote');
-    await turnOffDefaultBackup(browser);
+    await turnOffDefaultBackup(browser, await createProjectInBrowser(browser, 'W18 Git Remote'));
     await openSyncRegion(browser);
     const syncRegion = browser.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).last();
     await syncRegion.getByRole('radio', { name: 'Git remote' }).click();
@@ -2774,9 +2772,6 @@ describe('backup by default and one library', () => {
     slug = await createProjectInBrowser(client, name);
     projectId = required(await browserProjectId(client, slug), 'D19: the project id is absent.');
     await openRevisionsPane(client);
-    /* The opt-out is offered before anything leaves the device. */
-    await expect.poll(async () => backupByDefaultLine(client.page).count(), { timeout: 120_000 }).toBe(1);
-    expect(await backupByDefaultLine(client.page).textContent()).toContain('Backs up to Tau Cloud automatically.');
     await saveRevisionInBrowser(client);
     await expect
       .poll(async () => statusText(client), {
@@ -2822,11 +2817,10 @@ describe('backup by default and one library', () => {
     const second = required(desktop, 'The desktop client did not launch.');
     const keptSlug = await createProjectInBrowser(client, optedOutName);
     const keptId = required(await browserProjectId(client, keptSlug), 'D19: the project id is absent.');
-    await turnOffDefaultBackup(client);
+    await turnOffDefaultBackup(client, keptSlug);
     await client.page.reload({ waitUntil: 'domcontentloaded' });
     await openRevisionsPane(client);
     await expect.poll(async () => statusText(client), { timeout: 120_000 }).toBe('Nothing saved yet');
-    expect(await backupByDefaultLine(client.page).count(), 'D19: the opt-out survives a reload').toBe(0);
     await saveRevisionInBrowser(client);
     await expect.poll(async () => statusText(client), { timeout: 120_000 }).toBe('Saved on this device');
 

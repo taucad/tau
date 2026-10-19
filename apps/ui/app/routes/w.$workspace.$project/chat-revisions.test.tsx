@@ -1276,63 +1276,26 @@ describe('Revisions pane vocabulary and History', () => {
 });
 
 /**
- * D19: a new project on an entitled account backs up by default, with one line
- * in *Where you are* and a per-project opt-out. The default connection itself
- * is the session's (`project-live-sessions.test.tsx`); this is what the person
- * sees and turns off.
+ * D19: a new project on an entitled account backs up by default. The default
+ * connection itself is the session's (`project-live-sessions.test.tsx`); the
+ * pane adds no line of its own about it, before or after.
  */
 describe('Backup by default (D19)', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it.each(['default', 'noticed'] as const)(
-    'offers the opt-out, with its consequence, before the first revision leaves the device (%s)',
-    async (intent) => {
-      const user = userEvent.setup();
-      tauCloudIntent.set('p', intent);
+  it.each(['default', 'noticed'] as const)('shows no backup line before the first revision (%s)', async (intent) => {
+    tauCloudIntent.set('p', intent);
 
-      renderPane();
-
-      const line = await screen.findByRole('group', { name: 'Backup by default' });
-      expect(line).toHaveTextContent('Backs up to Tau Cloud automatically.');
-      /* Nothing is on Tau Cloud yet, so no copy there is promised (W10-L B-1). */
-      expect(line).toHaveTextContent('Turning it off keeps this project on this device.');
-      expect(line).not.toHaveTextContent('The copy already on Tau Cloud stays.');
-      await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
-
-      /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
-      expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
-      expect(tauCloudIntent.get('p')).toBeUndefined();
-      expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
-    },
-  );
-
-  it('cancels a default connection still being made rather than disconnecting it', async () => {
-    const user = userEvent.setup();
-    tauCloudIntent.set('p', 'connected');
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      headRevisionId: 'rev-1',
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
-    };
     renderPane();
-    const line = await screen.findByRole('group', { name: 'Backup by default' });
-    /* The live remote, read when the button is pressed, has moved on from the drawn one. */
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connecting' },
-    };
 
-    await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
-
-    expect(revisionStatusHarness.commands.cancelRemote).toHaveBeenCalledOnce();
-    expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
-    expect(tauCloudIntent.get('p')).toBeUndefined();
+    expect(await screen.findByRole('region', { name: 'Where you are' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Turn off backup' })).not.toBeInTheDocument();
   });
 
-  it('reads Saved · Backed up after the default connection, with no Connect step, and turns it off', async () => {
-    const user = userEvent.setup();
+  it('reads Saved · Backed up after the default connection, with no Connect step and no line', async () => {
     tauCloudIntent.set('p', 'connected');
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
@@ -1347,40 +1310,7 @@ describe('Backup by default (D19)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Backed up');
     });
-    expect(screen.getByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
-    expect(screen.getByText('Stops backing up. The copy already on Tau Cloud stays.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Turn off backup' }));
-
-    expect(revisionStatusHarness.commands.disconnectRemote).toHaveBeenCalledOnce();
-    expect(tauCloudIntent.get('p')).toBeUndefined();
-  });
-
-  it('dismisses the line and keeps the backup', async () => {
-    const user = userEvent.setup();
-    tauCloudIntent.set('p', 'connected');
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      headRevisionId: 'rev-1',
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
-    };
-
-    renderPane();
-    const line = await screen.findByRole('group', { name: 'Backup by default' });
-    await user.click(within(line).getByRole('button', { name: 'Dismiss' }));
-
-    expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
-  });
-
-  it('should show the pending inline offer immediately before the first save', async () => {
-    tauCloudIntent.set('p', 'noticed');
-    renderPane();
-    expect(await screen.findByRole('group', { name: 'Backup by default' })).toHaveTextContent('Turn off backup');
-  });
-
-  it('shows no line for a project nothing is owed on', () => {
-    renderPane();
-
-    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Turn off backup' })).not.toBeInTheDocument();
   });
 });

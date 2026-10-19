@@ -367,6 +367,41 @@ describe('FileSystemAccessProvider', () => {
   });
 
   describe('directory handle cache', () => {
+    it('should reuse enumerated directories while reading fresh file bytes', async () => {
+      await provider.writeFile('project/tau.json', 'first');
+      await provider.refresh();
+      const getDirectory = vi.spyOn(rootHandle, 'getDirectoryHandle');
+
+      expect(await provider.readdirEntries('')).toEqual([{ name: 'project', kind: 'dir' }]);
+      await expect(provider.readFile('project/tau.json', 'utf8')).resolves.toBe('first');
+      expect(getDirectory).not.toHaveBeenCalled();
+
+      await provider.writeFile('project/tau.json', 'updated');
+      await expect(provider.readFile('project/tau.json', 'utf8')).resolves.toBe('updated');
+    });
+
+    it('should not restore enumerated handles after a refresh during listing', async () => {
+      await provider.writeFile('project/tau.json', 'old');
+      await provider.refresh();
+      const oldHandle = await rootHandle.getDirectoryHandle('project');
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      vi.spyOn(rootHandle, 'entries').mockImplementationOnce(async function* () {
+        entered.resolve();
+        await release.promise;
+        yield ['project', oldHandle];
+      });
+      const listing = provider.readdirEntries('');
+      await entered.promise;
+      await rootHandle.removeEntry('project', { recursive: true });
+      await provider.writeFile('project/tau.json', 'new');
+      await provider.refresh(['project']);
+      release.resolve();
+      await listing;
+
+      await expect(provider.readFile('project/tau.json', 'utf8')).resolves.toBe('new');
+    });
+
     it('should cache handles for repeated directory resolution', async () => {
       await provider.mkdir('cached/nested', { recursive: true });
       await provider.writeFile('cached/nested/a.txt', 'a');
@@ -443,6 +478,21 @@ describe('FileSystemAccessProvider', () => {
       await expect(provider.readdir('cached')).resolves.toEqual([]);
       await provider.refresh();
       await expect(provider.readdir('cached')).resolves.toEqual(['new.txt']);
+    });
+
+    it('should clear every descendant when a scoped refresh names the root', async () => {
+      await provider.writeFile('cached/file.txt', 'old');
+      await provider.readdirEntries('');
+      await rootHandle.removeEntry('cached', { recursive: true });
+      const replacement = await rootHandle.getDirectoryHandle('cached', { create: true });
+      const file = await replacement.getFileHandle('file.txt', { create: true });
+      const writable = await file.createWritable();
+      await writable.write(new TextEncoder().encode('new'));
+      await writable.close();
+
+      await provider.refresh(['']);
+
+      await expect(provider.readFile('cached/file.txt', 'utf8')).resolves.toBe('new');
     });
 
     it('keeps handles outside the named prefixes when refresh is scoped', async () => {

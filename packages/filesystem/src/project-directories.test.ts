@@ -436,7 +436,7 @@ describe('WorkspaceFileService', () => {
 
     it('probes manifests with bounded concurrency in deterministic order', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-      const names = Array.from({ length: 40 }, (_, index) => `p${String(index).padStart(2, '0')}`);
+      const names = Array.from({ length: 150 }, (_, index) => `p${String(index).padStart(3, '0')}`);
       for (const [index, name] of names.entries()) {
         // oxlint-disable-next-line no-await-in-loop -- Fixture writes are sequential for determinism.
         await writeManifest(provider, name, manifestProject(`proj_${String(index).padStart(21, 'z')}`));
@@ -461,8 +461,8 @@ describe('WorkspaceFileService', () => {
       const result = await service.listProjectManifests();
 
       expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names);
-      // Sixteen directories each read declaration and identity concurrently.
-      expect(maxInFlight).toBe(32);
+      // Sixty-four directories each read declaration and identity concurrently.
+      expect(maxInFlight).toBe(128);
     });
 
     it('discovers out-of-band project creation from the external-change path without refreshing per scan', async () => {

@@ -194,10 +194,20 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._assertReady();
     this._assertRootedPath(path);
+    const generation = this._handleGeneration;
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const entries: DirectoryEntry[] = [];
     for await (const [name, handle] of directoryEntries(directoryHandle)) {
       entries.push({ name, kind: handle.kind === 'directory' ? 'dir' : 'file' });
+      // Enumeration already supplied the same directory capability that a
+      // following child read would otherwise acquire in a separate browser call.
+      // Keep the existing bounded cache and refresh fencing; never retain bytes.
+      if (handle.kind === 'directory' && generation === this._handleGeneration) {
+        const childPath = path === '' ? name : `${path}/${name}`;
+        if (!this._handleCache.has(childPath)) {
+          this._setHandleCache(childPath, handle);
+        }
+      }
     }
     return entries;
   }
@@ -917,6 +927,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   private _invalidateHandleCachePrefix(path: string): void {
     this._handleGeneration++;
     this._pendingDirectoryHandles.clear();
+    if (path === '') {
+      this._handleCache.clear();
+      return;
+    }
     const prefix = path + '/';
     for (const key of this._handleCache.keys()) {
       if (key === path || key.startsWith(prefix)) {

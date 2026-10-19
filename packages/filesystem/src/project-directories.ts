@@ -79,7 +79,7 @@ import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
-const manifestProbeConcurrency = 16;
+const manifestProbeConcurrency = 64;
 
 /** Declaration or generated-identity failure affecting one discovery entry. @public */
 export type ProjectDiscoveryIssue =

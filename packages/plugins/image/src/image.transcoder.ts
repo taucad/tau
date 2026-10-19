@@ -144,7 +144,8 @@ export const imageTranscoder = defineTranscoder({
   // Bump whenever the renderer's output bytes change for identical input, or
   // persisted export caches keep serving images from the previous renderer.
   // 12.0.0 = scale-independent ambient occlusion normals.
-  version: '12.0.0',
+  // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
+  version: '13.0.0',
   edges,
 
   async initialize() {
@@ -288,6 +289,10 @@ export const imageTranscoder = defineTranscoder({
         presentationBuilds: timings.presentationBuilds,
         sceneUploads: timings.sceneUploads,
         targetAllocations: timings.targetAllocations,
+        sectionSourceCount: timings.sections.length,
+        sectionUncertifiedSourceCount: timings.sections.filter(({ certified }) => !certified).length,
+        sectionClosedLoopCount: timings.sections.reduce((total, { closedLoops }) => total + closedLoops, 0),
+        sectionOpenChainCount: timings.sections.reduce((total, { openChains }) => total + openChains, 0),
       });
       /* oxlint-enable tau-lint/no-time-unit-suffix */
       const data = images.map(({ file }) => toExportFile(file));

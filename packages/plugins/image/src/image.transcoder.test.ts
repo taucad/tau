@@ -49,6 +49,10 @@ const timings: RenderModule.RenderTimings = {
   sceneUploads: 1,
   targetAllocations: 0,
   views: [{ id: 'single', render: 5, overlay: 6, encode: 7 }],
+  sections: [
+    { plane: 0, nodeIndex: 0, meshIndex: 0, primitiveIndex: 0, certified: true, closedLoops: 2, openChains: 0 },
+    { plane: 0, nodeIndex: 1, meshIndex: 1, primitiveIndex: 0, certified: false, closedLoops: 3, openChains: 1 },
+  ],
 };
 
 const timedImages = (
@@ -92,7 +96,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('12.0.0');
+      expect(imageDefinition.version).toBe('13.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -396,6 +400,10 @@ describe('image transcoder', () => {
           encodeMs: 7,
           glbParses: 1,
           sceneUploads: 1,
+          sectionSourceCount: 2,
+          sectionUncertifiedSourceCount: 1,
+          sectionClosedLoopCount: 5,
+          sectionOpenChainCount: 1,
         }),
       );
       /* oxlint-enable tau-lint/no-time-unit-suffix */

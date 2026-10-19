@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { DockviewTabsComboBox } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
+
+const toggleWorkbenchKeyCombination = {
+  key: 'w',
+  ctrlKey: true,
+} satisfies KeyCombination;
 
 type WorkbenchToggleProperties = {
   readonly isOpen: boolean;
@@ -96,6 +104,11 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
     isSuppressed.current = true;
     setIsMenuOpen(false);
   };
+
+  const { formattedKeyCombination } = useKeybinding(toggleWorkbenchKeyCombination, () => {
+    closeMenu();
+    onOpenChange(!isOpen);
+  });
 
   useEffect(() => cancelClose, []);
 
@@ -195,6 +208,13 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
       <WorkbenchToggleButton
         ref={triggerRef}
         isOpen={isOpen}
+        aria-keyshortcuts='Control+W'
+        tooltip={
+          <span className='flex items-center gap-2'>
+            Toggle Workbench
+            <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+          </span>
+        }
         count={canList ? panels.length : undefined}
         aria-description={canList ? `${panels.length} open tabs. Press Down Arrow to list them.` : undefined}
         onPointerEnter={(event) => {

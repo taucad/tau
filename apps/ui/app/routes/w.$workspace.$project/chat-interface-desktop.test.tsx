@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const send = vi.fn();
@@ -101,9 +102,11 @@ const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
 
 const renderDesktop = () =>
   render(
-    <TooltipProvider>
-      <ChatInterfaceDesktop />
-    </TooltipProvider>,
+    <KeyboardProvider>
+      <TooltipProvider>
+        <ChatInterfaceDesktop />
+      </TooltipProvider>
+    </KeyboardProvider>,
   );
 
 const resizeTo = (width: number): void => {

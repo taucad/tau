@@ -1,4 +1,6 @@
 import { Profiler } from 'react';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import userEvent from '@testing-library/user-event';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanel } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
@@ -57,10 +59,12 @@ const createApi = (initial: IDockviewPanel[]): { api: DockviewApi; setPanels: (p
 const renderToggle = (properties: Partial<React.ComponentProps<typeof WorkbenchToggle>> & { api?: DockviewApi }) => {
   const onOpenChange = vi.fn();
   const view = render(
-    <TooltipProvider>
-      <button type='button'>Editor</button>
-      <WorkbenchToggle isOpen={false} onOpenChange={onOpenChange} {...properties} />
-    </TooltipProvider>,
+    <KeyboardProvider>
+      <TooltipProvider delayDuration={0}>
+        <button type='button'>Editor</button>
+        <WorkbenchToggle isOpen={false} onOpenChange={onOpenChange} {...properties} />
+      </TooltipProvider>
+    </KeyboardProvider>,
   );
   return { onOpenChange, view, trigger: screen.getByRole('button', { name: 'Toggle Workbench lane' }) };
 };
@@ -92,16 +96,61 @@ afterEach(() => {
 });
 
 describe('WorkbenchToggle', () => {
+  it('should toggle with Control+W using the current lane state and unregister on unmount', () => {
+    const { trigger, onOpenChange, view } = renderToggle({});
+    expect(trigger).toHaveAttribute('aria-keyshortcuts', 'Control+W');
+    fireEvent.keyDown(document.body, { key: 'w' });
+    fireEvent.keyDown(document.body, { key: 'w', metaKey: true });
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    expect(fireEvent.keyDown(document.body, { key: 'w', ctrlKey: true })).toBe(false);
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(true);
+    view.rerender(
+      <KeyboardProvider>
+        <TooltipProvider>
+          <WorkbenchToggle isOpen onOpenChange={onOpenChange} />
+        </TooltipProvider>
+      </KeyboardProvider>,
+    );
+    onOpenChange.mockClear();
+    fireEvent.keyDown(document.body, { key: 'w', ctrlKey: true });
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+
+    view.unmount();
+    onOpenChange.mockClear();
+    fireEvent.keyDown(document.body, { key: 'w', ctrlKey: true });
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should close the open-tabs list when toggled with Control+W', () => {
+    const { trigger, onOpenChange } = renderToggle({ api: createApi([createPanel('one')]).api });
+    hover(trigger);
+    fireEvent.keyDown(document.body, { key: 'w', ctrlKey: true });
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('should show the shortcut in the tooltip', async () => {
+    const user = userEvent.setup();
+    const { trigger } = renderToggle({});
+    await user.hover(trigger);
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Toggle Workbench');
+    expect(within(tooltip).getByText('Ctrl+W')).toBeInTheDocument();
+  });
+
   it('should ignore layout notifications when the tab list is unchanged', () => {
     const panels = [createPanel('one')];
     const workbench = createApi(panels);
     const commit = vi.fn();
     render(
-      <TooltipProvider>
-        <Profiler id='toggle' onRender={commit}>
-          <WorkbenchToggle isOpen={false} onOpenChange={vi.fn()} api={workbench.api} />
-        </Profiler>
-      </TooltipProvider>,
+      <KeyboardProvider>
+        <TooltipProvider delayDuration={0}>
+          <Profiler id='toggle' onRender={commit}>
+            <WorkbenchToggle isOpen={false} onOpenChange={vi.fn()} api={workbench.api} />
+          </Profiler>
+        </TooltipProvider>
+      </KeyboardProvider>,
     );
     commit.mockClear();
     workbench.setPanels(panels);

@@ -13,7 +13,8 @@ const exporterFor = (mode: string, overrides: Partial<CommandExporterOptions> = 
     extensions: ['py'],
     command: [process.execPath, fixture],
     capabilities: { formats: ['glb'], parameters: true, region: true },
-    env: { MODE: mode },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are SCREAMING_SNAKE.
+    env: { GEOSPEC_FIXTURE_MODE: mode },
     ...overrides,
   });
 

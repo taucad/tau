@@ -1,4 +1,4 @@
-// A subprocess protocol 1 exporter for tests. MODE selects the response it gives.
+// A subprocess protocol 1 exporter for tests. GEOSPEC_FIXTURE_MODE selects the response it gives.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -13,7 +13,7 @@ const print = (document: unknown): void => {
   process.stdout.write(JSON.stringify(document));
 };
 
-const { MODE: mode } = process.env;
+const { GEOSPEC_FIXTURE_MODE: mode } = process.env;
 
 switch (mode) {
   case 'refuse': {

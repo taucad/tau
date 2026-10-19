@@ -1,6 +1,6 @@
 # geospec — Types
 
-90 top-level symbols. Signatures are verbatim typescript.
+92 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -1832,6 +1832,11 @@ CreateModelLoaderOptions: {
     runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
     /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
     sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+    /**
+     * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
+     * `extensions` claim the file exports it.
+     */
+    exporters?: readonly GeoSpecModelExporter[];
     /** Project root used by runtime integrations. */
     projectPath?: string;
     /** STEP reader strategy used for STEP sources or exports. */
@@ -1859,6 +1864,9 @@ CreateModelLoaderOptions: {
   // Source-specific runtime adapters, e.g
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
+  // Model exporters for source-kind files, consulted when no runtime is configured
+  exporters?: readonly GeoSpecModelExporter[]
+
   // Project root used by runtime integrations
   projectPath?: string
 
@@ -1874,6 +1882,33 @@ CreateModelLoaderOptions: {
   // Angular tolerance in degrees used while meshing exact BRep evidence
   meshAngularToleranceDegrees?: number
 
+// What a {@link GeoSpecModelExporter} declares it can do
+GeoSpecExporterCapabilities: {
+    /** The formats `export` produces; at least one. A GLB-only exporter refuses STEP loads up front. */
+    readonly formats: readonly GeoSpecExportFormat[];
+    /** Accepts `parameters`. Without it, a load that passes parameters refuses. */
+    readonly parameters?: boolean;
+    /** Crops to `region` (an axis-aligned millimetre box) before export. Without it, a region load refuses. */
+    readonly region?: boolean;
+    /** Accepts `inline` sources, which back `loadModel({ code })`. Without it, an inline load refuses. */
+    readonly inlineSources?: boolean;
+}
+
+  // The formats `export` produces
+  readonly formats: readonly GeoSpecExportFormat[]
+
+  // Accepts `parameters`
+  readonly parameters?: boolean
+
+  // Crops to `region` (an axis-aligned millimetre box) before export
+  readonly region?: boolean
+
+  // Accepts `inline` sources, which back `loadModel({ code })`
+  readonly inlineSources?: boolean
+
+// Formats a {@link GeoSpecModelExporter} may produce from a source-kind file
+GeoSpecExportFormat: Extract<GeoSpecModelFormat, 'glb' | 'step'>
+
 // Axis-aligned crop box in canonical Z-up millimetres
 GeoSpecLoadRegion: {
     readonly min: readonly [number, number, number];
@@ -1883,6 +1918,115 @@ GeoSpecLoadRegion: {
   readonly min: readonly [number, number, number]
 
   readonly max: readonly [number, number, number]
+
+// The bytes an exporter returns, in the canonical Z-up millimetre frame
+GeoSpecModelArtifact: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+    readonly format: GeoSpecExportFormat;
+    /** Unit of raw GLB coordinates; defaults to `'mm'`. STEP carries its own unit. */
+    readonly sourceUnit?: GeoSpecUnit;
+    /** External resources the primary bytes reference, by name. */
+    readonly resources?: ReadonlyArray<{
+        readonly name: string;
+        readonly bytes: Uint8Array<ArrayBuffer>;
+    }>;
+    /**
+     * Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits,
+     * optionally prefixed `sha256:`). The load records it as the subject's source revision.
+     */
+    readonly consumedSources?: ReadonlyArray<{
+        readonly path: string;
+        readonly sha256: string;
+    }>;
+}
+
+  readonly bytes: Uint8Array<ArrayBuffer>
+
+  readonly format: GeoSpecExportFormat
+
+  // Unit of raw GLB coordinates
+  readonly sourceUnit?: GeoSpecUnit
+
+  // External resources the primary bytes reference, by name
+  readonly resources?: ReadonlyArray<{
+          readonly name: string;
+          readonly bytes: Uint8Array<ArrayBuffer>;
+      }>
+
+  // Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits, optionally prefixed `sha256:`)
+  readonly consumedSources?: ReadonlyArray<{
+          readonly path: string;
+          readonly sha256: string;
+      }>
+
+// Turns a source-kind model file into GLB or STEP bytes for GeoSpec
+GeoSpecModelExporter: {
+    readonly id: string;
+    readonly extensions: readonly string[];
+    readonly capabilities: GeoSpecExporterCapabilities;
+    export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
+    /** Releases what the exporter holds; called by whoever constructed it, never by the loader. */
+    close?(): Promise<void>;
+}
+
+  readonly id: string
+
+  readonly extensions: readonly string[]
+
+  readonly capabilities: GeoSpecExporterCapabilities
+
+  // GeoSpecModelExporter.export (method)
+  export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
+
+  // Releases what the exporter holds
+  // GeoSpecModelExporter.close (method)
+  close?(): Promise<void>;
+
+// One export request
+GeoSpecModelExportRequest: {
+    /** Entry file, as a path from the project root. */
+    readonly file: string;
+    /** Absolute project root the exporter resolves `file` and its imports against, when the host has one. */
+    readonly projectPath?: string;
+    readonly format: GeoSpecExportFormat;
+    /** JSON-serialisable parameter values; present only when the exporter declares `parameters`. */
+    readonly parameters?: Readonly<Record<string, unknown>>;
+    /** Tessellation tolerances for a mesh export. */
+    readonly mesh?: {
+        readonly linearTolerance?: number;
+        readonly angularToleranceDegrees?: number;
+    };
+    /** Millimetre crop box; present only when the exporter declares `region`. */
+    readonly region?: GeoSpecLoadRegion;
+    /** Source text keyed by project-relative path; present only when the exporter declares `inlineSources`. */
+    readonly inline?: Readonly<Record<string, string>>;
+    readonly signal?: AbortSignal;
+}
+
+  // Entry file, as a path from the project root
+  readonly file: string
+
+  // Absolute project root the exporter resolves `file` and its imports against, when the host has one
+  readonly projectPath?: string
+
+  readonly format: GeoSpecExportFormat
+
+  // JSON-serialisable parameter values
+  readonly parameters?: Readonly<Record<string, unknown>>
+
+  // Tessellation tolerances for a mesh export
+  readonly mesh?: {
+          readonly linearTolerance?: number;
+          readonly angularToleranceDegrees?: number;
+      }
+
+  // Millimetre crop box
+  readonly region?: GeoSpecLoadRegion
+
+  // Source text keyed by project-relative path
+  readonly inline?: Readonly<Record<string, string>>
+
+  readonly signal?: AbortSignal
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
@@ -1897,52 +2041,3 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
 
   // ManagedGeoSpecModelLoader.dispose (method)
   dispose(): Promise<void>;
-
-// Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown' | 'snapshotSource' | 'describe'>> & {
-    open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
-    on?(event: 'telemetry', handler: (batch: {
-        readonly entries: ReadonlyArray<{
-            name: string;
-            duration: number;
-            startTime: number;
-            workerTimeOrigin: number;
-        }>;
-    }) => void): () => void;
-}
-
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
-
-  // GeoSpecRuntimeClient.on (method)
-  on?(event: 'telemetry', handler: (batch: {
-          readonly entries: ReadonlyArray<{
-              name: string;
-              duration: number;
-              startTime: number;
-              workerTimeOrigin: number;
-          }>;
-      }) => void): () => void;
-
-// Lazy runtime factory consumed by `geospec/model`
-GeoSpecRuntimeClientFactory: () => Promise<GeoSpecRuntimeClient>
-
-// Explicit source adapter for formats whose runtime setup is not part of the generic Tau runtime preset
-GeoSpecRuntimeSourceAdapter: {
-    id: string;
-    extensions: readonly string[];
-    createRuntime(options: {
-        projectPath?: string;
-        file?: string;
-    }): Promise<GeoSpecRuntimeClient>;
-}
-
-  id: string
-
-  extensions: readonly string[]
-
-  // GeoSpecRuntimeSourceAdapter.createRuntime (method)
-  createRuntime(options: {
-          projectPath?: string;
-          file?: string;
-      }): Promise<GeoSpecRuntimeClient>;

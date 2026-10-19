@@ -37,6 +37,7 @@
     "./engine": "./src/engine/index.ts",
     "./mesh": "./src/mesh/index.ts",
     "./model": "./src/model/index.ts",
+    "./model/node": "./src/model/node/index.ts",
     "./runner": "./src/runner/index.ts",
     "./runner/native": "./src/runner/native/index.ts",
     "./runner/node": "./src/runner/node/index.ts",
@@ -70,6 +71,11 @@
         "types": "./dist/model/index.d.mts",
         "import": "./dist/model/index.mjs",
         "default": "./dist/model/index.mjs"
+      },
+      "./model/node": {
+        "types": "./dist/model/node/index.d.mts",
+        "import": "./dist/model/node/index.mjs",
+        "default": "./dist/model/node/index.mjs"
       },
       "./runner": {
         "types": "./dist/runner/index.d.mts",

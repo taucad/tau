@@ -1,6 +1,6 @@
 # geospec — Functions
 
-38 top-level symbols. Signatures are verbatim typescript.
+39 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -81,6 +81,12 @@ export declare function resolveRuntimeExportIntent(options: {
      */
     kernelId?: string;
 }): RuntimeExportIntent | RuntimeExportIntentFailure;
+
+// Create a model exporter that runs a command speaking GeoSpec subprocess protocol 1
+// Throws: TypeError when the options are incomplete or declare `inlineSources`.
+// commandExporter (function)
+export declare function commandExporter(options: CommandExporterOptions): GeoSpecModelExporter;
+//   options: The exporter's identity, command and declared capabilities
 
 // clearCollectorGlobals (function)
 export declare function clearCollectorGlobals(): void;

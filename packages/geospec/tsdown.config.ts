@@ -11,6 +11,7 @@ const packageConfig: UserConfig = {
     'src/engine/index.ts',
     'src/mesh/index.ts',
     'src/model/index.ts',
+    'src/model/node/index.ts',
     'src/runner/index.ts',
     'src/runner/native/index.ts',
     'src/runner/node/index.ts',

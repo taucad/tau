@@ -1,6 +1,6 @@
 # geospec — Types
 
-69 top-level symbols. Signatures are verbatim typescript.
+72 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -1419,6 +1419,11 @@ CreateModelLoaderOptions: {
     runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
     /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
     sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+    /**
+     * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
+     * `extensions` claim the file exports it.
+     */
+    exporters?: readonly GeoSpecModelExporter[];
     /** Project root used by runtime integrations. */
     projectPath?: string;
     /** STEP reader strategy used for STEP sources or exports. */
@@ -1446,6 +1451,9 @@ CreateModelLoaderOptions: {
   // Source-specific runtime adapters, e.g
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
+  // Model exporters for source-kind files, consulted when no runtime is configured
+  exporters?: readonly GeoSpecModelExporter[]
+
   // Project root used by runtime integrations
   projectPath?: string
 
@@ -1461,6 +1469,33 @@ CreateModelLoaderOptions: {
   // Angular tolerance in degrees used while meshing exact BRep evidence
   meshAngularToleranceDegrees?: number
 
+// What a {@link GeoSpecModelExporter} declares it can do
+GeoSpecExporterCapabilities: {
+    /** The formats `export` produces; at least one. A GLB-only exporter refuses STEP loads up front. */
+    readonly formats: readonly GeoSpecExportFormat[];
+    /** Accepts `parameters`. Without it, a load that passes parameters refuses. */
+    readonly parameters?: boolean;
+    /** Crops to `region` (an axis-aligned millimetre box) before export. Without it, a region load refuses. */
+    readonly region?: boolean;
+    /** Accepts `inline` sources, which back `loadModel({ code })`. Without it, an inline load refuses. */
+    readonly inlineSources?: boolean;
+}
+
+  // The formats `export` produces
+  readonly formats: readonly GeoSpecExportFormat[]
+
+  // Accepts `parameters`
+  readonly parameters?: boolean
+
+  // Crops to `region` (an axis-aligned millimetre box) before export
+  readonly region?: boolean
+
+  // Accepts `inline` sources, which back `loadModel({ code })`
+  readonly inlineSources?: boolean
+
+// Formats a {@link GeoSpecModelExporter} may produce from a source-kind file
+GeoSpecExportFormat: Extract<GeoSpecModelFormat, 'glb' | 'step'>
+
 // Axis-aligned crop box in canonical Z-up millimetres
 GeoSpecLoadRegion: {
     readonly min: readonly [number, number, number];
@@ -1470,6 +1505,115 @@ GeoSpecLoadRegion: {
   readonly min: readonly [number, number, number]
 
   readonly max: readonly [number, number, number]
+
+// The bytes an exporter returns, in the canonical Z-up millimetre frame
+GeoSpecModelArtifact: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+    readonly format: GeoSpecExportFormat;
+    /** Unit of raw GLB coordinates; defaults to `'mm'`. STEP carries its own unit. */
+    readonly sourceUnit?: GeoSpecUnit;
+    /** External resources the primary bytes reference, by name. */
+    readonly resources?: ReadonlyArray<{
+        readonly name: string;
+        readonly bytes: Uint8Array<ArrayBuffer>;
+    }>;
+    /**
+     * Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits,
+     * optionally prefixed `sha256:`). The load records it as the subject's source revision.
+     */
+    readonly consumedSources?: ReadonlyArray<{
+        readonly path: string;
+        readonly sha256: string;
+    }>;
+}
+
+  readonly bytes: Uint8Array<ArrayBuffer>
+
+  readonly format: GeoSpecExportFormat
+
+  // Unit of raw GLB coordinates
+  readonly sourceUnit?: GeoSpecUnit
+
+  // External resources the primary bytes reference, by name
+  readonly resources?: ReadonlyArray<{
+          readonly name: string;
+          readonly bytes: Uint8Array<ArrayBuffer>;
+      }>
+
+  // Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits, optionally prefixed `sha256:`)
+  readonly consumedSources?: ReadonlyArray<{
+          readonly path: string;
+          readonly sha256: string;
+      }>
+
+// Turns a source-kind model file into GLB or STEP bytes for GeoSpec
+GeoSpecModelExporter: {
+    readonly id: string;
+    readonly extensions: readonly string[];
+    readonly capabilities: GeoSpecExporterCapabilities;
+    export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
+    /** Releases what the exporter holds; called by whoever constructed it, never by the loader. */
+    close?(): Promise<void>;
+}
+
+  readonly id: string
+
+  readonly extensions: readonly string[]
+
+  readonly capabilities: GeoSpecExporterCapabilities
+
+  // GeoSpecModelExporter.export (method)
+  export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
+
+  // Releases what the exporter holds
+  // GeoSpecModelExporter.close (method)
+  close?(): Promise<void>;
+
+// One export request
+GeoSpecModelExportRequest: {
+    /** Entry file, as a path from the project root. */
+    readonly file: string;
+    /** Absolute project root the exporter resolves `file` and its imports against, when the host has one. */
+    readonly projectPath?: string;
+    readonly format: GeoSpecExportFormat;
+    /** JSON-serialisable parameter values; present only when the exporter declares `parameters`. */
+    readonly parameters?: Readonly<Record<string, unknown>>;
+    /** Tessellation tolerances for a mesh export. */
+    readonly mesh?: {
+        readonly linearTolerance?: number;
+        readonly angularToleranceDegrees?: number;
+    };
+    /** Millimetre crop box; present only when the exporter declares `region`. */
+    readonly region?: GeoSpecLoadRegion;
+    /** Source text keyed by project-relative path; present only when the exporter declares `inlineSources`. */
+    readonly inline?: Readonly<Record<string, string>>;
+    readonly signal?: AbortSignal;
+}
+
+  // Entry file, as a path from the project root
+  readonly file: string
+
+  // Absolute project root the exporter resolves `file` and its imports against, when the host has one
+  readonly projectPath?: string
+
+  readonly format: GeoSpecExportFormat
+
+  // JSON-serialisable parameter values
+  readonly parameters?: Readonly<Record<string, unknown>>
+
+  // Tessellation tolerances for a mesh export
+  readonly mesh?: {
+          readonly linearTolerance?: number;
+          readonly angularToleranceDegrees?: number;
+      }
+
+  // Millimetre crop box
+  readonly region?: GeoSpecLoadRegion
+
+  // Source text keyed by project-relative path
+  readonly inline?: Readonly<Record<string, string>>
+
+  readonly signal?: AbortSignal
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
@@ -1705,112 +1849,3 @@ LoadModelFileOptions: {
 
   // Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model can be checked region by region
   region?: GeoSpecLoadRegion
-
-// Options accepted by {@link import ('./load-model.js').loadModel}
-LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
-
-  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
-  rootDir?: string
-
-  // Geometry format to export
-  format?: GeoSpecModelFormat
-
-  // Explicit parameters passed to the runtime
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP exports
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-// Direct geometry-source model load options
-LoadModelSourceOptions: {
-    /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
-    source: MeshSource | StepSource;
-    /** Named external resources consumed alongside the direct geometry bytes. */
-    resources?: ReadonlyArray<{
-        readonly name: string;
-        readonly source: MeshSource | StepSource;
-    }>;
-    /**
-     * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
-     * project root. Recorded in the load evidence.
-     */
-    rootDir?: string;
-    /** Source geometry format. Defaults to `glb`. */
-    format?: GeoSpecModelFormat;
-    /** Source path recorded in provenance. */
-    path?: string;
-    /** Human-readable source name recorded in provenance. */
-    name?: string;
-    /** Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization. */
-    sourceUnit?: GeoSpecUnit;
-    /** Explicit parameters recorded in provenance. */
-    parameters?: Record<string, unknown>;
-    /** STEP reader strategy used for STEP sources. */
-    stepStreaming?: StepStreamingMode;
-    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
-    mesh?: boolean;
-    /** Linear tolerance used while meshing exact BRep evidence. */
-    meshLinearTolerance?: number;
-    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
-    meshAngularToleranceDegrees?: number;
-    /**
-     * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
-     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
-     */
-    workUnitLimit?: number;
-}
-
-  // Geometry bytes, path, browser file/blob, or in-memory mesh buffer
-  source: MeshSource | StepSource
-
-  // Named external resources consumed alongside the direct geometry bytes
-  resources?: ReadonlyArray<{
-          readonly name: string;
-          readonly source: MeshSource | StepSource;
-      }>
-
-  // Project-relative folder a path `source` and each resource path resolve in
-  rootDir?: string
-
-  // Source geometry format
-  format?: GeoSpecModelFormat
-
-  // Source path recorded in provenance
-  path?: string
-
-  // Human-readable source name recorded in provenance
-  name?: string
-
-  // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit?: GeoSpecUnit
-
-  // Explicit parameters recorded in provenance
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP sources
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number

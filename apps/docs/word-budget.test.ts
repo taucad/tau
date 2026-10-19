@@ -43,7 +43,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/guides/bundler-configuration.mdx': 750,
   'runtime/guides/bundling.mdx': 800,
   // Raised 400 -> 500 on 2026-09-27 for the tscircuit kernel (charter D11), and 500 -> 550 on 2026-10-17 for the SMLib kernel.
-  'runtime/guides/choosing-a-kernel.mdx': 550,
+  // Raised 550 -> 600 on 2026-10-19 for the SMLibPy kernel row.
+  'runtime/guides/choosing-a-kernel.mdx': 600,
   'runtime/guides/cooperate-with-cancellation.mdx': 650,
   'runtime/guides/cross-origin-isolation.mdx': 750,
   'runtime/guides/custom-kernel.mdx': 800,
@@ -64,7 +65,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // T21 baseline repair documents configuration, jobs, machines, host, compute, Electron and protocol APIs in eight references.
 // Raised 33,500 -> 34,700 on 2026-10-15 for machines contract revision 3 (machines, machine-providers and host references).
 // Raised 34,700 -> 34,850 on 2026-10-17 for the SMLib kernel pages.
-const siteCeiling = 34_850;
+// Raised 34,850 -> 35,400 on 2026-10-19 for the SMLibPy kernel pages.
+const siteCeiling = 35_400;
 
 const documentTypeCaps = {
   tutorial: 1500,

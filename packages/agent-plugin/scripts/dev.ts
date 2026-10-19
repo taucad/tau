@@ -3,10 +3,11 @@
  *
  * `pnpm plugin:dev <command>` from the repository root, after `pnpm nx run agent-plugin:build`:
  *
- * - `install [--host claude|codex|all]` adds this folder's own catalog (`tau-dev`) to each host and installs `tau`
- *   from it. Claude Code reads the folder in place; Codex copies it. Both run this checkout's CLI through
- *   `.dev/cli.json`.
- * - `uninstall [--host …]` removes the plugin and the catalog again.
+ * - `install [--host claude|codex|all] [--force]` adds this folder's own catalog (`tau-dev`) to each host and installs
+ *   `tau` from it. Claude Code reads the folder in place; Codex copies it. Both run this checkout's CLI through
+ *   `.dev/cli.json`. It refuses while a host has the published `tau@taucad` enabled, which would load two plugins named
+ *   `tau`, unless `--force`.
+ * - `uninstall [--host …]` removes the plugin, at user and project scope, and the catalog again.
  * - `desktop --project <folder>` adds a `tau-dev` server to Claude Desktop's `claude_desktop_config.json`, keeping a
  *   backup; `desktop --remove` takes it out.
  * - `preview --sha <commit>` installs a pkg.pr.new preview into Claude Code: the plugin from a scratch catalog and the
@@ -64,6 +65,58 @@ export const missingBuiltFiles = (root: string, workspace: boolean, exists: (pat
   builtFiles.filter((file) => workspace || file !== '.dev/cli.json').filter((file) => !exists(join(root, file)));
 
 type Host = 'claude' | 'codex';
+
+/** The plugin the published `taucad` catalog installs. */
+export const publishedPlugin = 'tau@taucad';
+
+/** The plugin this folder's catalog installs. */
+export const devPlugin = `tau@${devMarketplace}`;
+
+/** One row of a host's `plugin list --json`. */
+export type PluginRow = { readonly id: string; readonly scope?: string; readonly enabled: boolean };
+
+/**
+ * The rows of a host's `plugin list --json` output.
+ *
+ * @param list - The parsed output: Claude Code prints an array of `{ id, scope, enabled }`, one per scope; Codex prints
+ *   `{ installed: [{ pluginId, enabled }] }`. Anything else has no rows.
+ * @returns Each listed plugin with its scope, where the host has scopes.
+ */
+export const pluginRows = (list: unknown): PluginRow[] => {
+  const field = (value: unknown, key: string): unknown =>
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  const entries = Array.isArray(list) ? (list as unknown[]) : field(list, 'installed');
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries.flatMap((entry: unknown) => {
+    const id = field(entry, 'id') ?? field(entry, 'pluginId');
+    const scope = field(entry, 'scope');
+    return typeof id === 'string'
+      ? [{ id, enabled: field(entry, 'enabled') === true, ...(typeof scope === 'string' ? { scope } : {}) }]
+      : [];
+  });
+};
+
+/**
+ * A Claude Code settings object without the `tau@tau-dev` entry that `--scope project` writes to `enabledPlugins`, and
+ * without the empty `enabledPlugins` an uninstall leaves, so a checkout's committed settings file returns to as it was.
+ *
+ * @param settings - The parsed `.claude/settings.json`.
+ * @returns The settings without either, or undefined when there is nothing to remove.
+ */
+export const withoutDevPlugin = (settings: Readonly<Record<string, unknown>>): Record<string, unknown> | undefined => {
+  const enabled = settings['enabledPlugins'] as Record<string, unknown> | undefined;
+  if (enabled === undefined) {
+    return undefined;
+  }
+  const kept = Object.entries(enabled).filter(([id]) => id !== devPlugin);
+  if (kept.length === Object.keys(enabled).length && kept.length > 0) {
+    return undefined;
+  }
+  const { enabledPlugins: _removed, ...rest } = settings;
+  return kept.length === 0 ? rest : { ...rest, enabledPlugins: Object.fromEntries(kept) };
+};
 
 /**
  * Claude Desktop's config file for a platform.
@@ -162,22 +215,56 @@ const requireBuild = (root = pluginRoot): void => {
   }
 };
 
-const install = (hosts: readonly Host[]): void => {
+const pluginList = (host: Host): unknown => {
+  const result = spawnSync(host, ['plugin', 'list', '--json'], {
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+  try {
+    return result.status === 0 ? JSON.parse(result.stdout) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const install = (hosts: readonly Host[], force: boolean): void => {
   requireBuild();
-  for (const host of hosts) {
+  const present = hosts.filter((host) => {
     if (!available(host)) {
       log(`skip ${host}: no \`${host}\` on PATH`);
-      continue;
+      return false;
     }
+    return true;
+  });
+  for (const host of force ? [] : present) {
+    if (pluginRows(pluginList(host)).some((row) => row.id === publishedPlugin && row.enabled)) {
+      const remove = host === 'claude' ? 'claude plugin uninstall' : 'codex plugin remove';
+      fail(
+        `${host} has ${publishedPlugin} enabled, and ${devPlugin} beside it is a second plugin named tau: run \`${remove} ${publishedPlugin}\` first, or pass --force`,
+      );
+    }
+  }
+  for (const host of present) {
     if (host === 'claude') {
       run('claude', ['plugin', 'marketplace', 'add', pluginRoot]);
-      run('claude', ['plugin', 'install', `tau@${devMarketplace}`]);
+      run('claude', ['plugin', 'install', devPlugin]);
       log('Claude Code reads this folder in place: start a new session, or /reload-plugins, after a rebuild.');
     } else {
       run('codex', ['plugin', 'marketplace', 'add', pluginRoot]);
-      run('codex', ['plugin', 'add', `tau@${devMarketplace}`]);
+      run('codex', ['plugin', 'add', devPlugin]);
       log('Codex installed a copy: run this again after a rebuild, then start a new thread.');
     }
+  }
+};
+
+const removeProjectEntry = (path: string): void => {
+  if (!existsSync(path)) {
+    return;
+  }
+  const settings = withoutDevPlugin(JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>);
+  if (settings !== undefined) {
+    writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+    log(`Cleaned enabledPlugins in ${path}.`);
   }
 };
 
@@ -187,10 +274,16 @@ const uninstall = (hosts: readonly Host[]): void => {
       continue;
     }
     if (host === 'claude') {
-      run('claude', ['plugin', 'uninstall', `tau@${devMarketplace}`], { allowFailure: true });
+      /* `claude plugin install tau@tau-dev --scope project` leaves a row the user-scope uninstall does not remove. */
+      if (pluginRows(pluginList('claude')).some((row) => row.id === devPlugin && row.scope === 'project')) {
+        run('claude', ['plugin', 'uninstall', devPlugin, '--scope', 'project'], { allowFailure: true });
+      }
+      run('claude', ['plugin', 'uninstall', devPlugin], { allowFailure: true });
       run('claude', ['plugin', 'marketplace', 'remove', devMarketplace], { allowFailure: true });
+      /* An entry left in the project's settings keeps a `tau@tau-dev` row in `claude plugin list`. */
+      removeProjectEntry(join(process.cwd(), '.claude', 'settings.json'));
     } else {
-      run('codex', ['plugin', 'remove', `tau@${devMarketplace}`], { allowFailure: true });
+      run('codex', ['plugin', 'remove', devPlugin], { allowFailure: true });
       run('codex', ['plugin', 'marketplace', 'remove', devMarketplace], { allowFailure: true });
     }
   }
@@ -442,6 +535,7 @@ const main = async (): Promise<void> => {
       project: { type: 'string' },
       plugin: { type: 'string' },
       sha: { type: 'string' },
+      force: { type: 'boolean', default: false },
       remove: { type: 'boolean', default: false },
       smoke: { type: 'boolean', default: false },
     },
@@ -449,7 +543,7 @@ const main = async (): Promise<void> => {
   const [command] = positionals;
   switch (command) {
     case 'install': {
-      install(hostsOf(values.host));
+      install(hostsOf(values.host), values.force);
       break;
     }
     case 'uninstall': {
@@ -470,7 +564,7 @@ const main = async (): Promise<void> => {
     }
     default: {
       fail(
-        'usage: pnpm plugin:dev install|uninstall|desktop|preview|doctor [--host claude|codex|all] [--project <folder>] [--plugin <folder>] [--sha <commit>] [--smoke] [--remove]',
+        'usage: pnpm plugin:dev install|uninstall|desktop|preview|doctor [--host claude|codex|all] [--project <folder>] [--plugin <folder>] [--sha <commit>] [--smoke] [--remove] [--force]',
       );
     }
   }

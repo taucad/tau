@@ -8,9 +8,13 @@ import {
   connect,
   desktopConfigPath,
   desktopServerName,
+  devPlugin,
   missingBuiltFiles,
+  pluginRows,
   previewUrl,
+  publishedPlugin,
   withDesktopServer,
+  withoutDevPlugin,
 } from './dev.js';
 /* oxlint-enable no-restricted-imports */
 
@@ -49,6 +53,50 @@ describe('withDesktopServer', () => {
     const config = { mcpServers: { tau: { command: 'node' }, [desktopServerName]: server } };
 
     expect(withDesktopServer(config, undefined)).toEqual({ mcpServers: { tau: { command: 'node' } } });
+  });
+});
+
+describe('pluginRows', () => {
+  it("reads Claude Code's per-scope rows", () => {
+    const list = [
+      { id: devPlugin, scope: 'project', enabled: true, installPath: '/cache' },
+      { id: publishedPlugin, scope: 'user', enabled: false },
+    ];
+
+    expect(pluginRows(list)).toEqual([
+      { id: devPlugin, scope: 'project', enabled: true },
+      { id: publishedPlugin, scope: 'user', enabled: false },
+    ]);
+  });
+
+  it("reads Codex's installed list", () => {
+    expect(
+      pluginRows({ installed: [{ pluginId: publishedPlugin, name: 'tau', enabled: true }], available: [] }),
+    ).toEqual([{ id: publishedPlugin, enabled: true }]);
+  });
+
+  it('has no rows for output it does not recognise', () => {
+    expect(pluginRows(undefined)).toEqual([]);
+    expect(pluginRows({ plugins: [{ id: publishedPlugin, enabled: true }] })).toEqual([]);
+    expect(pluginRows([null, { enabled: true }])).toEqual([]);
+  });
+});
+
+describe('withoutDevPlugin', () => {
+  it('removes only the tau-dev entry and keeps every other setting', () => {
+    const settings = { hooks: {}, enabledPlugins: { [devPlugin]: true, [publishedPlugin]: true } };
+
+    expect(withoutDevPlugin(settings)).toEqual({ hooks: {}, enabledPlugins: { [publishedPlugin]: true } });
+  });
+
+  it('drops the empty enabledPlugins an uninstall leaves', () => {
+    expect(withoutDevPlugin({ hooks: {}, enabledPlugins: { [devPlugin]: true } })).toEqual({ hooks: {} });
+    expect(withoutDevPlugin({ hooks: {}, enabledPlugins: {} })).toEqual({ hooks: {} });
+  });
+
+  it('leaves settings with nothing to remove alone', () => {
+    expect(withoutDevPlugin({ hooks: {} })).toBeUndefined();
+    expect(withoutDevPlugin({ enabledPlugins: { [publishedPlugin]: true } })).toBeUndefined();
   });
 });
 

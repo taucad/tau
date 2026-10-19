@@ -66,7 +66,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // Raised 33,500 -> 34,700 on 2026-10-15 for machines contract revision 3 (machines, machine-providers and host references).
 // Raised 34,700 -> 34,850 on 2026-10-17 for the SMLib kernel pages.
 // Raised 34,850 -> 35,400 on 2026-10-19 for the SMLibPy kernel pages.
-const siteCeiling = 35_400;
+// Raised 35,400 -> 35,500 on 2026-10-19 for the agent plugin page's install and check lines (ONB-4).
+const siteCeiling = 35_500;
 
 const documentTypeCaps = {
   tutorial: 1500,

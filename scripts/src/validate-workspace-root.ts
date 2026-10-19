@@ -15,7 +15,6 @@ import { pathToFileURL } from 'node:url';
 
 const authoredRoots = [
   '.agents',
-  '.claude-plugin',
   '.claude',
   '.codex',
   '.github',

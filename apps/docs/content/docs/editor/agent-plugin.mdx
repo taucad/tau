@@ -3,7 +3,8 @@ title: Agent Plugin
 description: Install the Tau plugin in Codex, Claude Code or Claude Desktop, and see what each host shows.
 docType: reference
 icon: 'lucide:puzzle text-purple'
-wordBudgetOverride: 500
+# Raised 500 -> 600 on 2026-10-19: three hosts' install and check lines.
+wordBudgetOverride: 600
 ---
 
 # Agent Plugin
@@ -18,8 +19,8 @@ npm install -g @taucad/cli@beta
 
 ## Install
 
+- Claude Code 2.1.275 or later, one step: `claude plugin install tau --marketplace taucad/marketplace`. Older Claude Code: `claude plugin marketplace add taucad/marketplace`, then `claude plugin install tau@taucad`.
 - Codex: `codex plugin marketplace add taucad/marketplace`, then `codex plugin add tau@taucad`.
-- Claude Code: `claude plugin marketplace add taucad/marketplace`, then `claude plugin install tau@taucad`.
 - Claude Desktop: `npm install -g @taucad/agent-plugin@beta`, then add its launcher to `claude_desktop_config.json`.
 
 Name the project folder in the launcher's arguments:
@@ -35,7 +36,14 @@ Name the project folder in the launcher's arguments:
 }
 ```
 
-Start a new thread or session after installing.
+Start a new thread or session after installing: the tools appear there, not in the current one. The plugin is not in the Anthropic or OpenAI plugin directories; install it from the `taucad/marketplace` catalog.
+
+## Check
+
+- Claude Code: `claude plugin list` shows `tau@taucad` enabled; `claude mcp list` shows `plugin:tau:tau … ✔ Connected`.
+- Codex: `codex plugin list` shows `tau@taucad  installed, enabled`.
+
+Troubleshooting, kernel choice and what to tell the user are in the [agent guide](https://taucad.dev/llms.txt).
 
 ## What each host shows
 

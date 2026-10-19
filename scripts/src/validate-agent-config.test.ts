@@ -129,4 +129,18 @@ describe('agent substrate validation', () => {
     ]);
     expect(readFileSync(resolve(root, 'AGENTS.md'), 'utf8')).toBe(before);
   });
+
+  it('should keep plugin catalogs to the plugin folder', () => {
+    const root = fixture();
+    const catalog = '{ "name": "taucad" }\n';
+    write(root, 'packages/agent-plugin/.claude-plugin/marketplace.json', '{ "name": "tau-dev" }\n');
+    expect(validateAgentConfig(root).issues).toEqual([]);
+
+    write(root, '.claude-plugin/marketplace.json', catalog);
+    write(root, '.agents/plugins/marketplace.json', catalog);
+    expect(validateAgentConfig(root).issues).toEqual([
+      '.agents/plugins/marketplace.json: plugin catalog outside packages/agent-plugin/.claude-plugin/; the taucad catalog lives in taucad/marketplace',
+      '.claude-plugin/marketplace.json: plugin catalog outside packages/agent-plugin/.claude-plugin/; the taucad catalog lives in taucad/marketplace',
+    ]);
+  });
 });

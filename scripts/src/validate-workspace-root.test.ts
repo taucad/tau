@@ -15,7 +15,6 @@ describe('workspace-root validation', () => {
 // Representative tracked paths cover the reviewed public root and nested authored directories.
 const approvedPaths = [
   '.agents/skills/create-script/SKILL.md',
-  '.claude-plugin/plugin.json',
   '.claude/settings.json',
   '.codex/config.toml',
   '.github/workflows/ci.yml',
@@ -48,8 +47,8 @@ const approvedPaths = [
 const approvedEntries = approvedPaths.map((path) => path.split('/')[0] ?? '');
 
 describe('authored workspace-root budget', () => {
-  it('should accept the approved 29 roots and documented local output boundaries', () => {
-    expect(approvedEntries).toHaveLength(29);
+  it('should accept the approved 28 roots and documented local output boundaries', () => {
+    expect(approvedEntries).toHaveLength(28);
     expect(
       workspaceRootInventoryErrors({
         trackedPaths: [...approvedPaths, 'apps/api/package.json'],

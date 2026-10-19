@@ -44,6 +44,13 @@ codex plugin add tau@taucad
 
 Start a new thread after installing. Codex offers the `tau` skill as the plugin's onboarding skill.
 
+### Check
+
+- Claude Code: `claude plugin list` shows `tau@taucad` enabled; `claude mcp list` shows `plugin:tau:tau … ✔ Connected`.
+- Codex: `codex plugin list` shows `tau@taucad  installed, enabled`.
+
+`tau --version` prints the same version as the plugin. Troubleshooting, kernel choice and what to tell the user are in the agent guide, <https://taucad.dev/llms.txt>.
+
 ### npm
 
 Both catalogs install this npm package from its `beta` tag; neither host runs its install scripts, and it has none. To use the folder without a catalog:
@@ -205,6 +212,8 @@ pnpm plugin:dev doctor --smoke                # starts the launcher as a host wo
 pnpm plugin:dev uninstall                     # and `desktop --remove`
 ```
 
+`install` stops when a host already has the published `tau@taucad` enabled, because the two would load side by side as two plugins named `tau`; uninstall that one first, or pass `--force` to keep both. `uninstall` removes `tau@tau-dev` at user and project scope, the `enabledPlugins` entry `--scope project` writes to the current folder's `.claude/settings.json`, and the `tau-dev` catalog.
+
 `doctor --smoke` calls `test_model`, which needs the GeoSpec engine that `pnpm install` takes from npm as `geospec-engine` (its prebuilt native binding covers only the platforms it publishes), and `screenshot`, which needs a graphics adapter.
 
 Claude Code reads a catalog added from a local folder in place, so a rebuild reaches it at the next session. Codex copies the folder into `~/.codex/plugins/cache/tau-dev/tau/<version>/`. By hand, the same steps are:
@@ -215,6 +224,16 @@ claude plugin marketplace add ./packages/agent-plugin # the folder's own catalog
 claude plugin install tau@tau-dev                     # add --scope project for one project
 codex plugin marketplace add ./packages/agent-plugin
 codex plugin add tau@tau-dev
+```
+
+To remove them by hand, a project-scope `tau@tau-dev` row in `claude plugin list` included:
+
+```bash
+claude plugin uninstall tau@tau-dev --scope project
+claude plugin uninstall tau@tau-dev
+claude plugin marketplace remove tau-dev
+codex plugin remove tau@tau-dev
+codex plugin marketplace remove tau-dev
 ```
 
 After changing a skill, a manifest or the launcher, rebuild, run `codex plugin add tau@tau-dev` again (or `pnpm plugin:dev install --host codex`) and start a new session or thread. CLI changes need no refresh: each copy's `.dev/cli.json` still points at this checkout.
@@ -268,7 +287,8 @@ OpenRSCAD (Apache-2.0 OR MIT), among others.
 
 ## Links
 
-- Documentation: <https://tau.new/docs>
+- Documentation: <https://docs.tau.new/editor/agent-plugin>
+- Agent guide (install, check, troubleshooting, kernel choice): <https://taucad.dev/llms.txt>
 - Source: <https://github.com/taucad/tau/tree/main/packages/agent-plugin>
 - Tau CLI and `tau mcp`: [`@taucad/cli`](https://www.npmjs.com/package/@taucad/cli)
 - Changelog: [`CHANGELOG.md`](./CHANGELOG.md)

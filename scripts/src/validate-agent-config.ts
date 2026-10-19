@@ -1,5 +1,5 @@
 /**
- * Validate Tau's authored instruction hierarchy and shared skill configuration.
+ * Validate Tau's authored instruction hierarchy, shared skill configuration and plugin catalog placement.
  *
  * Native behavior is verified separately; this check does not start model calls.
  * Usage: pnpm nx run scripts:validate-agent-config
@@ -22,6 +22,8 @@ const templateDirectories = [
 ];
 // Private documentation is published only as a symlink into the optional tau-brain checkout.
 const relocatableDocumentation = ['docs/handbooks', 'docs/incidents', 'docs/reference', 'docs/research'];
+// The `taucad` catalog lives in taucad/marketplace; a checkout carries only the plugin folder's `tau-dev` catalog.
+const devCatalogDirectory = 'packages/agent-plugin/.claude-plugin';
 const markdown = unified().use(remarkParse);
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -204,6 +206,11 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
   }
   if (existsSync(resolve(root, '.cursor'))) {
     issues.push('.cursor: retired development harness is still present');
+  }
+  for (const path of authored) {
+    if (basename(path) === 'marketplace.json' && dirname(repoPath(root, path)) !== devCatalogDirectory) {
+      report(path, `plugin catalog outside ${devCatalogDirectory}/; the taucad catalog lives in taucad/marketplace`);
+    }
   }
   if (!hasSharedSkillAlias(root)) {
     issues.push('.claude/skills: expected the shared ../.agents/skills symlink');

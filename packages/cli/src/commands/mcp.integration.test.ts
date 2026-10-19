@@ -1743,7 +1743,7 @@ registerHooks({
 
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain(
-        "No native kernel is called 'cadquery'. Kernels that can be prepared: build123d, picogk.",
+        "No native kernel is called 'cadquery'. Kernels that can be prepared: build123d, picogk, smlibpy.",
       );
     });
 

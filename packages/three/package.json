@@ -1,6 +1,6 @@
 {
   "name": "@taucad/three",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "Framework-independent Three.js capabilities for Tau",
   "type": "module",
   "sideEffects": false,

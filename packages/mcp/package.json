@@ -1,6 +1,6 @@
 {
   "name": "@taucad/mcp",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "Model Context Protocol server for Tau's CAD tools over canonical chat RPC contracts",
   "type": "module",
   "sideEffects": false,

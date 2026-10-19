@@ -1,6 +1,6 @@
 {
   "name": "@taucad/jobs",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "Durable job contracts, providers, events, artifacts, and executor conformance for Tau workloads",
   "type": "module",
   "sideEffects": false,

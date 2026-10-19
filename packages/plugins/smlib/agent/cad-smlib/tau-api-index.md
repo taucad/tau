@@ -1,6 +1,6 @@
 # @taucad/smlib tau API index
 
-@taucad/smlib 0.1.0-beta.6 · 36 symbols · extracted by TypeScript 5.9.3.
+@taucad/smlib 0.1.0-beta.7 · 36 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 

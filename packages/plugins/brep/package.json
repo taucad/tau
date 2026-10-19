@@ -1,6 +1,6 @@
 {
   "name": "@taucad/brep",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "BRep format import toolkit for Tau",
   "type": "module",
   "sideEffects": false,

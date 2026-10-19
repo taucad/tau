@@ -4,7 +4,7 @@
       "slug": "cad-smlibpy",
       "name": "SMLibPy authoring",
       "description": "Guides SMLib NURBS BRep modeling in main.py with smlibpy, Tau materials, textures and kinematics. Use for Python models that import smlibpy.",
-      "version": "0.1.0-beta.0",
+      "version": "0.1.0-beta.7",
       "whenToUse": "Use for Python models that import smlibpy, including physical materials, textures and moving assemblies in Tau Desktop.",
       "directory": "cad-smlibpy",
       "files": [

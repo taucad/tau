@@ -4,7 +4,7 @@
       "slug": "geospec-authoring",
       "name": "GeoSpec authoring",
       "description": "Guides canonical GeoSpec geometry tests in TypeScript or JavaScript for every Tau kernel. Use for *.geospec.ts and *.geospec.js tests.",
-      "version": "0.1.0-beta.6",
+      "version": "0.1.0-beta.7",
       "whenToUse": "Use before creating or editing *.geospec.ts or *.geospec.js tests, for a model in any kernel.",
       "directory": "geospec-authoring",
       "files": [

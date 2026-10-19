@@ -4,7 +4,7 @@
       "slug": "cad-smlib",
       "name": "SMLib authoring",
       "description": "Guides SMLib NURBS BRep modeling with @classcad/smlibwasm, Tau materials, textures and kinematics. Use for SMLib models, appearance or moving parts.",
-      "version": "0.1.0-beta.6",
+      "version": "0.1.0-beta.7",
       "whenToUse": "Use for TypeScript models that import @classcad/smlibwasm, including physical materials, textures and moving assemblies.",
       "directory": "cad-smlib",
       "files": [

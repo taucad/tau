@@ -27,13 +27,13 @@ const WorkbenchFrame = ({ count }: Readonly<{ count: number | undefined }>): Rea
 
 /**
  * Props for {@link WorkbenchToggleButton}: a {@link PaneButton}'s, less what the toggle fixes (its name, pressed
- * state, tooltip, size and glyph).
+ * state, size and glyph).
  *
  * @public
  */
 type WorkbenchToggleButtonProps = Omit<
   PaneButtonProps,
-  'aria-label' | 'aria-pressed' | 'asChild' | 'children' | 'size' | 'tooltip'
+  'aria-label' | 'aria-pressed' | 'asChild' | 'children' | 'size'
 > &
   Readonly<{
     /** Whether the workbench lane is on screen. */
@@ -45,7 +45,7 @@ type WorkbenchToggleButtonProps = Omit<
 /**
  * The top-right Workbench toggle, after Codex's side-panel button: a 28 px {@link PaneButton} named "Toggle Workbench
  * lane", pressed while the lane is open, with the frame glyph and the tooltip "Toggle Workbench", as the Chat lane's toggle reads "Toggle Chat". The Tau app wraps it in its open-tabs list; the agent
- * plugin viewer's page header draws it as it is. Other props, a ref and handlers included, reach the button.
+ * plugin viewer's page header draws it as it is. Hosts can supply a tooltip with their shortcut. Other props, a ref and handlers included, reach the button.
  *
  * @param props - Whether the lane is open, the hidden tab count, and the button's props.
  * @returns The toggle.
@@ -55,6 +55,7 @@ function WorkbenchToggleButton({
   isOpen,
   count,
   className,
+  tooltip = 'Toggle Workbench',
   tooltipSide = 'left',
   ...properties
 }: WorkbenchToggleButtonProps): React.JSX.Element {
@@ -63,7 +64,7 @@ function WorkbenchToggleButton({
       className={cn('aria-pressed:text-foreground', className)}
       aria-label='Toggle Workbench lane'
       aria-pressed={isOpen}
-      tooltip='Toggle Workbench'
+      tooltip={tooltip}
       tooltipSide={tooltipSide}
       {...properties}
     >

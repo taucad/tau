@@ -87,6 +87,8 @@ export type ModelComponentActionMenuData = {
  */
 export type ModelComponentActionDropdownProperties = ModelComponentActionMenuData & {
   readonly actionButtonClassName: string;
+  /** What the trigger shows, such as the part's name in a header; an ellipsis icon when absent. */
+  readonly children?: React.ReactNode;
 };
 
 /**
@@ -139,14 +141,15 @@ type ViewerModelComponentActionItemProperties = {
 };
 
 /**
- * A part's menu behind a row's "Actions" button.
+ * A part's menu behind its "Actions for <name>" button: a row's ellipsis, or whatever `children` the host draws.
  *
- * @param props - The part, its unit's state, the host verbs and the trigger button's class.
+ * @param props - The part, its unit's state, the host verbs, the trigger button's class and its content.
  * @returns The trigger and its dropdown menu.
  * @public
  */
 export function ModelComponentActionDropdown({
   actionButtonClassName,
+  children,
   ...data
 }: ModelComponentActionDropdownProperties): React.JSX.Element {
   return (
@@ -158,7 +161,7 @@ export function ModelComponentActionDropdown({
           className={actionButtonClassName}
           aria-label={`Actions for ${data.node.name}`}
         >
-          <EllipsisVertical className='size-3.5' />
+          {children ?? <EllipsisVertical className='size-3.5' />}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

@@ -1077,6 +1077,141 @@ describe('Add to chat on each route (VUI-3)', () => {
   );
 });
 
+describe('the part menu from the keyboard (VUI-6)', () => {
+  /** A wide part at the framed centre, so a right press there lands on it, and a narrow one beside it. */
+  const keysSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(40, 20).sketchOnPlane('XY').extrude(4), name: 'Wide' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(35, 0, 0), name: 'Narrow' },\n  ];\n}\n`;
+
+  beforeAll(async () => {
+    await writeFile(join(project, 'keys.ts'), keysSource);
+  });
+
+  /**
+   * Open the loopback page on `keys.ts`, wide enough that the lane opens with it.
+   *
+   * @returns The client and the drawn page.
+   */
+  const openKeys = async (): Promise<Readonly<{ client: Client; page: Page }>> => {
+    const client = await connect('claude-code', claudeCodeCapabilities);
+    const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'keys.ts' }));
+    const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message);
+    });
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+      origin: new URL(viewerUrl ?? '').origin,
+    });
+    await page.goto(viewerUrl ?? '');
+    await drawn(page, 'Export');
+    return { client, page };
+  };
+
+  const isFocused = async (locator: Locator): Promise<boolean> =>
+    locator.evaluate((element) => element === document.activeElement);
+
+  it(
+    'should open the selected part menu from the focused canvas with Shift+F10 and the Menu key, and from the header',
+    async () => {
+      const { page } = await openKeys();
+      const lane = page.getByRole('complementary', { name: 'Workbench' });
+      await lane.getByRole('tab', { name: 'Model' }).click();
+      const row = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: 'Wide', exact: true });
+      await row.waitFor({ timeout: 60_000 });
+      await row.click();
+
+      /* The header names the selected part; its name opens the part's menu. */
+      const trigger = page.getByRole('button', { name: 'Actions for Wide' }).filter({ hasText: 'Wide' });
+      await trigger.waitFor();
+
+      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
+      const region = page.getByRole('region', { name: 'Model viewer' });
+      await region.focus();
+      await page.keyboard.press('Shift+F10');
+      const menu = page.getByRole('menu');
+      await menu.waitFor();
+      expect(
+        await menu
+          .getByRole('menuitem')
+          .first()
+          .evaluate((item) => item === document.activeElement),
+      ).toBe(true);
+      const copy = menu.getByRole('menuitem', { name: 'Copy reference' });
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      expect(await isFocused(copy)).toBe(true);
+      await capture(page, 'part-menu-keyboard');
+      await page.keyboard.press('Enter');
+      await page.getByRole('status').filter({ hasText: 'Copied; paste it into your chat' }).waitFor();
+      expect(await page.evaluate(async () => navigator.clipboard.readText())).toMatch(
+        /^Wide in keys @cad\[keys\.ts#[^\]]+\]$/u,
+      );
+      expect(await menu.count()).toBe(0);
+      await expect.poll(async () => isFocused(region)).toBe(true);
+
+      /* The Menu key opens the same menu; Escape closes it and gives focus back to the canvas region. */
+      await page.keyboard.press('ContextMenu');
+      await menu.waitFor();
+      expect(await menu.getByRole('menuitem', { name: 'Reveal in Explorer' }).count()).toBe(1);
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => menu.count()).toBe(0);
+      await expect.poll(async () => isFocused(region)).toBe(true);
+
+      /* The header's trigger opens the same items, with the arrow keys of a dropdown menu. */
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await menu.waitFor();
+      for (const name of ['Focus on part', 'Copy reference', 'Reveal in Explorer', 'Hide', 'Isolate']) {
+        // oxlint-disable-next-line no-await-in-loop -- one item at a time.
+        expect(await menu.getByRole('menuitem', { name, exact: true }).count()).toBe(1);
+      }
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => menu.count()).toBe(0);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  /**
+   * The centre of the canvas region, where the framed model's wide part sits.
+   *
+   * @param page - The drawn page.
+   * @returns The point in viewport coordinates.
+   */
+  const regionCentre = async (page: Page): Promise<Readonly<{ x: number; y: number }>> => {
+    const box = await page.getByRole('region', { name: 'Model viewer' }).boundingBox();
+    if (box === null) {
+      throw new Error('The canvas region has no box.');
+    }
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  /* A right click on a part still opens the menu: "the tab's panels (W10)" checks it in the harness. */
+  it(
+    'should still pan on a right drag past 4 px, opening no menu',
+    async () => {
+      const { client, page } = await openKeys();
+      const centre = await regionCentre(page);
+      /* The camera's target, once the page has reported a view. */
+      const targetOf = async (): Promise<string | undefined> => {
+        const result = await callTool(client, 'view_state', {});
+        const view = (result.structuredContent as { view?: TauViewerViewState } | undefined)?.view;
+        return view?.camera === undefined ? undefined : JSON.stringify(view.camera.target);
+      };
+      await expect.poll(targetOf, { timeout: 30_000 }).toBeDefined();
+      const before = await targetOf();
+      await page.mouse.move(centre.x, centre.y);
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.move(centre.x + 40, centre.y + 20, { steps: 8 });
+      await page.mouse.up({ button: 'right' });
+      expect(await page.getByRole('menu').count()).toBe(0);
+      await expect.poll(targetOf, { timeout: 30_000 }).not.toBe(before);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the viewer page from a text host', () => {
   it(
     'should open the loopback link in the tab composition',

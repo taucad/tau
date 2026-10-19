@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { formatKeyCombination, setPlatform, getPlatform } from '#utils/keys.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { detectPlatform } from '#utils/platform.js';
+import type { DetectedPlatform } from '#utils/platform.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +51,7 @@ type KeybindingRegistration = {
 
 type KeyboardContextValue = {
   modifiers: ModifierState;
+  platform: DetectedPlatform;
   register: (combo: string, registration: KeybindingRegistration) => void;
   unregister: (combo: string, id: symbol) => void;
 };
@@ -242,6 +244,7 @@ function modifiersEqual(a: ModifierState, b: ModifierState): boolean {
  */
 export function KeyboardProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const [modifiers, setModifiers] = useState<ModifierState>(initialModifiers);
+  const [detectedPlatform, setDetectedPlatform] = useState(getPlatform);
   const modifiersRef = useRef<ModifierState>(initialModifiers);
   const registryRef = useRef(new Map<string, Set<KeybindingRegistration>>());
 
@@ -281,6 +284,7 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
     // Detect and set platform on mount
     const platform = detectPlatform();
     setPlatform(platform);
+    setDetectedPlatform(platform);
 
     /**
      * Update modifier state, only triggering a React re-render when values actually change.
@@ -406,8 +410,8 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
   }, []);
 
   const contextValue = useMemo<KeyboardContextValue>(
-    () => ({ modifiers, register, unregister }),
-    [modifiers, register, unregister],
+    () => ({ modifiers, platform: detectedPlatform, register, unregister }),
+    [modifiers, detectedPlatform, register, unregister],
   );
 
   return <KeyboardContext.Provider value={contextValue}>{children}</KeyboardContext.Provider>;
@@ -488,7 +492,8 @@ export function useKeybinding(
   }, [callback, options]);
 
   // Serialize combo for registry key and effect dependency
-  const comboKey = useMemo(() => serializeCombo(keyCombination), [keyCombination]);
+  // Platform detection updates the context, so recompute the binding and label on render.
+  const comboKey = serializeCombo(keyCombination);
 
   // Register/unregister via effect
   useEffect(() => {
@@ -507,7 +512,7 @@ export function useKeybinding(
   }, [comboKey, register, unregister]);
 
   // Format for display
-  const formattedKeyCombination = useMemo(() => formatKeyCombination(keyCombination), [keyCombination]);
+  const formattedKeyCombination = formatKeyCombination(keyCombination);
 
   return { formattedKeyCombination };
 }

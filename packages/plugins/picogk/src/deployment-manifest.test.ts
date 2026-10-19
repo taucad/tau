@@ -12,10 +12,11 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import { composeSbom, layerUrls } from '#picogk-layer.js';
+import { composeManifest, composeSbom, layerUrls } from '#picogk-layer.js';
 
 const text = readFileSync(resolve(import.meta.dirname, '../tau-plugin.json'), 'utf8');
 const sbomText = readFileSync(resolve(import.meta.dirname, '../tau-plugin.cdx.json'), 'utf8');
+const stagedText = readFileSync(resolve(import.meta.dirname, '../tau-plugin.variants.json'), 'utf8');
 const deployment = parsePluginDeployment(JSON.parse(text), '@taucad/picogk tau-plugin.json');
 const variants = deployment.dependencies['runtime'] ?? [];
 const payload = (name: string, key: string): DependencyPayload => {
@@ -40,7 +41,7 @@ describe('tau-plugin.json', () => {
     expect(deployment.kernels).toEqual({ [id]: { requires: ['runtime'], extensions } });
   });
 
-  it('pins darwin-arm64 only until a Linux engine builder exists, at the engine floor', () => {
+  it('pins darwin-arm64 only until the linux-x64 layer is published and its pin composed, at the engine floor', () => {
     expect(variants.map(({ target }) => target)).toEqual([
       { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
     ]);
@@ -78,15 +79,19 @@ describe('tau-plugin.json', () => {
 
 const nearestOf = (target: DependencyTarget | undefined): string => (target === undefined ? 'none' : targetKey(target));
 
-const answer = (host: Omit<HostIndicators, 'translated' | 'wasm'>, options?: SelectVariantOptions): string => {
-  const selection = selectVariant(variants, { translated: false, wasm: { threads: false }, ...host }, options);
+const answer = (
+  host: Omit<HostIndicators, 'translated' | 'wasm'>,
+  options?: SelectVariantOptions,
+  declared = variants,
+): string => {
+  const selection = selectVariant(declared, { translated: false, wasm: { threads: false }, ...host }, options);
   return selection.status === 'selected'
     ? `${targetKey(selection.variant.target)}${selection.emulated ? ' (emulated)' : ''}`
     : `unsupported ${selection.axis}, nearest ${nearestOf(selection.nearest)}`;
 };
 
-// Total over the declared targets (charter W14): darwin-arm64 alone until a Tau engine builder exists for another
-// target (D13); every other host refuses before any download, naming the axis.
+// Total over the declared targets (charter W14): darwin-arm64 alone until the linux-x64 layer the release job builds
+// is published and its pin composed (D13); every other host refuses before any download, naming the axis.
 describe('tau-plugin.json targets', () => {
   it('should declare darwin-arm64 on macOS 14 alone', () => {
     expect(variants.map(({ target }) => target)).toEqual([
@@ -173,5 +178,90 @@ describe('tau-plugin.cdx.json', () => {
         })),
       ),
     );
+  });
+});
+
+// The linux-x64 variant the release job composes from tau-plugin.variants.json once its layer is published (D13):
+// glibc 2.28 or newer on x64, as the engine's symbol audit enforces; every other Linux host still refuses by axis.
+describe('tau-plugin.variants.json', () => {
+  const staged = JSON.parse(stagedText) as Record<string, unknown>;
+  const composed = parsePluginDeployment(
+    composeManifest(
+      JSON.parse(text) as Record<string, unknown>,
+      {
+        schemaVersion: 2,
+        target: 'linux-x64',
+        asset: 'tau-picogk-layer-linux-x64.tar.gz',
+        sha256: '0123456789abcdef'.repeat(4),
+        byteLength: 40_000_000,
+        unpackedByteLength: 120_000_000,
+        fileCount: 48,
+        protocolVersion: 8,
+        dotnetRuntimeVersion: '10.0.11',
+        readyToRun: true,
+        sourceFilesSha256: 'f'.repeat(64),
+        nativeSourceSha256: 'e'.repeat(64),
+        toolchain: {
+          dotnetSdk: '10.0.400',
+          compiler: 'g++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-11)',
+          sdk: 'glibc 2.28',
+          cmake: 'cmake version 4.4.4',
+          ninja: '1.13.2',
+        },
+      },
+      staged,
+    ),
+    'composed tau-plugin.json',
+  );
+  const declared = composed.dependencies['runtime'] ?? [];
+
+  it("stages linux-x64 on glibc 2.28 with Microsoft's linux-x64 runtime archive, beside the darwin-arm64 pin", () => {
+    expect(declared.map(({ target }) => targetKey(target))).toEqual(['darwin-arm64', 'linux-x64-glibc']);
+    const dotnet = declared[1]?.payloads.find(({ name }) => name === 'dotnet');
+
+    expect(dotnet?.origin).toEqual({
+      kind: 'url',
+      urls: ['https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-linux-x64.tar.gz'],
+    });
+    expect(declared[1]?.payloads.map(({ name }) => name)).toEqual(['dotnet', 'worker']);
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly host: Omit<HostIndicators, 'translated' | 'wasm'>;
+    readonly expected: string;
+  }>([
+    {
+      name: 'glibc 2.39 Linux',
+      host: { os: 'linux', arch: 'x64', libc: 'glibc', libcVersion: '2.39' },
+      expected: 'linux-x64-glibc',
+    },
+    {
+      name: 'glibc 2.28 Linux',
+      host: { os: 'linux', arch: 'x64', libc: 'glibc', libcVersion: '2.28' },
+      expected: 'linux-x64-glibc',
+    },
+    {
+      name: 'glibc 2.27 Linux',
+      host: { os: 'linux', arch: 'x64', libc: 'glibc', libcVersion: '2.27' },
+      expected: 'unsupported minimumLibcVersion, nearest linux-x64-glibc',
+    },
+    {
+      name: 'musl Linux on x64',
+      host: { os: 'linux', arch: 'x64', libc: 'musl' },
+      expected: 'unsupported libc, nearest linux-x64-glibc',
+    },
+    {
+      name: 'glibc Linux on arm64',
+      host: { os: 'linux', arch: 'arm64', libc: 'glibc', libcVersion: '2.39' },
+      expected: 'unsupported arch, nearest linux-x64-glibc',
+    },
+    {
+      name: 'macOS 14 on Apple silicon',
+      host: { os: 'darwin', arch: 'arm64', osVersion: '14.0' },
+      expected: 'darwin-arm64',
+    },
+  ])('should answer $name once composed', ({ host, expected }) => {
+    expect(answer(host, undefined, declared)).toBe(expected);
   });
 });

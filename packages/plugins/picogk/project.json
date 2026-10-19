@@ -28,6 +28,20 @@
         }
       }
     },
+    "test:native-linux": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Tier 3b of PicoGK on linux-x64 (glibc), the counterpart of test:native-darwin: with TAU_PICOGK_CLOSURE=pinned the native fixture prepares the checked-in manifest's linux-x64 closure from its pinned origins (Microsoft's runtime and the published Tau layer) instead of building the layer, the closure must equal the golden receipt's linux-x64-glibc entry, and every native suite runs on it behind the global-fetch tripwire. Until the manifest pins linux-x64 the suites skip; a sealed closure without a golden entry fails and prints the entry to record."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/plugins/picogk",
+        "command": "../../../node_modules/.bin/vitest run src/picogk-closure.native.integration.test.ts src/picogk.native.integration.test.ts src/picogk.native-sandbox.integration.test.ts src/picogk.native-lifecycle.integration.test.ts src/picogk-materials.native.integration.test.ts",
+        "env": {
+          "TAU_PICOGK_CLOSURE": "pinned"
+        }
+      }
+    },
     "prepare-layer": {
       "executor": "nx:run-commands",
       "dependsOn": [
@@ -40,6 +54,17 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts --target darwin-arm64 --layer"
+      }
+    },
+    "prepare-layer-linux": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build the Tau PicoGK linux-x64 layer (out/picogk-layer/linux-x64) with its engine compiled in the pinned manylinux_2_28 builder image; needs Docker and readelf. On any other host it prints why it skipped."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts --target linux-x64 --layer"
       }
     },
     "check-payload-urls": {

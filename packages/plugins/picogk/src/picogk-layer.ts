@@ -13,7 +13,7 @@ import type { DotnetLayer, DotnetLayerRecord } from '@taucad/dotnet-kernel-core/
 
 /**
  * The Tau PicoGK layer: the ReadyToRun worker, the patched `PicoGK.dll`, Roslyn, SkiaSharp and the Tau-built engine,
- * which the macOS release job builds for darwin-arm64 only until a Linux engine builder exists.
+ * which the release jobs build for darwin-arm64 (on macOS) and linux-x64 (in the manylinux_2_28 builder image).
  * @internal
  */
 export const picogkLayer: DotnetLayer = {
@@ -22,7 +22,7 @@ export const picogkLayer: DotnetLayer = {
   displayName: 'PicoGK',
   description:
     "The native PicoGK runtime closure: Microsoft's .NET runtime archive and the Tau framework-dependent layer.",
-  targets: ['darwin-arm64'],
+  targets: ['darwin-arm64', 'linux-x64'],
 };
 
 const rule = createDotnetLayer(picogkLayer);
@@ -42,10 +42,13 @@ export const { releaseTag: layerReleaseTag } = rule;
 /** The URLs the manifest pins for a layer: the CDN URL, then the GitHub Release asset URL. @internal */
 export const { urls: layerUrls } = rule;
 
-/** The `worker` payload of the darwin-arm64 variant for a layer record. @internal */
+/** The `worker` payload of the record target's variant for a layer record. @internal */
 export const { payload: layerPayload } = rule;
 
-/** Replace the `worker` pin of the darwin-arm64 `runtime` variant and keep every other byte of the manifest. @internal */
+/**
+ * Replace the `worker` pin of the record target's `runtime` variant and keep every other byte of the manifest; a target
+ * the manifest does not pin yet takes its variant from the staged variants (`tau-plugin.variants.json`). @internal
+ */
 export const { composeManifest } = rule;
 
 /**

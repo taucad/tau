@@ -11,6 +11,7 @@
       "inputs": [
         "default",
         "^production",
+        "{workspaceRoot}/packages/agent-plugin/package.json",
         {
           "env": "WWW_ORIGIN"
         },

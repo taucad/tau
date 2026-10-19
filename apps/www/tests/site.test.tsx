@@ -128,6 +128,9 @@ test('should serve the agent page as plain-text Markdown naming the configured o
     expect(text).toMatch(/^- \[.+\]\(https:\/\/.+\)/mu);
     expect(text).toContain('    npm install -g @taucad/cli@beta\n');
     expect(text).not.toMatch(/\{(?:origin|release)\}|\n\n\n/u);
+    expect(text).not.toContain('Current release');
+    vi.stubEnv('WWW_PLUGIN_VERSION', '0.1.0-beta.7');
+    expect(await llms().text()).toContain('\n\nCurrent release: 0.1.0-beta.7 (npm tag `beta`).\n\n## Install');
   } finally {
     vi.unstubAllEnvs();
   }

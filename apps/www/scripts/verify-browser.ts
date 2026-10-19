@@ -49,7 +49,15 @@ try {
   const agentPage = await fetch(`${origin}/llms.txt`);
   assert.equal(agentPage.status, 200);
   assert.equal(agentPage.headers.get('content-type'), 'text/plain; charset=utf-8');
-  assert.match(await agentPage.text(), /^# Tau\n/u);
+  const agentText = await agentPage.text();
+  assert.match(agentText, /^# Tau\n/u);
+  const plugin = JSON.parse(await readFile(resolve(appRoot, '../../packages/agent-plugin/package.json'), 'utf8')) as {
+    version: string;
+  };
+  assert.ok(
+    agentText.includes(`Current release: ${plugin.version} (npm tag \`beta\`).`),
+    'Agent page names the plugin release',
+  );
   const serverFiles = await readdir(resolve(appRoot, 'build/server/_www/bundles'));
   assert.equal(
     serverFiles.some((file) => /live-|scene-|\.map$/u.test(file)),

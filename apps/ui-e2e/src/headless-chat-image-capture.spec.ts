@@ -67,7 +67,6 @@ type SectionCut =
 type SectionState = Readonly<{
   isActive: boolean;
   cuts: ReadonlyArray<Readonly<Record<string, unknown>>>;
-  certification: string;
   isCommitted: boolean;
 }>;
 
@@ -691,7 +690,6 @@ test('section captures preserve complete caps and positive-area overlap evidence
     cuts: [{ kind: 'plane', plane: 'yz', offset: 0, isFlipped: false }],
     isCommitted: true,
   });
-  expect(section.certification).not.toBe('rejected');
 
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);

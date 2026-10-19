@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSectionTopologyWorkerClient } from '#graphics/three/utils/section-surface-topology-worker-client.js';
-import type {
-  SectionCanonicalTopologyWorkerInput,
-  SectionCanonicalTopologyWorkerResult,
-} from '#graphics/three/utils/section-surface-topology.js';
+import type { SectionClosureCensus } from '#graphics/three/utils/section-surface-closure.js';
+import type { SectionClosureWorkerInput } from '#graphics/three/utils/section-surface-topology.js';
 
-type PostedRequest = Readonly<{ id: number; input: SectionCanonicalTopologyWorkerInput }>;
+type PostedRequest = Readonly<{ id: number; input: SectionClosureWorkerInput }>;
 
 /** A worker double that records requests and answers them only when the test says so. */
 class FakeTopologyWorker extends EventTarget {
@@ -20,7 +18,7 @@ class FakeTopologyWorker extends EventTarget {
     this.terminated = true;
   }
 
-  public answer(index: number, result: SectionCanonicalTopologyWorkerResult): void {
+  public answer(index: number, result: SectionClosureCensus): void {
     this.dispatchEvent(new MessageEvent('message', { data: { id: this.requests[index]!.id, result } }));
   }
 
@@ -29,16 +27,17 @@ class FakeTopologyWorker extends EventTarget {
   }
 }
 
-const input: SectionCanonicalTopologyWorkerInput = {
+const input: SectionClosureWorkerInput = {
   sourceKey: 'source',
   positions: new Float64Array(9),
   triangleVertices: new Uint32Array([0, 1, 2]),
-  allowSeamFallback: false,
 };
 
-const unsupported: SectionCanonicalTopologyWorkerResult = {
-  status: 'unsupported',
-  failure: { sourceKey: 'source', code: 'open-surface', message: 'open' },
+const openCensus: SectionClosureCensus = {
+  isClosed: false,
+  unbalancedEdgeCount: 3,
+  indexUnbalancedEdgeCount: 3,
+  milliseconds: 0,
 };
 
 const createHarness = () => {
@@ -69,9 +68,9 @@ describe('section topology worker client', () => {
   it('should terminate the worker once it has been idle for a second', async () => {
     const { client, workers } = createHarness();
     const result = client.build(input);
-    workers[0]!.answer(0, unsupported);
+    workers[0]!.answer(0, openCensus);
 
-    await expect(result).resolves.toEqual(unsupported);
+    await expect(result).resolves.toEqual(openCensus);
     expect(workers[0]!.terminated).toBe(false);
     await vi.advanceTimersByTimeAsync(999);
     expect(workers[0]!.terminated).toBe(false);
@@ -83,14 +82,14 @@ describe('section topology worker client', () => {
     const { client, workers } = createHarness();
     const first = client.build(input);
     const second = client.build(input);
-    workers[0]!.answer(0, unsupported);
+    workers[0]!.answer(0, openCensus);
     await first;
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(workers).toHaveLength(1);
     expect(workers[0]!.terminated).toBe(false);
-    workers[0]!.answer(1, unsupported);
-    await expect(second).resolves.toEqual(unsupported);
+    workers[0]!.answer(1, openCensus);
+    await expect(second).resolves.toEqual(openCensus);
     await vi.advanceTimersByTimeAsync(1000);
     expect(workers[0]!.terminated).toBe(true);
   });
@@ -98,20 +97,20 @@ describe('section topology worker client', () => {
   it('should start a fresh worker for a build after an idle termination', async () => {
     const { client, workers } = createHarness();
     const first = client.build(input);
-    workers[0]!.answer(0, unsupported);
+    workers[0]!.answer(0, openCensus);
     await first;
     await vi.advanceTimersByTimeAsync(1000);
     const second = client.build(input);
 
     expect(workers).toHaveLength(2);
-    workers[1]!.answer(0, unsupported);
-    await expect(second).resolves.toEqual(unsupported);
+    workers[1]!.answer(0, openCensus);
+    await expect(second).resolves.toEqual(openCensus);
   });
 
   it('should terminate an idle worker immediately when the viewer releases it', async () => {
     const { client, workers } = createHarness();
     const result = client.build(input);
-    workers[0]!.answer(0, unsupported);
+    workers[0]!.answer(0, openCensus);
     await result;
 
     client.release();
@@ -125,9 +124,9 @@ describe('section topology worker client', () => {
 
     client.release();
     expect(workers[0]!.terminated).toBe(false);
-    workers[0]!.answer(0, unsupported);
+    workers[0]!.answer(0, openCensus);
 
-    await expect(result).resolves.toEqual(unsupported);
+    await expect(result).resolves.toEqual(openCensus);
     await vi.advanceTimersByTimeAsync(1000);
     expect(workers[0]!.terminated).toBe(true);
   });

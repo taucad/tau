@@ -5,7 +5,7 @@ import { flushSync } from '@react-three/fiber';
 import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#graphics/three/react/lights.jsx';
-import type { SectionCertification } from '#graphics/three/react/section-contour-fill.jsx';
+import type { SectionCut } from '#graphics/section-cuts.js';
 import { SectionClippingGroup } from '#graphics/three/react/section-clipping-group.jsx';
 import { useLiveSectionCutSet, useSectionPieces, useSectionStripes } from '#graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#graphics/three/use-geometry-bounds.js';
@@ -46,9 +46,9 @@ type SectionViewSceneProperties = {
  * `Stage`, so a cut step re-renders this subtree but not `Stage`, whose re-render would hand the
  * clipping group a new child element and make it re-traverse the model.
  *
- * The caps certify the live cut list, and the clip removes only the committed one. The caps report a certification
- * from their frame callback, which runs before the clip's; flushing it here re-renders the clip with the committed
- * pieces within that frame, so the clip and the caps never draw different cut lists.
+ * The caps commit the live cut list, and the clip removes only the committed one. The caps report a commit from their
+ * frame callback, which runs before the clip's; flushing it here re-renders the clip with the committed pieces within
+ * that frame, so the clip and the caps never draw different cut lists.
  * @public
  */
 export function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
@@ -57,10 +57,10 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
   const liveCutSet = useLiveSectionCutSet();
   const committedPieces = useSectionPieces();
   const { stripeFrequency, stripeWidth } = useSectionStripes();
-  const certify = React.useCallback(
-    (payload: SectionCertification): void => {
+  const commit = React.useCallback(
+    (cuts: readonly SectionCut[]): void => {
       flushSync(() => {
-        graphicsActor.send({ type: 'setSectionCertification', payload });
+        graphicsActor.send({ type: 'commitSectionCuts', payload: cuts });
       });
     },
     [graphicsActor],
@@ -80,7 +80,7 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
             snapshotRef={snapshotRef}
             stripeFrequency={stripeFrequency}
             stripeWidth={stripeWidth}
-            onCertify={certify}
+            onCommit={commit}
           />
         ) : null}
       </React.Suspense>

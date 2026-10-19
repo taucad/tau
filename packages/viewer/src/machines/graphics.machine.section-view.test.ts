@@ -307,20 +307,17 @@ describe('graphics machine section cuts', () => {
         actor.send({ type: 'removeSectionCut', payload: actor.getSnapshot().context.sectionCuts[0]!.id });
       },
     ],
-  ] as const)('should forget the committed cuts and a refusal when the section is %s', (_label, turnOff) => {
+  ] as const)('should forget the committed cuts when the section is %s', (_label, turnOff) => {
     const actor = startCentred();
     try {
       actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
       const { sectionCuts } = actor.getSnapshot().context;
-      actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
+      actor.send({ type: 'commitSectionCuts', payload: sectionCuts });
 
       turnOff(actor);
 
       expect(actor.getSnapshot().matches({ operational: { section: 'off' } })).toBe(true);
-      expect(actor.getSnapshot().context).toMatchObject({
-        committedSectionCuts: [],
-        sectionCertification: 'certified',
-      });
+      expect(actor.getSnapshot().context).toMatchObject({ committedSectionCuts: [] });
     } finally {
       actor.stop();
     }

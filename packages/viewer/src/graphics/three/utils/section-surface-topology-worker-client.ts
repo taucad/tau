@@ -1,18 +1,16 @@
-import type {
-  SectionCanonicalTopologyWorkerInput,
-  SectionCanonicalTopologyWorkerResult,
-} from '#graphics/three/utils/section-surface-topology.js';
+import type { SectionClosureCensus } from '#graphics/three/utils/section-surface-closure.js';
+import type { SectionClosureWorkerInput } from '#graphics/three/utils/section-surface-topology.js';
 
 /** The part of a `Worker` the client uses, so tests can supply a double. */
 export type SectionTopologyWorkerPort = {
-  postMessage(message: Readonly<{ id: number; input: SectionCanonicalTopologyWorkerInput }>): void;
+  postMessage(message: Readonly<{ id: number; input: SectionClosureWorkerInput }>): void;
   terminate(): void;
   addEventListener(type: 'message' | 'error', listener: (event: Event) => void): void;
 };
 
 export type SectionTopologyWorkerClient = Readonly<{
-  /** Builds a canonical recipe off the main thread, or returns `undefined` when no worker can be created. */
-  build(input: SectionCanonicalTopologyWorkerInput): Promise<SectionCanonicalTopologyWorkerResult> | undefined;
+  /** Runs a closure census off the main thread, or returns `undefined` when no worker can be created. */
+  build(input: SectionClosureWorkerInput): Promise<SectionClosureCensus> | undefined;
   /** Terminates the worker now when nothing is in flight; otherwise it terminates once idle. */
   release(): void;
 }>;
@@ -33,7 +31,7 @@ export const createSectionTopologyWorkerClient = (
   const requests = new Map<
     number,
     Readonly<{
-      resolve: (result: SectionCanonicalTopologyWorkerResult) => void;
+      resolve: (result: SectionClosureCensus) => void;
       reject: (error: Error) => void;
     }>
   >();
@@ -66,7 +64,7 @@ export const createSectionTopologyWorkerClient = (
     }
     const current = created;
     current.addEventListener('message', (event) => {
-      const { data } = event as MessageEvent<Readonly<{ id: number; result: SectionCanonicalTopologyWorkerResult }>>;
+      const { data } = event as MessageEvent<Readonly<{ id: number; result: SectionClosureCensus }>>;
       const request = requests.get(data.id);
       requests.delete(data.id);
       request?.resolve(data.result);
@@ -90,7 +88,7 @@ export const createSectionTopologyWorkerClient = (
   };
 
   return {
-    build(input): Promise<SectionCanonicalTopologyWorkerResult> | undefined {
+    build(input): Promise<SectionClosureCensus> | undefined {
       const target = acquire();
       if (!target) {
         return undefined;
@@ -98,7 +96,7 @@ export const createSectionTopologyWorkerClient = (
       clearTimeout(idleTimer);
       idleTimer = undefined;
       const id = ++sequence;
-      return new Promise<SectionCanonicalTopologyWorkerResult>((resolve, reject) => {
+      return new Promise<SectionClosureCensus>((resolve, reject) => {
         requests.set(id, { resolve, reject });
         // The page keeps its own arrays: they become the retained topology, and a retry after a failure resends them.
         target.postMessage({ id, input });
@@ -121,10 +119,10 @@ const topologyWorkerClient = createSectionTopologyWorkerClient(() =>
       }),
 );
 
-/** Builds a canonical topology recipe on the shared page worker, or `undefined` without one. @internal */
-export const buildSectionTopologyRecipeInWorker = (
-  input: SectionCanonicalTopologyWorkerInput,
-): Promise<SectionCanonicalTopologyWorkerResult> | undefined => topologyWorkerClient.build(input);
+/** Runs a closure census on the shared page worker, or `undefined` without one. @internal */
+export const buildSectionClosureInWorker = (
+  input: SectionClosureWorkerInput,
+): Promise<SectionClosureCensus> | undefined => topologyWorkerClient.build(input);
 
 /** Releases the shared topology worker when its viewer unmounts; an in-flight build finishes first. @internal */
 export const releaseSectionTopologyWorker = (): void => {

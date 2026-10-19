@@ -265,42 +265,18 @@ describe('ChatViewerControls', () => {
       expect(screen.getByRole('button', { name: 'Section view', pressed: false })).toHaveFocus();
     });
 
-    it('should say, politely, when the section is refused and the view keeps the last one', () => {
-      const actor = startGraphics();
-      actor.send({ type: 'setSectionViewActive', payload: true });
-      const { sectionCuts } = actor.getSnapshot().context;
-      actor.send({
-        type: 'setSectionCertification',
-        payload: { status: 'certified', cuts: sectionCuts },
-      });
-      renderBar(actor);
-      // Present, and empty, before there is anything to say, so that the words are announced when they come.
-      const status = within(sectionRow()).getByRole('status');
-      expect(status).toBeEmptyDOMElement();
-
-      act(() => {
-        actor.send({
-          type: 'setSectionCertification',
-          payload: { status: 'rejected', cuts: sectionCuts },
-        });
-      });
-
-      expect(status).toHaveTextContent('Section unavailable for this model; showing the last section');
-    });
-
-    it('should claim no last section when the caps refuse before they ever drew one', () => {
+    it('should keep the section row free of model status text when the caps commit a section', () => {
       const actor = startGraphics();
       actor.send({ type: 'setSectionViewActive', payload: true });
       renderBar(actor);
 
       act(() => {
-        actor.send({
-          type: 'setSectionCertification',
-          payload: { status: 'rejected', cuts: [] },
-        });
+        actor.send({ type: 'commitSectionCuts', payload: actor.getSnapshot().context.sectionCuts });
       });
 
-      expect(within(sectionRow()).getByRole('status')).toHaveTextContent(/^Section unavailable for this model$/);
+      // Caps are never refused, so the row has nothing to say about the model.
+      expect(within(sectionRow()).queryByRole('status')).not.toBeInTheDocument();
+      expect(sectionRow()).not.toHaveTextContent(/unavailable/i);
     });
   });
 

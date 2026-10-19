@@ -56,11 +56,8 @@ describe('MeasureTool with section cuts', () => {
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld();
 
-  const certify = (): void => {
-    actor.send({
-      type: 'setSectionCertification',
-      payload: { status: 'certified', cuts: actor.getSnapshot().context.sectionCuts },
-    });
+  const commitCuts = (): void => {
+    actor.send({ type: 'commitSectionCuts', payload: actor.getSnapshot().context.sectionCuts });
   };
 
   const pixelOf = (x: number, y: number, z: number): readonly [number, number] => {
@@ -94,7 +91,7 @@ describe('MeasureTool with section cuts', () => {
     const [cut] = actor.getSnapshot().context.sectionCuts;
     act(() => {
       actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset } } });
-      certify();
+      commitCuts();
     });
   };
 
@@ -155,7 +152,7 @@ describe('MeasureTool with section cuts', () => {
     actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
     const [cut] = actor.getSnapshot().context.sectionCuts;
     actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: cutHeight } } });
-    certify();
+    commitCuts();
     actor.send({ type: 'setMeasureActive', payload: true });
     actor.send({ type: 'setMeasureMode', mode: 'point' });
 
@@ -258,7 +255,7 @@ describe('MeasureTool with section cuts', () => {
     const step = (offset: number): void => {
       act(() => {
         actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset } } });
-        certify();
+        commitCuts();
       });
     };
 
@@ -393,7 +390,7 @@ describe('MeasureTool with section cuts', () => {
       add({ kind: 'plane', plane: 'xz' }, { offset: 1.5, isFlipped: false });
       add({ kind: 'revolution', axis: 'z' }, { start: 45, sweep: 5 });
       actor.send({ type: 'selectSectionCut', payload: undefined });
-      certify();
+      commitCuts();
     });
     const cuts = actor.getSnapshot().context.sectionCuts;
     const controls = Object.assign(new THREE.EventDispatcher(), { enabled: true });

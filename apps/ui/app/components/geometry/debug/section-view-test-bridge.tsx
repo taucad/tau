@@ -66,10 +66,9 @@ export type SectionViewTestSectionState = Readonly<{
   cuts: readonly SectionCut[];
   selectedCutId: string | undefined;
   hoveredCutId: string | undefined;
-  /** The cuts the caps last certified, which picking and captures read, and the pieces they remove. */
+  /** The cuts the caps last committed, which picking and captures read, and the pieces they remove. */
   committedCuts: readonly SectionCut[];
   committedPieces: readonly SectionPiece[];
-  certification: GraphicsContext['sectionCertification'];
   /** Whether the committed cuts hold the live cuts' values: the caps have caught up with the last edit. */
   isCommitted: boolean;
 }>;
@@ -166,16 +165,17 @@ export type SectionViewTestRenderedModelComponentState = Readonly<{
   edgeMaterialOpacities: readonly number[];
 }>;
 
-export type SectionViewTestCapCompleteness =
-  | Readonly<{
-      status: 'complete';
-      admittedSourceCount: number;
-      unsupportedSourceCount: number;
-    }>
-  | Readonly<{
-      status: 'unsupported' | 'failed';
-      failure: Readonly<{ sourceKey: string; code: string; message: string }>;
-    }>;
+/** How the caps graded the committed sources: every source is capped, exactly or per loop. */
+export type SectionViewTestCapCompleteness = Readonly<{
+  status: 'complete';
+  admittedSourceCount: number;
+  exactSourceCount: number;
+  perLoopSourceCount: number;
+  pendingSourceCount: number;
+  sources: ReadonlyArray<
+    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: string | undefined }>
+  >;
+}>;
 
 export type SectionViewTestMeasureState = Readonly<{
   isMeasureActive: boolean;
@@ -839,7 +839,6 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           hoveredCutId: context.hoveredSectionCutId,
           committedCuts: context.committedSectionCuts,
           committedPieces: resolveSectionPieces(context.committedSectionCuts),
-          certification: context.sectionCertification,
           isCommitted: areSectionCutsEqual(context.committedSectionCuts, context.sectionCuts),
         };
       },

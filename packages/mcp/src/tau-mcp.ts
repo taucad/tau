@@ -73,10 +73,13 @@ const instructionsFor = (tested: boolean): string =>
       ? [
           'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
           'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed.',
         ]
       : [
           'After edits, call evaluate_model for build diagnostics and offered views/exports, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready and its summary bounds and componentCount fit the brief.',
         ]),
+    'A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done.',
     'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
   ].join(' ');
 

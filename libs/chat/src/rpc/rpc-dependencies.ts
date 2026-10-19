@@ -9,6 +9,7 @@
  */
 import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type { SourceRevisionOutput } from '#schemas/tools/source-revision.schema.js';
+import type { ExportValidation } from '#schemas/tools/export-model.tool.schema.js';
 import type { DeterministicEditFileInput } from '#schemas/tools/edit-file.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
@@ -188,6 +189,8 @@ export type RpcGraphicsExportModelResult =
       exportId: string;
       files: ExportFile[];
       sourceRevision?: SourceRevisionOutput;
+      /** What the exported files say about themselves, read from their bytes. */
+      validation?: ExportValidation;
       /** The non-fatal issues the runtime returned with the files; the handler hands the warnings to the agent. */
       issues?: KernelIssue[];
     }

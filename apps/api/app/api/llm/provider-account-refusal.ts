@@ -39,7 +39,9 @@ type ProviderError = {
 
 const responsesCodes = new Set(['credit_balance_exhausted', 'insufficient_quota', 'billing_not_active']);
 const completionsMessage = /insufficient (quota|credit|balance)|no credits|credit balance/i;
-const anthropicMessage = /credit balance/i;
+/* Anthropic answers an unfunded account with a 400 `invalid_request_error` in one of two sentences:
+ * a low credit balance, or a workspace past its spend limit ("specified API usage limits"). */
+const anthropicMessage = /credit balance|api usage limits/i;
 
 const responsesMatch = (error: ProviderError): boolean =>
   error.type === 'insufficient_quota' || (error.code !== undefined && responsesCodes.has(error.code));

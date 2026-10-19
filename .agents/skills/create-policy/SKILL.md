@@ -194,7 +194,7 @@ Link to related policies and research docs. Use relative paths:
 Policies are discoverable through a tiered system (see `docs/policy/agents-md-policy.md`). Use the cheapest tier that provides adequate discoverability:
 
 1. **Most policies** need no companion rule. `AGENTS.md` points to `docs/policy/` and the agent can search/read on demand.
-2. **Update the applicable AGENTS policy route** when the policy governs active editing. Put directory-local routes in the nearest boundary; retain explicit root file-type or cross-directory routes for tests, TypeScript, XState and overlapping concerns. Link the normative policy without duplicating its body. Follow `agents-md-policy` for budgets and adjacent Claude imports.
+2. **Update the applicable AGENTS policy route** when the policy governs active editing. Put directory-local routes in the nearest boundary; retain explicit root file-type or cross-directory routes for tests, TypeScript, XState and overlapping concerns. Link the normative policy without duplicating its body. Follow `agents-md-policy` for budgets and native AGENTS discovery.
 3. **Keep one normative owner.** The route activates the policy; it does not copy its rules.
 
 ```markdown

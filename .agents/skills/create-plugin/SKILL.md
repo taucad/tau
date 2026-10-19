@@ -46,10 +46,9 @@ targets. A .NET kernel swaps in `defineDotnetKernelAdopter` from
 see `/create-kernel` section 3.8.
 
 New plugin projects receive a local `AGENTS.md` naming only the selected
-capabilities, host target, generated entrypoints and real Nx commands, plus an
-adjacent `CLAUDE.md` containing exactly `@AGENTS.md`. The shared writer preserves
-authored instruction bytes and fills only a missing pair member. Maintain these
-instructions in place after creation.
+capabilities, host target, generated entrypoints and real Nx commands.
+The shared writer preserves authored instruction bytes and creates only a missing
+`AGENTS.md`. Maintain these instructions in place after creation.
 
 ## Complete
 

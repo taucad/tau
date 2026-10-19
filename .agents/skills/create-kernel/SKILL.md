@@ -50,9 +50,8 @@ This creates the package baseline; the kernel stub is intentionally non-function
 | `src/<name>.plugin.test.ts`                                                                                                          | Alias-identity test, capability-id assertions, and (for `hostTarget: browser`) the payload guard  |
 | `src/<name>.plugin.test-d.ts`                                                                                                        | Type-level alias identity                                                                         |
 | `AGENTS.md`                                                                                                                          | Plugin identity, `kernel` capability, selected host, entrypoints, Nx commands and owner links     |
-| `CLAUDE.md`                                                                                                                          | Exact `@AGENTS.md` import                                                                         |
 
-The plugin creator's shared KeepExisting writer owns this starter pair. A
+The plugin creator's shared KeepExisting writer owns this AGENTS starter. A
 kernel package has no separate generator or instruction template. Maintain the
 generated AGENTS in place after creation; do not rerun the full creator over an
 existing package.

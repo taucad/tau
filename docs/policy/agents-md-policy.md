@@ -3,7 +3,7 @@ title: 'AGENTS.md Policy'
 description: 'Canonical root and nested instructions, shared skills, native discovery, autonomous composition, learning and verification for Codex and Claude.'
 status: active
 created: '2026-03-09'
-updated: '2026-09-05'
+updated: '2026-10-19'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/policy/mcp-tool-budget-policy.md
@@ -41,7 +41,7 @@ Before editing a path, read every `AGENTS.md` from repository root through that 
 
 Start bounded tasks in their narrowest suitable working directory when supported. Codex startup discovery follows its ancestor chain; a root-launched task explicitly reads target descendants. This protocol supplements the native loader rather than assuming dynamic child discovery.
 
-Every canonical AGENTS has an adjacent `CLAUDE.md` containing exactly `@AGENTS.md` plus a newline. Claude imports the shared body through native memory discovery. Keep `.claude/skills` as a verified alias of `.agents/skills`; use a byte-checked generated mirror only for an observed native limitation. Never maintain two authored skill trees.
+Codex and Claude read canonical `AGENTS.md` files directly. Do not create `CLAUDE.md` import adapters or templates. Keep `.claude/skills` as a verified alias of `.agents/skills`; use a byte-checked generated mirror only for an observed native limitation. Never maintain two authored skill trees.
 
 ### 3. Route conditions explicitly
 
@@ -91,7 +91,7 @@ Use explicit host-supplied history/candidate artifacts and repository-safe finge
 
 ### 8. Preserve repository and optional-checkout boundaries
 
-Tau owns `docs/AGENTS.md` and its Claude import. `docs/research` and `docs/reference` may resolve into Tau Brain; do not create Tau instructions inside their symlink targets. Standalone Brain instructions belong to that repository.
+Tau owns `docs/AGENTS.md`. `docs/research` and `docs/reference` may resolve into Tau Brain; do not create Tau instructions inside their symlink targets. Standalone Brain instructions belong to that repository.
 
 Follow `.agents/skills/create-research/artifacts.md` for durable program evidence. A worker without Brain uses the permitted parent-save path; it does not create a second checkout. Ordinary public install/build/test/runtime remains independent of Brain and optional dependencies.
 
@@ -99,15 +99,15 @@ Required dependency-maintenance guidance stays reachable through Tau-side skills
 
 ### 9. Scaffold useful instructions at project creation
 
-All supported Nx project creators use one shared instruction-template pair to create local AGENTS and its Claude import by default. Package, core and plugin creation—including kernels—share this contract. File-addition generators do not create extra instruction boundaries.
+All supported Nx project creators use one shared instruction template to create local `AGENTS.md` by default. Package, core and plugin creation—including kernels—share this contract. File-addition generators do not create extra instruction boundaries.
 
 Resolve actual package/project identity, directory, entrypoints, description, capabilities and targets from the scaffold. Link root/ancestors, README and applicable policy/skill owners with correct relative paths. Commands run from workspace root using actual Nx identity; include build only when supported. A short project-notes section invites verified local invariants, not fabricated facts or task progress.
 
-Render instruction templates separately from code templates using native Nx `KeepExisting`. Full creators reject project/path collisions before changing instructions. Repeated writer calls preserve authored bytes and fill only missing pair members. A conflicting authored Claude body is a review finding. Do not synchronize template updates over existing projects or make the default starter opt-in.
+Render instruction templates separately from code templates using native Nx `KeepExisting`. Full creators reject project/path collisions before changing instructions. Repeated writer calls preserve authored bytes and create only a missing `AGENTS.md`. Do not synchronize template updates over existing projects or make the default starter opt-in.
 
 ### 10. Verify behavior and retire obsolete producers
 
-Use `pnpm nx run scripts:validate-agent-config` for authored boundaries, imports, paths, skills, invocation contracts and budgets. Keep focused tests in existing scripts/generator projects. Observe real root/nested discovery, overlapping policy routes, composition and delegation on each supported host; configuration existence is not runtime evidence.
+Use `pnpm nx run scripts:validate-agent-config` for authored boundaries, paths, skills, invocation contracts, budgets and absence of retired Claude import files/templates. Keep focused tests in existing scripts/generator projects. Observe real root/nested discovery, overlapping policy routes, composition and delegation on each supported host; configuration existence is not runtime evidence.
 
 Use disposable fixtures and documented native isolation without changing global permissions, trust or credentials. Preserve commands, versions, output and actual file/native events. Mark unavailable cases unverified and do not declare parity without evidence.
 
@@ -119,6 +119,6 @@ Before legacy deletion, account for every physical row and independent claim wit
 
 - [Codex instruction discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
 - [Codex skill metadata](https://learn.chatgpt.com/docs/build-skills)
-- [Claude memory and imports](https://code.claude.com/docs/en/memory)
+- [Claude instruction discovery](https://code.claude.com/docs/en/memory)
 - [Claude skill invocation](https://code.claude.com/docs/en/slash-commands#control-who-invokes-a-skill)
 - [Claude subagent skills](https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents)

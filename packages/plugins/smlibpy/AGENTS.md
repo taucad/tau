@@ -63,4 +63,4 @@ Record durable project-specific facts here after verifying them in current sourc
 - The worker writes a `TAUSMLB1` mesh bundle (`python/worker.py`), and `src/smlibpy-bundle.ts` reads it; `src/smlibpy-gltf.ts` builds the GLB in TypeScript, following `@taucad/smlib`'s converter. Change both sides together and bump the kernel version.
 - The model contract (`ShapeConfig`, `Model`, materials, `mechanism`) is SMLib's (`@taucad/smlib/model`) as plain Python data, normalized in `python/smlibpy_materials.py` and `python/smlibpy_mechanisms.py`.
 - `python/tests` requires 100% line and branch coverage (`nx run smlibpy:test-python`); `tau-plugin.json`, the SBOM and `project/` are generated (`generate-tau-plugin`, `generate-project-template`) and excluded from oxfmt.
-- `tau-plugin.golden.json` stays `{}` until a `smlibpy-tau-plugin.yml` dispatch records golden receipts.
+- `tau-plugin.golden.json` holds the four targets' receipts from a `smlibpy-tau-plugin.yml` dispatch; regenerating `tau-plugin.json` resets it to `{}` until the next dispatch re-records them.

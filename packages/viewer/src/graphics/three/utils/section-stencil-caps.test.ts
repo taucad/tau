@@ -6,6 +6,7 @@ import { resolveSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionCut, SectionHalfSpace, SectionPiece } from '#graphics/section-cuts.js';
 import { getSectionCapDepthBias } from '#graphics/three/materials/section-cap-depth-state.js';
 import { sectionStencilBits } from '#graphics/three/materials/section-stencil.material.js';
+import { sectionCapOpenChainWidthScale } from '#graphics/three/overlay-colors.constants.js';
 import {
   boxCrossesSectionRegion,
   createSectionStencilCaps,
@@ -264,6 +265,31 @@ describe('createSectionStencilCaps', () => {
       THREE.NotEqualStencilFunc,
       sectionStencilBits.count,
     ]);
+    caps.dispose();
+  });
+
+  it('should outline open chains at the open-chain scale of the ordinary outline width', () => {
+    const caps = createSectionStencilCaps('webgl');
+    const renderer = createRecordingRenderer();
+    const open = new THREE.BufferGeometry().setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3),
+    );
+    const source: SectionStencilCapSource = {
+      ...createSource('a', 'owner-a', new THREE.BoxGeometry()),
+      loops: {
+        matrix: new THREE.Matrix4(),
+        bySlot: new Map([[0, { fill: new THREE.BufferGeometry(), open, closedLoopCount: 0, openChainCount: 1 }]]),
+      },
+    };
+    caps.render(renderer, { ...frameFor([source]), outlineWidthPixels: 1.5 });
+    const outlineWidth = (mesh: THREE.Mesh | undefined): number =>
+      ((mesh!.material as THREE.ShaderMaterial).uniforms['tauOutline']!.value as THREE.Vector2).y;
+    const { objects } = renderer.frames[0]!;
+    const outlines = objects.filter(({ material }) => (material as THREE.Material).name === 'TauSectionCapOutline');
+    expect(outlineWidth(outlines.find(({ geometry }) => geometry !== open))).toBe(1.5);
+    expect(outlineWidth(outlines.find(({ geometry }) => geometry === open))).toBe(1.5 * sectionCapOpenChainWidthScale);
+    expect(sectionCapOpenChainWidthScale).toBe(2);
     caps.dispose();
   });
 });

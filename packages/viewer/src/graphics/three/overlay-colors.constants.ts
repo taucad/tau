@@ -128,3 +128,6 @@ export const axesHelperOpacity = 0.6;
  * both themes, as the semantic status colours keep their lightness in both modes.
  */
 export const sectionCapOpenChainColor = 0xdd_00_3f;
+
+/** How many times the ordinary cap outline's width an open chain is drawn, so it stands out from closed cap edges. */
+export const sectionCapOpenChainWidthScale = 2;

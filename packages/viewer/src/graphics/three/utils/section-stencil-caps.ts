@@ -10,6 +10,7 @@ import {
   writeSectionCapOutlineCamera,
   writeSectionCapOutlineFaces,
 } from '#graphics/three/materials/section-cap-outline.material.js';
+import type { SectionCapOutlineFaces } from '#graphics/three/materials/section-cap-outline.material.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
 import type { SectionClip } from '#graphics/three/materials/section-clip.js';
 import {
@@ -22,7 +23,7 @@ import {
   setVertexColoredStripedMaterialStripes,
 } from '#graphics/three/materials/striped-material.js';
 import type { StripedCapStripes } from '#graphics/three/materials/striped-material.js';
-import { sectionCapOpenChainColor } from '#graphics/three/overlay-colors.constants.js';
+import { sectionCapOpenChainColor, sectionCapOpenChainWidthScale } from '#graphics/three/overlay-colors.constants.js';
 import { getBvhGeometryBounds } from '#graphics/three/utils/bvh-cache.js';
 import { resolveSectionCapStyle } from '#graphics/three/utils/section-cap-style.js';
 import type { SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
@@ -410,8 +411,11 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   const fillSlots: FillSlot[] = [];
   const capSlots: CapSlot[] = [];
   const outlineFaces = createSectionCapOutlineFaces();
+  /** The same faces as {@link outlineFaces}, at the open chains' wider line. */
+  const openChainFaces = createSectionCapOutlineFaces();
   const outlineClip = createSectionClip(backend);
   const outlineMaterials = new Map<number, THREE.Material>();
+  let openChainMaterial: THREE.Material | undefined;
   const stencilMaterials = new Map<SectionStencilPass, THREE.Material>();
   let overlapCapMaterial: THREE.Material | undefined;
   let stripes: StripedCapStripes | undefined;
@@ -479,15 +483,20 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     return slot;
   };
 
+  const createOutlineMaterial = (faces: SectionCapOutlineFaces, color: number): THREE.Material => {
+    const material = own(
+      backend === 'webgpu'
+        ? createSectionCapOutlineNodeMaterial(faces, color)
+        : createSectionCapOutlineMaterial(faces, color),
+    );
+    installSectionClip(material, outlineClip);
+    return material;
+  };
+
   const outlineMaterial = (color: number): THREE.Material => {
     let material = outlineMaterials.get(color);
     if (!material) {
-      material = own(
-        backend === 'webgpu'
-          ? createSectionCapOutlineNodeMaterial(outlineFaces, color)
-          : createSectionCapOutlineMaterial(outlineFaces, color),
-      );
-      installSectionClip(material, outlineClip);
+      material = createOutlineMaterial(outlineFaces, color);
       outlineMaterials.set(color, material);
     }
     return material;
@@ -711,6 +720,8 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     if (allFaces.length > 0) {
       writeSectionCapOutlineFaces(outlineFaces, allFaces, frame.outlineWidthPixels);
       writeSectionCapOutlineCamera(outlineFaces, frame.camera, frame.viewportHeightPixels);
+      writeSectionCapOutlineFaces(openChainFaces, allFaces, frame.outlineWidthPixels * sectionCapOpenChainWidthScale);
+      writeSectionCapOutlineCamera(openChainFaces, frame.camera, frame.viewportHeightPixels);
       writeSectionClip(outlineClip, frame.pieces);
       const outlineOrder = order++;
       for (const { source, box } of boxes) {
@@ -733,7 +744,8 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
         for (const geometry of source.loops?.bySlot.values() ?? []) {
           if (geometry.openChainCount > 0) {
             stats.openChainDrawCount++;
-            takeMesh(geometry.open, outlineMaterial(sectionCapOpenChainColor), source.loops!.matrix, openChainOrder);
+            openChainMaterial ??= createOutlineMaterial(openChainFaces, sectionCapOpenChainColor);
+            takeMesh(geometry.open, openChainMaterial, source.loops!.matrix, openChainOrder);
           }
         }
       }
@@ -779,6 +791,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       fillSlots.length = 0;
       capSlots.length = 0;
       outlineMaterials.clear();
+      openChainMaterial = undefined;
       stencilMaterials.clear();
       overlapCapMaterial = undefined;
       scene.clear();

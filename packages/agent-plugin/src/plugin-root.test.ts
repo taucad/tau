@@ -19,9 +19,11 @@ type McpConfig = {
 
 /** Every bundle `nx build agent-plugin` installs, beside the committed onboarding skill `tau`. */
 const skillSlugs = [
+  'cad-build123d',
   'cad-jscad',
   'cad-manifold',
   'cad-openscad',
+  'cad-picogk',
   'cad-picovoxel',
   'cad-replicad',
   'cad-smlib',

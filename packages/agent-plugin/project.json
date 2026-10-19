@@ -36,7 +36,7 @@
         "cwd": "{workspaceRoot}",
         "commands": [
           "node -e \"const { readdirSync, rmSync } = require('node:fs'); for (const entry of readdirSync('packages/agent-plugin/skills')) if (entry !== 'tau') rmSync('packages/agent-plugin/skills/' + entry, { recursive: true, force: true })\"",
-          "tsx packages/skills/src/cli.ts packages/agent-plugin/skills @taucad/jscad @taucad/manifold @taucad/openrscad @taucad/picovoxel @taucad/replicad @taucad/smlib @taucad/tscircuit @taucad/workbench geospec",
+          "tsx packages/skills/src/cli.ts packages/agent-plugin/skills @taucad/build123d @taucad/jscad @taucad/manifold @taucad/openrscad @taucad/picogk @taucad/picovoxel @taucad/replicad @taucad/smlib @taucad/tscircuit @taucad/workbench geospec",
           "node -e \"const { mkdirSync, writeFileSync } = require('node:fs'); const { resolve } = require('node:path'); mkdirSync('packages/agent-plugin/.dev', { recursive: true }); writeFileSync('packages/agent-plugin/.dev/cli.json', JSON.stringify({ argv: [resolve('node_modules/tsx/dist/cli.mjs'), resolve('packages/cli/src/bin.ts')] }, null, 2) + '\\n')\""
         ],
         "parallel": false

@@ -14,6 +14,7 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/manifold`    | TypeScript/JavaScript using Manifold      | Mesh-first robust booleans                            |
 | `@taucad/jscad`       | TypeScript/JavaScript using JSCAD         | CSG modeling                                          |
 | `@taucad/smlib`       | TypeScript/JavaScript using smlibwasm     | NURBS BRep with a build123d-style API                 |
+| `@taucad/picovoxel`   | TypeScript/JavaScript using PicoVoxel     | Voxels, signed distance fields and lattices           |
 | `@taucad/openrscad`   | OpenSCAD                                  | `.scad` models in browser or Node                     |
 | `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution                       |
 | `@taucad/gltf`        | glTF/GLB                                  | glTF interchange with optional Draco                  |
@@ -22,6 +23,7 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports          |
 | `@taucad/smlibpy`     | Python using smlibpy                      | Native NURBS BRep, PBR materials and mechanisms       |
 | `@taucad/build123d`   | Python using Build123d                    | Native BRep assemblies, joints, textured GLB and STEP |
+| `@taucad/picogk`      | C# using PicoGK                           | Native C# voxel engineering, materials and mechanisms |
 | `@taucad/tscircuit`   | TSX using tscircuit                       | Electronics: 3D board, schematic, PCB, BOM            |
 
 There is no catch-all Tau kernel. Every first-party import extension has an explicit owner; `.py` files go to SMLibPy when they import `smlibpy` and to Build123d otherwise.

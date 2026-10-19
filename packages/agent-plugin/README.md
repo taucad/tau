@@ -12,7 +12,7 @@ Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher
 - **One plugin for both hosts.** This package's folder is a Codex plugin and a Claude Code plugin; each host reads its own manifest and MCP server config.
 - **The agent sees the part it builds.** Ten Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer and prepare native kernels; see [Tools](#tools).
 - **You see it too.** `show_model` opens the Tau viewer: inside Codex desktop and Claude Desktop as an MCP App, and as a local browser link in the CLIs.
-- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, tscircuit, GeoSpec and the workbench.
+- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK, GeoSpec and the workbench.
 - **Nothing to install inside the plugin.** It has no dependencies: a small launcher finds your Tau CLI, or fetches the matching release with `npx`.
 - **Your project stays clean.** Screenshots and large test reports live in a per-session temporary folder; only exports and workbench records land under the project's `.tau/`.
 
@@ -140,7 +140,7 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 
 | Skill               | Covers                                                                                               |
 | ------------------- | ---------------------------------------------------------------------------------------------------- |
-| `tau`               | Project layout, `tau.json`, which kernel a file uses, the evaluate → test → screenshot → export loop |
+| `tau`               | Project layout, `tau.json`, which kernel to use when, the evaluate → test → screenshot → export loop |
 | `cad-replicad`      | replicad: BRep solids, the default for parts                                                         |
 | `cad-openscad`      | OpenSCAD (`.scad`)                                                                                   |
 | `cad-jscad`         | JSCAD (`@jscad/modeling`)                                                                            |
@@ -148,10 +148,12 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 | `cad-picovoxel`     | PicoVoxel voxels, signed distance fields and lattices                                                |
 | `cad-smlib`         | SMLib NURBS BRep solids (`@classcad/smlibwasm`)                                                      |
 | `cad-tscircuit`     | tscircuit circuit boards                                                                             |
+| `cad-build123d`     | build123d Python BRep (`main.py`), after `prepare_kernel`                                            |
+| `cad-picogk`        | PicoGK C# voxel engineering (`main.cs`), after `prepare_kernel`                                      |
 | `geospec-authoring` | Writing `*.geospec.ts` geometry tests                                                                |
 | `workbench`         | The Tau app's workbench views and panes                                                              |
 
-The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel.
+Which kernel when: the `tau` skill. The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel. `cad-zoo` is not shipped because KCL is not available from the plugin, and `cad-smlibpy` is not shipped either: write Python models in build123d.
 
 ## How it works
 

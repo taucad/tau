@@ -20,6 +20,7 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '#components/ui/sonner.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { useComposerExit } from '#components/chat/use-composer-exit.js';
 import {
   getClipboardImageFiles,
   handleClipboardImagePaste,
@@ -70,16 +71,6 @@ export type ChatAttachmentAddOptions = Omit<DraftAttachmentOptions, 'model'>;
  * - `'reference'` — `tauEditorPanelDragMime` or `tauFileDragMime` (editor tab / file tree row) → insert as file-link pill
  */
 export type ChatTextareaDragKind = 'image' | 'viewer' | 'reference';
-
-/**
- * IMPORTANT NOTE:
- *
- * When adding a new element to the textarea and that element contains portalled content,
- * make sure to add the `data-chat-textarea-focustrap` attribute to the element.
- *
- * This is used to determine if the focus has truly left the textarea and its related UI elements.
- */
-export const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
 /**
  * Pure helper: parses a `tauViewerPanelDragMime` payload and returns the
@@ -825,39 +816,7 @@ export function useChatTextareaLogic({
     }
   }, []);
 
-  const handleTextareaBlur = useCallback((): void => {
-    // Use requestAnimationFrame to check focus after the browser has finished
-    // processing the focus change. This allows portaled elements (popovers, dialogs)
-    // to receive focus before we check if we should trigger onBlur
-    requestAnimationFrame(() => {
-      const { activeElement } = document;
-      const container = containerReference.current;
-
-      if (!container) {
-        return;
-      }
-
-      // Check if focus is within the container itself
-      if (container.contains(activeElement)) {
-        return;
-      }
-
-      // Check if focus moved to a related element (marked with data attribute).
-      // This allows child components to mark their portaled content as related —
-      // but not the controls of another composer on the page.
-      const otherComposer = activeElement?.closest('[data-chat-composer]');
-      if (
-        activeElement instanceof Element &&
-        activeElement.closest(`[${focusTrapAttribute}]`) &&
-        (!otherComposer || otherComposer.contains(container))
-      ) {
-        return;
-      }
-
-      // Focus has truly left the component and its related UI elements
-      onBlur?.();
-    });
-  }, [onBlur]);
+  const { handleBlur: handleTextareaBlur } = useComposerExit({ containerReference, onExit: onBlur });
 
   return {
     // State

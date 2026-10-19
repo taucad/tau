@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 
 /**
  * Marks portalled UI that belongs to a composer, such as its menus, popovers and drawers. Focus
- * inside a marked element counts as still being in the composer.
+ * inside a marked element counts as still being in the composer, so any new composer control with
+ * portalled content carries it.
  */
 export const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
@@ -38,6 +39,7 @@ export function useComposerExit({
   containerReference,
   onExit,
 }: {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLElement | null>;
   readonly onExit?: () => void;
 }): { readonly handleBlur: () => void } {
@@ -55,6 +57,7 @@ export function useComposerExit({
     if (!isTracked) {
       return undefined;
     }
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- DOM event target
     const isOwned = (target: EventTarget | null): boolean => {
       const container = containerReference.current;
       return container !== null && target instanceof Element && isComposerOwned(target, container);

@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
+import { focusTrapAttribute } from '#components/chat/use-composer-exit.js';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';

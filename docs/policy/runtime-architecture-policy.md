@@ -505,8 +505,10 @@ Target runtime exports are generic substrate and authoring surfaces, never concr
 @taucad/runtime/middleware  → defineMiddleware and middleware authoring types
 @taucad/runtime/bundler     → defineBundler and bundler authoring types
 @taucad/runtime/job         → generic job definitions and contracts
-@taucad/runtime/schema → pure configuration authoring, manifest admission and validation
-@taucad/runtime/schema/zod → native Zod quantity authoring helper
+@taucad/runtime/schema      → pure configuration authoring, manifest admission and validation
+@taucad/runtime/schema/zod  → native Zod quantity authoring helper
+@taucad/runtime/config      → defineConfig and TauConfig for a project's tau.config.*
+@taucad/runtime/config/node → loadTauConfig, the Node reader of tau.config.*
 @taucad/runtime/transport   → defineRuntimeTransport and transport implementations
 ```
 

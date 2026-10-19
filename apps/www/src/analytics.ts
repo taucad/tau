@@ -37,6 +37,7 @@ export const ctaPlacements = new Set([
   'header',
   'primary',
   'hero',
+  'hero-agent',
   'product',
   'closing',
   'download',

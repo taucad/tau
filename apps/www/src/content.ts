@@ -124,8 +124,8 @@ export const ecosystem = [
       ['PicoVoxel', 'Browser'],
       ['tscircuit', 'Browser'],
       ['Zoo KCL', 'Cloud · Pro'],
-      ['Build123d', 'Desktop · in development'],
-      ['PicoGK', 'Desktop · in development'],
+      ['Build123d', 'Desktop and plugin · native runtime'],
+      ['PicoGK', 'Desktop and plugin · native runtime'],
     ],
   },
   {
@@ -141,10 +141,10 @@ export const ecosystem = [
   },
   {
     title: 'Coding agents',
-    body: 'Bring your own agent to Tau Desktop.',
+    body: 'Bring your own agent to Tau.',
     items: [
-      ['Claude Code', 'Desktop · in development'],
-      ['Codex', 'Desktop · in development'],
+      ['Claude Code', 'Plugin · available'],
+      ['Codex', 'Plugin · available'],
       ['Grok Build', 'Desktop · in development'],
     ],
   },

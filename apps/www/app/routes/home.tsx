@@ -12,6 +12,8 @@ import {
   planCards,
   closing,
 } from '#www/page-components.js';
+import { Button } from '@taucad/ui/components/button';
+import { appOrigin } from '#www/environment.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -33,6 +35,23 @@ export const content = (): React.JSX.Element => (
           <SiteLink className='text-link' href='#story'>
             Watch it come together {down}
           </SiteLink>
+        </div>
+        <div className='agent-prompt'>
+          <p className='fine'>Using Claude Code or Codex? Paste this into your agent:</p>
+          <code id='agent-prompt-text'>Install the Tau plugin from {appOrigin}/llms.txt</code>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            data-copy='agent-prompt-text'
+            data-event='cta'
+            data-placement='hero-agent'
+            aria-label='Copy the agent prompt'
+            hidden
+          >
+            Copy
+          </Button>
+          <span role='status' className='sr-only' />
         </div>
       </div>
       {heroStage()}

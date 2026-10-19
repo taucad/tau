@@ -396,6 +396,28 @@ main > .band:not(.band ~ .band)::before {
   align-items: center;
   gap: 0.75rem 1.5rem;
 }
+/* The prompt sits close under the download, and the hero keeps its 1440 × 900 fit. */
+.agent-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  margin-top: -0.75rem;
+}
+.agent-prompt .fine {
+  flex-basis: 100%;
+}
+.agent-prompt code {
+  min-width: 0;
+  font: 400 var(--fine) / 1.5 var(--font-mono);
+  color: var(--foreground);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
 
 /* ── Hero ─────────────────────────────────────────────────────────────────────────────── */
 .hero {
@@ -409,7 +431,7 @@ main > .band:not(.band ~ .band)::before {
   justify-content: center;
   gap: 1.75rem;
   border-right: 1px solid var(--line);
-  padding-block: clamp(3rem, 6vw, 5rem);
+  padding-block: clamp(3rem, 6vw, 4rem);
 }
 .hero h1 {
   font-size: var(--display);

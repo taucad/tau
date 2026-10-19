@@ -213,6 +213,10 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(heroLink).toContain('href="/download/"');
   expect(heroLink).toContain('data-host-download="page"');
   expect(html).toContain('Download Tau');
+  const agentPrompt = /<div class="agent-prompt">.*?<\/div>/u.exec(html)?.[0];
+  expect(agentPrompt).toContain('Install the Tau plugin from https://tau.new/llms.txt</code>');
+  expect(agentPrompt).toMatch(/<button[^>]*type="button"[^>]*data-placement="hero-agent"[^>]*hidden=""/u);
+  expect(agentPrompt).toContain('role="status"');
   const downloads = renderToStaticMarkup(<MemoryRouter>{download()}</MemoryRouter>);
   for (const platform of ['mac', 'macIntel', 'windows', 'linux'] as const) {
     expect(downloads).toContain(desktopDownloadHref(platform));

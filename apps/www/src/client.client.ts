@@ -3,9 +3,51 @@ import type * as Live from '#www/live.js';
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
-import { environmentHref, stagingDesktopNote } from '#www/environment.js';
+import { appOrigin, environmentHref, stagingDesktopNote } from '#www/environment.js';
 import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
 import type { ConsentDecision } from '@taucad/consent';
+
+/**
+ * Offer the copy control for the hero's agent prompt and name the host serving the page in it.
+ * Without the script the prompt stays selectable text and the control stays hidden.
+ * @param signal - Aborts the click listener when the page changes.
+ * @returns Clears a pending label restore.
+ */
+function initializeCopyPrompt(signal: AbortSignal): () => void {
+  let restore: ReturnType<typeof setTimeout> | undefined;
+  const button = document.querySelector('button[data-copy]');
+  const text = button instanceof HTMLButtonElement ? document.querySelector(`#${button.dataset['copy']}`) : null;
+  const status = button?.parentElement?.querySelector('[role="status"]');
+  if (!(button instanceof HTMLButtonElement) || !text || !status) {
+    return () => undefined;
+  }
+  // The page renders production links; staging names its own agent page.
+  text.textContent = text.textContent.replace(appOrigin, environmentHref(appOrigin, location.hostname));
+  button.hidden = false;
+  button.addEventListener(
+    'click',
+    async () => {
+      clearTimeout(restore);
+      try {
+        await navigator.clipboard.writeText(text.textContent);
+        status.textContent = 'Copied to clipboard';
+        button.textContent = 'Copied';
+        restore = setTimeout(() => {
+          status.textContent = '';
+          button.textContent = 'Copy';
+        }, 1500);
+      } catch {
+        // No clipboard permission or API: leave the prompt selected for a manual copy.
+        getSelection()?.selectAllChildren(text);
+        status.textContent = 'Copy failed. Select the text and copy it.';
+      }
+    },
+    { signal },
+  );
+  return () => {
+    clearTimeout(restore);
+  };
+}
 
 export function initializePage(signal: AbortSignal): () => void {
   const cleanups: Array<() => void> = [];
@@ -40,6 +82,8 @@ export function initializePage(signal: AbortSignal): () => void {
         (hostPlatform === 'mac' ? stagingDesktopNote(location.hostname) : undefined) ?? download.updates;
     }
   }
+
+  cleanups.push(initializeCopyPrompt(signal));
 
   const mobileMenu = document.querySelector('.mobile-menu');
   document.addEventListener(
@@ -257,8 +301,8 @@ export function initializePage(signal: AbortSignal): () => void {
   document.addEventListener(
     'click',
     (event) => {
-      const target = event.target instanceof Element ? event.target.closest('a[data-event]') : null;
-      if (!(target instanceof HTMLAnchorElement) || consent !== 'accepted') {
+      const target = event.target instanceof Element ? event.target.closest('[data-event]') : null;
+      if (!(target instanceof HTMLElement) || consent !== 'accepted') {
         return;
       }
       const { placement } = target.dataset;

@@ -589,6 +589,89 @@ describe('exchange formats (W7)', () => {
   );
 });
 
+describe('a moving assembly (LRP-9)', () => {
+  /** The fixture's one animation, as its `mechanism` export declares it. */
+  const animation = { id: 'four-sun-turns', name: 'Four sun turns' };
+
+  beforeAll(async () => {
+    await copyFile(join(here, 'fixtures/planetary/main.ts'), join(project, 'planetary.ts'));
+  });
+
+  /**
+   * Show the planetary source and check what reaches the page: `evaluate_model` declares and admits the mechanism,
+   * the shown GLB carries `TAU_cad_topology` and `show_model` reports it preserved.
+   *
+   * @param client - The connected client.
+   * @returns The `show_model` result.
+   */
+  const showPlanetary = async (client: Client): Promise<CallToolResult> => {
+    const evaluated = await callTool(client, 'evaluate_model', { targetFile: 'planetary.ts' });
+    expect(evaluated.isError).toBeFalsy();
+    expect(evaluated.structuredContent).toMatchObject({
+      mechanism: { declared: true, admitted: true, links: 4, joints: 3, couplings: 1, animations: [animation.id] },
+    });
+
+    const showResult = await callTool(client, 'show_model', { targetFile: 'planetary.ts' });
+    const result = shown(showResult);
+    expect(result.model).toMatchObject({ sourceFile: 'planetary.ts', mimeType: 'model/gltf-binary' });
+    /* The GLB's JSON chunk: its length at byte 12, its text from byte 20. */
+    const glb = await readFile(join(project, result.model.path));
+    const gltf = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
+      extensionsUsed?: readonly string[];
+      extensions?: Record<string, { topologyBufferView?: number }>;
+    };
+    expect(gltf.extensionsUsed ?? []).toContain('TAU_cad_topology');
+    expect(gltf.extensions?.['TAU_cad_topology']?.topologyBufferView).toEqual(expect.any(Number));
+    expect(result.mechanism).toEqual({ preserved: true, joints: 3, animations: [animation.id] });
+    return showResult;
+  };
+
+  /**
+   * Open the Kinematics pane and check that its animation picker lists the fixture's animation.
+   *
+   * @param root - The frame or page the viewer is in, drawn in the tab composition with the lane open.
+   */
+  const checkKinematicsPane = async (root: Frame | Page): Promise<void> => {
+    const lane = root.getByRole('complementary', { name: 'Workbench' });
+    await lane.getByRole('tab', { name: 'Kinematics' }).click();
+    const panel = lane.getByRole('tabpanel', { name: 'Kinematics' });
+    await panel.getByRole('group', { name: 'Playback' }).waitFor({ timeout: 60_000 });
+    await panel.getByRole('button', { name: /^Animation: /u }).click();
+    await root.getByRole('option', { name: animation.name }).waitFor();
+  };
+
+  it(
+    'should carry the mechanism to the page in an MCP Apps host',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await showPlanetary(client);
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+      await checkKinematicsPane(frame);
+      await capture(page, 'basic-host-kinematics');
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should carry the mechanism to the loopback page of a text host',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await showPlanetary(client));
+      const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+      await checkKinematicsPane(page);
+      await capture(page, 'loopback-kinematics');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe("the tab's panels (W10)", () => {
   let client: Client;
 

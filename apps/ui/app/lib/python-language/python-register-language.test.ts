@@ -69,5 +69,23 @@ describe('Python language contribution', () => {
         cancellationToken,
       ),
     ).toEqual({ suggestions: [] });
+
+    const smlibpy = {
+      ...model,
+      getLineContent: () => 'from smlibpy import Bo',
+    } as unknown as Monaco.editor.ITextModel;
+    const smlibpyCompletion = await provider.provideCompletionItems(
+      smlibpy,
+      { lineNumber: 1, column: 23 } as Monaco.Position,
+      completionContext,
+      cancellationToken,
+    );
+    expect(smlibpyCompletion?.suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'GridLocations', detail: 'smlibpy.GridLocations', kind: 7 }),
+        expect.objectContaining({ label: 'loft', detail: 'smlibpy.loft', kind: 1 }),
+      ]),
+    );
+    expect(smlibpyCompletion?.suggestions.map(({ label }) => label)).not.toContain('BuildPart');
   });
 });

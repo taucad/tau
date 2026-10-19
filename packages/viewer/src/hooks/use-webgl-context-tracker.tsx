@@ -1,7 +1,12 @@
 import { createContext, useContext, useState } from 'react';
 import { useActorRef } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import { resolveWebglContextLimit, webglContextMachine } from '#machines/webgl-context.machine.js';
+import {
+  resolveViewerSurfaceByteBudget,
+  resolveWebglContextLimit,
+  webglContextMachine,
+} from '#machines/webgl-context.machine.js';
+import type { WebglContextDevice } from '#machines/webgl-context.machine.js';
 
 // ── React context ────────────────────────────────────────────────────────────
 
@@ -14,26 +19,29 @@ type WebglContextTrackerProviderProps = {
 };
 
 /**
- * Provides a shared WebGL-context tracking actor to all descendant viewers, admitting two contexts on
- * touch-first or low-memory devices and eight elsewhere.
+ * Provides a shared viewer-context tracking actor to all descendant viewers, admitting two contexts on
+ * touch-first or low-memory devices and eight elsewhere, within a render-surface budget of half the device memory.
  * Mount once above the viewer dockview so every panel shares the same count.
  * @public
  */
 export function WebglContextTrackerProvider({ children }: WebglContextTrackerProviderProps): React.JSX.Element {
-  const [limit] = useState(readDeviceWebglContextLimit);
-  const actorRef = useActorRef(webglContextMachine, { input: { limit } });
+  const [input] = useState(() => {
+    const device = readWebglContextDevice();
+    return { limit: resolveWebglContextLimit(device), byteBudget: resolveViewerSurfaceByteBudget(device) };
+  });
+  const actorRef = useActorRef(webglContextMachine, { input });
 
   return <WebglContextTrackerContext.Provider value={actorRef}>{children}</WebglContextTrackerContext.Provider>;
 }
 
 /** Sizes the budget once, when the provider mounts, from the pointer and memory the browser reports. */
-const readDeviceWebglContextLimit = (): number => {
+const readWebglContextDevice = (): WebglContextDevice => {
   const deviceMemory = (globalThis.navigator as (Navigator & { readonly deviceMemory?: number }) | undefined)
     ?.deviceMemory;
-  return resolveWebglContextLimit({
+  return {
     coarsePointer: typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches,
     ...(typeof deviceMemory === 'number' ? { deviceMemoryGigabytes: deviceMemory } : {}),
-  });
+  };
 };
 
 // ── Hooks ────────────────────────────────────────────────────────────────────

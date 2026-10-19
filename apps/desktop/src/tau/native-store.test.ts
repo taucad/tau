@@ -264,7 +264,11 @@ describe('startNativeStore', () => {
 
 describe('the desktop native packages', () => {
   it('should seed and inspect every bundled package with its launch set, and never run a seal step', () => {
-    expect(desktopNativePlugins.map((plugin) => plugin.package)).toEqual(['@taucad/build123d', '@taucad/picogk']);
+    expect(desktopNativePlugins.map((plugin) => plugin.package)).toEqual([
+      '@taucad/smlibpy',
+      '@taucad/build123d',
+      '@taucad/picogk',
+    ]);
     for (const plugin of desktopNativePlugins) {
       expect(plugin).not.toHaveProperty('seal');
       expect(plugin).not.toHaveProperty('directory');

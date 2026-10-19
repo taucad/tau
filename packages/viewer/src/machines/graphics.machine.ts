@@ -173,7 +173,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
  *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
- *   `committedSectionCuts` and `sectionCertification` (what the caps last certified),
+ *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
  *   `gltfPresentation`.
@@ -240,13 +240,11 @@ export interface GraphicsContext {
   selectedSectionCutId: string | undefined;
   /** The cut hovered in the section row or the scene; both highlight it. */
   hoveredSectionCutId: string | undefined;
-  /** The cut list the clip, caps and raycasts show: the latest one whose every cap face certified. */
-  committedSectionCuts: readonly SectionCut[];
   /**
-   * Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`.
-   * A certified list's caps are complete, though its exact overlap result may still be pending.
+   * The cut list the clip, caps and raycasts show: the latest one the caps committed. Every cut list commits once the
+   * sources it cuts are known; none is refused.
    */
-  sectionCertification: 'certified' | 'rejected';
+  committedSectionCuts: readonly SectionCut[];
 
   // Measure state
   isMeasureActive: boolean;
@@ -331,11 +329,8 @@ export type GraphicsEvent =
   | { type: 'removeSectionCut'; payload: string }
   | { type: 'selectSectionCut'; payload: string | undefined }
   | { type: 'hoverSectionCut'; payload: string | undefined }
-  /** From the caps, in the frame they certify or refuse a cut list. A repeated value keeps the snapshot. */
-  | {
-      type: 'setSectionCertification';
-      payload: { status: 'certified' | 'rejected'; cuts: readonly SectionCut[] };
-    }
+  /** From the caps, in the frame they commit a cut list. A repeated value keeps the snapshot. */
+  | { type: 'commitSectionCuts'; payload: readonly SectionCut[] }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
   | { type: 'adoptPinnedMeasurements'; measurements: readonly PinnedMeasurement[] }
@@ -738,18 +733,15 @@ const withoutSectionCut = (
 };
 
 /**
- * Turning the section off: nothing is cut, so nothing is committed or refused until the caps draw again, and no cut
- * stays hovered for when it turns back on.
+ * Turning the section off: nothing is cut, so nothing is committed until the caps draw again, and no cut stays hovered
+ * for when it turns back on.
  */
-const sectionOffContext: Pick<
-  GraphicsContext,
-  'isSectionViewActive' | 'committedSectionCuts' | 'sectionCertification' | 'hoveredSectionCutId'
-> = {
-  isSectionViewActive: false,
-  committedSectionCuts: [],
-  sectionCertification: 'certified',
-  hoveredSectionCutId: undefined,
-};
+const sectionOffContext: Pick<GraphicsContext, 'isSectionViewActive' | 'committedSectionCuts' | 'hoveredSectionCutId'> =
+  {
+    isSectionViewActive: false,
+    committedSectionCuts: [],
+    hoveredSectionCutId: undefined,
+  };
 
 /** Selecting or hovering names a cut in the list, or none; naming the current one again changes nothing. */
 const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
@@ -838,7 +830,6 @@ const graphicsMachineDefinition = setup({
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
       committedSectionCuts: [],
-      sectionCertification: 'certified',
 
       // Measure state
       isMeasureActive: false,
@@ -1365,15 +1356,8 @@ const graphicsMachineDefinition = setup({
           isSectionCutReference(context, context.hoveredSectionCutId, event.payload)
             ? { context: { hoveredSectionCutId: event.payload } }
             : {},
-        setSectionCertification: ({ context, event }) =>
-          event.payload.cuts === context.committedSectionCuts && event.payload.status === context.sectionCertification
-            ? {}
-            : {
-                context: {
-                  committedSectionCuts: event.payload.cuts,
-                  sectionCertification: event.payload.status,
-                },
-              },
+        commitSectionCuts: ({ context, event }) =>
+          event.payload === context.committedSectionCuts ? {} : { context: { committedSectionCuts: event.payload } },
 
         // Measurement events (available in all operational states)
         clearMeasurement: {

@@ -12,6 +12,7 @@ import { picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { smlib } from '@taucad/smlib';
+import { smlibpy } from '@taucad/smlibpy';
 import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
@@ -26,7 +27,7 @@ const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltf
 /*
  * The native kernels are listed like any other: each binds its own sealed closure from this machine's payload store
  * when it initialises (`tau prepare <kernel>`) and refuses with `KERNEL_NOT_PREPARED` until then. Per-host omission:
- * Build123d's examples ship no checked-in thumbnails yet, so only the workspace runtime lists it.
+ * Build123d's and SMLibPy's examples ship no checked-in thumbnails yet, so only the workspace runtime lists them.
  */
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
@@ -47,7 +48,7 @@ export const exampleRuntime = defineRuntime({
   middleware: exampleMiddleware(),
 });
 
-/** The example kernels plus Build123d: regenerates thumbnails for user projects. @public */
+/** The example kernels plus SMLibPy and Build123d: regenerates thumbnails for user projects. @public */
 export const workspaceRuntime = defineRuntime({
   plugins: [
     replicad(),
@@ -59,6 +60,7 @@ export const workspaceRuntime = defineRuntime({
     openrscad(),
     esbuild(),
     image(),
+    smlibpy(),
     build123d(),
     picogk(),
     tscircuit(),

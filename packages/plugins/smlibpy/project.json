@@ -1,0 +1,61 @@
+{
+  "name": "smlibpy",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/smlibpy",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "generate-tau-plugin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts generate --package packages/plugins/smlibpy"
+      },
+      "configurations": {
+        "check": {
+          "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts check --package packages/plugins/smlibpy"
+        }
+      }
+    },
+    "generate-project-template": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts template --package packages/plugins/smlibpy"
+      },
+      "configurations": {
+        "check": {
+          "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts template --package packages/plugins/smlibpy --check"
+        }
+      }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts seed --package packages/plugins/smlibpy"
+      }
+    },
+    "golden-tau-plugin": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts golden --package packages/plugins/smlibpy"
+      },
+      "dependsOn": ["seed"]
+    },
+    "test-python": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/core/python-kernel/scripts/tau-python-kernel.mts test --package packages/plugins/smlibpy"
+      },
+      "dependsOn": ["seed"]
+    }
+  }
+}

@@ -33,7 +33,7 @@ const fallbackDotnetProjectName = 'TauProject';
 /** The longest package name npm accepts. */
 const maxPackageNameLength = 214;
 
-/** The project name the build123d template's `pyproject.toml` and `uv.lock` carry until creation names the project. */
+/** The project name the Python kernel templates' `pyproject.toml` and `uv.lock` carry until creation names the project. */
 const templateProjectName = 'tau-project';
 
 /** Zoo's project file: the settings Zoo's tools read beside `main.kcl`, in the units Tau's KCL template starts in. */

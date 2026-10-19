@@ -33,7 +33,7 @@ const publicationOnlyKernelIds = ['zoo'];
  * Native kernels the engine lists when their packages are installed, binding a sealed closure from the local payload
  * store; the hosted publication runtime prepares no native closure, so it serves none of them.
  */
-const engineOnlyKernelIds = new Set(['build123d', 'picogk']);
+const engineOnlyKernelIds = new Set(['smlibpy', 'build123d', 'picogk']);
 
 describe('publicationKernelExtensions parity', () => {
   it('matches the engine default runtime for every shared kernel', { timeout: 30_000 }, async () => {

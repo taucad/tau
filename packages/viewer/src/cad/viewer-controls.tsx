@@ -9,13 +9,7 @@ import { GridSizeIndicator } from '#cad/grid-control.jsx';
 import { MeasureControl } from '#cad/measure-control.jsx';
 import { MeasurementList, MeasureOptions } from '#cad/measure-tool-row.jsx';
 import { SectionViewControl } from '#cad/section-view-control.jsx';
-import {
-  SectionEditor,
-  SectionOptions,
-  SectionStatus,
-  focusFirstControl,
-  useFocusHandOff,
-} from '#cad/section-tool-row.jsx';
+import { SectionEditor, SectionOptions, focusFirstControl, useFocusHandOff } from '#cad/section-tool-row.jsx';
 import { ViewerSettings } from '#cad/viewer-settings.jsx';
 import type { ViewerOperationTimeout } from '#cad/viewer-settings.jsx';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
@@ -219,12 +213,7 @@ export function ViewerControls({
           tool='section'
           name='Section view'
           icon={<FlipHorizontal className='size-4 text-viewer-tool-active' />}
-          above={
-            <>
-              <SectionEditor />
-              <SectionStatus />
-            </>
-          }
+          above={<SectionEditor />}
           onDone={stopSection}
         >
           <SectionOptions />

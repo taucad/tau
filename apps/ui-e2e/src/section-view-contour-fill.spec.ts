@@ -33,7 +33,14 @@ type SectionViewBridgeWindow = Window & {
     getSectionCapStencilDiagnostics():
       | {
           sequence: number;
-          latest: { drawnPieceCount: number; crossingSourceCount: number; outlineSourceCount: number } | undefined;
+          latest:
+            | {
+                drawnPieceCount: number;
+                crossingSourceCount: number;
+                outlineSourceCount: number;
+                loopSourceCount: number;
+              }
+            | undefined;
         }
       | undefined;
     getSectionCapCompleteness(): SectionCapCompleteness | undefined;
@@ -41,16 +48,32 @@ type SectionViewBridgeWindow = Window & {
   };
 };
 
-type SectionCapCompleteness =
-  | Readonly<{
-      status: 'complete';
-      admittedSourceCount: number;
-      unsupportedSourceCount: number;
-    }>
-  | Readonly<{
-      status: 'unsupported' | 'failed';
-      failure: Readonly<{ sourceKey: string; code: string; message: string }>;
-    }>;
+/**
+ * Every reason the caps give for capping a source per loop: a closure failure (the viewer's
+ * `SectionTopologyFailure['code']`, which this spec cannot import) or partial visibility.
+ */
+const perLoopReasons = [
+  'open-surface',
+  'collapsed-triangle',
+  'missing-position',
+  'non-finite-position',
+  'partial-visibility',
+  'topology-unavailable',
+] as const;
+type PerLoopReason = (typeof perLoopReasons)[number];
+/** The reasons a defect in the geometry itself gives, as opposed to visibility or an unavailable census. */
+const geometryReasons: ReadonlySet<PerLoopReason> = new Set(['open-surface', 'collapsed-triangle']);
+
+type SectionCapCompleteness = Readonly<{
+  status: 'complete';
+  admittedSourceCount: number;
+  exactSourceCount: number;
+  perLoopSourceCount: number;
+  pendingSourceCount: number;
+  sources: ReadonlyArray<
+    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: PerLoopReason | undefined }>
+  >;
+}>;
 
 const webgpuValidationPatterns: readonly RegExp[] = [
   /Vertex buffer slot \d+ required/,
@@ -77,7 +100,7 @@ const expectNoWebGpuValidationFailures = async (from?: number): Promise<void> =>
 
 /**
  * Waits until the caps have drawn the latest cuts from at least one model. While a model's section analysis is
- * pending the caps certify the cuts without it, so being committed alone can mean nothing was capped yet.
+ * pending the caps commit the cuts without it, so being committed alone can mean nothing was capped yet.
  */
 async function waitForCommittedSection(): Promise<void> {
   await target.waitFor(
@@ -325,7 +348,7 @@ async function expectCompleteSectionCaps(context: string): Promise<void> {
     completeness.admittedSourceCount,
     `${context}: at least one logical source should be admitted`,
   ).toBeGreaterThan(0);
-  expect(completeness.unsupportedSourceCount, `${context}: no admitted source may be unsupported`).toBe(0);
+  expect(completeness.perLoopSourceCount, `${context}: every closed source keeps its exact cap`).toBe(0);
 }
 
 async function expectClosedSectionCapIntegrity(backend: 'webgl' | 'webgpu', start: number): Promise<void> {
@@ -525,7 +548,7 @@ test.describe('Section view contour fill regression', () => {
   }
 
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`keeps branched non-manifold sections in the ordinary safe view in ${backend}`, async () => {
+    test(`caps branched non-manifold sections per loop in ${backend}`, async () => {
       const messageStart = backend === 'webgpu' ? await consoleMessageCount() : undefined;
       await target.navigate(
         `/__e2e/example-fixture?locator=jscad.non-manifold-section-fixture&graphicsBackend=${backend}`,
@@ -539,22 +562,22 @@ test.describe('Section view contour fill regression', () => {
         .poll(
           async () => {
             const completeness = await getSectionCapCompleteness();
-            return completeness?.status;
+            return completeness?.perLoopSourceCount ?? 0;
           },
           { timeout: 30_000 },
         )
-        .toBe('unsupported');
+        .toBeGreaterThan(0);
       await captureSectionCanvas(`non-manifold-section-${backend}.png`);
 
       const completeness = await getSectionCapCompleteness();
-      expect(completeness?.status, JSON.stringify(completeness)).toBe('unsupported');
+      const perLoop = completeness?.sources.filter(({ grade }) => grade === 'per-loop') ?? [];
       expect(
-        ['open-surface', 'inconsistent-orientation', 'ambiguous-seam', 'non-manifold-vertex'].includes(
-          completeness?.status === 'unsupported' ? completeness.failure.code : '',
-        ),
+        perLoop.every(({ reason }) => reason !== undefined && geometryReasons.has(reason)),
+        JSON.stringify(completeness),
       ).toBe(true);
       const diagnostics = await getSectionCapStencilDiagnostics();
-      expect(diagnostics?.latest?.drawnPieceCount ?? 0, 'refused sections draw no caps').toBe(0);
+      expect(diagnostics?.latest?.drawnPieceCount ?? 0, 'a non-manifold section is never refused').toBeGreaterThan(0);
+      expect(diagnostics?.latest?.loopSourceCount ?? 0).toBeGreaterThan(0);
       const helperSummary = await getSectionHelperSummary();
       expect(helperSummary.sectionHelperContourSegmentCount).toBe(0);
       await expectNoWebGpuValidationFailures(messageStart);

@@ -9,6 +9,7 @@ import {
   Mesh,
   Group,
   InterleavedBufferAttribute,
+  InstancedInterleavedBuffer,
 } from 'three';
 import { attribute, mat4, vec4 } from 'three/tsl';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
@@ -22,8 +23,108 @@ import { sceneTag } from '#graphics/three/utils/scene-tags.js';
 import type { GltfFatLineMaterial } from '#graphics/three/materials/gltf-edges.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 
-/** One immutable quad stream per edge prototype; the instance dimension contains occurrences. */
-export function createEdgePrototypeGeometry(positions: Float32Array, capacity: number): InstancedBufferGeometry {
+/**
+ * How an edge batch lays out its prototype segments and occurrence placements.
+ *
+ * - `occurrences`: occurrences are instances; every segment is unrolled into the 8 quad vertices with its
+ *   endpoints copied onto each, so the prototype costs about 400 B per segment and an occurrence 64 B.
+ * - `segments`: segments are instances that read the prototype's own endpoint array (24 B per segment on the GPU,
+ *   nothing on the CPU); each occurrence unrolls one quad carrying its placement, about 700 B.
+ *
+ * @public
+ */
+export type EdgeBatchLayout = 'occurrences' | 'segments';
+
+const quadVertices = 8;
+const quadIndices = 18;
+
+const indexBytes = (vertices: number): number => (vertices - 1 <= 65_534 ? 2 : 4);
+
+/**
+ * Resident bytes (CPU and GPU together) of an edge batch's own arrays in each layout. The `segments` layout shares
+ * the prototype's endpoint array on the CPU, so its per-segment cost is the GPU copy alone.
+ * @param segments - Prototype segment count.
+ * @param capacity - Occurrence capacity.
+ * @param layout - The layout to measure.
+ * @returns The batch's resident bytes.
+ * @public
+ */
+export function measureEdgeBatchBytes(segments: number, capacity: number, layout: EdgeBatchLayout): number {
+  if (layout === 'occurrences') {
+    const perSegment = quadVertices * (3 + 2 + 3 + 3) * 4 + quadIndices * indexBytes(segments * quadVertices);
+    return 2 * (segments * perSegment + capacity * 16 * 4);
+  }
+  const perOccurrence = quadVertices * (3 + 2 + 16) * 4 + quadIndices * indexBytes(capacity * quadVertices);
+  return segments * 6 * 4 + 2 * capacity * perOccurrence;
+}
+
+/**
+ * The cheaper layout for a prototype: `segments` unless the occurrence table would outweigh the unrolled segments,
+ * as for a few-segment fastener repeated thousands of times.
+ * @param segments - Prototype segment count.
+ * @param capacity - Occurrence capacity.
+ * @returns The layout with fewer resident bytes.
+ * @public
+ */
+export function selectEdgeBatchLayout(segments: number, capacity: number): EdgeBatchLayout {
+  return measureEdgeBatchBytes(segments, capacity, 'segments') <=
+    measureEdgeBatchBytes(segments, capacity, 'occurrences')
+    ? 'segments'
+    : 'occurrences';
+}
+
+const readEdgeBatchLayout = (geometry: InstancedBufferGeometry): EdgeBatchLayout =>
+  geometry.getAttribute('tauOccurrence0') instanceof InstancedBufferAttribute ? 'occurrences' : 'segments';
+
+/**
+ * The number of occurrences an edge batch geometry can place.
+ * @param geometry - A geometry from {@link createEdgePrototypeGeometry}.
+ * @returns Its occurrence capacity.
+ * @public
+ */
+export function getEdgeOccurrenceCapacity(geometry: InstancedBufferGeometry): number {
+  const { count } = geometry.getAttribute('tauOccurrence0');
+  return readEdgeBatchLayout(geometry) === 'occurrences' ? count : count / quadVertices;
+}
+
+/**
+ * Draw the first `count` placed occurrences of an edge batch.
+ * @param geometry - A geometry from {@link createEdgePrototypeGeometry}.
+ * @param count - Occurrences to draw, at most the capacity.
+ * @public
+ */
+export function setEdgeOccurrenceCount(geometry: InstancedBufferGeometry, count: number): void {
+  if (!Number.isInteger(count) || count < 0 || count > getEdgeOccurrenceCapacity(geometry)) {
+    throw new TypeError('Invalid edge occurrence count');
+  }
+  if (readEdgeBatchLayout(geometry) === 'occurrences') {
+    geometry.instanceCount = count;
+  } else {
+    geometry.setDrawRange(0, count * quadIndices);
+  }
+}
+
+/**
+ * The number of occurrences an edge batch draws.
+ * @param geometry - A geometry from {@link createEdgePrototypeGeometry}.
+ * @returns Its drawn occurrence count.
+ * @public
+ */
+export function getEdgeOccurrenceCount(geometry: InstancedBufferGeometry): number {
+  return readEdgeBatchLayout(geometry) === 'occurrences'
+    ? geometry.instanceCount
+    : Math.min(geometry.drawRange.count, geometry.index!.count) / quadIndices;
+}
+
+/**
+ * One quad stream per edge prototype, laid out as {@link selectEdgeBatchLayout} chooses unless `layout` is given.
+ * The `segments` layout reads `positions` in place, so the caller keeps that array unchanged while the batch lives.
+ */
+export function createEdgePrototypeGeometry(
+  positions: Float32Array,
+  capacity: number,
+  layout: EdgeBatchLayout = selectEdgeBatchLayout(positions.length / 6, capacity),
+): InstancedBufferGeometry {
   if (
     !Number.isSafeInteger(capacity) ||
     capacity < 1 ||
@@ -36,43 +137,63 @@ export function createEdgePrototypeGeometry(positions: Float32Array, capacity: n
   const quad = new LineSegmentsGeometry();
   const geometry = new InstancedBufferGeometry();
   const segments = positions.length / 6;
+  // Segment-major layouts repeat the quad per segment; occurrence-major ones repeat it per occurrence.
+  const repeats = layout === 'occurrences' ? segments : capacity;
   for (const name of ['position', 'uv']) {
     const source = quad.getAttribute(name);
-    const values = new Float32Array(source.array.length * segments);
-    for (let segment = 0; segment < segments; segment++) {
-      values.set(source.array, segment * source.array.length);
+    const values = new Float32Array(source.array.length * repeats);
+    for (let repeat = 0; repeat < repeats; repeat++) {
+      values.set(source.array, repeat * source.array.length);
     }
     geometry.setAttribute(name, new Float32BufferAttribute(values, source.itemSize));
   }
   const indices =
-    segments * 8 - 1 <= 65_534
-      ? new Uint16Array(quad.index!.count * segments)
-      : new Uint32Array(quad.index!.count * segments);
-  const starts = new Float32Array(segments * 8 * 3);
-  const ends = new Float32Array(starts.length);
-  for (let segment = 0; segment < segments; segment++) {
-    for (let i = 0; i < quad.index!.count; i++) {
-      indices[segment * quad.index!.count + i] = quad.index!.getX(i) + segment * 8;
-    }
-    for (let vertex = 0; vertex < 8; vertex++) {
-      starts.set(positions.subarray(segment * 6, segment * 6 + 3), (segment * 8 + vertex) * 3);
-      ends.set(positions.subarray(segment * 6 + 3, segment * 6 + 6), (segment * 8 + vertex) * 3);
+    indexBytes(repeats * quadVertices) === 2
+      ? new Uint16Array(quadIndices * repeats)
+      : new Uint32Array(quadIndices * repeats);
+  for (let repeat = 0; repeat < repeats; repeat++) {
+    for (let i = 0; i < quadIndices; i++) {
+      indices[repeat * quadIndices + i] = quad.index!.getX(i) + repeat * quadVertices;
     }
   }
   geometry.setIndex(new BufferAttribute(indices, 1));
-  geometry.setAttribute('instanceStart', new Float32BufferAttribute(starts, 3));
-  geometry.setAttribute('instanceEnd', new Float32BufferAttribute(ends, 3));
-  for (let column = 0; column < 4; column++) {
-    geometry.setAttribute(
-      `tauOccurrence${column}`,
-      new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(DynamicDrawUsage),
-    );
+  if (layout === 'occurrences') {
+    const starts = new Float32Array(segments * quadVertices * 3);
+    const ends = new Float32Array(starts.length);
+    for (let segment = 0; segment < segments; segment++) {
+      for (let vertex = 0; vertex < quadVertices; vertex++) {
+        starts.set(positions.subarray(segment * 6, segment * 6 + 3), (segment * quadVertices + vertex) * 3);
+        ends.set(positions.subarray(segment * 6 + 3, segment * 6 + 6), (segment * quadVertices + vertex) * 3);
+      }
+    }
+    geometry.setAttribute('instanceStart', new Float32BufferAttribute(starts, 3));
+    geometry.setAttribute('instanceEnd', new Float32BufferAttribute(ends, 3));
+    for (let column = 0; column < 4; column++) {
+      geometry.setAttribute(
+        `tauOccurrence${column}`,
+        new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(DynamicDrawUsage),
+      );
+    }
+    geometry.instanceCount = 0;
+  } else {
+    // The prototype's own endpoint stream, one instance per segment, as `LineSegmentsGeometry` lays it out.
+    // The interleaved stride also keeps this layout's pipeline cache key apart from the `occurrences` one.
+    const endpoints = Object.assign(new InstancedInterleavedBuffer(positions, 6, 1), { name: 'tau-edge-endpoints' });
+    geometry.setAttribute('instanceStart', new InterleavedBufferAttribute(endpoints, 3, 0));
+    geometry.setAttribute('instanceEnd', new InterleavedBufferAttribute(endpoints, 3, 3));
+    for (let column = 0; column < 4; column++) {
+      geometry.setAttribute(
+        `tauOccurrence${column}`,
+        new Float32BufferAttribute(new Float32Array(capacity * quadVertices * 4), 4).setUsage(DynamicDrawUsage),
+      );
+    }
+    geometry.instanceCount = segments;
+    geometry.setDrawRange(0, 0);
   }
   for (const [name, buffer] of Object.entries(geometry.attributes)) {
     buffer.name = `tau-edge-${name}`;
   }
   geometry.index!.name = 'tau-edge-index';
-  geometry.instanceCount = 0;
   quad.dispose();
   return geometry;
 }
@@ -125,17 +246,22 @@ export function writeEdgePlacement(geometry: InstancedBufferGeometry, slot: numb
     !matrix.elements.every((value) => Number.isFinite(value)) ||
     !Number.isInteger(slot) ||
     slot < 0 ||
-    slot >= geometry.getAttribute('tauOccurrence0').count
+    slot >= getEdgeOccurrenceCapacity(geometry)
   ) {
     throw new TypeError('Invalid edge occurrence placement');
   }
+  // An `occurrences` placement is one instance; a `segments` placement is repeated on its quad's 8 vertices.
+  const vertices = readEdgeBatchLayout(geometry) === 'occurrences' ? 1 : quadVertices;
   for (let column = 0; column < 4; column++) {
-    const buffer = geometry.getAttribute(`tauOccurrence${column}`) as InstancedBufferAttribute;
+    const buffer = geometry.getAttribute(`tauOccurrence${column}`) as BufferAttribute;
+    const first = slot * vertices * 4;
     // Copied element by element: placements are written during drags, so no per-column array is made.
-    for (let row = 0; row < 4; row++) {
-      buffer.array[slot * 4 + row] = matrix.elements[column * 4 + row]!;
+    for (let vertex = 0; vertex < vertices; vertex++) {
+      for (let row = 0; row < 4; row++) {
+        buffer.array[first + vertex * 4 + row] = matrix.elements[column * 4 + row]!;
+      }
     }
-    buffer.addUpdateRange(slot * 4, 4);
+    buffer.addUpdateRange(first, vertices * 4);
     buffer.needsUpdate = true;
   }
 }
@@ -148,10 +274,12 @@ export function createEdgeBatch(
     backend: ResolvedGraphicsBackend;
     resolution: Vector2;
     color: number;
+    /** Forces a layout; the cheaper one by default. */
+    layout?: EdgeBatchLayout;
   }>,
 ): Mesh<InstancedBufferGeometry, GltfFatLineMaterial> {
-  const { backend, resolution, color } = options;
-  const geometry = createEdgePrototypeGeometry(positions, capacity);
+  const { backend, resolution, color, layout } = options;
+  const geometry = createEdgePrototypeGeometry(positions, capacity, layout);
   const mesh = new Mesh(geometry, createEdgeBatchMaterial(backend, resolution, color));
   Object.defineProperty(mesh, 'type', { value: 'LineSegments2' });
   mesh.userData[sceneTag.gltfSurfacePresentation] = true;
@@ -261,7 +389,7 @@ export function createGltfEdgeBatches(
     for (const byMaterial of cohorts.values()) {
       for (const batch of byMaterial.values()) {
         batch.mesh.visible = false;
-        batch.mesh.geometry.instanceCount = 0;
+        setEdgeOccurrenceCount(batch.mesh.geometry, 0);
       }
     }
     for (const [prototype, byMaterial] of members) {
@@ -286,7 +414,7 @@ export function createGltfEdgeBatches(
         let batch = existing.get(key);
         if (
           batch &&
-          (batch.mesh.geometry.getAttribute('tauOccurrence0').count < list.length || batch.sourceVersion !== version)
+          (getEdgeOccurrenceCapacity(batch.mesh.geometry) < list.length || batch.sourceVersion !== version)
         ) {
           batch.mesh.removeFromParent();
           batch.mesh.geometry.dispose();
@@ -315,7 +443,7 @@ export function createGltfEdgeBatches(
         batch.mesh.renderOrder = source.renderOrder;
         batch.mesh.layers.mask = source.layers.mask;
         batch.mesh.visible = true;
-        batch.mesh.geometry.instanceCount = list.length;
+        setEdgeOccurrenceCount(batch.mesh.geometry, list.length);
         for (const [slot, source] of list.entries()) {
           const matrix = placement(source);
           if (batch.sources[slot] !== source || !batch.matrices[slot]?.equals(matrix)) {

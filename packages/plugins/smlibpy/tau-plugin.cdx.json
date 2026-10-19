@@ -1,0 +1,757 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "@taucad/smlibpy",
+      "name": "@taucad/smlibpy",
+      "description": "The native SMLibPy runtime closure: CPython, the pinned wheels and the Tau worker scripts."
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "0aadf13b60048d501e05fa699efaf7734e2494f3498a4c2a5521d822640324f3",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0aadf13b60048d501e05fa699efaf7734e2494f3498a4c2a5521d822640324f3"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/29/f1/2a64a307d92c5d98f5255a4014eb43bb6103ee477087b61ecae44a3aa9b9/numpy-2.5.2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "10b6ba00ab1132a0ce4428ff68cf50a25efd6840a42cdf4239c9b99aad83be8b",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "10b6ba00ab1132a0ce4428ff68cf50a25efd6840a42cdf4239c9b99aad83be8b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/a2/77/8c6d22bf61921a59bce5471c2f1f7ac30cd4ac50aadde72b8c48d5727902/coverage-7.10.7-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/7b/44/59a1eb68e773c4098d107ef34a0dbdeca501d72ffcfbff9a7707343921ce/numpy-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/analyzer.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "49dfd6e1dcba5647abe881c8256b6e90df5afa49fd3980227619f2a737de180f",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/glb.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "49dfd6e1dcba5647abe881c8256b6e90df5afa49fd3980227619f2a737de180f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/65/60/f2d208d366f263f39c6e69ed309290717aab41078b6d04c9be2a84fa2a07/numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "695ca595f42d86d3e9788201e79af36b371dc5cf9f08fa07c1fbf453ee02fcb3",
+      "type": "library",
+      "name": "smlibpy",
+      "version": "0.3.5",
+      "purl": "pkg:pypi/smlibpy@0.3.5?file_name=smlibpy-0.3.5-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "695ca595f42d86d3e9788201e79af36b371dc5cf9f08fa07c1fbf453ee02fcb3"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT AND Apache-2.0 AND OFL-1.1"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/e9/cb/aeb41cd6c9ba2f78fc78bab729348fcb53ef4d638aae1f8b5a11a57bf3eb/smlibpy-0.3.5-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "6a22eb5a972712ed3080ec46a821f55cd55b75d8784b2e9a43d88ad0e0879bce",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6a22eb5a972712ed3080ec46a821f55cd55b75d8784b2e9a43d88ad0e0879bce"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "73ab1601f84dc804f7812dc297e93cd99381162da39c47040a827d4e8dafe63b",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "73ab1601f84dc804f7812dc297e93cd99381162da39c47040a827d4e8dafe63b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/72/4f/732fff31c119bb73b35236dd333030f32c4bfe909f445b423e6c7594f9a2/coverage-7.10.7-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "8a689a077337bea6d1c4bc0b7df1d52fcaa28f5f67e50df8bf417c1e3f9d8874",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8a689a077337bea6d1c4bc0b7df1d52fcaa28f5f67e50df8bf417c1e3f9d8874"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "8e4cb9a754c8a0c62eaa88273a5fba3391f4a610d1dee893c0755da31c083f15",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-macosx_10_13_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8e4cb9a754c8a0c62eaa88273a5fba3391f4a610d1dee893c0755da31c083f15"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/f5/d2/6b24738a0ef4557d189b150046cd07823c50e4273e8aebd651222e24306f/numpy-2.5.2-cp313-cp313-macosx_10_13_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "981a651f543f2854abd3b5fcb3263aac581b18209be49863ba575de6edf4c14d",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-macosx_10_13_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "981a651f543f2854abd3b5fcb3263aac581b18209be49863ba575de6edf4c14d"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/9a/94/b765c1abcb613d103b64fcf10395f54d69b0ef8be6a0dd9c524384892cc7/coverage-7.10.7-cp313-cp313-macosx_10_13_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "9a172b38644cc2a2be12d0d54e49f9ddcf1793dcea2998793a4b1b53ee0b4907",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/protocol.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9a172b38644cc2a2be12d0d54e49f9ddcf1793dcea2998793a4b1b53ee0b4907"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "a65f37208d3665f894ee4ddac34d6e57be8daf8c54c274441f54769fda9b866f",
+      "type": "library",
+      "name": "smlibpy",
+      "version": "0.3.5",
+      "purl": "pkg:pypi/smlibpy@0.3.5?file_name=smlibpy-0.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a65f37208d3665f894ee4ddac34d6e57be8daf8c54c274441f54769fda9b866f"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT AND Apache-2.0 AND OFL-1.1"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/8e/38/92b5eb0cca60f97345a202aec5c977ec7b771d9459834869626e4b01815a/smlibpy-0.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "bdc43bc2655abf7553c3811386d55d977e6350b3c0c1d78eb5975c4410832528",
+      "type": "file",
+      "name": "tau-worker/smlibpy_mechanisms.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "bdc43bc2655abf7553c3811386d55d977e6350b3c0c1d78eb5975c4410832528"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "c79124f70465a150e89340de5963f936ee97097d2ef76c869708c4248c63ca49",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c79124f70465a150e89340de5963f936ee97097d2ef76c869708c4248c63ca49"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/b1/20/b6ea4f69bbb52dac0aebd62157ba6a9dddbfe664f5af8122dac296c3ee15/coverage-7.10.7-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e2332cc07d95d823e7e681270c3b09ad05859174cd45f6027e25529af94bf79f",
+      "type": "file",
+      "name": "tau-worker/smlibpy_materials.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e2332cc07d95d823e7e681270c3b09ad05859174cd45f6027e25529af94bf79f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ecc2ca0b00f1fde670edbfa470e84408a0c7c9e9b2d2753eb7e9bac917ffb39c",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/model.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ecc2ca0b00f1fde670edbfa470e84408a0c7c9e9b2d2753eb7e9bac917ffb39c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "f6f2fe5cd8c4384d026374707783bea7df0834789c6e31e26514b1154da3a639",
+      "type": "library",
+      "name": "smlibpy",
+      "version": "0.3.5",
+      "purl": "pkg:pypi/smlibpy@0.3.5?file_name=smlibpy-0.3.5-cp313-cp313-macosx_11_0_x86_64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f6f2fe5cd8c4384d026374707783bea7df0834789c6e31e26514b1154da3a639"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT AND Apache-2.0 AND OFL-1.1"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/82/3d/a5c9861f4e51c883b3f1fbf374f557f19263ccf6df2875ae5df23cd996d7/smlibpy-0.3.5-cp313-cp313-macosx_11_0_x86_64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "f712a9143c8a5d248438ec7921a0b48d548bca4f1337d33c690d28c2d0504137",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f712a9143c8a5d248438ec7921a0b48d548bca4f1337d33c690d28c2d0504137"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-apple-darwin-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "fab69bd6f69724ee882aa8e6f4300e1170df76d54d6f7e758ea925ca828f65f1",
+      "type": "library",
+      "name": "smlibpy",
+      "version": "0.3.5",
+      "purl": "pkg:pypi/smlibpy@0.3.5?file_name=smlibpy-0.3.5-cp313-cp313-macosx_11_0_arm64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fab69bd6f69724ee882aa8e6f4300e1170df76d54d6f7e758ea925ca828f65f1"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT AND Apache-2.0 AND OFL-1.1"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/95/94/3a1cce022396b3839c97e4da111094c74fc77c9b90ca9108ba7b5a83f010/smlibpy-0.3.5-cp313-cp313-macosx_11_0_arm64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        }
+      ]
+    }
+  ]
+}

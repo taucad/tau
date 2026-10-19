@@ -451,6 +451,47 @@ describe('Electron main runtime helpers', () => {
     liveUtilities.length = 0;
   });
 
+  it('should retire a spare nobody adopts within its idle time and warm a new one on the next fork', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const onError = vi.fn();
+    const handle = registerElectronRuntimeMain({
+      onError,
+      spareIdleMilliseconds: 120_000,
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      handle.prewarm();
+      const idle = liveUtilities[0];
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(idle?.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      /* A supervised retirement, not a boot death: nothing is reported. */
+      expect(idle?.kill).toHaveBeenCalledOnce();
+      expect(onError).not.toHaveBeenCalled();
+
+      /* The spare was gone, so this request forks cold and a fresh spare follows it. */
+      handle.connect({ purpose: 'main-process-client' });
+      expect(liveUtilities).toHaveLength(3);
+      const adopted = liveUtilities[1];
+      const refilled = liveUtilities[2];
+      expect(adopted?.postMessage).toHaveBeenCalledOnce();
+      expect(refilled?.postMessage).not.toHaveBeenCalled();
+
+      /* An adopted spare is never retired by the idle timer. */
+      handle.connect({ purpose: 'main-process-client' });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(refilled?.postMessage).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(refilled?.kill).not.toHaveBeenCalled();
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+      liveUtilities.length = 0;
+    }
+  });
+
   it('should report a spare that exits before adoption', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     liveUtilities.length = 0;
@@ -1244,6 +1285,29 @@ describe('Electron main runtime memory supervision', () => {
       expect(onError).toHaveBeenCalledOnce();
       const [reported] = onError.mock.calls[0] as [Error];
       expect(reported.message).toMatch(/resident memory 1001 bytes exceeds 1000/u);
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should report the largest resident sample with the utility exit', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onUtilityExit = vi.fn();
+    const samples = [300, 700, 500];
+    const handle = registerElectronRuntimeMain({
+      onUtilityExit,
+      residentLimit: { maxBytes: 1000, intervalMilliseconds: 5000, sample: () => samples.shift() },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      handle.connect({ purpose: 'main-process-client' });
+      await vi.advanceTimersByTimeAsync(15_000);
+      lastUtilityExitHandler()(0);
+      liveUtilities.at(-1)?.stderr?.end();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onUtilityExit).toHaveBeenCalledWith(expect.objectContaining({ exitCode: 0, peakResidentBytes: 700 }));
     } finally {
       handle.dispose();
       vi.useRealTimers();

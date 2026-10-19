@@ -1,0 +1,7 @@
+[
+  {
+    "name": "total (ESM JS) — measured 11.4 kB brotli on 2026-10-18; the kernel with its TypeScript GLB/glTF writer (PBR, box UVs and tangents, topology and mechanism), the mesh-bundle reader, the resident .smb codec, and the /native adopter entry",
+    "path": "dist/**/*.mjs",
+    "limit": "12 kB"
+  }
+]

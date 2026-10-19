@@ -15,7 +15,7 @@ Import `getIsolationStatus` from `@taucad/runtime/cross-origin-isolation` to che
 
 `registerElectronRuntimeMain` installs the IPC broker. An optional `ElectronRuntimeForkResolver` maps a sanitized renderer context to an application-owned utility entry, environment allowlist values, rooted filesystem port, and compute binding. `ElectronRuntimeMainConnectInput` is the privileged main-process request; the resulting `ElectronRuntimeMainConnection` owns a port, an exit promise, and idempotent disposal.
 
-`ElectronRuntimeHostExit` distinguishes a main-requested release from an unexplained process exit and may include bounded stderr. `ElectronRuntimeUtilityExit` adds the broker host id. `ElectronRuntimeUtilityLimitError` refuses a fork beyond the configured cap; it does not represent a crashed worker. `ElectronRuntimeResidentLimit` kills an adopted utility whose sampled resident set passes `maxBytes`; its owner sees an unreleased exit.
+`ElectronRuntimeHostExit` distinguishes a main-requested release from an unexplained exit and may include bounded stderr. `ElectronRuntimeUtilityExit` adds the broker host id and `peakResidentBytes`. `ElectronRuntimeUtilityLimitError` refuses a fork beyond its cap, not a crash. `ElectronRuntimeResidentLimit` kills an adopted utility whose sampled resident set passes `maxBytes`; its owner sees an unreleased exit. `spareIdleMilliseconds` retires an unadopted spare.
 
 ## Port relay and utility client
 

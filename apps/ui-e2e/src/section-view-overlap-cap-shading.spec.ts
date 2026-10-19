@@ -8,7 +8,7 @@ type SectionViewBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
     setSectionCuts(cuts: readonly SectionPlaneCut[]): string[];
     updateSectionCut(id: string, patch: Readonly<{ offset: number }>): void;
-    getSectionState(): { cuts: ReadonlyArray<{ id: string }>; isCommitted: boolean; certification: string };
+    getSectionState(): { cuts: ReadonlyArray<{ id: string }>; isCommitted: boolean };
     setCamera(camera: {
       position: readonly [number, number, number];
       target?: readonly [number, number, number];

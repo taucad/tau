@@ -125,6 +125,8 @@ export type ElectronRuntimeHostExit = {
 export type ElectronRuntimeUtilityExit = ElectronRuntimeHostExit & {
   /** Broker-assigned identity of the utility that exited. */
   readonly hostId: string;
+  /** Largest resident set the {@link ElectronRuntimeResidentLimit} sampled, in bytes; absent when never sampled. */
+  readonly peakResidentBytes?: number;
 };
 
 /**
@@ -172,6 +174,12 @@ export type RegisterElectronRuntimeMainOptions = {
   readonly maxUtilities?: number;
   /** Resident-memory ceiling per adopted utility. Unset, utilities are not sampled. */
   readonly residentLimit?: ElectronRuntimeResidentLimit;
+  /**
+   * Milliseconds a prewarmed spare may wait unadopted before it is retired. The next
+   * fork forks a new spare, so the pool stays warm while utilities are being opened
+   * and holds no process once they stop. Unset, a spare waits for as long as it takes.
+   */
+  readonly spareIdleMilliseconds?: number;
   /**
    * Electron IPC main implementation, primarily for alternate hosts and tests.
    * Also the admission seam: a view that filters before delegating to the real
@@ -314,6 +322,8 @@ type LiveUtility = {
   detachSender?: () => void;
   /** The resolver's {@link ElectronRuntimeForkResolver} `release`, called once. */
   releaseResolved?: () => void;
+  /** Largest resident sample, reported with the exit. */
+  peakResidentBytes?: number;
 };
 
 /**
@@ -550,6 +560,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   let spareFork: { readonly entry: string; readonly env: ForkOptions['env']; readonly key: string } | undefined;
   let disposed = false;
   let residentTimer: ReturnType<typeof setInterval> | undefined;
+  let spareTimer: ReturnType<typeof setTimeout> | undefined;
   const controlFrames = new Map<string, { readonly type: string }>();
 
   const reportError = (error: unknown): void => {
@@ -573,6 +584,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       } catch (error) {
         reportError(error);
         continue;
+      }
+      if (bytes !== undefined) {
+        record.peakResidentBytes = Math.max(record.peakResidentBytes ?? 0, bytes);
       }
       if (bytes === undefined || bytes <= limit.maxBytes) {
         continue;
@@ -646,7 +660,11 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         released: record.released,
         ...(record.stderrTail === '' ? {} : { stderrTail: record.stderrTail }),
       };
-      options.onUtilityExit?.({ hostId, ...exit });
+      options.onUtilityExit?.({
+        hostId,
+        ...exit,
+        ...(record.peakResidentBytes === undefined ? {} : { peakResidentBytes: record.peakResidentBytes }),
+      });
       record.onExit?.(exit);
     };
     /* A spare that died before adoption leases nothing, so there is no host to
@@ -666,6 +684,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       /* Synchronous, so a re-fork racing the drain never sees the dead record. */
       if (spare === record) {
         spare = undefined;
+        clearTimeout(spareTimer);
       }
       const { hostId } = record;
       if (hostId === undefined) {
@@ -683,6 +702,8 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   };
 
   const releaseSpare = (): void => {
+    clearTimeout(spareTimer);
+    spareTimer = undefined;
     const record = spare;
     if (!record) {
       return;
@@ -716,6 +737,8 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     }
     const record = spare;
     spare = undefined;
+    clearTimeout(spareTimer);
+    spareTimer = undefined;
     return record;
   };
 
@@ -737,6 +760,10 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       spare = forkUtility(utilityEntry, env, key);
     } catch (error) {
       reportError(error);
+      return;
+    }
+    if (options.spareIdleMilliseconds !== undefined) {
+      spareTimer = setTimeout(releaseSpare, options.spareIdleMilliseconds);
     }
   };
 
@@ -992,6 +1019,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     dispose(): void {
       disposed = true;
       clearInterval(residentTimer);
+      clearTimeout(spareTimer);
       residentTimer = undefined;
       targetIpcMain.off(channel, listener);
       targetIpcMain.off(releaseChannel, releaseListener);

@@ -121,3 +121,10 @@ export const axesHelperColors = {
  * gizmo cube axes import it from the same module.
  */
 export const axesHelperOpacity = 0.6;
+
+/**
+ * Outline of a section cut that does not close into a loop: an open surface, a crack or a branch, where the cap is
+ * left open. Tau's `--destructive` (`oklch(0.55 0.25 15deg)`, gamut-clipped to sRGB `#DD003F`); one opaque value for
+ * both themes, as the semantic status colours keep their lightness in both modes.
+ */
+export const sectionCapOpenChainColor = 0xdd_00_3f;

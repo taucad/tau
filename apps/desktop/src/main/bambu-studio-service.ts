@@ -149,7 +149,12 @@ const presetsStamp = async (dataDirectory: string | undefined): Promise<string> 
       }
     }),
   );
-  return `${paths.length}:${Math.max(...modified)}`;
+  /* A loop, not `Math.max(...modified)`: a spread of a large preset tree overflows the argument stack. */
+  let newest = 0;
+  for (const mtimeMs of modified) {
+    newest = Math.max(newest, mtimeMs);
+  }
+  return `${String(paths.length)}:${String(newest)}`;
 };
 
 /**
@@ -174,6 +179,8 @@ export const createBambuStudioService = (
     describeBambuStudioSettings,
   };
   const cache = new Map<string, Promise<unknown>>();
+  /* The preset stamp each install's cached entries were loaded under. */
+  const currentStamps = new Map<string, string>();
 
   const installation = async (): Promise<BambuStudioInstallation> => {
     const install = await engine.findBambuStudio({ env: options.env });
@@ -188,7 +195,19 @@ export const createBambuStudioService = (
     request: string,
     load: () => Promise<Value>,
   ): Promise<Value> => {
-    const key = [install.executable, install.version, await presetsStamp(install.dataDir), request].join('\0');
+    const installKey = [install.executable, install.version].join('\0');
+    const stamp = await presetsStamp(install.dataDir);
+    if (currentStamps.get(installKey) !== stamp) {
+      /* D-DT-12: a changed preset makes every catalog and settings entry loaded under the old stamp unreachable, so
+       * main releases them now rather than holding parsed catalogs until the cap clears the whole cache. */
+      for (const staleKey of cache.keys()) {
+        if (staleKey.startsWith(`${installKey}\0`)) {
+          cache.delete(staleKey);
+        }
+      }
+      currentStamps.set(installKey, stamp);
+    }
+    const key = [installKey, stamp, request].join('\0');
     let entry = cache.get(key) as Promise<Value> | undefined;
     if (entry === undefined) {
       // ponytail: stale stamps pile up until the cap clears everything; an LRU if panes ever juggle 64 printers.

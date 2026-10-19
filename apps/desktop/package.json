@@ -51,6 +51,7 @@
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/smlib": "workspace:*",
+    "@taucad/smlibpy": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/zoo": "workspace:*",

@@ -21,6 +21,7 @@ describe('default runtime', () => {
       'brep',
       'rhino',
       'assimp',
+      'smlibpy',
       'build123d',
       'picogk',
       'tscircuit',
@@ -63,7 +64,7 @@ describe('default runtime', () => {
     const optionalPeers = Object.keys(manifest.peerDependencies ?? {}).filter(
       (name) => manifest.peerDependenciesMeta?.[name]?.optional === true,
     );
-    const nativeKernelPackages = ['@taucad/build123d', '@taucad/picogk'];
+    const nativeKernelPackages = ['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk'];
     const expected = [
       ...Object.keys(manifest.dependencies ?? {}).filter(
         (name) => name.startsWith('@taucad/') && name !== '@taucad/runtime',

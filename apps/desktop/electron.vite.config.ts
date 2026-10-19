@@ -46,6 +46,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/skills',
   '@taucad/slicer',
   '@taucad/smlib',
+  '@taucad/smlibpy',
   '@taucad/tscircuit',
   '@taucad/types',
   '@taucad/zoo',

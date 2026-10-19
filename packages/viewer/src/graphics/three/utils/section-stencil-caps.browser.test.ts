@@ -6,6 +6,9 @@ import type { SectionCut, SectionHalfSpace, SectionPiece } from '#graphics/secti
 import { applyGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
 import { createRenderer } from '#graphics/three/renderer.js';
+import { sectionCapOpenChainColor } from '#graphics/three/overlay-colors.constants.js';
+import { sliceSectionLoops } from '#graphics/three/utils/section-loop-slice.js';
+import type { SectionLoopCapGeometry } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionStencilCaps } from '#graphics/three/utils/section-stencil-caps.js';
 import type {
   SectionStencilCapFrame,
@@ -908,5 +911,210 @@ describe.each(['webgl', 'webgpu'] as const)('section cap outline on %s', (backen
         inkedPixels * 0.15,
       );
     }
+  });
+});
+
+/**
+ * Per-loop caps on a real GPU: a hollow box (a cube with a cubic cavity) and an open box (a cube without its +x face),
+ * each capped from the loops a slice finds, counted even-odd with the stencil's invert operation. Seen from above, the
+ * hollow box's cap fills the wall between its two loops and not the cavity; the open box closes no loop, so it shows
+ * no cap at all, only its open chain in the open-chain colour.
+ */
+const hollowAt = centre.clone().add(new THREE.Vector3(-2.5, 0, 0));
+const openAt = centre.clone().add(new THREE.Vector3(2.5, 0, 0));
+const hollowTint = 0x00_ff_00;
+const loopView = new THREE.Vector3(-3, -5, 16);
+const openTint = 0x00_00_ff;
+
+const loopFixture = (): Array<Readonly<{ key: string; tint: number; geometry: THREE.BufferGeometry }>> => {
+  const cavity = new THREE.BoxGeometry(1, 1, 1).scale(-1, 1, 1);
+  const hollow = new THREE.BoxGeometry(3, 3, 3);
+  const hollowIndex = hollow.getIndex()!.array.length;
+  const merged = new THREE.BufferGeometry();
+  const positions = [...hollow.getAttribute('position').array, ...cavity.getAttribute('position').array];
+  const offset = hollow.getAttribute('position').count;
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  merged.setIndex([...hollow.getIndex()!.array, ...[...cavity.getIndex()!.array].map((vertex) => vertex + offset)]);
+  expect(merged.getIndex()!.count).toBe(hollowIndex * 2);
+  const open = new THREE.BoxGeometry(3, 3, 3);
+  open.setIndex([...open.getIndex()!.array].slice(6));
+  return [
+    { key: 'hollow', tint: hollowTint, geometry: merged.translate(hollowAt.x, hollowAt.y, hollowAt.z) },
+    { key: 'open', tint: openTint, geometry: open.translate(openAt.x, openAt.y, openAt.z) },
+  ];
+};
+
+describe.each(['webgl', 'webgpu'] as const)('per-loop section caps on %s', (backend) => {
+  const errors: unknown[][] = [];
+  const disposables: Array<{ dispose: () => void }> = [];
+  let frame: Frame | undefined;
+  let camera: THREE.Camera | undefined;
+  let counts: Array<Readonly<{ key: string; closedLoopCount: number; openChainCount: number }>> = [];
+
+  beforeAll(async () => {
+    vi.spyOn(console, 'error').mockImplementation((...data: unknown[]) => {
+      errors.push(data);
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const renderer = await createRenderer('viewport', backend, canvas);
+    disposables.push(renderer);
+    const renderFrame = createFrameRenderer(renderer, disposables);
+    const calibration = new THREE.Scene();
+    const topHalf = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ color: 0xff_ff_ff }));
+    topHalf.position.set(0, 0.5, 0);
+    calibration.add(topHalf);
+    const calibrationCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    calibrationCamera.position.set(0, 0, 5);
+    calibrationCamera.updateMatrixWorld();
+    const calibrated = await renderFrame(calibration, calibrationCamera, () => undefined);
+    const isTopRowFirst = (calibrated[0] ?? 0) > 128;
+    disposables.push(topHalf.geometry, topHalf.material);
+
+    const pieces = resolveSectionPieces([planeCut]);
+    const [face] = pieces[0]!.faces;
+    const clip = createSectionClip(backend);
+    writeSectionClip(clip, pieces);
+    const surface = new THREE.MeshBasicMaterial({ color: 0x40_40_40, side: THREE.DoubleSide });
+    applyGltfSurfaceDepthBias(surface, backend);
+    installSectionClip(surface, clip);
+    const caps = createSectionStencilCaps(backend);
+    disposables.push(surface, caps);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x00_00_00);
+    const sources: SectionStencilCapSource[] = loopFixture().map(({ key, tint, geometry }) => {
+      const mesh = new THREE.Mesh(geometry, surface);
+      scene.add(mesh);
+      const flat = geometry.toNonIndexed();
+      const slice = sliceSectionLoops({
+        triangles: Float64Array.from(flat.getAttribute('position').array),
+        plane: [face!.plane.normal[0], face!.plane.normal[1], face!.plane.normal[2], face!.plane.constant],
+        weldTolerance: 1e-9,
+      });
+      const fill = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(slice.fill, 3));
+      const open = new THREE.BufferGeometry().setAttribute(
+        'position',
+        new THREE.BufferAttribute(slice.openTriangles, 3),
+      );
+      disposables.push(geometry, flat, fill, open);
+      const capGeometry: SectionLoopCapGeometry = {
+        fill,
+        open,
+        closedLoopCount: slice.closedLoops.length,
+        openChainCount: slice.openChains.length,
+      };
+      counts.push({ key, closedLoopCount: capGeometry.closedLoopCount, openChainCount: capGeometry.openChainCount });
+      return {
+        key,
+        ownerKey: key,
+        meshes: [mesh],
+        tintHex: tint,
+        edgeHex: 0xff_ff_ff,
+        loops: { matrix: new THREE.Matrix4(), bySlot: new Map([[0, capGeometry]]) },
+      };
+    });
+    scene.updateMatrixWorld(true);
+    // Tilted, so the open box's walls face the camera enough to draw their outline band.
+    camera = lookFrom(loopView, 'orthographic');
+    const pixels = await renderFrame(scene, camera, () => {
+      caps.render(renderer, {
+        camera: camera!,
+        pieces,
+        sources,
+        stripes: noStripes,
+        outlineWidthPixels: 1.5,
+        viewportHeightPixels: size,
+      });
+    });
+    frame = createFrame(pixels, isTopRowFirst);
+  }, setupTimeout);
+
+  afterAll(() => {
+    vi.restoreAllMocks();
+    for (const resource of disposables.splice(0).reverse()) {
+      resource.dispose();
+    }
+    counts = [];
+  });
+
+  /** Where a pixel's ray meets the cut plane, in the plane's x and y. */
+  const rayCamera = lookFrom(loopView, 'orthographic');
+  const onPlane = (row: number, column: number): THREE.Vector2 => {
+    const raycaster = new THREE.Raycaster();
+    // A fresh camera: rendering re-projects one for its backend, which the ray caster does not follow.
+    raycaster.setFromCamera(
+      new THREE.Vector2(((column + 0.5) / size) * 2 - 1, 1 - ((row + 0.5) / size) * 2),
+      rayCamera,
+    );
+    const point = raycaster.ray.intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), -planeCut.offset),
+      new THREE.Vector3(),
+    )!;
+    return new THREE.Vector2(point.x, point.y);
+  };
+  /** The largest of the x and y offsets of a point from a centre. */
+  const reach = (point: THREE.Vector2, at: THREE.Vector3): number =>
+    Math.max(Math.abs(point.x - at.x), Math.abs(point.y - at.y));
+  const pixelWorld = (2 * halfExtent) / size;
+  const margin = pixelWorld * 2.5;
+
+  it('should find one closed loop pair in the hollow box and one open chain in the open box', () => {
+    expect(counts).toEqual([
+      { key: 'hollow', closedLoopCount: 2, openChainCount: 0 },
+      { key: 'open', closedLoopCount: 0, openChainCount: 1 },
+    ]);
+  });
+
+  it('should fill the hollow wall even-odd, leave its cavity open, and never cap the open box', () => {
+    const wrong: string[] = [];
+    let wall = 0;
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        const point = onPlane(row, column);
+        const hollowReach = reach(point, hollowAt);
+        const [red, green, blue] = frame!.pixel(row, column);
+        const isGreen = green > 150 && red < 100 && blue < 100;
+        const isBlue = blue > 150 && red < 100 && green < 100;
+        if (isBlue) {
+          wrong.push(`open cap at ${row},${column}`);
+        }
+        if (hollowReach < 1.5 - margin && hollowReach > 0.5 + margin) {
+          wall++;
+          if (!isGreen) {
+            wrong.push(`wall ${row},${column}: ${red},${green},${blue}`);
+          }
+        } else if ((hollowReach < 0.5 - margin || hollowReach > 1.5 + margin) && isGreen) {
+          wrong.push(`cap outside the wall ${row},${column}`);
+        }
+      }
+    }
+    expect(wall).toBeGreaterThan(size * 2);
+    expect(wrong.slice(0, 8)).toEqual([]);
+  });
+
+  it('should outline the open chain in the open-chain colour, beside the open box only', () => {
+    // #DD003F reads back as strong red, no green and a little blue; nothing else in the scene is red.
+    expect(sectionCapOpenChainColor).toBe(0xdd_00_3f);
+    let chainPixels = 0;
+    const stray: string[] = [];
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        const [red, green, blue] = frame!.pixel(row, column);
+        if (red > 150 && green < 60 && blue < 120) {
+          chainPixels++;
+          if (reach(onPlane(row, column), openAt) > 1.5 + margin) {
+            stray.push(`${row},${column}`);
+          }
+        }
+      }
+    }
+    // Three walls of 3 units at about 0.09 units a pixel, the far one partly behind the near.
+    expect(chainPixels).toBeGreaterThan(size / 2);
+    expect(stray.slice(0, 8)).toEqual([]);
+  });
+
+  it('should compile and draw every per-loop pass without a shader or pipeline error', () => {
+    expect(errors).toEqual([]);
   });
 });

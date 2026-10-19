@@ -143,10 +143,22 @@ describe('getSectionViewTestControlState', () => {
         crossingSourceCount: 2,
         overlapCandidateSourceCount: 1,
         outlineSourceCount: 2,
+        loopSourceCount: 1,
+        openChainDrawCount: 1,
         meshDrawCount: 6,
         polygonDrawCount: 5,
         submitMilliseconds: 0.5,
       },
+      loops: [
+        {
+          sourceKey: 'unit:open-shell',
+          closedLoopCount: 2,
+          openChainCount: 1,
+          pendingFaceCount: 0,
+          lastSlice: undefined,
+          failure: undefined,
+        },
+      ],
     };
     helperRoot.userData[sectionCapStencilDebugUserDataKey] = published;
     scene.add(helperRoot);

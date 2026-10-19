@@ -62,7 +62,7 @@ describe('resolveSectionViewRaycastClip', () => {
     expect(resolveSectionViewRaycastClip(context, renderFrame)).toBeUndefined();
   });
 
-  it('should raycast against the committed cuts while the caps certify newer ones', () => {
+  it('should raycast against the committed cuts until the caps commit newer ones', () => {
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -72,20 +72,17 @@ describe('resolveSectionViewRaycastClip', () => {
     const context = (): Parameters<typeof resolveSectionViewRaycastClip>[0] => actor!.getSnapshot().context;
     const { sectionCuts } = actor.getSnapshot().context;
     expect(sectionCuts).toMatchObject([{ plane: 'xy', offset: 0, isFlipped: false }]);
-    // Nothing is clipped until the caps certify the list.
+    // Nothing is clipped until the caps commit the list.
     expect(keepsHeight(context(), 0.02)).toBe(true);
 
-    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
+    actor.send({ type: 'commitSectionCuts', payload: sectionCuts });
     expect(keepsHeight(context(), 0.02)).toBe(false);
 
-    // A drag step lifts the live cut over the point; raycasts keep the committed cut until the caps certify it.
+    // A drag step lifts the live cut over the point; raycasts keep the committed cut until the caps commit it.
     actor.send({ type: 'updateSectionCut', payload: { id: sectionCuts[0]!.id, patch: { offset: 0.05 } } });
     expect(keepsHeight(context(), 0.02)).toBe(false);
 
-    actor.send({
-      type: 'setSectionCertification',
-      payload: { status: 'certified', cuts: actor.getSnapshot().context.sectionCuts },
-    });
+    actor.send({ type: 'commitSectionCuts', payload: actor.getSnapshot().context.sectionCuts });
     expect(keepsHeight(context(), 0.02)).toBe(true);
   });
 });
@@ -195,12 +192,12 @@ describe('useSectionPieces', () => {
     const { sectionCuts } = actor.getSnapshot().context;
     const pieces = toRenderSectionPieces(resolveSectionPieces(sectionCuts), scaledFrame);
     expect(sectionCuts).toHaveLength(2);
-    // The caps certify the live list; nothing is clipped until they commit it.
+    // The caps see the live list; nothing is clipped until they commit it.
     expect(seenLive.at(-1)).toEqual({ cuts: sectionCuts, pieces });
     expect(seen.at(-1)).toBe(off);
 
     act(() => {
-      actor!.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
+      actor!.send({ type: 'commitSectionCuts', payload: sectionCuts });
     });
     const on = seen.at(-1);
     expect(on).toEqual(pieces);
@@ -208,29 +205,24 @@ describe('useSectionPieces', () => {
 
     const renders = seen.length;
     const live = seenLive.at(-1);
-    const certified = actor.getSnapshot();
+    const committed = actor.getSnapshot();
     act(() => {
-      actor!.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
+      actor!.send({ type: 'commitSectionCuts', payload: sectionCuts });
       actor!.send({ type: 'hoverSectionCut', payload: sectionCuts[0]!.id });
     });
     expect(seen.length).toBeGreaterThan(renders);
     expect(seen.at(-1)).toBe(on);
     expect(seenLive.at(-1)).toBe(live);
-    expect(actor.getSnapshot().context.committedSectionCuts).toBe(certified.context.committedSectionCuts);
+    expect(actor.getSnapshot().context.committedSectionCuts).toBe(committed.context.committedSectionCuts);
 
-    // A refused list leaves the committed one clipped.
+    // A removed cut stays clipped until the caps commit the shorter list.
     act(() => {
       actor!.send({ type: 'removeSectionCut', payload: sectionCuts[1]!.id });
-      actor!.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
     });
-    expect(actor.getSnapshot().context.sectionCertification).toBe('rejected');
     expect(seen.at(-1)).toBe(on);
 
     act(() => {
-      actor!.send({
-        type: 'setSectionCertification',
-        payload: { status: 'certified', cuts: actor!.getSnapshot().context.sectionCuts },
-      });
+      actor!.send({ type: 'commitSectionCuts', payload: actor!.getSnapshot().context.sectionCuts });
     });
     expect(seen.at(-1)).toEqual(toRenderSectionPieces(resolveSectionPieces([sectionCuts[0]!]), scaledFrame));
 
@@ -241,7 +233,7 @@ describe('useSectionPieces', () => {
     expect(seenLive.at(-1)).toBe(liveOff);
   });
 
-  it('should keep the snapshot when the caps report the certification it holds', () => {
+  it('should keep the snapshot when the caps report the cuts it holds', () => {
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -249,12 +241,12 @@ describe('useSectionPieces', () => {
     actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
     actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
     const { sectionCuts } = actor.getSnapshot().context;
-    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
-    const certified = actor.getSnapshot();
+    actor.send({ type: 'commitSectionCuts', payload: sectionCuts });
+    const committed = actor.getSnapshot();
 
-    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
+    actor.send({ type: 'commitSectionCuts', payload: sectionCuts });
 
-    expect(actor.getSnapshot()).toBe(certified);
-    expect(certified.context).toMatchObject({ committedSectionCuts: sectionCuts, sectionCertification: 'certified' });
+    expect(actor.getSnapshot()).toBe(committed);
+    expect(committed.context).toMatchObject({ committedSectionCuts: sectionCuts });
   });
 });

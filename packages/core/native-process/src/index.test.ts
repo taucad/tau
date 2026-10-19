@@ -315,6 +315,35 @@ describe('NativeProcessSession', () => {
     }
   });
 
+  it('should take a large frame delivered in many small chunks in linear time', { timeout: 10_000 }, async () => {
+    /* Answers only its shutdown, so the frame under test is the one this case feeds. */
+    const value = fixture(
+      `${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='shutdown'){process.stdout.write(JSON.stringify({protocolVersion:1,requestId:request.requestId,result:{shutdown:true}})+'\\n');setTimeout(()=>process.exit(0),5)}});
+${keepAlive}`,
+      30_000,
+    );
+    const operation = request<{ readonly value: string }>(value.session);
+    try {
+      const internals = privateSession(value.session);
+      while (internals.pending.size === 0) {
+        await delay(1);
+      }
+      const payload = 'é'.repeat(200_000);
+      const frame = Buffer.from(
+        `${JSON.stringify({ protocolVersion: 1, requestId: [...internals.pending.keys()][0], result: { value: payload } })}\n`,
+      );
+      /* Re-measuring the whole unfinished tail on every chunk made this quadratic: minutes for 400 KB rather than well under a second. */
+      for (let offset = 0; offset < frame.byteLength; offset += 1) {
+        internals.onStdout(frame.subarray(offset, offset + 1) as Uint8Array<ArrayBuffer>);
+      }
+      await expect(operation).resolves.toEqual({ value: payload });
+    } finally {
+      await value.session.cleanup();
+    }
+  });
+
   it('delivers validated request events in sequence without settling the terminal response', async () => {
     const worker = `${ready}
 const readline=require('node:readline').createInterface({input:process.stdin});
@@ -990,6 +1019,62 @@ ${keepAlive}`);
     fsOverrides.unlink = undefined;
     unlinkSync(target);
     await value.session.cleanup();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'should kill a worker still inside a request when its host process exits',
+    async () => {
+      const value = fixture(
+        `${ready}require('node:fs').writeFileSync(require('node:path').join(process.env.TMPDIR,'pid'),String(process.pid));${keepAlive}`,
+        30_000,
+      );
+      const operation = request(value.session);
+      const settled = expect(operation).rejects.toBeInstanceOf(Error);
+      const pidPath = join(value.artifactPath, 'pid');
+      try {
+        while (!existsSync(pidPath)) {
+          await delay(5);
+        }
+        const pid = Number(readFileSync(pidPath, 'utf8'));
+        const alive = (): boolean => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        expect(alive()).toBe(true);
+        /* Only synchronous work runs in `'exit'`, so this is all the host gets to do before it is gone. */
+        const exitHooks = process.listeners('exit').filter((listener) => listener.name === 'killLiveProcessGroups');
+        expect(exitHooks).toHaveLength(1);
+        exitHooks[0]!(0);
+        await settled;
+        while (alive()) {
+          await delay(5);
+        }
+      } finally {
+        await value.session.cleanup();
+      }
+    },
+    10_000,
+  );
+
+  it('should hand back the bytes it read without copying them a second time', async () => {
+    const value = fixture();
+    const target = join(value.artifactPath, 'mesh');
+    writeFileSync(target, 'mesh');
+    const read = new TextEncoder().encode('mesh');
+    fsOverrides.readFile = async () => read;
+    try {
+      const bytes = await value.session.readArtifact({ artifactPath: target, byteLength: 4 });
+      /* A 1 GiB artifact otherwise peaks at 2 GiB in the utility while the copy is made. */
+      expect(bytes.buffer).toBe(read.buffer);
+      expect(bytes).toEqual(new Uint8Array([109, 101, 115, 104]));
+    } finally {
+      fsOverrides.readFile = undefined;
+      await value.session.cleanup();
+    }
   });
 
   it('terminates POSIX and Windows process trees and provides a minimal environment', async () => {

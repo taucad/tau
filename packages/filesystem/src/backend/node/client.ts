@@ -95,7 +95,7 @@ const toError = (frame: Extract<NodeFsResponse, { type: 'error' }>): Error => {
 export class NodeFsChannel {
   private readonly _port: NodeFsPort;
   private readonly _pending = new Map<number, Pending>();
-  private readonly _watchers = new Map<number, (event: NodeFsWatchEvent) => void>();
+  private readonly _watchers = new Map<number, (events: readonly NodeFsWatchEvent[]) => void>();
   private readonly _close = new Topic<void>({ name: 'NodeFsChannel.close' });
   private _nextId = 1;
   private _closed = false;
@@ -178,6 +178,26 @@ export class NodeFsChannel {
     request: WatchRequest,
     handler: (event: NodeFsWatchEvent) => void,
   ): Promise<() => void> {
+    return this.watchBatches(root, request, (events) => {
+      for (const event of events) {
+        handler(event);
+      }
+    });
+  }
+
+  /**
+   * {@link NodeFsChannel.watch}, delivering each frame's events together, in order.
+   *
+   * @param root - Absolute host directory the subscription is rooted at.
+   * @param request - Paths (root-relative) and options to watch.
+   * @param handler - Receives every batch until the returned unsubscribe runs.
+   * @returns Unsubscribe function once the host has armed; safe to call twice.
+   */
+  public async watchBatches(
+    root: string,
+    request: WatchRequest,
+    handler: (events: readonly NodeFsWatchEvent[]) => void,
+  ): Promise<() => void> {
     const id = this._nextId++;
     this._watchers.set(id, handler);
     const unsubscribe = (): void => {
@@ -221,7 +241,7 @@ export class NodeFsChannel {
     }
     this._pending.clear();
     for (const handler of this._watchers.values()) {
-      handler({ type: 'reset' });
+      handler([{ type: 'reset' }]);
     }
     this._watchers.clear();
     this._port.close?.();
@@ -238,7 +258,7 @@ export class NodeFsChannel {
       return;
     }
     if (frame.type === 'watch') {
-      this._watchers.get(frame.id)?.(frame.event);
+      this._watchers.get(frame.id)?.(frame.events);
       return;
     }
     const pending = this._pending.get(frame.id);
@@ -445,9 +465,13 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    * @returns A disposer, once the host has armed the watcher.
    */
   public async observe(listener: (facts: readonly ExternalChangeFact[]) => void): Promise<() => void> {
-    return this.watch({ paths: [''], recursive: true, excludes: hostWatchExcludes }, (event) => {
-      listener([toExternalChangeFact(event)]);
-    });
+    return this._channel.watchBatches(
+      this._root,
+      { paths: [''], recursive: true, excludes: hostWatchExcludes },
+      (events) => {
+        listener(events.map((event) => toExternalChangeFact(event)));
+      },
+    );
   }
 
   /**

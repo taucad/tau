@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_Hq3YzN8fKu5Rb1MwXc6Tg",
+  "name": "PBR Materials — SMLibPy",
+  "description": "Five finishes on one plinth: clearcoat, anisotropy, transmission with volume, emissive strength and a checker texture, written as glTF 2.0 material dicts.",
+  "tags": ["smlibpy", "python", "materials", "pbr", "reference"],
+  "assets": {
+    "main": {
+      "entryPath": "main.py"
+    }
+  }
+}

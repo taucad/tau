@@ -6,41 +6,32 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { GeometryComponentManifest } from '@taucad/types';
-import { countConstructions } from '#test/three-allocations.test-utils.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import * as bvhCache from '#graphics/three/utils/bvh-cache.js';
 import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
+import { censusSectionSurfaceClosure } from '#graphics/three/utils/section-surface-closure.js';
+import type { SectionClosureCensus } from '#graphics/three/utils/section-surface-closure.js';
 import {
-  buildSectionCanonicalTopologyWorkerResult,
-  buildSectionSurfaceTopologyForGeometry,
+  buildSectionSurfaceClosureForGeometry,
   collectSectionSurfaceSources,
   getSectionSourceWorldMatrix,
   registerGltfSectionSurfaceSources,
   setGltfSectionSurfaceRegistrationState,
-  sliceSectionSurfaceSource,
-  sliceSectionSurfaceTopologyForGeometry,
 } from '#graphics/three/utils/section-surface-topology.js';
 import type {
-  SectionCanonicalTopologyWorkerInput,
-  SectionCanonicalTopologyWorkerResult,
-  SectionSurfaceSlice,
+  SectionClosureWorkerInput,
   SectionTopologyGltfParser,
 } from '#graphics/three/utils/section-surface-topology.js';
 
 const workerMocks = vi.hoisted(() => ({
-  build: undefined as
-    | ((input: SectionCanonicalTopologyWorkerInput) => Promise<SectionCanonicalTopologyWorkerResult>)
-    | undefined,
+  build: undefined as ((input: SectionClosureWorkerInput) => Promise<SectionClosureCensus>) | undefined,
 }));
 
 vi.mock('#graphics/three/utils/section-surface-topology-worker-client.js', () => ({
   // oxlint-disable-next-line typescript/promise-function-async -- Without a worker the client returns undefined, not a promise.
-  buildSectionTopologyRecipeInWorker: (input: SectionCanonicalTopologyWorkerInput) => workerMocks.build?.(input),
+  buildSectionClosureInWorker: (input: SectionClosureWorkerInput) => workerMocks.build?.(input),
   releaseSectionTopologyWorker: () => undefined,
 }));
-
-const positionAttribute = 'POSITION';
-const manifoldExtension = 'EXT_mesh_manifold';
 
 const cubeGeometry = (): THREE.BufferGeometry => {
   const geometry = new THREE.BufferGeometry();
@@ -113,64 +104,25 @@ const createBodyManifest = (bodyId: string, faceIds: readonly string[]): Geometr
   },
 });
 
-/** A closed, fully indexed sphere of `20 × (detail + 1)²` triangles. */
-const indexedSphereGeometry = (detail: number): THREE.BufferGeometry => {
-  const geometry = new THREE.IcosahedronGeometry(1, detail);
-  geometry.deleteAttribute('normal');
-  geometry.deleteAttribute('uv');
-  return mergeVertices(geometry);
+const emptyParser: SectionTopologyGltfParser = {
+  json: {},
+  associations: new Map(),
+  getDependency: async () => undefined,
 };
 
-type RetainedFootprint = Readonly<{ objects: number; typedBytes: number }>;
+const register = async (scene: THREE.Group, options: { manifest?: GeometryComponentManifest; unitId?: string } = {}) =>
+  registerGltfSectionSurfaceSources({
+    scene,
+    manifest: options.manifest ?? manifest,
+    unitId: options.unitId ?? 'unit',
+    parser: emptyParser,
+  });
 
-/**
- * Walks everything a section source keeps alive except the scene it points at (meshes, materials, the root),
- * counting JS objects and typed-array bytes, so the footprint of the topology alone is measurable.
- */
-const measureRetainedFootprint = (root: unknown): RetainedFootprint => {
-  const seen = new Set<unknown>();
-  let objects = 0;
-  let typedBytes = 0;
-  const skippedKeys = new Set(['mesh', 'root', 'owner', 'localToSource']);
-  const visit = (value: unknown): void => {
-    if (value === null || typeof value !== 'object' || seen.has(value)) {
-      return;
-    }
-    seen.add(value);
-    if (ArrayBuffer.isView(value)) {
-      typedBytes += value.byteLength;
-      return;
-    }
-    if (value instanceof THREE.Material || value instanceof THREE.Object3D) {
-      return;
-    }
-    objects += 1;
-    if (value instanceof Map) {
-      for (const [key, entry] of value) {
-        visit(key);
-        visit(entry);
-      }
-      return;
-    }
-    if (value instanceof Set) {
-      for (const entry of value) {
-        visit(entry);
-      }
-      return;
-    }
-    for (const [key, entry] of Object.entries(value)) {
-      if (!skippedKeys.has(key)) {
-        visit(entry);
-      }
-    }
-  };
-  visit(root);
-  return { objects, typedBytes };
-};
+describe('section surface closure', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-const countVector3Constructions = <T>(run: () => T) => countConstructions(THREE.Vector3.prototype, 'x', run);
-
-describe('section surface topology', () => {
   it('should update the whole root once when registering many surfaces', async () => {
     const scene = new THREE.Group();
     for (const offset of [0, 2, 4]) {
@@ -179,281 +131,88 @@ describe('section surface topology', () => {
       scene.add(mesh);
     }
     const update = vi.spyOn(scene, 'updateWorldMatrix');
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest,
-      unitId: 'unit',
-      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
-    });
+    await register(scene);
     expect(update).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith(true, true);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it.each([1e-12, 1e-6, 1, 1e6, 1e12])(
-    'keeps canonical box topology and cuts scale-covariant at local extent %s',
-    (scale) => {
-      const geometry = cubeGeometry().scale(scale, scale, scale);
-      const topology = buildSectionSurfaceTopologyForGeometry(geometry);
-      expect(topology).toMatchObject({ status: 'ready' });
-      if (topology.status === 'ready') {
-        expect(topology.topology.distanceTolerance / scale).toBeCloseTo(2 * Math.sqrt(3) * 1e-6, 8);
-      }
-
-      expect(
-        sliceSectionSurfaceTopologyForGeometry({
-          geometry,
-          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-          meshWorldMatrix: new THREE.Matrix4(),
-        }),
-      ).toMatchObject({
-        status: 'complete',
-        closedContours: [expect.any(Array)],
-        trueCutComponentCount: 1,
-      });
-    },
-  );
-
-  it.each([1e-12, 1, 1e12])('clusters equivalent non-indexed seams at local extent %s', (scale) => {
-    const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed().scale(scale, scale, scale);
-
-    expect(buildSectionSurfaceTopologyForGeometry(geometry)).toMatchObject({
-      status: 'ready',
-      topology: { path: 'fallback' },
+  it.each([1e-12, 1, 1e12])('closes an indexed box and a box of duplicated seam vertices at extent %s', (scale) => {
+    expect(buildSectionSurfaceClosureForGeometry(cubeGeometry().scale(scale, scale, scale))).toMatchObject({
+      status: 'closed',
+      census: { indexUnbalancedEdgeCount: 0 },
     });
-  });
-
-  it('closes exact fallback cuts deterministically and rejects open surfaces', () => {
-    const closed = cubeGeometry();
-    const plane = new THREE.Plane(new THREE.Vector3(1, 0, 1).normalize(), 0);
-    const first = sliceSectionSurfaceTopologyForGeometry({
-      geometry: closed,
-      worldPlane: plane,
-      meshWorldMatrix: new THREE.Matrix4(),
-    });
-    const second = sliceSectionSurfaceTopologyForGeometry({
-      geometry: closed,
-      worldPlane: plane,
-      meshWorldMatrix: new THREE.Matrix4(),
-    });
-
-    expect(first.status).toBe('complete');
-    expect(second).toMatchObject({
-      status: first.status,
-      closedContours: first.status === 'complete' ? first.closedContours : undefined,
-      trueCutComponentCount: first.status === 'complete' ? first.trueCutComponentCount : undefined,
-      cappedTrueCutComponentCount: first.status === 'complete' ? first.cappedTrueCutComponentCount : undefined,
-      unresolvedTrueCutEdgeCount: first.status === 'complete' ? first.unresolvedTrueCutEdgeCount : undefined,
-    });
-    if (first.status === 'complete') {
-      expect(first.trueCutComponentCount).toBe(1);
-      expect(first.cappedTrueCutComponentCount).toBe(1);
-      expect(first.unresolvedTrueCutEdgeCount).toBe(0);
-      expect(first.closedContours).toHaveLength(1);
-    }
-
-    const open = new THREE.BufferGeometry();
-    open.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
-    expect(buildSectionSurfaceTopologyForGeometry(open)).toMatchObject({
-      status: 'unsupported',
-      failure: { code: 'open-surface' },
-    });
-  });
-
-  it('certifies non-indexed glTF seams without rebuilding topology per plane', () => {
-    const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
-    const topology = buildSectionSurfaceTopologyForGeometry(geometry);
-    expect(topology).toMatchObject({
-      status: 'ready',
-      topology: { path: 'fallback' },
-    });
-    expect(buildSectionSurfaceTopologyForGeometry(geometry)).toBe(topology);
-    const buildMilliseconds = topology.status === 'ready' ? topology.topology.buildMilliseconds : undefined;
-
-    for (const constant of [-0.5, 0, 0.5]) {
-      expect(
-        sliceSectionSurfaceTopologyForGeometry({
-          geometry,
-          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), constant),
-          meshWorldMatrix: new THREE.Matrix4(),
-        }),
-      ).toMatchObject({
-        status: 'complete',
-        trueCutComponentCount: 1,
-        cappedTrueCutComponentCount: 1,
-        unresolvedTrueCutEdgeCount: 0,
-      });
-      const cached = buildSectionSurfaceTopologyForGeometry(geometry);
-      expect(cached.status === 'ready' ? cached.topology.buildMilliseconds : undefined).toBe(buildMilliseconds);
-    }
-  });
-
-  it('should reuse the triangle component index built with the topology across repeated slices', () => {
-    const geometry = mergeGeometries([cubeGeometry(), cubeGeometry().translate(4, 0, 0)]);
-    const topology = buildSectionSurfaceTopologyForGeometry(geometry);
-    if (topology.status !== 'ready') {
-      expect.fail('two closed cubes should certify');
-    }
-    const { componentByTriangle } = topology.topology;
-    expect([...componentByTriangle]).toEqual([
-      ...Array.from({ length: 12 }, () => 0),
-      ...Array.from({ length: 12 }, () => 1),
-    ]);
-    const slice = () =>
-      sliceSectionSurfaceTopologyForGeometry({
-        geometry,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-        meshWorldMatrix: new THREE.Matrix4(),
-      });
-
-    const first = slice();
-    expect(first).toMatchObject({
-      status: 'complete',
-      closedContours: [expect.any(Array), expect.any(Array)],
-      trueCutComponentCount: 2,
-    });
-    expect(slice()).toEqual({
-      ...first,
-      candidateBroadphaseMilliseconds: expect.any(Number) as unknown,
-      topologySliceMilliseconds: expect.any(Number) as unknown,
-    });
-    expect(buildSectionSurfaceTopologyForGeometry(geometry)).toBe(topology);
-    expect(topology.topology.componentByTriangle).toBe(componentByTriangle);
-
-    // A slice counts cut components through the topology's own index instead of rebuilding one.
-    componentByTriangle.fill(0);
-    expect(slice()).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
-  });
-
-  it('should slice through the caller-updated matrices of a source without updating any scene node', async () => {
-    const cut = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
-    const cutNode = new THREE.Group();
-    cutNode.add(cut);
-    const other = new THREE.Mesh(cubeGeometry().translate(4, 0, 0), new THREE.MeshBasicMaterial());
-    const scene = new THREE.Group();
-    scene.add(cutNode, other);
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest,
-      unitId: 'unit',
-      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
-    });
-    const cutSource = collectSectionSurfaceSources(scene).find(({ source }) => source.participants[0]!.mesh === cut);
-    if (!cutSource) {
-      expect.fail('the cut mesh should register as its own source');
-    }
-    // The cap frame updates each source root and its descendants once, then slices every source.
-    scene.position.z = 1.5;
-    scene.updateWorldMatrix(true, true);
-    const matrixUpdate = vi.spyOn(THREE.Object3D.prototype, 'updateWorldMatrix');
-
+    // Every face of a non-indexed box has its own vertices: balanced only once the seams are welded.
     expect(
-      sliceSectionSurfaceSource({
-        visibleSource: cutSource,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -1.5),
-      }),
-    ).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
-    expect(matrixUpdate).not.toHaveBeenCalled();
+      buildSectionSurfaceClosureForGeometry(new THREE.BoxGeometry(2, 2, 2).toNonIndexed().scale(scale, scale, scale)),
+    ).toMatchObject({ status: 'closed', census: { unbalancedEdgeCount: 0 } });
   });
 
-  it.each(['fallback', 'extension'] as const)(
-    'should follow the visibility of only the materials its %s topology triangles use',
-    async (path) => {
-      const geometry = cubeGeometry();
-      geometry.addGroup(0, 18, 0);
-      geometry.addGroup(18, 18, 1);
-      const [first, second, unused] = [
-        new THREE.MeshBasicMaterial(),
-        new THREE.MeshBasicMaterial(),
-        new THREE.MeshBasicMaterial(),
-      ];
-      const mesh = new THREE.Mesh(geometry, [first, second, unused]);
-      const scene = new THREE.Group();
-      scene.add(mesh);
-      if (path === 'extension') {
-        const position = geometry.getAttribute('position');
-        const index = geometry.getIndex()!;
-        await registerGltfSectionSurfaceSources({
-          scene,
-          manifest,
-          unitId: 'unit',
-          parser: {
-            json: {
-              meshes: [
-                {
-                  primitives: [{ attributes: { [positionAttribute]: 0 }, indices: 1 }],
-                  extensions: {
-                    [manifoldExtension]: { manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 1 } },
-                  },
-                },
-              ],
-              accessors: [
-                { componentType: 5126, count: position.count, type: 'VEC3' },
-                { bufferView: 0, componentType: 5123, count: index.count, type: 'SCALAR' },
-              ],
-            },
-            associations: new Map([[mesh, { nodes: 0, meshes: 0, primitives: 0 }]]),
-            getDependency: async (_type, accessorIndex) => (accessorIndex === 0 ? position : index),
-          },
-        });
-      }
-      const visibility = () =>
-        collectSectionSurfaceSources(scene).map(({ source, visibility: state }) => [
-          source.topology.status === 'ready' ? source.topology.topology.path : source.topology.status,
-          state,
-        ]);
+  it('opens a surface with a hole, a flipped face or a lone triangle', () => {
+    const holed = cubeGeometry();
+    holed.setIndex([...holed.getIndex()!.array].slice(6));
+    const flipped = cubeGeometry();
+    const index = [...flipped.getIndex()!.array];
+    [index[0], index[1]] = [index[1]!, index[0]!];
+    flipped.setIndex(index);
+    const lone = new THREE.BufferGeometry();
+    lone.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
 
-      expect(visibility()).toEqual([[path, 'complete']]);
-      unused.visible = false;
-      expect(visibility()).toEqual([[path, 'complete']]);
-      first.visible = false;
-      expect(visibility()).toEqual([[path, 'partial']]);
-      second.opacity = 0;
-      expect(visibility()).toEqual([]);
-      first.visible = true;
-      second.opacity = 1;
-      expect(visibility()).toEqual([[path, 'complete']]);
-    },
-  );
+    for (const geometry of [holed, flipped, lone]) {
+      expect(buildSectionSurfaceClosureForGeometry(geometry)).toMatchObject({
+        status: 'open',
+        failure: { code: 'open-surface' },
+      });
+    }
+  });
 
-  it('closes a metre-native box cut after a millimetre render-frame transform', () => {
-    const geometry = new THREE.BoxGeometry(0.026, 0.02, 0.02).toNonIndexed();
-    geometry.translate(0.025, 0, 0);
-    const meshWorldMatrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(-88.5, 0, 0),
-      new THREE.Quaternion(),
-      new THREE.Vector3(1000, 1000, 1000),
+  it('closes a cube that carries a zero-area sliver with three distinct indices', () => {
+    const geometry = cubeGeometry();
+    const positions = [...geometry.getAttribute('position').array];
+    // Vertex 8 halves the top edge from 4 to 5; the top triangle over that edge becomes two, and the sliver (4, 5, 8)
+    // closes the edge against the side face, as voxel meshers emit where a surface grazes a grid vertex.
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([...positions, 0, -1, 1], 3));
+    const index = [...geometry.getIndex()!.array];
+    const top = index.findIndex(
+      (_value, offset) => offset % 3 === 0 && index[offset] === 4 && index[offset + 1] === 5 && index[offset + 2] === 6,
+    );
+    index.splice(top, 3, 4, 8, 6, 8, 5, 6, 4, 5, 8);
+    geometry.setIndex(index);
+
+    expect(buildSectionSurfaceClosureForGeometry(geometry).status).toBe('closed');
+  });
+
+  it('closes two solids that touch at one vertex, where a stencil count still winds correctly', () => {
+    const pinched = mergeVertices(
+      mergeGeometries([cubeGeometry().deleteAttribute('normal'), cubeGeometry().translate(2, 2, 2)]),
     );
 
-    expect(
-      sliceSectionSurfaceTopologyForGeometry({
-        geometry,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-        meshWorldMatrix,
-      }),
-    ).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
+    expect(buildSectionSurfaceClosureForGeometry(pinched).status).toBe('closed');
   });
 
-  it('keeps coplanar boundary evidence separate from true-cut certification', () => {
-    const result = sliceSectionSurfaceTopologyForGeometry({
-      geometry: cubeGeometry(),
-      worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -1),
-      meshWorldMatrix: new THREE.Matrix4(),
-    });
+  it('should follow the visibility of only the materials its triangles use', () => {
+    const geometry = cubeGeometry();
+    geometry.addGroup(0, 18, 0);
+    geometry.addGroup(18, 18, 1);
+    const [first, second, unused] = [
+      new THREE.MeshBasicMaterial(),
+      new THREE.MeshBasicMaterial(),
+      new THREE.MeshBasicMaterial(),
+    ];
+    const scene = new THREE.Group();
+    scene.add(new THREE.Mesh(geometry, [first, second, unused]));
+    const visibility = () =>
+      collectSectionSurfaceSources(scene).map(({ source, visibility: state }) => [source.closure.status, state]);
 
-    expect(result).toMatchObject({
-      status: 'complete',
-      trueCutComponentCount: 0,
-      cappedTrueCutComponentCount: 0,
-      unresolvedTrueCutEdgeCount: 0,
-    });
-    expect(result.status === 'complete' ? result.openPolylines : []).toHaveLength(4);
+    expect(visibility()).toEqual([['closed', 'complete']]);
+    unused.visible = false;
+    expect(visibility()).toEqual([['closed', 'complete']]);
+    first.visible = false;
+    expect(visibility()).toEqual([['closed', 'partial']]);
+    second.opacity = 0;
+    expect(visibility()).toEqual([]);
   });
 
-  it('closes every admitted cut in the reduced Racing Drone conformance fixture', async () => {
+  it('closes every source of the reduced Racing Drone conformance fixture', async () => {
     const bytes = await readFile(resolve(import.meta.dirname, './fixtures/racing-drone-section-repro.glb'));
     const gltf = await new GLTFLoader().parseAsync(Uint8Array.from(bytes).buffer, '');
     await registerGltfSectionSurfaceSources({
@@ -462,38 +221,33 @@ describe('section surface topology', () => {
       unitId: 'racing-drone-repro',
       parser: gltf.parser as unknown as SectionTopologyGltfParser,
     });
-    const results = collectSectionSurfaceSources(gltf.scene).map((visibleSource) =>
-      sliceSectionSurfaceSource({
-        visibleSource,
-        worldPlane: new THREE.Plane(new THREE.Vector3(1, 0, 0), 0),
-      }),
-    );
+    const sources = collectSectionSurfaceSources(gltf.scene);
 
-    expect(results.length).toBeGreaterThan(0);
-    expect(results.every((result) => result.status === 'complete')).toBe(true);
-    expect(
-      results.reduce((sum, result) => sum + (result.status === 'complete' ? result.trueCutComponentCount : 0), 0),
-    ).toBeGreaterThan(0);
-    expect(
-      results.reduce((sum, result) => sum + (result.status === 'complete' ? result.unresolvedTrueCutEdgeCount : 0), 0),
-    ).toBe(0);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources.map(({ source }) => source.closure.status)).toEqual(sources.map(() => 'closed'));
   });
 
   it('does not treat fat-line edge overlays as section surfaces', () => {
     const root = new THREE.Group();
-    const edgeOverlay = new LineSegments2();
-    root.add(edgeOverlay);
+    root.add(new LineSegments2());
 
     expect(collectSectionSurfaceSources(root)).toEqual([]);
   });
 
-  it.each(['pending', 'cancelled'] as const)('does not run standalone fallback below a %s glTF root', (status) => {
-    const scene = new THREE.Group();
-    scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
-    setGltfSectionSurfaceRegistrationState(scene, status);
+  it.each(['pending', 'cancelled'] as const)(
+    'stands in a pending source for each mesh of a %s glTF root, without grading it',
+    (status) => {
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
+      setGltfSectionSurfaceRegistrationState(scene, status);
+      const blocked = vi.fn();
 
-    expect(collectSectionSurfaceSources(scene)).toEqual([]);
-  });
+      expect(collectSectionSurfaceSources(scene, blocked).map(({ source }) => source.closure)).toEqual([
+        { status: 'pending' },
+      ]);
+      expect(blocked).toHaveBeenCalled();
+    },
+  );
 
   describe('off the main thread', () => {
     afterEach(() => {
@@ -501,7 +255,7 @@ describe('section surface topology', () => {
       workerMocks.build = undefined;
     });
 
-    /** A closed sphere above the synchronous limit, so its topology may only build in the worker. */
+    /** A closed sphere above the synchronous limit, so its census may only run in the worker. */
     const largeSphere = (): THREE.BufferGeometry => {
       const geometry = mergeVertices(
         new THREE.SphereGeometry(1, 256, 80).deleteAttribute('normal').deleteAttribute('uv'),
@@ -515,70 +269,49 @@ describe('section surface topology', () => {
         .filter(({ name }) => name === 'renderer.section-source-unsupported')
         .map(({ detail }) => detail);
 
-    it('never waits on a tree to register or slice a source', async () => {
+    const collectLarge = async () => {
       const scene = new THREE.Group();
-      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
-      scene.add(mesh);
-      const ensure = vi.spyOn(bvhCache, 'ensureBvh');
-      vi.spyOn(bvhCache, 'getBvh').mockReturnValue(undefined);
-      await registerGltfSectionSurfaceSources({
-        scene,
-        manifest,
-        unitId: 'unit',
-        parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
-      });
-      expect(ensure).not.toHaveBeenCalled();
-      const [visible] = collectSectionSurfaceSources(scene);
-      expect(
-        sliceSectionSurfaceSource({
-          visibleSource: visible!,
-          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-        }),
-      ).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
-    });
+      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
+      const blocked = vi.fn();
+      const provisional = collectSectionSurfaceSources(scene, blocked);
+      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
+      await ready;
+      return { provisional, landed: collectSectionSurfaceSources(scene) };
+    };
 
-    it('refuses the meshes of a model whose registration failed, without building them, reported once', () => {
+    it('caps the meshes of a model whose registration failed per loop, reported once', () => {
       const scene = new THREE.Group();
       scene.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
       setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
       for (let frame = 0; frame < 2; frame++) {
         const [visible] = collectSectionSurfaceSources(scene);
-        expect(visible?.source.topology).toMatchObject({
-          status: 'unsupported',
+        expect(visible?.source.closure).toMatchObject({
+          status: 'open',
           failure: { code: 'topology-unavailable' },
         });
       }
       expect(unsupportedSpans()).toEqual([expect.objectContaining({ code: 'topology-unavailable' })]);
     });
 
-    it('builds a large standalone surface in the worker, out of the cut until it lands', async () => {
-      workerMocks.build = async (input) => buildSectionCanonicalTopologyWorkerResult(input);
-      const scene = new THREE.Group();
-      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
-      const blocked = vi.fn();
-      expect(collectSectionSurfaceSources(scene, blocked)).toEqual([]);
-      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
-      await ready;
-      const [visible] = collectSectionSurfaceSources(scene);
-      expect(visible?.source.topology.status).toBe('ready');
+    it('censuses a large standalone surface in the worker, standing in as pending until it lands', async () => {
+      workerMocks.build = async (input) => censusSectionSurfaceClosure(input);
+      const { provisional, landed } = await collectLarge();
+
+      expect(provisional.map(({ source }) => source.closure.status)).toEqual(['pending']);
+      expect(landed.map(({ source }) => source.closure.status)).toEqual(['closed']);
     });
 
-    it('refuses a large surface whose worker fails twice, without building it here', async () => {
+    it('caps a large surface per loop when its worker fails twice, without censusing it here', async () => {
       const build = vi.fn(async () => {
         throw new Error('worker crashed');
       });
       workerMocks.build = build;
-      const scene = new THREE.Group();
-      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
-      const blocked = vi.fn();
-      collectSectionSurfaceSources(scene, blocked);
-      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
-      await ready;
-      const [visible] = collectSectionSurfaceSources(scene);
+      const { landed } = await collectLarge();
+
       // Asked once, then once more in a fresh worker.
       expect(build).toHaveBeenCalledTimes(2);
-      expect(visible?.source.topology).toMatchObject({
-        status: 'unsupported',
+      expect(landed[0]?.source.closure).toMatchObject({
+        status: 'open',
         failure: { code: 'topology-unavailable' },
       });
       expect(unsupportedSpans()).toEqual([
@@ -586,51 +319,32 @@ describe('section surface topology', () => {
       ]);
     });
 
-    it('refuses a large surface without a worker rather than building it here', async () => {
-      const scene = new THREE.Group();
-      scene.add(new THREE.Mesh(largeSphere(), new THREE.MeshBasicMaterial()));
-      const blocked = vi.fn();
-      collectSectionSurfaceSources(scene, blocked);
-      const [[ready]] = blocked.mock.calls as [[Promise<unknown>]];
-      await ready;
-      const [visible] = collectSectionSurfaceSources(scene);
-      expect(visible?.source.topology).toMatchObject({ status: 'unsupported' });
+    it('caps a large surface per loop without a worker rather than censusing it here', async () => {
+      const { landed } = await collectLarge();
+
+      expect(landed[0]?.source.closure).toMatchObject({ status: 'open' });
       expect(unsupportedSpans()).toEqual([expect.objectContaining({ reason: 'no topology worker' })]);
     });
   });
 
-  it('cuts a registered part where a kinematic pose placed it after registration', async () => {
+  it('places a registered part where a kinematic pose moved it after registration', async () => {
     const node = new THREE.Group();
     node.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
     const scene = new THREE.Group();
     scene.add(node);
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest,
-      unitId: 'unit',
-      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
-    });
+    await register(scene);
 
     // The pose composer moves the part's node; the scene root the source registered under stays put.
     node.matrixAutoUpdate = false;
     node.matrix.makeTranslation(3, 0, 0);
     scene.updateMatrixWorld(true);
-    const worldPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -3);
     const [visible] = collectSectionSurfaceSources(scene);
-    const slice = sliceSectionSurfaceSource({ visibleSource: visible!, worldPlane });
 
-    expect(slice).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
-    const sourceWorld = getSectionSourceWorldMatrix(visible!.source);
-    const distances = (slice as SectionSurfaceSlice).closedContours
-      .flat()
-      .map((point) => Math.abs(worldPlane.distanceToPoint(point.clone().applyMatrix4(sourceWorld))));
-    expect(distances.length).toBeGreaterThan(0);
-    expect(Math.max(...distances)).toBeLessThan(1e-9);
+    expect(getSectionSourceWorldMatrix(visible!.source).elements[12]).toBe(3);
   });
 
-  it('certifies face-split bodies as one logical source and rejects partial visibility', async () => {
+  it('closes face-split bodies as one logical source and reports partial visibility', async () => {
     const unitId = 'unit';
-    const bodyId = 'body';
     const faceIds = ['face-a', 'face-b'] as const;
     const source = cubeGeometry();
     const sourceIndex = source.getIndex()!;
@@ -643,449 +357,18 @@ describe('section surface topology', () => {
       return mesh;
     };
     const firstFace = createFace(0, 18, faceIds[0]);
-    const secondFace = createFace(18, 18, faceIds[1]);
     const scene = new THREE.Group();
-    scene.add(firstFace, secondFace);
-    const bodyManifest = createBodyManifest(bodyId, faceIds);
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest: bodyManifest,
-      unitId,
-      parser: {
-        json: {},
-        associations: new Map(),
-        getDependency: async () => undefined,
-      },
-    });
+    scene.add(firstFace, createFace(18, 18, faceIds[1]));
+    await register(scene, { manifest: createBodyManifest('body', faceIds), unitId });
 
     const visible = collectSectionSurfaceSources(scene);
     expect(visible).toHaveLength(1);
-    expect(visible[0]!.source).toMatchObject({
-      key: 'unit:body',
-      topology: { status: 'ready' },
-    });
-    expect(
-      sliceSectionSurfaceSource({
-        visibleSource: visible[0]!,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toMatchObject({
-      status: 'complete',
-      trueCutComponentCount: 1,
-      unresolvedTrueCutEdgeCount: 0,
+    expect(visible[0]).toMatchObject({
+      visibility: 'complete',
+      source: { key: 'unit:body', closure: { status: 'closed' } },
     });
 
     firstFace.visible = false;
-    const partial = collectSectionSurfaceSources(scene)[0]!;
-    expect(partial.visibility).toBe('partial');
-    expect(
-      sliceSectionSurfaceSource({
-        visibleSource: partial,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toMatchObject({
-      status: 'unsupported',
-      failure: { code: 'partial-visibility' },
-    });
-  });
-
-  it('uses a valid manifold extension and fails closed when a present claim is malformed', async () => {
-    const createRegistered = async (
-      extension: unknown,
-      accessorOverrides: Readonly<Record<number, THREE.BufferAttribute>> = {},
-    ) => {
-      const scene = new THREE.Group();
-      const geometry = cubeGeometry();
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
-      scene.add(mesh);
-      const position = geometry.getAttribute('position');
-      const index = geometry.getIndex()!;
-      const parser = {
-        json: {
-          meshes: [
-            {
-              primitives: [{ attributes: { [positionAttribute]: 0 }, indices: 1 }],
-              extensions: { [manifoldExtension]: extension },
-            },
-          ],
-          accessors: [
-            { componentType: 5126, count: position.count, type: 'VEC3' },
-            {
-              bufferView: 0,
-              componentType: 5123,
-              count: index.count,
-              type: 'SCALAR',
-            },
-            {
-              bufferView: 1,
-              componentType: 5123,
-              count: accessorOverrides[2]?.count ?? index.count,
-              type: 'SCALAR',
-            },
-            {
-              bufferView: 2,
-              componentType: 5123,
-              count: accessorOverrides[3]?.count ?? 0,
-              type: 'SCALAR',
-            },
-            {
-              bufferView: 3,
-              componentType: 5123,
-              count: accessorOverrides[4]?.count ?? 0,
-              type: 'SCALAR',
-            },
-          ],
-        },
-        associations: new Map([[mesh, { nodes: 0, meshes: 0, primitives: 0 }]]),
-        getDependency: async (_type: 'accessor', accessorIndex: number) =>
-          accessorIndex === 0 ? position : (accessorOverrides[accessorIndex] ?? index),
-      } as const;
-      await registerGltfSectionSurfaceSources({
-        scene,
-        manifest,
-        unitId: 'unit',
-        parser,
-      });
-      return collectSectionSurfaceSources(scene)[0]!;
-    };
-
-    const valid = await createRegistered({
-      manifoldPrimitive: { attributes: { [positionAttribute]: 0 }, indices: 2 },
-    });
-    expect(valid.source.topology).toMatchObject({
-      status: 'ready',
-      topology: { path: 'extension' },
-    });
-    expect(
-      sliceSectionSurfaceSource({
-        visibleSource: valid,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toMatchObject({ status: 'complete', unresolvedTrueCutEdgeCount: 0 });
-
-    const malformed = await createRegistered({});
-    expect(malformed.source.topology).toMatchObject({
-      status: 'unsupported',
-      failure: { code: 'invalid-extension' },
-    });
-
-    const invalidSourceIndex = cubeGeometry().getIndex()!;
-    const outOfRange = invalidSourceIndex.clone();
-    outOfRange.setX(0, 8);
-    const outOfRangeRegistered = await createRegistered(
-      {
-        manifoldPrimitive: {
-          attributes: { [positionAttribute]: 0 },
-          indices: 2,
-        },
-        mergeIndices: 3,
-        mergeValues: 4,
-      },
-      {
-        2: outOfRange,
-        3: new THREE.Uint16BufferAttribute([0], 1),
-        4: new THREE.Uint16BufferAttribute([8], 1),
-      },
-    );
-    expect(outOfRangeRegistered.source.topology).toMatchObject({
-      status: 'unsupported',
-      failure: { code: 'invalid-extension' },
-    });
-
-    const collapsed = invalidSourceIndex.clone();
-    collapsed.setX(1, collapsed.getX(0));
-    const collapsedRegistered = await createRegistered(
-      {
-        manifoldPrimitive: {
-          attributes: { [positionAttribute]: 0 },
-          indices: 2,
-        },
-        mergeIndices: 3,
-        mergeValues: 4,
-      },
-      {
-        2: collapsed,
-        3: new THREE.Uint16BufferAttribute([1], 1),
-        4: new THREE.Uint16BufferAttribute([collapsed.getX(0)], 1),
-      },
-    );
-    expect(collapsedRegistered.source.topology).toMatchObject({
-      status: 'unsupported',
-      failure: { code: 'invalid-extension' },
-    });
-  });
-
-  it('decodes sparse manifold merges across material primitives and matches fallback cuts', async () => {
-    const base = cubeGeometry();
-    const basePosition = base.getAttribute('position');
-    const positions = new Float32Array(basePosition.count * 2 * 3);
-    positions.set(basePosition.array as Float32Array);
-    positions.set(basePosition.array as Float32Array, basePosition.count * 3);
-    const sharedPosition = new THREE.BufferAttribute(positions, 3);
-    const sourceIndices = [...base.getIndex()!.array];
-    const firstIndices = sourceIndices.filter((_, offset) => Math.floor(offset / 3) % 2 === 0);
-    const secondIndices = sourceIndices
-      .filter((_, offset) => Math.floor(offset / 3) % 2 === 1)
-      .map((index) => index + basePosition.count);
-    const renderIndices = [...firstIndices, ...secondIndices];
-    const manifoldIndices = [...firstIndices, ...secondIndices.map((index) => index - basePosition.count)];
-    const changes = renderIndices.flatMap((before, offset) =>
-      before === manifoldIndices[offset] ? [] : [[offset, manifoldIndices[offset]!] as const],
-    );
-    const accessors = [
-      sharedPosition,
-      new THREE.Uint16BufferAttribute(firstIndices, 1),
-      new THREE.Uint16BufferAttribute(secondIndices, 1),
-      new THREE.Uint16BufferAttribute(manifoldIndices, 1),
-      new THREE.Uint8BufferAttribute(
-        changes.map(([offset]) => offset),
-        1,
-      ),
-      new THREE.Uint16BufferAttribute(
-        changes.map(([, value]) => value),
-        1,
-      ),
-    ] as const;
-    const firstGeometry = new THREE.BufferGeometry();
-    firstGeometry.setAttribute('position', sharedPosition);
-    firstGeometry.setIndex(firstIndices);
-    const secondGeometry = new THREE.BufferGeometry();
-    secondGeometry.setAttribute('position', sharedPosition);
-    secondGeometry.setIndex(secondIndices);
-    const firstMaterial = new THREE.MeshBasicMaterial({ color: 0xff_00_00 });
-    const secondMaterial = new THREE.MeshBasicMaterial({ color: 0x00_ff_00 });
-    const firstMesh = new THREE.Mesh(firstGeometry, firstMaterial);
-    const secondMesh = new THREE.Mesh(secondGeometry, secondMaterial);
-    const scene = new THREE.Group();
-    scene.add(firstMesh, secondMesh);
-    const parser = {
-      json: {
-        meshes: [
-          {
-            primitives: [
-              {
-                attributes: { [positionAttribute]: 0 },
-                indices: 1,
-                material: 0,
-              },
-              {
-                attributes: { [positionAttribute]: 0 },
-                indices: 2,
-                material: 1,
-              },
-            ],
-            extensions: {
-              [manifoldExtension]: {
-                manifoldPrimitive: {
-                  attributes: { [positionAttribute]: 0 },
-                  indices: 3,
-                },
-                mergeIndices: 4,
-                mergeValues: 5,
-              },
-            },
-          },
-        ],
-        accessors: [
-          { componentType: 5126, count: sharedPosition.count, type: 'VEC3' },
-          {
-            bufferView: 0,
-            componentType: 5123,
-            count: firstIndices.length,
-            type: 'SCALAR',
-          },
-          {
-            bufferView: 0,
-            componentType: 5123,
-            count: secondIndices.length,
-            type: 'SCALAR',
-          },
-          {
-            bufferView: 0,
-            componentType: 5123,
-            count: manifoldIndices.length,
-            type: 'SCALAR',
-            sparse: { count: changes.length },
-          },
-          {
-            bufferView: 1,
-            componentType: 5121,
-            count: changes.length,
-            type: 'SCALAR',
-          },
-          {
-            bufferView: 2,
-            componentType: 5123,
-            count: changes.length,
-            type: 'SCALAR',
-          },
-        ],
-      },
-      associations: new Map([
-        [firstMesh, { nodes: 0, meshes: 0, primitives: 0 }],
-        [secondMesh, { nodes: 0, meshes: 0, primitives: 1 }],
-      ]),
-      getDependency: async (_type: 'accessor', accessorIndex: number) => accessors[accessorIndex],
-    } as const;
-
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest,
-      unitId: 'unit',
-      parser,
-    });
-    const exactSource = collectSectionSurfaceSources(scene)[0]!;
-    expect(exactSource.source.topology).toMatchObject({
-      status: 'ready',
-      topology: { path: 'extension' },
-    });
-    const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
-    const exact = sliceSectionSurfaceSource({
-      visibleSource: exactSource,
-      worldPlane: plane,
-    });
-    const fallback = sliceSectionSurfaceTopologyForGeometry({
-      geometry: base,
-      worldPlane: plane,
-      meshWorldMatrix: new THREE.Matrix4(),
-    });
-    expect(exact).toMatchObject({
-      status: 'complete',
-      trueCutComponentCount: 1,
-      cappedTrueCutComponentCount: 1,
-      unresolvedTrueCutEdgeCount: 0,
-    });
-    expect(exact.status === 'complete' ? exact.closedContours : undefined).toEqual(
-      fallback.status === 'complete' ? fallback.closedContours : undefined,
-    );
-  });
-
-  it('keeps manifold topology authoritative when a logical body contains multiple mesh identities', async () => {
-    const faceIds = ['face-a', 'face-b'] as const;
-    const geometries = [cubeGeometry(), cubeGeometry()];
-    geometries[1]!.translate(4, 0, 0);
-    const meshes = geometries.map((geometry, index) => {
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
-      setModelComponentOwner(mesh, {
-        unitId: 'unit',
-        componentId: faceIds[index]!,
-      });
-      return mesh;
-    });
-    const scene = new THREE.Group();
-    scene.add(...meshes);
-    const decodedAccessors = geometries.flatMap((geometry) => [
-      geometry.getAttribute('position'),
-      geometry.getIndex()!,
-    ]);
-    const parser = {
-      json: {
-        meshes: geometries.map((_, index) => ({
-          primitives: [
-            {
-              attributes: { [positionAttribute]: index * 2 },
-              indices: index * 2 + 1,
-            },
-          ],
-          extensions: {
-            [manifoldExtension]: {
-              manifoldPrimitive: {
-                attributes: { [positionAttribute]: index * 2 },
-                indices: index * 2 + 1,
-              },
-            },
-          },
-        })),
-        accessors: geometries.flatMap((geometry, index) => [
-          {
-            componentType: 5126,
-            count: geometry.getAttribute('position').count,
-            type: 'VEC3',
-          },
-          {
-            bufferView: index,
-            componentType: 5123,
-            count: geometry.getIndex()!.count,
-            type: 'SCALAR',
-          },
-        ]),
-      },
-      associations: new Map(
-        meshes.map((mesh, index) => [mesh, { nodes: index, meshes: index, primitives: 0 }] as const),
-      ),
-      getDependency: async (_type: 'accessor', accessorIndex: number) => decodedAccessors[accessorIndex],
-    } as const;
-
-    await registerGltfSectionSurfaceSources({
-      scene,
-      manifest: createBodyManifest('body', faceIds),
-      unitId: 'unit',
-      parser,
-    });
-    const source = collectSectionSurfaceSources(scene)[0]!;
-    expect(source.source.topology).toMatchObject({
-      status: 'ready',
-      topology: { path: 'extension', components: [{}, {}] },
-    });
-    expect(
-      source.source.topology.status === 'ready' ? [...source.source.topology.topology.componentByTriangle] : [],
-    ).toEqual([...Array.from({ length: 12 }, () => 0), ...Array.from({ length: 12 }, () => 1)]);
-    expect(
-      sliceSectionSurfaceSource({
-        visibleSource: source,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toMatchObject({
-      status: 'complete',
-      trueCutComponentCount: 2,
-      cappedTrueCutComponentCount: 2,
-      unresolvedTrueCutEdgeCount: 0,
-    });
-  });
-  describe('retained memory', () => {
-    const detail = 30;
-    const triangleCount = 20 * (detail + 1) ** 2;
-
-    it('should keep the topology of a closed surface in typed arrays rather than per-triangle objects', () => {
-      const scene = new THREE.Group();
-      const mesh = new THREE.Mesh(indexedSphereGeometry(detail), new THREE.MeshBasicMaterial());
-      scene.add(mesh);
-      const [visible] = collectSectionSurfaceSources(scene);
-      expect(visible?.source.topology).toMatchObject({ status: 'ready' });
-
-      const footprint = measureRetainedFootprint(visible!.source);
-
-      // A struct-of-arrays topology keeps a fixed number of containers whatever the triangle count.
-      expect(footprint.objects).toBeLessThan(64);
-      expect(footprint.typedBytes / triangleCount).toBeLessThan(128);
-    });
-
-    it('should not allocate a vector per vertex or per triangle while building a topology', () => {
-      const geometry = indexedSphereGeometry(detail);
-      const { result, constructions } = countVector3Constructions(() =>
-        buildSectionSurfaceTopologyForGeometry(geometry),
-      );
-
-      expect(result).toMatchObject({ status: 'ready' });
-      expect(constructions).toBeLessThan(64);
-    });
-
-    it('should allocate vectors only for the edges a slice touches', () => {
-      const geometry = indexedSphereGeometry(detail);
-      expect(buildSectionSurfaceTopologyForGeometry(geometry)).toMatchObject({ status: 'ready' });
-      const { result, constructions } = countVector3Constructions(() =>
-        sliceSectionSurfaceTopologyForGeometry({
-          geometry,
-          worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-          meshWorldMatrix: new THREE.Matrix4(),
-        }),
-      );
-
-      expect(result).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
-      const contourPoints = result.status === 'complete' ? result.closedContours[0]!.length : 0;
-      // The cut crosses about √T triangles; a slice may allocate a few vectors for each, never one per triangle.
-      expect(constructions).toBeLessThan(contourPoints * 8 + 64);
-      expect(constructions).toBeLessThan(triangleCount / 10);
-    });
+    expect(collectSectionSurfaceSources(scene)[0]!.visibility).toBe('partial');
   });
 });

@@ -29,6 +29,7 @@ const builtInKernelIds = [
   'rhino',
   'tscircuit',
   'zoo',
+  'smlibpy',
   'build123d',
   'picogk',
   'assimp',
@@ -166,6 +167,7 @@ describe('createCliRuntime', () => {
         kernels: kernels.map(({ id, extensions }) => ({ id, extensions })),
       })),
     ).toEqual([
+      { package: '@taucad/smlibpy', kernels: [{ id: 'smlibpy', extensions: ['py'] }] },
       { package: '@taucad/build123d', kernels: [{ id: 'build123d', extensions: ['py'] }] },
       { package: '@taucad/picogk', kernels: [{ id: 'picogk', extensions: ['cs'] }] },
     ]);

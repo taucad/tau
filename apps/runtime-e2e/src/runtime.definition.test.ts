@@ -14,6 +14,7 @@ describe('runtime-e2e runtime', () => {
         openscad: 'scope: the e2e runtime lists only esbuild, replicad, middleware and tscircuit',
         zoo: 'credentialed: the e2e fixture has no Zoo proxy token',
         build123d: 'native: the e2e runtime is portable; the CLI, GeoSpec and desktop runtimes list build123d()',
+        smlibpy: 'native: the e2e runtime is portable; the CLI, GeoSpec and desktop runtimes list smlibpy()',
         picogk: 'native: the e2e runtime is portable; the CLI, GeoSpec and desktop runtimes list picogk()',
       },
     });

@@ -11,8 +11,8 @@
  * 2. npm projects: `tau install` writes `package-lock.json`, as the app's Install does.
  * 3. Copy the project, without `node_modules`, to a bare directory outside the repository.
  * 4. Tau's export of the original: `tau prepare <kernel>` for a native kernel, then `tau export … --ext=<glb|json>`.
- * 5. The bare copy with the native toolchain only: npm (`npm ci --ignore-scripts`, then the runner), build123d
- *    (`uv sync --locked`, `uv run main.py`), PicoGK (`dotnet restore --locked-mode`, `dotnet run`), OpenSCAD
+ * 5. The bare copy with the native toolchain only: npm (`npm ci --ignore-scripts`, then the runner), build123d and
+ *    SMLibPy (`uv sync --locked`, `uv run main.py`), PicoGK (`dotnet restore --locked-mode`, `dotnet run`), OpenSCAD
  *    (`openscad -o`) or KCL (`zoo kcl export`).
  * 6. Compare: the enclosed volume of both meshes within 1e-6 (relative), or identical Circuit JSON (tscircuit).
  *
@@ -97,6 +97,13 @@ export const standaloneRows: Readonly<Record<string, StandaloneRow>> = {
   tscircuit: { tauExtension: 'json', install: npmInstall, run: nodeRunner('circuit.json'), output: 'circuit.json' },
   build123d: {
     prepare: 'build123d',
+    tauExtension: 'glb',
+    install: [['uv', 'sync', '--locked']],
+    run: ['uv', 'run', '--locked', 'main.py', 'native.stl'],
+    output: 'native.stl',
+  },
+  smlibpy: {
+    prepare: 'smlibpy',
     tauExtension: 'glb',
     install: [['uv', 'sync', '--locked']],
     run: ['uv', 'run', '--locked', 'main.py', 'native.stl'],

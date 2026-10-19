@@ -2,13 +2,12 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
-type SectionCapCompleteness =
-  | {
-      status: 'complete';
-      admittedSourceCount: number;
-      unsupportedSourceCount: number;
-    }
-  | { status: 'unsupported' | 'failed' };
+type SectionCapCompleteness = {
+  status: 'complete';
+  admittedSourceCount: number;
+  exactSourceCount: number;
+  perLoopSourceCount: number;
+};
 
 type SectionViewBridge = {
   setSectionCuts(
@@ -40,7 +39,7 @@ test('repaired involute gear produces a complete section snapshot', async () => 
     bridge.setSectionCuts([{ kind: 'plane', plane: 'xy', offset: 0.004, isFlipped: false }]);
   });
 
-  // While the gear's section analysis is pending the caps certify the cut without it, as complete with no sources.
+  // While the gear's section analysis is pending the caps commit the cut without it, as complete with no sources.
   await expect
     .poll(
       async () => {
@@ -57,5 +56,6 @@ test('repaired involute gear produces a complete section snapshot', async () => 
     throw new Error(`Section caps are incomplete: ${JSON.stringify(completeness)}`);
   }
   expect(completeness.admittedSourceCount).toBeGreaterThan(0);
-  expect(completeness.unsupportedSourceCount).toBe(0);
+  // The repaired gear is a closed solid, so it keeps its exact stencil cap.
+  expect(completeness.perLoopSourceCount).toBe(0);
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
+import type * as NodeFs from 'node:fs';
 import {
   lstatSync,
   mkdirSync,
@@ -14,6 +15,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
 import parcelWatcher from '@parcel/watcher';
+import type { Event as ParcelEvent } from '@parcel/watcher';
+
+/* Every `statSync` the provider makes, so a case can show which events it never measured. */
+const statted = vi.hoisted(() => ({ paths: [] as string[] }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFs>();
+  return {
+    ...actual,
+    statSync: ((...arguments_: Parameters<typeof actual.statSync>) => {
+      statted.paths.push(String(arguments_[0]));
+      return actual.statSync(...arguments_);
+    }) as typeof actual.statSync,
+  };
+});
 
 const roots: string[] = [];
 
@@ -130,6 +145,42 @@ describe('NodeFsProvider atomic writes', () => {
     stop();
     await drainNodeFsProviderWatchClosures(provider);
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('should keep excluded subtrees out of the native watch and never stat their events', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const close = vi.fn(async () => undefined);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: close };
+    });
+    const events: unknown[] = [];
+    const stop = await provider.watch(
+      { paths: [''], recursive: true, excludes: ['.tau/cache/**', 'exact.txt'] },
+      (event) => events.push(event),
+    );
+    try {
+      const [[directory, , options]] = subscribe.mock.calls as unknown as [[string, unknown, { ignore?: string[] }]];
+      /* The OS never reports a subtree that would only be filtered out afterwards. */
+      expect(options.ignore).toEqual([join(directory, '.tau', 'cache')]);
+
+      const created = (index: number): ParcelEvent => ({
+        path: join(directory, '.tau', 'cache', `entry-${String(index)}`),
+        type: 'create',
+      });
+      const updated: ParcelEvent = { path: join(directory, 'target.txt'), type: 'update' };
+      const burst = [...Array.from({ length: 50 }, (_, index) => created(index)), updated];
+      statted.paths.length = 0;
+      onEvents?.(null, burst);
+      expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);
+      /* A bulk change under an excluded tree costs no syscall on the services utility's event loop. */
+      expect(statted.paths.filter((statPath) => statPath.includes(join('.tau', 'cache')))).toEqual([]);
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
   });
 
   it('rejects admission when the native stream fails before readiness', async () => {

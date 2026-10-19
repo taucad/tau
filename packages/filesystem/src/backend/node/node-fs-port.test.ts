@@ -1305,6 +1305,42 @@ describe('node filesystem host hardening', () => {
     }
   });
 
+  it('should carry one native burst across the port as one frame and observe it as one fact batch', async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-watch-batch-'));
+    const root = join(sandbox, 'root');
+    mkdirSync(root);
+    let emitEvent: ((event: NodeFsWatchEvent) => void) | undefined;
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async (_request, handler) => {
+      emitEvent = handler;
+      return () => undefined;
+    });
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const frames: unknown[] = [];
+    port1.addEventListener('message', ({ data }) => frames.push(data));
+    const channel = new NodeFsChannel(port1);
+    const provider = new NodeFsProviderClient(channel, root);
+    try {
+      const batches: Array<readonly unknown[]> = [];
+      await provider.observe((facts) => batches.push(facts));
+      /* What one native callback reports during a checkout: hundreds of paths at once. */
+      for (let index = 0; index < 300; index += 1) {
+        emitEvent?.({ type: 'change', path: `src/file-${String(index)}.ts`, kind: 'file' });
+      }
+      await vi.waitFor(() => {
+        expect(batches.flat()).toHaveLength(300);
+      });
+      expect(frames.filter((frame) => (frame as { type?: unknown }).type === 'watch')).toHaveLength(1);
+      expect(batches).toHaveLength(1);
+    } finally {
+      channel.close();
+      await stop();
+      port2.close();
+      watch.mockRestore();
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it('refuses to remove its own root', async () => {
     const { provider, root } = connect();
 

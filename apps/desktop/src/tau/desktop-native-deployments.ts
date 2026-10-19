@@ -12,6 +12,11 @@
 import { build123dNative } from '@taucad/build123d/native';
 import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 import { picogkNative } from '@taucad/picogk/native';
+import { smlibpyNative } from '@taucad/smlibpy/native';
 
 /** The native deployments the desktop runtime lists, in its list order. */
-export const desktopNativeDeployments: readonly NativeKernelDeployment[] = [build123dNative, picogkNative];
+export const desktopNativeDeployments: readonly NativeKernelDeployment[] = [
+  smlibpyNative,
+  build123dNative,
+  picogkNative,
+];

@@ -15,8 +15,14 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 5 adds authoritative head stat. @public */
-export const nodeFsProtocolVersion = 5;
+/** Wire version. Version 5 adds authoritative head stat; version 6 carries watch events in batches. @public */
+export const nodeFsProtocolVersion = 6;
+
+/**
+ * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
+ * change (a checkout, an install) crosses the port as a few frames rather than one per path. @internal
+ */
+export const nodeFsMaxWatchBatch = 512;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -201,7 +207,11 @@ export const nodeFsResponseSchema = z.discriminatedUnion('type', [
     code: z.string().optional(),
     applicationState: z.enum(['known-not-applied', 'potentially-applied']).optional(),
   }),
-  z.object({ ...versioned, type: z.literal('watch'), event: watchEventSchema }),
+  z.object({
+    ...versioned,
+    type: z.literal('watch'),
+    events: z.array(watchEventSchema).min(1).max(nodeFsMaxWatchBatch),
+  }),
 ]);
 
 /** One response frame. @public */

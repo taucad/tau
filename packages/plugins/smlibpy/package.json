@@ -1,0 +1,111 @@
+{
+  "name": "@taucad/smlibpy",
+  "version": "0.1.0-beta.0",
+  "description": "Native SMLibPy kernel for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/smlibpy"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/smlibpy#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "python",
+    "tau-plugin.json",
+    "tau-plugin.cdx.json",
+    "notices",
+    "agent",
+    "project",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "smlibpy",
+    "smlib",
+    "nurbs"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./native": "./src/native.ts",
+    "./agent": {
+      "types": "./agent/skills.d.cts",
+      "default": "./agent/skills.json"
+    },
+    "./agent/*": "./agent/*",
+    "./tau-plugin.json": "./tau-plugin.json",
+    "./project/*": "./project/*",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./native": {
+        "types": "./dist/native.d.mts",
+        "import": "./dist/native.mjs",
+        "default": "./dist/native.mjs"
+      },
+      "./agent": {
+        "types": "./agent/skills.d.cts",
+        "default": "./agent/skills.json"
+      },
+      "./agent/*": "./agent/*",
+      "./tau-plugin.json": "./tau-plugin.json",
+      "./project/*": "./project/*",
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@taucad/archive-core": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/extensions": "catalog:",
+    "@taucad/cache-core": "workspace:*",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
+    "@taucad/native-process-core": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
+    "@taucad/python-kernel-core": "workspace:*"
+  },
+  "taucad": {
+    "hostTarget": "python"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
+  }
+}

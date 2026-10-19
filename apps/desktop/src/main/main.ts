@@ -308,6 +308,8 @@ const keepAwakeIntervalMilliseconds = 20_000;
 /* Kernel utility resident ceiling (D-DT-02): the upper bound on half of physical memory. */
 const maxKernelResidentBytes = 8 * 1024 * 1024 * 1024;
 const kernelResidentPollMilliseconds = 5000;
+/* D-DT-09: an unadopted spare retires after the geometry slot's idle time; the next fork warms another. */
+const kernelSpareIdleMilliseconds = 120_000;
 /* One metrics read serves every sampler for this long. */
 const residentMetricsReuseMilliseconds = 500;
 
@@ -698,6 +700,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       intervalMilliseconds: kernelResidentPollMilliseconds,
       sample: residentBytesOf,
     },
+    spareIdleMilliseconds: kernelSpareIdleMilliseconds,
     resolveFork: (context) => {
       const requestedRoot = context['projectRoot'];
       const registeredProjectRoot =

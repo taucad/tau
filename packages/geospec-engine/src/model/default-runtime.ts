@@ -36,7 +36,11 @@ const optionalPlugin = async (load: () => Promise<PluginInstance>): Promise<read
  * The native kernels are optional peers: listed when installed, each binds its own sealed closure from the payload
  * store when it initialises (`tau prepare <kernel>`) and refuses with `KERNEL_NOT_PREPARED` until then.
  */
-const [build123dPlugins, picogkPlugins] = await Promise.all([
+const [smlibpyPlugins, build123dPlugins, picogkPlugins] = await Promise.all([
+  optionalPlugin(async () => {
+    const { smlibpy } = await import('@taucad/smlibpy');
+    return smlibpy();
+  }),
   optionalPlugin(async () => {
     const { build123d } = await import('@taucad/build123d');
     return build123d();
@@ -65,6 +69,8 @@ export const defaultRuntime = defineRuntime({
     rhino(),
     image(),
     assimp({ preset: 'all' }),
+    // SMLibPy precedes Build123d: it claims only a `.py` entry that imports smlibpy, and the rest falls through.
+    ...smlibpyPlugins,
     ...build123dPlugins,
     ...picogkPlugins,
     tscircuit(),

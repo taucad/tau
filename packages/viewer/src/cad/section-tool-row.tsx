@@ -2,7 +2,7 @@ import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useSelector } from '@xstate/react';
-import { ArrowLeftRight, CircleAlert, FlipHorizontal, PieChart, Plus, X } from 'lucide-react';
+import { ArrowLeftRight, FlipHorizontal, PieChart, Plus, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SnapshotFrom } from 'xstate';
 import { Button } from '@taucad/ui/components/button';
@@ -757,27 +757,4 @@ export function SectionEditor(): React.ReactNode {
   const cutId = useGraphicsSelector((state) => selectOpenCut(state)?.id);
   const kind = useGraphicsSelector((state) => selectOpenCut(state)?.kind);
   return cutId && kind ? <SectionCutEditor key={cutId} cutId={cutId} kind={kind} /> : null;
-}
-
-/**
- * Says so when the caps refuse the latest cuts, and that the view keeps the last section they drew, if they ever drew
- * one. It stays mounted with the row, so the words are announced when they arrive, and takes no room while there is
- * nothing to say.
- * @public
- */
-export function SectionStatus(): React.JSX.Element {
-  const isRejected = useGraphicsSelector((state) => state.context.sectionCertification === 'rejected');
-  const hasLastSection = useGraphicsSelector((state) => state.context.committedSectionCuts.length > 0);
-  return (
-    <p role='status' className={isRejected ? 'flex items-center gap-1 px-1 text-xs text-muted-foreground' : 'sr-only'}>
-      {isRejected ? (
-        <>
-          <CircleAlert aria-hidden='true' className='size-3.5 shrink-0 text-feature' />
-          {hasLastSection
-            ? 'Section unavailable for this model; showing the last section'
-            : 'Section unavailable for this model'}
-        </>
-      ) : null}
-    </p>
-  );
 }

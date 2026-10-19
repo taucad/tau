@@ -7,9 +7,8 @@ import { mock } from 'vitest-mock-extended';
 import { resolveSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionCut } from '#graphics/section-cuts.js';
 import { SectionContourFills, sectionCapRenderPriority } from '#graphics/three/react/section-contour-fill.jsx';
-import type { SectionCertification } from '#graphics/three/react/section-contour-fill.jsx';
 import { ThreeGraphicsBackendProvider } from '#graphics/three/three-graphics-backend-context.jsx';
-import { gltfEdgeHoverColor } from '#graphics/three/overlay-colors.constants.js';
+import { gltfEdgeHoverColor, sectionCapOpenChainColor } from '#graphics/three/overlay-colors.constants.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { sectionCapStencilDebugUserDataKey } from '#graphics/three/utils/section-cap-stencil-debug.js';
 import type { SectionCapStencilDiagnostics } from '#graphics/three/utils/section-cap-stencil-debug.js';
@@ -43,7 +42,6 @@ const mocks = vi.hoisted(() => ({
   modelInteractionContext: undefined as ModelInteractionContext | undefined,
   collected: 0,
   span: vi.fn(),
-  warning: vi.fn(),
 }));
 
 vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => {
@@ -74,8 +72,6 @@ vi.mock('#graphics/three/utils/section-surface-topology.js', async (importOrigin
 
 vi.mock('#lib/renderer-telemetry.js', () => ({ recordRendererSpan: mocks.span }));
 
-vi.mock('@taucad/ui/components/sonner', () => ({ toast: { warning: mocks.warning, error: vi.fn() } }));
-
 const planeCut = (offset: number): SectionCut => ({ id: 'cut', kind: 'plane', plane: 'xy', offset, isFlipped: false });
 
 const cutSetOf = (...cuts: SectionCut[]): SectionCutSet => ({ cuts, pieces: resolveSectionPieces(cuts) });
@@ -83,7 +79,8 @@ const cutSetOf = (...cuts: SectionCut[]): SectionCutSet => ({ cuts, pieces: reso
 type Harness = Readonly<{
   inner: THREE.Group;
   gl: ReturnType<typeof mock<WebGLRenderer>>;
-  certifications: SectionCertification[];
+  /** Every cut list the caps reported committing, in order. */
+  commits: Array<readonly SectionCut[]>;
   snapshotStore: ReturnType<typeof createSectionViewSafeSnapshotStore>;
   render: (cutSet: SectionCutSet) => Promise<void>;
   frame: () => void;
@@ -113,7 +110,7 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
   inner.add(...meshes);
   inner.updateMatrixWorld(true);
   const snapshotStore = createSectionViewSafeSnapshotStore();
-  const certifications: SectionCertification[] = [];
+  const commits: Array<readonly SectionCut[]> = [];
   let scene: THREE.Scene | undefined;
   const render = async (next: SectionCutSet): Promise<void> => {
     await act(async () => {
@@ -126,7 +123,7 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
             snapshotRef={{ current: snapshotStore }}
             stripeFrequency={2}
             stripeWidth={0.25}
-            onCertify={(certification) => certifications.push(certification)}
+            onCommit={(cuts) => commits.push(cuts)}
           />
         </ThreeGraphicsBackendProvider>,
       );
@@ -138,7 +135,7 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
   return {
     inner,
     gl,
-    certifications,
+    commits,
     snapshotStore,
     render,
     frame() {
@@ -166,6 +163,20 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
   };
 };
 
+/** A 2 m cube with its +x face removed: an open shell whose horizontal cut is one open chain and no loop. */
+const openBox = (): THREE.Mesh => {
+  const geometry = new THREE.BoxGeometry(2, 2, 2);
+  // The first group is the +x face.
+  geometry.setIndex([...geometry.getIndex()!.array].slice(6));
+  geometry.clearGroups();
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+};
+
+const outlineColors = (drawn: Map<string, THREE.Mesh[]>): number[] =>
+  (drawn.get('TauSectionCapOutline') ?? []).map(({ material }) =>
+    ((material as THREE.ShaderMaterial).uniforms['tauOutlineColor']!.value as THREE.Color).getHex(),
+  );
+
 const ownedBox = (): THREE.Mesh => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial({ color: 0x33_66_99 }));
   setModelComponentOwner(mesh, { unitId, componentId });
@@ -183,7 +194,6 @@ describe('SectionContourFills', () => {
     mocks.modelInteractionContext = createModelInteractionContext();
     mocks.collected = 0;
     mocks.span.mockClear();
-    mocks.warning.mockClear();
   });
 
   afterEach(() => {
@@ -191,12 +201,10 @@ describe('SectionContourFills', () => {
     harness = undefined;
   });
 
-  it('should certify a cut through closed solids, then draw its caps after the model in one render', async () => {
+  it('should commit a cut through closed solids, then draw its exact caps after the model in one render', async () => {
     harness = await mountFills(cutSetOf(planeCut(0.1)), [ownedBox()]);
     harness.frame();
-    expect(harness.certifications).toEqual([
-      { status: 'certified', cuts: harness.snapshotStore.committed?.cutSet.cuts },
-    ]);
+    expect(harness.commits).toEqual([harness.snapshotStore.committed?.cutSet.cuts]);
     expect(harness.snapshotStore.committed?.kind).toBe('complete');
     expect(harness.gl.render).toHaveBeenCalledTimes(1);
     const drawn = harness.drawn();
@@ -223,12 +231,7 @@ describe('SectionContourFills', () => {
       const { latest } = harness.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
       counts.push({ ...latest, submitMilliseconds: 0 });
     }
-    expect(harness.certifications.map(({ status }) => status)).toEqual([
-      'certified',
-      'certified',
-      'certified',
-      'certified',
-    ]);
+    expect(harness.commits).toEqual([planeCut(0.1), ...steps.flatMap(({ cuts }) => cuts)].map((cut) => [cut]));
     // The same draws for a sphere of 64 times the triangles.
     harness.inner.remove(coarse);
     harness.inner.add(new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32)));
@@ -238,13 +241,13 @@ describe('SectionContourFills', () => {
     expect({ ...latest, submitMilliseconds: 0 }).toEqual(counts[0]);
   });
 
-  it('should leave the certification alone on frames whose cuts and sources are unchanged', async () => {
+  it('should leave the commit alone on frames whose cuts and sources are unchanged', async () => {
     harness = await mountFills(cutSetOf(planeCut(0.1)), [ownedBox()]);
     harness.frame();
     const { committed } = harness.snapshotStore;
     harness.frame();
     harness.frame();
-    expect(harness.certifications).toHaveLength(1);
+    expect(harness.commits).toHaveLength(1);
     expect(harness.snapshotStore.committed).toBe(committed);
     expect(harness.gl.render).toHaveBeenCalledTimes(3);
   });
@@ -260,56 +263,184 @@ describe('SectionContourFills', () => {
     );
   });
 
-  it('should refuse a cut set over an open shell with a span and one warning', async () => {
+  it('should commit a cut over an open shell and outline its open chain without a cap', async () => {
     harness = await mountFills(cutSetOf(planeCut(0.1)), [ownedBox()]);
     harness.frame();
-    const open = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    const open = openBox();
     open.position.set(4, 0, 0);
     harness.inner.add(open);
     harness.inner.updateMatrixWorld(true);
-    await harness.render(cutSetOf(planeCut(0.2)));
-    harness.gl.render.mockClear();
-    harness.frame();
-    harness.frame();
-    expect(harness.certifications.at(-1)?.status).toBe('rejected');
-    expect(harness.snapshotStore.rejection?.failure.code).toBe('open-surface');
-    // The sources changed, so nothing stays committed and nothing is capped.
-    expect(harness.snapshotStore.committed).toBeUndefined();
-    expect(harness.gl.render).not.toHaveBeenCalled();
-    expect(mocks.warning).toHaveBeenCalledTimes(1);
+    const cutSet = cutSetOf(planeCut(0.2));
+    await harness.render(cutSet);
+
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(outlineColors(harness!.drawn())).toContain(new THREE.Color(sectionCapOpenChainColor).getHex());
+    });
+
+    expect(harness.snapshotStore.committed?.cutSet).toBe(cutSet);
+    expect(harness.commits.at(-1)).toBe(cutSet.cuts);
+    expect(harness.root().userData['sectionCapCompleteness']).toMatchObject({
+      status: 'complete',
+      exactSourceCount: 1,
+      perLoopSourceCount: 1,
+      sources: expect.arrayContaining([
+        expect.objectContaining({ grade: 'per-loop', reason: 'open-surface' }),
+      ]) as unknown,
+    });
+    // The open box closes no loop: nothing of it is counted, so its cap polygon fills no pixel.
+    expect(harness.drawn().get('TauSectionStencil:count-parity')).toBeUndefined();
+    expect(harness.drawn().get('TauSectionStencil:count-back')).toHaveLength(1);
+    const { loops } = harness.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
+    expect(loops).toEqual([
+      expect.objectContaining({ closedLoopCount: 0, openChainCount: 1, pendingFaceCount: 0, failure: undefined }),
+    ]);
     expect(mocks.span).toHaveBeenCalledWith(
-      'renderer.section-cap-refused',
-      expect.objectContaining({ attributes: expect.objectContaining({ code: 'open-surface' }) as unknown }),
+      'renderer.section-cap-graded',
+      expect.objectContaining({
+        attributes: expect.objectContaining({ grade: 'per-loop', closedLoopCount: 0, openChainCount: 1 }) as unknown,
+      }),
     );
   });
 
-  it('should refuse the meshes of a model whose registration failed, without building them one by one', async () => {
+  it('should cap the meshes of a model whose registration failed per loop, without building their topology', async () => {
     const model = new THREE.Group();
     model.add(ownedBox());
     setGltfSectionSurfaceRegistrationState(model, 'unsupported');
     harness = await mountFills(cutSetOf(planeCut(0.1)), []);
     harness.inner.add(model);
     harness.inner.updateMatrixWorld(true);
-    harness.frame();
-    expect(harness.snapshotStore.rejection?.failure.code).toBe('topology-unavailable');
+
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(harness!.drawn().get('TauSectionStencil:count-parity')).toHaveLength(1);
+    });
+
+    expect(harness.snapshotStore.committed?.kind).toBe('complete');
+    expect(harness.drawn().get('TauSectionCap')).toHaveLength(1);
+    expect(outlineColors(harness.drawn())).not.toContain(new THREE.Color(sectionCapOpenChainColor).getHex());
     expect(mocks.span).toHaveBeenCalledWith(
       'renderer.section-source-unsupported',
       expect.objectContaining({ attributes: expect.objectContaining({ code: 'topology-unavailable' }) as unknown }),
     );
   });
 
-  it('should keep the committed caps while a model is still preparing', async () => {
+  it('should commit at once while a model is still preparing, leaving its meshes uncapped', async () => {
     harness = await mountFills(cutSetOf(planeCut(0.1)), [ownedBox()]);
     harness.frame();
-    const { committed } = harness.snapshotStore;
     const pending = new THREE.Group();
-    pending.add(new THREE.Mesh(new THREE.BoxGeometry()));
+    pending.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
     setGltfSectionSurfaceRegistrationState(pending, 'pending');
     harness.inner.add(pending);
-    await harness.render(cutSetOf(planeCut(0.3)));
+    const next = cutSetOf(planeCut(0.3));
+    await harness.render(next);
     harness.frame();
-    expect(harness.snapshotStore.committed).toBe(committed);
-    expect(harness.gl.render).toHaveBeenCalledTimes(2);
+
+    expect(harness.snapshotStore.committed?.cutSet).toBe(next);
+    expect(harness.commits.at(-1)).toBe(next.cuts);
+    expect(harness.root().userData['sectionCapCompleteness']).toMatchObject({
+      exactSourceCount: 1,
+      pendingSourceCount: 1,
+    });
+    // Only the closed box counts into the stencil; the pending mesh is cut and outlined, not capped.
+    expect(harness.drawn().get('TauSectionStencil:count-back')).toHaveLength(1);
+    expect(harness.drawn().get('TauSectionStencil:count-parity')).toBeUndefined();
+    expect(harness.drawn().get('TauSectionCapOutline')).toHaveLength(2);
+  });
+
+  it('should grade a large standalone mesh again once its census lands, without the cut changing', async () => {
+    // Above the synchronous limit, so its census waits on the worker; without one it lands as unavailable, per loop.
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 256, 80), new THREE.MeshBasicMaterial());
+    const cutSet = cutSetOf(planeCut(0.2));
+    harness = await mountFills(cutSet, [sphere]);
+    harness.frame();
+    const grades = () =>
+      (harness!.root().userData['sectionCapCompleteness'] as { sources: Array<{ grade: string }> }).sources.map(
+        ({ grade }) => grade,
+      );
+    expect(grades()).toEqual(['pending']);
+
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(grades()).toEqual(['per-loop']);
+    });
+    expect(harness.snapshotStore.committed?.cutSet).toBe(cutSet);
+    expect(harness.commits).toEqual([cutSet.cuts]);
+  });
+
+  it('should show the back faces of a per-loop source while it is cut, and only then', async () => {
+    const open = openBox();
+    const material = open.material as THREE.Material;
+    const closed = ownedBox();
+    harness = await mountFills(cutSetOf(planeCut(0.2)), [closed, open]);
+    harness.frame();
+
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect((closed.material as THREE.Material).side).toBe(THREE.FrontSide);
+
+    await harness.render({ cuts: [], pieces: [] });
+    harness.frame();
+    expect(material.side).toBe(THREE.FrontSide);
+
+    await harness.render(cutSetOf(planeCut(0.2)));
+    harness.frame();
+    expect(material.side).toBe(THREE.DoubleSide);
+    harness.unmount();
+    harness = undefined;
+    expect(material.side).toBe(THREE.FrontSide);
+  });
+
+  it('should cap a closed source shown in part per loop, from its visible triangles only', async () => {
+    const geometry = new THREE.BoxGeometry(2, 2, 2);
+    // BoxGeometry's groups: +x, -x, +y, -y, +z, -z. Hiding the +x material opens the cut at +x.
+    const shown = new THREE.MeshBasicMaterial();
+    const hidden = new THREE.MeshBasicMaterial({ visible: false });
+    const mesh = new THREE.Mesh(geometry, [hidden, shown, shown, shown, shown, shown]);
+    harness = await mountFills(cutSetOf(planeCut(0.2)), [mesh]);
+
+    await vi.waitFor(() => {
+      harness!.frame();
+      const { loops } = harness!.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
+      expect(loops).toEqual([expect.objectContaining({ pendingFaceCount: 0 })]);
+    });
+
+    expect(harness.root().userData['sectionCapCompleteness']).toMatchObject({
+      sources: [expect.objectContaining({ grade: 'per-loop', reason: 'partial-visibility' })],
+    });
+    const { loops } = harness.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
+    expect(loops[0]).toMatchObject({ closedLoopCount: 0, openChainCount: 1 });
+  });
+
+  it('should slice a posed per-loop source where it is drawn now', async () => {
+    const open = openBox();
+    harness = await mountFills(cutSetOf(planeCut(0.2)), [open]);
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(outlineColors(harness!.drawn())).toContain(new THREE.Color(sectionCapOpenChainColor).getHex());
+    });
+    const openChainDraws = () =>
+      harness!
+        .drawn()
+        .get('TauSectionCapOutline')!
+        .filter(({ material }) =>
+          ((material as THREE.ShaderMaterial).uniforms['tauOutlineColor']!.value as THREE.Color).equals(
+            new THREE.Color(sectionCapOpenChainColor),
+          ),
+        );
+    const lastSlice = () =>
+      (harness!.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics).loops[0]!.lastSlice;
+    const before = lastSlice();
+
+    // A kinematic pose lifts the part by 0.5 after it was graded: the cut crosses it elsewhere in its own frame, so it
+    // is sliced again, and its open chain is drawn where the part is now.
+    open.position.z = 0.5;
+    open.updateMatrixWorld(true);
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(lastSlice()).not.toBe(before);
+      const [after] = openChainDraws();
+      expect(after!.matrixWorld.elements[14]).toBeCloseTo(0.5);
+    });
   });
 
   it('should draw nothing with no cut', async () => {

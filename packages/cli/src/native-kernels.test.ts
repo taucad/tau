@@ -7,6 +7,7 @@ import { build123dNative } from '@taucad/build123d/native';
 import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 import type { NativeDeploymentReport } from '@taucad/native-process-core/store';
 import { picogkNative } from '@taucad/picogk/native';
+import { smlibpyNative } from '@taucad/smlibpy/native';
 import type { KernelIssue } from '@taucad/runtime/kernel';
 import { parsePluginDeployment } from '@taucad/runtime/preparation/node';
 import type * as PreparationNode from '@taucad/runtime/preparation/node';
@@ -46,7 +47,11 @@ const rowOf = (deployment: NativeKernelDeployment, kernels: readonly string[]): 
 });
 
 /* What a thread building the CLI runtime reports for the built-in native kernels. */
-const builtIns: NativeDeploymentReport = [rowOf(build123dNative, ['build123d']), rowOf(picogkNative, ['picogk'])];
+const builtIns: NativeDeploymentReport = [
+  rowOf(smlibpyNative, ['smlibpy']),
+  rowOf(build123dNative, ['build123d']),
+  rowOf(picogkNative, ['picogk']),
+];
 
 const requestOf = (deployment: NativeKernelDeployment, kernel: string) => ({
   package: deployment.package,
@@ -83,12 +88,15 @@ describe('native kernels from the payload store', () => {
       });
 
       expect(described.report).toEqual(builtIns);
-      expect(described.plugins).toEqual(expect.arrayContaining(['@taucad/build123d', '@taucad/picogk']));
+      expect(described.plugins).toEqual(
+        expect.arrayContaining(['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk']),
+      );
     },
   );
 
   it('should list every kernel a report declares, with its extensions, from the manifests alone', () => {
     expect(preparableKernelsOf(builtIns)).toEqual([
+      { kernel: 'smlibpy', extensions: ['py'] },
       { kernel: 'build123d', extensions: ['py'] },
       { kernel: 'picogk', extensions: ['cs'] },
     ]);
@@ -97,7 +105,7 @@ describe('native kernels from the payload store', () => {
   it('should prepare a report with each package root and seal step, imported by the entry it names', async () => {
     const plugins = await preparationPluginsFor(builtIns);
 
-    expect(plugins.map((plugin) => plugin.package)).toEqual(['@taucad/build123d', '@taucad/picogk']);
+    expect(plugins.map((plugin) => plugin.package)).toEqual(['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk']);
     expect(plugins.every((plugin) => typeof plugin.directory === 'string')).toBe(true);
     expect(plugins.find((plugin) => plugin.package === '@taucad/build123d')?.seal).toBeTypeOf('function');
   });
@@ -112,7 +120,9 @@ describe('native kernels from the payload store', () => {
       { name: '@taucad/build123d', entry: build123dNative.entry },
       { name: '@taucad/picogk', entry: picogkNative.entry },
     ]);
-    await expect(shippedKernelsOf([...builtIns, rustcad])).resolves.toEqual(new Set(['build123d', 'picogk']));
+    await expect(shippedKernelsOf([...builtIns, rustcad])).resolves.toEqual(
+      new Set(['smlibpy', 'build123d', 'picogk']),
+    );
     await expect(shippedKernelsOf([rustcad])).resolves.toEqual(new Set());
   });
 

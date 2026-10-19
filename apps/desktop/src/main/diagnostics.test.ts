@@ -265,6 +265,23 @@ describe('forwarders', () => {
     ]);
   });
 
+  it('should record how large a kernel utility grew when it exits', () => {
+    const log = { filePath: '', log: vi.fn() };
+
+    kernelUtilityDiagnostics(log).onUtilityExit?.({
+      hostId: 'host-3',
+      exitCode: 0,
+      released: true,
+      peakResidentBytes: 812_000_000,
+    });
+
+    expect(log.log).toHaveBeenCalledWith(
+      'info',
+      'kernel.exit',
+      expect.objectContaining({ hostId: 'host-3', peakResidentBytes: 812_000_000 }),
+    );
+  });
+
   it('treats a kill main ordered as expected, whatever the exit code', () => {
     const log = { filePath: '', log: vi.fn() };
 

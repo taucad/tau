@@ -8,8 +8,13 @@
  */
 
 import type { NodeFsPort } from '#backend/node/port.js';
-import type { NodeFsRequest, NodeFsResponse } from '#backend/node/protocol.js';
-import { nodeFsProtocolVersion, nodeFsRequestSchema, parseNodeFsFrame } from '#backend/node/protocol.js';
+import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import {
+  nodeFsMaxWatchBatch,
+  nodeFsProtocolVersion,
+  nodeFsRequestSchema,
+  parseNodeFsFrame,
+} from '#backend/node/protocol.js';
 import {
   NodeFsProvider,
   drainNodeFsProviderWatchClosures,
@@ -539,9 +544,27 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
               !disposed &&
               (pendingSubscriptions.get(request.id) === pending ||
                 (active.unsubscribe !== undefined && subscriptions.get(request.id) === active.unsubscribe));
+            /* Everything one native callback reports, in order, as one frame: the provider emits synchronously, so
+             * the batch closes by the next microtask. */
+            let batch: NodeFsWatchEvent[] | undefined;
+            const flush = (): void => {
+              const events = batch;
+              batch = undefined;
+              if (events !== undefined && isCurrent()) {
+                send({ v: nodeFsProtocolVersion, id: request.id, type: 'watch', events });
+              }
+            };
             const unsubscribe = await provider.watch(request.request, (watchEvent) => {
-              if (isCurrent()) {
-                send({ v: nodeFsProtocolVersion, id: request.id, type: 'watch', event: watchEvent });
+              if (!isCurrent()) {
+                return;
+              }
+              if (batch === undefined) {
+                batch = [];
+                queueMicrotask(flush);
+              }
+              batch.push(watchEvent);
+              if (batch.length >= nodeFsMaxWatchBatch) {
+                flush();
               }
             });
             active.unsubscribe = unsubscribe;

@@ -28,6 +28,8 @@ export const sectionStencilBits = {
  * - `clear-all`: zeroes the byte over the piece's exit planes, where every later pass of the piece reads it.
  * - `count-back`, `count-front`: the source's surfaces under the piece's exit clip, with no depth test, add one for each
  *   back face and take one for each front face, so the count is how many solids hold the pixel's cap point.
+ * - `count-parity`: instead of a source's surfaces, fans over the closed loops its per-loop slice found on the face,
+ *   with no depth test, flip the count's lowest bit, so the count is odd exactly inside the loops (even-odd).
  * - `mark-overlap`: where the count is non-zero and an earlier owner's source held the point, sets `overlap`.
  * - `cap`: the source's tint where the count is non-zero and the cap wins the depth test; sets `visible` and
  *   `ownerSeen`.
@@ -38,6 +40,7 @@ export const sectionStencilBits = {
 export type SectionStencilPass =
   | 'count-back'
   | 'count-front'
+  | 'count-parity'
   | 'mark-overlap'
   | 'cap'
   | 'clear-count'
@@ -82,6 +85,15 @@ const stencilStates: Readonly<Record<SectionStencilPass, StencilState>> = {
     fail: THREE.DecrementWrapStencilOp,
     zFail: THREE.DecrementWrapStencilOp,
     zPass: THREE.DecrementWrapStencilOp,
+  },
+  'count-parity': {
+    func: THREE.AlwaysStencilFunc,
+    ref: 0,
+    funcMask: all,
+    writeMask: 0x01,
+    fail: THREE.InvertStencilOp,
+    zFail: THREE.InvertStencilOp,
+    zPass: THREE.InvertStencilOp,
   },
   // `previousSeen` < the masked byte: `previousSeen` is set and the count is non-zero.
   'mark-overlap': {
@@ -155,8 +167,8 @@ const applyStencilState = (material: THREE.Material, pass: SectionStencilPass): 
 };
 
 /**
- * A pass that writes only the stencil: a count over a source's own surfaces, or a mark, promotion or clear over cap
- * polygons. It never tests or writes depth or colour.
+ * A pass that writes only the stencil: a count over a source's own surfaces or its per-loop fans, or a mark, promotion
+ * or clear over cap polygons. It never tests or writes depth or colour.
  */
 export const createSectionStencilMaterial = (
   backend: ResolvedGraphicsBackend,

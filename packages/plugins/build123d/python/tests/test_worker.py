@@ -372,9 +372,10 @@ class WorkerTest(unittest.TestCase):
             floored, compute_config()
         ) as cheap:
             tracked = Solid.make_box(1, 1, 1)
+            # Lineage lives for the build that produced it (D-DT-03), so identity is checked while it runs.
+            self.assertIsNotNone(cheap.lineage(tracked))
         self.assertEqual(cheap.announcements, [])
         self.assertEqual(floored.stats()["entries"], 0)
-        self.assertIsNotNone(cheap.lineage(tracked))
 
     def test_native_metadata_and_history_survive_resident_and_restored_primitive_reuse(self) -> None:
         from bd_materials import metals
@@ -458,10 +459,33 @@ class WorkerTest(unittest.TestCase):
         self.assertNotIn("Shape.cut", [entry["action"]["operation"] for entry in adapter.announcements])
         self.assertLess(bypassed.volume, 8000)
 
-        while len(cache.stamps) < worker.MAX_COMPUTE_STAMPS:
-            cache.stamps[len(cache.stamps) + 1_000_000] = []
-        cache.stamp(Solid.make_box(1, 1, 1), f"sha256:{'2' * 64}")
-        self.assertEqual(len(cache.stamps), worker.MAX_COMPUTE_STAMPS)
+    def test_lineage_stamps_are_bounded_by_entry_and_released_when_the_build_ends(self) -> None:
+        """D-DT-03: stamps hold native TShapes alive, so they are bounded per entry and live only for one build."""
+
+        from build123d import Solid
+
+        cache = worker._ComputeCache()
+        box = Solid.make_box(1, 2, 3)
+        with patch.object(worker, "MAX_COMPUTE_STAMPS", 4):
+            for index in range(10):
+                cache.stamp(box, f"sha256:{index:064x}")
+            # One TShape key with many digests is still bounded by entries, not keys.
+            self.assertLessEqual(sum(len(entries) for entries in cache.stamps.values()), 4)
+        repeated = worker._ComputeCache()
+        for _ in range(10):
+            repeated.stamp(box, f"sha256:{'4' * 64}")
+        self.assertEqual(sum(len(entries) for entries in repeated.stamps.values()), 1)
+
+        resident = worker._ComputeCache()
+        with patch.object(worker, "COMPUTE_ADMISSION_FLOOR", 0.0), worker._ComputeAdapter(resident, compute_config()):
+            Solid.make_box(30, 30, 30).cut(Solid.make_cylinder(4, 40))
+            self.assertNotEqual(resident.stamps, {})
+        # No shape of the finished build is reachable any more, so none stays pinned by lineage.
+        self.assertEqual(resident.stamps, {})
+        self.assertGreaterEqual(resident.stats()["entries"], 1)
+        with worker._ComputeAdapter(resident, compute_config()) as again:
+            Solid.make_box(30, 30, 30).cut(Solid.make_cylinder(4, 40))
+        self.assertEqual(again.hits, 2)
 
     def test_implementation_fingerprints_invalidate_on_body_constants_and_defaults(self) -> None:
         """G-F6: a changed implementation cannot silently retain old keys; unknown funnels fail closed."""

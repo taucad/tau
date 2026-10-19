@@ -1,0 +1,25 @@
+smlibpy 0.3.5
+
+The pinned smlibpy-0.3.5 wheels carry their own licence files in
+smlibpy-0.3.5.dist-info/licenses/, which every sealed closure keeps:
+
+- LICENSE: smlibpy, MIT License, Copyright (c) 2026 AWV Informatik AG.
+- NOTICE: the attribution for USD BRep (SMLib, SM_API, SmPyLib) and Lato.
+- third_party/usd-brep/LICENSE: USD BRep, Apache License 2.0,
+  Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES.
+- src/smlibpy/fonts/OFL.txt: Lato Regular, SIL Open Font License 1.1.
+
+The wheel's METADATA declares License-Expression: MIT AND Apache-2.0 AND OFL-1.1.
+
+The wheel's NOTICE refers to third_party/usd-brep/THIRD_PARTY_NOTICES.md,
+which the wheel does not include. usd-brep-THIRD_PARTY_NOTICES.md is that file
+reproduced verbatim from the USD BRep repository, fetched on 2026-10-18 from:
+https://raw.githubusercontent.com/NVIDIA-Omniverse/usd-brep/main/THIRD_PARTY_NOTICES.md
+
+usd-brep-THIRD_PARTY_NOTICES.md SHA-256:
+9fcacebdd1d3e2559959cc504331b0f58d3b3f460b9da5caea4efc84fd20eb7b
+
+The wheel does not name the USD BRep commit it compiles, so this copy is the
+repository's current notice file rather than one tied to a tag. The compiled
+extension (smlibpy/_core) links only the C and C++ runtime of the host and
+embeds pybind11 (BSD 3-Clause), whose notice is in that file.

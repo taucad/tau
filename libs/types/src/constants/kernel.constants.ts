@@ -150,6 +150,32 @@ def main(params: Params) -> Shape | None:
     requiresRuntimeKernelId: 'build123d',
   },
   {
+    id: 'smlibpy',
+    name: 'SMLibPy',
+    dimensions: [2, 3],
+    language: 'python',
+    ecosystem: 'pypi',
+    description: 'Native Python NURBS CAD with a build123d-style API',
+    mainFile: 'main.py',
+    backendProvider: 'smlib',
+    longDescription:
+      'The SMLib NURBS kernel in native Python through smlibpy, the API SMLib WebAssembly mirrors. Build exact B-rep parts with sketches, extrusions, fillets and booleans in the Tau desktop app or the CLI, with PBR materials, mechanisms and STEP, STL and glTF export.',
+    emptyCode: `from dataclasses import dataclass
+import smlibpy
+
+@dataclass(frozen=True)
+class Params:
+    pass
+
+def main(params: Params) -> smlibpy.Part | None:
+    return None
+`,
+    recommended: 'Native Python NURBS CAD',
+    tags: ['Python', 'SMLib', 'NURBS', 'Boundary Representation', 'Desktop'],
+    features: ['build123d-style API', 'Exact NURBS geometry', 'PBR materials', 'STEP export'],
+    requiresRuntimeKernelId: 'smlibpy',
+  },
+  {
     id: 'openscad',
     name: 'OpenSCAD',
     dimensions: [3],

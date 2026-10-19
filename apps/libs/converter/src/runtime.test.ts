@@ -24,6 +24,7 @@ describe('converterRuntime', () => {
         jscad: importOnly,
         opencascadejs: importOnly,
         smlib: importOnly,
+        smlibpy: importOnly,
         tscircuit: importOnly,
       },
     });

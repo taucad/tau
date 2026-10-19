@@ -225,6 +225,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                 "picogk",
                 "picovoxel",
                 "build123d",
+                "smlibpy",
                 "openscad",
                 "replicad",
                 "manifold",

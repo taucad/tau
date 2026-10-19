@@ -1,0 +1,7 @@
+---
+viewer: minor
+---
+
+Edge batches for repeated parts draw one instance per prototype segment and read the prototype's own endpoint array, instead of unrolling every segment into 8 vertices with copied endpoints. A 50,000-segment prototype repeated 20 times now owns about 1.2 MiB of GPU arrays and no CPU copy, where it held about 40 MiB on the CPU and GPU together. When an occurrence table would cost more than unrolling, as for a few-segment fastener repeated thousands of times, the batch keeps the unrolled layout. `createEdgePrototypeGeometry` and `createEdgeBatch` take an optional layout, and `setEdgeOccurrenceCount`, `getEdgeOccurrenceCount`, `getEdgeOccurrenceCapacity`, `selectEdgeBatchLayout` and `measureEdgeBatchBytes` manage and measure either layout.
+
+Viewer context admission counts WebGPU canvases as well as WebGL ones, and estimates each viewer's render surface in bytes (64 B per device pixel). A new viewer is refused when the context limit is reached or when its surface would take the viewers past half the device's reported memory (4 GiB when the browser does not report it). A viewer counts as filling the window until its canvas reports a size. `webglContextMachine` gains `bytes`, `byteBudget` and `holders`, and `acquire`, `resize` and `release` events carry an optional holder id and byte estimate. `admitsViewerContext`, `estimateViewerSurfaceBytes` and `resolveViewerSurfaceByteBudget` are exported, and `ThreeCanvasInstance` takes an `onSurfaceResize` callback.

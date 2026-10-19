@@ -42,21 +42,77 @@ export const resolveWebglContextLimit = (device: WebglContextDevice): number =>
     ? constrainedWebglContexts
     : maxWebglContexts;
 
-// Type definitions
-type WebglContextMachineContext = {
-  count: number;
-  limit: number;
-};
+/**
+ * Estimated bytes of render surface per device pixel for one viewer: the multisampled drawing buffer with depth and
+ * stencil (about 38 B, measured at 51 MiB for a 1.34 Mpx iPhone canvas at DPR 2) plus the resolved and
+ * post-processing targets. Geometry and environment lighting are not per-pixel and are left out.
+ */
+const viewerSurfaceBytesPerDevicePixel = 64;
 
-type WebglContextMachineInput = Readonly<{ limit?: number }> | undefined;
+/** Without `navigator.deviceMemory` (Safari, Firefox) the budget assumes an 8 GB device. */
+const assumedDeviceMemoryGigabytes = 8;
 
-type WebglContextMachineEvents = { type: 'acquire' } | { type: 'release' };
+const gibibyte = 1024 ** 3;
 
 /**
- * Tracks the number of active WebGL rendering contexts across all viewer
- * panels.  Components send `acquire` when a Canvas mounts and `release`
- * when it unmounts.  Consumers read `count` / `limit` via
- * `actorRef.getSnapshot()` (imperative, non-reactive) to decide whether
+ * Estimated render-surface bytes of a viewer canvas.
+ * @param cssPixels - The canvas's CSS width times height.
+ * @param pixelRatio - The drawing-buffer pixel ratio.
+ * @returns The estimated bytes.
+ * @public
+ */
+export const estimateViewerSurfaceBytes = (cssPixels: number, pixelRatio: number): number =>
+  Math.max(0, cssPixels) * pixelRatio * pixelRatio * viewerSurfaceBytesPerDevicePixel;
+
+/**
+ * The render-surface bytes all viewers on a device may hold together: half the device memory the browser reports.
+ * @param device - The device's pointer and memory class.
+ * @returns The byte budget.
+ * @public
+ */
+export const resolveViewerSurfaceByteBudget = (device: WebglContextDevice): number =>
+  ((device.deviceMemoryGigabytes ?? assumedDeviceMemoryGigabytes) * gibibyte) / 2;
+
+// Type definitions
+type WebglContextMachineContext = {
+  /** Live viewer contexts, WebGL and WebGPU alike. */
+  count: number;
+  limit: number;
+  /** Estimated render-surface bytes of the viewers that reported a size. */
+  bytes: number;
+  byteBudget: number;
+  /** Each identified holder's current surface estimate. */
+  holders: Readonly<Record<string, number>>;
+};
+
+type WebglContextMachineInput = Readonly<{ limit?: number; byteBudget?: number }> | undefined;
+
+type WebglContextMachineEvents =
+  | { type: 'acquire'; id?: string; bytes?: number }
+  | { type: 'resize'; id: string; bytes: number }
+  | { type: 'release'; id?: string };
+
+const sumHolderBytes = (holders: Readonly<Record<string, number>>): number =>
+  Object.values(holders).reduce((total, bytes) => total + bytes, 0);
+
+/**
+ * Whether a tracker admits one more viewer of an estimated size. The first viewer is always admitted, so a page
+ * with one oversized canvas still renders; after that both the context limit and the byte budget hold.
+ * @param context - The tracker's current context.
+ * @param bytes - The new viewer's estimated surface bytes.
+ * @returns Whether the viewer may create its context.
+ * @public
+ */
+export const admitsViewerContext = (
+  context: Pick<WebglContextMachineContext, 'count' | 'limit' | 'bytes' | 'byteBudget'>,
+  bytes: number,
+): boolean => context.count === 0 || (context.count < context.limit && context.bytes + bytes <= context.byteBudget);
+
+/**
+ * Tracks the active viewer rendering contexts (WebGL and WebGPU) across all viewer
+ * panels and their estimated render-surface bytes.  Components send `acquire` when a Canvas mounts,
+ * `resize` when its surface changes size and `release` when it unmounts.  Consumers read the context via
+ * `actorRef.getSnapshot()` (imperative, non-reactive) and {@link admitsViewerContext} to decide whether
  * to create a new context or show a fallback.
  *
  * **Important**: Do NOT use `useSelector` on this actor in any component
@@ -77,11 +133,36 @@ export const webglContextMachine = setup({
   context: ({ input }) => ({
     count: 0,
     limit: input?.limit ?? maxWebglContexts,
+    bytes: 0,
+    byteBudget: input?.byteBudget ?? Number.POSITIVE_INFINITY,
+    holders: {},
   }),
   on: {
     acquire: {
-      context: ({ context }) => ({ count: context.count + 1 }),
+      context({ context, event }) {
+        if (event.id === undefined) {
+          return { count: context.count + 1 };
+        }
+        const holders = { ...context.holders, [event.id]: Math.max(0, event.bytes ?? 0) };
+        return { count: context.count + 1, holders, bytes: sumHolderBytes(holders) };
+      },
     },
-    release: ({ context }) => (context.count > 0 ? { context: { count: context.count - 1 } } : undefined),
+    resize({ context, event }) {
+      if (!(event.id in context.holders)) {
+        return undefined;
+      }
+      const holders = { ...context.holders, [event.id]: Math.max(0, event.bytes) };
+      return { context: { holders, bytes: sumHolderBytes(holders) } };
+    },
+    release({ context, event }) {
+      if (context.count === 0) {
+        return undefined;
+      }
+      if (event.id === undefined || !(event.id in context.holders)) {
+        return { context: { count: context.count - 1 } };
+      }
+      const holders = Object.fromEntries(Object.entries(context.holders).filter(([id]) => id !== event.id));
+      return { context: { count: context.count - 1, holders, bytes: sumHolderBytes(holders) } };
+    },
   },
 });

@@ -1,9 +1,8 @@
 import * as React from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { toast } from '@taucad/ui/components/sonner';
-import { sectionPiecesKey } from '#graphics/section-cuts.js';
-import type { SectionCut } from '#graphics/section-cuts.js';
+import { isSameSectionHalfSpace, sectionPiecesKey } from '#graphics/section-cuts.js';
+import type { SectionCut, SectionPiece } from '#graphics/section-cuts.js';
 import { gltfEdgeLineWidth } from '#graphics/three/materials/gltf-edges.js';
 import {
   mixModelEmphasisTint,
@@ -18,9 +17,15 @@ import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-
 import { sceneTag, sceneTagData } from '#graphics/three/utils/scene-tags.js';
 import { sectionCapStencilDebugUserDataKey } from '#graphics/three/utils/section-cap-stencil-debug.js';
 import type { SectionCapStencilDiagnostics } from '#graphics/three/utils/section-cap-stencil-debug.js';
-import { createSectionStencilCaps } from '#graphics/three/utils/section-stencil-caps.js';
+import { createSectionLoopCaps } from '#graphics/three/utils/section-loop-caps.js';
+import type { SectionLoopCapFace, SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
+import { createSectionOpenBackFaces } from '#graphics/three/utils/section-open-back-faces.js';
+import { createSectionStencilCaps, resolveSectionExitHalfSpaces } from '#graphics/three/utils/section-stencil-caps.js';
 import type { SectionStencilCapSource } from '#graphics/three/utils/section-stencil-caps.js';
-import { collectSectionSurfaceSources } from '#graphics/three/utils/section-surface-topology.js';
+import {
+  collectSectionSurfaceSources,
+  isSectionObjectVisible,
+} from '#graphics/three/utils/section-surface-topology.js';
 import type {
   SectionTopologyFailure,
   VisibleSectionSurfaceSource,
@@ -28,7 +33,6 @@ import type {
 import {
   commitSectionViewSafeSnapshot,
   getSectionViewSafeSnapshotDebugState,
-  rejectSectionViewSafeSnapshot,
   resetSectionViewSafeSnapshot,
   sectionViewSafeSnapshotDebugUserDataKey,
 } from '#graphics/three/utils/section-view-safe-snapshot.js';
@@ -39,13 +43,8 @@ import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
 
-/**
- * What the caps committed: the cut list the clip, the caps and raycasts show, and whether the live list certified.
- */
-export type SectionCertification = Readonly<{ status: 'certified' | 'rejected'; cuts: readonly SectionCut[] }>;
-
 export type SectionContourFillsProperties = Readonly<{
-  /** The live cut list and its pieces in the render frame, committed once every source it may cut certifies. */
+  /** The live cut list and its pieces in the render frame, committed once the sources it may cut are known. */
   cutSet: SectionCutSet;
   enabled: boolean;
   stripeFrequency: number;
@@ -53,8 +52,8 @@ export type SectionContourFillsProperties = Readonly<{
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: React.RefObject<THREE.Group | null>;
   snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
-  /** Called from the frame in which the committed cut list or its certification changes. */
-  onCertify: (certification: SectionCertification) => void;
+  /** Called from the frame in which the committed cut list changes. */
+  onCommit: (cuts: readonly SectionCut[]) => void;
 }>;
 
 /**
@@ -65,28 +64,65 @@ export const sectionCapRenderPriority = 1.2;
 
 const noCuts: readonly SectionCut[] = [];
 
-/** One source as the caps draw it: its meshes, its owner and the tint of its first material. */
+/** A pending source counts nothing into the stencil, so it is cut and outlined but not capped. */
+const uncappedLoops: SectionLoopCapSource = { matrix: new THREE.Matrix4(), bySlot: new Map() };
+
+/**
+ * How a source is capped.
+ *
+ * - `exact`: a closed, consistently oriented surface shown whole, counted by the stencil from its own meshes (nonzero).
+ * - `per-loop`: anything else (an open or non-manifold surface, or one shown in part), capped from the closed loops a
+ *   slice of its shown triangles finds on each face, counted even-odd, with its open chains outlined and its back faces
+ *   shown.
+ * - `pending`: its census has not landed; it is cut and outlined but not capped until it does, and its back faces are
+ *   not shown.
+ */
+export type SectionCapGrade = 'exact' | 'per-loop' | 'pending';
+
+/** One source as the caps draw it: its shown meshes, its grade, its owner and the tint of its first material. */
 export type SectionSourceRecord = Readonly<{
   key: string;
   visibleSource: VisibleSectionSurfaceSource;
   ownerKey: string;
   meshes: readonly THREE.Mesh[];
   baseTintHex: number;
+  grade: SectionCapGrade;
+  /** Why a source is capped per loop: its closure failure, or `partial-visibility`. */
+  reason: SectionTopologyFailure['code'] | undefined;
 }>;
 
 const toSourceRecord = (visibleSource: VisibleSectionSurfaceSource): SectionSourceRecord => {
-  const { source } = visibleSource;
-  const meshes = source.participants.map(({ mesh }) => mesh);
+  const { source, visibility } = visibleSource;
+  const meshes = source.participants.map(({ mesh }) => mesh).filter((mesh) => isSectionObjectVisible(mesh));
   const firstMaterial = meshes[0]?.material;
   const material = Array.isArray(firstMaterial) ? firstMaterial[0] : firstMaterial;
+  const reason =
+    source.closure.status === 'open'
+      ? source.closure.failure.code
+      : visibility === 'partial'
+        ? 'partial-visibility'
+        : undefined;
   return {
     key: source.key,
     visibleSource,
     ownerKey: source.owner ? `${source.owner.unitId}:${source.owner.componentId}` : source.key,
     meshes,
     baseTintHex: material ? resolveModelMaterialBaseTintHex(material) : 0xff_ff_ff,
+    grade: reason === undefined ? (source.closure.status === 'pending' ? 'pending' : 'exact') : 'per-loop',
+    reason,
   };
 };
+
+/** The faces a per-loop source is sliced through this frame: the exit faces of every piece seen from its removed side. */
+const resolveLoopCapFaces = (camera: THREE.Camera, pieces: readonly SectionPiece[]): SectionLoopCapFace[] =>
+  pieces.flatMap((piece, pieceIndex) => {
+    const exit = resolveSectionExitHalfSpaces(camera, piece);
+    return piece.faces.flatMap((face, faceIndex) =>
+      exit.some((halfSpace) => isSameSectionHalfSpace(halfSpace, face.plane))
+        ? [{ slot: pieceIndex * 2 + faceIndex, plane: face.plane }]
+        : [],
+    );
+  });
 
 /** The emphasis of the component a cut face belongs to, or `none` when it has no owner. */
 export function resolveSectionSourceEmphasis(
@@ -103,34 +139,13 @@ export function resolveSectionSourceEmphasis(
 }
 
 /**
- * Why a cut set cannot be capped exactly: a source whose surface is not a closed, consistently oriented solid (an
- * open shell among them), or one shown only in part, so the stencil count has no inside to find. The exact slicer
- * refuses the same sources, so the cut set is refused as a whole and the committed one stays.
- */
-const findUncappableSource = (records: readonly SectionSourceRecord[]): SectionTopologyFailure | undefined => {
-  for (const { key, visibleSource } of records) {
-    const { topology } = visibleSource.source;
-    if (topology.status === 'unsupported') {
-      return topology.failure;
-    }
-    if (visibleSource.visibility === 'partial') {
-      return {
-        sourceKey: key,
-        code: 'partial-visibility',
-        message: `Section topology ${key}: visible selection opens a certified surface`,
-      };
-    }
-  }
-  return undefined;
-};
-
-/**
- * The section view's cut faces, drawn with stencil caps on both backends.
+ * The section view's cut faces, drawn with stencil caps on both backends. A cut is never refused.
  *
- * The frame before the model's (priority -1) certifies the live cut list: every visible source must be a closed solid
- * for a cut list to commit, and nothing is sliced, built or triangulated for it. A refused list is reported once and
- * the committed one stays. The pass after the model's draws the committed list's caps, overlap and outline from the
- * sources' own meshes, so moving a cut costs the same at any triangle count.
+ * The frame before the model's (priority -1) commits the live cut list once the sources it may cut are known, and
+ * grades each source. The pass after the model's draws the committed list's caps, overlap and outline. An `exact`
+ * source is counted from its own meshes, so moving a cut costs the same at any triangle count. A `per-loop` source is
+ * counted from fans over the closed loops a worker slice found on each face; while a new plane's slice runs, the last
+ * landed one stays drawn, and its open chains are outlined in the open-chain colour.
  */
 export function SectionContourFills({
   cutSet,
@@ -139,7 +154,7 @@ export function SectionContourFills({
   stripeFrequency,
   stripeWidth,
   snapshotRef,
-  onCertify,
+  onCommit,
 }: SectionContourFillsProperties): React.JSX.Element {
   const backend = useThreeGraphicsBackend();
   const { colorScheme } = useViewerEnvironment();
@@ -158,16 +173,30 @@ export function SectionContourFills({
   const awaitedTreesRef = React.useRef(new Set<Promise<unknown>>());
   /** The sources of the committed cut list, which the caps draw until another list commits. */
   const committedRecordsRef = React.useRef<readonly SectionSourceRecord[]>([]);
-  const reportedFailureKeyRef = React.useRef<string | undefined>(undefined);
-  const reportedCertificationRef = React.useRef<SectionCertification | undefined>(undefined);
-  const diagnosticsRef = React.useRef<SectionCapStencilDiagnostics>({ sequence: 0, latest: undefined });
+  const reportedCutsRef = React.useRef<readonly SectionCut[] | undefined>(undefined);
+  const reportedGradesRef = React.useRef(new Map<string, string>());
+  const diagnosticsRef = React.useRef<SectionCapStencilDiagnostics>({ sequence: 0, latest: undefined, loops: [] });
   const drawingBufferSize = React.useMemo(() => new THREE.Vector2(), []);
+  const loopCaps = React.useMemo(() => createSectionLoopCaps({ onLanded: invalidate }), [invalidate]);
+  const backFaces = React.useMemo(() => createSectionOpenBackFaces(), []);
 
   React.useEffect(
     () => () => {
       caps.dispose();
     },
     [caps],
+  );
+  React.useEffect(
+    () => () => {
+      loopCaps.dispose();
+    },
+    [loopCaps],
+  );
+  React.useEffect(
+    () => () => {
+      backFaces.dispose();
+    },
+    [backFaces],
   );
 
   // A layout effect, so a cut step, restyle or emphasis change asks for its frame before the browser paints.
@@ -177,21 +206,28 @@ export function SectionContourFills({
     }
   }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, stripeFrequency, stripeWidth]);
 
-  const reportFailure = (failure: SectionTopologyFailure, identity: string): void => {
-    const key = `${identity}|${failure.sourceKey}|${failure.code}`;
-    if (reportedFailureKeyRef.current === key) {
+  /** Records a source's grade and what its per-loop slices found, once per change, as telemetry. */
+  const reportGrade = (record: SectionSourceRecord, closedLoopCount: number, openChainCount: number): void => {
+    const summary = `${record.grade}|${record.reason ?? ''}|${closedLoopCount}|${openChainCount}`;
+    if (reportedGradesRef.current.get(record.key) === summary) {
       return;
     }
-    reportedFailureKeyRef.current = key;
-    recordRendererSpan('renderer.section-cap-refused', {
+    reportedGradesRef.current.set(record.key, summary);
+    recordRendererSpan('renderer.section-cap-graded', {
       startTime: performance.now(),
       duration: 0,
-      attributes: { sourceKey: failure.sourceKey, code: failure.code, backend },
+      attributes: {
+        sourceKey: record.key,
+        grade: record.grade,
+        reason: record.reason ?? 'none',
+        closedLoopCount,
+        openChainCount,
+        backend,
+      },
     });
-    toast.warning('Section view unavailable', { description: failure.message });
   };
 
-  // Certification: before the model's pass, so the clip follows a commit within the same frame.
+  // Commit: before the model's pass, so the clip follows a commit within the same frame.
   useFrame(() => {
     const root = rootRef.current;
     const inner = innerRef.current;
@@ -200,21 +236,22 @@ export function SectionContourFills({
     }
     const store = snapshotRef.current;
     if (!enabled || !inner) {
-      reportedFailureKeyRef.current = undefined;
-      reportedCertificationRef.current = undefined;
+      reportedCutsRef.current = undefined;
+      reportedGradesRef.current.clear();
       committedRecordsRef.current = [];
+      loopCaps.retain(new Set());
+      backFaces.show([]);
       resetSectionViewSafeSnapshot(store);
       root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(store);
       return;
     }
 
-    const readiness = { isBlocked: false };
+    // A source whose census is pending is collected uncapped, so the cut commits now; draw again once it lands, as a
+    // registration does.
     const visibleSources = collectSectionSurfaceSources(inner, (ready) => {
-      readiness.isBlocked = true;
-      // A standalone surface waits on its worker topology: draw again once it lands, as a registration does.
       if (ready && !awaitedTreesRef.current.has(ready)) {
         awaitedTreesRef.current.add(ready);
-        // async-iife: bootstrap -- A frame cannot await a topology building in the worker.
+        // async-iife: bootstrap -- A frame cannot await a census running in the worker.
         void (async () => {
           await ready.catch(() => undefined);
           awaitedTreesRef.current.delete(ready);
@@ -222,53 +259,42 @@ export function SectionContourFills({
         })();
       }
     });
-    // Pending topology is not an empty model: keep the committed cuts and caps until its owner invalidates.
-    if (readiness.isBlocked) {
-      return;
-    }
     // The caps follow posed parts by drawing their meshes where they are, so placement is not part of the identity.
     let sourceIdentity = '';
     for (const { source, visibility } of visibleSources) {
       sourceIdentity += `${source.key}|${source.revision}|${visibility};`;
     }
     const candidateIdentity = `${sectionPiecesKey(cutSet.pieces)}#${sourceIdentity}`;
-    if ((store.rejection ? store.rejection.identity : store.committed?.identity) !== candidateIdentity) {
+    if (store.committed?.identity !== candidateIdentity) {
       const records = visibleSources.map((visibleSource) => toSourceRecord(visibleSource));
-      const failure = cutSet.pieces.length > 0 ? findUncappableSource(records) : undefined;
-      if (failure) {
-        rejectSectionViewSafeSnapshot(store, { identity: candidateIdentity, sourceIdentity, failure });
-        if (!store.committed) {
-          committedRecordsRef.current = [];
-        }
-        reportFailure(failure, candidateIdentity);
-        root.userData['sectionCapCompleteness'] = { status: 'unsupported', failure };
-      } else {
-        commitSectionViewSafeSnapshot(store, {
-          identity: candidateIdentity,
-          sourceIdentity,
-          kind: cutSet.pieces.length > 0 ? 'complete' : 'uncut',
-          cutSet,
-        });
-        committedRecordsRef.current = records;
-        reportedFailureKeyRef.current = undefined;
-        root.userData['sectionCapCompleteness'] = {
-          status: 'complete',
-          admittedSourceCount: records.length,
-          unsupportedSourceCount: 0,
-        };
-      }
+      commitSectionViewSafeSnapshot(store, {
+        identity: candidateIdentity,
+        sourceIdentity,
+        kind: cutSet.pieces.length > 0 ? 'complete' : 'uncut',
+        cutSet,
+      });
+      committedRecordsRef.current = records;
+      const perLoop = records.filter(({ grade }) => grade === 'per-loop');
+      loopCaps.retain(new Set(perLoop.map(({ key }) => key)));
+      // Only per-loop sources: a pending source is usually graded exact a moment later, and switching its materials
+      // there and back would rebuild their programs twice for nothing.
+      backFaces.show(cutSet.pieces.length > 0 ? perLoop.flatMap(({ meshes }) => meshes) : []);
+      root.userData['sectionCapCompleteness'] = {
+        status: 'complete',
+        admittedSourceCount: records.length,
+        exactSourceCount: records.filter(({ grade }) => grade === 'exact').length,
+        perLoopSourceCount: perLoop.length,
+        pendingSourceCount: records.filter(({ grade }) => grade === 'pending').length,
+        sources: records.map(({ key, grade, reason }) => ({ sourceKey: key, grade, reason })),
+      };
       root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(store);
     }
 
     // Tells the stage what is committed, only when that changes; the clip follows it within this frame.
-    const certification: SectionCertification = {
-      status: store.rejection ? 'rejected' : 'certified',
-      cuts: store.committed?.cutSet.cuts ?? noCuts,
-    };
-    const reported = reportedCertificationRef.current;
-    if (reported?.status !== certification.status || reported.cuts !== certification.cuts) {
-      reportedCertificationRef.current = certification;
-      onCertify(certification);
+    const cuts = store.committed?.cutSet.cuts ?? noCuts;
+    if (reportedCutsRef.current !== cuts) {
+      reportedCutsRef.current = cuts;
+      onCommit(cuts);
     }
   }, -1);
 
@@ -281,17 +307,27 @@ export function SectionContourFills({
       return;
     }
     const modelInteractionContext = modelInteractionRef.getSnapshot().context;
+    const { gl, camera } = state;
+    const loopFaces = records.some(({ grade }) => grade === 'per-loop')
+      ? resolveLoopCapFaces(camera, committed.cutSet.pieces)
+      : [];
     const sources: SectionStencilCapSource[] = records.map((record) => {
       const emphasis = resolveSectionSourceEmphasis(record, modelInteractionContext);
+      const loops =
+        record.grade === 'per-loop'
+          ? loopCaps.resolve(record.visibleSource.source, loopFaces)
+          : record.grade === 'pending'
+            ? uncappedLoops
+            : undefined;
       return {
         key: record.key,
         ownerKey: record.ownerKey,
         meshes: record.meshes,
         tintHex: mixModelEmphasisTint(record.baseTintHex, emphasis),
         edgeHex: resolveSectionCapOutlineColor(emphasis, edgeColor),
+        loops,
       };
     });
-    const { gl, camera } = state;
     gl.getDrawingBufferSize(drawingBufferSize);
     // Without a post owner the model's pass left the canvas depth, and this is a no-op.
     restoreDepth();
@@ -303,10 +339,18 @@ export function SectionContourFills({
       outlineWidthPixels: gltfEdgeLineWidth * gl.getPixelRatio(),
       viewportHeightPixels: drawingBufferSize.y,
     });
+    const loopDiagnostics = loopCaps.diagnostics();
+    for (const record of records) {
+      const loops = loopDiagnostics.find(({ sourceKey }) => sourceKey === record.key);
+      if (record.grade === 'exact' || loops?.pendingFaceCount === 0) {
+        reportGrade(record, loops?.closedLoopCount ?? 0, loops?.openChainCount ?? 0);
+      }
+    }
     if (isTauDebugEnabled) {
       const diagnostics = diagnosticsRef.current;
       diagnostics.sequence++;
       diagnostics.latest = stats;
+      diagnostics.loops = loopDiagnostics;
       root.userData[sectionCapStencilDebugUserDataKey] = diagnostics;
     }
   }, sectionCapRenderPriority);

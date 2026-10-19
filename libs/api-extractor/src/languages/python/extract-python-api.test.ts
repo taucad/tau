@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { extractPythonApi, resolvePythonExecutable } from '#languages/python/extract-python-api.js';
 import { flattenEntries } from '#model/api-corpus.js';
@@ -25,6 +25,15 @@ const available = ((): boolean => {
 const describeWithPython = available ? describe : describe.skip;
 
 describe('resolvePythonExecutable', () => {
+  it('prefers the interpreter named by TAU_PYTHON_API_EXECUTABLE', () => {
+    vi.stubEnv('TAU_PYTHON_API_EXECUTABLE', '/venv/bin/python');
+    try {
+      expect(resolvePythonExecutable()).toBe('/venv/bin/python');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('names the preparation target when the runtime is absent', () => {
     if (available) {
       expect(resolvePythonExecutable()).toMatch(/apps\/desktop\/resources\/python\/.+python3?(\.exe)?$/u);

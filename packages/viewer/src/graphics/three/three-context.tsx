@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState } from 'react';
 import { Node } from 'three/webgpu';
 import { WebglLimitFallback } from '#cad/webgl-fallback.jsx';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import type { ThreeContextProperties } from '#graphics/three/three-viewer-properties.js';
 import { useWebglContextRef } from '#hooks/use-webgl-context-tracker.jsx';
 import { useViewerFeature } from '#environment/viewer-environment.jsx';
+import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
+import { admitsViewerContext, estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 
 // Three owns one global switch; each requesting WebGPU canvas holds a reference.
 let shaderStackOwners = 0;
 
 /**
- * Mounts the Three.js canvas for the chosen graphics backend, showing a fallback when the WebGL context limit is reached.
+ * Mounts the Three.js canvas for the chosen graphics backend, showing a fallback when the viewer context limit or
+ * render-surface budget is reached. Until the canvas reports its size, a viewer counts as filling the window.
  *
  * @param properties - The backend, canvas, camera control and stage options.
  * @returns The canvas, or the WebGL limit fallback.
@@ -36,6 +39,15 @@ export function ThreeProvider({
   const captureShaderStacks = useViewerFeature('webGpuShaderStacks');
 
   const webglRef = useWebglContextRef();
+  const holderId = useId();
+
+  // oxlint-disable-next-line react/hook-use-state -- one-time snapshot, setter intentionally unused
+  const [initialSurfaceBytes] = useState(() =>
+    estimateViewerSurfaceBytes(
+      (globalThis.innerWidth || 0) * (globalThis.innerHeight || 0),
+      resolveViewerPixelRatio() || 1,
+    ),
+  );
 
   // oxlint-disable-next-line react/hook-use-state -- one-time snapshot, setter intentionally unused
   const [isOverLimit] = useState(() => {
@@ -43,20 +55,28 @@ export function ThreeProvider({
       return false;
     }
 
-    const snap = webglRef.getSnapshot();
-    return snap.context.count >= snap.context.limit;
+    return !admitsViewerContext(webglRef.getSnapshot().context, initialSurfaceBytes);
   });
 
-  useEffect(() => {
-    if (graphicsBackend !== 'webgl' || !webglRef || isOverLimit) {
+  // A layout effect, so the holder exists before the canvas reports its first size.
+  useLayoutEffect(() => {
+    if (!webglRef || isOverLimit) {
       return;
     }
 
-    webglRef.send({ type: 'acquire' });
+    // WebGPU canvases hold a device and surface too, so both backends count against one budget.
+    webglRef.send({ type: 'acquire', id: holderId, bytes: initialSurfaceBytes });
     return () => {
-      webglRef.send({ type: 'release' });
+      webglRef.send({ type: 'release', id: holderId });
     };
-  }, [graphicsBackend, webglRef, isOverLimit]);
+  }, [graphicsBackend, webglRef, isOverLimit, holderId, initialSurfaceBytes]);
+
+  const handleSurfaceResize = useCallback(
+    (cssPixels: number, pixelRatio: number): void => {
+      webglRef?.send({ type: 'resize', id: holderId, bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio) });
+    },
+    [webglRef, holderId],
+  );
 
   useEffect(() => {
     if (!captureShaderStacks || graphicsBackend !== 'webgpu') {
@@ -79,7 +99,7 @@ export function ThreeProvider({
     setCanvasKey((previous) => previous + 1);
   }, []);
 
-  if (graphicsBackend === 'webgl' && isOverLimit) {
+  if (isOverLimit) {
     return <WebglLimitFallback onRetry={handleRetry} />;
   }
 
@@ -101,6 +121,7 @@ export function ThreeProvider({
       gizmoContainer={gizmoContainer}
       graphicsBackend={graphicsBackend}
       onRetry={handleRetry}
+      onSurfaceResize={webglRef ? handleSurfaceResize : undefined}
     >
       {children}
     </ThreeCanvasInstance>

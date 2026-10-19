@@ -176,6 +176,7 @@
             "dotnet-kernel-core",
             "python-kernel-core",
             "build123d",
+            "smlibpy",
             "native-process-core"
           ]
         }

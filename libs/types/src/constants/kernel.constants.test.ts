@@ -82,6 +82,23 @@ describe('kernel configuration identity', () => {
     expect(languageFromKernel.smlib).toBe('typescript');
   });
 
+  it('should expose SMLibPy as a native Python NURBS offering after Build123d', () => {
+    const smlibpy = kernelConfigurations.find(({ id }) => id === 'smlibpy');
+    const ids = kernelConfigurations.map(({ id }) => id);
+
+    expect(smlibpy).toMatchObject({
+      name: 'SMLibPy',
+      language: 'python',
+      mainFile: 'main.py',
+      backendProvider: 'smlib',
+      requiresRuntimeKernelId: 'smlibpy',
+    });
+    // The runtime routes a .py entry that imports smlibpy to SMLibPy; the catalog keeps Build123d the first .py row.
+    expect(smlibpy?.emptyCode).toContain('import smlibpy');
+    expect(ids.indexOf('smlibpy')).toBe(ids.indexOf('build123d') + 1);
+    expect(languageFromKernel.smlibpy).toBe('python');
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 
@@ -99,6 +116,7 @@ describe('kernel configuration identity', () => {
       picogk: 'nuget',
       picovoxel: 'npm',
       build123d: 'pypi',
+      smlibpy: 'pypi',
       openscad: 'none',
       replicad: 'npm',
       manifold: 'npm',

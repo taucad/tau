@@ -61,6 +61,7 @@
     "---Reference---",
     "reference/replicad",
     "reference/build123d",
+    "reference/smlibpy",
     "reference/tscircuit"
   ]
 }

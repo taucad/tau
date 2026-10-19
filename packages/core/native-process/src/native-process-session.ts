@@ -430,6 +430,38 @@ const verifyResources = async (launch: NativeWorkerLaunch): Promise<void> => {
   }
 };
 
+/* POSIX process groups of the workers this process started and that have not exited yet. */
+const liveProcessGroups = new Set<number>();
+let exitHookInstalled = false;
+
+/* Synchronous, because nothing asynchronous runs in `'exit'`: a session's graceful `cleanup()` cannot finish there, and
+ * a worker held inside a long native call would not see its parent watchdog fire until the call returned. */
+const killLiveProcessGroups = (): void => {
+  for (const pid of liveProcessGroups) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // The group exited already.
+    }
+  }
+  liveProcessGroups.clear();
+};
+
+const trackProcessGroup = (child: ChildProcessWithoutNullStreams): void => {
+  const { pid } = child;
+  if (process.platform === 'win32' || pid === undefined) {
+    return;
+  }
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on('exit', killLiveProcessGroups);
+  }
+  liveProcessGroups.add(pid);
+  child.once('exit', () => {
+    liveProcessGroups.delete(pid);
+  });
+};
+
 /* Wrap a verified launch in the sandbox and spawn it; nothing is spawned when the sandbox cannot wrap it. */
 const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerProcess> => {
   const vector = await launchInNativeSandbox({
@@ -444,6 +476,7 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     cwd: launch.workspacePath,
     env: processEnvironment(launch.artifactPath),
   });
+  trackProcessGroup(child);
   const ended = new Promise<NativeWorkerEnd>((resolve) => {
     child.once('error', (error) => {
       resolve({ error });
@@ -499,7 +532,9 @@ export class NativeProcessSession<Issue> {
   private ready: Promise<void> | undefined;
   private resolveReady: (() => void) | undefined;
   private rejectReady: ((reason: unknown) => void) | undefined;
-  private stdout = '';
+  /** The unfinished protocol line, as received, and its UTF-8 byte length. */
+  private stdoutChunks: string[] = [];
+  private stdoutBytes = 0;
   private stderr = '';
   private decoder = new StringDecoder('utf8');
   private readonly pending = new Map<string, PendingRequest>();
@@ -583,7 +618,13 @@ export class NativeProcessSession<Issue> {
       if (bytes.byteLength !== artifact.byteLength || bytes.byteLength > this.options.maxArtifactBytes) {
         throw new Error(`${this.options.sessionName} artifact changed while it was being read.`);
       }
-      return Uint8Array.from(bytes);
+      /* `readFile` sizes a dedicated buffer to the file, so a view over it is the artifact; only a read that landed in
+       * a shared pool slab is copied, so the result never retains bytes beyond its own. */
+      return bytes.buffer instanceof ArrayBuffer &&
+        bytes.byteOffset === 0 &&
+        bytes.buffer.byteLength === bytes.byteLength
+        ? new Uint8Array(bytes.buffer, 0, bytes.byteLength)
+        : Uint8Array.from(bytes);
     } finally {
       await unlink(physical).catch(() => undefined);
     }
@@ -684,7 +725,8 @@ export class NativeProcessSession<Issue> {
       throw new Error(`${this.options.sessionName} session is closed.`);
     }
     this.generation += 1;
-    this.stdout = '';
+    this.stdoutChunks = [];
+    this.stdoutBytes = 0;
     this.stderr = '';
     this.decoder = new StringDecoder('utf8');
     this.ready = new Promise<void>((resolve, reject) => {
@@ -805,22 +847,41 @@ export class NativeProcessSession<Issue> {
     });
   }
 
+  /* Linear in the bytes received: the unfinished tail is kept as chunks with a running byte count, and a chunk's
+   * lines are cut by offset rather than by re-slicing the remainder after each one. */
   private onStdout(chunk: Uint8Array<ArrayBuffer>): void {
-    this.stdout += this.decoder.write(chunk);
-    let newline = this.stdout.indexOf('\n');
+    const text = this.decoder.write(chunk);
+    let start = 0;
+    let newline = text.indexOf('\n');
     while (newline >= 0) {
-      const line = this.stdout.slice(0, newline);
-      this.stdout = this.stdout.slice(newline + 1);
-      if (Buffer.byteLength(line) > this.maxProtocolLineBytes) {
-        this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
+      const piece = text.slice(start, newline);
+      this.stdoutBytes += Buffer.byteLength(piece);
+      if (this.stdoutBytes > this.maxProtocolLineBytes) {
+        this.oversizedFrame();
         return;
       }
+      this.stdoutChunks.push(piece);
+      const line = this.stdoutChunks.join('');
+      this.stdoutChunks = [];
+      this.stdoutBytes = 0;
       this.onLine(line);
-      newline = this.stdout.indexOf('\n');
+      start = newline + 1;
+      newline = text.indexOf('\n', start);
     }
-    if (Buffer.byteLength(this.stdout) > this.maxProtocolLineBytes) {
-      this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
+    if (start < text.length) {
+      const tail = text.slice(start);
+      this.stdoutBytes += Buffer.byteLength(tail);
+      this.stdoutChunks.push(tail);
+      if (this.stdoutBytes > this.maxProtocolLineBytes) {
+        this.oversizedFrame();
+      }
     }
+  }
+
+  private oversizedFrame(): void {
+    this.stdoutChunks = [];
+    this.stdoutBytes = 0;
+    this.requestTermination(new Error(`${this.options.sessionName} emitted an oversized protocol frame.`));
   }
 
   private onStderr(chunk: Uint8Array<ArrayBuffer>): void {

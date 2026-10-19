@@ -1,6 +1,7 @@
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { mkdir, open, readFile, realpath, stat, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
@@ -18,11 +19,102 @@ import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.j
 import type { ChatStore } from '#launchers/chat-store.js';
 import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
+/* A host-saved tool result (the MCP endpoint's oversized `test_model` verdict) shares the chat's attachment directory
+ * but is never a durable `file-ref`, so the shared writer admits it beside the durable shapes. */
+const hostResultPathPattern = /^attachments\/[\da-f]{64}\.json$/u;
+
+const writablePath = (chatId: string, path: string): string =>
+  hostResultPathPattern.test(path)
+    ? `.tau/chats/${requireChatPathSegment(chatId)}/${path}`
+    : chatAttachmentPath(chatId, path);
+
+/** Filesystems without hard links (exFAT, some network shares) refuse `link` with one of these. */
+const noHardLinkCodes = new Set(['EPERM', 'ENOTSUP', 'EXDEV', 'EOPNOTSUPP']);
+
 /**
- * Read chat attachments from a workspace on the Node filesystem (D15).
+ * Whether a file holds exactly some bytes.
+ *
+ * @param path - The file.
+ * @param bytes - The bytes it should hold.
+ * @returns `false` when the file is absent or holds other bytes.
+ */
+const holdsBytes = async (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<boolean> => {
+  try {
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).equals(await readFile(path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+};
+
+const contentAddressConflict = (path: string): Error =>
+  Object.assign(new Error(`Chat attachment "${path}" already holds different bytes.`), { code: 'EEXIST' });
+
+/**
+ * Publish content-addressed bytes under their final name, whole or not at all (D-UI-04).
+ *
+ * The bytes are written to a fresh temporary file and synced, then linked into place, so the final name never
+ * names a torn file. A name already present must hold the same bytes. The directory is synced after a publish,
+ * so the name survives power loss before the row naming it is appended.
+ *
+ * @param absolutePath - The final, content-addressed name.
+ * @param bytes - The bytes it names.
+ */
+const publishAttachment = async (absolutePath: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+  const directory = dirname(absolutePath);
+  await mkdir(directory, { recursive: true });
+  const temporaryPath = `${absolutePath}.${randomUUID()}.tmp`;
+  const temporary = await open(temporaryPath, 'wx');
+  try {
+    try {
+      await temporary.writeFile(bytes);
+      await temporary.datasync();
+    } finally {
+      await temporary.close();
+    }
+    try {
+      await link(temporaryPath, absolutePath);
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === 'EEXIST') {
+        if (await holdsBytes(absolutePath, bytes)) {
+          return;
+        }
+        throw contentAddressConflict(absolutePath);
+      }
+      if (code === undefined || !noHardLinkCodes.has(code)) {
+        throw error;
+      }
+      // No hard links here: `rename` replaces, so check the name first; content addressing makes the race benign.
+      if (await holdsBytes(absolutePath, bytes)) {
+        return;
+      }
+      if ((await stat(absolutePath).catch(() => undefined)) !== undefined) {
+        throw contentAddressConflict(absolutePath);
+      }
+      await rename(temporaryPath, absolutePath);
+    }
+    await syncDirectory(directory);
+  } finally {
+    await unlink(temporaryPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    });
+  }
+};
+
+/**
+ * Read and write chat attachments in a workspace on the Node filesystem (D15, D-UI-04).
+ *
+ * The writer is the chat-log owner's: it writes beside `events.jsonl` with the same raw `node:fs` discipline, and a
+ * session writes before it appends the row naming the bytes.
  *
  * @param workspaceRoot - Absolute root whose `.tau/chats` holds each chat.
- * @returns A reader answering `undefined` for bytes not on this machine; any other I/O failure rejects.
+ * @returns A reader answering `undefined` for bytes not on this machine (any other I/O failure rejects), and a
+ * writer that publishes content-addressed bytes atomically and rejects different bytes at an existing path.
  * @public
  */
 export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentReader => ({
@@ -37,6 +129,7 @@ export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentRea
       throw error;
     }
   },
+  write: async (chatId, path, bytes) => publishAttachment(join(workspaceRoot, writablePath(chatId, path)), bytes),
 });
 
 /** Node event-log options. @public */

@@ -311,8 +311,8 @@ describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
       images: [{ view: 'printer-1', dataUrl: `data:image/jpeg;base64,${base64(jpegBytes)}` }],
     };
     const files = new Map<string, Uint8Array<ArrayBuffer>>();
-    const attachments: AttachmentReader = {
-      read: async (_chatId, path) => files.get(path),
+    const attachments: AttachmentReader & { read: ReturnType<typeof vi.fn> } = {
+      read: vi.fn(async (_chatId: string, path: string) => files.get(path)),
       write: async (_chatId, path, bytes) => {
         files.set(path, bytes);
       },
@@ -350,9 +350,17 @@ describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
     await session.prompt({ id: 'user-1', role: 'user', content: 'is the bed clear?' });
 
     expect(files.get(`attachments/${jpegHash}.jpg`)).toEqual(jpegBytes);
-    const events = await (await file.open()).read();
-    expect(JSON.stringify(events)).not.toContain(base64(jpegBytes));
-    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual(still);
+    const log = await file.open();
+    expect(JSON.stringify(await log.read())).not.toContain(base64(jpegBytes));
+    expect(attachments.read).toHaveBeenCalledWith('chat-1', `attachments/${jpegHash}.jpg`);
+    // Restored, the still reaches the model as an image, exactly as an inline still did (older images are elided).
+    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual([
+      expect.objectContaining({
+        type: 'text',
+        text: expect.stringMatching(/^Captured 1 screenshot\(s\)\./u) as string,
+      }),
+      { type: 'text', text: '[screenshot image - previously captured]' },
+    ]);
   });
 });
 

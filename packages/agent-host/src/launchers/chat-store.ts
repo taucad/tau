@@ -133,6 +133,19 @@ export const isPurgedChatRecord = (text: string | undefined): boolean => {
 };
 
 /**
+ * The refusal every write into a purged chat answers.
+ *
+ * @param chatId - The purged chat.
+ * @returns A `LOG_FENCED` error naming it.
+ * @internal
+ */
+export const purgedChatError = (chatId: string): EventLogError =>
+  new EventLogError(
+    'LOG_FENCED',
+    `Chat "${chatId}" was deleted permanently; its log and attachments are not written again.`,
+  );
+
+/**
  * Fence a binding's writes by the chat's tombstone (OQ2): a purged chat's writer is refused `LOG_FENCED` at open, at
  * each append and at each attachment write, so a run that outlives the purge stops at its next row and writes nothing
  * back. The check reads the record each time; the append it guards costs a sync already.
@@ -147,10 +160,7 @@ const fencePurged = (binding: ChatStoreBinding): ChatStoreBinding => {
   }
   const refuse = async (chatId: string): Promise<void> => {
     if (await purged(chatId)) {
-      throw new EventLogError(
-        'LOG_FENCED',
-        `Chat "${chatId}" was deleted permanently; its log and attachments are not written again.`,
-      );
+      throw purgedChatError(chatId);
     }
   };
   const write = attachments.write?.bind(attachments);

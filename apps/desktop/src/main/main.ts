@@ -1325,7 +1325,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       throw new Error('Home cannot be disconnected.');
     }
     if (!roots.roots().includes(resolve(path))) {
-      return;
+      return undefined;
     }
     if (services.hasActiveDirectory(path)) {
       return 'Close projects in this folder and wait for their work to finish before disconnecting.';
@@ -1336,6 +1336,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(directoryGrantChannels.changed);
     }
+    return undefined;
   });
 
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {

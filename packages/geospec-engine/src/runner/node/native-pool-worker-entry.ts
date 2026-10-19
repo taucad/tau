@@ -8,7 +8,7 @@ import type { RuntimeDefinition } from '@taucad/runtime';
 import type * as NativeStore from '@taucad/native-process-core/store';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import { createNodeVmFileSystem } from 'geospec/runner/node';
-import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
+import { startGeoSpecPoolWorkerHost } from 'geospec/runner/worker';
 
 /** Rooted project and assigned caller-inclusive native CPU grant. @public */
 export type NativePoolWorkerOptions = { projectPath: string; grant: number };

@@ -224,15 +224,14 @@ describe('startGeoSpecPoolWorkerHost', () => {
     });
   });
 
-  it('should apply resolved forensic and matcher limits to a collection pass', async () => {
+  it('should apply the resolved test timeout to a collection pass', async () => {
     const host = startHost({ 'a.geospec.ts': passingSpec('listed') });
 
     const replies = await host.send({
       type: 'list-tests',
       shardId: 4,
       file: 'a.geospec.ts',
-      matcherWallBackstop: 1000,
-      forensic: true,
+      testTimeout: 1000,
     });
 
     expect(replies[0]).toMatchObject({ type: 'tests-listed', shardId: 4 });
@@ -378,26 +377,6 @@ describe('startGeoSpecPoolWorkerHost', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it('should post file and shard timings with the shard identity when forensic', async () => {
-    const host = startHost({ 'a.geospec.ts': passingSpec('a') });
-
-    const replies = await host.send({
-      type: 'run-shard',
-      shard: { id: 9, file: 'a.geospec.ts' },
-      testTimeout: 5000,
-      matcherWallBackstop: 1000,
-      forensic: true,
-    });
-
-    const forensic = replies.flatMap((reply) =>
-      reply.type === 'forensic' ? [[reply.shardId, reply.name, reply.unit]] : [],
-    );
-    expect(forensic).toStrictEqual([
-      [9, 'runner.file', 'milliseconds'],
-      [9, 'runner.shard', 'milliseconds'],
-    ]);
-  });
-
   it('should keep a pass error over a later release failure', async () => {
     const releaseAll = vi.fn(async () => undefined).mockRejectedValueOnce(new Error('release failed'));
     const posted: GeoSpecPoolWorkerMessage[] = [];
@@ -406,10 +385,10 @@ describe('startGeoSpecPoolWorkerHost', () => {
       filesystem: memoryFileSystem({ 'a.geospec.ts': passingSpec('a') }),
       nativeAssertions: { engine: mock<GeoSpecNativeModelEngine>() },
       nativeModelLoader: nativeLoader(releaseAll),
+      measureMemoryBytes: () => {
+        throw new Error('memory probe failed');
+      },
       postMessage: (message) => {
-        if (message.type === 'forensic') {
-          throw new Error('forensic port closed');
-        }
         posted.push(message);
       },
       onHostMessage: (listener) => {
@@ -417,7 +396,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
       },
     });
 
-    deliver?.({ type: 'run-shard', shard: { id: 3, file: 'a.geospec.ts' }, forensic: true });
+    deliver?.({ type: 'run-shard', shard: { id: 3, file: 'a.geospec.ts' } });
     await vi.waitFor(() => {
       expect(posted.some((message) => message.type === 'shard-error')).toBe(true);
     });
@@ -427,7 +406,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
       type: 'shard-error',
       shardId: 3,
       file: 'a.geospec.ts',
-      message: 'forensic port closed',
+      message: 'memory probe failed',
     });
   });
 

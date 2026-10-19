@@ -33,7 +33,7 @@ vi.mock('@taucad/native-process-core/store', () => ({
 }));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
 vi.mock('geospec/runner/node', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
-vi.mock('#runner/pool/worker-host.js', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
+vi.mock('geospec/runner/worker', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
 
 const runtimeFactory = () => {
   startNativePoolWorker({ postMessage: vi.fn(), on: vi.fn() }, { projectPath: '/project', grant: 1 });

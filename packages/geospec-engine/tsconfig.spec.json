@@ -31,27 +31,10 @@
     "src/doctrine-ceilings.test.ts",
     "src/package-metadata.test.ts",
     "src/provenance-script.test.ts",
-    "src/runner/events.test.ts",
-    "src/runner/events.ts",
-    "src/runner/forensic.test.ts",
-    "src/runner/forensic.ts",
     "src/runner/node/native-pool-runner.test.ts",
     "src/runner/node/native-pool-runner.ts",
     "src/runner/node/native-pool-worker-entry.test.ts",
     "src/runner/node/native-pool-worker-entry.ts",
-    "src/runner/node/node-vm-filesystem.ts",
-    "src/runner/pool/pool.test.ts",
-    "src/runner/pool/pool.ts",
-    "src/runner/pool/shard-planner.test.ts",
-    "src/runner/pool/shard-planner.ts",
-    "src/runner/pool/timings.test.ts",
-    "src/runner/pool/timings.ts",
-    "src/runner/pool/transport.ts",
-    "src/runner/pool/worker-host.test.ts",
-    "src/runner/pool/worker-host.ts",
-    "src/runner/serial.test.ts",
-    "src/runner/serial.ts",
-    "src/runner/testing/memory-filesystem.ts",
-    "src/runner/types.ts"
+    "src/runner/node/node-vm-filesystem.ts"
   ]
 }

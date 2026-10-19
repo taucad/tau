@@ -1,6 +1,123 @@
 # geospec — Types (3)
 
-21 top-level symbols. Signatures are verbatim typescript.
+28 top-level symbols. Signatures are verbatim typescript.
+
+// Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery: {
+    readonly capability: 'minimumDistance';
+    readonly subject: GeoSpecNativeSubject;
+    readonly payload: {
+        readonly pair: readonly [{
+            readonly occurrencePath: string;
+        }, {
+            readonly occurrencePath: string;
+        }];
+    };
+}
+
+  readonly capability: 'minimumDistance'
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly payload: {
+          readonly pair: readonly [{
+              readonly occurrencePath: string;
+          }, {
+              readonly occurrencePath: string;
+          }];
+      }
+
+// Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult: {
+    readonly status: 'complete';
+    readonly fact: MinimumDistanceFact;
+} | {
+    readonly status: 'refused';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
+    readonly message: string;
+} | {
+    readonly status: 'interrupted';
+    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+    readonly message: string;
+}
+
+  readonly status: 'complete'
+
+// Flat native query transport options
+GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
+    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
+    readonly payload?: unknown;
+}
+
+  readonly engine: GeoSpecNativeEngine
+
+  readonly claimId: string
+
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot: string
+
+  readonly workUnitLimit: number
+
+  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
+  readonly maximumWorkUnitLimit?: number
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
+
+  readonly payload?: unknown
+
+// Existing positive-only ancillary operations owned by the native core
+GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
+
+// Explicit support state for one source-attributed inventory field
+GeoSpecPmiField: {
+    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
+    readonly value: Value | null;
+    readonly reason: string | null;
+}
+
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+
+  readonly value: Value | null
+
+  readonly reason: string | null
+
+// Original Part21 entity ID and exact source argument tokens
+GeoSpecPmiRawEntity: {
+    readonly sourceId: number;
+    readonly kind: string;
+    readonly arguments: readonly string[];
+}
+
+  readonly sourceId: number
+
+  readonly kind: string
+
+  readonly arguments: readonly string[]
+
+// Source-authored scalar and Rust-normalized reduced rational millimetres
+GeoSpecPmiNumber: {
+    readonly sourceId: number;
+    readonly authoredText: string;
+    readonly unitId: number;
+    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
+    readonly millimetres: string;
+    readonly name: string;
+}
+
+  readonly sourceId: number
+
+  readonly authoredText: string
+
+  readonly unitId: number
+
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
+
+  readonly millimetres: string
+
+  readonly name: string
 
 // A uniquely forward-transferred face
 GeoSpecPmiFaceAssociation: {
@@ -325,10 +442,7 @@ GeoSpecConfig: {
     testNamePattern?: string;
     /** Positive finite milliseconds; the runner owns its default. */
     testTimeout?: number;
-    /** Positive finite milliseconds; does not define a geometry verdict. */
-    matcherWallBackstop?: number;
     bail?: boolean;
-    forensic?: boolean;
     cache?: boolean;
     /** Requested cache location only; loading configuration creates no store. */
     cacheDirectory?: string;
@@ -344,12 +458,7 @@ GeoSpecConfig: {
   // Positive finite milliseconds
   testTimeout?: number
 
-  // Positive finite milliseconds
-  matcherWallBackstop?: number
-
   bail?: boolean
-
-  forensic?: boolean
 
   cache?: boolean
 

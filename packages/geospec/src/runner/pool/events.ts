@@ -1,6 +1,6 @@
 /** Runner event subscriptions shared by serial and pooled hosts. @module */
 
-import type { GeoSpecRunner, GeoSpecRunnerEvent } from 'geospec/runner/worker';
+import type { GeoSpecRunner, GeoSpecRunnerEvent } from '#runner/worker/runner-types.js';
 
 /** A runner-local event channel. */
 export const createRunnerEventChannel = (): {

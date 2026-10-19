@@ -5,7 +5,7 @@ import type {
   GeoSpecPoolWorkerMessage,
   GeoSpecRunnerEvent,
 } from 'geospec/runner/worker';
-import { openShardTimings } from '#runner/pool/timings.js';
+import { openShardTimings } from '#runner/node/pool-timings.js';
 import { createGeoSpecPoolRunner, mergeShardResults } from '#runner/pool/pool.js';
 import { sanitizePoolResult } from '#runner/pool/transport.js';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
@@ -78,8 +78,6 @@ const scriptedWorker = (script: {
   onList?: (file: string) => string[];
   /** Emit a `file-start` progress message before the settlement. */
   progress?: boolean;
-  /** Emit one forensic measurement before a shard settlement. */
-  forensic?: boolean;
 }): {
   handle: GeoSpecPoolWorkerHandle;
   sent: GeoSpecPoolHostMessage[];
@@ -122,17 +120,6 @@ const scriptedWorker = (script: {
             type: 'file-start',
             shardId: message.shard.id,
             file: message.shard.file,
-          }),
-        );
-      }
-      if (script.forensic === true) {
-        queueMicrotask(() =>
-          listener?.({
-            type: 'forensic',
-            shardId: message.shard.id,
-            name: 'runner.shard',
-            value: 1,
-            unit: 'milliseconds',
           }),
         );
       }
@@ -641,30 +628,6 @@ describe('createGeoSpecPoolRunner', () => {
     await expect(runner.run({ files: ['a.geospec.ts'] })).rejects.toThrow('native unavailable');
     expect(sent[0]).toContainEqual({ type: 'shutdown' });
     expect(terminated).toStrictEqual([true, true]);
-  });
-
-  it('should forward worker forensic events with their shard identity', async () => {
-    const events: GeoSpecRunnerEvent[] = [];
-    const worker = scriptedWorker({
-      forensic: true,
-      onShard: (file) => complete({ id: 0, file }, passing(file)),
-    });
-    const runner = createGeoSpecPoolRunner({
-      createWorker: () => worker.handle,
-      workers: 1,
-    });
-    runner.on('forensic', (event) => events.push(event));
-
-    await runner.run({ files: ['a.geospec.ts'], forensic: true });
-    await runner.close();
-
-    expect(events).toContainEqual({
-      type: 'forensic',
-      shardId: 0,
-      name: 'runner.shard',
-      value: 1,
-      unit: 'milliseconds',
-    });
   });
 
   it('should run every shard and report files in DECLARED order', async () => {
@@ -1386,8 +1349,6 @@ describe('the worker channel', () => {
     await runner.run({
       files: ['slow.geospec.ts'],
       testTimeout: 7000,
-      matcherWallBackstop: 9000,
-      forensic: true,
     });
     await runner.close();
 
@@ -1395,14 +1356,10 @@ describe('the worker channel', () => {
       {
         type: 'list-tests',
         testTimeout: 7000,
-        matcherWallBackstop: 9000,
-        forensic: true,
       },
       {
         type: 'run-shard',
         testTimeout: 7000,
-        matcherWallBackstop: 9000,
-        forensic: true,
       },
     ]);
   });

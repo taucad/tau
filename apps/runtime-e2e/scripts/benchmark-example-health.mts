@@ -47,7 +47,6 @@ type Sample = {
   iteration: number;
   wallDurationMs: number;
   result: GeoSpecRunnerResult;
-  forensic: Array<Extract<GeoSpecRunnerEvent, { type: 'forensic' }>>;
   shards: Array<Extract<GeoSpecRunnerEvent, { type: 'file-complete' }>>;
   observations: ModelObservation[];
 };
@@ -142,15 +141,12 @@ const runSample = async (options: { iteration: number; expectedModels: number })
   const started = performance.now();
   const observations = new Map<string, ModelObservation>();
   const runner = createRunner(observations);
-  const forensic: Sample['forensic'] = [];
   const shards: Sample['shards'] = [];
-  runner.on('forensic', (event) => forensic.push(event));
   runner.on('file-complete', (event) => shards.push(event));
   let sample: Sample | undefined;
   try {
     const result = await runner.run({
       files: [specFile],
-      forensic: true,
       testTimeout: 300_000,
       ...(examplePattern ? { testNamePattern: examplePattern } : {}),
     });
@@ -182,7 +178,6 @@ const runSample = async (options: { iteration: number; expectedModels: number })
       iteration: options.iteration,
       wallDurationMs,
       result,
-      forensic,
       shards,
       observations: [...observations.values()],
     };
@@ -198,10 +193,6 @@ const runSample = async (options: { iteration: number; expectedModels: number })
 const summarize = (samples: readonly Sample[]): Record<string, unknown> => {
   if (samples.length === 0) {
     return {};
-  }
-  const forensicTotals = new Map<string, number>();
-  for (const event of samples.flatMap(({ forensic }) => forensic)) {
-    forensicTotals.set(event.name, (forensicTotals.get(event.name) ?? 0) + event.value);
   }
   const tests = samples.flatMap(({ result }) =>
     result.files.flatMap(({ result: fileResult }) =>
@@ -221,7 +212,6 @@ const summarize = (samples: readonly Sample[]): Record<string, unknown> => {
       medianDurationMs: median(durations),
       spread: Math.max(...durations) - Math.min(...durations),
       slowestTests: tests.sort((left, right) => right.durationMs - left.durationMs).slice(0, 10),
-      forensicTotals: Object.fromEntries([...forensicTotals].sort(([left], [right]) => left.localeCompare(right))),
       shardDurations: samples.flatMap(({ shards }) => shards.map(({ durationMs }) => durationMs ?? 0)),
     },
   };

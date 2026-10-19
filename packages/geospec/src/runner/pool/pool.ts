@@ -29,18 +29,16 @@ import type {
   GeoSpecPoolShard,
   GeoSpecPoolWorkerHandle,
   GeoSpecPoolWorkerMessage,
-  GeoSpecRunner,
-  GeoSpecRunnerResult,
-  GeoSpecRunnerRunOptions,
-} from 'geospec/runner/worker';
-import { geoSpecTimeoutCode } from 'geospec/runner';
-import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
+} from '#runner/pool/pool-messages.js';
+import type { GeoSpecRunner, GeoSpecRunnerResult, GeoSpecRunnerRunOptions } from '#runner/worker/runner-types.js';
+import { geoSpecTimeoutCode } from '#runner/timeout-codes.js';
+import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/no-matching-tests-issue.js';
 import { assertRootedPath } from '@taucad/runtime/kernel';
-import type { ShardTimings } from '#runner/pool/timings.js';
+import type { ShardTimings } from '#runner/pool/shard-timings.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
-import { accumulateFileResult } from '#runner/serial.js';
-import { createRunnerEventChannel } from '#runner/events.js';
-import type { RunnerIssue } from '#runner/serial.js';
+import { accumulateFileResult } from '#runner/worker/serial-runner.js';
+import { createRunnerEventChannel } from '#runner/pool/events.js';
+import type { RunnerIssue } from '#runner/worker/serial-runner.js';
 import type { PlannedShard } from '#runner/pool/shard-planner.js';
 import { filesToSplit, planShards, selectShard } from '#runner/pool/shard-planner.js';
 
@@ -170,7 +168,6 @@ type ShardSettlement =
 
 const createWorkerChannel = (
   handle: GeoSpecPoolWorkerHandle,
-  emitForensic: (event: Extract<GeoSpecPoolWorkerMessage, { type: 'forensic' }>) => void,
 ): {
   settle: (shardId: number) => Promise<ShardSettlement>;
   ready: Promise<void>;
@@ -253,10 +250,6 @@ const createWorkerChannel = (
         deliver({ type: 'error', message: message.message });
         break;
       }
-      case 'forensic': {
-        emitForensic(message);
-        break;
-      }
       // `file-start` is progress, not a settlement.
       default:
     }
@@ -325,12 +318,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           await handle.terminate();
           return;
         }
-        channels.set(
-          handle,
-          createWorkerChannel(handle, ({ shardId, name, value, unit }) => {
-            events.emit({ type: 'forensic', shardId, name, value, unit });
-          }),
-        );
+        channels.set(handle, createWorkerChannel(handle));
         workers.push({ handle, busy: false, dead: false, initialized: false });
       }
     })();
@@ -563,10 +551,6 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
                 shardId: shard.id,
                 file,
                 ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
-                ...(runOptions.matcherWallBackstop === undefined
-                  ? {}
-                  : { matcherWallBackstop: runOptions.matcherWallBackstop }),
-                ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
               });
             },
             shard,
@@ -629,10 +613,6 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
                     ? {}
                     : { testNamePattern: String(runOptions.testNamePattern) }),
                   ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
-                  ...(runOptions.matcherWallBackstop === undefined
-                    ? {}
-                    : { matcherWallBackstop: runOptions.matcherWallBackstop }),
-                  ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
                 });
               },
               shard,

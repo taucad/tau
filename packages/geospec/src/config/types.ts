@@ -32,10 +32,7 @@ export type GeoSpecConfig = {
   testNamePattern?: string;
   /** Positive finite milliseconds; the runner owns its default. */
   testTimeout?: number;
-  /** Positive finite milliseconds; does not define a geometry verdict. */
-  matcherWallBackstop?: number;
   bail?: boolean;
-  forensic?: boolean;
   cache?: boolean;
   /** Requested cache location only; loading configuration creates no store. */
   cacheDirectory?: string;

@@ -10,14 +10,12 @@
  * @module
  */
 
-import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage, GeoSpecRunnerOptions } from 'geospec/runner/worker';
-import type { GeoSpecModuleBundleCache } from 'geospec/runner';
-import type { ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
-import { forensicSpanAsync } from '#runner/forensic.js';
-import type { ForensicSink } from '#runner/forensic.js';
+import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from '#runner/pool/pool-messages.js';
+import type { GeoSpecRunnerOptions } from '#runner/worker/runner-types.js';
+import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import { sanitizePoolResult } from '#runner/pool/transport.js';
-import { executeGeoSpecFile } from '#runner/serial.js';
-import type { GeoSpecRunResult } from '#runner/types.js';
+import { executeGeoSpecFile } from '#runner/worker/serial-runner.js';
+import type { GeoSpecModuleBundleCache, GeoSpecRunResult } from '#runner/types.js';
 
 /**
  * Options accepted by {@link startGeoSpecPoolWorkerHost}.
@@ -166,8 +164,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           collectOnly: true,
           bundleCache,
           ...(message.testTimeout === undefined ? {} : { testTimeout: message.testTimeout }),
-          ...(message.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: message.matcherWallBackstop }),
-          ...(message.forensic === undefined ? {} : { forensic: message.forensic }),
         });
         reply = { type: 'tests-listed', shardId: message.shardId, file: message.file, names: collectedNames(result) };
       } catch (error) {
@@ -179,12 +175,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
 
     const { shard } = message;
     options.postMessage({ type: 'file-start', shardId: shard.id, file: shard.file });
-    const forensicSink: ForensicSink | undefined =
-      message.forensic === true
-        ? ({ name, value, unit }) => {
-            options.postMessage({ type: 'forensic', shardId: shard.id, name, value, unit });
-          }
-        : undefined;
     const startedAt = performance.now();
     const shardFailed = (error: unknown): GeoSpecPoolWorkerMessage => ({
       type: 'shard-error',
@@ -194,26 +184,18 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     });
     let reply: GeoSpecPoolWorkerMessage;
     try {
-      const result = await forensicSpanAsync(
-        'runner.shard',
-        async () =>
-          executeGeoSpecFile({
-            runner,
-            file: shard.file,
-            bundleCache,
-            // A split shard's own pattern wins: it names exactly one test.
-            ...(shard.testNamePattern === undefined
-              ? message.testNamePattern === undefined
-                ? {}
-                : { testNamePattern: message.testNamePattern }
-              : { testNamePattern: shard.testNamePattern }),
-            ...(message.testTimeout === undefined ? {} : { testTimeout: message.testTimeout }),
-            ...(message.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: message.matcherWallBackstop }),
-            ...(message.forensic === undefined ? {} : { forensic: message.forensic }),
-            ...(forensicSink === undefined ? {} : { forensicSink }),
-          }),
-        forensicSink,
-      );
+      const result = await executeGeoSpecFile({
+        runner,
+        file: shard.file,
+        bundleCache,
+        // A split shard's own pattern wins: it names exactly one test.
+        ...(shard.testNamePattern === undefined
+          ? message.testNamePattern === undefined
+            ? {}
+            : { testNamePattern: message.testNamePattern }
+          : { testNamePattern: shard.testNamePattern }),
+        ...(message.testTimeout === undefined ? {} : { testTimeout: message.testTimeout }),
+      });
       const workerMemoryBytes = options.measureMemoryBytes?.();
       reply = {
         type: 'shard-complete',

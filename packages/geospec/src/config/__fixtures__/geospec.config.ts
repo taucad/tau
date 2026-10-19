@@ -7,9 +7,7 @@ export default {
   exclude: ['**/skip.geospec.ts'],
   testNamePattern: 'ordinary',
   testTimeout: 1200,
-  matcherWallBackstop: 2400,
   bail: true,
-  forensic: true,
   cache: true,
   cacheDirectory: '.tau/config-cache',
   subjects: {

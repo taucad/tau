@@ -40,9 +40,7 @@ describe('trusted Node GeoSpec configuration', () => {
       exclude: [],
       testNamePattern: undefined,
       testTimeout: 600,
-      matcherWallBackstop: undefined,
       bail: false,
-      forensic: false,
       cache: false,
       cacheDirectory: '.tau/overridden',
       subjects: { alternate: { kind: 'tau-project', manifestPath: 'tau.json', manifest, format: 'glb' } },
@@ -89,6 +87,8 @@ describe('trusted Node GeoSpec configuration', () => {
   it.each([
     { value: [], message: 'GeoSpec config must be a plain object.' },
     { value: { timeout: 1 }, message: "Unsupported GeoSpec config field 'timeout'." },
+    { value: { forensic: true }, message: "Unsupported GeoSpec config field 'forensic'." },
+    { value: { matcherWallBackstop: 1 }, message: "Unsupported GeoSpec config field 'matcherWallBackstop'." },
     { value: { testTimeout: 0 }, message: 'GeoSpec testTimeout must be positive finite milliseconds.' },
     { value: { bail: 'yes' }, message: 'GeoSpec bail must be a boolean.' },
     { value: { include: 'cases' }, message: 'GeoSpec include must be an array of strings.' },

@@ -88,8 +88,7 @@ const validateConfig = (value: unknown): GeoSpecConfig => {
         result[key] = entry;
         break;
       }
-      case 'testTimeout':
-      case 'matcherWallBackstop': {
+      case 'testTimeout': {
         if (entry === undefined) {
           break;
         }
@@ -100,7 +99,6 @@ const validateConfig = (value: unknown): GeoSpecConfig => {
         break;
       }
       case 'bail':
-      case 'forensic':
       case 'cache': {
         if (entry === undefined) {
           break;

@@ -56,8 +56,6 @@ export type GeoSpecCollector = {
 
 /** Per-module collector configuration; native subject/engine lifetime stays with the host. @public */
 export type GeoSpecCollectorOptions = {
-  matcherWallBackstop?: number;
-  forensic?: boolean;
   nativeAssertions: GeoSpecAssertionClientOptions;
   /** Observes each selected test as it starts and settles, for host progress reporting. */
   onTestEvent?: (event: GeoSpecTestEvent) => void;

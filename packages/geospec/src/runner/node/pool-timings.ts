@@ -14,34 +14,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
-
-/**
- * One shard's recorded cost.
- *
- * @public
- */
-export type ShardTiming = {
-  /** Wall duration of the last recorded run, in milliseconds. */
-  durationMs: number;
-  /** Highest RSS observed for this shard, in bytes. Monotonic. */
-  peakRssBytes: number;
-};
-
-/**
- * A mutable timings table.
- *
- * @public
- */
-export type ShardTimings = {
-  /** Merge one observation. Peak RSS only ever grows. */
-  record(shard: string, timing: ShardTiming): void;
-  /** The hint for one shard, or `undefined` when unknown. */
-  read(shard: string): ShardTiming | undefined;
-  /** Every recorded shard, sorted by descending duration (longest-first). */
-  longestFirst(): string[];
-  /** Persist the table. Failure is silent: telemetry never fails a run. */
-  save(): void;
-};
+import type { ShardTiming, ShardTimings } from '#runner/pool/shard-timings.js';
 
 const timingsPath = (root: string): string => join(root, 'telemetry', 'shard-timings.json');
 
@@ -60,7 +33,7 @@ const readTable = (path: string): Record<string, ShardTiming> => {
  *
  * @param root - Cache root, or `undefined` to keep the table in memory only.
  * @returns The table.
- * @public
+ * @internal
  */
 export const openShardTimings = (root: string | undefined): ShardTimings => {
   const path = root === undefined ? undefined : timingsPath(root);

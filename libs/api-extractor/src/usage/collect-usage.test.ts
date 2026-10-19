@@ -13,6 +13,7 @@ import {
   identifierTokens,
   indexCorpora,
   lookupReference,
+  pruneUsageReports,
   stripSource,
   usedIds,
   withJsxTokens,
@@ -283,6 +284,21 @@ describe('collect-usage', () => {
       expect(written).toBe(`${JSON.stringify(reports[0], undefined, 2)}\n`);
       expect(written).not.toContain(scratch);
       expect(written).not.toContain('main.scad');
+    });
+
+    it('should drop only the symbols a corpus no longer declares and keep every other count', () => {
+      const shrunk = { ...openscad, corpus: () => corpus('openscad', [{ name: 'cube', kind: 'module' }]) };
+
+      const pruned = pruneUsageReports(reports, [shrunk]);
+
+      expect(pruned).toEqual([
+        {
+          slug: 'cad-openscad',
+          sources: { workspaceFiles: 1, exampleFiles: 1, transcriptRuns: 2 },
+          symbols: [{ id: 'openscad:cube', name: 'cube', score: 2, workspace: 1, examples: 1, lookups: 0 }],
+        },
+      ]);
+      expect(reports[0]?.symbols).toHaveLength(4);
     });
   });
 });

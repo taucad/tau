@@ -3,7 +3,7 @@
 import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { allocateNativePoolGrants } from 'geospec/runner/native';
-import { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
+import { createGeoSpecPoolRunner } from 'geospec/runner/worker';
 import type {
   GeoSpecPoolHostMessage,
   GeoSpecPoolWorkerHandle,

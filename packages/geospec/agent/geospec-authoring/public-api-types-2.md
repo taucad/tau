@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-60 top-level symbols. Signatures are verbatim typescript.
+56 top-level symbols. Signatures are verbatim typescript.
 
 // Runtime client surface consumed by `geospec/model`
 // Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
@@ -397,16 +397,10 @@ GeoSpecCollector: {
 
 // Per-module collector configuration
 GeoSpecCollectorOptions: {
-    matcherWallBackstop?: number;
-    forensic?: boolean;
     nativeAssertions: GeoSpecAssertionClientOptions;
     /** Observes each selected test as it starts and settles, for host progress reporting. */
     onTestEvent?: (event: GeoSpecTestEvent) => void;
 }
-
-  matcherWallBackstop?: number
-
-  forensic?: boolean
 
   nativeAssertions: GeoSpecAssertionClientOptions
 
@@ -619,10 +613,6 @@ RunGeoSpecModuleOptions: {
     testNamePattern?: string | RegExp;
     /** Timeout for async test callbacks, in milliseconds. */
     testTimeout?: number;
-    /** Milliseconds. Non-verdict matcher infrastructure backstop. */
-    matcherWallBackstop?: number;
-    /** Emit structured forensic events for this run. */
-    forensic?: boolean;
     /** Observes each selected test as it starts and settles, for host progress reporting. */
     onTestEvent?: (event: GeoSpecTestEvent) => void;
     /**
@@ -659,12 +649,6 @@ RunGeoSpecModuleOptions: {
 
   // Timeout for async test callbacks, in milliseconds
   testTimeout?: number
-
-  // Milliseconds
-  matcherWallBackstop?: number
-
-  // Emit structured forensic events for this run
-  forensic?: boolean
 
   // Observes each selected test as it starts and settles, for host progress reporting
   onTestEvent?: (event: GeoSpecTestEvent) => void
@@ -900,16 +884,12 @@ GeoSpecPoolHostMessage: {
     shard: GeoSpecPoolShard;
     testNamePattern?: string;
     testTimeout?: number;
-    matcherWallBackstop?: number;
-    forensic?: boolean;
 } | {
     /** List-only collection pass: register tests, run no bodies (R3 splitting). */
     type: 'list-tests';
     shardId: number;
     file: string;
     testTimeout?: number;
-    matcherWallBackstop?: number;
-    forensic?: boolean;
 } | {
     type: 'shutdown';
 }
@@ -974,12 +954,6 @@ GeoSpecPoolWorkerMessage: {
     shardId: number;
     file: string;
 } | {
-    type: 'forensic';
-    shardId: number;
-    name: string;
-    value: number;
-    unit: 'milliseconds' | 'count';
-} | {
     type: 'tests-listed';
     shardId: number;
     file: string;
@@ -1006,25 +980,6 @@ GeoSpecPoolWorkerMessage: {
 }
 
   type: 'ready'
-
-// One structured forensic measurement emitted by a runner
-GeoSpecForensicEvent: {
-    type: 'forensic';
-    name: string;
-    value: number;
-    unit: 'milliseconds' | 'count';
-    shardId?: number;
-}
-
-  type: 'forensic'
-
-  name: string
-
-  value: number
-
-  unit: 'milliseconds' | 'count'
-
-  shardId?: number
 
 // Public GeoSpec runner lifecycle surface
 GeoSpecRunner: {
@@ -1083,14 +1038,14 @@ GeoSpecRunnerEvent: {
 } | {
     type: 'run-complete';
     result: GeoSpecRunnerResult;
-} | GeoSpecForensicEvent | {
+} | {
     type: 'abort';
     reason?: string;
 } | {
     type: 'close';
 }
 
-  type: 'forensic'
+  type: 'run-start'
 
 // One GeoSpec test file executed by a worker-style runner
 GeoSpecRunnerFileResult: {
@@ -1202,16 +1157,12 @@ GeoSpecRunnerRunOptions: {
     testNamePattern?: string | RegExp;
     /** Timeout for each async test callback, in milliseconds. */
     testTimeout?: number;
-    /** Non-verdict matcher wall backstop. Milliseconds. */
-    matcherWallBackstop?: number;
     /**
      * Engine work-unit budget for this run's claims, replacing the runner's
      * `nativeAssertions.workUnitLimit`. A `loadModel` or `expectGeo` budget still
      * wins for its own claims.
      */
     workUnitLimit?: number;
-    /** Emit structured forensic measurements for this run. */
-    forensic?: boolean;
     /**
      * Stop after the first failing file (R1). Interactive fail-fast only —
      * never the default for reward runs, which want the complete red set.
@@ -1228,17 +1179,136 @@ GeoSpecRunnerRunOptions: {
   // Timeout for each async test callback, in milliseconds
   testTimeout?: number
 
-  // Non-verdict matcher wall backstop
-  matcherWallBackstop?: number
-
   // Engine work-unit budget for this run's claims, replacing the runner's `nativeAssertions.workUnitLimit`
   workUnitLimit?: number
 
-  // Emit structured forensic measurements for this run
-  forensic?: boolean
-
   // Stop after the first failing file (R1)
   bail?: boolean
+
+// Everything the pool needs that differs between Node and the browser
+GeoSpecPoolOptions: {
+    /** Spawn one worker running `startGeoSpecPoolWorkerHost`. */
+    createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
+    /** Optional one-time worker initialization performed after its ready signal. */
+    initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
+    /** Wait for each native worker's cleanup acknowledgement before terminating it. */
+    gracefulShutdown?: boolean;
+    /** Worker count. Omit to let the caller's host auto-size before calling. */
+    workers: number;
+    /** Optional scheduling telemetry. Absent = declared order, no memory class. */
+    timings?: ShardTimings;
+    /** Per-shard non-verdict watchdog, milliseconds (R11). */
+    shardTimeout?: number;
+    /** Split files whose recorded duration exceeds this. Milliseconds. */
+    splitThreshold?: number;
+}
+
+  // Spawn one worker running `startGeoSpecPoolWorkerHost`
+  createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>
+
+  // Optional one-time worker initialization performed after its ready signal
+  initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void
+
+  // Wait for each native worker's cleanup acknowledgement before terminating it
+  gracefulShutdown?: boolean
+
+  // Worker count
+  workers: number
+
+  // Optional scheduling telemetry
+  timings?: ShardTimings
+
+  // Per-shard non-verdict watchdog, milliseconds (R11)
+  shardTimeout?: number
+
+  // Split files whose recorded duration exceeds this
+  splitThreshold?: number
+
+// One shard's recorded cost
+ShardTiming: {
+    /** Wall duration of the last recorded run, in milliseconds. */
+    durationMs: number;
+    /** Highest RSS observed for this shard, in bytes. Monotonic. */
+    peakRssBytes: number;
+}
+
+  // Wall duration of the last recorded run, in milliseconds
+  durationMs: number
+
+  // Highest RSS observed for this shard, in bytes
+  peakRssBytes: number
+
+// A mutable timings table
+ShardTimings: {
+    /** Merge one observation. Peak RSS only ever grows. */
+    record(shard: string, timing: ShardTiming): void;
+    /** The hint for one shard, or `undefined` when unknown. */
+    read(shard: string): ShardTiming | undefined;
+    /** Every recorded shard, sorted by descending duration (longest-first). */
+    longestFirst(): string[];
+    /** Persist the table. Failure is silent: telemetry never fails a run. */
+    save(): void;
+}
+
+  // Merge one observation
+  // ShardTimings.record (method)
+  record(shard: string, timing: ShardTiming): void;
+
+  // The hint for one shard, or `undefined` when unknown
+  // ShardTimings.read (method)
+  read(shard: string): ShardTiming | undefined;
+
+  // Every recorded shard, sorted by descending duration (longest-first)
+  // ShardTimings.longestFirst (method)
+  longestFirst(): string[];
+
+  // Persist the table
+  // ShardTimings.save (method)
+  save(): void;
+
+// Options accepted by {@link startGeoSpecPoolWorkerHost}
+GeoSpecPoolWorkerHostOptions: {
+    /** Filesystem containing the project and test modules. */
+    filesystem: GeoSpecRunnerOptions['filesystem'];
+    /** Native assertion client shared with this worker's model admissions. */
+    nativeAssertions: GeoSpecRunnerOptions['nativeAssertions'];
+    /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+    nativeModelLoader: ManagedGeoSpecNativeModelLoader;
+    /** Additional in-memory modules made available to the VM. */
+    builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+    /** Post a message to the pool host. */
+    postMessage: (message: GeoSpecPoolWorkerMessage) => void;
+    /** Subscribe to pool-host messages. */
+    onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void;
+    /** Sample this worker's resident memory in bytes (R15 telemetry); optional. */
+    measureMemoryBytes?: () => number | undefined;
+    /** Release platform resources on shutdown, after the native subjects are released. */
+    onShutdown?: () => Promise<void> | void;
+}
+
+  // Filesystem containing the project and test modules
+  filesystem: GeoSpecRunnerOptions['filesystem']
+
+  // Native assertion client shared with this worker's model admissions
+  nativeAssertions: GeoSpecRunnerOptions['nativeAssertions']
+
+  // Managed native admissions, released after every shard and collection pass and before shutdown
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+
+  // Additional in-memory modules made available to the VM
+  builtinModules?: GeoSpecRunnerOptions['builtinModules']
+
+  // Post a message to the pool host
+  postMessage: (message: GeoSpecPoolWorkerMessage) => void
+
+  // Subscribe to pool-host messages
+  onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void
+
+  // Sample this worker's resident memory in bytes (R15 telemetry)
+  measureMemoryBytes?: () => number | undefined
+
+  // Release platform resources on shutdown, after the native subjects are released
+  onShutdown?: () => Promise<void> | void
 
 // Runner-independent native assertion client
 GeoSpecAssertionClient: {
@@ -1370,120 +1440,3 @@ MinimumDistanceFact: {
   readonly distance: number
 
   readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
-
-// Complete AP242 minimum over two subject-bound occurrence paths
-MinimumDistanceQuery: {
-    readonly capability: 'minimumDistance';
-    readonly subject: GeoSpecNativeSubject;
-    readonly payload: {
-        readonly pair: readonly [{
-            readonly occurrencePath: string;
-        }, {
-            readonly occurrencePath: string;
-        }];
-    };
-}
-
-  readonly capability: 'minimumDistance'
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly payload: {
-          readonly pair: readonly [{
-              readonly occurrencePath: string;
-          }, {
-              readonly occurrencePath: string;
-          }];
-      }
-
-// Geometry refusal and infrastructure interruption never masquerade as facts
-MinimumDistanceResult: {
-    readonly status: 'complete';
-    readonly fact: MinimumDistanceFact;
-} | {
-    readonly status: 'refused';
-    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
-    readonly message: string;
-} | {
-    readonly status: 'interrupted';
-    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
-    readonly message: string;
-}
-
-  readonly status: 'complete'
-
-// Flat native query transport options
-GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
-    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
-    readonly payload?: unknown;
-}
-
-  readonly engine: GeoSpecNativeEngine
-
-  readonly claimId: string
-
-  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
-
-  readonly subjectSlot: string
-
-  readonly workUnitLimit: number
-
-  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
-  readonly maximumWorkUnitLimit?: number
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
-
-  readonly payload?: unknown
-
-// Existing positive-only ancillary operations owned by the native core
-GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
-
-// Explicit support state for one source-attributed inventory field
-GeoSpecPmiField: {
-    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
-    readonly value: Value | null;
-    readonly reason: string | null;
-}
-
-  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
-
-  readonly value: Value | null
-
-  readonly reason: string | null
-
-// Original Part21 entity ID and exact source argument tokens
-GeoSpecPmiRawEntity: {
-    readonly sourceId: number;
-    readonly kind: string;
-    readonly arguments: readonly string[];
-}
-
-  readonly sourceId: number
-
-  readonly kind: string
-
-  readonly arguments: readonly string[]
-
-// Source-authored scalar and Rust-normalized reduced rational millimetres
-GeoSpecPmiNumber: {
-    readonly sourceId: number;
-    readonly authoredText: string;
-    readonly unitId: number;
-    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
-    readonly millimetres: string;
-    readonly name: string;
-}
-
-  readonly sourceId: number
-
-  readonly authoredText: string
-
-  readonly unitId: number
-
-  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
-
-  readonly millimetres: string
-
-  readonly name: string

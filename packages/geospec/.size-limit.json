@@ -1,8 +1,8 @@
 [
   {
-    "name": "portable (ESM JS without the Node-only subpaths) — measured 31.81 kB brotli on 2026-10-19 (adds the model exporter route)",
+    "name": "portable (ESM JS without the Node-only subpaths) — measured 37.03 kB brotli on 2026-10-19 (adds the worker pool)",
     "path": ["dist/**/*.mjs", "!dist/config/node/**", "!dist/model/node/**", "!dist/runner/node/**"],
-    "limit": "32 kB"
+    "limit": "38 kB"
   },
   {
     "name": "Node-only subpaths (config/node, model/node, runner/node) — measured 3.33 kB brotli on 2026-10-19 (adds commandExporter)",

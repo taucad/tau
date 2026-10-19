@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { openShardTimings } from '#runner/pool/timings.js';
+import { openShardTimings } from '#runner/node/pool-timings.js';
 
 const roots: string[] = [];
 const freshRoot = (): string => {

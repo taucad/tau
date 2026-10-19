@@ -36,8 +36,6 @@ type SuiteRequest = Readonly<{
     files: readonly string[];
     testNamePattern?: string | RegExp;
     testTimeout?: number;
-    matcherWallBackstop?: number;
-    forensic?: boolean;
     bail?: boolean;
   }>;
 }>;
@@ -167,23 +165,18 @@ const suiteRequest = (value: unknown): value is SuiteRequest => {
   ) {
     return false;
   }
-  const allowed = new Set(['files', 'testNamePattern', 'testTimeout', 'matcherWallBackstop', 'forensic', 'bail']);
+  const allowed = new Set(['files', 'testNamePattern', 'testTimeout', 'bail']);
   if (Object.keys(options).some((key) => !allowed.has(key))) {
     return false;
   }
   const pattern = options['testNamePattern'];
-  const { testTimeout, matcherWallBackstop } = options;
+  const { testTimeout } = options;
   return (
     (pattern === undefined || (typeof pattern === 'string' && pattern.length <= 1024) || pattern instanceof RegExp) &&
     (testTimeout === undefined ||
       (Number.isSafeInteger(testTimeout) &&
         (testTimeout as number) > 0 &&
         (testTimeout as number) <= suiteDeadlineMilliseconds)) &&
-    (matcherWallBackstop === undefined ||
-      (Number.isSafeInteger(matcherWallBackstop) &&
-        (matcherWallBackstop as number) > 0 &&
-        (matcherWallBackstop as number) <= suiteDeadlineMilliseconds)) &&
-    (options['forensic'] === undefined || typeof options['forensic'] === 'boolean') &&
     (options['bail'] === undefined || typeof options['bail'] === 'boolean')
   );
 };

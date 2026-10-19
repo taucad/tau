@@ -12,8 +12,8 @@
  * @module
  */
 
-import type { GeoSpecPoolShard } from 'geospec/runner/worker';
-import type { ShardTiming, ShardTimings } from '#runner/pool/timings.js';
+import type { GeoSpecPoolShard } from '#runner/pool/pool-messages.js';
+import type { ShardTiming, ShardTimings } from '#runner/pool/shard-timings.js';
 
 /**
  * The telemetry key one shard is recorded under.

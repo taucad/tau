@@ -535,14 +535,6 @@
       "lookups": 4
     },
     {
-      "id": "typescript:GeoSpecForensicEvent.type",
-      "name": "type",
-      "score": 4,
-      "workspace": 1,
-      "examples": 1,
-      "lookups": 2
-    },
-    {
       "id": "typescript:GeoSpecMatcher.toHaveMass",
       "name": "toHaveMass",
       "score": 4,

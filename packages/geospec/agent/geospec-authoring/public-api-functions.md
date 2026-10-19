@@ -1,6 +1,6 @@
 # geospec — Functions
 
-39 top-level symbols. Signatures are verbatim typescript.
+41 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -178,6 +178,16 @@ export declare function resolveUnderRoot(root: string, path: string): string;
 // Create a run-level issue when filters select no tests
 // createNoMatchingGeoSpecTestsIssue (function)
 export declare function createNoMatchingGeoSpecTestsIssue(): VmIssue;
+
+// Create the host-agnostic pool runner
+// createGeoSpecPoolRunner (function)
+export declare function createGeoSpecPoolRunner(options: GeoSpecPoolOptions): GeoSpecRunner;
+//   options: Worker factory, worker count, telemetry and event hook
+
+// Serve shards until the host says shutdown
+// startGeoSpecPoolWorkerHost (function)
+export declare function startGeoSpecPoolWorkerHost(options: GeoSpecPoolWorkerHostOptions): void;
+//   options: Worker filesystem, native engine, and message plumbing
 
 // Create a standalone native GeoSpec assertion client
 // createGeoSpecAssertionClient (function)

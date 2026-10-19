@@ -49,7 +49,6 @@ describe('Tau example model health', () => {
         // oxlint-disable-next-line no-await-in-loop -- Runs are serial so each releases its evidence first.
         const result = await runner.run({
           files: ['example-health.geospec.ts'],
-          forensic: true,
           testNamePattern: `(^|\\s)${escapeRegExp(`${kernel}.${name}`)}$`,
           testTimeout: 300_000,
         });

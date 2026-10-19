@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRunnerEventChannel } from '#runner/events.js';
+import { createRunnerEventChannel } from '#runner/pool/events.js';
 
 describe('createRunnerEventChannel', () => {
   it('should deliver only the subscribed event type until unsubscribed or cleared', () => {

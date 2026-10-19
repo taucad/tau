@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { GeoSpecNativeModelEngine } from 'geospec/runner/native';
-import type { GeoSpecRunnerOptions } from 'geospec/runner/worker';
-import type { ForensicMeasurement } from '#runner/forensic.js';
-import { accumulateFileResult, countRunnerTests, executeGeoSpecFile } from '#runner/serial.js';
+import type { GeoSpecRunnerOptions } from '#runner/worker/index.js';
+import { accumulateFileResult, countRunnerTests, executeGeoSpecFile } from '#runner/worker/serial-runner.js';
 import { failingSpec, memoryFileSystem, passingSpec } from '#runner/testing/memory-filesystem.js';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
 
@@ -90,8 +89,6 @@ describe('executeGeoSpecFile', () => {
       file: 'spec.geospec.ts',
       testNamePattern: 'nothing matches',
       testTimeout: 5000,
-      matcherWallBackstop: 1000,
-      forensic: false,
     });
 
     expect(result.success && result.tests).toStrictEqual([]);
@@ -123,17 +120,21 @@ describe('executeGeoSpecFile', () => {
     expect(load.mock.calls[0]).toMatchObject([{ file: 'main.ts' }]);
   });
 
-  it('should time the file through the forensic sink', async () => {
-    const measurements: ForensicMeasurement[] = [];
-    const runner = runnerOptions({ 'spec.geospec.ts': passingSpec('timed') });
+  it('should apply a per-run work-unit limit over the runner assertion options', async () => {
+    const runner = runnerOptions({ 'spec.geospec.ts': passingSpec('limited') });
 
-    await executeGeoSpecFile({
-      runner,
-      file: 'spec.geospec.ts',
-      forensic: true,
-      forensicSink: (measurement) => measurements.push(measurement),
-    });
+    const result = await executeGeoSpecFile({ runner, file: 'spec.geospec.ts', workUnitLimit: 7 });
 
-    expect(measurements.map(({ name, unit }) => [name, unit])).toStrictEqual([['runner.file', 'milliseconds']]);
+    expect(result.success).toBe(true);
+    expect(runner.nativeAssertions.workUnitLimit).toBeUndefined();
+  });
+
+  it('should report each test start and completion to the observer', async () => {
+    const events: string[] = [];
+    const runner = runnerOptions({ 'spec.geospec.ts': passingSpec('observed') });
+
+    await executeGeoSpecFile({ runner, file: 'spec.geospec.ts', onTestEvent: (event) => events.push(event.type) });
+
+    expect(events).toStrictEqual(['test-start', 'test-complete']);
   });
 });

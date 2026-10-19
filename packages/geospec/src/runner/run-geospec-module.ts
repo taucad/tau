@@ -212,8 +212,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     filesystem: recorder.filesystem,
   });
   const collector = createCollector({
-    ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
-    ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
     ...(options.onTestEvent === undefined ? {} : { onTestEvent: options.onTestEvent }),
     nativeAssertions: options.nativeAssertions,
   });

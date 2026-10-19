@@ -27,7 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine, initialize } from 'geospec-engine/wasm';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { RuntimeClient } from '@taucad/runtime/client';

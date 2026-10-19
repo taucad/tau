@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { VmFileSystem } from '#runner/node/node-vm-filesystem.js';
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 
 /**
  * Build a filesystem over a path → source map.

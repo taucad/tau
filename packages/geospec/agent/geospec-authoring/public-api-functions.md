@@ -1,6 +1,6 @@
 # geospec — Functions
 
-36 top-level symbols. Signatures are verbatim typescript.
+38 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -156,6 +156,18 @@ export declare function allocateNativePoolGrants(options: {
 // createGeoSpecNativeModelLoader (function)
 export declare function createGeoSpecNativeModelLoader(defaults: CreateGeoSpecNativeModelLoaderOptions): ManagedGeoSpecNativeModelLoader;
 //   defaults: Native engine, Runtime defaults, and optional source reader
+
+// Create a Node `VmFileSystem` rooted at `root`
+// createNodeVmFileSystem (function)
+export declare function createNodeVmFileSystem(root: string): VmFileSystem;
+//   root: Absolute project root path
+
+// Resolve one VM path to a real path under the root
+// Throws: Error when the path escapes the root.
+// resolveUnderRoot (function)
+export declare function resolveUnderRoot(root: string, path: string): string;
+//   root: The project root
+//   path: A canonical path rooted by the supplied project capability
 
 // Create a run-level issue when filters select no tests
 // createNoMatchingGeoSpecTestsIssue (function)

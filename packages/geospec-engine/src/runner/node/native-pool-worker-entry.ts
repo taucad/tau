@@ -7,7 +7,7 @@ import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { RuntimeDefinition } from '@taucad/runtime';
 import type * as NativeStore from '@taucad/native-process-core/store';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
-import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 
 /** Rooted project and assigned caller-inclusive native CPU grant. @public */

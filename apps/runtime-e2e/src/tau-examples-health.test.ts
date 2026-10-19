@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';

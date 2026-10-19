@@ -171,6 +171,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       'model/index.d.ts',
       'runner/index.d.ts',
       'runner/native/index.d.ts',
+      'runner/node/index.d.ts',
       'runner/worker/index.d.ts',
     ]) {
       expect(typeof files[declarationFile]).toBe('string');
@@ -186,17 +187,10 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       ['./config/node', './config/node/index.d.ts'],
       ['./model', './model/index.d.ts'],
       ['./runner/native', './runner/native/index.d.ts'],
+      ['./runner/node', './runner/node/index.d.ts'],
       ['./runner/worker', './runner/worker/index.d.ts'],
     ] as const;
-    for (const removed of [
-      './brep',
-      './inspection',
-      './proofs',
-      './runner/node',
-      './runner/web',
-      './selector',
-      './step',
-    ]) {
+    for (const removed of ['./brep', './inspection', './proofs', './runner/web', './selector', './step']) {
       expect(packageExports[removed]).toBeUndefined();
     }
     for (const [specifier, typePath] of expectedPublicExports) {

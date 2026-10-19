@@ -1,6 +1,6 @@
 # geospec public API index
 
-geospec 0.1.0-beta.7 · 875 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.7 · 877 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -35,16 +35,18 @@ isGeoSpecTimeoutCode (function) [lines 136-139] — Whether a diagnostic or issu
 createNativeGeoSpecRunner (function) [lines 141-144] — Compose compiled assertion and model bindings with the SDK's serial…
 allocateNativePoolGrants (function) [lines 146-153] — Assign a bounded CPU budget across already-selected worker isolates
 createGeoSpecNativeModelLoader (function) [lines 155-158] — Create a native model loader that admits actual STEP/GLB bytes…
-createNoMatchingGeoSpecTestsIssue (function) [lines 160-162] — Create a run-level issue when filters select no tests
-createGeoSpecAssertionClient (function) [lines 164-167] — Create a standalone native GeoSpec assertion client
-createGeoSpecMatcherMethods (function) [lines 169-176] — Create the one registry-derived matcher surface used by every JavaScript…
-evaluateGeoSpecNativeQuery (function) [lines 178-182] — Submit an ancillary query with positive polarity through the native…
-resolveGeoSpecMaximumWorkUnitLimit (function) [lines 184-188] — Resolve a host's largest authored work-unit budget
-createGeoSpecVitestAdapter (function) [lines 190-193] — Create Vitest matchers over an existing runner-independent client
-installGeoSpecVitest (function) [lines 195-198] — Register GeoSpec matchers and their settlement hook in the active…
-setupGeoSpecVitest (function) [lines 200-203] — Create a native client and register it with the active…
-exportTauProjectArtifact (function) [lines 205-209] — Export one Tau project from Runtime's coherent source snapshot
-loadGeoSpecConfig (function) [lines 211-215] — Load one trusted project config using Node's native module loader
+createNodeVmFileSystem (function) [lines 160-163] — Create a Node `VmFileSystem` rooted at `root`
+resolveUnderRoot (function) [lines 165-170] — Resolve one VM path to a real path under the…
+createNoMatchingGeoSpecTestsIssue (function) [lines 172-174] — Create a run-level issue when filters select no tests
+createGeoSpecAssertionClient (function) [lines 176-179] — Create a standalone native GeoSpec assertion client
+createGeoSpecMatcherMethods (function) [lines 181-188] — Create the one registry-derived matcher surface used by every JavaScript…
+evaluateGeoSpecNativeQuery (function) [lines 190-194] — Submit an ancillary query with positive polarity through the native…
+resolveGeoSpecMaximumWorkUnitLimit (function) [lines 196-200] — Resolve a host's largest authored work-unit budget
+createGeoSpecVitestAdapter (function) [lines 202-205] — Create Vitest matchers over an existing runner-independent client
+installGeoSpecVitest (function) [lines 207-210] — Register GeoSpec matchers and their settlement hook in the active…
+setupGeoSpecVitest (function) [lines 212-215] — Create a native client and register it with the active…
+exportTauProjectArtifact (function) [lines 217-221] — Export one Tau project from Runtime's coherent source snapshot
+loadGeoSpecConfig (function) [lines 223-227] — Load one trusted project config using Node's native module loader
 
 ## Constants — `public-api-constants.md`
 

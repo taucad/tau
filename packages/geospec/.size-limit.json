@@ -1,7 +1,12 @@
 [
   {
-    "name": "total (ESM JS) — measured 30.36 kB brotli on 2026-10-16 (adds region-scoped claims, host work maxima, run budgets and capacity guidance)",
-    "path": "dist/**/*.mjs",
+    "name": "portable (ESM JS without the Node-only subpaths) — measured 30.8 kB brotli on 2026-10-19",
+    "path": ["dist/**/*.mjs", "!dist/config/node/**", "!dist/runner/node/**"],
     "limit": "32 kB"
+  },
+  {
+    "name": "Node-only subpaths (config/node, runner/node) — measured 1.64 kB brotli on 2026-10-19",
+    "path": ["dist/config/node/**/*.mjs", "dist/runner/node/**/*.mjs"],
+    "limit": "3 kB"
   }
 ]

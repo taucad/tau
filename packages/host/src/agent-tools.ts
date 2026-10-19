@@ -261,7 +261,7 @@ const geoSpecEngineResolves = (): boolean => {
      * dependencies, so its own module is the correct base — unlike the kernel
      * plugins next door. */
     import.meta.resolve('geospec/runner/native');
-    import.meta.resolve('@taucad/geospec-engine/node-filesystem');
+    import.meta.resolve('geospec/runner/node');
     createRequire(import.meta.url)('geospec-engine/node');
     geoSpecEngineLoads = true;
   } catch {
@@ -450,7 +450,7 @@ export const createHostGeoSpecRunner = async (
     const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
       openNativeGeoSpecSession(workspaceRoot),
       import('geospec/runner/native'),
-      import('@taucad/geospec-engine/node-filesystem'),
+      import('geospec/runner/node'),
     ]);
 
     const filesystem = createNodeVmFileSystem(workspaceRoot);

@@ -31,7 +31,7 @@ import { availableParallelism, cpus, freemem, hostname, platform, release, total
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';

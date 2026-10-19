@@ -32,7 +32,7 @@ vi.mock('@taucad/native-process-core/store', () => ({
   installNativeClosureResolver: owner.install,
 }));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
-vi.mock('#runner/node/node-vm-filesystem.js', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
+vi.mock('geospec/runner/node', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
 vi.mock('#runner/pool/worker-host.js', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
 
 const runtimeFactory = () => {

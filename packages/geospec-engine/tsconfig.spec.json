@@ -39,7 +39,6 @@
     "src/runner/node/native-pool-runner.ts",
     "src/runner/node/native-pool-worker-entry.test.ts",
     "src/runner/node/native-pool-worker-entry.ts",
-    "src/runner/node/node-vm-filesystem.test.ts",
     "src/runner/node/node-vm-filesystem.ts",
     "src/runner/pool/pool.test.ts",
     "src/runner/pool/pool.ts",

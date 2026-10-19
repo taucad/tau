@@ -21,6 +21,7 @@ const publicEntries = {
   './model': './model/index.d.ts',
   './runner': './runner/index.d.ts',
   './runner/native': './runner/native/index.d.ts',
+  './runner/node': './runner/node/index.d.ts',
   './runner/worker': './runner/worker/index.d.ts',
   './assertion-client': './assertion-client/index.d.ts',
   './vitest': './vitest/index.d.ts',

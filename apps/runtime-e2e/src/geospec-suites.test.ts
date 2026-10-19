@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
 import { createExampleRuntimeClient, exampleKernelIds } from '@taucad/tau-examples/runtime';
 import type { GeoSpecRuntimeClient } from 'geospec/model';

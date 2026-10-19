@@ -42,7 +42,7 @@ vi.mock('geospec-engine/node', () => ({
   Engine: native.engine,
 }));
 vi.mock('geospec/runner/native', () => ({ createNativeGeoSpecRunner: native.runner }));
-vi.mock('@taucad/geospec-engine/node-filesystem', () => ({ createNodeVmFileSystem: native.filesystem }));
+vi.mock('geospec/runner/node', () => ({ createNodeVmFileSystem: native.filesystem }));
 
 /**
  * Load the host module afresh, so each test starts before the process-wide engine exists.

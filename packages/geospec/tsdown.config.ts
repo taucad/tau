@@ -13,6 +13,7 @@ const packageConfig: UserConfig = {
     'src/model/index.ts',
     'src/runner/index.ts',
     'src/runner/native/index.ts',
+    'src/runner/node/index.ts',
     'src/runner/worker/index.ts',
   ],
   sourcemap: false,

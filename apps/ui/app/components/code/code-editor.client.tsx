@@ -8,6 +8,7 @@ import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { configureMonaco, registerCompletions } from '#lib/monaco.lib.client.js';
 import { useMonacoConfiguration } from '#hooks/use-monaco-configuration.js';
+import { useCodePanePresence } from '#hooks/use-code-pane-presence.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
@@ -122,6 +123,8 @@ const monacoOverlayRestoreStyles = [
  */
 export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
   const configuration = useMonacoConfiguration();
+  /* A mounted editor is a code pane: the project's language services start with it (B-16). */
+  useCodePanePresence();
   const { theme, isHighContrast } = useTheme();
   const [areInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
   const completionRef = useRef<CompletionRegistration | undefined>(null);

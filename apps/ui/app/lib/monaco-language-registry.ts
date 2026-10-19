@@ -236,6 +236,8 @@ export class LanguageContributionRegistry {
    * Used by the host to mitigate first-keystroke latency for the project's
    * active kernel — pre-warming the language activation avoids the first
    * keystroke paying the full activation cost (LSP worker spawn, WASM init).
+   * It starts those workers, so the host calls it only once a code pane is
+   * open (see `MonacoModelServiceProvider`).
    */
   public prefetch(ids: readonly string[]): void {
     const monaco = this.activeMonaco;

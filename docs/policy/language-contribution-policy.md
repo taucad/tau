@@ -3,7 +3,7 @@ title: 'Language Contribution Policy'
 description: 'Monaco and Shiki language registration, shared workspace filesystem tiers, and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-09-05'
+updated: '2026-10-19'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -56,6 +56,8 @@ Mount generated dependency declarations at their canonical `/node_modules` paths
 ### 7. Activate contributions on demand
 
 Register language loaders through Monaco's `onLanguage` or the existing extension-driven contribution registry. Do not import every grammar, WASM server, declaration set, or worker during editor startup.
+
+Start no Monaco model, contribution activation, or language worker (TypeScript, JavaScript, JSON, editor, or LSP) before a code pane mounts. Warming Monaco on intent may load and configure the editor only; kernel prefetch waits for the first code pane.
 
 Dispose registrations and workers when their owning editor or project scope ends.
 

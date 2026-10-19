@@ -14,6 +14,13 @@
  * revision UI) renders at once, and consumers read `undefined` services until
  * Monaco is configured. Code panes own their own placeholder, and opening one
  * is what configures Monaco: the provider only observes (B-16).
+ *
+ * The services start with the project's first code pane, not with Monaco:
+ * link intent may already have configured Monaco, and services started then
+ * would create models (the kernel prefetch) and activate contributions, which
+ * starts the TypeScript, JSON and KCL LSP workers in a project whose code
+ * pane is never opened. Once started they stay until the project changes, so
+ * closing and reopening a pane keeps its models and warm workers.
  */
 
 import type { ReactNode } from 'react';
@@ -42,6 +49,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { getMonacoLanguageIdsForKernel } from '#lib/kernel-monaco-language.utils.js';
 import { useMonacoIfConfigured } from '#hooks/use-monaco-configuration.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
+import { useIsCodePaneOpen } from '#hooks/use-code-pane-presence.js';
 
 type MonacoServicesContextType = {
   modelService: MonacoModelService | undefined;
@@ -67,8 +75,16 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
 
   const [services, setServices] = useState<MonacoServicesContextType>(defaultContextValue);
 
+  /* The project whose code pane has opened; a project switch starts closed again. */
+  const isCodePaneOpen = useIsCodePaneOpen();
+  const [codePaneProjectId, setCodePaneProjectId] = useState<string>();
+  if (isCodePaneOpen && codePaneProjectId !== projectId) {
+    setCodePaneProjectId(projectId);
+  }
+  const hasOpenedCodePane = codePaneProjectId === projectId;
+
   useEffect(() => {
-    if (!monaco || !contentService || !treeService) {
+    if (!monaco || !contentService || !treeService || !hasOpenedCodePane) {
       return;
     }
 
@@ -175,7 +191,7 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
 
       setServices(defaultContextValue);
     };
-  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef, projectId]);
+  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef, projectId, hasOpenedCodePane]);
 
   useEffect(() => {
     const ms = services.modelService;
@@ -201,8 +217,8 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
   }, [projectId, services.modelService]);
 
   // Prefetch language contributions for each geometry unit's active kernel
-  // so first-keystroke latency in the dominant code path is hidden behind the
-  // cad worker's own boot.
+  // once a code pane has started the services, so the kernel's language
+  // workers boot while the pane loads its file instead of on first keystroke.
   useGeometryUnitKernelPrefetch(geometryUnits, services.modelService !== undefined);
 
   return <MonacoServicesContext.Provider value={services}>{children}</MonacoServicesContext.Provider>;

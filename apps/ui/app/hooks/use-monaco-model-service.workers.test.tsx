@@ -104,9 +104,12 @@ const { CodeEditor } = await import('#components/code/code-editor.client.js');
 const { createWorkerStub } = await import('#lib/testing/worker-stub.js');
 vi.stubGlobal('Worker', createWorkerStub(startedWorkers));
 
-/** Long enough for Monaco's diagnostics to ask for a worker once a model exists. */
-const settleMs = 3000;
-const settle = async (): Promise<void> => new Promise((resolve) => setTimeout(resolve, settleMs));
+/** Milliseconds: long enough for Monaco's diagnostics to ask for a worker once a model exists. */
+const settleTime = 3000;
+const settle = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, settleTime);
+  });
 
 function Workspace({ children }: { readonly children?: ReactNode }): React.JSX.Element {
   return (
@@ -145,7 +148,12 @@ describe('MonacoModelServiceProvider language workers', () => {
 
     view.rerender(
       <Workspace>
-        <CodeEditor path='file:///main.ts' defaultLanguage='typescript' defaultValue='export const width = 10;' />
+        <CodeEditor
+          path='file:///main.ts'
+          defaultLanguage='typescript'
+          defaultValue='export const width = 10;'
+          onChange={() => undefined}
+        />
       </Workspace>,
     );
 

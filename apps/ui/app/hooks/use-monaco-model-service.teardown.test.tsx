@@ -92,12 +92,20 @@ vi.mock('@taucad/lsp/language-fs-sync-host', () => ({
 }));
 
 const { MonacoModelServiceProvider } = await import('#hooks/use-monaco-model-service.js');
+const { useCodePanePresence } = await import('#hooks/use-code-pane-presence.js');
+
+/** An open code pane: the services start with the first one (B-16). */
+function CodePane(): React.JSX.Element {
+  useCodePanePresence();
+  return <span>Code</span>;
+}
 
 describe('MonacoModelServiceProvider teardown', () => {
   it('closes the project models before the language contributions restore the TS defaults', () => {
     const view = render(
       <MonacoModelServiceProvider>
         <span>Workspace</span>
+        <CodePane />
       </MonacoModelServiceProvider>,
     );
     order.length = 0;

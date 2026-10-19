@@ -35,8 +35,9 @@ import { tsContribution } from '#lib/typescript-contribution.js';
  *
  * Every language contribution below is added to the registry at module load
  * (Phase 1 — `registerAll(monaco)` runs from {@link configureMonaco}, doing
- * only cheap language-metadata wiring). Phase 2 — `registry.activate(...)` —
- * runs from `MonacoModelServiceProvider` and gates each contribution's heavy
+ * only cheap language-metadata wiring and starting no worker). Phase 2 —
+ * `registry.activate(...)` — runs from `MonacoModelServiceProvider` once the
+ * project's first code pane opens, and gates each contribution's heavy
  * boot (LSP worker, WASM, ATA) behind the first `monaco.languages.onLanguage`
  * fire for any of its `activationLanguageIds`. A model already open at
  * `activate()` time runs the activation immediately (fast path). The

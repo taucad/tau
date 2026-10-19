@@ -87,6 +87,7 @@ import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import type { FileProvenance } from '@taucad/types';
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
 import { useConfiguredMonaco, useMonacoIfConfigured } from '#hooks/use-monaco-configuration.js';
+import { useCodePanePresence } from '#hooks/use-code-pane-presence.js';
 import type { MonacoModelService } from '#lib/monaco-model-service.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -1294,6 +1295,9 @@ export const FileEditor = memo(function ({
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const result = useFileContent(filePath);
+  /* A text pane is a code pane. It waits for the model service before it mounts
+   * its editor, so it declares itself before then (B-16). */
+  useCodePanePresence(result.kind === 'text');
 
   const handleFileSelectorSelect = useCallback(
     (path: string) => {

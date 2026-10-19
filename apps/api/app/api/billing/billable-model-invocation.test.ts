@@ -1462,6 +1462,51 @@ describe('BillableModelInvocationService', () => {
     });
   });
 
+  /* Anthropic answers an unfunded account with a 400 `invalid_request_error`, not a 402, in either of
+   * two sentences; both are Tau's account on Cloud, never a request the customer can change. */
+  it.each([
+    'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+    'You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+  ])(
+    'should refuse an Anthropic 400 for an unfunded supplier account as PROVIDER_ACCOUNT_EXHAUSTED: %s',
+    async (message) => {
+      const qualified: QualifiedBillableInvocation = {
+        ...qualification(),
+        providerId: 'anthropic',
+        providerWire: 'anthropic',
+      };
+      qualified.adapter.createEvidenceCollector = () => ({
+        accept: vi.fn(),
+        complete: () => ({ kind: 'absorbed_unknown' }),
+        failed: () => ({ kind: 'provider_rejected', executionStatus: 'rejected' }),
+      });
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message } }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      const { service } = exhaustionHarness(qualified);
+
+      const refused = await service.invoke(intent()).then(
+        () => expect.fail('The unfunded supplier account should refuse the invocation'),
+        (error: unknown) => error,
+      );
+
+      expect(refused).toBeInstanceOf(LlmGatewayError);
+      expect((refused as LlmGatewayError).getStatus()).toBe(503);
+      expect((refused as LlmGatewayError).getResponse()).toEqual({
+        type: 'error',
+        error: {
+          type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          message: "The model provider's account is unavailable.",
+          details: { providerId: 'anthropic', providerCode: 'invalid_request_error', accountOwner: 'tau' },
+        },
+      });
+    },
+  );
+
   /* F-11: through the funded gateway the upstream key is Tau's, so a 401 is a supplier-account
    * failure that pages, while the caller sees the same opaque supplier-account answer as an
    * exhausted account: resuming cannot change it, so the host never offers to. */

@@ -58,6 +58,19 @@ describe('recognizeProviderAccountRefusal', () => {
       providerCode: 'invalid_request_error',
     },
     {
+      // Anthropic refuses a workspace past its spend limit with a 400 that never says "credit".
+      providerId: 'anthropic',
+      body: {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message:
+            'You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+        },
+      },
+      providerCode: 'invalid_request_error',
+    },
+    {
       providerId: 'together',
       body: { error: { type: 'invalid_request_error', message: 'You have insufficient credits.' } },
       providerCode: 'invalid_request_error',

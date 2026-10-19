@@ -152,6 +152,44 @@ describe('DirectModelInvocationService', () => {
     }
   });
 
+  it.each([
+    'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+    'You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+  ])('should answer an Anthropic 400 for an unfunded account as the operator account refusal: %s', async (message) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    const refused = await service
+      .invoke({
+        ...gatewayIntent(),
+        providerWire: 'anthropic',
+        body: {
+          model: 'anthropic-claude-haiku-5.5',
+          max_tokens: 16,
+          stream: true,
+          messages: [{ role: 'user', content: 'A cool vase' }],
+        },
+        priceHeaders: { 'anthropic-version': '2023-06-01' },
+      })
+      .then(
+        () => expect.fail('The unfunded Anthropic account should refuse the relay'),
+        (error: unknown) => error,
+      );
+
+    expect(refused).toBeInstanceOf(LlmGatewayError);
+    expect((refused as LlmGatewayError).getStatus()).toBe(503);
+    expect(errorDetails(refused)).toEqual({
+      type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      message,
+      details: { providerId: 'anthropic', providerCode: 'invalid_request_error', accountOwner: 'operator' },
+    });
+  });
+
   it('should keep the provider reason in an unrecognized self-host rejection', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

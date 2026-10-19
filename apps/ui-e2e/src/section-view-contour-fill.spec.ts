@@ -48,12 +48,31 @@ type SectionViewBridgeWindow = Window & {
   };
 };
 
+/**
+ * Every reason the caps give for capping a source per loop: a closure failure (the viewer's
+ * `SectionTopologyFailure['code']`, which this spec cannot import) or partial visibility.
+ */
+const perLoopReasons = [
+  'open-surface',
+  'collapsed-triangle',
+  'missing-position',
+  'non-finite-position',
+  'partial-visibility',
+  'topology-unavailable',
+] as const;
+type PerLoopReason = (typeof perLoopReasons)[number];
+/** The reasons a defect in the geometry itself gives, as opposed to visibility or an unavailable census. */
+const geometryReasons: ReadonlySet<PerLoopReason> = new Set(['open-surface', 'collapsed-triangle']);
+
 type SectionCapCompleteness = Readonly<{
   status: 'complete';
   admittedSourceCount: number;
   exactSourceCount: number;
   perLoopSourceCount: number;
-  sources: ReadonlyArray<Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop'; reason: string | undefined }>>;
+  pendingSourceCount: number;
+  sources: ReadonlyArray<
+    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: PerLoopReason | undefined }>
+  >;
 }>;
 
 const webgpuValidationPatterns: readonly RegExp[] = [
@@ -553,9 +572,7 @@ test.describe('Section view contour fill regression', () => {
       const completeness = await getSectionCapCompleteness();
       const perLoop = completeness?.sources.filter(({ grade }) => grade === 'per-loop') ?? [];
       expect(
-        perLoop.every(({ reason }) =>
-          ['open-surface', 'inconsistent-orientation', 'ambiguous-seam', 'non-manifold-vertex'].includes(reason ?? ''),
-        ),
+        perLoop.every(({ reason }) => reason !== undefined && geometryReasons.has(reason)),
         JSON.stringify(completeness),
       ).toBe(true);
       const diagnostics = await getSectionCapStencilDiagnostics();

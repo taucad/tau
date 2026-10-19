@@ -424,12 +424,14 @@ const getStandaloneSource = (
     owner: getModelComponentOwnerInHierarchy(mesh),
     participants: [participant],
     closure: pendingClosure,
-    revision,
+    // Its own revision, so the landed source changes the caps' commit identity and is graded again.
+    revision: `${revision}:pending`,
   };
   const build = async (): Promise<SectionSurfaceSource> => {
     const source: SectionSurfaceSource = {
       ...provisional,
       closure: await buildClosureAsync({ sourceKey: mesh.uuid, participants: [participant] }),
+      revision,
     };
     // A newer revision may have replaced this build meanwhile; only the current one is kept.
     if (pendingStandaloneSources.get(mesh)?.revision === revision) {

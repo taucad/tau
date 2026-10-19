@@ -348,6 +348,26 @@ describe('SectionContourFills', () => {
     expect(harness.drawn().get('TauSectionCapOutline')).toHaveLength(2);
   });
 
+  it('should grade a large standalone mesh again once its census lands, without the cut changing', async () => {
+    // Above the synchronous limit, so its census waits on the worker; without one it lands as unavailable, per loop.
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 256, 80), new THREE.MeshBasicMaterial());
+    const cutSet = cutSetOf(planeCut(0.2));
+    harness = await mountFills(cutSet, [sphere]);
+    harness.frame();
+    const grades = () =>
+      (harness!.root().userData['sectionCapCompleteness'] as { sources: Array<{ grade: string }> }).sources.map(
+        ({ grade }) => grade,
+      );
+    expect(grades()).toEqual(['pending']);
+
+    await vi.waitFor(() => {
+      harness!.frame();
+      expect(grades()).toEqual(['per-loop']);
+    });
+    expect(harness.snapshotStore.committed?.cutSet).toBe(cutSet);
+    expect(harness.commits).toEqual([cutSet.cuts]);
+  });
+
   it('should show the back faces of a per-loop source while it is cut, and only then', async () => {
     const open = openBox();
     const material = open.material as THREE.Material;

@@ -12,6 +12,7 @@ import {
 import type {
   TauViewerBrowseResult,
   TauViewerCaptureReplyInput,
+  TauViewerComponent,
   TauViewerImage,
   TauViewerPresentation,
   TauViewerReadInput,
@@ -123,7 +124,7 @@ const descriptions = {
   browseModels: "List the project's renderable model files for the Tau viewer's file list.",
   appRead: 'Read a byte range of a model the Tau viewer shows. Only the viewer page calls this.',
   viewState:
-    'Report what the person sees in the Tau viewer: the model, the selected components (ids as @cad references and arrange_workbench take them), hidden and isolated components, and the camera. Set capture to also get an image of the live view.',
+    'Report what the person sees in the Tau viewer: the model, the selected components and those the person added to chat (each with the component id that follows # in a @cad[<path>#<componentId>] reference, as show_model select and arrange_workbench take it), hidden and isolated components, and the camera. Call it when the person names a part they picked or added in the viewer. Set capture to also get an image of the live view.',
   appSync: "The Tau viewer page's sync with the server. Only the viewer page calls this.",
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
   appShareLink:
@@ -141,7 +142,9 @@ const showModelInputSchema = z
       .array(z.string().min(1).max(256))
       .max(64)
       .optional()
-      .describe('Component ids to select in the viewer, as @cad references and view_state name them.'),
+      .describe(
+        'Component ids to select in the viewer: the part after # in a @cad[<path>#<componentId>] reference, as view_state names them.',
+      ),
   })
   .strict();
 
@@ -184,6 +187,7 @@ const viewSchema = z
     measurementCount: z.number().int().nonnegative(),
     composition: z.enum(['inline', 'tab']),
     interactedAt: z.number().nonnegative(),
+    references: z.array(componentSchema).max(64).optional(),
   })
   .strict();
 
@@ -290,6 +294,9 @@ const listed = (ids: readonly string[]): string =>
       ? ids.join(', ')
       : `${ids.slice(0, 8).join(', ')} and ${String(ids.length - 8)} more`;
 
+const components = (list: readonly TauViewerComponent[], empty: string): string =>
+  list.length === 0 ? empty : list.map((component) => `${component.label} (${component.componentId})`).join(', ');
+
 const vector = (value: readonly number[]): string => `(${value.map((axis) => axis.toPrecision(3)).join(', ')})`;
 
 /**
@@ -301,7 +308,9 @@ const vector = (value: readonly number[]): string => `(${value.map((axis) => axi
 const describeView = (view: TauViewerViewState): string =>
   [
     `The Tau viewer (${view.composition === 'inline' ? 'a card in the conversation' : 'a tab'}) shows ${view.model.sourceFile ?? view.model.path}.`,
-    `Selected: ${view.selected.length === 0 ? 'nothing' : view.selected.map((component) => `${component.label} (${component.componentId})`).join(', ')}.`,
+    `Selected: ${components(view.selected, 'nothing')}.`,
+    /* A page older than the field reports no added set, which is not an empty one. */
+    ...(view.references === undefined ? [] : [`Added to chat: ${components(view.references, 'none')}.`]),
     `Hidden: ${listed(view.hidden)}. Isolated: ${listed(view.isolated)}.`,
     view.camera === undefined
       ? 'The camera has not framed the model yet.'
@@ -381,7 +390,7 @@ export const registerTauMcpViewer = (
 
   /* The page needs no origin at all: its bytes travel through `app_read`
    * (blueprint D4, I2), so the CSP lists only `data:` (inlined wasm) and
-   * `blob:` (inlined workers, decoded models). Copy prompt writes the clipboard. */
+   * `blob:` (inlined workers, decoded models). Add to chat's clipboard route writes the clipboard. */
   const resourceMeta = {
     ui: {
       csp: { connectDomains: ['data:', 'blob:'], resourceDomains: ['data:', 'blob:'] },

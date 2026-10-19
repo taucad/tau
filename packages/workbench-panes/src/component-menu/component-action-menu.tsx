@@ -376,7 +376,7 @@ function buildModelComponentActionDescriptors(
 ): readonly ModelComponentActionDescriptor[] {
   const actions = createModelComponentGraphicsActions(data);
   const host = data.actions ?? {};
-  const { addToChat, revealInExplorer, showKinematics, openPreview } = host;
+  const { addToChat, addToChatLabel = 'Add to chat', revealInExplorer, showKinematics, openPreview } = host;
   const opacityPercent = Math.round(data.opacity * 100);
   const kinematicsTarget = findModelComponentKinematicsTarget(data.manifest, data.node);
   const openPreviewDescriptor: readonly ModelComponentActionDescriptor[] =
@@ -411,7 +411,7 @@ function buildModelComponentActionDescriptors(
         {
           type: 'item',
           id: 'addToChat',
-          label: 'Add to chat',
+          label: addToChatLabel,
           icon: <AtSign className='size-3.5' />,
           onSelect: () => {
             const reference = buildGeometryComponentReference(data.manifest, data.node);

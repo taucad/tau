@@ -45,6 +45,11 @@ export type ModelComponentPreviewRequest = Readonly<{
 export type ModelComponentHostActions = Readonly<{
   /** "Add to chat": hand the part's structured reference to the host's chat. */
   addToChat?: (reference: GeometryComponentReference, target: ModelComponentActionTarget) => void;
+  /**
+   * The {@link ModelComponentHostActions.addToChat} item's label, naming where the reference goes on this host, such as
+   * "Send to chat" or "Copy reference". "Add to chat" when absent.
+   */
+  addToChatLabel?: string;
   /** "Reveal in Explorer": select the part and reveal it in the Model pane. Offered only in the viewer's menu. */
   revealInExplorer?: (target: ModelComponentActionTarget) => void;
   /**

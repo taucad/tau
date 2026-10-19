@@ -321,7 +321,7 @@ const checkTabChrome = async (root: Frame | Page, isOpenAtLoad: boolean): Promis
   const bar = root.getByRole('group', { name: 'Viewer controls' });
   const barSnapshot = await bar.ariaSnapshot();
   expect(barSnapshot.trimEnd()).toMatch(/- button "Viewer settings"$/u);
-  for (const name of ['Add to chat', 'Send to chat', 'Copy prompt', 'Hide panes', 'Show panes', 'Hide workbench']) {
+  for (const name of ['Add to chat', 'Send to chat', 'Copy reference', 'Hide panes', 'Show panes', 'Hide workbench']) {
     // oxlint-disable-next-line no-await-in-loop -- one name at a time.
     expect(await root.getByRole('button', { name, exact: true }).count()).toBe(0);
   }
@@ -955,6 +955,122 @@ describe('the live view (W6)', () => {
         .toBe('surface.glb');
       await capture(page, 'live-follow');
       expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
+describe('Add to chat on each route (VUI-3)', () => {
+  /** Two named parts, so the person can add one, then the other. */
+  const pairSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4), name: 'Left' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(20, 0, 0), name: 'Right' },\n  ];\n}\n`;
+
+  beforeAll(async () => {
+    await writeFile(join(project, 'pair.ts'), pairSource);
+  });
+
+  /**
+   * Add one part from its row's menu in the Model pane, the same menu the canvas opens.
+   *
+   * @param root - The frame or page the viewer is in, with the lane open.
+   * @param part - The part's name.
+   * @param item - The chat item's label on this route.
+   */
+  const addPart = async (root: Frame | Page, part: string, item: string): Promise<void> => {
+    const lane = root.getByRole('complementary', { name: 'Workbench' });
+    await lane.getByRole('tab', { name: 'Model' }).click();
+    const actions = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: `Actions for ${part}` });
+    await actions.waitFor({ timeout: 60_000 });
+    await actions.click();
+    const menu = root.getByRole('menu');
+    expect(await menu.getByRole('menuitem', { name: 'Add to chat' }).count()).toBe(item === 'Add to chat' ? 1 : 0);
+    await menu.getByRole('menuitem', { name: item }).click();
+  };
+
+  it(
+    'should hand model context every part added, in order, on a host that takes it',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'pair.ts' });
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+
+      await addPart(frame, 'Left', 'Add to chat');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat (1)' }).waitFor();
+      await addPart(frame, 'Right', 'Add to chat');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat (2)' }).waitFor();
+
+      const updates = (await recorded(page, 'modelContext')) as ReadonlyArray<{
+        content: ReadonlyArray<{ text: string }>;
+        structuredContent: { references: ReadonlyArray<{ target: { label: string } }> };
+      }>;
+      expect(updates).toHaveLength(2);
+      const last = updates.at(-1);
+      expect(last?.structuredContent.references.map((reference) => reference.target.label)).toEqual(['Left', 'Right']);
+      expect(last?.content[0]?.text).toMatch(/^Left, Right in pair @cad\[pair\.ts#[^\]]+\] @cad\[pair\.ts#[^\]]+\]$/u);
+      expect(await recorded(page, 'messages')).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should send one part as a message on a host that takes no model context',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'pair.ts' });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'fullscreen',
+        hostCapabilities: { serverTools: {}, message: { text: {} } },
+      });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+
+      await addPart(frame, 'Left', 'Send to chat');
+      await frame.getByRole('status').filter({ hasText: 'Sent to chat' }).waitFor();
+      const messages = await recorded(page, 'messages');
+      expect(messages).toHaveLength(1);
+      expect(JSON.stringify(messages).match(/@cad\[/gu)).toHaveLength(1);
+      expect(await recorded(page, 'modelContext')).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should copy the reference on the loopback page and report the added part to view_state',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'pair.ts' }));
+      const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: new URL(viewerUrl ?? '').origin,
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+
+      await addPart(page, 'Left', 'Copy reference');
+      await page.getByRole('status').filter({ hasText: 'Copied; paste it into your chat' }).waitFor();
+      const copied = await page.evaluate(async () => navigator.clipboard.readText());
+      expect(copied).toMatch(/^Left in pair @cad\[pair\.ts#[^\]]+\]$/u);
+
+      /* Without a paste the agent still finds the part: the page reported it with its next sync. */
+      let text = '';
+      await expect
+        .poll(
+          async () => {
+            const state = await callTool(client, 'view_state', {});
+            text = state.content.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
+            return text;
+          },
+          { timeout: 30_000 },
+        )
+        .toMatch(/^Added to chat: Left \(/mu);
+      const componentId = /^Added to chat: Left \(([^)]+)\)\.$/mu.exec(text)?.[1];
+      expect(copied).toBe(`Left in pair @cad[pair.ts#${componentId ?? ''}]`);
       await page.close();
     },
     kernelCallLimit,

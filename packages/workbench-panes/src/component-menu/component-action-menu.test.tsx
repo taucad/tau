@@ -418,6 +418,37 @@ describe('model component action menu', () => {
     });
   });
 
+  it("should name the chat item by the host's route and hand it the same reference", async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node, 'src/main.ts')}
+        node={node}
+        graphicsRef={createSpyGraphicsRef()}
+        unitId={unitId}
+        source='viewer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        actionButtonClassName='size-5'
+        opacity={1}
+        actions={{ ...allActions, addToChatLabel: 'Copy reference' }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Add to chat' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Copy reference' }));
+
+    expect(mocks.addToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: 'src/main.ts', componentId }),
+      expect.objectContaining({ node, unitId }),
+    );
+  });
+
   it('should render the same action surface for coordinate-anchored viewer menus', async () => {
     const user = userEvent.setup();
     const node = createNode();

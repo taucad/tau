@@ -7,20 +7,19 @@ import type { GeometryComponentReference } from '@taucad/types';
 export type ChatReference = Readonly<{ text: string; references: readonly CadReference[] }>;
 
 /**
- * The page's "Add to chat" payload (blueprint D6, E8): the picked component's label and `@cad[...]` token, the same
- * reference object the workbench chip carries, or the model's name and file when nothing is picked.
+ * The page's "Add to chat" payload (blueprint D6, E8): the parts' labels and `@cad[...]` tokens, the same reference
+ * objects the workbench chip carries, or the model's name and file when no part is named.
  *
  * @param model - The model the page shows.
- * @param picked - The viewer's reference to the picked component, if any.
+ * @param parts - The viewer's references to the parts, in the order the person added them.
  * @returns The text and references.
  */
-export const chatReferenceOf = (
-  model: TauViewerModel,
-  picked: GeometryComponentReference | undefined,
-): ChatReference => {
-  if (picked === undefined) {
+export const chatReferenceOf = (model: TauViewerModel, parts: readonly GeometryComponentReference[]): ChatReference => {
+  if (parts.length === 0) {
     return { text: `${model.title} (${model.sourceFile ?? model.path})`, references: [] };
   }
-  const reference = cadReferenceFromGeometryComponent(picked);
-  return { text: `${picked.label} in ${model.title} ${cadReferenceToken(reference)}`, references: [reference] };
+  const references = parts.map((part) => cadReferenceFromGeometryComponent(part));
+  const labels = parts.map((part) => part.label).join(', ');
+  const tokens = references.map((reference) => cadReferenceToken(reference)).join(' ');
+  return { text: `${labels} in ${model.title} ${tokens}`, references };
 };

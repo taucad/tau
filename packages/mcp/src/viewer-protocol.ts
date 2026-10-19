@@ -168,7 +168,20 @@ export type TauViewerViewState = Readonly<{
   composition: 'inline' | 'tab';
   /** Milliseconds since the epoch of the person's last pointer or keyboard input on the page. */
   interactedAt: number;
+  /**
+   * The components the person added to chat from this model, in the order added. A page sends it only to a server
+   * whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}.
+   */
+  references?: readonly TauViewerComponent[] | undefined;
 }>;
+
+/**
+ * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
+ * one of them only after a sync result listed it: an older server rejects the whole sync otherwise.
+ *
+ * @public
+ */
+export const tauViewerAcceptedViewFields = ['references'] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -195,6 +208,11 @@ export type TauViewerSyncResult = Readonly<{
   show?: TauViewerShowResult | undefined;
   /** A capture of this page's view the agent is waiting for. */
   capture?: Readonly<{ requestId: string }> | undefined;
+  /**
+   * The optional view fields the server takes ({@link tauViewerAcceptedViewFields}); absent from a server older than
+   * them. A page may read names it does not know.
+   */
+  accepts?: readonly string[] | undefined;
 }>;
 
 /** One captured image of the live view. @public */

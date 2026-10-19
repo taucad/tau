@@ -4,7 +4,12 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ClientCapabilities } from '@modelcontextprotocol/sdk/types.js';
 import { createTauMcpServer } from '#tau-mcp.js';
 import type { TauMcpViewer } from '#tau-mcp-viewer.js';
-import { resolveTauViewerPresentation, tauViewerResourceUri, tauViewerToolName } from '#viewer-protocol.js';
+import {
+  resolveTauViewerPresentation,
+  tauViewerAcceptedViewFields,
+  tauViewerResourceUri,
+  tauViewerToolName,
+} from '#viewer-protocol.js';
 import type { TauViewerModel, TauViewerViewState } from '#viewer-protocol.js';
 
 const uiExtension = { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } };
@@ -361,6 +366,54 @@ describe('Tau MCP viewer', () => {
     ]);
     const captured = await client.callTool({ name: 'view_state', arguments: { capture: true } });
     expect(captured.content).toContainEqual({ type: 'image', data: 'cG5n', mimeType: 'image/png' });
+    await client.close();
+  });
+
+  it('should list the parts the person added to chat, by name and component id', async () => {
+    const added: TauViewerViewState = {
+      ...view,
+      references: [
+        { componentId: 'component:arm', label: 'Arm', kind: 'part' },
+        { componentId: 'component:bolt', label: 'Bolt', kind: 'part' },
+      ],
+    };
+    let reported = added;
+    const viewer = { ...createViewer(), viewState: async () => ({ view: reported }) };
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+    const [block] = result.content as Array<{ type: 'text'; text: string }>;
+    expect(block?.text.split('\n').slice(1, 3)).toEqual([
+      'Selected: Arm (component:arm).',
+      'Added to chat: Arm (component:arm), Bolt (component:bolt).',
+    ]);
+    expect(result.structuredContent).toEqual({ view: added });
+
+    reported = { ...view, references: [] };
+    const none = await client.callTool({ name: 'view_state', arguments: {} });
+    expect((none.content as Array<{ text: string }>)[0]?.text).toContain('Added to chat: none.');
+    await client.close();
+  });
+
+  it('should take every view field it lists as accepted, and reject any other', async () => {
+    const client = await connect(clients.claudeDesktop);
+    const sync = async (extra: Readonly<Record<string, unknown>>) =>
+      client.callTool({
+        name: 'app_sync',
+        arguments: { pageId: 'page-0001', version: 0, follow: true, wait: false, view: { ...view, ...extra } },
+      });
+
+    const values: Readonly<Record<(typeof tauViewerAcceptedViewFields)[number], unknown>> = {
+      references: [{ componentId: 'component:arm', label: 'Arm', kind: 'part' }],
+    };
+    for (const field of tauViewerAcceptedViewFields) {
+      // oxlint-disable-next-line no-await-in-loop -- one field at a time.
+      const taken = await sync({ [field]: values[field] });
+      expect(taken.isError).toBeFalsy();
+    }
+    /* What an older server does with a field it does not take: the whole sync fails, hence the guard. */
+    const rejected = await sync({ playback: { playing: true } });
+    expect(rejected.isError).toBe(true);
     await client.close();
   });
 

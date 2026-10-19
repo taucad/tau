@@ -293,7 +293,11 @@ describe('createLocalMcpViewer', () => {
       const next = shownModel(await viewer.show({ targetFile: 'models/part.glb', select: ['component:arm'] }, text));
       const synced = await held;
       expect(synced.status).toBe(200);
-      expect(await synced.json()).toEqual({ version: 2, show: { ...next, select: ['component:arm'] } });
+      expect(await synced.json()).toEqual({
+        accepts: ['references'],
+        version: 2,
+        show: { ...next, select: ['component:arm'] },
+      });
       const malformed = await call('app_sync', { pageId: 'p' });
       expect(malformed.status).toBe(400);
     });

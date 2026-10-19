@@ -98,8 +98,10 @@ export function createComponentReveal(): ComponentReveal {
 
 /** What the page does for the part menu's host verbs. */
 export type PageComponentMenuOptions = Readonly<{
-  /** "Add to chat": the page sends `bridge.addToChat(chatReferenceOf(model, reference))` and shows its notice. */
+  /** "Add to chat": the page adds the part to what it handed the chat (`bridge.addToChat`) and shows its notice. */
   addToChat: (reference: GeometryComponentReference) => void;
+  /** The chat item's label on this host's route: "Add to chat", "Send to chat" or "Copy reference". */
+  addToChatLabel: string;
   /** Show the lane and make `pane` its active tab, opening the tab when it is closed. */
   openPane: (pane: ComponentMenuPane) => void;
   /** The page's reveal channels. */
@@ -109,11 +111,12 @@ export type PageComponentMenuOptions = Readonly<{
 /**
  * The page's part verbs, for both the canvas menu and the Model pane's row menus.
  *
- * @param options - What the page does for chat and its panes.
+ * @param options - What the page does for chat and its panes, and the chat item's label.
  * @returns The host verbs; "Open preview" is absent because the page has no part gallery.
  */
 export function createPageComponentActions({
   addToChat,
+  addToChatLabel,
   openPane,
   reveal,
 }: PageComponentMenuOptions): ModelComponentHostActions {
@@ -121,6 +124,7 @@ export function createPageComponentActions({
     addToChat: (reference) => {
       addToChat(reference);
     },
+    addToChatLabel,
     revealInExplorer: ({ manifest, node, graphicsRef, unitId }) => {
       const entryPath = manifest.sourceFile;
       if (entryPath === undefined) {

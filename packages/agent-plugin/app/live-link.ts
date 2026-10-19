@@ -3,7 +3,7 @@
  * person sees and hears of models `show_model` handed over and of captures the agent waits for.
  */
 
-import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
+import { tauViewerAcceptedViewFields, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCamera,
   TauViewerComponent,
@@ -13,7 +13,7 @@ import type {
   TauViewerSyncResult,
   TauViewerViewState,
 } from '@taucad/mcp/viewer-protocol';
-import type { GeometryComponentManifest } from '@taucad/types';
+import type { GeometryComponentManifest, GeometryComponentReference } from '@taucad/types';
 import type { HostBridge } from '#app/host-bridge.js';
 
 /** What the page knows about one unit of the model it draws. */
@@ -24,10 +24,21 @@ export type ShownUnit = Readonly<{
   isolatedComponentIds: readonly string[];
 }>;
 
+const componentOf = (
+  componentId: string,
+  node: Readonly<{ name: string; kind: string; selector: string }>,
+): TauViewerComponent => ({
+  componentId,
+  label: node.name,
+  kind: node.kind,
+  ...(node.selector === '' ? {} : { selector: node.selector }),
+});
+
 /**
  * The view the page reports.
  *
- * @param input - The shown model, its unit's interaction state, the camera and the page's composition.
+ * @param input - The shown model, its unit's interaction state, the camera, the page's composition and the parts the
+ * person added to chat from the model.
  * @returns The view state.
  */
 export const viewStateOf = (
@@ -39,21 +50,13 @@ export const viewStateOf = (
     measurementCount: number;
     composition: 'inline' | 'tab';
     interactedAt: number;
+    references: readonly GeometryComponentReference[];
   }>,
 ): TauViewerViewState => {
   const { model, unit, camera } = input;
   const selected = unit.selectedComponentIds.slice(0, 64).flatMap((componentId): TauViewerComponent[] => {
     const node = unit.manifest?.nodesById[componentId];
-    return node === undefined
-      ? []
-      : [
-          {
-            componentId,
-            label: node.name,
-            kind: node.kind,
-            ...(node.selector === '' ? {} : { selector: node.selector }),
-          },
-        ];
+    return node === undefined ? [] : [componentOf(componentId, node)];
   });
   return {
     model: {
@@ -70,7 +73,29 @@ export const viewStateOf = (
     measurementCount: input.measurementCount,
     composition: input.composition,
     interactedAt: input.interactedAt,
+    references: input.references.slice(0, 64).map((reference) =>
+      componentOf(reference.componentId, {
+        name: reference.label,
+        kind: reference.kind,
+        selector: reference.selector,
+      }),
+    ),
   };
+};
+
+/**
+ * The view as one server takes it: an optional field it has not listed under `accepts` is left out, because its strict
+ * `app_sync` would reject the whole sync (an older `tau` on `PATH`).
+ *
+ * @param view - The page's view.
+ * @param accepts - The fields the server's last sync result listed.
+ * @returns The view without the fields the server does not take.
+ */
+const viewFor = (view: TauViewerViewState, accepts: ReadonlySet<string>): TauViewerViewState => {
+  const withheld = new Set<string>(tauViewerAcceptedViewFields.filter((field) => !accepts.has(field)));
+  return withheld.size === 0
+    ? view
+    : (Object.fromEntries(Object.entries(view).filter(([key]) => !withheld.has(key))) as TauViewerViewState);
 };
 
 /** The widest capture the page sends; the agent reads a frame, not a print. */
@@ -212,6 +237,8 @@ export const startLiveLink = (
   /* `randomUUID` needs a secure context, which a sandboxed host frame may not be. */
   const pageId = `page-${[...crypto.getRandomValues(new Uint8Array(12))].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   let version = 0;
+  /* Nothing optional goes before the server has said it takes it. */
+  let accepts: ReadonlySet<string> = new Set();
   const control: { stopped: boolean; resume?: (() => void) | undefined } = { stopped: false };
   let retry = retryFloor;
   const answered = new Set<string>();
@@ -247,6 +274,7 @@ export const startLiveLink = (
 
   const handle = (result: TauViewerSyncResult): void => {
     version = Math.max(version, result.version);
+    accepts = new Set(result.accepts ?? []);
     if (result.show !== undefined && page.follows()) {
       page.show(result.show);
     }
@@ -267,7 +295,7 @@ export const startLiveLink = (
       version,
       follow: page.follows() && caughtUp,
       wait,
-      ...(view === undefined ? {} : { view }),
+      ...(view === undefined ? {} : { view: viewFor(view, accepts) }),
       ...(toolCallId === undefined ? {} : { toolCallId }),
     });
     if (isSyncResult(result)) {

@@ -69,19 +69,35 @@ const inlineHeight = 420;
 const cardHeight = (view: HostView): number | undefined =>
   view.composition === 'inline' ? Math.min(inlineHeight, view.maxHeight ?? inlineHeight) : undefined;
 
-/** The reference action's name per route: a message starts a turn, so it says so. */
+/** The reference action's name per route, on the card and in the part menu: each says what a click does (D3, D9). */
 const chatAction: Readonly<Record<ChatRoute, string>> = {
   context: 'Add to chat',
   message: 'Send to chat',
-  clipboard: 'Copy prompt',
+  clipboard: 'Copy reference',
 };
 
-/** What the page says once the reference went its route. */
-const chatNotice: Readonly<Record<ChatRoute, string>> = {
-  context: 'Added to chat',
-  message: 'Sent to chat',
-  clipboard: 'Copied; paste it into your chat',
+/**
+ * What the page says once a reference went its route.
+ *
+ * @param route - The route it took.
+ * @param added - On the model-context route, how many parts the chat now holds and whether this one was there before.
+ * @returns The notice.
+ */
+const chatNotice = (route: ChatRoute, added?: Readonly<{ count: number; isRepeat: boolean }>): string => {
+  if (route === 'message') {
+    return 'Sent to chat';
+  }
+  if (route === 'clipboard') {
+    return 'Copied; paste it into your chat';
+  }
+  if (added === undefined) {
+    return 'Added to chat';
+  }
+  return added.isRepeat ? 'Already in chat' : `Added to chat (${String(added.count)})`;
 };
+
+/** The parts the person added to chat from one shown model, keyed `path#componentId`, in the order added. */
+type AddedParts = Readonly<{ modelSha: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
 
 /**
  * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads. The
@@ -358,6 +374,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       ? undefined
       : { unitId, unit: getModelInteractionUnitState(context.modelInteractionRef.getSnapshot().context, unitId) };
   }, [graphicsRef]);
+  /* What the person added to chat; a newly shown model starts an empty set (VUI-3). */
+  const added = useRef<AddedParts | undefined>(undefined);
+  const addedFrom = useCallback(
+    (modelSha: string): GeometryComponentReference[] =>
+      added.current?.modelSha === modelSha ? [...added.current.parts.values()] : [],
+    [],
+  );
   const linkRef = useRef<LiveLink | undefined>(undefined);
   useEffect(() => {
     const link = startLiveLink(bridge.callTool, {
@@ -389,6 +412,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           measurementCount: context.measurements.length,
           composition: latest.current.view.composition,
           interactedAt: interactedAt.current,
+          references: addedFrom(model.sha256),
         });
       },
       follows: () => latest.current.view.follows,
@@ -411,7 +435,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       linkRef.current = undefined;
       link.stop();
     };
-  }, [bridge, graphicsRef, isDrawn, showRef, shownUnit]);
+  }, [addedFrom, bridge, graphicsRef, isDrawn, showRef, shownUnit]);
 
   /* Report the view once a newly shown model is drawn, so `view_state` finds the page without waiting for its held
    * sync to come back: a card's first sync left before it had a model. */
@@ -488,22 +512,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     };
   }, [graphicsRef, isDrawn, select, shownUnit]);
 
-  const addToChat = useCallback(() => {
-    if (shown === undefined) {
-      return;
-    }
-    const add = async (): Promise<void> => {
-      try {
-        const outcome = await bridge.addToChat(chatReferenceOf(shown.model, selected));
-        setNotice(chatNotice[outcome]);
-      } catch {
-        setNotice('Could not add to chat');
-      }
-    };
-    // async-iife: bootstrap — a click starts it; the notice reports its outcome.
-    void add();
-  }, [bridge, shown, selected]);
-
   /* The app's part menu (viewer parity V13): right-click a part on the canvas, or a row's menu in the Model pane. */
   const reveal = useMemo(() => createComponentReveal(), []);
   const [openPaneRequest, setOpenPaneRequest] = useState<
@@ -516,26 +524,61 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     setIsPanelOpen(true);
     setOpenPaneRequest({ pane, requestId: paneRequests.current });
   }, []);
+  /* One verb for the part menu, the Model pane's rows and the card: the part joins the set, the chat gets it along
+   * the host's route, and the next sync reports the set to view_state (D2). */
   const addPartToChat = useCallback(
     (reference: GeometryComponentReference) => {
       const model = latest.current.shown?.model;
       if (model === undefined) {
         return;
       }
+      const parts = new Map(addedFrom(model.sha256).map((part) => [`${part.filePath}#${part.componentId}`, part]));
+      const key = `${reference.filePath}#${reference.componentId}`;
+      const isRepeat = parts.has(key);
+      parts.set(key, parts.get(key) ?? reference);
+      added.current = { modelSha: model.sha256, parts };
+      linkRef.current?.nudge();
+      const all = chatReferenceOf(model, [...parts.values()]);
       // async-iife: bootstrap — a menu click starts it; the notice reports its outcome.
       void (async () => {
         try {
-          setNotice(chatNotice[await bridge.addToChat(chatReferenceOf(model, reference))]);
+          const route = await bridge.addToChat(chatReferenceOf(model, [reference]), all);
+          setNotice(chatNotice(route, { count: parts.size, isRepeat }));
         } catch {
           setNotice('Could not add to chat');
         }
       })();
     },
-    [bridge],
+    [addedFrom, bridge],
   );
+  /* The card's action adds the picked part, or names the whole model when nothing is picked (D1). */
+  const addToChat = useCallback(() => {
+    if (shown === undefined) {
+      return;
+    }
+    if (selected !== undefined) {
+      addPartToChat(selected);
+      return;
+    }
+    const add = async (): Promise<void> => {
+      try {
+        setNotice(chatNotice(await bridge.addToChat(chatReferenceOf(shown.model, []))));
+      } catch {
+        setNotice('Could not add to chat');
+      }
+    };
+    // async-iife: bootstrap — a click starts it; the notice reports its outcome.
+    void add();
+  }, [addPartToChat, bridge, shown, selected]);
   const componentActions = useMemo(
-    () => createPageComponentActions({ addToChat: addPartToChat, openPane, reveal }),
-    [addPartToChat, openPane, reveal],
+    () =>
+      createPageComponentActions({
+        addToChat: addPartToChat,
+        addToChatLabel: chatAction[view.chatRoute],
+        openPane,
+        reveal,
+      }),
+    [addPartToChat, openPane, reveal, view.chatRoute],
   );
   const rowMenus = useMemo(() => createModelComponentActionMenus(componentActions), [componentActions]);
   const componentMenu = useViewerComponentMenu({ graphicsRef, actions: componentActions });

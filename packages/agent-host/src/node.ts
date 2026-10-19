@@ -14,7 +14,12 @@ import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
-import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import {
+  chatRecordFileName,
+  createChatStore,
+  isPurgedChatRecord,
+  requireChatPathSegment,
+} from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
@@ -363,6 +368,15 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
     durability: 'exclusive-append',
     attachments: createNodeAttachmentReader(options.workspaceRoot),
     readBytes: async (chatId) => readIfPresent(filePath(chatId)),
+    purged: async (chatId) =>
+      isPurgedChatRecord(
+        await readFile(join(dirname(filePath(chatId)), chatRecordFileName), 'utf8').catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return undefined;
+          }
+          throw error;
+        }),
+      ),
     observeBytes: async (chatId, { signal, onChange, onError }) => {
       const key = Symbol(chatId);
       subscriptions.set(key, { path: relative(options.workspaceRoot, filePath(chatId)), onChange, onError });

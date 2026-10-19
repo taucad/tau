@@ -8,7 +8,12 @@ import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
 import { createBrowserLeadership } from '#browser/leadership.js';
-import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import {
+  chatRecordFileName,
+  createChatStore,
+  isPurgedChatRecord,
+  requireChatPathSegment,
+} from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 
 type SyncAccessHandle = {
@@ -392,6 +397,8 @@ const logName = 'events.jsonl';
 export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatStore => {
   const { log } = options;
   const logPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${logName}`;
+  const recordPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${chatRecordFileName}`;
+  const decoder = new TextDecoder();
 
   /** A file under the OPFS project directory, by its root-relative path; `undefined` when it is not there. */
   const opfsFile = async (
@@ -455,6 +462,10 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         },
       },
       readBytes: async (chatId) => (await bytesOf(logPath(chatId))) ?? new Uint8Array(),
+      purged: async (chatId) => {
+        const record = await bytesOf(recordPath(chatId));
+        return isPurgedChatRecord(record === undefined ? undefined : decoder.decode(record));
+      },
       openWriter: async (chatId) =>
         createOpfsEventLog({ fileHandle: (await opfsFile(directory, logPath(chatId), true))!, access: 'write' }),
       /* OPFS's exclusive handle cannot be stolen from a frozen holder (RH-R12). */
@@ -474,6 +485,12 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     readBytes: async (chatId) => {
       const filePath = logPath(chatId);
       return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array();
+    },
+    purged: async (chatId) => {
+      const filePath = recordPath(chatId);
+      return isPurgedChatRecord(
+        (await fileSystem.exists(filePath)) ? decoder.decode(await fileSystem.readFile(filePath)) : undefined,
+      );
     },
     openWriter: async (chatId) => {
       const filePath = logPath(chatId);

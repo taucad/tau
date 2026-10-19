@@ -75,6 +75,7 @@ import {
 } from '#utils/render-output.js';
 import * as tauReplicadAnnotations from '#annotations/index.js';
 import { exportSTEP } from '#export/interface-export.js';
+import { drawingFaces, isClosedDrawing } from '#utils/drawing-faces.js';
 import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resolution.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
@@ -102,7 +103,9 @@ import {
 type NativeHandle = GlbResources & { shapes: NativeHandleEntry[]; mechanism?: unknown };
 
 /**
- * Advertise the views and exports supported by one retained model.
+ * Advertise the views and exports supported by one retained model. A drawing-only model has no mesh to
+ * export; when every drawing bounds closed profiles it offers STEP, which writes the drawing's region faces
+ * on the XY plane, and otherwise it offers no export.
  * @param handle - Evaluated Replicad shapes.
  * @returns Ordered view and export offers with stable authored drawing instances.
  * @internal
@@ -111,7 +114,7 @@ export const offersFor = (
   handle: NativeHandle,
 ): {
   views: ReadonlyArray<'model' | 'drawing'>;
-  exports: ReadonlyArray<'glb' | 'gltf'> | undefined;
+  exports: ReadonlyArray<'glb' | 'gltf' | 'step'> | undefined;
   instances?: { drawing: ReadonlyArray<{ id: string; title: string }> };
 } => {
   const drawings = handle.shapes.filter(({ shape }) => isDrawingShape(shape));
@@ -125,7 +128,13 @@ export const offersFor = (
   const instances = drawings.flatMap(({ name }) => (name && names.get(name) === 1 ? [{ id: name, title: name }] : []));
   return {
     views: hasModel || drawings.length === 0 ? (drawings.length > 0 ? ['model', 'drawing'] : ['model']) : ['drawing'],
-    exports: hasModel ? undefined : drawings.length === 0 ? ['glb', 'gltf'] : [],
+    exports: hasModel
+      ? undefined
+      : drawings.length === 0
+        ? ['glb', 'gltf']
+        : drawings.every(({ shape }) => isClosedDrawing(shape))
+          ? ['step']
+          : [],
     ...(drawings.length > 0 ? { instances: { drawing: instances } } : {}),
   };
 };
@@ -1128,15 +1137,26 @@ export const replicadKernel = defineKernel({
 
             const { coordinateSystem } = options;
 
-            // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
-            // model in the OCCT heap until a finalizer runs.
-            const rotated =
-              coordinateSystem === 'y-up' ? entries.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
-
+            // A drawing-only model is offered STEP only when every drawing bounds closed profiles (`offersFor`);
+            // it writes those region faces, sketched on XY at Z = 0, in place of the drawings.
+            const drawingOnly = entries.every(({ shape }) => isDrawingShape(shape));
+            let faced: NativeHandleEntry[] | undefined;
+            let rotated: NativeHandleEntry[] | undefined;
             let stepBlob: Blob;
             try {
+              if (drawingOnly) {
+                // Built one entry at a time so `finally` deletes the faces made before a later drawing throws.
+                faced = [];
+                for (const entry of entries) {
+                  faced.push({ ...entry, shape: drawingFaces(entry.shape) });
+                }
+              }
+              const source = faced ?? entries;
+              // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
+              // model in the OCCT heap until a finalizer runs.
+              rotated = coordinateSystem === 'y-up' ? source.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
               stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
-                exportSTEP(context.openCascade, rotated ?? entries, {
+                exportSTEP(context.openCascade, rotated ?? source, {
                   phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
                 }),
               );
@@ -1144,6 +1164,7 @@ export const replicadKernel = defineKernel({
               return stepExportError(error);
             } finally {
               deleteExportCopies(rotated);
+              deleteExportCopies(faced);
             }
             const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
             return { files: [createExportFile('step', 'assembly', stepBytes)] as const };

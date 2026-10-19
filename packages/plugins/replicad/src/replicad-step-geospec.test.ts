@@ -137,6 +137,24 @@ const expectResolvedInterfaceStep = (stepText: string): void => {
 };
 
 describe('Replicad — GeoSpec STEP export', () => {
+  it('should export a drawing-only model as its region faces on the XY plane, holes included', async () => {
+    const stepText = await exportStepText(`
+      import { drawCircle, drawRectangle } from 'replicad';
+
+      export default function main() {
+        return [
+          { shape: drawRectangle(40, 20).cut(drawCircle(5)), name: 'plate' },
+          { shape: drawCircle(4).translate(40, 0), name: 'disc' },
+        ];
+      }
+    `);
+    expect([...stepText.matchAll(/ADVANCED_FACE\(/g)]).toHaveLength(2);
+    expect([...stepText.matchAll(/FACE_BOUND\(|FACE_OUTER_BOUND\(/g)]).toHaveLength(3);
+    expect(stepText).not.toContain('MANIFOLD_SOLID_BREP');
+    expect(stepText).toContain("PRODUCT('plate'");
+    expect(stepText).toContain("PRODUCT('disc'");
+  });
+
   it('should export a root assembly with one NAUO per component and a native face() interface name', async () => {
     const stepText = await exportStepText(interfacesModelSource);
 

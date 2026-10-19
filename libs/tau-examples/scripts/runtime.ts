@@ -125,8 +125,10 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
       return {
         async export(format, request) {
           requireOpen();
-          if (format !== 'glb') {
-            throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence only.');
+          // GLB is mesh evidence; STEP is exact evidence, which a 2D drawing gives as its region faces.
+          const target = format === 'glb' ? 'glb' : format === 'step' ? 'step' : undefined;
+          if (target === undefined) {
+            throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence or STEP exact evidence only.');
           }
           if (root !== activeRoot) {
             client?.terminate();
@@ -143,7 +145,7 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
             source: { path: isolated ? basename(path) : path },
             watch: false,
           });
-          return document.export('glb', request);
+          return document.export(target, request);
         },
         close() {
           closed = true;

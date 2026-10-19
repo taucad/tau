@@ -41,6 +41,7 @@ describe('Tau example model health', () => {
       model: { projectPath: examplesSource, runtime },
     });
     try {
+      expect(selectedModels.length, `TAU_EXAMPLE_PATTERN ${examplePattern ?? ''} selects no model`).toBeGreaterThan(0);
       /* One run per model, so each model's admitted evidence is released before the next loads. A single run keeps
        * every model's retained input live until the module ends, and the corpus outgrows the host's retained input
        * byte limit part-way through (F-B1); per-model runs check the same rows without raising that limit. */

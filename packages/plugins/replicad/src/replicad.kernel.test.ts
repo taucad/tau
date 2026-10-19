@@ -1424,7 +1424,7 @@ describe('ReplicadWorker', () => {
         const offers = offersFor({ shapes: normalizeRenderShapes({ shape: drawing, name: 'Front' }) });
         expect(offers.views).toEqual(['drawing']);
         expect(offers.views[0]).toBe('drawing');
-        expect(offers.exports).toEqual([]);
+        expect(offers.exports).toEqual(['step']);
         expect(offers.instances?.drawing).toEqual([{ id: 'Front', title: 'Front' }]);
       });
 

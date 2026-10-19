@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineRuntime } from '@taucad/runtime/host';
 import { definePlugin } from '@taucad/runtime/plugin';
 import { defineJobProvider } from '@taucad/runtime/job';
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineMachine } from '@taucad/runtime/machine';
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 

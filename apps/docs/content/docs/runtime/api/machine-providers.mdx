@@ -36,7 +36,7 @@ A `MachineManifest` has `version: 3` and these parts:
 `jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`: a semantic `contract`, `mediaType`, `technology`, `requiredMembers` and `payloadSelection`, `single` for a G-code or NC program; optional `extensions` such as `.gcode` name the files a consumer offers), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start (always `work-area-clear`), and the start's attendance and interlocks; a person always approves a job, so it names no authority. `stop` is a `MachineHaltOutcome`: what motion, spindle, heaters and an optional beam `emission` do, whether position is kept, and the recovery remedies.
 
 ```ts
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { machineJogHold, standardMachineAction } from '@taucad/runtime/machine';
 import type { MachineManifestDefinition } from '@taucad/runtime/machine';
 import { z } from 'zod';

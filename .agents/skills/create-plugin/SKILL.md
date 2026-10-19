@@ -64,7 +64,7 @@ duplicate that workflow here.
 
 Author jobs through `@taucad/runtime/job`, machines through
 `@taucad/runtime/machine`, and their schemas through the pure
-`@taucad/runtime/configuration` entrypoint. A machine declares a manifest
+`@taucad/runtime/schema` entrypoint. A machine declares a manifest
 `version: 3` under `protocolVersion: 2`: its actions come from
 `standardMachineAction` or `defineMachineAction`, each `designed` until a
 qualification profile names it, with `holds`, `jobs` and `stop` declared

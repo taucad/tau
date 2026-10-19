@@ -40,8 +40,8 @@
     "./types": "./src/types/index.ts",
     "./metadata": "./src/utils/package-info.ts",
     "./client": "./src/client/index.ts",
-    "./configuration": "./src/configuration/index.ts",
-    "./configuration/zod": "./src/configuration/zod.ts",
+    "./schema": "./src/configuration/index.ts",
+    "./schema/zod": "./src/configuration/zod.ts",
     "./job": "./src/jobs/index.ts",
     "./machine": "./src/machines/index.ts",
     "./host": "./src/host/index.ts",
@@ -106,12 +106,12 @@
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
       },
-      "./configuration": {
+      "./schema": {
         "types": "./dist/configuration/index.d.mts",
         "import": "./dist/configuration/index.mjs",
         "default": "./dist/configuration/index.mjs"
       },
-      "./configuration/zod": {
+      "./schema/zod": {
         "types": "./dist/configuration/zod.d.mts",
         "import": "./dist/configuration/zod.mjs",
         "default": "./dist/configuration/zod.mjs"

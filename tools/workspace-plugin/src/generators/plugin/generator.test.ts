@@ -333,14 +333,14 @@ describe('plugin generator', () => {
     expect(source).toContain('default: manufacturingFixtureMachine');
 
     const job = readText(tree, `${root}/src/manufacturing-fixture.job.ts`);
-    expect(job).toContain("from '@taucad/runtime/configuration'");
+    expect(job).toContain("from '@taucad/runtime/schema'");
     expect(job).toContain("from '@taucad/runtime/job'");
     expect(job).toContain("from 'zod'");
     expect(job).toContain('input.configuration.enabled');
     expect(job).toContain('TODO: implement manufacturing-fixture job execution');
 
     const machine = readText(tree, `${root}/src/manufacturing-fixture.machine.ts`);
-    expect(machine).toContain("from '@taucad/runtime/configuration'");
+    expect(machine).toContain("from '@taucad/runtime/schema'");
     expect(machine).toContain("from '@taucad/runtime/machine'");
     expect(machine).toContain("from 'zod'");
     expect(machine).toContain('schema: z.object({}),');

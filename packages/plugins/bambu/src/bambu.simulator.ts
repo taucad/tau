@@ -9,7 +9,7 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
 
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import type {
   MachineArtifactReference,
   MachineClock,

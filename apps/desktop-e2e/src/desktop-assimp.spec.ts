@@ -32,7 +32,6 @@ import {
   connectPickedFolder,
   ensureFilesPane,
   expectCount,
-  expectGeometryFramed,
   expectRenderCycleSince,
   expectSignedIn,
   expectVisible,
@@ -257,29 +256,6 @@ const utilityProcesses = async (desktopSession: DesktopSession): Promise<Readonl
     ),
   );
 
-/**
- * The kernel utilities once two samples a second apart agree, so a fork still in flight is not missed.
- * @param desktopSession - The packaged app.
- * @returns The settled kernel utility pids.
- */
-const settledUtilityProcesses = async (desktopSession: DesktopSession): Promise<ReadonlySet<number>> => {
-  let previous = await utilityProcesses(desktopSession);
-  let settled: ReadonlySet<number> | undefined;
-  await expect
-    .poll(
-      async () => {
-        const current = await utilityProcesses(desktopSession);
-        settled =
-          current.size === previous.size && [...current].every((pid) => previous.has(pid)) ? current : undefined;
-        previous = current;
-        return settled !== undefined;
-      },
-      { interval: 1000, timeout: 30_000 },
-    )
-    .toBe(true);
-  return settled!;
-};
-
 const packagedRendererChunkUrl = (app: string, prefix: string, diagnostic: string): string => {
   const assets = join(app, 'Contents/Resources/ui/client/assets');
   const matches = readdirSync(assets).filter(
@@ -375,10 +351,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         'renderer-',
         'requestElectronRuntimePort: preload relay omitted the runtime host ID',
       );
-      /* The project's own viewer adopts the prewarmed spare and forks the next one when it first renders. Sampled
-       * before that, the spare this client adopts is forked after the sample and counts as a second new utility. */
-      await expectGeometryFramed(page);
-      const utilitiesBefore = await settledUtilityProcesses(session);
+      const utilitiesBefore = await utilityProcesses(session);
       await page.evaluate(
         async ({ clientUrl, entryPath, projectRoot, rendererUrl }) => {
           type Callable = (...arguments_: unknown[]) => unknown;
@@ -441,13 +414,19 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         },
         { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
       );
+      /* The replacement spare is the one new utility that stays. The page can open an ephemeral client of its own
+       * meanwhile (a project thumbnail), which forks outside the pool and exits once it has rendered, so wait for that
+       * rather than taking the first sample. */
       let replacementSparePid: number | undefined;
       await expect
-        .poll(async () => {
-          const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
-          replacementSparePid = added.length === 1 ? added[0] : undefined;
-          return added.length;
-        })
+        .poll(
+          async () => {
+            const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
+            replacementSparePid = added.length === 1 ? added[0] : undefined;
+            return added.length;
+          },
+          { timeout: 60_000 },
+        )
         .toBe(1);
 
       fifoWriter = await openPendingFifoWriter(lifecycleBlockedMaterialPath);

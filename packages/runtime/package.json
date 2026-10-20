@@ -1,6 +1,6 @@
 {
   "name": "@taucad/runtime",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Multi-kernel CAD runtime framework for browser and Node.js",
   "type": "module",
   "sideEffects": false,

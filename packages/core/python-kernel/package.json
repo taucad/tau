@@ -1,6 +1,6 @@
 {
   "name": "@taucad/python-kernel-core",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Shared Python language-kernel worker, session, closure and payload-generator helpers for Tau's native Python kernels",
   "type": "module",
   "sideEffects": false,

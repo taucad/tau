@@ -4,7 +4,7 @@
       "slug": "cad-zoo",
       "name": "Zoo KCL authoring",
       "description": "Guides Zoo KCL modeling in main.kcl with constrained sketch blocks, regions and extrusions. Use when creating or editing KCL models.",
-      "version": "0.1.0-beta.7",
+      "version": "0.1.0-beta.8",
       "whenToUse": "Use when creating or editing KCL models.",
       "directory": "cad-zoo",
       "files": [

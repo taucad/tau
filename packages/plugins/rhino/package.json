@@ -1,6 +1,6 @@
 {
   "name": "@taucad/rhino",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Rhino 3DM import toolkit for Tau",
   "type": "module",
   "sideEffects": false,

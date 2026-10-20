@@ -4,7 +4,7 @@
       "slug": "cad-replicad",
       "name": "Replicad authoring",
       "description": "Guides Replicad BRep, Tau physical materials, textures, named interfaces and kinematics. Use for Replicad models and appearance or moving-part requests.",
-      "version": "0.1.0-beta.7",
+      "version": "0.1.0-beta.8",
       "whenToUse": "Use for Replicad models, including physical materials, textures, STEP interfaces and moving assemblies.",
       "directory": "cad-replicad",
       "files": [

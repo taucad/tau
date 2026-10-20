@@ -46,10 +46,11 @@ Start a new thread after installing. Codex offers the `tau` skill as the plugin'
 
 ### Check
 
-- Claude Code: `claude plugin list` shows `tau@taucad` enabled; `claude mcp list` shows `plugin:tau:tau … ✔ Connected`.
-- Codex: `codex plugin list` shows `tau@taucad  installed, enabled`.
+- Claude Code: `claude plugin list` shows `tau@taucad` enabled.
+- Codex: `codex plugin list --marketplace taucad` shows `tau@taucad  installed, enabled`.
+- From the project folder, `node <plugin folder>/dist/doctor.mjs` checks Node.js, npm and its cache, the CLI the launcher runs and its version, a live `initialize` and the skills; see [Which Tau CLI runs](#which-tau-cli-runs).
 
-`tau --version` prints the same version as the plugin. Troubleshooting, kernel choice and what to tell the user are in the agent guide, <https://taucad.dev/llms.txt>.
+The doctor, like any shell handshake, proves the launcher and CLI start, not that the host loads the tools: they appear in a new session or thread. A handshake run outside the project folder reports that folder as the project. `tau --version` prints the same version as the plugin; the two `beta` installs can differ, and then `npm install -g @taucad/cli@<plugin version>` fixes it. Troubleshooting, kernel choice and what to tell the user are in the agent guide, <https://taucad.dev/llms.txt>.
 
 ### npm
 

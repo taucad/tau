@@ -38,7 +38,10 @@ export const content = (): React.JSX.Element => (
         </div>
         <div className='agent-prompt'>
           <p className='fine'>Using Claude Code or Codex? Paste this into your agent:</p>
-          <code id='agent-prompt-text'>Install the Tau plugin from {appOrigin}/llms.txt</code>
+          {/* One text node, so the UI edge function can name staging's own agent page before React hydrates it. */}
+          <code id='agent-prompt-text' suppressHydrationWarning>
+            {`Install the Tau plugin from ${appOrigin}/llms.txt`}
+          </code>
           <Button
             type='button'
             variant='outline'

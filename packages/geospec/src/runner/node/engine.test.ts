@@ -34,6 +34,23 @@ const select = async (loadError?: Error) => {
   return createNodeGeoSpecEngine;
 };
 
+/**
+ * The error napi-rs throws when no candidate binding loads, with each candidate's failure in its cause chain.
+ * @param candidates - The failure message of each candidate the loader tried.
+ * @returns The loader's error.
+ */
+const noBinding = (...candidates: string[]): Error => {
+  const error = new Error('Cannot find native binding. npm has a bug related to optional dependencies.');
+  let chain: Error | undefined;
+  for (const message of candidates) {
+    const candidate = new Error(message);
+    candidate.cause = chain;
+    chain = candidate;
+  }
+  error.cause = chain;
+  return error;
+};
+
 afterEach(() => {
   vi.doUnmock('geospec-engine/node');
   vi.clearAllMocks();
@@ -49,7 +66,12 @@ describe('createNodeGeoSpecEngine', () => {
   });
 
   it('should fall back to the initialized WASM build only when no addon is installed', async () => {
-    const absent = new Error('Cannot find native binding. npm has a bug related to optional dependencies.');
+    const absent = noBinding(
+      "Cannot find module './geospec-engine.linux-x64-gnu.node'",
+      "Cannot find module 'geospec-engine-linux-x64-gnu'",
+      "Cannot find module './geospec-engine.wasi.cjs'",
+      "Cannot find module 'geospec-engine-wasm32-wasi'",
+    );
 
     const created = await (await select(absent))({ executionPermits: 2 });
 
@@ -62,6 +84,24 @@ describe('createNodeGeoSpecEngine', () => {
     const broken = new Error('Native binding package version mismatch, expected 0.2.1 but got 0.2.0.');
 
     await expect((await select(broken))()).rejects.toThrow(expect.objectContaining({ cause: broken }));
+    expect(owner.wasm).not.toHaveBeenCalled();
+  });
+
+  it('should throw when an installed addon fails to load behind the no-binding message', async () => {
+    const broken = noBinding(
+      "Cannot find module './geospec-engine.linux-x64-gnu.node'",
+      '/project/node_modules/geospec-engine-linux-x64-gnu/geospec-engine.linux-x64-gnu.node: file too short',
+      "Cannot find module 'geospec-engine-wasm32-wasi'",
+    );
+
+    await expect((await select(broken))()).rejects.toThrow(expect.objectContaining({ cause: broken }));
+    expect(owner.wasm).not.toHaveBeenCalled();
+  });
+
+  it('should throw when the no-binding message carries no candidate failures', async () => {
+    const bare = noBinding();
+
+    await expect((await select(bare))()).rejects.toThrow(expect.objectContaining({ cause: bare }));
     expect(owner.wasm).not.toHaveBeenCalled();
   });
 });

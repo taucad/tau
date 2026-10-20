@@ -61,8 +61,8 @@ export const createNodeGeoSpecCliHost = (options: NodeGeoSpecCliHostOptions = {}
         projectPath,
         ...(configPath === undefined ? {} : { configPath }),
         ...(options.exporterModules === undefined ? {} : { exporterModules: options.exporterModules }),
-        // `--workers` with no count auto-sizes, which the pool models as an
-        // absent `workers`.
+        // `--workers` with no count parses as 0 and auto-sizes to the host's
+        // parallelism; an absent `workers` runs one worker.
         workers: workers === 0 ? availableParallelism() : (workers ?? 1),
         ...(shardTimeout === undefined ? {} : { shardTimeout }),
       }),

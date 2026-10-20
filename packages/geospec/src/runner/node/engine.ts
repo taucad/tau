@@ -30,16 +30,34 @@ export type NodeGeoSpecEngine = {
   readonly binding: GeoSpecEngineBinding;
 };
 
-/** The message napi-rs throws when no platform addon is installed, as opposed to an addon that fails to load. */
-const absentAddon = 'Cannot find native binding.';
+/** The message napi-rs throws when no candidate binding loaded, whether absent or broken. */
+const noBinding = 'Cannot find native binding.';
+
+/** A candidate the napi-rs loader tried that is not installed, or a platform it has no candidate for. */
+const absentCandidate =
+  /^(?:Cannot find module '(?:\.\/geospec-engine\.|geospec-engine-)|Unsupported architecture on )/v;
 
 /**
- * Whether a load error, or an error a module loader wrapped it in, says no platform addon is installed.
- * @param error - The error the native entry's import threw.
- * @returns True only for napi-rs's absent-addon error.
+ * The messages of an error and its causes, outermost first.
+ * @param error - The error to walk.
+ * @returns One message per error in the chain.
  */
-const isAbsentAddon = (error: unknown): boolean =>
-  error instanceof Error && (error.message.startsWith(absentAddon) || isAbsentAddon(error.cause));
+const causeMessages = (error: unknown): string[] =>
+  error instanceof Error ? [error.message, ...causeMessages(error.cause)] : [];
+
+/**
+ * Whether a load error, or an error a module loader wrapped it in, says no platform addon is installed. napi-rs
+ * throws the same message for an installed addon that fails to load, so every candidate in its cause chain must be
+ * missing rather than broken.
+ * @param error - The error the native entry's import threw.
+ * @returns True only when no candidate binding is installed.
+ */
+const isAbsentAddon = (error: unknown): boolean => {
+  const messages = causeMessages(error);
+  const outer = messages.findIndex((message) => message.startsWith(noBinding));
+  const candidates = messages.slice(outer + 1);
+  return outer !== -1 && candidates.length > 0 && candidates.every((message) => absentCandidate.test(message));
+};
 
 /**
  * Create a GeoSpec engine for this process: the `geospec-engine` native addon when this platform has one, else its

@@ -1,6 +1,6 @@
 # geospec — Functions
 
-41 top-level symbols. Signatures are verbatim typescript.
+46 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -160,6 +160,24 @@ export declare function resolveUnderRoot(root: string, path: string): string;
 //   root: The project root
 //   path: A canonical path rooted by the supplied project capability
 
+// Create a GeoSpec engine for this process
+// Throws: Error when the native addon is installed but cannot load, or the permits are invalid.
+// createNodeGeoSpecEngine (function)
+export declare function createNodeGeoSpecEngine(options?: CreateNodeGeoSpecEngineOptions): Promise<NodeGeoSpecEngine>;
+//   options: CPU permits for the native addon
+
+// Create a pool with one engine and one set of exporters constructed inside each worker
+// Remarks: Workers are threads of this process and share one OCCT library instance and pool width, so inner parallelism is all-or-nothing: either several workers with one permit each, or one worker holding the whole budget. A budget above the worker count with more than one worker is refused before any worker starts rather than silently run serial.
+// Throws: RangeError When the budget is invalid, exceeds the host cap, or gives any of several in-process workers more than one permit.
+// createGeoSpecNodePoolRunner (function)
+export declare function createGeoSpecNodePoolRunner(options: GeoSpecNodePoolOptions): GeoSpecRunner;
+//   options: Project, config, exporter modules, outer workers and caller-inclusive CPU budget
+
+// Adapt a Node worker thread to the pool's host-agnostic handle
+// createNodeWorkerHandle (function)
+export declare function createNodeWorkerHandle(worker: NodeWorkerLike): GeoSpecPoolWorkerHandle;
+//   worker: The spawned worker
+
 // Create a run-level issue when filters select no tests
 // createNoMatchingGeoSpecTestsIssue (function)
 export declare function createNoMatchingGeoSpecTestsIssue(): VmIssue;
@@ -199,6 +217,17 @@ export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOp
 // resolveGeoSpecMaximumWorkUnitLimit (function)
 export declare function resolveGeoSpecMaximumWorkUnitLimit(maximum?: number): number;
 //   maximum: The host's configured maximum, when it sets one
+
+// Run the CLI
+// runGeoSpecCli (function)
+export declare function runGeoSpecCli(argv: readonly string[], host: GeoSpecCliHost): Promise<number>;
+//   argv: Arguments after the executable and script
+//   host: The injected platform
+
+// Build the Node CLI host
+// createNodeGeoSpecCliHost (function)
+export declare function createNodeGeoSpecCliHost(options?: NodeGeoSpecCliHostOptions): GeoSpecCliHost;
+//   options: Report sink and host-supplied exporter modules
 
 // Create Vitest matchers over an existing runner-independent client
 // createGeoSpecVitestAdapter (function)

@@ -189,7 +189,7 @@ describe('isUndecidedFailure', () => {
 });
 
 describe('formatTestModelHeadline', () => {
-  // `geospec run` prints the same line from the same counts (`formatRunHeadline` in geospec-engine's cli.test.ts).
+  // `geospec run` prints the same line from the same counts (`formatRunHeadline` in geospec's cli.test.ts).
   it('should print the headline geospec run prints for the same counts', () => {
     expect(formatTestModelHeadline('inconclusive', summarizeTestModelOutput(planetary).counts)).toBe(
       'GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.',

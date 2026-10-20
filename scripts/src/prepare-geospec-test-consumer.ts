@@ -329,6 +329,11 @@ const main = async (): Promise<void> => {
     'f1-public-a1/vitest.config.mjs',
     'fixtures/read-fixture.mjs',
     'fixtures/manifest.json',
+    'installed-cli/cli.test.mjs',
+    'installed-cli/box-project/box-exporter.mjs',
+    'installed-cli/box-project/box.geospec.ts',
+    'installed-cli/box-project/geospec.config.mjs',
+    'installed-cli/box-project/part.box',
   ].map((path) => {
     const input = fileRecord(join(repositoryRoot, 'packages/geospec/host-tests', path));
     const destination = join(consumerRoot, 'host-tests', path);

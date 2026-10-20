@@ -1,6 +1,6 @@
-import { geoSpecTimeoutCode } from 'geospec/runner';
+import { geoSpecTimeoutCode } from '#runner/index.js';
 import { describe, expect, it, vi } from 'vitest';
-import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { GeoSpecRunnerResult } from '#runner/worker/index.js';
 import {
   formatFileReport,
   formatRunHeadline,
@@ -12,8 +12,8 @@ import {
   runReportJson,
 } from '#cli/cli.js';
 import type { GeoSpecCliHost } from '#cli/cli.js';
-import type { GeometryDiagnostic } from 'geospec/mesh';
-import type { GeoSpecRunResult } from 'geospec/runner';
+import type { GeometryDiagnostic } from '#mesh/index.js';
+import type { GeoSpecRunResult } from '#runner/index.js';
 
 const bundle = { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
 
@@ -29,7 +29,9 @@ const parsed = (...argv: string[]) => {
 const cliHost = (options: {
   tree?: Readonly<Record<string, string[]>>;
   result?: GeoSpecRunnerResult;
-}): GeoSpecCliHost & { written: string[]; runs: unknown[]; closed: () => number } => {
+  config?: Awaited<ReturnType<GeoSpecCliHost['loadConfig']>> | Error;
+}): GeoSpecCliHost & { written: string[]; runs: unknown[]; configs: unknown[]; closed: () => number } => {
+  const configs: unknown[] = [];
   const written: string[] = [];
   const runs: unknown[] = [];
   let closed = 0;
@@ -37,6 +39,7 @@ const cliHost = (options: {
   return {
     written,
     runs,
+    configs,
     closed: () => closed,
     cwd: () => '/project',
     write: (line) => written.push(line),
@@ -47,6 +50,13 @@ const cliHost = (options: {
         return { kind };
       },
     }),
+    loadConfig: async (configOptions) => {
+      configs.push(configOptions);
+      if (options.config instanceof Error) {
+        throw options.config;
+      }
+      return options.config ?? { options: {} };
+    },
     createRunner: (runnerOptions) => {
       runs.push(runnerOptions);
       return {
@@ -756,7 +766,12 @@ describe('runGeoSpecCli', () => {
 
     await runGeoSpecCli(['run', '.', '--test-timeout', '1234', '--bail'], host);
 
-    expect(host.runs[0]).toStrictEqual({ projectPath: '/project', workers: undefined, shardTimeout: undefined });
+    expect(host.runs[0]).toStrictEqual({
+      projectPath: '/project',
+      configPath: undefined,
+      workers: undefined,
+      shardTimeout: undefined,
+    });
     expect(host.runs[1]).toMatchObject({ testTimeout: 1234, bail: true });
   });
 
@@ -814,7 +829,12 @@ describe('runGeoSpecCli', () => {
         },
         on: () => () => undefined,
         abort: () => undefined,
-        close: host.createRunner({ projectPath: '/project', workers: undefined, shardTimeout: undefined }).close,
+        close: host.createRunner({
+          projectPath: '/project',
+          configPath: undefined,
+          workers: undefined,
+          shardTimeout: undefined,
+        }).close,
       }),
     };
 
@@ -835,6 +855,60 @@ describe('runGeoSpecCli', () => {
     await runGeoSpecCli(['run', '.', '--include', '**/*.geospec.ts', '--exclude', '**/*.slow.geospec.ts'], host);
 
     expect(discovery).toHaveBeenCalledWith('/project');
+  });
+});
+
+describe('the project config', () => {
+  it('should load the explicit --config and hand its path to the runner', async () => {
+    const host = cliHost({ config: { configPath: '/project/ci.config.ts', options: {} } });
+
+    await runGeoSpecCli(['run', '.', '--config', 'ci.config.ts'], host);
+
+    expect(host.configs).toStrictEqual([{ projectPath: '/project', configPath: 'ci.config.ts' }]);
+    expect(host.runs[0]).toMatchObject({ configPath: '/project/ci.config.ts' });
+  });
+
+  it("should run with the config's fields where no flag replaces them", async () => {
+    const discovery = vi.fn(() => ({
+      readdir: async () => ['a.geospec.ts', 'b.slow.geospec.ts'],
+      stat: async (path: string) => {
+        const kind: 'directory' | 'file' = path === '/project' ? 'directory' : 'file';
+        return { kind };
+      },
+    }));
+    const host = cliHost({
+      config: {
+        configPath: '/project/geospec.config.ts',
+        options: { exclude: ['**/*.slow.geospec.ts'], testNamePattern: 'volume', testTimeout: 5000, bail: true },
+      },
+    });
+
+    await runGeoSpecCli(['run', '.', '--test-timeout', '9000'], { ...host, discoveryFileSystem: discovery });
+
+    expect(host.runs[1]).toStrictEqual({
+      files: ['a.geospec.ts'],
+      testNamePattern: 'volume',
+      testTimeout: 9000,
+      bail: true,
+    });
+  });
+
+  it('should fail without running when the config cannot load', async () => {
+    const host = cliHost({ config: new TypeError('Multiple GeoSpec configs found: a, b.') });
+
+    expect(await runGeoSpecCli(['run', '.', '--json'], host)).toBe(1);
+    expect(JSON.parse(host.written[0] ?? '{}')).toStrictEqual({
+      success: false,
+      error: 'GeoSpec config: Multiple GeoSpec configs found: a, b.',
+    });
+    expect(host.runs).toHaveLength(0);
+  });
+
+  it('should refuse --config without a path', () => {
+    expect(parseGeoSpecCliArguments(['run', '--config'])).toStrictEqual({
+      kind: 'error',
+      message: '--config needs a path.',
+    });
   });
 });
 

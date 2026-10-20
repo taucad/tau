@@ -648,7 +648,7 @@ GeoSpecProductStructureExpectation: {
   count?: GeoSpecNumericExpectation
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
-// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
+// Remarks: Each kind admits narrow geometry and refuses outside it, never falling back to an estimate (D3). On STEP, `clearance`, `contact`, `insertion` and `interference` take complete box-shaped occurrences (`insertion` also a Cartesian `axis`); `coaxial`, `concentric`, `coplanar`, `parallel`, `perpendicular` and `angle` take one analytic face, axis or plane per endpoint; `containment` takes closed solids. On glTF/GLB, `body` endpoints admit `contact`, `clearance`, `containment` and `interference` over closed shells. Shared volume for `interference` must lie in `[minVolume, maxVolume]`.
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';

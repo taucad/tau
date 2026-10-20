@@ -1,9 +1,9 @@
 import { createElement } from 'react';
-import { ExternalLink, Link2, ShieldCheck } from 'lucide-react';
+import { Link2, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/project-core/share-artifact';
 import { createDirectShareUrlFromArchive } from '@taucad/project-core/share-direct';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
-import type { TauViewerDirectShare, TauViewerModel, TauViewerShareLink } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerDirectShare, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import type {
   ShareLinkMethod,
   ShareLinkOutcome,
@@ -13,18 +13,8 @@ import type {
 } from '@taucad/workbench-panes/share/share-source';
 import type { HostBridge } from '#app/host-bridge.js';
 
-/** The app-visible tool that answers both links of a shown model: `kind: 'direct'` packs it, `'github'` imports it. */
+/** The app-visible tool that packs a shown model's project for the direct link. */
 export const appShareLinkTool = tauViewerToolName.appShareLink;
-
-/** What {@link appShareLinkTool} answers on success for `kind: 'github'`. */
-type ShareLinkAnswer = Pick<TauViewerShareLink, 'url' | 'repository' | 'ref' | 'hasLocalChanges'>;
-
-const isShareLinkAnswer = (value: unknown): value is ShareLinkAnswer =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as { url?: unknown }).url === 'string' &&
-  typeof (value as { repository?: unknown }).repository === 'string' &&
-  typeof (value as { ref?: unknown }).ref === 'string';
 
 const fieldOf = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null ? (value as Readonly<Record<string, unknown>>)[key] : undefined;
@@ -93,7 +83,7 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
   share: async ({ protection, signal }: ShareLinkRequest): Promise<ShareLinkOutcome> => {
     let warning: string | undefined;
     try {
-      const answer = await bridge.callTool(appShareLinkTool, { modelId: model.id, kind: 'direct' });
+      const answer = await bridge.callTool(appShareLinkTool, { modelId: model.id });
       if (!isDirectShareAnswer(answer)) {
         return { error: messageOf(answer) ?? 'Tau could not pack this project for a direct link.' };
       }
@@ -112,66 +102,18 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
 });
 
 /**
- * "Open in Tau": the GitHub import link of the branch the checkout tracks.
- *
- * @param bridge - The page's host bridge.
- * @param model - The shown model.
- * @returns The method.
- */
-const openInTauMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMethod => ({
-  kind: 'link',
-  id: 'open-in-tau',
-  label: 'Open in Tau',
-  icon: ExternalLink,
-  description: 'Create a link that opens this project in Tau from its GitHub repository.',
-  notice: {
-    icon: createElement(ExternalLink, {
-      className: 'mt-0.5 size-5 text-primary',
-      'aria-hidden': true,
-    }),
-    title: 'Opens what is on GitHub',
-    text: 'Tau imports the branch this project tracks. Commit and push first: changes GitHub does not have are not in the link.',
-  },
-  action: { label: 'Copy Tau link', icon: ExternalLink },
-  copiedMessage: 'Tau link copied',
-  share: async (): Promise<ShareLinkOutcome> => {
-    try {
-      const answer = await bridge.callTool(appShareLinkTool, {
-        modelId: model.id,
-        kind: 'github',
-      });
-      if (!isShareLinkAnswer(answer)) {
-        return {
-          error: messageOf(answer) ?? 'Tau could not make a link for this project.',
-        };
-      }
-      return {
-        url: answer.url,
-        warning: answer.hasLocalChanges
-          ? `This checkout has changes that are not on GitHub; the link opens ${answer.repository} at ${answer.ref} without them.`
-          : undefined,
-      };
-    } catch (error) {
-      return {
-        error: failureMessage(error),
-      };
-    }
-  },
-});
-
-/**
- * The Share pane's source on the viewer page: the desktop's "Direct link" first, then "Open in Tau".
+ * The Share pane's source on the viewer page: the desktop's "Direct link", its one method.
  *
  * The direct link is the one the Tau desktop's Share pane makes: the project packed into the URL, optionally sealed
- * under a password. The hosted and Gist links need a Tau or GitHub account the page cannot sign in to, so the second
- * method is the link Tau's GitHub import already serves for the repository the checkout tracks.
+ * under a password. The hosted and Gist links need a Tau or GitHub account the page cannot sign in to. With one method
+ * the pane draws no method picker, as the desktop's does for a single method.
  *
- * @param bridge - The page's host bridge; both links come from {@link appShareLinkTool}.
+ * @param bridge - The page's host bridge; the packed project comes from {@link appShareLinkTool}.
  * @param model - The model the page shows; its id names the project and entry on the server.
- * @returns A source with the direct link and the "Open in Tau" link.
+ * @returns A source with the direct link.
  */
 export function createShareSource(bridge: HostBridge, model: TauViewerModel): ShareSource {
   return {
-    methods: [directMethod(bridge, model), openInTauMethod(bridge, model)],
+    methods: [directMethod(bridge, model)],
   };
 }

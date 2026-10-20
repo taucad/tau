@@ -21,7 +21,7 @@ export const tauViewerToolName = {
   appSync: 'app_sync',
   /** The page's answer to a capture request. */
   appCaptureReply: 'app_capture_reply',
-  /** A Tau link to the shown model's project, for the page's Share pane. */
+  /** The shown model's project packed for the page's direct share link. */
   appShareLink: 'app_share_link',
 } as const;
 
@@ -297,13 +297,10 @@ export const resolveTauViewerPresentation = (client: TauViewerClient): TauViewer
  */
 export const tauViewerResourceUri = (sha256: string): string => `ui://tau/${sha256.slice(0, 16)}/app.html`;
 
-/** Which link `app_share_link` makes: `'direct'` (the default) packs the project, `'github'` imports it. @public */
-export type TauViewerShareKind = 'direct' | 'github';
-
 /**
- * What `app_share_link` answers for `kind: 'direct'`: the shown model's project as the deterministic portable share
- * ZIP (`@taucad/project-core/share-artifact`), base64url. The page makes the direct link from it, and seals it under
- * a password itself, so a password never reaches the server.
+ * What `app_share_link` answers: the shown model's project as the deterministic portable share ZIP
+ * (`@taucad/project-core/share-artifact`), base64url. The page makes the direct link from it, and seals it under a
+ * password itself, so a password never reaches the server.
  * @public
  */
 export type TauViewerDirectShare = Readonly<{
@@ -321,20 +318,4 @@ export type TauViewerDirectShare = Readonly<{
   archiveBytes: number;
   /** Non-blocking diagnostics safe to show the person sharing. */
   warnings: ReadonlyArray<Readonly<{ code: string; message: string }>>;
-}>;
-
-/** What `app_share_link` answers for `kind: 'github'`: a Tau link that imports the shown model's project from GitHub. @public */
-export type TauViewerShareLink = Readonly<{
-  /** The Tau link that imports the project from GitHub. */
-  url: string;
-  /** `owner/repo` on GitHub. */
-  repository: string;
-  /** The branch on GitHub the local checkout tracks. */
-  ref: string;
-  /** The project folder inside the repository, `''` at its root. */
-  path: string;
-  /** The entry the link opens, relative to the project folder. */
-  mainFile: string;
-  /** Whether the checkout has commits or edits GitHub does not have, which the link does not include. */
-  hasLocalChanges: boolean;
 }>;

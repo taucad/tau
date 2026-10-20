@@ -18,8 +18,6 @@ import type {
   TauViewerReadInput,
   TauViewerReadResult,
   TauViewerDirectShare,
-  TauViewerShareKind,
-  TauViewerShareLink,
   TauViewerShowResult,
   TauViewerSyncInput,
   TauViewerSyncResult,
@@ -109,11 +107,11 @@ export type TauMcpViewer = Readonly<{
     input: TauViewerCaptureReplyInput,
     options: TauMcpViewerCallOptions,
   ): Promise<Readonly<{ accepted: boolean }> | TauMcpViewerFailure>;
-  /** A Tau link to a shown model's project, for the page's Share pane; a host without one leaves the tool out. */
+  /** A shown model's project packed for the page's direct link; a host without one leaves the tool out. */
   shareLink?(
-    input: Readonly<{ modelId: string; kind?: TauViewerShareKind | undefined }>,
+    input: Readonly<{ modelId: string }>,
     options: TauMcpViewerCallOptions,
-  ): Promise<TauViewerDirectShare | TauViewerShareLink | TauMcpViewerFailure>;
+  ): Promise<TauViewerDirectShare | TauMcpViewerFailure>;
 }>;
 
 const descriptions = {
@@ -128,7 +126,7 @@ const descriptions = {
   appSync: "The Tau viewer page's sync with the server. Only the viewer page calls this.",
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
   appShareLink:
-    "A Tau link to the shown model's project, for the Tau viewer page's Share pane: kind 'direct' (the default) packs the project for a self-contained link, kind 'github' imports it from GitHub. Only the viewer page calls this.",
+    "The shown model's project packed for the Tau viewer page's direct share link. Only the viewer page calls this.",
 } as const;
 
 const showModelInputSchema = z
@@ -202,9 +200,7 @@ const appSyncInputSchema = z
   })
   .strict();
 
-const appShareLinkInputSchema = z
-  .object({ modelId: z.string().min(1), kind: z.enum(['direct', 'github']).optional() })
-  .strict();
+const appShareLinkInputSchema = z.object({ modelId: z.string().min(1) }).strict();
 
 /** A capture travels base64 in one reply; 8 MiB of base64 is a 6 MiB image, far above a 1280 px frame. */
 const captureDataLimit = 8 * 1024 * 1024;
@@ -568,10 +564,8 @@ export const registerTauMcpViewer = (
       return isFailure(result)
         ? failure(result)
         : {
-            /* A direct answer carries the packed project; its text stays short. */
-            content: [
-              { type: 'text', text: 'kind' in result ? 'The project is packed for a direct link.' : result.url },
-            ],
+            /* The answer carries the packed project; its text stays short. */
+            content: [{ type: 'text', text: 'The project is packed for a direct link.' }],
             structuredContent: result,
           };
     },

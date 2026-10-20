@@ -27,7 +27,7 @@ import { tauViewerReadLimit, tauViewerToolName } from '@taucad/mcp/viewer-protoc
 import { readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
-import { createDirectShare, createOpenInTauLink } from '#mcp-viewer-share.js';
+import { createDirectShare } from '#mcp-viewer-share.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import {
   viewerExportFormatsInputSchema,
@@ -690,14 +690,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       const entry = shown.get(input.modelId);
       return entry === undefined
         ? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.')
-        : input.kind === 'github'
-          ? createOpenInTauLink({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path })
-          : createDirectShare({
-              root: entry.root,
-              entryPath: entry.model.sourceFile ?? entry.model.path,
-              snapshotSource: options.snapshotSource,
-              signal: callOptions.signal,
-            });
+        : createDirectShare({
+            root: entry.root,
+            entryPath: entry.model.sourceFile ?? entry.model.path,
+            snapshotSource: options.snapshotSource,
+            signal: callOptions.signal,
+          });
     },
     async close() {
       sessions.close();

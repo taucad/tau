@@ -41,6 +41,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
+  stageNativePackageFiles,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -310,6 +311,7 @@ await Promise.all([
 ]);
 await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+  stageNativePackageFiles(resources),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   /* The legal pages live on the website; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */

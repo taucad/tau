@@ -44,6 +44,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
+  stageNativePackageFiles,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -124,6 +125,7 @@ const resources = resolve(appRoot, 'resources');
 await mkdir(resolve(resources, 'branding'), { recursive: true });
 await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+  stageNativePackageFiles(resources),
   ...plan.branding.map(async (name) =>
     cp(resolve(desktopRoot, 'resources', name), resolve(resources, 'branding', name)),
   ),

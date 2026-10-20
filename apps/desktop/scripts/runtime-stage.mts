@@ -8,9 +8,10 @@
  * Exit codes: n/a (library module).
  */
 
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { acpAgentProfiles } from '@taucad/host';
 import { preparationPluginsOf } from '@taucad/native-process-core/store';
@@ -18,7 +19,8 @@ import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/p
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
-import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
+import { desktopNativeDeployments, nativePackageResources } from '#tau/desktop-native-deployments.js';
+import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyRuntimeClosure, copyTree } from '@taucad/nx/runtime-closure';
@@ -416,14 +418,19 @@ export type PreparedNativeClosure = Readonly<{
  * @throws When a closure the target declares cannot be prepared.
  */
 export const prepareNativeClosures = async (
-  options: Readonly<{ target: RuntimeTarget; workRoot: string }>,
+  options: Readonly<{
+    target: RuntimeTarget;
+    workRoot: string;
+    /** The deployments to prepare; the packaged app's, read from its resources, when verifying a package. */
+    deployments?: readonly NativeKernelDeployment[];
+  }>,
 ): Promise<readonly PreparedNativeClosure[]> => {
   const target = nativePayloadTargets[options.target];
   if (target === undefined) {
     return [];
   }
   /* Each bundled package with its seal step, launch set and directory, which payloads shipped inside it resolve from. */
-  const plugins = preparationPluginsOf(desktopNativeDeployments);
+  const plugins = preparationPluginsOf(options.deployments ?? desktopNativeDeployments);
   const managed = readManagedPreparation(process.env);
   const store = join(options.workRoot, 'payload-store');
   await rm(options.workRoot, { recursive: true, force: true });
@@ -471,4 +478,49 @@ export const prepareNativeClosures = async (
     host.dispose();
   }
   return prepared;
+};
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null;
+
+/**
+ * The paths of the payloads a `tau-plugin.json` ships inside its package (`packagePath` origins), for every target.
+ * @param manifest - The package's unparsed `tau-plugin.json`.
+ * @returns The package-relative paths, each once.
+ */
+export const packagePathPayloads = (manifest: unknown): readonly string[] => {
+  const paths = new Set<string>();
+  const dependencies = isRecord(manifest) ? manifest['dependencies'] : undefined;
+  for (const variants of isRecord(dependencies) ? Object.values(dependencies) : []) {
+    for (const variant of Array.isArray(variants) ? variants : []) {
+      const payloads: unknown = isRecord(variant) ? variant['payloads'] : undefined;
+      for (const payload of Array.isArray(payloads) ? payloads : []) {
+        const origin: unknown = isRecord(payload) ? payload['origin'] : undefined;
+        if (isRecord(origin) && origin['kind'] === 'packagePath' && typeof origin['path'] === 'string') {
+          paths.add(origin['path']);
+        }
+      }
+    }
+  }
+  return [...paths];
+};
+
+/**
+ * Copy each native package's own payload files (its worker and support modules) into the app's resources, where main
+ * prepares a kernel from on first use (`preparableNativeDeployments`). They are source files, not executables, so the
+ * app signs and notarizes without them changing.
+ * @param resources - The packaged app's resources directory.
+ */
+export const stageNativePackageFiles = async (resources: string): Promise<void> => {
+  await Promise.all(
+    desktopNativeDeployments.flatMap((deployment) =>
+      packagePathPayloads(deployment.manifest).map(async (path) =>
+        cp(
+          join(fileURLToPath(deployment.packageRoot), path),
+          join(resources, nativePackageResources, deployment.package, path),
+          { recursive: true },
+        ),
+      ),
+    ),
+  );
 };

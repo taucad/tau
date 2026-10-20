@@ -38,6 +38,7 @@ import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 import { isQuickLookEnabled } from '#shared/quick-look.js';
+import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
@@ -498,7 +499,12 @@ const verifyNativeClosures = async (store: string): Promise<ReadonlyMap<string, 
   if (existsSync(resolve(appPath, 'Contents/Resources/payloads'))) {
     throw new Error('The app ships native kernel payloads; it downloads them on first use instead.');
   }
-  const prepared = await prepareNativeClosures({ target: `darwin-${architecture}`, workRoot: store });
+  /* From the package files the app ships, as main prepares them, so a missing worker fails here rather than on first use. */
+  const prepared = await prepareNativeClosures({
+    target: `darwin-${architecture}`,
+    workRoot: store,
+    deployments: preparableNativeDeployments({ packaged: true, resourcesPath: resolve(appPath, 'Contents/Resources') }),
+  });
   const expected = new Map<string, { readonly package: string; readonly dependency: string }>();
   for (const name of ['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk']) {
     const manifestPath = resolve(workspaceRoot, `packages/plugins/${name.slice('@taucad/'.length)}/tau-plugin.json`);

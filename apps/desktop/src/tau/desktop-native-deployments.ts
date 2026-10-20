@@ -10,6 +10,10 @@
  *
  * @module
  */
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import { build123dNative } from '@taucad/build123d/native';
 import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 import { picogkNative } from '@taucad/picogk/native';
@@ -21,3 +25,32 @@ export const desktopNativeDeployments: readonly NativeKernelDeployment[] = [
   build123dNative,
   picogkNative,
 ];
+
+/**
+ * Where a packaged app keeps each native package's own payload files (its `packagePath` payloads: the worker and its
+ * support modules), under the app's resources, one directory per package name.
+ */
+export const nativePackageResources = 'native-packages';
+
+/**
+ * The deployments with each package root at a directory that holds the package's own payload files. Main is bundled,
+ * so the root a deployment derives from its module URL names the bundle, not the package: the packaged app reads the
+ * copies packaging stages under its resources, and a development build reads the installed package.
+ * @param input - Whether the app is packaged, and its resources directory.
+ * @returns The deployments to prepare from.
+ */
+export const preparableNativeDeployments = (
+  input: Readonly<{ packaged: boolean; resourcesPath: string }>,
+): readonly NativeKernelDeployment[] => {
+  const require = createRequire(import.meta.url);
+  return desktopNativeDeployments.map((deployment) => ({
+    ...deployment,
+    packageRoot: pathToFileURL(
+      `${
+        input.packaged
+          ? join(input.resourcesPath, nativePackageResources, deployment.package)
+          : dirname(require.resolve(`${deployment.package}/tau-plugin.json`))
+      }/`,
+    ).href,
+  }));
+};

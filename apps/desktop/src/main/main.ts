@@ -112,6 +112,7 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
@@ -785,6 +786,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const nativeKernels = createDesktopKernelPreparer({
     store: nativeStorePath,
     environment: process.env,
+    deployments: preparableNativeDeployments({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
     onProgress: (progress) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed() && isTrustedSender(window.webContents.mainFrame, origins)) {

@@ -81,7 +81,17 @@ export const createDesktopKernelPreparer = (input: {
   ): Promise<DesktopKernelPreparation> => {
     try {
       opened ??= open();
-      const preparation = await opened;
+      const opening = opened;
+      let preparation: NativePreparation;
+      try {
+        preparation = await opening;
+      } catch (error) {
+        /* A store that failed to open is opened again by the next preparation rather than failing it too. */
+        if (opened === opening) {
+          opened = undefined;
+        }
+        throw error;
+      }
       input.log('info', 'native.prepare', { kernel });
       const outcome = await preparation.prepare(kernel, {
         signal,

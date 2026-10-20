@@ -159,6 +159,24 @@ describe('createDesktopKernelPreparer', () => {
     }
   });
 
+  it('should open the store again after a failed open', async () => {
+    /* A file where the store directory belongs fails the first open. */
+    await writeFile(store, '');
+    const { preparer } = open();
+    try {
+      await expect(preparer.prepare('demo')).resolves.toMatchObject({
+        status: 'failed',
+        kernel: 'demo',
+        code: 'PREPARE_KERNEL_FAILED',
+      });
+      await rm(store);
+
+      await expect(preparer.prepare('demo')).resolves.toMatchObject({ status: 'ready', kernel: 'demo' });
+    } finally {
+      await preparer.dispose();
+    }
+  });
+
   it('should cancel a preparation that is downloading', async () => {
     const started = Promise.withResolvers<undefined>();
     const { preparer } = open({

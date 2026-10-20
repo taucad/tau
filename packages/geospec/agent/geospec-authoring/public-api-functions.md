@@ -204,7 +204,7 @@ export declare function createGeoSpecMatcherMethods<Result>(options: {
 //   options: Subject, polarity and host invocation function
 
 // Submit an ancillary query with positive polarity through the native core
-// Remarks: Queries return full reports even when failed or refused. Protocol errors propagate unchanged. Rust owns defaults, validation and canonical encoding.
+// Remarks: A query asserts nothing, so it never fails: when the evidence it reads is missing or cannot decide it returns a full refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`. Protocol errors propagate unchanged. Rust owns defaults, validation and canonical encoding.
 // evaluateGeoSpecNativeQuery (function)
 export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOptions): GeoSpecCanonicalClaimReport;
 //   options: Query identity, subject and authored payload

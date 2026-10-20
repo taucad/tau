@@ -1,6 +1,37 @@
 # geospec — Types (3)
 
-28 top-level symbols. Signatures are verbatim typescript.
+29 top-level symbols. Signatures are verbatim typescript.
+
+// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceFact: {
+    readonly source: 'ap242';
+    readonly assurance: 'exact-brep';
+    readonly unit: 'mm';
+    readonly coordinateSystem: 'z-up';
+    readonly subjectHash: string;
+    readonly algorithmProfile: 'geospec-minimum-distance-v1';
+    readonly occurrences: readonly [string, string];
+    readonly distance: number;
+    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
+}
+
+  readonly source: 'ap242'
+
+  readonly assurance: 'exact-brep'
+
+  readonly unit: 'mm'
+
+  readonly coordinateSystem: 'z-up'
+
+  readonly subjectHash: string
+
+  readonly algorithmProfile: 'geospec-minimum-distance-v1'
+
+  readonly occurrences: readonly [string, string]
+
+  readonly distance: number
+
+  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
 
 // Complete AP242 minimum over two subject-bound occurrence paths
 MinimumDistanceQuery: {

@@ -12,8 +12,10 @@ const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().en
 const decode = (bytes: Uint8Array<ArrayBuffer>): Record<string, JSONValue> =>
   JSON.parse(new TextDecoder().decode(bytes)) as Record<string, JSONValue>;
 
+const passedOutcome: Record<string, JSONValue> = { diagnostics: [{ code: 'UNIT_RESULT' }], evidence: { raw: true } };
+
 // This double records host transport only; it does not canonicalize or evaluate geometry.
-const recordingEngine = (status = 'passed') => {
+const recordingEngine = (status = 'passed', outcome = passedOutcome) => {
   const requests: Array<Record<string, JSONValue>> = [];
   const plans: Array<Uint8Array<ArrayBuffer>> = [];
   const results: Array<Uint8Array<ArrayBuffer>> = [];
@@ -26,9 +28,7 @@ const recordingEngine = (status = 'passed') => {
       const [claim] = claims as Array<Record<string, JSONValue>>;
       results.push(
         encode({
-          results: [
-            { claimId: claim!['claimId'], status, diagnostics: [{ code: 'UNIT_RESULT' }], evidence: { raw: true } },
-          ],
+          results: [{ claimId: claim!['claimId'], status, ...outcome }],
         }),
       );
       return { canonicalClaim: encode(claim), canonicalPlan: plans.at(-1)!, canonicalResult: results.at(-1)! };
@@ -130,20 +130,23 @@ describe('positive ancillary query authoring', () => {
     expect(report.claim['payload']).toStrictEqual({ part_id: 1, partId: 2, nested: { explicit: null } });
   });
 
-  it.each(['failed', 'refused'])('returns %s query reports while matchers still reject', async (status) => {
-    const { engine } = recordingEngine(status);
+  it('returns refused query reports while matchers still reject', async () => {
+    // A query lacking the evidence it reads refuses; the client transports that report unchanged.
+    const diagnostics = [{ code: 'GEOSPEC_UNSUPPORTED_EVIDENCE', severity: 'error' }];
+    const { engine } = recordingEngine('refused', { diagnostics });
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
-    await expect(client.query({ subject, capability: 'analyzeBrep' })).resolves.toMatchObject({ status });
-    expect(
-      evaluateGeoSpecNativeQuery({
-        engine,
-        capability: 'analyzeBrep',
-        subject,
-        claimId: 'raw',
-        subjectSlot: 'subject',
-        workUnitLimit: 1,
-      }).status,
-    ).toBe(status);
+    const report = await client.query({ subject, capability: 'analyzeBrep' });
+    expect(report).toMatchObject({ status: 'refused', diagnostics });
+    expect(report).not.toHaveProperty('evidence');
+    const raw = evaluateGeoSpecNativeQuery({
+      engine,
+      capability: 'analyzeBrep',
+      subject,
+      claimId: 'raw',
+      subjectSlot: 'subject',
+      workUnitLimit: 1,
+    });
+    expect(raw).toMatchObject({ status: 'refused', diagnostics });
     expect(() => client.expectGeo(subject).toBeValidBrep()).toThrow(GeoSpecAssertionError);
   });
 

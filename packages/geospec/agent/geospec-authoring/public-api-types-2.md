@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-56 top-level symbols. Signatures are verbatim typescript.
+55 top-level symbols. Signatures are verbatim typescript.
 
 // Runtime client surface consumed by `geospec/model`
 // Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits. A client with `snapshotSource` lets one run reuse an identical file load after confirming that the source closure it exported is unchanged.
@@ -1394,7 +1394,7 @@ GeoSpecMatcherMethods: {
 }
 
 // One positive-only ancillary query
-// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports, including failed/refused reports, without assertion errors.
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
 GeoSpecQueryOptions: {
     readonly capability: GeoSpecQueryCapability;
     readonly claimId?: string;
@@ -1409,34 +1409,3 @@ GeoSpecQueryOptions: {
   readonly payload?: unknown
 
   readonly subject: GeoSpecNativeSubject
-
-// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
-MinimumDistanceFact: {
-    readonly source: 'ap242';
-    readonly assurance: 'exact-brep';
-    readonly unit: 'mm';
-    readonly coordinateSystem: 'z-up';
-    readonly subjectHash: string;
-    readonly algorithmProfile: 'geospec-minimum-distance-v1';
-    readonly occurrences: readonly [string, string];
-    readonly distance: number;
-    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
-}
-
-  readonly source: 'ap242'
-
-  readonly assurance: 'exact-brep'
-
-  readonly unit: 'mm'
-
-  readonly coordinateSystem: 'z-up'
-
-  readonly subjectHash: string
-
-  readonly algorithmProfile: 'geospec-minimum-distance-v1'
-
-  readonly occurrences: readonly [string, string]
-
-  readonly distance: number
-
-  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]

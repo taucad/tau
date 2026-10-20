@@ -7,6 +7,7 @@ import {
   loadM3Corpus,
   nativeTargetOf,
   projectCurrentM3Campaign,
+  QUERY_EVIDENCE_REFUSALS,
   requireDefinitionsInBinary,
   selectNativeTargetExpectations,
 } from './corpus.mjs';
@@ -59,11 +60,17 @@ void test('should bind the existing F1 authority to the exact current profile an
   }
 });
 
-void test('should preserve every frozen M3 declaration with only exact profile and F1 definition identities projected', () => {
+void test('should preserve every frozen M3 declaration with only exact profile, F1 definition and query-refusal projections', () => {
   const original = JSON.parse(readFixture('packages/geospec/host-tests/m3-corpus/current-authority-v5.json'));
   const before = JSON.stringify(original);
   const current = projectCurrentM3Campaign(original);
   assert.equal(JSON.stringify(original), before);
+  assert.deepEqual(
+    current.rows
+      .filter((row, index) => row.expected.status !== original.rows[index].expected.status)
+      .map((row) => row.id),
+    QUERY_EVIDENCE_REFUSALS,
+  );
   for (const [index, row] of current.rows.entries()) {
     const prior = original.rows[index];
     const key = prior.expected.canonicalPlan.canonicalUtf8 === undefined ? 'derivationUtf8' : 'canonicalUtf8';
@@ -81,6 +88,7 @@ void test('should preserve every frozen M3 declaration with only exact profile a
         ...(row.capability === 'toSatisfyRationalPlate'
           ? { verifierSourceHash: 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350' }
           : {}),
+        ...(QUERY_EVIDENCE_REFUSALS.includes(row.id) ? { status: 'refused' } : {}),
       },
     });
   }
@@ -103,6 +111,10 @@ void test('should preserve every frozen M3 declaration with only exact profile a
     },
     (value) => {
       value.rows[0].id = value.rows[1].id;
+    },
+    (value) => {
+      // A ruling row that no longer fails is not projected silently.
+      value.rows.find((row) => row.id === QUERY_EVIDENCE_REFUSALS[0]).expected.status = 'passed';
     },
   ]) {
     const changed = structuredClone(original);
@@ -289,6 +301,28 @@ void test('should refuse a per-target expectation its operand, claim or base no 
       () => selectNativeTargetExpectations(changed, campaign, { backend: 'native', nativeTarget: 'linux-x64-gnu' }),
       assert.AssertionError,
     );
+  }
+});
+
+void test('should move exactly the four ruled query rows from failed to refused on every backend', () => {
+  for (const campaign of [
+    loadCurrentM3Campaign('native', undefined, { requireDefinitions: acceptDefinitions, nativeTarget: 'darwin-arm64' }),
+    loadCurrentM3Campaign('native', undefined, {
+      requireDefinitions: acceptDefinitions,
+      nativeTarget: 'linux-x64-gnu',
+    }),
+    loadCurrentM3Campaign('mixed', undefined, { requireDefinitions: acceptDefinitions }),
+  ]) {
+    const statuses = statusesOf(campaign);
+    assert.deepEqual(
+      QUERY_EVIDENCE_REFUSALS.map((id) => statuses.get(id)),
+      ['refused', 'refused', 'refused', 'refused'],
+    );
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'passed').length, 213);
+    // QUERY-EVIDENCE-REFUSAL-01 moves four failed inspectGeometry rows to refused.
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'failed').length, 115);
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'refused').length, 20);
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'protocol-error').length, 4);
   }
 });
 

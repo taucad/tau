@@ -18,6 +18,7 @@ import {
   desktopE2EFrontendUrl,
   desktopE2EPackagedExecutable,
 } from '#support/config.js';
+import { restorePreparedKernels, savePreparedKernels } from '#support/prepared-kernels.js';
 
 /**
  * Electron launch + diagnostics for the desktop smoke suite (work item Z1).
@@ -59,13 +60,13 @@ const isAnyProcessNaming = async (pattern: string): Promise<boolean> => {
 /**
  * Remove a throwaway root the app wrote into, once nothing is still writing there.
  *
- * Main's children outlive it: a packaged launch seeds the payload store under the profile with `/bin/cp -c -R`
- * (`apps/desktop/src/tau/native-store.ts`), and when the fixture stops main with `app.exit` or `SIGKILL` that copy
- * keeps adding files, so a recursive remove meets a directory it has just emptied filled again (`ENOTEMPTY`). Every
- * such process names the root in its arguments. Native workers do too, since a packaged worker runs from the store
- * under the profile, and they clean their own temporary roots once their parent is gone; so each process gets
- * {@link childExitGraceMilliseconds} to exit on its own, and only what remains is killed by that name. The remove
- * then retries the transient errors Node lists for `rm`.
+ * Main's children outlive it: a kernel's first-use preparation unpacks into the payload store under the profile and
+ * runs the package's seal step there (`apps/desktop/src/tau/native-preparation.ts`), and when the fixture stops main
+ * with `app.exit` or `SIGKILL` a seal step can keep adding files, so a recursive remove meets a directory it has just
+ * emptied filled again (`ENOTEMPTY`). Every such process names the root in its arguments. Native workers do too, since
+ * a worker runs from the store under the profile, and they clean their own temporary roots once their parent is gone;
+ * so each process gets {@link childExitGraceMilliseconds} to exit on its own, and only what remains is killed by that
+ * name. The remove then retries the transient errors Node lists for `rm`.
  * @param root - The profile or picked-directory parent this fixture created.
  * @returns Nothing.
  */
@@ -281,6 +282,8 @@ export type DesktopSession = {
   readonly application: ElectronApplication;
   /** The app's node-backed Home, `<userData>/home`. */
   readonly homeRoot: string;
+  /** The launch's `TAU_CONFIG_DIR`, whose `payloads` is main's native payload store. */
+  readonly configRoot: string;
   readonly page: Page;
   /**
    * The shell's rotating diagnostics log. Main names this directory to the
@@ -383,8 +386,13 @@ export const launchDesktopApp = async (options: {
   readonly captureStartupNetwork?: boolean | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
   readonly fakeMicrophonePath?: string | undefined;
-  /** Launch this copy of the packaged app instead of the built one, e.g. one whose bundled closure a spec damaged. */
+  /** Launch this copy of the packaged app instead of the built one, e.g. a clone a spec altered. */
   readonly packagedExecutable?: string | undefined;
+  /**
+   * Copy the suite's prepared native kernels into the store before launch and keep what the launch prepares
+   * (`prepared-kernels.ts`). `false` launches with the store as the profile left it: empty, for a first use.
+   */
+  readonly preparedKernels?: boolean | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -407,6 +415,12 @@ export const launchDesktopApp = async (options: {
     );
   const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
+  const configRoot = options.env?.['TAU_CONFIG_DIR'] ?? join(userData, 'config');
+  const payloadStore = join(configRoot, 'payloads');
+  const preparedKernels = options.preparedKernels !== false;
+  if (preparedKernels) {
+    await restorePreparedKernels(payloadStore);
+  }
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
    * slug the UI mints is the folder name slugified, so a `mkdtemp` name with
@@ -517,7 +531,7 @@ export const launchDesktopApp = async (options: {
         TAU_SECRET_VAULT: 'file',
         /* The per-user machine store and every other Tau config live in the
          * throwaway profile too, never the person's own. */
-        TAU_CONFIG_DIR: join(userData, 'config'),
+        TAU_CONFIG_DIR: configRoot,
         ...options.env,
         TAU_E2E_HIDE_WINDOW: options.visible === true ? '0' : '1',
         ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
@@ -833,6 +847,13 @@ export const launchDesktopApp = async (options: {
       child.kill('SIGKILL');
     }
     await exited;
+    if (preparedKernels) {
+      /* Before the roots go, and before a failure keeps them: a closure this launch sealed spares the next spec its
+       * download. The cache is only an optimisation, so a failed copy never fails the spec. */
+      await savePreparedKernels(payloadStore).catch((error: unknown) => {
+        console.warn('DESKTOP PREPARED KERNELS', 'could not keep the prepared kernels', error);
+      });
+    }
     /* Field trace validation (formal-verification policy): copy every chat log the
      * app wrote under Home or the picked project before the roots go. */
     const chatLogs = chatLogDestination('desktop-e2e', expect.getState().testPath);
@@ -854,6 +875,7 @@ export const launchDesktopApp = async (options: {
     application,
     capture,
     close,
+    configRoot,
     homeRoot: join(userData, 'home'),
     logPath: join(userData, 'logs/desktop.log'),
     page,

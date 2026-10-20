@@ -1,5 +1,5 @@
 ---
-geospec: patch
+geospec: minor
 geospec-engine: minor
 cli: minor
 ---

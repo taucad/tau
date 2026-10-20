@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,12 +30,15 @@ const integrity = (bytes: Uint8Array<ArrayBuffer>): string =>
 
 let root: string;
 let store: string;
+let executable: string;
 
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'tau-desktop-prepare-')));
   await mkdir(join(root, 'package', 'payloads'), { recursive: true });
   await writeFile(join(root, 'package', 'payloads', 'worker.py'), worker);
   store = join(root, 'store');
+  executable = join(root, 'Tau');
+  await writeFile(executable, '');
 });
 
 afterEach(async () => {
@@ -93,6 +96,7 @@ const open = (
   const progress: DesktopKernelProgress[] = [];
   const preparer = createDesktopKernelPreparer({
     store,
+    hostPath: executable,
     environment: {},
     onProgress: (report) => progress.push(report),
     log: () => undefined,
@@ -118,6 +122,11 @@ describe('createDesktopKernelPreparer', () => {
       expect(progress.length).toBeGreaterThan(0);
       expect(progress.at(-1)?.kernel).toBe('demo');
       expect(progress.at(-1)?.total).toBeGreaterThan(0);
+      /* The link names the app, so the startup collection of the next launch keeps what this one prepared. */
+      const links = await readdir(join(store, 'links'));
+      expect(links).toHaveLength(1);
+      const link: unknown = JSON.parse(await readFile(join(store, 'links', links[0]!), 'utf8'));
+      expect(link).toMatchObject({ hostPath: executable });
     } finally {
       await preparer.dispose();
     }

@@ -41,12 +41,14 @@ export type DesktopKernelPreparer = {
 
 /**
  * Open the desktop's preparation over the channel's payload store.
- * @param input - The store root (the one main inspects at startup), the environment the managed profile is read
- *   from, where progress goes, a log, and for tests the deployments and transport.
+ * @param input - The store root (the one main inspects at startup), the installation its link names (the app's
+ *   executable, as the startup collection reads it), the environment the managed profile is read from, where progress
+ *   goes, a log, and for tests the deployments and transport.
  * @returns The preparer.
  */
 export const createDesktopKernelPreparer = (input: {
   readonly store: string;
+  readonly hostPath: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly onProgress: (progress: DesktopKernelProgress) => void;
   readonly log: (level: 'info' | 'warn' | 'error', event: string, detail: unknown) => void;
@@ -60,6 +62,7 @@ export const createDesktopKernelPreparer = (input: {
     return openNativePreparation({
       store: await realpath(input.store),
       managed: readManagedPreparation(input.environment),
+      hostPath: input.hostPath,
       deployments: input.deployments ?? desktopNativeDeployments,
       ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     });

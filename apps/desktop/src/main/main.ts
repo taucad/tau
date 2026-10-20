@@ -785,6 +785,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * prepare it here. Every window sees every download's progress. */
   const nativeKernels = createDesktopKernelPreparer({
     store: nativeStorePath,
+    hostPath: app.getPath('exe'),
     environment: process.env,
     deployments: preparableNativeDeployments({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
     onProgress: (progress) => {

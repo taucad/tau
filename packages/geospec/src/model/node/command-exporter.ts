@@ -128,6 +128,12 @@ const decodeText = (chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>): string => {
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 };
 
+/** The largest delay `AbortSignal.timeout` accepts, in milliseconds. */
+const maxTimeout = 2_147_483_647;
+
+/** Milliseconds an aborted command has to exit after SIGTERM before it is killed. */
+const killGrace = 2000;
+
 type CommandResult = { readonly exitCode: number | undefined; readonly stdout: string; readonly stderr: string };
 
 const run = async (
@@ -146,8 +152,24 @@ const run = async (
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => stdout.push(chunk));
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-    child.once('error', reject);
+    let failure: Error | undefined;
+    let forceKill: NodeJS.Timeout | undefined;
+    child.once('error', (error) => {
+      if (child.pid === undefined) {
+        reject(error);
+        return;
+      }
+      // An abort sends SIGTERM and reports here before the command exits; settle on 'close' so the
+      // caller never cleans up under a live command, and kill one that ignores SIGTERM.
+      failure = error;
+      forceKill = setTimeout(() => child.kill('SIGKILL'), killGrace);
+    });
     child.once('close', (exitCode) => {
+      clearTimeout(forceKill);
+      if (failure !== undefined) {
+        reject(failure);
+        return;
+      }
       resolve({
         exitCode: exitCode ?? undefined,
         stdout: decodeText(stdout),
@@ -172,8 +194,13 @@ export const commandExporter = (options: CommandExporterOptions): GeoSpecModelEx
   if (options.capabilities.formats.length === 0) {
     throw new TypeError(`commandExporter '${options.id}' must declare at least one format.`);
   }
-  if (options.exportTimeout !== undefined && !(Number.isFinite(options.exportTimeout) && options.exportTimeout > 0)) {
-    throw new TypeError(`commandExporter '${options.id}' exportTimeout must be positive finite milliseconds.`);
+  if (
+    options.exportTimeout !== undefined &&
+    !(Number.isInteger(options.exportTimeout) && options.exportTimeout > 0 && options.exportTimeout <= maxTimeout)
+  ) {
+    throw new TypeError(
+      `commandExporter '${options.id}' exportTimeout must be whole milliseconds from 1 to ${String(maxTimeout)}.`,
+    );
   }
   if (options.capabilities.inlineSources === true) {
     throw new TypeError(`commandExporter '${options.id}' cannot accept inline sources: protocol 1 passes files only.`);

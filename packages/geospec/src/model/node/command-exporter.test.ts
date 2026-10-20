@@ -1,3 +1,5 @@
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { describe, expect, it } from 'vitest';
@@ -109,6 +111,21 @@ describe('commandExporter', () => {
     ]);
   });
 
+  it('should settle a timed-out export only after killing a command that ignores SIGTERM', async () => {
+    const pidFile = join(await mkdtemp(join(tmpdir(), 'geospec-stubborn-')), 'pid');
+    const error = await rejection(
+      exporterFor('stubborn', {
+        exportTimeout: 200,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are SCREAMING_SNAKE.
+        env: { GEOSPEC_FIXTURE_MODE: 'stubborn', GEOSPEC_FIXTURE_PID_FILE: pidFile },
+      }).export({ file: 'main.py', format: 'glb' }),
+    );
+    const pid = Number(await readFile(pidFile, 'utf8'));
+
+    expect(error.diagnostics[0]?.message).toMatch(/ran longer than 200 ms/u);
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+  });
+
   it('should report a caller abort as an abort, not a timeout', async () => {
     const controller = new AbortController();
     const pending = exporterFor('hang', { exportTimeout: 30_000 }).export({
@@ -130,5 +147,7 @@ describe('commandExporter', () => {
     expect(() => exporterFor('ok', { capabilities: { formats: [] } })).toThrow(/format/u);
     expect(() => exporterFor('ok', { exportTimeout: 0 })).toThrow(/exportTimeout/u);
     expect(() => exporterFor('ok', { exportTimeout: Number.POSITIVE_INFINITY })).toThrow(/exportTimeout/u);
+    expect(() => exporterFor('ok', { exportTimeout: 1.5 })).toThrow(/exportTimeout/u);
+    expect(() => exporterFor('ok', { exportTimeout: 2_147_483_648 })).toThrow(/exportTimeout/u);
   });
 });

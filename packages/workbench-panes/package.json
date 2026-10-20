@@ -263,7 +263,7 @@
     "@taucad/project-core": "workspace:*",
     "@taucad/units": "workspace:*",
     "class-variance-authority": "catalog:",
-    "dockview-react": "^8.2.0",
+    "dockview-react": "^8.6.0",
     "lucide-react": "catalog:",
     "radix-ui": "catalog:"
   },

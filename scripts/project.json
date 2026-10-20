@@ -220,6 +220,10 @@
       "dependsOn": [
         {
           "target": "validate-*"
+        },
+        {
+          "target": "validate-shell-parity",
+          "projects": ["workbench-panes"]
         }
       ],
       "cache": false

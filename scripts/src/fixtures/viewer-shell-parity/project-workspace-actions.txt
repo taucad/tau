@@ -1,0 +1,16 @@
+// The Tau app's viewer header actions before they drew ViewerHeaderActions (project-workspace-actions.tsx).
+import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
+
+export const ProjectWorkspaceActions = ({ openPanel }: { openPanel: (pane: string) => void }) => (
+  <div role='group' aria-label='Workbench actions'>
+    <PaneAction
+      icon={Share2}
+      label='Share'
+      tooltip='Share project'
+      onClick={() => {
+        openPanel('share');
+      }}
+    />
+    <PaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' onClick={() => openPanel('export')} />
+  </div>
+);

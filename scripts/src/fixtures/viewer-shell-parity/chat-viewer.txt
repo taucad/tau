@@ -1,0 +1,17 @@
+// The Tau app's viewer stage before it drew ViewerStage and useViewerPartMenu (chat-viewer.tsx).
+import {
+  beginViewerSecondaryGesture,
+  completeViewerSecondaryGesture,
+} from '@taucad/workbench-panes/component-menu/viewer-secondary-gesture';
+import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
+
+const hoveredName = (context, unitId, componentId) =>
+  getModelInteractionUnitState(context, unitId).manifest?.nodesById[componentId]?.name;
+
+const placeLabel = (layout: HTMLElement, x: number, y: number) => {
+  layout.style.setProperty('--viewer-hover-label-x', `${String(x)}px`);
+  layout.style.setProperty('--viewer-hover-label-y', `${String(y)}px`);
+};
+
+const onPointerDown = (event) => beginViewerSecondaryGesture({ pointerId: event.pointerId, point: event });
+const onPointerUp = (state, event) => completeViewerSecondaryGesture({ state, pointerId: event.pointerId, point: event });

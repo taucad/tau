@@ -1,12 +1,11 @@
 /**
  * The `geospec` CLI (D-S4).
  *
- * The CLI is execution machinery, so it ships from the engine; the substrate
- * documents it and declares nothing of it. Everything it does is assembled
- * from parts that already exist — discovery and filtering are substrate
- * functions, execution is the runner host — which is the point: a CLI run and
- * an embedded run take the same path, so a verdict never depends on how the
- * spec was invoked.
+ * Everything it does is assembled from parts that already exist — discovery
+ * and filtering are runner functions, execution is the pool host, models come
+ * from the exporters `geospec.config.*` declares — which is the point: a CLI
+ * run and an embedded run take the same path, so a verdict never depends on
+ * how the spec was invoked.
  *
  * Three deliberate choices:
  *
@@ -24,10 +23,11 @@
  * @module
  */
 
-import { discoverGeoSpecFiles } from 'geospec/runner';
-import type { GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
-import type { GeoSpecRunResult, GeoSpecTestCase } from 'geospec/runner';
 import { protocolWireValue } from '#cli/wire-value.js';
+import type { GeoSpecConfigData } from '#config/types.js';
+import { discoverGeoSpecFiles } from '#runner/discovery.js';
+import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
+import type { GeoSpecRunner, GeoSpecRunnerResult } from '#runner/worker/runner-types.js';
 
 /** Parsed CLI invocation, or the reason it could not be parsed. */
 export type GeoSpecCliCommand =
@@ -48,6 +48,8 @@ export type GeoSpecCliRunOptions = {
   /** Run in a worker pool. `0` means "auto-size". */
   workers?: number;
   shardTimeout?: number;
+  /** `geospec.config.*` to use instead of the one in `projectPath`. */
+  config?: string;
 };
 
 /** The CLI's usage text. Also the answer to `--help` and to a parse error. */
@@ -65,6 +67,7 @@ Options:
   --workers [n]              Run in a worker pool; omit n to auto-size
   --shard-timeout <ms>       Non-verdict per-shard watchdog (GEOSPEC_SHARD_TIMEOUT)
   --bail                     Stop after the first failing file
+  --config <path>            geospec.config.* to use (default: the one in projectPath)
   --json                     Print one JSON result document and nothing else
   -h, --help                 Show this help
 
@@ -127,6 +130,14 @@ export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCom
           return { kind: 'error', message: '--file needs a path.' };
         }
         options.files.push(next);
+        index += 1;
+        continue;
+      }
+      case '--config': {
+        if (next === undefined) {
+          return { kind: 'error', message: '--config needs a path.' };
+        }
+        options.config = next;
         index += 1;
         continue;
       }
@@ -328,9 +339,18 @@ export type GeoSpecCliHost = {
   write(line: string): void;
   /** Recursive discovery filesystem. */
   discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
-  /** Build the runner the selected files execute on. */
+  /**
+   * Import the project's `geospec.config.*`, or the explicit one, for its data fields.
+   * @throws Error when the config is ambiguous, invalid or fails to import.
+   */
+  loadConfig(options: {
+    projectPath: string;
+    configPath: string | undefined;
+  }): Promise<{ readonly configPath?: string; readonly options: GeoSpecConfigData }>;
+  /** Build the runner the selected files execute on; its workers import the same config for its exporters. */
   createRunner(options: {
     projectPath: string;
+    configPath: string | undefined;
     workers: number | undefined;
     shardTimeout: number | undefined;
   }): GeoSpecRunner;
@@ -501,12 +521,27 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
     ? options.projectPath
     : `${host.cwd()}/${options.projectPath}`.replace(/\/\.$/u, '');
 
+  let config: Awaited<ReturnType<GeoSpecCliHost['loadConfig']>>;
+  try {
+    config = await host.loadConfig({ projectPath, configPath: options.config });
+  } catch (error) {
+    const message = `GeoSpec config: ${error instanceof Error ? error.message : String(error)}`;
+    host.write(options.json ? JSON.stringify({ success: false, error: message }) : message);
+    return 1;
+  }
+  // A flag replaces the config's field; the config replaces the runner's default.
+  const include = options.include.length > 0 ? options.include : config.options.include;
+  const exclude = options.exclude.length > 0 ? options.exclude : config.options.exclude;
+  const testNamePattern = options.testNamePattern ?? config.options.testNamePattern;
+  const testTimeout = options.testTimeout ?? config.options.testTimeout;
+  const bail = options.bail || config.options.bail === true;
+
   const discovery = await discoverGeoSpecFiles({
     filesystem: host.discoveryFileSystem(projectPath),
     projectPath,
     ...(options.files.length > 0 ? { files: options.files } : {}),
-    ...(options.include.length > 0 ? { include: options.include } : {}),
-    ...(options.exclude.length > 0 ? { exclude: options.exclude } : {}),
+    ...(include === undefined ? {} : { include }),
+    ...(exclude === undefined ? {} : { exclude }),
   });
 
   if (discovery.files.length === 0) {
@@ -520,6 +555,7 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
 
   const runner = host.createRunner({
     projectPath,
+    configPath: config.configPath,
     workers: options.workers,
     shardTimeout: options.shardTimeout,
   });
@@ -527,9 +563,9 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
   try {
     result = await runner.run({
       files: discovery.files,
-      ...(options.testNamePattern === undefined ? {} : { testNamePattern: options.testNamePattern }),
-      ...(options.testTimeout === undefined ? {} : { testTimeout: options.testTimeout }),
-      ...(options.bail ? { bail: true } : {}),
+      ...(testNamePattern === undefined ? {} : { testNamePattern }),
+      ...(testTimeout === undefined ? {} : { testTimeout }),
+      ...(bail ? { bail: true } : {}),
     });
   } finally {
     await runner.close();

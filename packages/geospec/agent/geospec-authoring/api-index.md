@@ -363,7 +363,10 @@ LoadModelOptions (type) [lines 1729-1754] [8 members] — Options accepted by {@
   LoadModelOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   LoadModelOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
   LoadModelOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
-LoadModelSourceOptions (type) [lines 1756-1836] [13 members] — Direct geometry-source model load options
+
+## Types (2) — `api-types-2.md`
+
+LoadModelSourceOptions (type) [lines 5-85] [13 members] — Direct geometry-source model load options
   LoadModelSourceOptions.source (property) — Geometry bytes, path, browser file/blob, or in-memory mesh buffer
   LoadModelSourceOptions.resources (property) — Named external resources consumed alongside the direct geometry bytes
   LoadModelSourceOptions.rootDir (property) — Project-relative folder a path `source` and each resource path resolve…

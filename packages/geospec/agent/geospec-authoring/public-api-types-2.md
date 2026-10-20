@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-60 top-level symbols. Signatures are verbatim typescript.
+58 top-level symbols. Signatures are verbatim typescript.
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -802,6 +802,106 @@ ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
   // ManagedGeoSpecNativeModelLoader.releaseAll (method)
   releaseAll(): Promise<void>;
 
+// Options for {@link createNodeGeoSpecEngine}
+CreateNodeGeoSpecEngineOptions: {
+    /** Caller-inclusive CPU permits for the native addon; the WASM build is single-threaded and ignores them. */
+    readonly executionPermits?: number;
+}
+
+  // Caller-inclusive CPU permits for the native addon
+  readonly executionPermits?: number
+
+// Which build of `geospec-engine` a Node engine runs on
+GeoSpecEngineBinding: 'napi' | 'wasm'
+
+// An engine and the build it runs on
+NodeGeoSpecEngine: {
+    readonly engine: GeoSpecNativeModelEngine & {
+        close(): void;
+    };
+    readonly binding: GeoSpecEngineBinding;
+}
+
+  readonly engine: GeoSpecNativeModelEngine & {
+          close(): void;
+      }
+
+  readonly binding: GeoSpecEngineBinding
+
+// Options for the Node pool
+GeoSpecNodePoolOptions: {
+    /** Absolute project root. */
+    projectPath: string;
+    /** The `geospec.config.*` each worker imports for its exporters; absent to discover one in `projectPath`. */
+    configPath?: string;
+    /**
+     * URLs of modules each worker imports whose default export creates exporters that precede the config's (see
+     * `GeoSpecExporterModule`). A host that composes its own exporters, such as `tau test`, passes them here.
+     */
+    exporterModules?: readonly string[];
+    /** Number of outer worker isolates; defaults to one. */
+    workers?: number;
+    /**
+     * Caller-inclusive total CPU budget; defaults to one per worker. Above one
+     * permit per worker only with a single worker: every worker shares this
+     * process's OCCT library, whose admission refuses any second engine beside
+     * one holding two or more permits.
+     */
+    budget?: number;
+    /** Non-verdict shard watchdog in milliseconds. */
+    shardTimeout?: number;
+}
+
+  // Absolute project root
+  projectPath: string
+
+  // The `geospec.config.*` each worker imports for its exporters
+  configPath?: string
+
+  // URLs of modules each worker imports whose default export creates exporters that precede the config's (see `GeoSpecExporterModule`)
+  exporterModules?: readonly string[]
+
+  // Number of outer worker isolates
+  workers?: number
+
+  // Caller-inclusive total CPU budget
+  budget?: number
+
+  // Non-verdict shard watchdog in milliseconds
+  shardTimeout?: number
+
+// The slice of `node:worker_threads`' `Worker` the pool drives
+// Remarks: Declared structurally so the adapter can be exercised against a stub as well as against a real thread (D-8: vitest cannot host a TypeScript worker).
+NodeWorkerLike: {
+    postMessage(value: unknown): void;
+    on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
+    on(event: 'exit', listener: (code: number) => void): void;
+    on(event: 'error', listener: (error: Error) => void): void;
+    terminate(): Promise<number> | number;
+}
+
+  // NodeWorkerLike.postMessage (method)
+  postMessage(value: unknown): void;
+
+  // NodeWorkerLike.on (method)
+  on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
+  on(event: 'exit', listener: (code: number) => void): void;
+  on(event: 'error', listener: (error: Error) => void): void;
+
+  // NodeWorkerLike.terminate (method)
+  terminate(): Promise<number> | number;
+
+// A module whose default export creates exporters for one worker
+GeoSpecExporterModule: {
+    default: (context: {
+        readonly projectPath: string;
+    }) => Promise<readonly GeoSpecModelExporter[]>;
+}
+
+  default: (context: {
+          readonly projectPath: string;
+      }) => Promise<readonly GeoSpecModelExporter[]>
+
 GeoSpecPoolHostMessage: {
     type: 'initialize';
 } | {
@@ -1334,151 +1434,3 @@ GeoSpecQueryOptions: {
   readonly payload?: unknown
 
   readonly subject: GeoSpecNativeSubject
-
-// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
-MinimumDistanceFact: {
-    readonly source: 'ap242';
-    readonly assurance: 'exact-brep';
-    readonly unit: 'mm';
-    readonly coordinateSystem: 'z-up';
-    readonly subjectHash: string;
-    readonly algorithmProfile: 'geospec-minimum-distance-v1';
-    readonly occurrences: readonly [string, string];
-    readonly distance: number;
-    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
-}
-
-  readonly source: 'ap242'
-
-  readonly assurance: 'exact-brep'
-
-  readonly unit: 'mm'
-
-  readonly coordinateSystem: 'z-up'
-
-  readonly subjectHash: string
-
-  readonly algorithmProfile: 'geospec-minimum-distance-v1'
-
-  readonly occurrences: readonly [string, string]
-
-  readonly distance: number
-
-  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
-
-// Complete AP242 minimum over two subject-bound occurrence paths
-MinimumDistanceQuery: {
-    readonly capability: 'minimumDistance';
-    readonly subject: GeoSpecNativeSubject;
-    readonly payload: {
-        readonly pair: readonly [{
-            readonly occurrencePath: string;
-        }, {
-            readonly occurrencePath: string;
-        }];
-    };
-}
-
-  readonly capability: 'minimumDistance'
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly payload: {
-          readonly pair: readonly [{
-              readonly occurrencePath: string;
-          }, {
-              readonly occurrencePath: string;
-          }];
-      }
-
-// Geometry refusal and infrastructure interruption never masquerade as facts
-MinimumDistanceResult: {
-    readonly status: 'complete';
-    readonly fact: MinimumDistanceFact;
-} | {
-    readonly status: 'refused';
-    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
-    readonly message: string;
-} | {
-    readonly status: 'interrupted';
-    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
-    readonly message: string;
-}
-
-  readonly status: 'complete'
-
-// Flat native query transport options
-GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
-    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
-    readonly payload?: unknown;
-}
-
-  readonly engine: GeoSpecNativeEngine
-
-  readonly claimId: string
-
-  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
-
-  readonly subjectSlot: string
-
-  readonly workUnitLimit: number
-
-  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
-  readonly maximumWorkUnitLimit?: number
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
-
-  readonly payload?: unknown
-
-// Existing positive-only ancillary operations owned by the native core
-GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
-
-// Explicit support state for one source-attributed inventory field
-GeoSpecPmiField: {
-    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
-    readonly value: Value | null;
-    readonly reason: string | null;
-}
-
-  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
-
-  readonly value: Value | null
-
-  readonly reason: string | null
-
-// Original Part21 entity ID and exact source argument tokens
-GeoSpecPmiRawEntity: {
-    readonly sourceId: number;
-    readonly kind: string;
-    readonly arguments: readonly string[];
-}
-
-  readonly sourceId: number
-
-  readonly kind: string
-
-  readonly arguments: readonly string[]
-
-// Source-authored scalar and Rust-normalized reduced rational millimetres
-GeoSpecPmiNumber: {
-    readonly sourceId: number;
-    readonly authoredText: string;
-    readonly unitId: number;
-    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
-    readonly millimetres: string;
-    readonly name: string;
-}
-
-  readonly sourceId: number
-
-  readonly authoredText: string
-
-  readonly unitId: number
-
-  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
-
-  readonly millimetres: string
-
-  readonly name: string

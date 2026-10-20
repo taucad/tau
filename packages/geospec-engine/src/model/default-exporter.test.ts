@@ -1,10 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { CreateGeoSpecNativeModelLoaderOptions } from 'geospec/runner/native';
-import { startNativePoolWorker } from '#runner/node/native-pool-worker-entry.js';
+import createDefaultExporters, { defaultExporterModule } from '#model/default-exporter.js';
 
 const owner = vi.hoisted(() => ({
-  loader: vi.fn<(options: CreateGeoSpecNativeModelLoaderOptions) => void>(),
-  close: vi.fn(),
   client: vi.fn(async () => ({})),
   exporter: vi.fn(async (options: { client: () => Promise<unknown>; extensions: readonly string[] }) => ({
     id: 'tau',
@@ -14,6 +11,7 @@ const owner = vi.hoisted(() => ({
     kernels: [
       { id: 'kernel', extensions: ['ts'] },
       { id: 'fallback', extensions: ['*', 'ts', 'scad'] },
+      { id: 'bare' },
     ],
   },
   resolve: vi.fn(async (_runtime: unknown, _config: unknown) => owner.resolved),
@@ -25,14 +23,6 @@ const owner = vi.hoisted(() => ({
   defaults: { kernels: ['kernel'], middleware: ['middleware'], bundlers: ['bundler'], transcoders: ['transcoder'] },
 }));
 
-vi.mock('node:worker_threads', () => ({ parentPort: null, workerData: undefined }));
-vi.mock('geospec-engine/node', () => ({
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native package's public constructor export.
-  Engine: class {
-    public close = owner.close;
-  },
-}));
-vi.mock('geospec/runner/native', () => ({ createGeoSpecNativeModelLoader: owner.loader }));
 vi.mock('@taucad/agent-tools/geospec/exporter', () => ({ tauClientExporter: owner.exporter }));
 vi.mock('@taucad/runtime/node', () => ({ createNodeClient: owner.client }));
 vi.mock('@taucad/runtime/worker', () => ({ resolveRuntimeDefinition: owner.resolve }));
@@ -42,16 +32,13 @@ vi.mock('@taucad/native-process-core/store', () => ({
   installNativeClosureResolver: owner.install,
 }));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
-vi.mock('geospec/runner/node', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
-vi.mock('geospec/runner/worker', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
 
-const runtimeFactory = async () => {
-  await startNativePoolWorker({ postMessage: vi.fn(), on: vi.fn() }, { projectPath: '/project', grant: 1 });
-  const [exporter] = owner.loader.mock.calls.at(-1)?.[0].exporters ?? [];
+const clientFactory = async () => {
+  const [exporter] = await createDefaultExporters({ projectPath: '/project' });
   expect(exporter).toBe(await owner.exporter.mock.results.at(-1)?.value);
   const factory = owner.exporter.mock.calls.at(-1)?.[0].client;
   if (typeof factory !== 'function') {
-    throw new TypeError('The Node worker must supply its owning Runtime factory.');
+    throw new TypeError('The default exporter must supply its owning Runtime factory.');
   }
   return factory;
 };
@@ -62,14 +49,17 @@ beforeAll(async () => {
 }, 60_000);
 
 afterEach(() => {
-  owner.close();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
-describe('configured native Node worker Runtime', () => {
+describe("Tau's default exporter module", () => {
+  it('names itself by URL for the pool workers to import', () => {
+    expect(defaultExporterModule).toMatch(/\/model\/default-exporter\.ts$/u);
+  });
+
   it("claims the default runtime's kernel extensions without the catch-all", async () => {
-    await runtimeFactory();
+    await clientFactory();
     expect(owner.exporter.mock.calls.at(-1)?.[0].extensions).toEqual(['ts', 'scad']);
     expect(owner.client).not.toHaveBeenCalled();
   });
@@ -77,7 +67,7 @@ describe('configured native Node worker Runtime', () => {
   it('serves the default runtime unchanged when it lists no native kernel', async () => {
     owner.deployments = [];
     await (
-      await runtimeFactory()
+      await clientFactory()
     )();
     expect(owner.resolve).toHaveBeenCalledWith(owner.defaults, undefined);
     expect(owner.deploymentsOf).toHaveBeenCalledWith(owner.resolved);
@@ -88,7 +78,7 @@ describe('configured native Node worker Runtime', () => {
   it('binds the native kernels the default runtime lists to the payload store before the client starts', async () => {
     owner.deployments = [{ deployment: { package: '@taucad/picogk' }, kernels: [] }];
     await (
-      await runtimeFactory()
+      await clientFactory()
     )();
     expect(owner.storeResolver).toHaveBeenCalledWith({ managed: expect.any(Object) as unknown });
     expect(owner.install).toHaveBeenCalledWith(owner.resolver);
@@ -98,7 +88,7 @@ describe('configured native Node worker Runtime', () => {
 
   it('refuses a malformed managed profile without falling back to another Runtime', async () => {
     vi.stubEnv('TAU_ACQUISITION', 'sometimes');
-    await expect((await runtimeFactory())()).rejects.toThrow('TAU_ACQUISITION');
+    await expect((await clientFactory())()).rejects.toThrow('TAU_ACQUISITION');
     expect(owner.install).not.toHaveBeenCalled();
     expect(owner.client).not.toHaveBeenCalled();
   });

@@ -19,7 +19,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
     const examplesRoot = resolve(import.meta.dirname, '../../../libs/tau-examples');
     const step = join(root, 'assembly.step');
     await copyFile(
-      resolve(import.meta.dirname, '../../../packages/geospec-engine/fixtures/xde/two-cube-assembly.step'),
+      resolve(import.meta.dirname, '../../../packages/geospec/src/runner/node/__fixtures__/two-cube-assembly.step'),
       step,
     );
     const file = 'evidence.geospec.ts';

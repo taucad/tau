@@ -23,6 +23,8 @@ export const substrateCoverageSourcePolicy = {
     'src/**/*.test-support.ts',
     'src/**/runner-types.ts',
     'src/runner/pool/pool-messages.ts',
+    // Two-line process shim; every decision lives in cli.ts and node-host.ts.
+    'src/cli/main.ts',
   ],
 };
 

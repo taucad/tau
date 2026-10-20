@@ -49,11 +49,11 @@ describe('default runtime', () => {
 
   it('should match the production @taucad package dependencies and optional native peers', async () => {
     const sourceUrl = new URL('default-runtime.ts', import.meta.url);
-    const nativeWorkerUrl = new URL('../runner/node/native-pool-worker-entry.ts', import.meta.url);
+    const exporterUrl = new URL('default-exporter.ts', import.meta.url);
     const manifestUrl = new URL('../../package.json', import.meta.url);
-    const [source, nativeWorkerSource, manifestSource] = await Promise.all([
+    const [source, exporterSource, manifestSource] = await Promise.all([
       readFile(sourceUrl, 'utf8'),
-      readFile(nativeWorkerUrl, 'utf8'),
+      readFile(exporterUrl, 'utf8'),
       readFile(manifestUrl, 'utf8'),
     ]);
     const manifest = JSON.parse(manifestSource) as {
@@ -82,8 +82,8 @@ describe('default runtime', () => {
     for (const name of optionalPeers) {
       expect(manifest.dependencies).not.toHaveProperty(name);
     }
-    expect(ts.preProcessFile(nativeWorkerSource, true, true).importedFiles.map(({ fileName }) => fileName)).toEqual(
-      expect.arrayContaining(['geospec-engine/node', '@taucad/native-process-core/store']),
+    expect(ts.preProcessFile(exporterSource, true, true).importedFiles.map(({ fileName }) => fileName)).toEqual(
+      expect.arrayContaining(['@taucad/native-process-core/store']),
     );
   });
 

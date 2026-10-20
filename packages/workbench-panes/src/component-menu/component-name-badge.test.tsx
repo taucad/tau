@@ -42,6 +42,18 @@ describe('placeModelComponentNameBadge', () => {
     expect(layout.style.getPropertyValue('--viewer-hover-label-translate-y')).toBe('calc(-100% - 10px)');
   });
 
+  it('should flip the label left once its widest name would pass the right edge', () => {
+    const layout = document.createElement('div');
+    boxOf(layout, { left: 0, top: 0, width: 600, height: 400 });
+
+    /* 18rem of label and its 8 px offset: 296 px from the edge. */
+    placeModelComponentNameBadge(layout, { clientX: 304, clientY: 100 });
+    expect(layout.style.getPropertyValue('--viewer-hover-label-translate-x')).toBe('8px');
+
+    placeModelComponentNameBadge(layout, { clientX: 305, clientY: 100 });
+    expect(layout.style.getPropertyValue('--viewer-hover-label-translate-x')).toBe('calc(-100% - 8px)');
+  });
+
   it('should keep the label inside the layout when the pointer leaves it mid-move', () => {
     const layout = document.createElement('div');
     boxOf(layout, { left: 0, top: 0, width: 300, height: 200 });

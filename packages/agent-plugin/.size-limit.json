@@ -10,7 +10,7 @@
     "limit": "3.5 kB"
   },
   {
-    "name": "viewer page (single file) — measured 1.89 MB gzip on 2026-10-16 (the shared workbench panes and part menu; provisional, to be re-baselined when the page is trimmed)",
+    "name": "viewer page (single file) — measured 1.77 MB gzip on 2026-10-20, after the page adopted the shared viewer shell (+0.9 kB over the same tree without it; 1.89 MB on 2026-10-16 with the shared workbench panes and part menu)",
     "path": "dist-app/app.html",
     "gzip": true,
     "limit": "2 MB"

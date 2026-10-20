@@ -1,6 +1,6 @@
 {
   "name": "@taucad/agent-host",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Portable browser-safe agent host and durable session log core",
   "type": "module",
   "sideEffects": false,

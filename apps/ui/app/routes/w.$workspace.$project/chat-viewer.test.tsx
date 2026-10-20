@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { setLiveViewOptions } from '#workbench-records/live-view-options.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -308,6 +309,13 @@ const mockGraphicsActor = {
       cameraFovAngle: 45,
       measurements: [],
       units: undefined,
+      // The shared part menu reads the presented unit and its interaction state from the actor itself.
+      modelInteractionUnitId: helperUnitId,
+      modelInteractionRef: {
+        getSnapshot: () => ({ context: createModelInteractionContext() }),
+        subscribe: () => ({ unsubscribe: () => undefined }),
+      },
+      artifactKey: mockGraphicsProjection.artifactKey,
     },
   })),
   send: mockGraphicsSend,
@@ -557,7 +565,9 @@ const renderViewer = (ui: React.ReactElement): ReturnType<typeof render> =>
   render(ui, {
     wrapper: ({ children }) => (
       <MemoryRouter>
-        <TooltipProvider>{children}</TooltipProvider>
+        <KeyboardProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </KeyboardProvider>
       </MemoryRouter>
     ),
   });
@@ -1393,9 +1403,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
     render(
-      <Profiler id='viewer' onRender={onRender}>
-        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
-      </Profiler>,
+      <KeyboardProvider>
+        <Profiler id='viewer' onRender={onRender}>
+          <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
+        </Profiler>
+      </KeyboardProvider>,
     );
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
@@ -1589,7 +1601,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
     } as unknown as PartThumbnailService;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
     const tree = (profile: 'editor' | 'shared' = 'editor') => (
-      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+      <KeyboardProvider>
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+      </KeyboardProvider>
     );
     const view = render(tree());
     const openMenu = (): void => {

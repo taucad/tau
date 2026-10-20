@@ -12,8 +12,11 @@ import { useKinematicsSelector, useModelInteractionSelector } from '@taucad/view
 import { describeKinematicsHover, getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 
-/** Within this distance of the layout's right edge the label flips to the pointer's left. */
-const rightEdgeThresholdPx = 220;
+/**
+ * Within this distance of the layout's right edge the label flips to the pointer's left: the label's 18rem maximum
+ * width plus its 8 px offset from the pointer, so even the longest name it draws never clips past the right edge.
+ */
+const rightEdgeThresholdPx = 18 * 16 + 8;
 
 /** Within this distance of the bottom controls' top edge the label flips above the pointer. */
 const bottomThresholdPx = 56;

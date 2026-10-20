@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +14,7 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { PaneButton } from '#components/pane-button.jsx';
+import { WorkbenchTab } from '#components/workbench-tab.jsx';
 import { dockviewStyleOverrides, tauDockviewTheme } from '#paneview/dockview-theme.js';
 import { workbenchPanes } from '#registry/pane-registry.js';
 import type { WorkbenchPaneDefinition, WorkbenchPaneId } from '#registry/pane-registry.js';
@@ -176,62 +177,22 @@ export function PaneLane({
         >
           {open.map((pane) => {
             const { icon: Icon, title } = workbenchPanes[pane];
-            const isActive = pane === active;
             return (
-              /* As the app's dock tabs do, tabs share the header equally up to 144 px and their titles dissolve at
-               * the end, under the close glyph when it shows. A tab stops at 48 px, where its centre still clears the
+              /* The app's dock tab leaf: tabs share the header equally up to 144 px and their titles dissolve at the
+               * end, under the close glyph when it shows. A tab stops at 48 px, where its centre still clears the
                * glyph; past that the tablist scrolls, never under the header's buttons. */
-              <div
+              <WorkbenchTab
                 key={pane}
-                className={cn(
-                  'group/tab fade-row flex h-7 w-36 min-w-12 shrink items-center rounded-sm text-[13px]',
-                  isActive
-                    ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground [--fade-scrim-into:var(--background)] hover:text-foreground',
-                )}
-              >
-                <button
-                  type='button'
-                  role='tab'
-                  title={title}
-                  aria-selected={isActive}
-                  aria-keyshortcuts='Delete'
-                  className='flex size-full min-w-0 items-center gap-1.5 pr-1 pl-2'
-                  onClick={() => {
-                    setActive(pane);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Delete' || event.key === 'Backspace') {
-                      event.preventDefault();
-                      closePane(pane);
-                    }
-                  }}
-                >
-                  <Icon aria-hidden className='size-3.5 shrink-0' />
-                  <span
-                    className={cn(
-                      'fade-label flex-1 text-left',
-                      isActive && '[--fade-label-size:var(--fade-label-size-actions)]',
-                    )}
-                  >
-                    {title}
-                  </span>
-                </button>
-                <button
-                  type='button'
-                  tabIndex={-1}
-                  aria-label={`Close ${title}`}
-                  className={cn(
-                    'fade-action absolute right-1 flex size-4 items-center justify-center rounded-xs opacity-0 group-focus-within/tab:opacity-100 group-hover/tab:opacity-100 hover:bg-background/60',
-                    isActive && 'opacity-100',
-                  )}
-                  onClick={() => {
-                    closePane(pane);
-                  }}
-                >
-                  <X aria-hidden className='size-3' />
-                </button>
-              </div>
+                icon={<Icon aria-hidden className='size-3.5 shrink-0' />}
+                title={title}
+                isActive={pane === active}
+                onSelect={() => {
+                  setActive(pane);
+                }}
+                onClose={() => {
+                  closePane(pane);
+                }}
+              />
             );
           })}
         </div>

@@ -1136,7 +1136,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       await trigger.waitFor();
 
       /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
-      const region = page.getByRole('region', { name: 'Model viewer' });
+      const region = page.getByRole('application', { name: 'Model viewer' });
       await region.focus();
       await page.keyboard.press('Shift+F10');
       const menu = page.getByRole('menu');
@@ -1191,7 +1191,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
    * @returns The point in viewport coordinates.
    */
   const regionCentre = async (page: Page): Promise<Readonly<{ x: number; y: number }>> => {
-    const box = await page.getByRole('region', { name: 'Model viewer' }).boundingBox();
+    const box = await page.getByRole('application', { name: 'Model viewer' }).boundingBox();
     if (box === null) {
       throw new Error('The canvas region has no box.');
     }
@@ -1239,7 +1239,12 @@ describe('the viewer page from a text host', () => {
 
       await drawn(page, 'Export');
       /* The workbench's file tab names the source the link shows. */
-      expect(await page.getByTitle('main.ts', { exact: true }).count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-slot="workbench-tab"]')
+          .filter({ hasText: /^main\.ts$/u })
+          .count(),
+      ).toBe(1);
       await page.getByRole('group', { name: 'Viewer controls' }).waitFor();
       await capture(page, 'loopback');
       await page.close();
@@ -1349,7 +1354,7 @@ describe('the viewer page from a text host', () => {
       await page.goto(viewerUrl ?? '');
       await drawn(page, 'Export');
 
-      const region = page.getByRole('region', { name: 'Model viewer' });
+      const region = page.getByRole('application', { name: 'Model viewer' });
       const box = await region.boundingBox();
       if (box === null) {
         throw new Error('The canvas region has no box.');

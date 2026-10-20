@@ -39,10 +39,12 @@
     "./component-menu/component-action-menu": "./src/component-menu/component-action-menu.tsx",
     "./component-menu/component-actions": "./src/component-menu/component-actions.ts",
     "./component-menu/component-name-badge": "./src/component-menu/component-name-badge.tsx",
+    "./component-menu/use-viewer-part-menu": "./src/component-menu/use-viewer-part-menu.tsx",
     "./component-menu/viewer-component-action-menu": "./src/component-menu/viewer-component-action-menu.tsx",
     "./component-menu/viewer-secondary-gesture": "./src/component-menu/viewer-secondary-gesture.ts",
     "./components/pane-action": "./src/components/pane-action.tsx",
     "./components/pane-button": "./src/components/pane-button.tsx",
+    "./components/workbench-tab": "./src/components/workbench-tab.tsx",
     "./components/workbench-toggle": "./src/components/workbench-toggle.tsx",
     "./export/export-pane": "./src/export/export-pane.tsx",
     "./export/export-source": "./src/export/export-source.ts",
@@ -62,6 +64,9 @@
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
+    "./shell/viewer-header-actions": "./src/shell/viewer-header-actions.tsx",
+    "./shell/viewer-stage": "./src/shell/viewer-stage.tsx",
+    "./shell/viewer-status": "./src/shell/viewer-status.tsx",
     "./styles/panes.css": {
       "types": "./src/styles/panes.css.d.ts",
       "default": "./src/styles/panes.css"
@@ -92,6 +97,11 @@
         "import": "./dist/component-menu/component-name-badge.mjs",
         "default": "./dist/component-menu/component-name-badge.mjs"
       },
+      "./component-menu/use-viewer-part-menu": {
+        "types": "./dist/component-menu/use-viewer-part-menu.d.mts",
+        "import": "./dist/component-menu/use-viewer-part-menu.mjs",
+        "default": "./dist/component-menu/use-viewer-part-menu.mjs"
+      },
       "./component-menu/viewer-component-action-menu": {
         "types": "./dist/component-menu/viewer-component-action-menu.d.mts",
         "import": "./dist/component-menu/viewer-component-action-menu.mjs",
@@ -111,6 +121,11 @@
         "types": "./dist/components/pane-button.d.mts",
         "import": "./dist/components/pane-button.mjs",
         "default": "./dist/components/pane-button.mjs"
+      },
+      "./components/workbench-tab": {
+        "types": "./dist/components/workbench-tab.d.mts",
+        "import": "./dist/components/workbench-tab.mjs",
+        "default": "./dist/components/workbench-tab.mjs"
       },
       "./components/workbench-toggle": {
         "types": "./dist/components/workbench-toggle.d.mts",
@@ -206,6 +221,21 @@
         "types": "./dist/share/share-source.d.mts",
         "import": "./dist/share/share-source.mjs",
         "default": "./dist/share/share-source.mjs"
+      },
+      "./shell/viewer-header-actions": {
+        "types": "./dist/shell/viewer-header-actions.d.mts",
+        "import": "./dist/shell/viewer-header-actions.mjs",
+        "default": "./dist/shell/viewer-header-actions.mjs"
+      },
+      "./shell/viewer-stage": {
+        "types": "./dist/shell/viewer-stage.d.mts",
+        "import": "./dist/shell/viewer-stage.mjs",
+        "default": "./dist/shell/viewer-stage.mjs"
+      },
+      "./shell/viewer-status": {
+        "types": "./dist/shell/viewer-status.d.mts",
+        "import": "./dist/shell/viewer-status.mjs",
+        "default": "./dist/shell/viewer-status.mjs"
       },
       "./styles/panes.css": {
         "types": "./dist/styles/panes.css.d.ts",

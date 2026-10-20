@@ -32,7 +32,7 @@
     "typescript"
   ],
   "bin": {
-    "geospec": "./dist/cli/main.mjs"
+    "tau-geospec": "./dist/cli/main.mjs"
   },
   "author": "Richard Fontein",
   "license": "Apache-2.0",

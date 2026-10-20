@@ -1,6 +1,6 @@
 # @taucad/geospec-engine
 
-A compatibility package, removed once Tau's own `tau test` replaces it. Its `geospec` bin is the
+A compatibility package, removed once Tau's own `tau test` replaces it. Its `tau-geospec` bin is the
 [`geospec`](../geospec) CLI with Tau's default exporter in every pool worker, so a Tau project's code models run with
 no `geospec.config.*`.
 

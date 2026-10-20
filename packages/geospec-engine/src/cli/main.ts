@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * The `geospec` bin of this compatibility package: the `geospec` CLI with Tau's default exporter in every worker,
- * so a Tau project runs with no `geospec.config.*`. It is removed with this package.
+ * The `tau-geospec` bin of this compatibility package: the `geospec` CLI with Tau's default exporter in every worker,
+ * so a Tau project runs with no `geospec.config.*`. It is named apart from `geospec`'s own bin because npm
+ * links a hoisted dependency's bin over a direct one of the same name. It is removed with this package.
  *
  * @module
  */

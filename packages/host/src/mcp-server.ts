@@ -812,7 +812,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
 
 /** Options for {@link serveLocalHostMcp}. @public */
 export type LocalHostMcpOptions = {
-  /** The project a call works in when its client names none. */
+  /** The project a call works in when its client names none and its conversation has shown no model. */
   readonly workspaceRoot: string;
   /**
    * Work in `workspaceRoot` even when a call names its own folder, because the
@@ -925,8 +925,8 @@ export const serveLocalHostMcp = async (
     await writeFile(absolutePath, bytes);
     return { path, absolutePath, byteLength: bytes.length, sha256 };
   };
-  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string =>
-    (options.pinned ? undefined : callerRoot(meta)) ?? options.workspaceRoot;
+  const namedRoot = (meta: Readonly<Record<string, unknown>> | undefined): string | undefined =>
+    options.pinned ? options.workspaceRoot : callerRoot(meta);
   const invokeIn = async ({
     workspaceRoot,
     tool,
@@ -979,7 +979,8 @@ export const serveLocalHostMcp = async (
       ? undefined
       : createLocalMcpViewer({
           page: options.viewerPage,
-          rootOf,
+          namedRoot,
+          workspaceRoot: options.workspaceRoot,
           /* Stdout carries the protocol; a view the page could not keep is said on stderr, and the page works on. */
           workbench: {
             onError: (error) => {
@@ -1037,7 +1038,13 @@ export const serveLocalHostMcp = async (
         )
         .map((definition) => hostToolOf(definition)),
       screenshotImages: 'inline',
-      dispatch: async (call, dispatchOptions) => dispatchIn(rootOf(dispatchOptions.meta), call, dispatchOptions),
+      /* A call the viewer page makes names no folder; the viewer knows the project its conversation's model came from. */
+      dispatch: async (call, dispatchOptions) =>
+        dispatchIn(
+          viewer?.rootOf(dispatchOptions.meta) ?? namedRoot(dispatchOptions.meta) ?? options.workspaceRoot,
+          call,
+          dispatchOptions,
+        ),
     },
     streams,
   );

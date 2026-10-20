@@ -58,7 +58,6 @@ import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
-import type { TauExporterClient } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -127,6 +126,24 @@ export const runStatusFromCounts = (
   counts: HostTestModelCounts,
   run: { readonly completed: boolean; readonly cancelled?: boolean },
 ): HostTestModelRunStatus => chatRunStatusFromCounts(counts, run);
+
+/**
+ * Runtime surface the host's GeoSpec runner exports through. A connected `RuntimeClient` satisfies it;
+ * the runner borrows it and never shuts it down.
+ * @public
+ */
+export type HostGeoSpecRuntimeClient = Pick<RuntimeClient, 'connect'> &
+  Partial<Pick<RuntimeClient, 'snapshotSource' | 'describe'>> & {
+    readonly capabilities?:
+      | {
+          readonly registrations: ReadonlyArray<{ readonly kind: string; readonly extensions?: readonly string[] }>;
+          readonly routes?: readonly unknown[];
+        }
+      | undefined;
+    open: (
+      input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'watch' | 'signal'>,
+    ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
+  };
 
 /**
  * The canonical host runner. Per-load source identity belongs to its finalized lineage.
@@ -433,7 +450,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  */
 export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
-  runtime: TauExporterClient,
+  runtime: HostGeoSpecRuntimeClient,
 ): Promise<HostGeoSpecRunner> => {
   const previous = nativeTail;
   let endTurn = (): void => undefined;

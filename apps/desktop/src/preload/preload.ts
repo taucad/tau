@@ -1,3 +1,9 @@
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
+import type {
+  DesktopKernelPreparation,
+  DesktopKernelProgress,
+  DesktopNativeKernelBridge,
+} from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { browserChannels } from '@taucad/types/browser';
@@ -154,8 +160,27 @@ const updates: DesktopUpdateBridge = {
   },
 };
 
+/* First-use download: the renderer names a kernel; main owns the store, the origins and the progress. */
+const nativeKernels: DesktopNativeKernelBridge = {
+  prepare: async (kernel) =>
+    ipcRenderer.invoke(desktopNativeKernelChannels.prepare, kernel) as Promise<DesktopKernelPreparation>,
+  cancel: async (kernel) => {
+    await ipcRenderer.invoke(desktopNativeKernelChannels.cancel, kernel);
+  },
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: DesktopKernelProgress): void => {
+      listener(progress);
+    };
+    ipcRenderer.on(desktopNativeKernelChannels.progress, handler);
+    return () => {
+      ipcRenderer.off(desktopNativeKernelChannels.progress, handler);
+    };
+  },
+};
+
 contextBridge.exposeInMainWorld('tau', {
   updates,
+  nativeKernels,
   /* The page matches relays on this tag rather than repeating the literal:
    * a duplicated string across a process boundary is how relays go quiet. */
   relayTag: servicesPortRelayTag,

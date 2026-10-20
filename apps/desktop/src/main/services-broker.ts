@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 import type { MachineBindingOutcome } from '@taucad/runtime/machine';
+import type { DesktopKernelPreparation, DesktopKernelProgress } from '@taucad/types/desktop-native-kernels';
 
 /** Concerns the services utility serves, one dedicated port each. */
 export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
@@ -100,6 +101,14 @@ export type ServicesBrokerOptions = {
       stillAuthorized: () => boolean;
     }>,
   ) => MessagePortMain;
+  /**
+   * Prepare a native kernel for the agent's `prepare_kernel` (W6 phase 2): the same preparation the viewer's first-use
+   * download runs, which a second caller joins. Absent, the utility's `prepare_kernel` answers that it cannot.
+   */
+  readonly prepareNativeKernel?: (
+    kernel: string,
+    onProgress: (progress: DesktopKernelProgress) => void,
+  ) => Promise<DesktopKernelPreparation>;
   /** Recheck queued/active geometry suites whenever a main-owned root grant changes. */
   readonly revokeGeometry?: () => void;
   /** Called once for each freshly forked utility, for diagnostics attachment. */
@@ -491,6 +500,49 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      return;
+    }
+    if (
+      type === 'native-kernel-prepare' &&
+      typeof requestId === 'string' &&
+      requestId.length > 0 &&
+      requestId.length <= 128
+    ) {
+      const { kernel } = frame as Record<string, unknown>;
+      const answer = (outcome: DesktopKernelPreparation): void => {
+        if (utility === spawned) {
+          spawned.postMessage({ type: 'native-kernel-prepared', requestId, outcome });
+        }
+      };
+      if (utility !== spawned || typeof kernel !== 'string' || options.prepareNativeKernel === undefined) {
+        answer({
+          status: 'failed',
+          kernel: typeof kernel === 'string' ? kernel : '',
+          code: 'PREPARE_KERNEL_FAILED',
+          message: 'Tau main refused a kernel preparation from a superseded services utility.',
+        });
+        return;
+      }
+      const { prepareNativeKernel } = options;
+      // async-iife: bootstrap -- the utility waits on the answer frame, not on this handler.
+      void (async () => {
+        try {
+          answer(
+            await prepareNativeKernel(kernel, (progress) => {
+              if (utility === spawned) {
+                spawned.postMessage({ type: 'native-kernel-progress', requestId, progress });
+              }
+            }),
+          );
+        } catch (error) {
+          answer({
+            status: 'failed',
+            kernel,
+            code: 'PREPARE_KERNEL_FAILED',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
       return;
     }
     if (

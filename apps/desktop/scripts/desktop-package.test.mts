@@ -125,12 +125,12 @@ try {
 }
 console.log('✓ native binaries and spawned adapters stay unpacked beneath hidden checkout directories');
 
-/* Omissions: GeoSpec native and PicoGK are always named; git only when it is absent. */
+/* Omissions: GeoSpec native is always named; git only when it is absent; no kernel closure ships anywhere. */
 const linux = desktopPackagePlans['linux-x64'];
 const windows = desktopPackagePlans['win32-x64'];
 const withGit = desktopPackageOmissions(linux, { git: true, gitResourceRoot: '/r/git/linux-x64' });
 assert.ok(withGit.some((line) => line.startsWith('GeoSpec native engine')));
-assert.ok(withGit.some((line) => line.startsWith('PicoGK C# worker')));
+assert.ok(!withGit.some((line) => line.includes('PicoGK')));
 assert.ok(!withGit.some((line) => line.startsWith('git payload')));
 assert.ok(
   desktopPackageOmissions(linux, { git: false, gitResourceRoot: '/r/git/linux-x64' }).includes(

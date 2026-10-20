@@ -1,8 +1,9 @@
 /**
- * The native kernel packages the desktop bundles closures for (charter W6 phase 1).
+ * The native kernel packages the desktop prepares on first use (charter W6 phase 2).
  *
- * Main seeds its payload store from the closures `Contents/Resources/payloads` ships and the packaging scripts seal
- * them, so both need each package's `tau-plugin.json` and launch set without loading a kernel. This list imports only
+ * The app ships no closure: main prepares each one the first time a model or the agent needs it, and the packaging
+ * verification prepares them the same way, so both need each package's `tau-plugin.json` and launch set without
+ * loading a kernel. This list imports only
  * the light `/native` subpaths (static manifest JSON and the closure mapping), so main stays kernel-free. It is a
  * packaging fact, not a support gate: the kernel utility's runtime definition (`createDesktopRuntime`) is the source
  * of truth for what runs, and a parity test pins this list to the native deployments that definition lists.

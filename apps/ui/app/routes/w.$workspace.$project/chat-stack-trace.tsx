@@ -1,10 +1,11 @@
 import { useSelector } from '@xstate/react';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
-import { ChevronRight, ChevronUp, CircleX, Info, Sparkles, TriangleAlert } from 'lucide-react';
+import { ChevronRight, ChevronUp, CircleX, Download, Info, Sparkles, TriangleAlert } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { Button } from '@taucad/ui/components/button';
+import { Progress } from '@taucad/ui/components/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Separator } from '@taucad/ui/components/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -12,7 +13,10 @@ import { FileLink } from '#components/files/file-link.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { useProject } from '#hooks/use-project.js';
-import { useCadSelector } from '#hooks/use-cad.js';
+import { useCad, useCadSelector } from '#hooks/use-cad.js';
+import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
+import type { NativeKernelDownload } from '#hooks/use-native-kernel-download.js';
+import { formatBytes } from '#lib/format-bytes.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '@taucad/ui/components/keyboard';
@@ -368,7 +372,32 @@ function IssueGlyphCounts({
 }
 
 /** A view problem the person resolves by a choice, such as a saved view this build no longer offers. */
-export type ViewerNotice = Readonly<{ message: string; actionLabel: string; onAct: () => void }>;
+export type ViewerNotice = Readonly<{
+  message: string;
+  actionLabel: string;
+  onAct: () => void;
+  /** Percent done of work the view waits on, such as a kernel download; shown as a bar under the message. */
+  progress?: number;
+}>;
+
+/**
+ * The notice for a native kernel the desktop is downloading on first use, or could not download.
+ * @param download - The download's state.
+ * @returns A notice that cancels a running download or retries a stopped one.
+ */
+const downloadNotice = (download: NativeKernelDownload): ViewerNotice => {
+  if (download.status === 'stopped') {
+    return { message: download.message, actionLabel: 'Retry', onAct: download.retry };
+  }
+  const size = download.byteLength === undefined ? '' : ` (${formatBytes(download.byteLength)})`;
+  const { progress } = download;
+  return {
+    message: `Downloading the ${download.kernel} kernel runtime${size}. It is needed once; the model renders when it is ready.`,
+    actionLabel: 'Cancel',
+    onAct: download.cancel,
+    progress: progress === undefined || progress.total <= 0 ? 0 : Math.min(100, (progress.done / progress.total) * 100),
+  };
+};
 
 const Hairline = (): React.JSX.Element => (
   <Separator orientation='vertical' className='mx-0 first:hidden data-[orientation=vertical]:h-4' />
@@ -478,14 +507,25 @@ function ViewerIssuesContent({
   const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
   const entryIssues = useCadSelector(selectEntryIssues, undefined);
   const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
-  const isFailed = !isCadActorStale && failureIssues !== undefined && failureIssues.length > 0;
-  const sorted = useMemo(
+  const ordered = useMemo(
     () => [...(errors ?? [])].sort((a, b) => severityRank[a.severity] - severityRank[b.severity]),
     [errors],
   );
 
+  // Download on first use: a native kernel the desktop has not prepared yet downloads at once and renders again.
+  const cad = useCad();
+  const download = useNativeKernelDownload(ordered, () => {
+    cad?.send({ type: 'initializeModel', entryPath });
+  });
+  const sorted = download === undefined ? ordered : ordered.filter((issue) => issue.code !== 'KERNEL_NOT_PREPARED');
+  const notices = [notice, download === undefined ? undefined : downloadNotice(download)].filter(
+    (shown): shown is ViewerNotice => shown !== undefined,
+  );
+  const isFailed =
+    !isCadActorStale && failureIssues !== undefined && failureIssues.length > 0 && (!download || sorted.length > 0);
+
   // A notice is a decision the view waits on: it opens the list each time a new one arrives.
-  const noticeMessage = notice?.message;
+  const noticeMessage = notices.length === 0 ? undefined : notices.map((shown) => shown.message).join('\n');
   const [seenNotice, setSeenNotice] = useState(noticeMessage);
   if (noticeMessage !== seenNotice) {
     setSeenNotice(noticeMessage);
@@ -496,7 +536,7 @@ function ViewerIssuesContent({
 
   const { shift: isShiftHeld } = useModifiers();
 
-  const total = sorted.length + (notice ? 1 : 0);
+  const total = sorted.length + notices.length;
   const open = isOpen && total > 0;
   const close = (event: React.KeyboardEvent): void => {
     if (event.key === 'Escape' && open) {
@@ -507,8 +547,8 @@ function ViewerIssuesContent({
   };
 
   const counts = getIssueCounts(sorted);
-  if (notice) {
-    counts.warning++;
+  for (const shown of notices) {
+    counts[shown.progress === undefined ? 'warning' : 'info']++;
   }
 
   const segment =
@@ -544,15 +584,28 @@ function ViewerIssuesContent({
       onKeyDown={close}
     >
       <ul className='max-h-[min(16rem,40svh)] divide-y overflow-y-auto'>
-        {notice ? (
-          <li role='alert' className='flex items-start gap-2 py-1.5 pr-1 pl-2 text-xs text-foreground'>
-            <TriangleAlert aria-hidden='true' className='mt-0.5 size-3.5 shrink-0 text-warning' />
-            <p className='min-w-0 flex-1'>{notice.message}</p>
-            <Button size='xs' variant='outline' className='shrink-0' onClick={notice.onAct}>
-              {notice.actionLabel}
+        {notices.map((shown) => (
+          <li
+            key={shown.message}
+            role={shown.progress === undefined ? 'alert' : 'status'}
+            className='flex items-start gap-2 py-1.5 pr-1 pl-2 text-xs text-foreground'
+          >
+            {shown.progress === undefined ? (
+              <TriangleAlert aria-hidden='true' className='mt-0.5 size-3.5 shrink-0 text-warning' />
+            ) : (
+              <Download aria-hidden='true' className='mt-0.5 size-3.5 shrink-0 text-muted-foreground' />
+            )}
+            <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+              <p>{shown.message}</p>
+              {shown.progress === undefined ? null : (
+                <Progress aria-label='Download progress' value={shown.progress} className='h-1' />
+              )}
+            </div>
+            <Button size='xs' variant='outline' className='shrink-0' onClick={shown.onAct}>
+              {shown.actionLabel}
             </Button>
           </li>
-        ) : null}
+        ))}
         {sorted.map((issue) => (
           <IssueRow
             // Create a unique key from issue properties

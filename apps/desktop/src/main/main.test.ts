@@ -10,6 +10,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
@@ -114,7 +115,17 @@ const state = vi.hoisted(() => ({
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
   nativeStoreOptions: undefined as unknown,
+  nativePreparerOptions: undefined as unknown,
+  nativePrepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel, byteLength: 1 })),
+  nativeCancel: vi.fn(),
   runtimePost: vi.fn(),
+}));
+
+vi.mock('#tau/native-preparation.js', () => ({
+  createDesktopKernelPreparer: (options: unknown) => {
+    state.nativePreparerOptions = options;
+    return { prepare: state.nativePrepare, cancel: state.nativeCancel, dispose: async () => undefined };
+  },
 }));
 
 vi.mock('#tau/native-store.js', () => ({
@@ -545,6 +556,30 @@ describe('desktop main compute owner', () => {
         }),
       );
       expect(state.updaterInstall).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should prepare and cancel a native kernel for a trusted document only',
+    async () => {
+      await bootstrap();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      const prepare = state.handlers.get(desktopNativeKernelChannels.prepare)!;
+      const cancel = state.handlers.get(desktopNativeKernelChannels.cancel)!;
+
+      await expect(prepare({ senderFrame: {} }, 'build123d')).resolves.toEqual({
+        status: 'ready',
+        kernel: 'build123d',
+        byteLength: 1,
+      });
+      await cancel({ senderFrame: {} }, 'build123d');
+      expect(state.nativeCancel).toHaveBeenCalledWith('build123d');
+
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(prepare({ senderFrame: {} }, 'build123d')).rejects.toThrow('Untrusted kernel preparation request');
+      await expect(prepare({ senderFrame: {} }, 42)).rejects.toThrow('Untrusted kernel preparation request');
+      expect(state.nativePrepare).toHaveBeenCalledTimes(1);
     },
     bootMilliseconds,
   );
@@ -1659,7 +1694,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'seeds the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    'reads the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
     async () => {
       await boot();
       await vi.waitFor(() => {
@@ -1667,12 +1702,13 @@ describe('desktop main machine store', () => {
       });
       const options = state.nativeStoreOptions as {
         readonly store: string;
-        readonly bundle: string | undefined;
         readonly hostPath: string;
         readonly post: (frame: unknown) => void;
       };
-      // Unpackaged there is no bundle to seed from; the store is the one every Tau host on the machine shares.
-      expect(options).toMatchObject({ store: join(state.userData, 'store'), bundle: undefined });
+      // The store is the one every Tau host on the machine shares, and the one main prepares kernels into.
+      expect(options).toMatchObject({ store: join(state.userData, 'store') });
+      expect(options).not.toHaveProperty('bundle');
+      expect(state.nativePreparerOptions).toMatchObject({ store: join(state.userData, 'store') });
       expect(options.hostPath).toBe(join(state.userData, 'exe'));
       const frame = { type: 'tau:native-kernels', kernels: [] };
       options.post(frame);

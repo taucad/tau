@@ -24,7 +24,7 @@ serveElectronRuntime({
   ...(ephemeral ? { fileSystem: fromMemoryFs() } : {}),
   runtime: process.env['TAU_RUNTIME_DEBUG'] === '1' ? debugRuntime : runtime,
 });
-/* Main posts the native kernels' sealed closures once the payload store is seeded; the runtime composes after. */
+/* Main posts the native kernels' sealed closures once it has read the payload store; the runtime composes after. */
 process.parentPort.on('message', ({ data }) => {
   receiveNativeKernels(data);
 });

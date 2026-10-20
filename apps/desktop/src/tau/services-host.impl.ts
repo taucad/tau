@@ -60,6 +60,8 @@ import type {
   AcpAdapter,
   HostMcpEndpoint,
   MachineHostIdentity,
+  HostPreparableKernel,
+  HostPrepareKernel,
   MachineSecretStore,
   ProjectHost,
   ProjectHostActor,
@@ -285,6 +287,11 @@ export type ServicesHostOptions = {
    * daemon. Absent, turns run where the host's own checkouts put them.
    */
   readonly turnPlacement?: ProjectHostOptions['turnPlacement'];
+  /**
+   * The agent's `prepare_kernel` (W6 phase 2): main prepares each kernel, in the same preparation the viewer's
+   * first-use download runs, and these are the kernels it takes. Absent, the agent has no `prepare_kernel`.
+   */
+  readonly nativeKernels?: Readonly<{ prepare: HostPrepareKernel; preparable: readonly HostPreparableKernel[] }>;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
   /** Reply to main with one binding ceremony's outcome, or why it failed. */
@@ -374,6 +381,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     machineBindingCompleted,
     machinesDirectory,
     machinesStreaming,
+    nativeKernels,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -934,6 +942,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return createGeometryRunnerClient(port);
       },
       systemSkillBundles,
+      ...(nativeKernels === undefined
+        ? {}
+        : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
       tauCredential: () => {

@@ -1,3 +1,4 @@
+import type { DesktopNativeKernelBridge } from '@taucad/types/desktop-native-kernels';
 import type { DesktopUpdateBridge } from '@taucad/types/desktop-updates';
 /**
  * Renderer-side seam onto the Electron shell.
@@ -34,6 +35,8 @@ import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
  */
 type DesktopShell = {
   readonly updates?: DesktopUpdateBridge;
+  /** First-use download of native kernels; absent on a shell that still bundles them. */
+  readonly nativeKernels?: DesktopNativeKernelBridge;
   /** Relay tag preload stamps on the message carrying a services port. */
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
@@ -500,6 +503,10 @@ export const onDesktopHostHandOff = (handler: (handOff: DesktopHostHandOff) => v
   const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.hostHandOff?.onHandOff(handler) ?? ((): void => undefined);
 };
+
+/** Native kernels are prepared only by the desktop's main process, never in a web session. */
+export const desktopNativeKernels = (): DesktopNativeKernelBridge | undefined =>
+  isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau?.nativeKernels : undefined;
 
 /** Updates are available only through the desktop preload, never in a web session. */
 export const desktopUpdates = (): DesktopUpdateBridge | undefined =>

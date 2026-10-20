@@ -268,7 +268,6 @@ export class BillableModelInvocationService {
           maximumInput: BigInt(maximumInput.quantity),
           capability: selectedCount.capability,
           environment: intent.environment,
-          credentialAccount: qualification.invocation.credentialAccount,
           signal: countSignal,
         });
         countSignal.throwIfAborted();

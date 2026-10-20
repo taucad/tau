@@ -148,18 +148,6 @@ const environmentSchemaBase = z.object({
   ),
   BILLING_USAGE_CURSOR_SECRET: z.string().min(32).optional(),
   BILLING_REQUEST_DIGEST_SECRET: z.string().min(32).optional(),
-  BILLING_PROVIDER_ACCOUNTS: jsonCodec(
-    z.partialRecord(
-      z.enum(['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai', 'zoo']),
-      z
-        .string()
-        .min(1)
-        .max(128)
-        .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u),
-    ),
-  )
-    .optional()
-    .default({}),
   TAU_LLM_PROVIDER_UPSTREAM_URL: z
     .url()
     .optional()

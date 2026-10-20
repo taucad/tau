@@ -315,7 +315,6 @@ const createOwner = (
     ledger,
     new CodeOwnedBillableModelQualificationResolver({
       adapters,
-      credentialAccounts: new Map([['openai', 'fixture-openai-account']]),
       executionTimeout,
       ...(inputCounters === undefined ? {} : { inputCounters }),
     }),
@@ -874,7 +873,6 @@ describe('funded invocation HTTP boundary', () => {
                   {
                     qualification: 'controlled-local-zero',
                     environment: 'development',
-                    credentialAccount: 'fixture-openai-account',
                     sourceRevision: 'c05-controlled-http',
                     url: `${providerUrl}/v1/responses/input_tokens`,
                   },
@@ -1597,7 +1595,6 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
         {
           qualification: 'controlled-local-zero',
           environment: 'development',
-          credentialAccount: 'fixture-openai-account',
           sourceRevision: 'c05-controlled-limits',
           url: `${url}/v1/responses/input_tokens`,
         },

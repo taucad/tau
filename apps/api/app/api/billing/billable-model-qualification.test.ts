@@ -29,14 +29,6 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['google-gemini-3.5-flash', adapter],
     ['xai-grok-4.6', adapter],
   ]),
-  credentialAccounts: new Map([
-    ['openai', 'openai-primary'],
-    ['anthropic', 'anthropic-primary'],
-    ['together', 'together-primary'],
-    ['morph', 'morph-primary'],
-    ['vertexai', 'vertex-primary'],
-    ['xai', 'xai-primary'],
-  ]),
   executionTimeout: 30_000,
 });
 
@@ -59,23 +51,36 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
   });
 
-  it('should answer a route without a billing account as a 503 provider outage, not a client fault', () => {
-    const unaccounted = new CodeOwnedBillableModelQualificationResolver({
-      adapters: new Map([['openai-gpt-5.6-luna', adapter]]),
-      credentialAccounts: new Map(),
+  it('should qualify a configured provider without a manual account map', () => {
+    const dependencies = { adapters: new Map([['openai-gpt-5.6-luna', adapter]]), executionTimeout: 30_000 };
+    const configured = new CodeOwnedBillableModelQualificationResolver(dependencies);
+    const result = configured.resolve(
+      intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
+    );
+    expect(result).toMatchObject({ providerId: 'openai' });
+    expect(result.invocation).not.toHaveProperty('credentialAccount');
+  });
+
+  it('should answer a route without an adapter as a 503 provider outage', () => {
+    const unavailable = new CodeOwnedBillableModelQualificationResolver({
+      adapters: new Map(),
       executionTimeout: 30_000,
     });
-    let caught: unknown;
+    expect(() =>
+      unavailable.resolve(
+        intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
+      ),
+    ).toThrow(LlmGatewayError);
     try {
-      unaccounted.resolve(
+      unavailable.resolve(
         intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
       );
+      expect.fail('Expected an unavailable provider');
     } catch (error) {
-      caught = error;
+      expect(error).toBeInstanceOf(LlmGatewayError);
+      expect((error as LlmGatewayError).getStatus()).toBe(503);
+      expect((error as LlmGatewayError).getResponse()).toMatchObject({ error: { type: 'PROVIDER_UNAVAILABLE' } });
     }
-    expect(caught).toBeInstanceOf(LlmGatewayError);
-    expect((caught as LlmGatewayError).getStatus()).toBe(503);
-    expect((caught as LlmGatewayError).getResponse()).toMatchObject({ error: { type: 'PROVIDER_UNAVAILABLE' } });
   });
 
   it('should emit the exact Vertex OpenAI compatibility model name', () => {
@@ -436,12 +441,6 @@ const catalogRows = Object.values(modelList)
 
 const catalogResolver = new CodeOwnedBillableModelQualificationResolver({
   adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, adapter])),
-  credentialAccounts: new Map(
-    ['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai'].map((provider) => [
-      provider,
-      `${provider}-primary`,
-    ]),
-  ),
   executionTimeout: 30_000,
 });
 

@@ -54,12 +54,6 @@ const session = {
  * admission path's own qualification, not a parallel pricing formula. */
 const resolver = new CodeOwnedBillableModelQualificationResolver({
   adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, mock<BillableModelProviderAdapter>()])),
-  credentialAccounts: new Map(
-    ['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai'].map((provider) => [
-      provider,
-      `${provider}-primary`,
-    ]),
-  ),
   executionTimeout: 30_000,
 });
 

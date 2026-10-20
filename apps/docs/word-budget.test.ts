@@ -43,8 +43,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/guides/bundler-configuration.mdx': 750,
   'runtime/guides/bundling.mdx': 800,
   // Raised 400 -> 500 on 2026-09-27 for the tscircuit kernel (charter D11), and 500 -> 550 on 2026-10-17 for the SMLib kernel.
-  // Raised 550 -> 600 on 2026-10-19 for the SMLibPy kernel row.
-  'runtime/guides/choosing-a-kernel.mdx': 600,
+  // Raised 550 -> 600 on 2026-10-19 for the SMLibPy kernel row, and 600 -> 650 on 2026-10-19 for the PicoVoxel and PicoGK rows (ONB-2).
+  'runtime/guides/choosing-a-kernel.mdx': 650,
   'runtime/guides/cooperate-with-cancellation.mdx': 650,
   'runtime/guides/cross-origin-isolation.mdx': 750,
   'runtime/guides/custom-kernel.mdx': 800,
@@ -58,7 +58,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/guides/testing-kernels.mdx': 700,
   'runtime/guides/using-middleware.mdx': 500,
   // Raised 550 -> 600 on 2026-09-06 for the tscircuit kernel row (charter D11).
-  'runtime/index.mdx': 600,
+  // Raised 600 -> 650 on 2026-10-19 for the PicoVoxel, SMLib and PicoGK kernel rows (ONB-2).
+  'runtime/index.mdx': 650,
   'runtime/reference/replicad.mdx': 100,
 };
 // Agent Workbench Control T20 adds two reviewed editor pages, each with a 500-word budget.
@@ -67,7 +68,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // Raised 34,700 -> 34,850 on 2026-10-17 for the SMLib kernel pages.
 // Raised 34,850 -> 35,400 on 2026-10-19 for the SMLibPy kernel pages.
 // Raised 35,400 -> 35,500 on 2026-10-19 for the agent plugin page's install and check lines (ONB-4).
-const siteCeiling = 35_500;
+// Raised 35,500 -> 35,550 on 2026-10-19 for the PicoVoxel, SMLib and PicoGK kernel rows (ONB-2).
+const siteCeiling = 35_550;
 
 const documentTypeCaps = {
   tutorial: 1500,

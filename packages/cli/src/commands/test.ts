@@ -16,7 +16,7 @@
 import { readdir, stat } from 'node:fs/promises';
 
 import { createHostGeoSpecRunner, formatTestModelHeadline, runStatusFromCounts } from '@taucad/host/agent-tools';
-import type { HostGeoSpecRunner, HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
+import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineCommand } from 'citty';
 
@@ -294,7 +294,7 @@ export const testCommand = defineCommand({
     let record: TestRecord;
     try {
       try {
-        runner = await createHostGeoSpecRunner(projectRoot, client as unknown as HostGeoSpecRuntimeClient);
+        runner = await createHostGeoSpecRunner(projectRoot, client);
       } catch (error) {
         /* The GeoSpec engine is an optional peer of the host; without it nothing can run. */
         if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {

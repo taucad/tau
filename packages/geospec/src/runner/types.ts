@@ -781,10 +781,6 @@ export type RunGeoSpecModuleOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for async test callbacks, in milliseconds. */
   testTimeout?: number;
-  /** Milliseconds. Non-verdict matcher infrastructure backstop. */
-  matcherWallBackstop?: number;
-  /** Emit structured forensic events for this run. */
-  forensic?: boolean;
   /** Observes each selected test as it starts and settles, for host progress reporting. */
   onTestEvent?: (event: GeoSpecTestEvent) => void;
   /**

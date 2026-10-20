@@ -21,7 +21,7 @@ export const tauViewerToolName = {
   appSync: 'app_sync',
   /** The page's answer to a capture request. */
   appCaptureReply: 'app_capture_reply',
-  /** A Tau link to the shown model's project, for the page's Share pane. */
+  /** The shown model's project packed for the page's direct share link. */
   appShareLink: 'app_share_link',
 } as const;
 
@@ -85,6 +85,8 @@ export type TauViewerShowResult = Readonly<{
   model: TauViewerModel;
   /** What the shown GLB carries of a mechanism; absent for an SVG. */
   mechanism?: TauViewerMechanism | undefined;
+  /** What the agent should know about the shown file, such as the source an export was made from. */
+  hint?: string | undefined;
   /** The loopback page showing this model, when the server runs one. */
   viewerUrl?: string | undefined;
   /** Component ids the agent asked the page to select, as the model tree names them. */
@@ -168,7 +170,20 @@ export type TauViewerViewState = Readonly<{
   composition: 'inline' | 'tab';
   /** Milliseconds since the epoch of the person's last pointer or keyboard input on the page. */
   interactedAt: number;
+  /**
+   * The components the person added to chat from this model, in the order added. A page sends it only to a server
+   * whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}.
+   */
+  references?: readonly TauViewerComponent[] | undefined;
 }>;
+
+/**
+ * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
+ * one of them only after a sync result listed it: an older server rejects the whole sync otherwise.
+ *
+ * @public
+ */
+export const tauViewerAcceptedViewFields = ['references'] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -195,6 +210,11 @@ export type TauViewerSyncResult = Readonly<{
   show?: TauViewerShowResult | undefined;
   /** A capture of this page's view the agent is waiting for. */
   capture?: Readonly<{ requestId: string }> | undefined;
+  /**
+   * The optional view fields the server takes ({@link tauViewerAcceptedViewFields}); absent from a server older than
+   * them. A page may read names it does not know.
+   */
+  accepts?: readonly string[] | undefined;
 }>;
 
 /** One captured image of the live view. @public */
@@ -277,13 +297,10 @@ export const resolveTauViewerPresentation = (client: TauViewerClient): TauViewer
  */
 export const tauViewerResourceUri = (sha256: string): string => `ui://tau/${sha256.slice(0, 16)}/app.html`;
 
-/** Which link `app_share_link` makes: `'direct'` (the default) packs the project, `'github'` imports it. @public */
-export type TauViewerShareKind = 'direct' | 'github';
-
 /**
- * What `app_share_link` answers for `kind: 'direct'`: the shown model's project as the deterministic portable share
- * ZIP (`@taucad/project-core/share-artifact`), base64url. The page makes the direct link from it, and seals it under
- * a password itself, so a password never reaches the server.
+ * What `app_share_link` answers: the shown model's project as the deterministic portable share ZIP
+ * (`@taucad/project-core/share-artifact`), base64url. The page makes the direct link from it, and seals it under a
+ * password itself, so a password never reaches the server.
  * @public
  */
 export type TauViewerDirectShare = Readonly<{
@@ -301,20 +318,4 @@ export type TauViewerDirectShare = Readonly<{
   archiveBytes: number;
   /** Non-blocking diagnostics safe to show the person sharing. */
   warnings: ReadonlyArray<Readonly<{ code: string; message: string }>>;
-}>;
-
-/** What `app_share_link` answers for `kind: 'github'`: a Tau link that imports the shown model's project from GitHub. @public */
-export type TauViewerShareLink = Readonly<{
-  /** The Tau link that imports the project from GitHub. */
-  url: string;
-  /** `owner/repo` on GitHub. */
-  repository: string;
-  /** The branch on GitHub the local checkout tracks. */
-  ref: string;
-  /** The project folder inside the repository, `''` at its root. */
-  path: string;
-  /** The entry the link opens, relative to the project folder. */
-  mainFile: string;
-  /** Whether the checkout has commits or edits GitHub does not have, which the link does not include. */
-  hasLocalChanges: boolean;
 }>;

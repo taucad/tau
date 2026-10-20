@@ -3,12 +3,12 @@ import type * as Live from '#www/live.js';
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
-import { appOrigin, environmentHref, stagingDesktopNote } from '#www/environment.js';
+import { environmentHref, stagingDesktopNote } from '#www/environment.js';
 import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
 import type { ConsentDecision } from '@taucad/consent';
 
 /**
- * Offer the copy control for the hero's agent prompt and name the host serving the page in it.
+ * Offer the copy control for the hero's agent prompt, whose text the server already names for the host serving it.
  * Without the script the prompt stays selectable text and the control stays hidden.
  * @param signal - Aborts the click listener when the page changes.
  * @returns Clears a pending label restore.
@@ -21,8 +21,6 @@ function initializeCopyPrompt(signal: AbortSignal): () => void {
   if (!(button instanceof HTMLButtonElement) || !text || !status) {
     return () => undefined;
   }
-  // The page renders production links; staging names its own agent page.
-  text.textContent = text.textContent.replace(appOrigin, environmentHref(appOrigin, location.hostname));
   button.hidden = false;
   button.addEventListener(
     'click',

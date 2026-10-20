@@ -962,7 +962,7 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { quantity } from '@taucad/runtime/configuration/zod';
+import { quantity } from '@taucad/runtime/schema/zod';
 import { z } from 'zod';
 const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'));
 const requireFromConsumer = createRequire(import.meta.url);

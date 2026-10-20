@@ -194,6 +194,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
       }
     },
@@ -271,6 +274,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release"
         }
       }
     },
@@ -359,6 +365,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
       }
     },

@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { FileCode2, Maximize2, MessageSquarePlus } from 'lucide-react';
+import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
 import type { TauViewerCamera, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
 import type { GeometryComponentReference } from '@taucad/types';
@@ -34,16 +34,19 @@ import { loadModel } from '#app/model-loader.js';
 import { chatReferenceOf } from '#app/chat-reference.js';
 import { captureLiveView, startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
 import type { LiveLink } from '#app/live-link.js';
-import { createModelComponentActionMenus } from '@taucad/workbench-panes/component-menu/component-action-menu';
-import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
-import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
-import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
-import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
 import {
-  createComponentReveal,
-  createPageComponentActions,
-  useViewerComponentMenu,
-} from '#app/sources/component-menu.jsx';
+  createModelComponentActionMenus,
+  ModelComponentActionDropdown,
+} from '@taucad/workbench-panes/component-menu/component-action-menu';
+import type { ModelComponentActionMenuData } from '@taucad/workbench-panes/component-menu/component-action-menu';
+import { useViewerPartMenu } from '@taucad/workbench-panes/component-menu/use-viewer-part-menu';
+import { WorkbenchTab } from '@taucad/workbench-panes/components/workbench-tab';
+import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
+import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
+import { ViewerHeaderActions } from '@taucad/workbench-panes/shell/viewer-header-actions';
+import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
+import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
+import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
@@ -69,19 +72,35 @@ const inlineHeight = 420;
 const cardHeight = (view: HostView): number | undefined =>
   view.composition === 'inline' ? Math.min(inlineHeight, view.maxHeight ?? inlineHeight) : undefined;
 
-/** The reference action's name per route: a message starts a turn, so it says so. */
+/** The reference action's name per route, on the card and in the part menu: each says what a click does (D3, D9). */
 const chatAction: Readonly<Record<ChatRoute, string>> = {
   context: 'Add to chat',
   message: 'Send to chat',
-  clipboard: 'Copy prompt',
+  clipboard: 'Copy reference',
 };
 
-/** What the page says once the reference went its route. */
-const chatNotice: Readonly<Record<ChatRoute, string>> = {
-  context: 'Added to chat',
-  message: 'Sent to chat',
-  clipboard: 'Copied; paste it into your chat',
+/**
+ * What the page says once a reference went its route.
+ *
+ * @param route - The route it took.
+ * @param added - On the model-context route, how many parts the chat now holds and whether this one was there before.
+ * @returns The notice.
+ */
+const chatNotice = (route: ChatRoute, added?: Readonly<{ count: number; isRepeat: boolean }>): string => {
+  if (route === 'message') {
+    return 'Sent to chat';
+  }
+  if (route === 'clipboard') {
+    return 'Copied; paste it into your chat';
+  }
+  if (added === undefined) {
+    return 'Added to chat';
+  }
+  return added.isRepeat ? 'Already in chat' : `Added to chat (${String(added.count)})`;
 };
+
+/** The parts the person added to chat from one shown model, keyed `path#componentId`, in the order added. */
+type AddedParts = Readonly<{ modelSha: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
 
 /**
  * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads. The
@@ -158,7 +177,7 @@ function useShownModel(
 /** The agent's request to select components of one model (`show_model` with `select`). */
 type SelectRequest = Readonly<{ modelSha: string; componentIds: readonly string[] }> | undefined;
 
-/** The canvas region the view cube draws in. */
+/** The canvas region the view cube draws in; in the tab it takes focus, so Shift+F10 opens the part menu (VUI-6). */
 const canvasRegionId = 'tau-viewer-canvas';
 
 /** A short confirmation over the canvas. */
@@ -170,78 +189,61 @@ function Notice({ text }: Readonly<{ text: string }>): React.JSX.Element {
   );
 }
 
-/** The header's labels fold to their icons in a narrow tab, as the desktop's fold below its viewer width. */
-const foldClasses = {
-  className: '@max-[520px]/viewer:w-7 @max-[520px]/viewer:px-0',
-  labelClassName: 'hidden @min-[520px]/viewer:inline',
-};
-
 type PageHeaderProps = Readonly<{
   model: TauViewerModel | undefined;
-  selected: GeometryComponentReference | undefined;
-  isPanelOpen: boolean;
+  /** The selected part's menu, which its name in the header opens; `undefined` with no part selected. */
+  selectedMenu: ModelComponentActionMenuData | undefined;
+  /** The selected part's name, as its chat reference names it. */
+  selectedLabel: string | undefined;
   onOpenPane: (pane: WorkbenchPaneId) => void;
-  onTogglePanel: () => void;
+  /** The workbench toggle, drawn last while the lane is closed; the open lane draws it at the end of its tabs. */
+  toggle: React.ReactNode;
 }>;
 
 /**
- * The tab's header, as the app's viewer header: the shown file as the workbench's one editor tab (its name, then its
- * path, and the selected component), then the app's top-right cluster: Share and Export, which open their panes, and
- * the one workbench toggle (viewer chrome D4, D5).
+ * The canvas's header, as the app's viewer header: the shown file as the workbench's one editor tab (its name, its
+ * path in the tooltip and beside it, and the selected part, whose name opens its part menu), then the shared Share and
+ * Export, which open their panes (viewer chrome D4, D5, D8). The open lane's tabs continue the same row beside it,
+ * ending in the workbench toggle, as the app's dock groups share one top bar; with the lane closed the toggle ends
+ * this header.
  *
- * @param props - The shown model and selection, whether the lane is open, and what the actions do.
+ * @param props - The shown model, the selected part's menu and name, what the actions do and the toggle while the
+ *   lane is closed.
  * @returns The header.
  */
-function PageHeader({ model, selected, isPanelOpen, onOpenPane, onTogglePanel }: PageHeaderProps): React.JSX.Element {
+function PageHeader({ model, selectedMenu, selectedLabel, onOpenPane, toggle }: PageHeaderProps): React.JSX.Element {
   const path = model === undefined ? undefined : (model.sourceFile ?? model.path);
   return (
     <div className='flex h-9 shrink-0 items-center gap-1 border-b px-0.5'>
       {path === undefined ? null : (
         <>
-          <div
-            title={path}
-            className='mx-0.5 flex h-7 max-w-full min-w-28 items-center gap-1.5 rounded-sm bg-accent px-2 text-[13px] text-foreground'
-          >
-            <FileCode2 aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-            <span className='truncate'>{basenameOf(path)}</span>
-          </div>
+          <WorkbenchTab
+            as='div'
+            isActive
+            icon={<Box aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />}
+            title={basenameOf(path)}
+            fullTitle={path}
+            className='mx-0.5 h-7 w-auto max-w-56 min-w-28 shrink-0 rounded-sm'
+          />
           {/* The folder only when the file is not at the project root, so the name shows once. */}
           <p className='ml-1 min-w-0 truncate text-xs text-muted-foreground'>
             {path === basenameOf(path) ? null : path}
-            {selected === undefined ? null : (
+            {selectedMenu === undefined || selectedLabel === undefined ? null : (
               <span>
                 {path === basenameOf(path) ? '' : ' · '}
-                {selected.label}
+                <ModelComponentActionDropdown
+                  {...selectedMenu}
+                  actionButtonClassName='inline-flex h-6 max-w-full items-center rounded-sm px-1 align-middle hover:bg-accent hover:text-foreground focus-visible:focus-outline'
+                >
+                  <span className='truncate'>{selectedLabel}</span>
+                </ModelComponentActionDropdown>
               </span>
             )}
           </p>
         </>
       )}
-      <div role='group' aria-label='Workbench actions' className='ml-auto flex shrink-0 items-center gap-1 pr-0.5'>
-        {/* What Export can do for the shown file is the Export pane's to say, so the button stays live (LRP-6). */}
-        <PaneAction
-          icon={workbenchPanes.share.icon}
-          label='Share'
-          tooltip='Share project'
-          disabled={model === undefined}
-          onClick={() => {
-            onOpenPane('share');
-          }}
-          {...foldClasses}
-        />
-        <PaneAction
-          icon={workbenchPanes.export.icon}
-          label='Export'
-          tooltip='Open exporter'
-          disabled={model === undefined}
-          onClick={() => {
-            onOpenPane('export');
-          }}
-          {...foldClasses}
-        />
-        {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
-        <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
-        <WorkbenchToggleButton isOpen={isPanelOpen} onClick={onTogglePanel} />
+      <div className='ml-auto flex shrink-0 items-center pr-0.5'>
+        <ViewerHeaderActions isDisabled={model === undefined} trailing={toggle} onOpenPane={onOpenPane} />
       </div>
     </div>
   );
@@ -249,25 +251,38 @@ function PageHeader({ model, selected, isPanelOpen, onOpenPane, onTogglePanel }:
 
 const basenameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
-/** What the canvas shows besides the model: progress, a failure, or the wait for a first model. */
-function StatusLine({ state }: Readonly<{ state: PageState }>): React.ReactNode {
-  if (state.kind === 'loading') {
-    const percent = state.model.byteLength === 0 ? 100 : Math.round((state.loaded / state.model.byteLength) * 100);
-    return (
-      <p role='status' className='text-xs text-muted-foreground'>
-        Loading {state.model.title}… {percent}%
-      </p>
-    );
-  }
-  if (state.kind === 'failed') {
-    return (
-      <p role='alert' className='text-xs text-feature'>
-        {state.message}
-      </p>
-    );
-  }
-  return null;
+/**
+ * The rule and the workbench toggle at the end of the open lane's tabs; the canvas header draws its own rule.
+ *
+ * @param props - The workbench toggle button the rule precedes.
+ * @returns The rule and the toggle.
+ */
+function LaneToggle({ children }: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  return (
+    <>
+      {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
+      <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
+      {children}
+    </>
+  );
 }
+
+/**
+ * What the canvas shows besides the model, in the shared stage: the download's progress or the failure.
+ *
+ * @param state - Whether the page waits, loads, shows or failed, with the download's byte count.
+ * @returns The loading pill with its share, the failure, or `undefined` while waiting or showing.
+ */
+const stageStatusOf = (state: PageState): ViewerStageStatus | undefined => {
+  if (state.kind === 'loading') {
+    return {
+      kind: 'loading',
+      label: `Loading ${state.model.title}`,
+      progress: state.model.byteLength === 0 ? 1 : state.loaded / state.model.byteLength,
+    };
+  }
+  return state.kind === 'failed' ? { kind: 'failed', message: state.message } : undefined;
+};
 
 /**
  * The page.
@@ -277,7 +292,6 @@ function StatusLine({ state }: Readonly<{ state: PageState }>): React.ReactNode 
  */
 export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.JSX.Element {
   const [state, view, showRef, select] = useShownModel(bridge);
-  const [selected, setSelected] = useState<GeometryComponentReference | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
@@ -317,10 +331,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const enableMatcap = useSelector(graphicsRef, (snapshot) => snapshot.context.enableMatcap);
   const enableGizmo = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGizmo);
 
-  useEffect(() => {
-    setSelected(undefined);
-  }, [shown?.model.sha256]);
-
   /* The live link (W6) reads the latest of these, not the render they were captured in. */
   const rootRef = useRef<HTMLElement>(null);
   const interactedAt = useRef(0);
@@ -358,6 +368,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       ? undefined
       : { unitId, unit: getModelInteractionUnitState(context.modelInteractionRef.getSnapshot().context, unitId) };
   }, [graphicsRef]);
+  /* What the person added to chat; a newly shown model starts an empty set (VUI-3). */
+  const added = useRef<AddedParts | undefined>(undefined);
+  const addedFrom = useCallback(
+    (modelSha: string): GeometryComponentReference[] =>
+      added.current?.modelSha === modelSha ? [...added.current.parts.values()] : [],
+    [],
+  );
   const linkRef = useRef<LiveLink | undefined>(undefined);
   useEffect(() => {
     const link = startLiveLink(bridge.callTool, {
@@ -389,6 +406,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           measurementCount: context.measurements.length,
           composition: latest.current.view.composition,
           interactedAt: interactedAt.current,
+          references: addedFrom(model.sha256),
         });
       },
       follows: () => latest.current.view.follows,
@@ -411,7 +429,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       linkRef.current = undefined;
       link.stop();
     };
-  }, [bridge, graphicsRef, isDrawn, showRef, shownUnit]);
+  }, [addedFrom, bridge, graphicsRef, isDrawn, showRef, shownUnit]);
 
   /* Report the view once a newly shown model is drawn, so `view_state` finds the page without waiting for its held
    * sync to come back: a card's first sync left before it had a model. */
@@ -476,9 +494,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           source: 'chat',
         });
       }
-      const [first] = known;
-      const node = first === undefined ? undefined : manifest.nodesById[first];
-      setSelected(node === undefined ? undefined : buildGeometryComponentReference(manifest, node));
       linkRef.current?.nudge();
     };
     // async-iife: bootstrap — the selection lands when the model is drawn; a newer request cancels it.
@@ -487,22 +502,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       cancelled = true;
     };
   }, [graphicsRef, isDrawn, select, shownUnit]);
-
-  const addToChat = useCallback(() => {
-    if (shown === undefined) {
-      return;
-    }
-    const add = async (): Promise<void> => {
-      try {
-        const outcome = await bridge.addToChat(chatReferenceOf(shown.model, selected));
-        setNotice(chatNotice[outcome]);
-      } catch {
-        setNotice('Could not add to chat');
-      }
-    };
-    // async-iife: bootstrap — a click starts it; the notice reports its outcome.
-    void add();
-  }, [bridge, shown, selected]);
 
   /* The app's part menu (viewer parity V13): right-click a part on the canvas, or a row's menu in the Model pane. */
   const reveal = useMemo(() => createComponentReveal(), []);
@@ -516,33 +515,92 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     setIsPanelOpen(true);
     setOpenPaneRequest({ pane, requestId: paneRequests.current });
   }, []);
+  /* One verb for the part menu, the Model pane's rows and the card: the part joins the set, the chat gets it along
+   * the host's route, and the next sync reports the set to view_state (D2). */
   const addPartToChat = useCallback(
     (reference: GeometryComponentReference) => {
       const model = latest.current.shown?.model;
       if (model === undefined) {
         return;
       }
+      const parts = new Map(addedFrom(model.sha256).map((part) => [`${part.filePath}#${part.componentId}`, part]));
+      const key = `${reference.filePath}#${reference.componentId}`;
+      const isRepeat = parts.has(key);
+      parts.set(key, parts.get(key) ?? reference);
+      added.current = { modelSha: model.sha256, parts };
+      linkRef.current?.nudge();
+      const all = chatReferenceOf(model, [...parts.values()]);
       // async-iife: bootstrap — a menu click starts it; the notice reports its outcome.
       void (async () => {
         try {
-          setNotice(chatNotice[await bridge.addToChat(chatReferenceOf(model, reference))]);
+          const route = await bridge.addToChat(chatReferenceOf(model, [reference]), all);
+          setNotice(chatNotice(route, { count: parts.size, isRepeat }));
         } catch {
           setNotice('Could not add to chat');
         }
       })();
     },
-    [bridge],
+    [addedFrom, bridge],
   );
+  const latestSelected = useRef<GeometryComponentReference | undefined>(undefined);
+  /* The card's action adds the picked part, or names the whole model when nothing is picked (D1). */
+  const addToChat = useCallback(() => {
+    if (shown === undefined) {
+      return;
+    }
+    const selected = latestSelected.current;
+    if (selected !== undefined) {
+      addPartToChat(selected);
+      return;
+    }
+    const add = async (): Promise<void> => {
+      try {
+        setNotice(chatNotice(await bridge.addToChat(chatReferenceOf(shown.model, []))));
+      } catch {
+        setNotice('Could not add to chat');
+      }
+    };
+    // async-iife: bootstrap — a click starts it; the notice reports its outcome.
+    void add();
+  }, [addPartToChat, bridge, shown]);
   const componentActions = useMemo(
-    () => createPageComponentActions({ addToChat: addPartToChat, openPane, reveal }),
-    [addPartToChat, openPane, reveal],
+    () =>
+      createPageComponentActions({
+        addToChat: addPartToChat,
+        addToChatLabel: chatAction[view.chatRoute],
+        openPane,
+        reveal,
+      }),
+    [addPartToChat, openPane, reveal, view.chatRoute],
   );
   const rowMenus = useMemo(() => createModelComponentActionMenus(componentActions), [componentActions]);
-  const componentMenu = useViewerComponentMenu({ graphicsRef, actions: componentActions });
-  const closeComponentMenu = componentMenu.close;
-  useEffect(() => {
-    closeComponentMenu();
-  }, [shown?.model.sha256, closeComponentMenu]);
+  /* The selected part is the graphics actor's first selected component, whichever surface picked it. */
+  const partMenu = useViewerPartMenu({ graphicsRef, actions: componentActions });
+  const { selectedMenu } = partMenu;
+  const selectedReference = useMemo(
+    () =>
+      selectedMenu === undefined
+        ? undefined
+        : buildGeometryComponentReference(selectedMenu.manifest, selectedMenu.node),
+    [selectedMenu],
+  );
+  latestSelected.current = selectedReference;
+  const selectedLabel = selectedReference?.label;
+  /* A secondary press on a part in the card picks it, as the card has no part menu (D1). */
+  const pickPart = useCallback(
+    (reference: GeometryComponentReference) => {
+      const unitId = graphicsRef.getSnapshot().context.modelInteractionUnitId;
+      if (unitId !== undefined) {
+        graphicsRef.send({
+          type: 'selectModelComponent',
+          unitId,
+          componentId: reference.componentId,
+          source: 'viewer',
+        });
+      }
+    },
+    [graphicsRef],
+  );
 
   useEffect(() => {
     if (notice === undefined) {
@@ -556,14 +614,24 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     };
   }, [notice]);
 
-  /* Closing drops the last pane request, so the lane reopens on its opening tabs instead of replaying it. */
+  /* Closing drops the last pane request, so the lane reopens on its opening tabs instead of replaying it. The toggle
+   * moves between the canvas header and the lane's, so the one it lands in takes focus back. */
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const isToggleFocusPending = useRef(false);
   const togglePanel = useCallback(() => {
     if (isPanelOpen) {
       setOpenPaneRequest(undefined);
     }
+    isToggleFocusPending.current = toggleRef.current !== null && toggleRef.current === document.activeElement;
     setIsPanelOpen(!isPanelOpen);
   }, [isPanelOpen]);
-
+  useEffect(() => {
+    if (isToggleFocusPending.current) {
+      isToggleFocusPending.current = false;
+      toggleRef.current?.focus();
+    }
+  }, [isPanelOpen]);
+  const toggle = <WorkbenchToggleButton ref={toggleRef} isOpen={isPanelOpen} onClick={togglePanel} />;
   return (
     <ViewerEnvironmentProvider value={environment}>
       <KeyboardProvider>
@@ -584,89 +652,98 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 paddingLeft: view.safeArea.left,
               }}
             >
-              {isInline ? null : (
-                <PageHeader
-                  model={shown?.model}
-                  selected={selected}
-                  isPanelOpen={isPanelOpen}
-                  onOpenPane={openPane}
-                  onTogglePanel={togglePanel}
-                />
-              )}
               <div className='flex min-h-0 flex-1'>
-                <div
-                  id={canvasRegionId}
-                  className='@container/viewer relative min-w-0 flex-1 overflow-hidden'
-                  {...(isInline ? {} : componentMenu.regionProps)}
-                >
-                  {shown === undefined && state.kind !== 'loading' ? (
-                    <div className='flex size-full items-center justify-center p-4 text-center'>
-                      {state.kind === 'failed' ? (
-                        <StatusLine state={state} />
-                      ) : (
-                        <p className='text-sm text-muted-foreground'>Waiting for a model.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <ModelViewer
-                      graphicsRef={graphicsRef}
-                      artifact={shown?.artifact}
-                      artifactHash={shown?.model.sha256}
-                      /* The unit the panes name: the source, or the GLB itself when it has none. */
-                      sourceFile={shown?.model.sourceFile ?? shown?.model.path}
-                      enablePan={!isInline}
-                      enableZoom={!isInline}
-                      graphicsOptions={{
-                        enableGrid,
-                        enableAxes,
-                        enableLines,
-                        enableSurfaces,
-                        enableMatcap,
-                        /* The view cube belongs to the tab; a card shows the canvas and two actions (E2). */
-                        enableGizmo: !isInline && enableGizmo,
-                      }}
-                      /* Top-right of the canvas, as in the workbench (viewer parity V5). */
-                      gizmoContainer={isInline ? undefined : `#${canvasRegionId}`}
-                      onComponentReference={setSelected}
-                      onComponentSecondaryPointerCandidate={
-                        isInline ? undefined : componentMenu.onComponentSecondaryPointerCandidate
-                      }
+                {/* The canvas column: its header and the open lane's tabs make one top row (viewer chrome D4). */}
+                <div className='@container/viewer flex min-w-0 flex-1 flex-col'>
+                  {isInline ? null : (
+                    <PageHeader
+                      model={shown?.model}
+                      selectedMenu={selectedMenu}
+                      selectedLabel={selectedLabel}
+                      onOpenPane={openPane}
+                      toggle={isPanelOpen ? undefined : toggle}
                     />
                   )}
-                  <div className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-1 p-2'>
+                  {/* In the tab the region takes focus, so its part menu has a keyboard route (VUI-6, D8). */}
+                  <ViewerStage
+                    graphicsRef={graphicsRef}
+                    regionId={canvasRegionId}
+                    regionLabel='Model viewer'
+                    partMenu={isInline ? undefined : partMenu}
+                    isModelShown={shown !== undefined}
+                    status={stageStatusOf(state)}
+                    className='min-h-0 min-w-0 flex-1'
+                    /* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */
+                    controls={
+                      isInline ? undefined : (
+                        <>
+                          {notice === undefined ? null : <Notice text={notice} />}
+                          <ViewerControls />
+                        </>
+                      )
+                    }
+                    renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) =>
+                      shown === undefined && state.kind !== 'loading' ? (
+                        state.kind === 'failed' ? null : (
+                          <div className='flex size-full items-center justify-center p-4 text-center'>
+                            <p className='text-sm text-muted-foreground'>Waiting for a model.</p>
+                          </div>
+                        )
+                      ) : (
+                        <ModelViewer
+                          graphicsRef={graphicsRef}
+                          artifact={shown?.artifact}
+                          artifactHash={shown?.model.sha256}
+                          /* The unit the panes name: the source, or the GLB itself when it has none. */
+                          sourceFile={shown?.model.sourceFile ?? shown?.model.path}
+                          enablePan={!isInline}
+                          enableZoom={!isInline}
+                          graphicsOptions={{
+                            enableGrid,
+                            enableAxes,
+                            enableLines,
+                            enableSurfaces,
+                            enableMatcap,
+                            /* The view cube belongs to the tab; a card shows the canvas and two actions (E2). */
+                            enableGizmo: !isInline && enableGizmo,
+                          }}
+                          /* The canvas region's pointer events, so the part menu and the camera see the same press. */
+                          eventSource={eventSource}
+                          /* Top-right of the canvas, as in the workbench (viewer parity V5). */
+                          gizmoContainer={isInline ? undefined : gizmoContainer}
+                          onComponentReference={isInline ? pickPart : undefined}
+                          onComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
+                        />
+                      )
+                    }
+                  >
                     {shown === undefined || !isInline ? null : (
-                      <p className='rounded-md bg-background/80 px-2 py-1 text-xs font-medium'>
-                        {shown.model.title}
-                        {selected === undefined ? null : (
-                          <span className='text-muted-foreground'> · {selected.label}</span>
-                        )}
-                      </p>
+                      <div className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-1 p-2'>
+                        <p className='rounded-md bg-background/80 px-2 py-1 text-xs font-medium'>
+                          {shown.model.title}
+                          {selectedLabel === undefined ? null : (
+                            <span className='text-muted-foreground'> · {selectedLabel}</span>
+                          )}
+                        </p>
+                      </div>
                     )}
-                    {shown === undefined ? null : <StatusLine state={state} />}
-                  </div>
-                  {/* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */}
-                  {isInline ? null : (
-                    <div className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'>
-                      {notice === undefined ? null : <Notice text={notice} />}
-                      <ViewerControls />
-                    </div>
-                  )}
-                  {isInline && notice !== undefined ? (
-                    <div className='absolute right-2 bottom-2'>
-                      <Notice text={notice} />
-                    </div>
-                  ) : null}
+                    {isInline && notice !== undefined ? (
+                      <div className='absolute right-2 bottom-2'>
+                        <Notice text={notice} />
+                      </div>
+                    ) : null}
+                  </ViewerStage>
                 </div>
                 {isInline || !isPanelOpen ? null : (
                   <WorkbenchLane
                     bridge={bridge}
                     model={shown?.model}
                     graphicsRef={graphicsRef}
-                    onSelect={setSelected}
                     onParametersWritten={showAgain}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}
+                    headerEnd={<LaneToggle>{toggle}</LaneToggle>}
                   />
                 )}
               </div>
@@ -693,7 +770,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 </div>
               ) : null}
             </main>
-            {isInline ? null : componentMenu.menu}
           </GraphicsProvider>
         </TooltipProvider>
       </KeyboardProvider>

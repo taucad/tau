@@ -48,7 +48,7 @@ export const assertProjectCreationAvailable = (tree: Tree, projectName: string, 
   }
 };
 
-/** Add missing project instruction files without changing either authored sibling. */
+/** Add missing project AGENTS.md instructions without changing authored bytes. */
 export const writeProjectInstructions = (tree: Tree, options: ProjectInstructionOptions): void => {
   generateFiles(
     tree,

@@ -73,19 +73,27 @@ const instructionsFor = (tested: boolean): string =>
       ? [
           'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
           'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed.',
         ]
       : [
           'After edits, call evaluate_model for build diagnostics and offered views/exports, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready and its summary bounds and componentCount fit the brief.',
         ]),
+    'A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done.',
     'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
   ].join(' ');
 
 /** Model-facing guidance returned by MCP initialization. @public */
 export const tauMcpInstructions = instructionsFor(true);
 
-/** The sentence a server with the viewer adds to {@link tauMcpInstructions}. */
-const viewerInstruction =
-  'When the person should look at a model, call show_model after evaluate_model succeeds; it shows the model in the Tau viewer, or returns a viewer link to share with them.';
+/**
+ * The sentences a server with the viewer adds to {@link tauMcpInstructions}: what `show_model` shows, and what a
+ * part reference names.
+ */
+const viewerInstruction = [
+  'When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism, or returns a link to share; showing an exported file shows that file only.',
+  'A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take.',
+].join(' ');
 
 /** {@link serverVersion}, read once. */
 let installedVersion: string | undefined;

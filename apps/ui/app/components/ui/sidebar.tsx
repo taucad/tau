@@ -155,11 +155,10 @@ const SidebarTrigger = ({
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        Toggle Sidebar{' '}
+        Sidebar{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
           {formatKeyCombination(sidebarToggleKeyCombo)}
         </KeyShortcut>
-        {onSidebarResize && !isMobile ? <span className='ml-1 text-muted-foreground'>· ←/→ Resize</span> : null}
       </TooltipContent>
     </Tooltip>
   );

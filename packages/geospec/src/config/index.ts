@@ -1,16 +1,7 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- Public portable configuration and Tau artifact adapter. */
-/** Portable configuration and Tau artifact helpers; the native loader is in config/node. @module */
+/* oxlint-disable no-barrel-files/no-barrel-files -- Public portable configuration entry point. */
+/** Portable configuration: types, `defineConfig` and the spec-VM reader; the native loader is in config/node. @module */
 
-export { exportTauProjectArtifact } from '#config/tau-project-artifact.js';
-
-export type {
-  ExportTauProjectArtifactOptions,
-  GeoSpecTauProjectArtifact,
-  GeoSpecTauProjectRuntime,
-} from '#config/tau-project-artifact.js';
-export type {
-  GeoSpecConfig,
-  GeoSpecTauProjectDescriptor,
-  LoadedGeoSpecConfig,
-  LoadGeoSpecConfigOptions,
-} from '#config/types.js';
+export { defineConfig } from '#config/define-config.js';
+export { readGeoSpecConfig } from '#config/read-geospec-config.js';
+export type { ReadGeoSpecConfigOptions, ReadGeoSpecConfigResult } from '#config/read-geospec-config.js';
+export type { GeoSpecConfig, GeoSpecConfigData, LoadedGeoSpecConfig, LoadGeoSpecConfigOptions } from '#config/types.js';

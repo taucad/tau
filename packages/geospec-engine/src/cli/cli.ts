@@ -25,8 +25,8 @@
  */
 
 import { discoverGeoSpecFiles } from 'geospec/runner';
-import type { GeoSpecForensicEvent, GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
-import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
+import type { GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { GeoSpecRunResult, GeoSpecTestCase } from 'geospec/runner';
 import { protocolWireValue } from '#cli/wire-value.js';
 
 /** Parsed CLI invocation, or the reason it could not be parsed. */
@@ -48,8 +48,6 @@ export type GeoSpecCliRunOptions = {
   /** Run in a worker pool. `0` means "auto-size". */
   workers?: number;
   shardTimeout?: number;
-  matcherWallBackstop?: number;
-  forensic: boolean;
 };
 
 /** The CLI's usage text. Also the answer to `--help` and to a parse error. */
@@ -66,8 +64,6 @@ Options:
   --test-timeout <ms>        Per-test async timeout (GEOSPEC_TEST_TIMEOUT)
   --workers [n]              Run in a worker pool; omit n to auto-size
   --shard-timeout <ms>       Non-verdict per-shard watchdog (GEOSPEC_SHARD_TIMEOUT)
-  --matcher-wall-backstop <ms>  Non-verdict matcher watchdog
-  --forensic                 Include structured timing measurements
   --bail                     Stop after the first failing file
   --json                     Print one JSON result document and nothing else
   -h, --help                 Show this help
@@ -115,7 +111,6 @@ export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCom
     exclude: [],
     bail: false,
     json: false,
-    forensic: false,
   };
   let sawProjectPath = false;
 
@@ -154,19 +149,13 @@ export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCom
         continue;
       }
       case '--test-timeout':
-      case '--shard-timeout':
-      case '--matcher-wall-backstop': {
+      case '--shard-timeout': {
         const parsed = numericFlag(next, argument);
         if (typeof parsed !== 'number') {
           return { kind: 'error', message: parsed.error };
         }
-        if (argument === '--matcher-wall-backstop' && parsed <= 0) {
-          return { kind: 'error', message: '--matcher-wall-backstop needs a positive number.' };
-        }
         if (argument === '--test-timeout') {
           options.testTimeout = parsed;
-        } else if (argument === '--matcher-wall-backstop') {
-          options.matcherWallBackstop = parsed;
         } else {
           options.shardTimeout = parsed;
         }
@@ -193,10 +182,6 @@ export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCom
       }
       case '--json': {
         options.json = true;
-        continue;
-      }
-      case '--forensic': {
-        options.forensic = true;
         continue;
       }
       default: {
@@ -538,38 +523,24 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
     workers: options.workers,
     shardTimeout: options.shardTimeout,
   });
-  const forensicEvents: GeoSpecForensicEvent[] = [];
-  const unsubscribe = options.forensic
-    ? runner.on('forensic', (event) => {
-        forensicEvents.push(event);
-      })
-    : undefined;
   let result: GeoSpecRunnerResult;
   try {
     result = await runner.run({
       files: discovery.files,
       ...(options.testNamePattern === undefined ? {} : { testNamePattern: options.testNamePattern }),
       ...(options.testTimeout === undefined ? {} : { testTimeout: options.testTimeout }),
-      ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
-      ...(options.forensic ? { forensic: true } : {}),
       ...(options.bail ? { bail: true } : {}),
     });
   } finally {
-    unsubscribe?.();
     await runner.close();
   }
 
   if (options.json) {
-    const report = { ...runReportJson(result), ...(options.forensic ? { forensic: forensicEvents } : {}) };
-    for (const chunk of jsonChunks(report)) {
+    for (const chunk of jsonChunks(runReportJson(result))) {
       host.write(chunk);
     }
   } else {
-    const forensicLines = forensicEvents.map(
-      ({ name, value, unit, shardId }) =>
-        `FORENSIC${shardId === undefined ? '' : ` shard=${shardId}`} ${name} ${value} ${unit}`,
-    );
-    host.write([...formatRunReport(result), ...forensicLines].join('\n'));
+    host.write(formatRunReport(result).join('\n'));
   }
   return result.success ? 0 : 1;
 };

@@ -52,7 +52,7 @@ const request = {
 
 const shareWith = async (
   bridge: HostBridge,
-  id = 'open-in-tau',
+  id = 'direct',
   protection: ShareLinkProtection = request.protection,
 ): Promise<unknown> => {
   const method = createShareSource(bridge, model).methods.find((candidate) => candidate.id === id);
@@ -63,16 +63,13 @@ const shareWith = async (
 };
 
 describe('createShareSource', () => {
-  it('should offer the direct link with a password first, then Open in Tau without one', () => {
+  it('should offer the direct link, with a password, as its one method', () => {
     const { methods } = createShareSource(
       bridgeAnswering(async () => ({})),
       model,
     );
 
-    expect(methods.map(({ id, label }) => [id, label])).toEqual([
-      ['direct', 'Direct link'],
-      ['open-in-tau', 'Open in Tau'],
-    ]);
+    expect(methods.map(({ id, label }) => [id, label])).toEqual([['direct', 'Direct link']]);
     expect(methods[0]).toMatchObject({
       kind: 'link',
       description: 'Create a self-contained link that works without a Tau account or storage.',
@@ -81,7 +78,6 @@ describe('createShareSource', () => {
       action: { label: 'Copy direct link' },
       copiedMessage: 'Direct link copied',
     });
-    expect(methods[1]).not.toHaveProperty('encryption');
   });
 
   it('should make the direct link from the project the server packed', async () => {
@@ -90,7 +86,7 @@ describe('createShareSource', () => {
 
     const outcome = (await shareWith(bridge, 'direct')) as { readonly url: string };
 
-    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, { modelId: 'model-1', kind: 'direct' });
+    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, { modelId: 'model-1' });
     expect(outcome).toEqual({ url: `https://tau.new/s/direct#v=2&zip=${encodedArchive}`, warning: undefined });
     const { pathname, hash } = new URL(outcome.url);
     const { locator, secrets } = parseShareUrl({ slug: pathname.slice('/s/'.length), fragment: hash });
@@ -127,53 +123,5 @@ describe('createShareSource', () => {
         'direct',
       ),
     ).resolves.toEqual({ error: 'Too large.' });
-  });
-
-  it('should ask the server for the shown model link and answer it', async () => {
-    const bridge = bridgeAnswering(async () => ({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main&main=bracket.ts',
-      repository: 'taucad/brackets',
-      ref: 'main',
-      hasLocalChanges: false,
-    }));
-
-    await expect(shareWith(bridge)).resolves.toEqual({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main&main=bracket.ts',
-      warning: undefined,
-    });
-    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, {
-      modelId: 'model-1',
-      kind: 'github',
-    });
-  });
-
-  it('should warn when the checkout has changes GitHub does not have', async () => {
-    const bridge = bridgeAnswering(async () => ({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main',
-      repository: 'taucad/brackets',
-      ref: 'main',
-      hasLocalChanges: true,
-    }));
-
-    const outcome = (await shareWith(bridge)) as { readonly warning?: string };
-    expect(outcome.warning).toContain('taucad/brackets at main');
-  });
-
-  it('should pass on the server refusal as the error sentence', async () => {
-    await expect(
-      shareWith(
-        bridgeAnswering(async () => {
-          throw new Error('This branch is not pushed to GitHub.');
-        }),
-      ),
-    ).resolves.toEqual({ error: 'This branch is not pushed to GitHub.' });
-    await expect(
-      shareWith(
-        bridgeAnswering(async () => ({
-          errorCode: 'NOT_ON_GITHUB',
-          message: 'Not on GitHub.',
-        })),
-      ),
-    ).resolves.toEqual({ error: 'Not on GitHub.' });
   });
 });

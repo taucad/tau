@@ -4,7 +4,7 @@
 
 Read [workspace-project policy](../docs/policy/workspace-project-policy.md) and the relevant creation skill before changing the workspace generators. `tools/workspace-plugin` owns package, core, plugin, machine and lint-rule generation. Question manual additions that the owning generator should produce consistently.
 
-Project creators share the instruction starter pair and preserve authored AGENTS/CLAUDE bytes. Use the actual normalized Nx project name, selected build mode, capability/host and package entrypoints. Test every affected creator and collision path; machine/lint-rule additions must not rewrite project instructions. Follow [AGENTS policy](../docs/policy/agents-md-policy.md) for native discovery and budgets. Do not add a separate agent provisioning layer.
+Project creators share the AGENTS starter and preserve authored instruction bytes. Use the actual normalized Nx project name, selected build mode, capability/host and package entrypoints. Test every affected creator and collision path; machine/lint-rule additions must not rewrite project instructions. Follow [AGENTS policy](../docs/policy/agents-md-policy.md) for native discovery and budgets. Do not add a separate agent provisioning layer.
 
 ## Workspace tooling and build outputs
 

@@ -1,19 +1,17 @@
 import { useSelector } from '@xstate/react';
-import { Loader } from '@taucad/ui/components/loader';
+import { ViewerStatusPill } from '@taucad/workbench-panes/shell/viewer-status';
 import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
-import { cn } from '@taucad/ui/utils/cn';
 import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.js';
 import { selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
 
 /**
- * The running build phase, as a pill in the viewer bar's skin: absolutely placed by its host (centred in an empty
- * viewer, in the upper sixth over a model), so the bar never grows or shrinks around it, and where a person waiting
- * on a build is looking. "Build
- * failed" and the issue counts stay in the bar's status segment. Once the build settles, the Zoo upgrade banner takes
- * the slot when the failure calls for it.
+ * The running build phase, as the shared viewer status pill in `ViewerStage`'s status slot, which places it (centred
+ * in an empty viewer, in the upper sixth over a model) so the bar never grows or shrinks around it. "Build failed" and
+ * the issue counts stay in the bar's status segment. Once the build settles, the Zoo upgrade banner takes the slot
+ * when the failure calls for it.
  */
-export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
+export function ChatViewerStatus(): React.ReactNode {
   const { projectRef } = useProject();
   const cadRef = useCad();
   const loadingState = useCadSelector(selectCadLoadingPhase, undefined);
@@ -27,19 +25,7 @@ export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<H
   }
 
   if (loadingState) {
-    return (
-      <div
-        role='status'
-        {...props}
-        className={cn(
-          'm-auto flex h-7 items-center gap-1.5 rounded-lg border bg-sidebar px-2 text-xs text-foreground shadow-xs',
-          className,
-        )}
-      >
-        <Loader className='size-3.5 text-primary' />
-        <span className='capitalize'>{loadingState}…</span>
-      </div>
-    );
+    return <ViewerStatusPill label={loadingState} />;
   }
 
   return (

@@ -17,7 +17,6 @@ const fixture = (): string => {
   execFileSync('git', ['init', '-q', root]);
   write(root, '.gitignore', 'node_modules/\n');
   write(root, 'AGENTS.md', '# Root\n');
-  write(root, 'CLAUDE.md', '@AGENTS.md\n');
   write(
     root,
     '.agents/skills/helper/SKILL.md',
@@ -38,37 +37,42 @@ describe('agent substrate validation', () => {
   it('should discover new authored boundaries while excluding templates, dependencies and worktrees', () => {
     const root = fixture();
     write(root, 'packages/new-project/AGENTS.md', '# New project\n\n[Root](../../AGENTS.md)\n');
-    write(root, 'packages/new-project/CLAUDE.md', '@AGENTS.md\n');
     for (const directory of [
       'repos/external',
       'node_modules/package',
       '.claude/worktrees/copy',
       '.agents/skills/create-repo/templates',
     ]) {
-      write(root, `${directory}/AGENTS.md`, '# Deliberately lacks adapter\n');
+      write(root, `${directory}/AGENTS.md`, '# Excluded instructions\n');
     }
     expect(validateAgentConfig(root)).toEqual({ issues: [], boundaries: 2, skills: 1, maximumChainBytes: 46 });
   });
 
-  it('should reject missing imports, duplicate native bodies, broken routes and excessive context', () => {
+  it('should reject broken routes and excessive context', () => {
     const root = fixture();
     write(root, 'nested/AGENTS.md', `# Nested\n\n[Missing](missing.md)\n${'x'.repeat(4100)}\n`);
-    write(root, 'CLAUDE.md', '@AGENTS.md\nDuplicated instructions\n');
     const { issues } = validateAgentConfig(root);
-    expect(issues).toEqual(
-      expect.arrayContaining([
-        'CLAUDE.md: expected only @AGENTS.md and a newline',
-        'nested/CLAUDE.md: expected only @AGENTS.md and a newline',
-        'nested/AGENTS.md: broken local link: missing.md',
-      ]),
-    );
+    expect(issues).toEqual(expect.arrayContaining(['nested/AGENTS.md: broken local link: missing.md']));
     expect(issues.some((issue) => issue.includes('4096-byte instruction budget'))).toBe(true);
+  });
+
+  it('should reject retired Claude instruction files and scaffold templates', () => {
+    const root = fixture();
+    write(root, 'CLAUDE.md', '@AGENTS.md\n');
+    write(root, 'nested/Claude.md', '# Separate instructions\n');
+    write(root, '.agents/skills/create-repo/templates/CLAUDE.md', '@AGENTS.md\n');
+    write(root, 'tools/workspace-plugin/src/generators/instruction-files/CLAUDE.md__tmpl__', '@AGENTS.md\n');
+    expect(validateAgentConfig(root).issues).toEqual([
+      '.agents/skills/create-repo/templates/CLAUDE.md: retired instruction adapter; use AGENTS.md directly',
+      'CLAUDE.md: retired instruction adapter; use AGENTS.md directly',
+      'nested/Claude.md: retired instruction adapter; use AGENTS.md directly',
+      'tools/workspace-plugin/src/generators/instruction-files/CLAUDE.md__tmpl__: retired instruction adapter; use AGENTS.md directly',
+    ]);
   });
 
   it('should discover authored reserved-name paths and reject native-visible raw skill templates', () => {
     const root = fixture();
     write(root, 'packages/build/AGENTS.md', '# Build project\n');
-    write(root, 'packages/build/CLAUDE.md', '@AGENTS.md\n');
     write(root, '.agents/skills/repos/SKILL.md', '---\nname: repos\ndescription: Inspect source repos.\n---\n');
     write(root, '.agents/skills/create-repo/templates/release-skill/SKILL.md', '---\nname: unresolved\n---\n');
     const result = validateAgentConfig(root);

@@ -29,6 +29,34 @@ export const exportModelInputSchema = z
   })
   .strict();
 
+/**
+ * What the exported files say about themselves, read from their bytes: the facts a manufacturing deliverable is
+ * checked against. A fact the format does not carry, or that could not be read, is absent.
+ * @public
+ */
+export const exportValidationSchema = z
+  .object({
+    units: z
+      .string()
+      .max(16)
+      .optional()
+      .describe('Length unit the file declares: m for GLB, the STEP length unit such as mm or in; STL declares none.'),
+    triangles: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Triangles in a GLB or in every STL file of the export, each mesh counted once.'),
+    watertight: z
+      .boolean()
+      .optional()
+      .describe(
+        'GLB or STL: true when every mesh is closed, each edge shared by exactly two triangles once coincident vertices are merged.',
+      ),
+    solids: z.number().int().nonnegative().optional().describe('BRep solids in a STEP file.'),
+  })
+  .strict();
+
 /** @public */
 export const exportModelOutputSchema = z.object({
   to: z.string().describe('The requested export target.'),
@@ -44,6 +72,7 @@ export const exportModelOutputSchema = z.object({
     )
     .min(1)
     .describe('Ordered files, primary first, followed by required companions.'),
+  validation: exportValidationSchema.optional().describe('Facts read from the exported GLB, STL or STEP bytes.'),
   warnings: z.array(kernelIssueSchema).optional(),
   sourceRevision: sourceRevisionSchema.optional().describe('Digests of the pinned source exported.'),
   projectRoot: z
@@ -57,3 +86,5 @@ export const exportModelOutputSchema = z.object({
 export type ExportModelInput = z.infer<typeof exportModelInputSchema>;
 /** @public */
 export type ExportModelOutput = z.infer<typeof exportModelOutputSchema>;
+/** @public */
+export type ExportValidation = z.infer<typeof exportValidationSchema>;

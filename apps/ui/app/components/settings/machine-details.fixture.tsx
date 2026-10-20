@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { parseMachineManifest, parseMachineProvider } from '@taucad/runtime/machine';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import {

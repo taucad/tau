@@ -1,13 +1,13 @@
 // @vitest-environment node
 /*
- * The pinned PicoGK closure on darwin-arm64 (charter D27, D30): under `TAU_PICOGK_CLOSURE=pinned` the native fixture
- * prepares the checked-in manifest's closure from its pinned origins, and this file proves the sealed tree is the one
- * the golden receipt records, re-verifies it file by file and keeps every other request off the network. The other
- * native suites then run on the same closure.
+ * The pinned PicoGK closure on darwin-arm64 and linux-x64 (charter D27, D30): under `TAU_PICOGK_CLOSURE=pinned` the
+ * native fixture prepares the checked-in manifest's closure from its pinned origins, and this file proves the sealed
+ * tree is the one the golden receipt records for the host's target, re-verifies it file by file and keeps every other
+ * request off the network. The other native suites then run on the same closure.
  */
 import { join, resolve } from 'node:path';
 
-import { createPreparationHost } from '@taucad/runtime/preparation/node';
+import { createPreparationHost, targetKey } from '@taucad/runtime/preparation/node';
 import {
   appendGoldenSummary,
   compareWithGolden,
@@ -26,8 +26,8 @@ describe.runIf(pinnedReceipt !== undefined)('PicoGK pinned closure', () => {
 
   beforeAll(() => installFetchTripwire());
 
-  it('should seal the tree the golden receipt records for darwin-arm64', async () => {
-    const comparison = compareWithGolden(sealed, golden, 'darwin-arm64');
+  it("should seal the tree the golden receipt records for the host's target", async () => {
+    const comparison = compareWithGolden(sealed, golden, targetKey(sealed.target));
     await appendGoldenSummary('@taucad/picogk runtime', comparison);
 
     // The message carries the observed entry, which is what a producer records when a pin moves.

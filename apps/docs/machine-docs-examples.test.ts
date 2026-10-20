@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineMachine } from '@taucad/runtime/machine';
 import type { MachineManifestDefinition } from '@taucad/runtime/machine';
 import ts from 'typescript';

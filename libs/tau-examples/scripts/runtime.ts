@@ -20,7 +20,9 @@ import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
+import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
+import type { TauExporterClient } from '@taucad/agent-tools/geospec/exporter';
+import type { GeoSpecModelExporter } from 'geospec/model';
 
 const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()];
 
@@ -101,7 +103,9 @@ export const createExampleRuntimeClient = async (projectPath: string): Promise<R
   createNodeClient({ runtime: exampleRuntime, projectPath });
 
 /** Isolate C# compilations while preserving shared imports for bundled examples. @public */
-export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Promise<GeoSpecRuntimeClient> => {
+export const createExampleGeoSpecRuntimeClient = async (
+  projectPath: string,
+): Promise<TauExporterClient & { terminate(): void }> => {
   let client: RuntimeClient<typeof exampleRuntime> | undefined;
   let activeRoot: string | undefined;
   return {
@@ -125,8 +129,10 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
       return {
         async export(format, request) {
           requireOpen();
-          if (format !== 'glb') {
-            throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence only.');
+          // GLB is mesh evidence; STEP is exact evidence, which a 2D drawing gives as its region faces.
+          const target = format === 'glb' ? 'glb' : format === 'step' ? 'step' : undefined;
+          if (target === undefined) {
+            throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence or STEP exact evidence only.');
           }
           if (root !== activeRoot) {
             client?.terminate();
@@ -143,7 +149,7 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
             source: { path: isolated ? basename(path) : path },
             watch: false,
           });
-          return document.export('glb', request);
+          return document.export(target, request);
         },
         close() {
           closed = true;
@@ -153,3 +159,22 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
     },
   };
 };
+
+const { kernels: exampleKernels } = await resolveRuntimeDefinition(exampleRuntime, undefined);
+/** File extensions the example runtime's kernels claim, without the catch-all. @public */
+export const exampleKernelExtensions: readonly string[] = [
+  ...new Set(exampleKernels.flatMap(({ extensions = [] }) => extensions).filter((extension) => extension !== '*')),
+];
+
+/**
+ * A GeoSpec exporter over the example corpus: each run scope gets its own isolated example client, shut down when the
+ * scope releases.
+ * @param projectPath - The example corpus root.
+ * @returns The exporter.
+ * @public
+ */
+export const createExampleGeoSpecExporter = async (projectPath: string): Promise<GeoSpecModelExporter> =>
+  tauClientExporter({
+    client: async () => createExampleGeoSpecRuntimeClient(projectPath),
+    extensions: exampleKernelExtensions,
+  });

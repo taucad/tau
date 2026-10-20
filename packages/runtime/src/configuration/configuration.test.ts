@@ -659,7 +659,7 @@ describe('authoritative configuration validation', () => {
   });
 });
 
-describe('@taucad/runtime/configuration', () => {
+describe('@taucad/runtime/schema', () => {
   it('should keep a lightweight non-plugin browser root', () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
     const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);

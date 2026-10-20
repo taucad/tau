@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
-import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
+import { createExampleGeoSpecExporter, createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, expect, it } from 'vitest';
 
@@ -49,7 +49,7 @@ describe('Manifold boolean GeoSpec evidence', () => {
       nativeAssertions: { engine },
       model: {
         projectPath: root,
-        runtime: async () => createExampleGeoSpecRuntimeClient(root),
+        exporters: [await createExampleGeoSpecExporter(root)],
         readSource: async (source) => {
           if (typeof source !== 'string') {
             throw new TypeError('Only path sources are read from disk.');

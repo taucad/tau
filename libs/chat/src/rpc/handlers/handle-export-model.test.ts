@@ -132,6 +132,25 @@ describe('handleExportModel', () => {
     }
   });
 
+  it('should hand the validation of the exported files to the tool output', async () => {
+    const graphics = mock<RpcGraphicsClient>();
+    graphics.exportModel.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+      validation: { units: 'm', triangles: 12, watertight: true },
+    });
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.writeBinaryFile.mockResolvedValue(undefined);
+
+    const result = await handleExportModel(
+      { toolCallId: 'tc-1', targetFile: 'main.ts', to: 'glb' },
+      { graphics, fileSystem },
+    );
+
+    expect(result).toMatchObject({ success: true, validation: { units: 'm', triangles: 12, watertight: true } });
+  });
+
   it('should hand the warnings of a successful export to the tool output', async () => {
     const warning: KernelIssue = {
       message: 'Sliced in one colour: the printer profile has one filament for three model colours.',

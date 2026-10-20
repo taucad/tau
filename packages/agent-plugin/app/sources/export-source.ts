@@ -250,8 +250,8 @@ export function createExportSource(bridge: HostBridge, model: TauViewerModel): E
       () => read(entryPath),
     );
 
-  /* The loopback server finds the project from the shown model; a host frame names it in the call's `_meta`, and
-   * `export_model`'s strict input admits no model id there. */
+  /* The loopback server finds the project from the shown model; in a host frame the server finds it from the call's
+   * conversation, and `export_model`'s strict input admits no model id there. */
   const isLoopback = bridge.view().kind === 'loopback';
 
   const exportEntry = async (request: ExportRequest): Promise<ExportOutcome> => {

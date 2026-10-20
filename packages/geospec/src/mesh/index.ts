@@ -21,6 +21,7 @@ export type {
   GeometryCapability,
   GeometryFileFormat,
   GeometryDiagnostic,
+  GeometryExportIntent,
   GeometryEvidenceDiagnostic,
   GeometryProvenance,
   GeometrySource,

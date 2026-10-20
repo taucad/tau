@@ -30,7 +30,7 @@ Before editing a path, read every `AGENTS.md` from the repository root through t
 
 System, developer and current user instructions take precedence. [Design](docs/policy/design-policy.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
 
-Every canonical AGENTS has an adjacent `CLAUDE.md` containing only `@AGENTS.md`. Shared skills live in [.agents/skills](.agents/skills); `.claude/skills` is a discovery alias. Native permissions, trust and tool availability are host responsibilities.
+Codex and Claude read canonical `AGENTS.md` files directly. Shared skills live in [.agents/skills](.agents/skills); `.claude/skills` is a discovery alias. Native permissions, trust and tool availability are host responsibilities.
 
 ## Architecture and owners
 
@@ -69,7 +69,7 @@ Read the owners for each touched concern:
 - Parameter sidecars: [record](docs/policy/parameter-record-policy.md)
 - Geometry assertions/GeoSpec: [GeoSpec](docs/policy/geospec-policy.md), [testing](docs/policy/testing-policy.md)
 - Policy/research/MDX: [documentation](docs/policy/documentation-policy.md); use `create-policy`/`create-research`; published content also follows docs-site gates
-- AGENTS/CLAUDE, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`
+- AGENTS, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`
 - Dependencies/commits/releases: [npm](docs/policy/npm-policy.md), [commit](docs/policy/commit-policy.md), applicable procedure and authorization
 - Cloud services, deploys, IaC, DNS, secrets, billing operations: [handbooks](docs/handbooks); use `create-handbook` to update affected pages and the go-live checklist in the same change. Outage, customer-impacting failure or credential leak: `create-incident` first; records in [incidents](docs/incidents)
 - Generated outputs or temporary files: [tool output locations](docs/policy/tool-output-location-policy.md)

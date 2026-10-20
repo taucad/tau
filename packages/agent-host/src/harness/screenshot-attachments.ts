@@ -16,9 +16,10 @@ import { encodeBase64 } from '#harness/base64.js';
 import { attachmentPathPattern } from '#log/event-schema.js';
 import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
 
-const dataUrlPattern = /^data:(image\/(?:png|webp));base64,(.+)$/u;
+// JPEG is a machine camera still's encoding (WP5); captures themselves are PNG or WebP.
+const dataUrlPattern = /^data:(image\/(?:png|webp|jpeg));base64,(.+)$/u;
 
-const extensionOf: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/webp': 'webp' };
+const extensionOf: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
 
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
   Array.from(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes)), (byte) =>

@@ -311,8 +311,10 @@ const drawn = async (root: Frame | Page, action: string): Promise<void> => {
 };
 
 /**
- * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the header carries
- * Share, Export and the one workbench toggle, which hides and shows the lane, and Export opens its pane.
+ * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the canvas header
+ * carries Share and Export, and the one workbench toggle ends the top row: in the lane's header beside its tabs while
+ * the lane is open, in the canvas header while it is closed. The toggle hides and shows the lane, and Export opens its
+ * pane.
  *
  * @param root - The frame or page the viewer is in, drawn in the tab composition.
  * @param isOpenAtLoad - Whether the lane is open when the page loads (the tab is at least 720 px wide).
@@ -321,28 +323,39 @@ const checkTabChrome = async (root: Frame | Page, isOpenAtLoad: boolean): Promis
   const bar = root.getByRole('group', { name: 'Viewer controls' });
   const barSnapshot = await bar.ariaSnapshot();
   expect(barSnapshot.trimEnd()).toMatch(/- button "Viewer settings"$/u);
-  for (const name of ['Add to chat', 'Send to chat', 'Copy prompt', 'Hide panes', 'Show panes', 'Hide workbench']) {
+  for (const name of ['Add to chat', 'Send to chat', 'Copy reference', 'Hide panes', 'Show panes', 'Hide workbench']) {
     // oxlint-disable-next-line no-await-in-loop -- one name at a time.
     expect(await root.getByRole('button', { name, exact: true }).count()).toBe(0);
   }
   const header = root.getByRole('group', { name: 'Workbench actions' });
-  const toggle = header.getByRole('button', { name: 'Toggle Workbench lane' });
-  expect(await header.ariaSnapshot()).toBe(
-    [
-      '- group "Workbench actions":',
-      '  - button "Share"',
-      '  - button "Export"',
-      `  - button "Toggle Workbench lane"${isOpenAtLoad ? ' [pressed]' : ''}`,
-    ].join('\n'),
-  );
+  /* One toggle on the page, wherever the row ends. */
+  const toggle = root.getByRole('button', { name: 'Toggle Workbench lane' });
   const lane = root.getByRole('complementary', { name: 'Workbench' });
+  const closedHeader = [
+    '- group "Workbench actions":',
+    '  - button "Share"',
+    '  - button "Export"',
+    '  - button "Toggle Workbench lane"',
+  ].join('\n');
   expect(await lane.count()).toBe(isOpenAtLoad ? 1 : 0);
+  expect(await toggle.count()).toBe(1);
 
   if (isOpenAtLoad) {
+    expect(await header.ariaSnapshot()).toBe(
+      ['- group "Workbench actions":', '  - button "Share"', '  - button "Export"'].join('\n'),
+    );
+    expect(await lane.getByRole('button', { name: 'Toggle Workbench lane' }).getAttribute('aria-pressed')).toBe('true');
+    /* The lane's tabs share the canvas header's row: one top row, no second row of tabs. */
+    const headerBox = await header.boundingBox();
+    const tabsBox = await lane.getByRole('tablist', { name: 'Open panes' }).boundingBox();
+    expect(
+      Math.abs((headerBox?.y ?? 0) + (headerBox?.height ?? 0) / 2 - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0) / 2)),
+    ).toBeLessThan(2);
     await toggle.click();
     await expect.poll(async () => lane.count()).toBe(0);
     expect(await toggle.getAttribute('aria-pressed')).toBe('false');
   }
+  expect(await header.ariaSnapshot()).toBe(closedHeader);
   /* Export opens the closed lane on its pane. */
   await header.getByRole('button', { name: 'Export', exact: true }).click();
   await lane.getByRole('tabpanel', { name: 'Export' }).waitFor();
@@ -961,6 +974,257 @@ describe('the live view (W6)', () => {
   );
 });
 
+describe('Add to chat on each route (VUI-3)', () => {
+  /** Two named parts, so the person can add one, then the other. */
+  const pairSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4), name: 'Left' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(20, 0, 0), name: 'Right' },\n  ];\n}\n`;
+
+  beforeAll(async () => {
+    await writeFile(join(project, 'pair.ts'), pairSource);
+  });
+
+  /**
+   * Add one part from its row's menu in the Model pane, the same menu the canvas opens.
+   *
+   * @param root - The frame or page the viewer is in, with the lane open.
+   * @param part - The part's name.
+   * @param item - The chat item's label on this route.
+   */
+  const addPart = async (root: Frame | Page, part: string, item: string): Promise<void> => {
+    const lane = root.getByRole('complementary', { name: 'Workbench' });
+    await lane.getByRole('tab', { name: 'Model' }).click();
+    const actions = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: `Actions for ${part}` });
+    await actions.waitFor({ timeout: 60_000 });
+    await actions.click();
+    const menu = root.getByRole('menu');
+    expect(await menu.getByRole('menuitem', { name: 'Add to chat' }).count()).toBe(item === 'Add to chat' ? 1 : 0);
+    await menu.getByRole('menuitem', { name: item }).click();
+  };
+
+  it(
+    'should hand model context every part added, in order, on a host that takes it',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'pair.ts' });
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+
+      await addPart(frame, 'Left', 'Add to chat');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat (1)' }).waitFor();
+      await addPart(frame, 'Right', 'Add to chat');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat (2)' }).waitFor();
+
+      const updates = (await recorded(page, 'modelContext')) as ReadonlyArray<{
+        content: ReadonlyArray<{ text: string }>;
+        structuredContent: { references: ReadonlyArray<{ target: { label: string } }> };
+      }>;
+      expect(updates).toHaveLength(2);
+      const last = updates.at(-1);
+      expect(last?.structuredContent.references.map((reference) => reference.target.label)).toEqual(['Left', 'Right']);
+      expect(last?.content[0]?.text).toMatch(/^Left, Right in pair @cad\[pair\.ts#[^\]]+\] @cad\[pair\.ts#[^\]]+\]$/u);
+      expect(await recorded(page, 'messages')).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should send one part as a message on a host that takes no model context',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'pair.ts' });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'fullscreen',
+        hostCapabilities: { serverTools: {}, message: { text: {} } },
+      });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+
+      await addPart(frame, 'Left', 'Send to chat');
+      await frame.getByRole('status').filter({ hasText: 'Sent to chat' }).waitFor();
+      const messages = await recorded(page, 'messages');
+      expect(messages).toHaveLength(1);
+      expect(JSON.stringify(messages).match(/@cad\[/gu)).toHaveLength(1);
+      expect(await recorded(page, 'modelContext')).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should copy the reference on the loopback page and report the added part to view_state',
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'pair.ts' }));
+      const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: new URL(viewerUrl ?? '').origin,
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+
+      await addPart(page, 'Left', 'Copy reference');
+      await page.getByRole('status').filter({ hasText: 'Copied; paste it into your chat' }).waitFor();
+      const copied = await page.evaluate(async () => navigator.clipboard.readText());
+      expect(copied).toMatch(/^Left in pair @cad\[pair\.ts#[^\]]+\]$/u);
+
+      /* Without a paste the agent still finds the part: the page reported it with its next sync. */
+      let text = '';
+      await expect
+        .poll(
+          async () => {
+            const state = await callTool(client, 'view_state', {});
+            text = state.content.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
+            return text;
+          },
+          { timeout: 30_000 },
+        )
+        .toMatch(/^Added to chat: Left \(/mu);
+      const componentId = /^Added to chat: Left \(([^)]+)\)\.$/mu.exec(text)?.[1];
+      expect(copied).toBe(`Left in pair @cad[pair.ts#${componentId ?? ''}]`);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
+describe('the part menu from the keyboard (VUI-6)', () => {
+  /** A wide part at the framed centre, so a right press there lands on it, and a narrow one beside it. */
+  const keysSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(40, 20).sketchOnPlane('XY').extrude(4), name: 'Wide' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(35, 0, 0), name: 'Narrow' },\n  ];\n}\n`;
+
+  beforeAll(async () => {
+    await writeFile(join(project, 'keys.ts'), keysSource);
+  });
+
+  /**
+   * Open the loopback page on `keys.ts`, wide enough that the lane opens with it.
+   *
+   * @returns The client and the drawn page.
+   */
+  const openKeys = async (): Promise<Readonly<{ client: Client; page: Page }>> => {
+    const client = await connect('claude-code', claudeCodeCapabilities);
+    const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'keys.ts' }));
+    const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message);
+    });
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+      origin: new URL(viewerUrl ?? '').origin,
+    });
+    await page.goto(viewerUrl ?? '');
+    await drawn(page, 'Export');
+    return { client, page };
+  };
+
+  const isFocused = async (locator: Locator): Promise<boolean> =>
+    locator.evaluate((element) => element === document.activeElement);
+
+  it(
+    'should open the selected part menu from the focused canvas with Shift+F10 and the Menu key, and from the header',
+    async () => {
+      const { page } = await openKeys();
+      const lane = page.getByRole('complementary', { name: 'Workbench' });
+      await lane.getByRole('tab', { name: 'Model' }).click();
+      const row = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: 'Wide', exact: true });
+      await row.waitFor({ timeout: 60_000 });
+      await row.click();
+
+      /* The header names the selected part; its name opens the part's menu. */
+      const trigger = page.getByRole('button', { name: 'Actions for Wide' }).filter({ hasText: 'Wide' });
+      await trigger.waitFor();
+
+      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
+      const region = page.getByRole('application', { name: 'Model viewer' });
+      await region.focus();
+      await page.keyboard.press('Shift+F10');
+      const menu = page.getByRole('menu');
+      await menu.waitFor();
+      expect(
+        await menu
+          .getByRole('menuitem')
+          .first()
+          .evaluate((item) => item === document.activeElement),
+      ).toBe(true);
+      const copy = menu.getByRole('menuitem', { name: 'Copy reference' });
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      expect(await isFocused(copy)).toBe(true);
+      await capture(page, 'part-menu-keyboard');
+      await page.keyboard.press('Enter');
+      await page.getByRole('status').filter({ hasText: 'Copied; paste it into your chat' }).waitFor();
+      expect(await page.evaluate(async () => navigator.clipboard.readText())).toMatch(
+        /^Wide in keys @cad\[keys\.ts#[^\]]+\]$/u,
+      );
+      expect(await menu.count()).toBe(0);
+      await expect.poll(async () => isFocused(region)).toBe(true);
+
+      /* The Menu key opens the same menu; Escape closes it and gives focus back to the canvas region. */
+      await page.keyboard.press('ContextMenu');
+      await menu.waitFor();
+      expect(await menu.getByRole('menuitem', { name: 'Reveal in Explorer' }).count()).toBe(1);
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => menu.count()).toBe(0);
+      await expect.poll(async () => isFocused(region)).toBe(true);
+
+      /* The header's trigger opens the same items, with the arrow keys of a dropdown menu. */
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await menu.waitFor();
+      for (const name of ['Focus on part', 'Copy reference', 'Reveal in Explorer', 'Hide', 'Isolate']) {
+        // oxlint-disable-next-line no-await-in-loop -- one item at a time.
+        expect(await menu.getByRole('menuitem', { name, exact: true }).count()).toBe(1);
+      }
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => menu.count()).toBe(0);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  /**
+   * The centre of the canvas region, where the framed model's wide part sits.
+   *
+   * @param page - The drawn page.
+   * @returns The point in viewport coordinates.
+   */
+  const regionCentre = async (page: Page): Promise<Readonly<{ x: number; y: number }>> => {
+    const box = await page.getByRole('application', { name: 'Model viewer' }).boundingBox();
+    if (box === null) {
+      throw new Error('The canvas region has no box.');
+    }
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  /* A right click on a part still opens the menu: "the tab's panels (W10)" checks it in the harness. */
+  it(
+    'should still pan on a right drag past 4 px, opening no menu',
+    async () => {
+      const { client, page } = await openKeys();
+      const centre = await regionCentre(page);
+      /* The camera's target, once the page has reported a view. */
+      const targetOf = async (): Promise<string | undefined> => {
+        const result = await callTool(client, 'view_state', {});
+        const view = (result.structuredContent as { view?: TauViewerViewState } | undefined)?.view;
+        return view?.camera === undefined ? undefined : JSON.stringify(view.camera.target);
+      };
+      await expect.poll(targetOf, { timeout: 30_000 }).toBeDefined();
+      const before = await targetOf();
+      await page.mouse.move(centre.x, centre.y);
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.move(centre.x + 40, centre.y + 20, { steps: 8 });
+      await page.mouse.up({ button: 'right' });
+      expect(await page.getByRole('menu').count()).toBe(0);
+      await expect.poll(targetOf, { timeout: 30_000 }).not.toBe(before);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the viewer page from a text host', () => {
   it(
     'should open the loopback link in the tab composition',
@@ -975,7 +1239,12 @@ describe('the viewer page from a text host', () => {
 
       await drawn(page, 'Export');
       /* The workbench's file tab names the source the link shows. */
-      expect(await page.getByTitle('main.ts', { exact: true }).count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-slot="workbench-tab"]')
+          .filter({ hasText: /^main\.ts$/u })
+          .count(),
+      ).toBe(1);
       await page.getByRole('group', { name: 'Viewer controls' }).waitFor();
       await capture(page, 'loopback');
       await page.close();
@@ -1071,6 +1340,35 @@ describe('the viewer page from a text host', () => {
       await lane.getByRole('tabpanel', { name: 'Kinematics' }).waitFor();
       expect(await tablist.evaluate((list) => list.scrollLeft)).toBe(0);
       await capture(page, 'lane-header');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    "should name the part under the pointer as the app's viewer does, and drop the name when the pointer leaves",
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+
+      const region = page.getByRole('application', { name: 'Model viewer' });
+      const box = await region.boundingBox();
+      if (box === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const badge = page.getByTestId('model-component-name-badge');
+      /* The surface fills the middle of the framed view; the label names it as the Model pane's row does. */
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+      await expect.poll(async () => badge.textContent(), { timeout: 30_000 }).toBe('surface');
+      expect(await badge.getAttribute('aria-hidden')).toBe('true');
+      await capture(page, 'hover-label');
+      /* Off the canvas, into the lane: the label goes. */
+      const lane = await page.getByRole('complementary', { name: 'Workbench' }).boundingBox();
+      await page.mouse.move((lane?.x ?? 0) + 40, (lane?.y ?? 0) + 200, { steps: 4 });
+      await expect.poll(async () => badge.count()).toBe(0);
       await page.close();
     },
     kernelCallLimit,

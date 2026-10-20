@@ -58,6 +58,7 @@ describe('page component menu', () => {
     reveal.model.subscribe(listener);
     const actions = createPageComponentActions({
       addToChat: vi.fn(),
+      addToChatLabel: 'Add to chat',
       openPane,
       reveal,
     });
@@ -84,6 +85,7 @@ describe('page component menu', () => {
     const openPane = vi.fn();
     const actions = createPageComponentActions({
       addToChat: vi.fn(),
+      addToChatLabel: 'Add to chat',
       openPane,
       reveal,
     });
@@ -102,10 +104,11 @@ describe('page component menu', () => {
     expect(later).not.toHaveBeenCalled();
   });
 
-  it('hands the reference to the page and offers no part preview', () => {
+  it("hands the reference to the page under the route's label and offers no part preview", () => {
     const addToChat = vi.fn();
     const actions = createPageComponentActions({
       addToChat,
+      addToChatLabel: 'Copy reference',
       openPane: vi.fn(),
       reveal: createComponentReveal(),
     });
@@ -121,6 +124,7 @@ describe('page component menu', () => {
     actions.addToChat?.(reference, targetOf('bracket.ts'));
 
     expect(addToChat).toHaveBeenCalledWith(reference);
+    expect(actions.addToChatLabel).toBe('Copy reference');
     expect(actions.openPreview).toBeUndefined();
   });
 
@@ -128,6 +132,7 @@ describe('page component menu', () => {
     const openPane = vi.fn();
     const actions = createPageComponentActions({
       addToChat: vi.fn(),
+      addToChatLabel: 'Add to chat',
       openPane,
       reveal: createComponentReveal(),
     });

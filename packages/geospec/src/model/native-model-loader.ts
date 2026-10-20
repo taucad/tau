@@ -1,22 +1,21 @@
-/** Native protocol-3 model admission over direct bytes and Tau Runtime exports. @module */
+/** Native protocol-3 model admission over direct bytes and model exporters. @module */
 
 import type { GeoSpecNativeEngine, GeoSpecNativeSubject } from '#assertion-client/index.js';
 import { geoSpecAuthoredWorkUnitLimitProblem, resolveGeoSpecMaximumWorkUnitLimit } from '#engine/client.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
-import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import { bindRawSubjectResidency } from '#model/subject.js';
-import type { GeoSpecExportRoute, RuntimeBackedModelFormat, RuntimeClientWithRoutes } from '#model/export-intent.js';
 import type {
+  GeoSpecExportFormat,
   GeoSpecLoadRegion,
+  GeoSpecModelArtifact,
+  GeoSpecModelExporter,
+  GeoSpecModelExportRequest,
   GeoSpecModelFormat,
-  GeoSpecRuntimeClient,
-  GeoSpecRuntimeClientFactory,
-  GeoSpecRuntimeSourceAdapter,
   LoadModelOptions,
   LoadModelSourceOptions,
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
-import type { ExportFile, KernelIssue, SourceRevision } from '@taucad/runtime/types';
+import type { SourceRevision } from '@taucad/runtime/types';
 import { assertRootedPath, isNotFoundError, joinRelativePath, sha256Bytes } from '@taucad/runtime/kernel';
 
 const protocolHeader = {
@@ -172,7 +171,7 @@ export type GeoSpecModelLoadEvidence = {
     readonly name: string;
     readonly sha256: string;
     readonly byteLength: number;
-    /** Actual source locator consumed by a direct load; absent for bytes and Runtime exports. */
+    /** Actual source locator consumed by a direct load; absent for bytes and exports. */
     readonly sourcePath?: string;
   }>;
 };
@@ -194,8 +193,8 @@ export type CreateGeoSpecNativeModelLoaderOptions = {
   readonly format?: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
   readonly projectPath?: string;
   readonly readSource?: GeoSpecNativeSourceReader;
-  readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-  readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+  /** Model exporters for source-kind files; the first whose `extensions` claim the file exports it. */
+  readonly exporters?: readonly GeoSpecModelExporter[];
   /**
    * Subject handles carried between the release scopes of loaders that share one engine, keyed by
    * subjectHash. With a carrier, `releaseAll` keeps this scope's subjects for the next scope and
@@ -217,11 +216,11 @@ export type CreateGeoSpecNativeModelLoaderOptions = {
  * Direct `source` loads read their source again on every call and the engine
  * digests those exact bytes; bytes equal to an admitted subject's reuse that
  * subject by digest, length and descriptor, and edited bytes admit a new
- * subject. Runtime loads are coalesced per release scope (one run): a load
+ * subject. Exported loads are coalesced per release scope (one run): a load
  * whose file, inline code, project path, parameters, format, tolerances,
  * region and ingest options equal an earlier successful load's reuses that
  * admission without exporting or ingesting again. A file load is reused only
- * while a Runtime source snapshot still matches the earlier load's complete
+ * while the exporter's `revision` still matches the earlier load's complete
  * source revision; otherwise, or when every owner of the earlier admission has
  * released it, the load exports afresh. Failures are never reused.
  *
@@ -240,7 +239,7 @@ export type ManagedGeoSpecNativeModelLoader = GeoSpecNativeModelLoader & {
   /**
    * Drain registered admissions, including additions while drainage awaits,
    * then release this scope's subjects (with a carrier: the previous scope's
-   * subjects this scope did not load again) and owned Runtime clients.
+   * subjects this scope did not load again), then close every exporter it exported through.
    *
    * Await the intended complete load chain before final release, and await
    * this method before closing the caller-owned engine. Calls after it returns
@@ -252,7 +251,7 @@ export type ManagedGeoSpecNativeModelLoader = GeoSpecNativeModelLoader & {
   releaseAll(): Promise<void>;
 };
 
-type RuntimeOptions = Exclude<LoadModelOptions, { source: unknown }>;
+type ExportedLoadOptions = Exclude<LoadModelOptions, { source: unknown }>;
 
 const failure = (diagnostics: GeometryDiagnostic[]): GeoSpecModelLoadError => new GeoSpecModelLoadError(diagnostics);
 
@@ -267,13 +266,6 @@ const diagnostic = (options: {
   message: options.message,
   suggestion: options.suggestion,
   ...(options.details === undefined ? {} : { details: options.details }),
-});
-
-const runtimeIssueDiagnostic = (issue: KernelIssue): GeometryDiagnostic => ({
-  code: issue.code,
-  severity: issue.severity,
-  message: issue.message,
-  suggestion: 'Fix the model source or its Runtime export route, then retry the native run.',
 });
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => encoder.encode(JSON.stringify(value));
@@ -425,8 +417,80 @@ const directBytes = async (
   ]);
 };
 
-const runtimeSource = (options: RuntimeOptions): { files: Record<string, string>; entry: string } | { path: string } =>
-  'code' in options ? { files: options.code, entry: options.file } : { path: options.file };
+/**
+ * Whether an exporter claims a file: its extension, without the dot and compared case-insensitively,
+ * is listed, or the exporter lists `'*'`.
+ *
+ * @param exporter - The configured exporter.
+ * @param file - The project-relative model file.
+ * @returns True when the exporter claims the file.
+ */
+const exporterClaims = (exporter: GeoSpecModelExporter, file: string): boolean => {
+  const name = file.slice(file.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  const extension = dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
+  return exporter.extensions.some(
+    (candidate) => candidate === '*' || (extension !== '' && candidate.replace(/^\./u, '').toLowerCase() === extension),
+  );
+};
+
+const exporterUnsupported = ({
+  exporter,
+  file,
+  capability,
+  reason,
+  details = {},
+}: {
+  readonly exporter: GeoSpecModelExporter;
+  readonly file: string;
+  readonly capability: keyof GeoSpecModelExporter['capabilities'];
+  readonly reason: string;
+  readonly details?: Record<string, unknown>;
+}): GeoSpecModelLoadError =>
+  failure([
+    diagnostic({
+      code: 'GEOSPEC_EXPORTER_UNSUPPORTED',
+      message: `Exporter '${exporter.id}' cannot export '${file}': ${reason}`,
+      suggestion:
+        'Keep the claim and report it as unsupported by this exporter, or configure an exporter that declares the capability.',
+      details: { exporter: exporter.id, file, capability, ...details },
+    }),
+  ]);
+
+const invalidArtifact = (exporter: GeoSpecModelExporter, file: string, reason: string): GeoSpecModelLoadError =>
+  failure([
+    diagnostic({
+      code: 'GEOSPEC_EXPORTER_INVALID_ARTIFACT',
+      message: `Exporter '${exporter.id}' returned an artifact GeoSpec cannot admit for '${file}': ${reason}`,
+      suggestion: 'Fix the exporter so it returns non-empty bytes in the requested format.',
+      details: { exporter: exporter.id, file },
+    }),
+  ]);
+
+const sha256Hex = /^(?:sha256:)?([0-9a-f]{64})$/u;
+
+/**
+ * The source revision an exporter's `consumedSources` describe, or undefined when it names none.
+ *
+ * @param entry - The rooted entry file of the load.
+ * @param consumed - The exporter's consumed sources.
+ * @returns The revision; an unrecognised digest is recorded as is and makes the revision incomplete.
+ */
+const exportedRevision = (
+  entry: string,
+  consumed: GeoSpecModelArtifact['consumedSources'],
+): SourceRevision | undefined => {
+  if (consumed === undefined || consumed.length === 0) {
+    return undefined;
+  }
+  const files: Record<string, SourceRevision['files'][string]> = {};
+  for (const { path, sha256 } of consumed) {
+    const hex = sha256Hex.exec(sha256)?.[1];
+    // SAFETY: `'missing'` and any digest that is not 64 hex digits stay as they are; the completeness check decides.
+    files[path] = (hex === undefined ? sha256 : `sha256:${hex}`) as SourceRevision['files'][string];
+  }
+  return { entry, files };
+};
 
 const resolveFormat = (
   options: GeoSpecNativeLoadModelOptions,
@@ -444,46 +508,6 @@ const resolveFormat = (
     ]);
   }
   return format as Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
-};
-
-/**
- * Every export route the Runtime offers for a format: `routesFor` when it lists them, else its best
- * route, else none.
- *
- * @param runtime - The connected Runtime client.
- * @param format - The requested export format.
- * @returns The routes, possibly empty.
- */
-const runtimeRoutesFor = (runtime: GeoSpecRuntimeClient, format: string): readonly GeoSpecExportRoute[] => {
-  const { routesFor, bestRouteFor } = runtime as Partial<{
-    routesFor: (format: string) => readonly GeoSpecExportRoute[];
-    bestRouteFor: RuntimeClientWithRoutes['bestRouteFor'];
-  }>;
-  if (typeof routesFor === 'function') {
-    return routesFor.call(runtime, format);
-  }
-  const best = typeof bestRouteFor === 'function' ? bestRouteFor.call(runtime, format) : undefined;
-  return best === undefined ? [] : [best];
-};
-
-/**
- * The kernel that evaluates a Runtime source, so export routes are chosen among its own.
- * @param runtime - The connected Runtime.
- * @param options - The load naming the source.
- * @returns The kernel id, or `undefined` when the Runtime cannot describe the source; route
- *   selection then spans every kernel, as it did before description existed.
- */
-const describedKernel = async (runtime: GeoSpecRuntimeClient, options: RuntimeOptions): Promise<string | undefined> => {
-  if (typeof runtime.describe !== 'function') {
-    return undefined;
-  }
-  try {
-    const { kernelId } = await runtime.describe({ source: runtimeSource(options) });
-    return typeof kernelId === 'string' && kernelId.length > 0 ? kernelId : undefined;
-  } catch {
-    // A source the Runtime cannot describe still fails or succeeds at export, with its own issues.
-    return undefined;
-  }
 };
 
 /**
@@ -559,23 +583,23 @@ const copyRegion = ({ min, max }: GeoSpecLoadRegion): GeoSpecLoadRegion => ({
 });
 
 /**
- * Whether a Runtime source snapshot still matches a complete exported source revision.
- * @param revision - The earlier load's complete source revision.
- * @param snapshot - A successful snapshot of the same entry.
- * @returns True only when every read digest is unchanged and no new file joined the closure.
+ * Whether the sources an exporter reports now match an earlier load's complete source revision.
+ * A file the earlier export found missing still matches while it stays missing.
+ *
+ * @param revision - The earlier load's revision.
+ * @param current - What the exporter reports the export would read now.
+ * @returns True when every digest is unchanged.
  */
-const revisionUnchanged = (
-  revision: SourceRevision,
-  snapshot: Extract<Awaited<ReturnType<NonNullable<GeoSpecRuntimeClient['snapshotSource']>>>, { success: true }>,
-): boolean => {
-  const observed: Readonly<Record<string, string>> =
-    snapshot.sourceRevision?.files ??
-    Object.fromEntries(snapshot.data.files.map(({ path, sha256 }) => [path, `sha256:${sha256}`]));
+const revisionUnchanged = (revision: SourceRevision, current: GeoSpecModelArtifact['consumedSources']): boolean => {
+  const observed = exportedRevision(revision.entry, current);
+  if (observed === undefined) {
+    return false;
+  }
+  const { files } = observed;
   return (
-    (snapshot.sourceRevision?.entry ?? snapshot.data.entryPath) === revision.entry &&
-    Object.entries(observed).every(([path, digest]) => digest === 'missing' || revision.files[path] === digest) &&
+    Object.entries(files).every(([path, digest]) => digest === 'missing' || revision.files[path] === digest) &&
     Object.entries(revision.files).every(([path, digest]) =>
-      digest === 'missing' ? observed[path] === undefined || observed[path] === 'missing' : observed[path] === digest,
+      digest === 'missing' ? files[path] === undefined || files[path] === 'missing' : files[path] === digest,
     )
   );
 };
@@ -584,7 +608,7 @@ const revisionUnchanged = (
  * Create a native model loader that admits actual STEP/GLB bytes and retains
  * generation-checked handles until the owning runner finishes.
  *
- * @param defaults - Native engine, Runtime defaults, and optional source reader.
+ * @param defaults - Native engine, exporters, and optional source reader.
  * @returns A loader plus run-level cleanup operation.
  * @public
  */
@@ -597,10 +621,10 @@ export const createGeoSpecNativeModelLoader = (
   const admissionOwners = new Map<ResidencyOwner, string>();
   let generation = 0;
   const pendingLoads = new Set<Promise<GeoSpecNativeModelSubject>>();
-  // GR7: one entry per identical Runtime load in this release scope. Successful entries stay until
+  // GR7: one entry per identical exported load in this release scope. Successful entries stay until
   // releaseAll; a failed one is dropped at once, so failures are never reused.
-  const runtimeLoads = new Map<
-    GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory,
+  const exportedLoads = new Map<
+    GeoSpecModelExporter,
     Map<
       string,
       {
@@ -610,51 +634,36 @@ export const createGeoSpecNativeModelLoader = (
       }
     >
   >();
-  const ownedRuntimes = new Set<GeoSpecRuntimeClient>();
-  const runtimeFactories = new Map<GeoSpecRuntimeClientFactory, Promise<GeoSpecRuntimeClient>>();
+  // Every exporter this scope exported through; releaseAll closes each.
+  const usedExporters = new Set<GeoSpecModelExporter>();
 
   const nextRequestId = (operation: string): string => {
     requestSequence += 1;
     return `geospec-native-model:${operation}:${requestSequence}`;
   };
 
-  const adapterFor = (options: RuntimeOptions): GeoSpecRuntimeSourceAdapter | undefined =>
-    (options.sourceAdapters ?? defaults.sourceAdapters)?.find((adapter) =>
-      adapter.extensions.some((extension) => options.file.endsWith(extension)),
-    );
-
-  const runtimeFor = async (options: RuntimeOptions): Promise<GeoSpecRuntimeClient> => {
-    const configured = options.runtime ?? defaults.runtime;
-    if (typeof configured === 'function') {
-      let pending = runtimeFactories.get(configured);
-      if (pending === undefined) {
-        pending = configured();
-        runtimeFactories.set(configured, pending);
-      }
-      const runtime = await pending;
-      ownedRuntimes.add(runtime);
-      return runtime;
-    }
-    if (configured !== undefined) {
-      return configured;
-    }
-    const adapter = adapterFor(options);
-    if (adapter !== undefined) {
-      const runtime = await adapter.createRuntime({
-        file: options.file,
-        ...((options.projectPath ?? defaults.projectPath) === undefined
-          ? {}
-          : { projectPath: options.projectPath ?? defaults.projectPath }),
-      });
-      ownedRuntimes.add(runtime);
-      return runtime;
+  /**
+   * The exporter for a file load: the first configured exporter that claims the file.
+   * @param options - The load.
+   * @returns The exporter.
+   * @throws GeoSpecModelLoadError `GEOSPEC_EXPORTER_MISSING` when no configured exporter claims the file.
+   */
+  const exporterFor = (options: ExportedLoadOptions): GeoSpecModelExporter => {
+    const exporters = defaults.exporters ?? [];
+    const exporter = exporters.find((candidate) => exporterClaims(candidate, options.file));
+    if (exporter !== undefined) {
+      return exporter;
     }
     throw failure([
       diagnostic({
-        code: 'GEOSPEC_NATIVE_RUNTIME_UNAVAILABLE',
-        message: `No Tau Runtime is configured to export '${options.file}' for native GeoSpec.`,
-        suggestion: 'Pass a Runtime client/factory or a matching source adapter to the native runner.',
-        details: { file: options.file },
+        code: 'GEOSPEC_EXPORTER_MISSING',
+        message:
+          exporters.length === 0
+            ? `No exporter is configured, so GeoSpec cannot export '${options.file}'.`
+            : `No configured exporter claims '${options.file}', so GeoSpec cannot export it.`,
+        suggestion:
+          "Give the host an exporter whose extensions include this file's, or load STEP or GLB bytes directly.",
+        details: { file: options.file, exporters: exporters.map(({ id }) => id) },
       }),
     ]);
   };
@@ -953,7 +962,7 @@ export const createGeoSpecNativeModelLoader = (
   };
 
   /**
-   * Whether the host's rooted reader finds no file at a project path: the Runtime reports a missing entry only as
+   * Whether the host's rooted reader finds no file at a project path: an exporter reports a missing entry only as
    * text, so a failed export asks the reader. `false` when there is no reader or it fails another way.
    * @param path - The project path the load named.
    * @returns True only for a not-found read.
@@ -971,19 +980,19 @@ export const createGeoSpecNativeModelLoader = (
   };
 
   /**
-   * What a failed Runtime export of a load refuses with: one typed not-found diagnostic, naming the root and the
-   * load's `rootDir`, when the host's reader finds no file at the load's project path; else the Runtime's issues.
+   * What a failed export of a load refuses with: one typed not-found diagnostic, naming the root and the load's
+   * `rootDir`, when the host's reader finds no file at the load's project path; else the exporter's own refusal.
    * @param options - The load, its `file` already joined to its `rootDir`.
-   * @param issues - The failed export's issues.
-   * @returns The diagnostics to refuse with.
+   * @param refusal - The exporter's refusal.
+   * @returns The error to throw.
    */
-  const exportFailureDiagnostics = async (
-    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
-    issues: readonly KernelIssue[],
-  ): Promise<GeometryDiagnostic[]> =>
+  const exportFailure = async (
+    options: ExportedLoadOptions & GeoSpecNativeLoadModelOptions,
+    refusal: GeoSpecModelLoadError,
+  ): Promise<GeoSpecModelLoadError> =>
     !('code' in options) && (await sourceMissing(options.file))
-      ? [sourceNotFound({ path: options.file, projectPath: defaults.projectPath, rootDir: options.rootDir })]
-      : issues.map((issue) => runtimeIssueDiagnostic(issue));
+      ? failure([sourceNotFound({ path: options.file, projectPath: defaults.projectPath, rootDir: options.rootDir })])
+      : refusal;
 
   const loadDirect = async (
     options: Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>,
@@ -1040,136 +1049,108 @@ export const createGeoSpecNativeModelLoader = (
     };
   };
 
-  const loadRuntime = async (
-    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
+  const loadExported = async (
+    route: {
+      readonly exporter: GeoSpecModelExporter;
+      readonly options: ExportedLoadOptions & GeoSpecNativeLoadModelOptions;
+      readonly format: GeoSpecExportFormat;
+    },
     owners: ReadonlySet<ResidencyOwner>,
   ) => {
-    for (const key of ['sourceUnit', 'unit', 'scale', 'coordinateSystem'] as const) {
-      if (key in options) {
-        throw failure([
-          diagnostic({
-            code: 'GEOSPEC_NATIVE_RUNTIME_FRAME_OVERRIDE',
-            message: `Native Runtime model loading rejects '${key}': the Runtime export intent owns the frame.`,
-            suggestion: 'Remove the frame override and let GeoSpec request canonical Z-up millimetre evidence.',
-            details: { key },
-          }),
-        ]);
-      }
+    const { exporter, options, format } = route;
+    const { capabilities } = exporter;
+    if (!capabilities.formats.includes(format)) {
+      throw exporterUnsupported({
+        exporter,
+        file: options.file,
+        capability: 'formats',
+        reason: `it does not produce ${format.toUpperCase()}.`,
+        details: { format, formats: [...capabilities.formats] },
+      });
     }
-    const requestedFormat = resolveFormat(options, defaults.format);
-    const format: Extract<RuntimeBackedModelFormat, 'glb' | 'step'> =
-      requestedFormat === 'stp' ? 'step' : requestedFormat;
-    const runtime = await runtimeFor(options);
-    await runtime.connect();
-    const kernelId = await describedKernel(runtime, options);
-    const intentOptions = {
-      runtime,
-      format,
-      ...(kernelId === undefined ? {} : { kernelId }),
-      ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
-      ...(options.meshAngularToleranceDegrees === undefined
-        ? {}
-        : { meshAngularToleranceDegrees: options.meshAngularToleranceDegrees }),
-    };
-    const requested = resolveRuntimeExportIntent(intentOptions);
-    if ('success' in requested) {
-      throw failure(requested.diagnostics);
+    const inline = 'code' in options ? options.code : undefined;
+    if (inline !== undefined && capabilities.inlineSources !== true) {
+      throw exporterUnsupported({
+        exporter,
+        file: options.file,
+        capability: 'inlineSources',
+        reason: 'it does not accept inline sources.',
+      });
     }
-    // Validated by the loader before any Runtime work.
+    const parameters =
+      options.parameters === undefined || Object.keys(options.parameters).length === 0 ? undefined : options.parameters;
+    if (parameters !== undefined && capabilities.parameters !== true) {
+      throw exporterUnsupported({
+        exporter,
+        file: options.file,
+        capability: 'parameters',
+        reason: 'it does not accept parameters.',
+        details: { parameters: Object.keys(parameters) },
+      });
+    }
     const region = options.region === undefined ? undefined : copyRegion(options.region);
-    if (region !== undefined) {
-      // A described kernel's own direct routes decide. Without one, the kernel that renders the file
-      // is chosen when it opens, so admit the crop when any direct route declares it; an option no
-      // route declares would be dropped by option parsing and export the whole model. The kernel's
-      // crop notice below stays the authority for the chosen route.
-      const routes = runtimeRoutesFor(runtime, format).filter(
-        (route) => kernelId === undefined || route.kernelId === kernelId,
-      );
-      const cropping = routes.some(
-        (route) => route.transcoderId === undefined && 'region' in (route.exportOptions?.schema.properties ?? {}),
-      );
-      if (!cropping) {
-        const kernelIds = [
-          ...new Set(routes.flatMap((route) => (route.kernelId === undefined ? [] : [route.kernelId]))),
-        ];
-        throw failure([
-          diagnostic({
-            code: 'GEOSPEC_MODEL_REGION_UNSUPPORTED',
-            message: `No direct ${format.toUpperCase()} export of this Runtime${kernelIds.length === 0 ? '' : ` (${kernelIds.join(', ')})`} declares a region option, so GeoSpec cannot crop '${options.file}' before admission.`,
-            suggestion:
-              'Load the whole model; if it exceeds a host limit, report the claim as not decided at this capacity. A region load needs a kernel whose GLB export crops, such as PicoVoxel, and only scopes a separate claim to that region.',
-            details: { file: options.file, format, region, kernelIds },
-          }),
-        ]);
-      }
+    if (region !== undefined && capabilities.region !== true) {
+      throw exporterUnsupported({
+        exporter,
+        file: options.file,
+        capability: 'region',
+        reason: 'it does not crop to a region.',
+        details: { region },
+      });
     }
-    const exportOptions = {
-      ...structuredClone(requested.options),
-      ...(region === undefined ? {} : { region: { min: [...region.min], max: [...region.max] } }),
+    const projectPath = options.projectPath ?? defaults.projectPath;
+    const mesh =
+      options.meshLinearTolerance === undefined && options.meshAngularToleranceDegrees === undefined
+        ? undefined
+        : {
+            ...(options.meshLinearTolerance === undefined ? {} : { linearTolerance: options.meshLinearTolerance }),
+            ...(options.meshAngularToleranceDegrees === undefined
+              ? {}
+              : { angularToleranceDegrees: options.meshAngularToleranceDegrees }),
+          };
+    const request: GeoSpecModelExportRequest = {
+      file: options.file,
+      format,
+      ...(projectPath === undefined ? {} : { projectPath }),
+      ...(parameters === undefined ? {} : { parameters: structuredClone(parameters) }),
+      ...(mesh === undefined ? {} : { mesh }),
+      ...(region === undefined ? {} : { region: copyRegion(region) }),
+      ...(inline === undefined ? {} : { inline: { ...inline } }),
     };
-    // One export, then close: a file watcher would outlive the worker that tears it down.
-    const document = runtime.open({
-      source: runtimeSource(options),
-      ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      watch: false,
-    });
-    const exported = await (async () => {
-      try {
-        return await document.export(format, { options: structuredClone(exportOptions) });
-      } finally {
-        document.close();
-      }
-    })();
-    if (!exported.success) {
-      throw failure(await exportFailureDiagnostics(options, exported.issues));
+    let artifact: GeoSpecModelArtifact;
+    usedExporters.add(exporter);
+    try {
+      artifact = await exporter.export(request);
+    } catch (error) {
+      throw await exportFailure(
+        options,
+        error instanceof GeoSpecModelLoadError
+          ? error
+          : failure([
+              diagnostic({
+                code: 'GEOSPEC_EXPORTER_FAILED',
+                message: `Exporter '${exporter.id}' failed to export '${options.file}': ${error instanceof Error ? error.message : String(error)}`,
+                suggestion: 'Fix the model or the exporter, then rerun.',
+                details: { exporter: exporter.id, file: options.file, format },
+              }),
+            ]),
+      );
     }
-    if (
-      region !== undefined &&
-      !exported.issues.some((issue) => {
-        const { details } = issue;
-        const cropped: unknown =
-          details !== null && typeof details === 'object' && 'region' in details ? details.region : undefined;
-        return (
-          cropped !== null &&
-          typeof cropped === 'object' &&
-          keyJson(cropped) === keyJson({ min: [...region.min], max: [...region.max] })
-        );
-      })
-    ) {
-      throw failure([
-        diagnostic({
-          code: 'GEOSPEC_MODEL_REGION_NOT_HONORED',
-          message: `The Runtime export of '${options.file}' did not confirm the requested region crop, so its bytes may be the whole model.`,
-          suggestion: 'Load the whole model, or update the kernel so its export reports the region it cropped.',
-          details: { file: options.file, format, region },
-        }),
-      ]);
+    if (!(artifact.bytes instanceof Uint8Array) || artifact.bytes.byteLength === 0) {
+      throw invalidArtifact(exporter, options.file, 'its bytes are empty.');
     }
-    const files: ExportFile[] = [...exported.files];
-    const [primary, ...resources] = files;
-    if (primary === undefined) {
-      throw failure([
-        diagnostic({
-          code: 'GEOSPEC_NATIVE_MODEL_EXPORT_EMPTY',
-          message: `The Tau Runtime exported no ${format.toUpperCase()} artifact for '${options.file}'.`,
-          suggestion: 'Check that the selected source exports geometry in the requested format.',
-          details: { file: options.file, format },
-        }),
-      ]);
+    if (artifact.format !== format) {
+      throw invalidArtifact(exporter, options.file, `it is ${String(artifact.format)}, not the requested ${format}.`);
     }
-    const honored = resolveRuntimeExportIntent(intentOptions);
-    if ('success' in honored) {
-      throw failure(honored.diagnostics);
-    }
-    // The export is consumed synchronously by admission, so its bytes need no copy.
+    const resources = (artifact.resources ?? []).map(({ name, bytes }) => ({ name, bytes }));
     const artifacts = await Promise.all(
-      files.map(async ({ name, bytes }) => ({
+      [{ name: `model.${format}`, bytes: artifact.bytes }, ...resources].map(async ({ name, bytes }) => ({
         name,
         sha256: await sha256Bytes(bytes),
         byteLength: bytes.byteLength,
       })),
     );
-    const sourceRevision = exported.sourceRevision === undefined ? undefined : structuredClone(exported.sourceRevision);
+    const sourceRevision = exportedRevision(options.file, artifact.consumedSources);
     const completeSourceRevision =
       sourceRevision !== undefined &&
       /^sha256:[0-9a-f]{64}$/u.test(sourceRevision.files[sourceRevision.entry] ?? '') &&
@@ -1179,14 +1160,20 @@ export const createGeoSpecNativeModelLoader = (
     const subject = admit(
       {
         format,
-        primary: primary.bytes,
+        primary: artifact.bytes,
         resources,
-        sourceUnit: honored.sourceUnit,
-        diagnostics: exported.issues.map(runtimeIssueDiagnostic),
+        sourceUnit: artifact.sourceUnit ?? 'mm',
+        ...(artifact.diagnostics === undefined ? {} : { diagnostics: artifact.diagnostics }),
         ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
       },
       owners,
     );
+    const exportOptions = {
+      exporter: exporter.id,
+      ...(mesh === undefined ? {} : { mesh }),
+      ...(region === undefined ? {} : { region: { min: [...region.min], max: [...region.max] } }),
+      ...(artifact.exportOptions === undefined ? {} : { options: structuredClone(artifact.exportOptions) }),
+    };
     return {
       ...subject,
       load: {
@@ -1203,6 +1190,27 @@ export const createGeoSpecNativeModelLoader = (
         artifacts,
       } satisfies GeoSpecModelLoadEvidence,
     };
+  };
+
+  const loadExport = async (
+    options: ExportedLoadOptions & GeoSpecNativeLoadModelOptions,
+    owners: ReadonlySet<ResidencyOwner>,
+  ) => {
+    for (const key of ['sourceUnit', 'unit', 'scale', 'coordinateSystem'] as const) {
+      if (key in options) {
+        throw failure([
+          diagnostic({
+            code: 'GEOSPEC_NATIVE_RUNTIME_FRAME_OVERRIDE',
+            message: `Exported model loading rejects '${key}': the exporter owns the frame.`,
+            suggestion: 'Remove the frame override and let GeoSpec request canonical Z-up millimetre evidence.',
+            details: { key },
+          }),
+        ]);
+      }
+    }
+    const requestedFormat = resolveFormat(options, defaults.format);
+    const format: GeoSpecExportFormat = requestedFormat === 'stp' ? 'step' : requestedFormat;
+    return loadExported({ exporter: exporterFor(options), options, format }, owners);
   };
 
   /**
@@ -1224,36 +1232,39 @@ export const createGeoSpecNativeModelLoader = (
 
   /**
    * Whether the earlier file load's exported source closure is unchanged now.
+   * @param exporter - The exporter both loads go through.
    * @param options - The reusing file load.
    * @param load - The earlier load's evidence.
-   * @returns False without a complete revision or a successful matching Runtime snapshot.
+   * @returns False without a complete revision or a matching `revision` from the exporter.
    */
   const fileUnchanged = async (
-    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
+    exporter: GeoSpecModelExporter,
+    options: ExportedLoadOptions & GeoSpecNativeLoadModelOptions,
     load: GeoSpecModelLoadEvidence,
   ): Promise<boolean> => {
     const revision = load.status === 'complete' ? load.sourceRevision : undefined;
-    if (revision === undefined) {
+    // An exporter without `revision` offers no way to confirm the closure, so its file loads export afresh.
+    if (revision === undefined || exporter.revision === undefined) {
       return false;
     }
-    const runtime = await runtimeFor(options);
-    if (runtime.snapshotSource === undefined) {
-      return false;
-    }
+    const projectPath = options.projectPath ?? defaults.projectPath;
     try {
-      const snapshot = await runtime.snapshotSource({ source: { path: options.file } });
-      return snapshot.success && revisionUnchanged(revision, snapshot);
+      return revisionUnchanged(
+        revision,
+        await exporter.revision({ file: options.file, ...(projectPath === undefined ? {} : { projectPath }) }),
+      );
     } catch {
       // An unverifiable closure is not a load failure: the fresh export that follows reports any real error.
       return false;
     }
   };
 
-  const coalescedRuntime = async (
-    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
+  const coalescedExport = async (
+    options: ExportedLoadOptions & GeoSpecNativeLoadModelOptions,
     owner: ResidencyOwner,
   ): Promise<GeoSpecNativeModelSubject> => {
-    const configured = options.runtime ?? defaults.runtime;
+    // An unclaimed file goes straight to `loadExported`, which validates the load before refusing it.
+    const configured = defaults.exporters?.find((candidate) => exporterClaims(candidate, options.file));
     const inline = 'code' in options;
     // The loader already snapshotted `code` into a plain object; only its values can defeat the key.
     const code =
@@ -1277,19 +1288,19 @@ export const createGeoSpecNativeModelLoader = (
             region: options.region,
           });
     if (configured === undefined || key === undefined) {
-      return loadRuntime(options, new Set([owner]));
+      return loadExport(options, new Set([owner]));
     }
-    let loads = runtimeLoads.get(configured);
+    let loads = exportedLoads.get(configured);
     if (loads === undefined) {
       loads = new Map();
-      runtimeLoads.set(configured, loads);
+      exportedLoads.set(configured, loads);
     }
     const existing = loads.get(key);
     if (existing !== undefined) {
       existing.owners?.add(owner);
       const subject = await existing.pending;
       const reusable =
-        (existing.owners !== undefined || (await fileUnchanged(options, subject.load))) &&
+        (existing.owners !== undefined || (await fileUnchanged(configured, options, subject.load))) &&
         adopt(subject.subjectHash, owner);
       if (reusable) {
         const { workUnitLimit: earlierWorkUnitLimit, rootDir: earlierFolder, ...earlier } = subject.load;
@@ -1305,7 +1316,7 @@ export const createGeoSpecNativeModelLoader = (
       }
     }
     const owners = new Set([owner]);
-    const pending = loadRuntime(options, owners);
+    const pending = loadExport(options, owners);
     const entry = { pending, ...(code === undefined ? {} : { owners }) };
     loads.set(key, entry);
     // A failed load is replaced only by a later load of the same key, which reads the map afresh;
@@ -1406,7 +1417,7 @@ export const createGeoSpecNativeModelLoader = (
     const admission =
       'source' in options
         ? loadDirect(snapshot as Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>, new Set([owner]))
-        : coalescedRuntime(snapshot as RuntimeOptions & GeoSpecNativeLoadModelOptions, owner);
+        : coalescedExport(snapshot as ExportedLoadOptions & GeoSpecNativeLoadModelOptions, owner);
     const pending = (async () => {
       const subject = await admission;
       const result = { ...subject, ...(subject.load === undefined ? {} : { load: { ...subject.load, loadId } }) };
@@ -1454,7 +1465,7 @@ export const createGeoSpecNativeModelLoader = (
       const errors: unknown[] = [];
       const { carried } = defaults;
       generation += 1;
-      runtimeLoads.clear();
+      exportedLoads.clear();
       if (carried !== undefined) {
         for (const [subjectHash, handle] of staleCarried()) {
           try {
@@ -1489,20 +1500,15 @@ export const createGeoSpecNativeModelLoader = (
           errors.push(error);
         }
       }
-      for (const runtime of ownedRuntimes) {
+      for (const exporter of usedExporters) {
         try {
-          if (runtime.shutdown) {
-            // oxlint-disable-next-line no-await-in-loop -- Each owned runtime must close before release settles.
-            await runtime.shutdown();
-          } else {
-            runtime.terminate();
-          }
+          // oxlint-disable-next-line no-await-in-loop -- Each exporter must close this scope before release settles.
+          await exporter.close?.();
         } catch (error) {
           errors.push(error);
         }
       }
-      ownedRuntimes.clear();
-      runtimeFactories.clear();
+      usedExporters.clear();
       if (errors.length > 0) {
         throw new AggregateError(errors, 'Native GeoSpec model cleanup failed.');
       }

@@ -17,7 +17,7 @@ import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { parseProjectIdentityBytes } from '@taucad/project-core/identity';
 import { tauRemoteUrl } from '@taucad/revisions';
 import workbenchBundles from '@taucad/workbench/agent/resources.js';
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { connectMachineChannel, defineMachine } from '@taucad/runtime/machine';
 import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';

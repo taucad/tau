@@ -1,16 +1,9 @@
 /**
- * The viewer page's Share pane links (viewer parity blueprint V10): a direct link, and "Open in Tau".
- *
- * Direct link (the default, as on the desktop): the shown entry's project packed into the portable share ZIP
- * `@taucad/project-core/share-artifact` makes, which the page turns into the self-contained `/s/direct#v=2&zip=` link
- * and seals under a password itself when asked. The files are the runtime's source closure of the entry when the host
- * wires one in ({@link SourceSnapshotter}, the seam the desktop's `snapshotSource` uses); without it, every project
- * file git does not ignore, under the portable-share caps.
- *
- * "Open in Tau": the GitHub import link Tau already serves (`/import/<repository>?ref=&path=&main=`): it opens the
- * project as it is on GitHub, at the branch the local checkout tracks, in the folder the project sits in, on the entry
- * the page shows. A project that is not on GitHub, or a branch that tracks nothing, has no such link, and the answer
- * says so.
+ * The viewer page's Share pane link (viewer parity blueprint V10): the desktop's direct link, the shown entry's
+ * project packed into the portable share ZIP `@taucad/project-core/share-artifact` makes, which the page turns into
+ * the self-contained `/s/direct#v=2&zip=` link and seals under a password itself when asked. The files are the
+ * runtime's source closure of the entry when the host wires one in ({@link SourceSnapshotter}, the seam the desktop's
+ * `snapshotSource` uses); without it, every project file git does not ignore, under the portable-share caps.
  */
 
 import { execFile } from 'node:child_process';
@@ -19,7 +12,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 
 import type { TauMcpViewerFailure } from '@taucad/mcp';
-import type { TauViewerDirectShare, TauViewerShareLink } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerDirectShare } from '@taucad/mcp/viewer-protocol';
 import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/project-core';
 import { parameterEntryPath } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/project-core';
@@ -36,21 +29,6 @@ export const defaultTauOrigin = 'https://tau.new';
 
 /** Runs one git command in a folder: its trimmed standard output, or `undefined` when it fails. */
 export type GitRunner = (cwd: string, args: readonly string[]) => Promise<string | undefined>;
-
-/** What the page's Share pane gets back: the link and what it opens. */
-export type McpViewerShareLink = TauViewerShareLink;
-
-/** What {@link createOpenInTauLink} needs. */
-export type OpenInTauLinkInput = Readonly<{
-  /** The project folder of the shown model. */
-  root: string;
-  /** The entry the page shows, project-relative (`model.sourceFile ?? model.path`). */
-  entryPath: string;
-  /** The Tau web origin; {@link defaultTauOrigin} when absent. */
-  origin?: string | undefined;
-  /** How git runs; the system `git` when absent. */
-  git?: GitRunner | undefined;
-}>;
 
 /** Most a git command may print before it is treated as failed. */
 const gitOutputLimit = 1024 * 1024;
@@ -79,92 +57,6 @@ const failure = (errorCode: string, message: string): TauMcpViewerFailure => ({
   errorCode,
   message,
 });
-
-/** Owner and repository segments GitHub accepts. */
-const githubSegment = /^[\w.-]+$/u;
-
-/**
- * The GitHub repository a remote URL names, in any form git writes one: `https://github.com/o/r(.git)`,
- * `git@github.com:o/r(.git)` or `ssh://git@github.com/o/r(.git)`.
- *
- * @param remote - The remote's URL.
- * @returns `owner/repo`, or `undefined` for a remote that is not on github.com.
- */
-export const githubRepositoryOf = (remote: string): string | undefined => {
-  const scp = /^[\w.-]+@github\.com:(?<path>.+)$/u.exec(remote);
-  let path: string | undefined = scp?.groups?.['path'];
-  if (path === undefined) {
-    try {
-      const url = new URL(remote);
-      if (url.hostname.toLowerCase() !== 'github.com' || !['https:', 'http:', 'ssh:', 'git:'].includes(url.protocol)) {
-        return undefined;
-      }
-      path = url.pathname;
-    } catch {
-      return undefined;
-    }
-  }
-  const [owner, repository, ...rest] = path.replaceAll(/^\/+|\/+$/gu, '').split('/');
-  const name = repository?.replace(/\.git$/u, '');
-  if (owner === undefined || name === undefined || rest.length > 0 || name === '') {
-    return undefined;
-  }
-  return githubSegment.test(owner) && githubSegment.test(name) ? `${owner}/${name}` : undefined;
-};
-
-/**
- * The Tau link that opens a local project from its GitHub repository.
- *
- * @param input - The project folder, the entry the page shows, and optionally the Tau origin and git.
- * @returns The link and what it opens, or why the project has none.
- */
-export const createOpenInTauLink = async (
-  input: OpenInTauLinkInput,
-): Promise<McpViewerShareLink | TauMcpViewerFailure> => {
-  const git = input.git ?? systemGit;
-  const { root } = input;
-  const prefix = await git(root, ['rev-parse', '--show-prefix']);
-  if (prefix === undefined) {
-    return failure('NOT_A_REPOSITORY', 'This project is not in a git repository, so Tau cannot open it from GitHub.');
-  }
-  const branch = await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  const remoteName = branch === undefined ? undefined : await git(root, ['config', '--get', `branch.${branch}.remote`]);
-  const mergeRef = branch === undefined ? undefined : await git(root, ['config', '--get', `branch.${branch}.merge`]);
-  if (remoteName === undefined || mergeRef === undefined) {
-    return failure(
-      'NO_UPSTREAM',
-      'This branch is not pushed to GitHub. Push it, then share again: Tau opens the project from GitHub.',
-    );
-  }
-  const remote = await git(root, ['remote', 'get-url', remoteName]);
-  const repository = remote === undefined ? undefined : githubRepositoryOf(remote);
-  if (repository === undefined) {
-    return failure('NOT_ON_GITHUB', 'This project is not on GitHub, so Tau cannot open it from there.');
-  }
-  const ref = mergeRef.replace(/^refs\/heads\//u, '');
-  const path = prefix.replace(/\/+$/u, '');
-  const mainFile = input.entryPath.replace(/^\.?\/+/u, '');
-  const ahead = await git(root, ['rev-list', '--count', '@{upstream}..HEAD']);
-  const edits = await git(root, ['status', '--porcelain', '--', '.']);
-  const hasLocalChanges = ahead === undefined || ahead !== '0' || edits === undefined || edits !== '';
-
-  const parameters = new URLSearchParams({ ref });
-  if (path !== '') {
-    parameters.set('path', path);
-  }
-  if (mainFile !== '') {
-    parameters.set('main', mainFile);
-  }
-  const { origin } = new URL(input.origin ?? defaultTauOrigin);
-  return {
-    url: `${origin}/import/https://github.com/${repository}?${parameters.toString()}`,
-    repository,
-    ref,
-    path,
-    mainFile,
-    hasLocalChanges,
-  };
-};
 
 /** What the page's Share pane gets back for a direct link: the packed project. */
 export type McpViewerDirectShare = TauViewerDirectShare;

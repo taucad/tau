@@ -10,7 +10,7 @@ import { parseProjectManifestBytes } from '@taucad/project-core';
 import { shareArtifactCodec } from '@taucad/project-core/share-artifact';
 import type { TauMcpViewerFailure } from '@taucad/mcp';
 
-import { createDirectShare, createOpenInTauLink, githubRepositoryOf } from '#mcp-viewer-share.js';
+import { createDirectShare } from '#mcp-viewer-share.js';
 import type { GitRunner, McpViewerDirectShare, SourceSnapshotter } from '#mcp-viewer-share.js';
 
 const run = promisify(execFile);
@@ -20,134 +20,6 @@ const git = async (cwd: string, ...args: string[]): Promise<void> => {
     cwd,
   });
 };
-
-describe('githubRepositoryOf', () => {
-  it.each([
-    ['https://github.com/taucad/tau.git', 'taucad/tau'],
-    ['https://github.com/taucad/tau', 'taucad/tau'],
-    ['git@github.com:taucad/tau.git', 'taucad/tau'],
-    ['ssh://git@github.com/taucad/tau.git', 'taucad/tau'],
-    ['https://GitHub.com/taucad/tau/', 'taucad/tau'],
-  ])('should read %s as %s', (remote, repository) => {
-    expect(githubRepositoryOf(remote)).toBe(repository);
-  });
-
-  it.each([
-    'https://gitlab.com/taucad/tau.git',
-    'git@gitlab.com:taucad/tau.git',
-    'https://github.com/taucad',
-    'https://github.com/taucad/tau/tree/main',
-    'file:///srv/tau.git',
-    '../tau',
-  ])('should refuse %s', (remote) => {
-    expect(githubRepositoryOf(remote)).toBeUndefined();
-  });
-});
-
-describe('createOpenInTauLink', () => {
-  let repository: string;
-  let project: string;
-
-  beforeEach(async () => {
-    repository = await mkdtemp(join(tmpdir(), 'tau-viewer-share-'));
-    project = join(repository, 'models', 'bracket');
-    await mkdir(project, { recursive: true });
-    await writeFile(join(project, 'main.ts'), 'export default () => undefined;\n');
-    await git(repository, 'init', '--quiet', '--initial-branch=main');
-    await git(repository, 'add', '.');
-    await git(repository, 'commit', '--quiet', '-m', 'bracket');
-  });
-
-  afterEach(async () => {
-    await rm(repository, { recursive: true, force: true });
-  });
-
-  const track = async (remote: string): Promise<void> => {
-    await git(repository, 'remote', 'add', 'origin', remote);
-    await git(repository, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
-    await git(repository, 'branch', '--set-upstream-to=origin/main', 'main');
-  };
-
-  it('should open the tracked branch, the project folder and the shown entry from GitHub', async () => {
-    await track('git@github.com:taucad/brackets.git');
-
-    const link = await createOpenInTauLink({
-      root: project,
-      entryPath: 'main.ts',
-      origin: 'https://tau.example/x',
-    });
-
-    expect(link).toEqual({
-      url: 'https://tau.example/import/https://github.com/taucad/brackets?ref=main&path=models%2Fbracket&main=main.ts',
-      repository: 'taucad/brackets',
-      ref: 'main',
-      path: 'models/bracket',
-      mainFile: 'main.ts',
-      hasLocalChanges: false,
-    });
-  });
-
-  it('should say when the checkout has edits or commits GitHub does not have', async () => {
-    await track('https://github.com/taucad/brackets.git');
-    await writeFile(join(project, 'main.ts'), 'export default () => 1;\n');
-
-    const edited = await createOpenInTauLink({
-      root: project,
-      entryPath: 'main.ts',
-    });
-    expect(edited).toMatchObject({ hasLocalChanges: true });
-    expect('url' in edited && edited.url).toBe(
-      'https://tau.new/import/https://github.com/taucad/brackets?ref=main&path=models%2Fbracket&main=main.ts',
-    );
-
-    await git(repository, 'commit', '--quiet', '-am', 'edit');
-    await expect(createOpenInTauLink({ root: project, entryPath: 'main.ts' })).resolves.toMatchObject({
-      hasLocalChanges: true,
-    });
-  });
-
-  it('should leave out the folder at the repository root', async () => {
-    await track('https://github.com/taucad/brackets');
-
-    const link = await createOpenInTauLink({
-      root: repository,
-      entryPath: 'models/bracket/main.ts',
-    });
-
-    expect(link).toMatchObject({
-      path: '',
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main&main=models%2Fbracket%2Fmain.ts',
-    });
-  });
-
-  it('should refuse a branch that tracks nothing', async () => {
-    await expect(createOpenInTauLink({ root: project, entryPath: 'main.ts' })).resolves.toMatchObject({
-      errorCode: 'NO_UPSTREAM',
-    });
-  });
-
-  it('should refuse a repository that is not on GitHub', async () => {
-    await track('https://gitlab.com/taucad/brackets.git');
-
-    await expect(createOpenInTauLink({ root: project, entryPath: 'main.ts' })).resolves.toMatchObject({
-      errorCode: 'NOT_ON_GITHUB',
-    });
-  });
-
-  it('should refuse a folder outside git', async () => {
-    const failing: GitRunner = async () => undefined;
-
-    await expect(
-      createOpenInTauLink({
-        root: project,
-        entryPath: 'main.ts',
-        git: failing,
-      }),
-    ).resolves.toMatchObject({
-      errorCode: 'NOT_A_REPOSITORY',
-    });
-  });
-});
 
 describe('createDirectShare', () => {
   let project: string;

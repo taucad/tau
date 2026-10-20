@@ -27,6 +27,7 @@ import { projectParameterValues } from '#runtime/parameter-values.js';
 import { reportModelMechanism } from '#runtime/model-mechanism.js';
 import type { RenderedArtifact } from '#runtime/glb-chunks.js';
 import { summarizeRenderedModel } from '#runtime/model-summary.js';
+import { validateExport } from '#runtime/export-validation.js';
 import type { ModelAdmissionLimits } from '#runtime/model-summary.js';
 
 import {
@@ -596,10 +597,12 @@ export const createRuntimeAgentClients = (
         });
         context?.signal?.throwIfAborted();
         if (result.success) {
+          const validation = validateExport(result.files);
           return {
             success: true,
             exportId: result.exportId,
             files: [...result.files],
+            ...(validation === undefined ? {} : { validation }),
             issues: [...result.issues],
             ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
           };

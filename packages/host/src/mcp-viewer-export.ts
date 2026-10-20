@@ -42,7 +42,7 @@ const modelIdSchema = z
   .string()
   .min(1)
   .optional()
-  .describe('The shown model the page names; the loopback server finds the project folder from it.');
+  .describe('The shown model the page names; the server finds the project folder from it.');
 
 /** Input of `app_export_formats`. */
 export const viewerExportFormatsInputSchema = z

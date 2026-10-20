@@ -1,6 +1,6 @@
 import { geoSpecTimeoutCode } from 'geospec/runner';
 import { describe, expect, it, vi } from 'vitest';
-import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import {
   formatFileReport,
   formatRunHeadline,
@@ -13,7 +13,7 @@ import {
 } from '#cli/cli.js';
 import type { GeoSpecCliHost } from '#cli/cli.js';
 import type { GeometryDiagnostic } from 'geospec/mesh';
-import type { GeoSpecRunResult } from '#runner/types.js';
+import type { GeoSpecRunResult } from 'geospec/runner';
 
 const bundle = { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
 
@@ -70,28 +70,6 @@ const cliHost = (options: {
       };
     },
   };
-};
-
-const forensicCliHost = () => {
-  const host = cliHost({});
-  const unsubscribe = vi.fn();
-  host.createRunner = () => {
-    let handler: ((event: GeoSpecRunnerEvent) => void) | undefined;
-    return {
-      run: async () => {
-        handler?.({ type: 'forensic', name: 'runner.file', value: 4, unit: 'milliseconds' });
-        handler?.({ type: 'forensic', shardId: 2, name: 'proof.classify', value: 3, unit: 'count' });
-        return { success: true, passed: 1, failed: 0, selectedTests: 1, files: [] };
-      },
-      on: (_type, next) => {
-        handler = next as (event: GeoSpecRunnerEvent) => void;
-        return unsubscribe;
-      },
-      abort: () => undefined,
-      close: async () => undefined,
-    };
-  };
-  return { host, unsubscribe };
 };
 
 describe('parseGeoSpecCliArguments', () => {
@@ -169,17 +147,21 @@ describe('parseGeoSpecCliArguments', () => {
   });
 
   it('should parse the numeric flags', () => {
-    expect(
-      parsed('run', '--test-timeout', '30000', '--shard-timeout', '600000', '--matcher-wall-backstop', '9000'),
-    ).toMatchObject({
+    expect(parsed('run', '--test-timeout', '30000', '--shard-timeout', '600000')).toMatchObject({
       testTimeout: 30_000,
       shardTimeout: 600_000,
-      matcherWallBackstop: 9000,
     });
   });
 
-  it('should parse the forensic flag', () => {
-    expect(parsed('run', '--forensic').forensic).toBe(true);
+  it('should reject the retired forensic and matcher backstop flags as unknown options', () => {
+    expect(parseGeoSpecCliArguments(['run', '--forensic'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--forensic'.",
+    });
+    expect(parseGeoSpecCliArguments(['run', '--matcher-wall-backstop', '9000'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--matcher-wall-backstop'.",
+    });
   });
 
   it('should reject the retired evidence cache flags as unknown options', () => {
@@ -212,9 +194,8 @@ describe('parseGeoSpecCliArguments', () => {
       ['run', '--test-timeout'],
       ['run', '--test-timeout', 'soon'],
       ['run', '--workers', 'lots'],
-      ['run', '--matcher-wall-backstop'],
-      ['run', '--matcher-wall-backstop', '0'],
-      ['run', '--matcher-wall-backstop', '-1'],
+      ['run', '--shard-timeout'],
+      ['run', '--shard-timeout', '-1'],
     ]) {
       expect(parseGeoSpecCliArguments(argv).kind).toBe('error');
     }
@@ -773,30 +754,10 @@ describe('runGeoSpecCli', () => {
   it('should map operational flags directly to the runner factory and run', async () => {
     const host = cliHost({});
 
-    await runGeoSpecCli(['run', '.', '--forensic', '--matcher-wall-backstop', '1234'], host);
+    await runGeoSpecCli(['run', '.', '--test-timeout', '1234', '--bail'], host);
 
     expect(host.runs[0]).toStrictEqual({ projectPath: '/project', workers: undefined, shardTimeout: undefined });
-    expect(host.runs[1]).toMatchObject({ forensic: true, matcherWallBackstop: 1234 });
-  });
-
-  it('should stream forensic events into the text report and unsubscribe', async () => {
-    const { host, unsubscribe } = forensicCliHost();
-
-    await runGeoSpecCli(['run', '.', '--forensic'], host);
-
-    expect(host.written.join('\n')).toContain('FORENSIC runner.file 4 milliseconds');
-    expect(host.written.join('\n')).toContain('FORENSIC shard=2 proof.classify 3 count');
-    expect(unsubscribe).toHaveBeenCalledOnce();
-  });
-
-  it('should include forensic events in the JSON report', async () => {
-    const { host } = forensicCliHost();
-
-    await runGeoSpecCli(['run', '.', '--forensic', '--json'], host);
-
-    expect(JSON.parse(host.written.join('\n'))).toMatchObject({
-      forensic: [{ name: 'runner.file' }, { shardId: 2, name: 'proof.classify' }],
-    });
+    expect(host.runs[1]).toMatchObject({ testTimeout: 1234, bail: true });
   });
 
   it('should print exactly one JSON document under --json', async () => {

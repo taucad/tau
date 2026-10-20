@@ -298,6 +298,10 @@ const config: KnipConfig = {
         'src/renderer/main.tsx',
       ],
     },
+    'libs/agent-tools': {
+      // Tau project sources the C2 export generator evaluates through the Replicad kernel.
+      ignore: ['host-tests/tau-project-c2/fixtures/**'],
+    },
     'libs/api-extractor': {
       // Generated declarations are catalog data read from disk by extraction tools.
       ignore: ['src/generated/**'],
@@ -333,8 +337,6 @@ const config: KnipConfig = {
         // `scripts:prepare-geospec-test-consumer` stages from this directory.
         'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
       ],
-      // CAD source snapshots the Replicad kernel evaluates (bench/measurements.test.ts opens one as a project).
-      ignore: ['host-tests/tau-project-c2/fixtures/**'],
     },
     'packages/geospec-engine': {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed

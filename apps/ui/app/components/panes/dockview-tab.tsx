@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Box, X } from 'lucide-react';
+import { Box } from 'lucide-react';
+import { WorkbenchTab } from '@taucad/workbench-panes/components/workbench-tab';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**
@@ -58,7 +57,8 @@ export function DockviewTabIcon({
 }
 
 /**
- * Custom Dockview tab component that adds a leading icon before the title.
+ * Custom Dockview tab: the shared `WorkbenchTab` leaf as the content of dockview's `.dv-tab`, with a leading icon
+ * before the title.
  *
  * Reuses the dv-default-tab / dv-default-tab-content / dv-default-tab-action
  * class names so all built-in + theme CSS applies unchanged.
@@ -71,7 +71,6 @@ export function DockviewTabIcon({
 export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
   const { api, icon, leadingIcon = 'extension' } = properties;
   const [title, setTitle] = useState(api.title ?? '');
-  const rootRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLSpanElement>(null);
   const fullTitle = resolveFullTitle(properties, title);
 
@@ -88,7 +87,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
 
   // Dockview owns the actual keyboard-focus target outside this React root.
   useEffect(() => {
-    const tab = rootRef.current?.closest<HTMLElement>('.dv-tab');
+    const tab = closeRef.current?.closest<HTMLElement>('.dv-tab');
     if (!tab) {
       return;
     }
@@ -138,29 +137,16 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
   }, [api]);
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          ref={rootRef}
-          className='dv-default-tab group/default-tab fade-row size-full min-w-0 overflow-hidden py-1 pr-1 pl-2'
-        >
-          <span className='dv-default-tab-content mr-0! flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden'>
-            <DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />
-            <span className='dockview-tab-title fade-label flex-1'>{title}</span>
-          </span>
-          <span
-            ref={closeRef}
-            aria-hidden
-            className={nestedActionVariants({
-              className:
-                'dv-default-tab-action fade-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 hover:bg-nested-action-hover! pointer-coarse:opacity-100',
-            })}
-          >
-            <X className='size-3.5' />
-          </span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent className='max-w-[min(42rem,calc(100vw-1rem))] text-left break-all'>{fullTitle}</TooltipContent>
-    </Tooltip>
+    <WorkbenchTab
+      as='div'
+      icon={<DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />}
+      title={title}
+      fullTitle={fullTitle}
+      closeRef={closeRef}
+      className='dv-default-tab'
+      contentClassName='dv-default-tab-content mr-0!'
+      titleClassName='dockview-tab-title'
+      closeClassName='dv-default-tab-action size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! hover:bg-nested-action-hover!'
+    />
   );
 }

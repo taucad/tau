@@ -28,7 +28,6 @@ geospec run . -t "intended envelope"
 geospec run . --file lib
 geospec run . --workers            # worker pool, auto-sized
 geospec run . --workers 4 --shard-timeout 600000
-geospec run . --forensic --matcher-wall-backstop 600000
 geospec run . --bail
 geospec run . --json
 ```
@@ -41,8 +40,6 @@ geospec run . --json
 | `--test-timeout <ms>`                   | Timeout for each async test callback.                                                                     |
 | `--workers [n]`                         | Run in a worker pool. Default is one; omit the count after the flag to request available CPU parallelism. |
 | `--shard-timeout <ms>`                  | Per-shard **non-verdict** watchdog. Off by default.                                                       |
-| `--matcher-wall-backstop <ms>`          | Per-matcher **non-verdict** watchdog. Off by default.                                                     |
-| `--forensic`                            | Include structured timing measurements in the run output.                                                 |
 | `--bail`                                | Stop after the first red file. Interactive use only — a reward run wants the complete red set.            |
 | `--json`                                | Print exactly one JSON result document on stdout and nothing else.                                        |
 

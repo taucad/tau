@@ -7,8 +7,8 @@
  */
 
 import { z } from 'zod';
-import { defineConfiguration } from '@taucad/runtime/configuration';
-import { quantity } from '@taucad/runtime/configuration/zod';
+import { defineConfiguration } from '@taucad/runtime/schema';
+import { quantity } from '@taucad/runtime/schema/zod';
 import {
   defineMachineAction,
   machineActionDescriptorOf,

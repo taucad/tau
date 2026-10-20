@@ -301,7 +301,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: 4.4.3
-  nanoraster: ^0.7.0
+  nanoraster: ^0.7.1
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.1.0
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
@@ -337,6 +337,7 @@ catalog:
   '@better-auth-ui/core': 1.7.29
   '@better-auth-ui/react': 1.7.29
   smol-toml: 1.9.1
+  nanoraster-darwin-arm64: 0.7.1
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

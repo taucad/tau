@@ -11,8 +11,10 @@ const packageConfig: UserConfig = {
     'src/engine/index.ts',
     'src/mesh/index.ts',
     'src/model/index.ts',
+    'src/model/node/index.ts',
     'src/runner/index.ts',
     'src/runner/native/index.ts',
+    'src/runner/node/index.ts',
     'src/runner/worker/index.ts',
   ],
   sourcemap: false,
@@ -23,14 +25,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  external: [
-    '@taucad/project-core',
-    '@taucad/runtime',
-    '@taucad/runtime/types',
-    '@taucad/esbuild/vm',
-    '@gltf-transform/core',
-    'vitest',
-  ],
+  external: ['@taucad/runtime', '@taucad/runtime/types', '@taucad/esbuild/vm', '@gltf-transform/core', 'vitest'],
 };
 
 export default defineConfig(packageConfig);

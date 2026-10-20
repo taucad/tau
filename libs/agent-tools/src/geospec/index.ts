@@ -19,3 +19,16 @@ export {
   type GeoSpecRunTimeoutFacts,
 } from '#geospec/run-progress.js';
 export { hasGeoSpecSelectionFilters, runGeoSpecTests, type RunGeoSpecTestsOptions } from '#geospec/run-tests.js';
+export {
+  tauClientExporter,
+  type TauClientExporterOptions,
+  type TauExporterClient,
+} from '#geospec/tau-client-exporter.js';
+export {
+  resolveRuntimeExportIntent,
+  type GeoSpecExportRoute,
+  type RuntimeBackedModelFormat,
+  type RuntimeClientWithRoutes,
+  type RuntimeExportIntent,
+  type RuntimeExportIntentFailure,
+} from '#geospec/tau-export-intent.js';

@@ -114,7 +114,7 @@ describe('package generator', () => {
     expect(instructions).toContain('../../.agents/skills/update-agent-memory/SKILL.md');
     expect(instructions).toContain('../../docs/policy/workspace-project-policy.md');
     expect(instructions).not.toMatch(/<%|__tmpl__/);
-    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('@AGENTS.md\n');
+    expect(tree.exists('packages/example/CLAUDE.md')).toBe(false);
   });
 
   it.each([
@@ -164,7 +164,7 @@ describe('package generator', () => {
     expect(projectJson.tags).toStrictEqual(placement.tags);
     expect(readText(tree, `${root}/LICENSE`)).toContain('Apache License');
     expect(tree.exists(`${root}/AGENTS.md`)).toBe(true);
-    expect(readText(tree, `${root}/CLAUDE.md`)).toBe('@AGENTS.md\n');
+    expect(tree.exists(`${root}/CLAUDE.md`)).toBe(false);
     const instructions = readText(tree, `${root}/AGENTS.md`);
     expect(instructions).toContain(`Project root: \`${root}\``);
     for (const link of placement.ancestorLinks) {
@@ -312,7 +312,7 @@ describe('package generator', () => {
     expect(snapshotChanges(tree)).toEqual(before);
   });
 
-  it('keeps authored instruction bytes and fills only a missing pair member', async () => {
+  it('preserves authored AGENTS bytes and recreates only missing instructions', async () => {
     const tree = createTreeWithEmptyWorkspace();
     const options = {
       projectName: 'example',
@@ -326,16 +326,15 @@ describe('package generator', () => {
       owners: [{ label: 'Testing policy', path: 'docs/policy/testing-policy.md' }],
     };
     tree.write('packages/example/AGENTS.md', '# Authored\nKeep this byte-for-byte.\n');
-    tree.write('packages/example/CLAUDE.md', 'custom adapter\n');
 
     writeProjectInstructions(tree, options);
     expect(readText(tree, 'packages/example/AGENTS.md')).toBe('# Authored\nKeep this byte-for-byte.\n');
-    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('custom adapter\n');
+    expect(tree.exists('packages/example/CLAUDE.md')).toBe(false);
 
-    tree.delete('packages/example/CLAUDE.md');
+    tree.delete('packages/example/AGENTS.md');
     writeProjectInstructions(tree, options);
-    expect(readText(tree, 'packages/example/AGENTS.md')).toBe('# Authored\nKeep this byte-for-byte.\n');
-    expect(readText(tree, 'packages/example/CLAUDE.md')).toBe('@AGENTS.md\n');
+    expect(readText(tree, 'packages/example/AGENTS.md')).toContain('# @taucad/example');
+    expect(tree.exists('packages/example/CLAUDE.md')).toBe(false);
 
     const afterMissingFill = snapshotChanges(tree);
     writeProjectInstructions(tree, options);

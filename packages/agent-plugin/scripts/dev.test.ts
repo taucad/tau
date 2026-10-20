@@ -1,11 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /* oxlint-disable no-restricted-imports -- `pnpm plugin:dev` runs this script by path; the `#` import map covers only src/. */
 import {
-  connect,
   desktopConfigPath,
   desktopServerName,
   devPlugin,
@@ -113,7 +110,7 @@ describe('missingBuiltFiles', () => {
   const present = (files: readonly string[]) => (path: string) => files.some((file) => join(root, file) === path);
 
   it('requires the .dev/cli.json pointer only in the workspace folder', () => {
-    const installed = present(['dist/launch.mjs', 'dist-app/app.html', 'skills/tau/SKILL.md']);
+    const installed = present(['dist/launch.mjs', 'dist/doctor.mjs', 'dist-app/app.html', 'skills/tau/SKILL.md']);
 
     expect(missingBuiltFiles(root, false, installed)).toEqual([]);
     expect(missingBuiltFiles(root, true, installed)).toEqual(['.dev/cli.json']);
@@ -122,23 +119,8 @@ describe('missingBuiltFiles', () => {
   it('names every missing file of an installed folder', () => {
     expect(missingBuiltFiles(root, false, present(['skills/tau/SKILL.md']))).toEqual([
       'dist/launch.mjs',
+      'dist/doctor.mjs',
       'dist-app/app.html',
     ]);
-  });
-});
-
-describe('connect', () => {
-  it('fails a request the server never answers, with its stderr', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'tau-plugin-silent-'));
-    mkdirSync(join(root, 'dist'));
-    /* A server that started, said something and then answers nothing. */
-    writeFileSync(join(root, 'dist', 'launch.mjs'), "process.stderr.write('listening\\n');\nprocess.stdin.resume();\n");
-    const { child, request } = connect(root, [], 2000);
-    try {
-      await expect(request('initialize', {})).rejects.toThrow('initialize got no answer in 2 s:\nlistening');
-    } finally {
-      child.kill('SIGKILL');
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });

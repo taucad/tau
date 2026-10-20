@@ -25,13 +25,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  external: [
-    '@taucad/runtime',
-    '@taucad/runtime/types',
-    '@taucad/esbuild/vm',
-    '@gltf-transform/core',
-    'vitest',
-  ],
+  external: ['@taucad/runtime', '@taucad/runtime/types', '@taucad/esbuild/vm', '@gltf-transform/core', 'vitest'],
 };
 
 export default defineConfig(packageConfig);
